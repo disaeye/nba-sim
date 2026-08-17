@@ -1,0 +1,644 @@
+{
+  "foundation_version": "0.13.0",
+  "events": [
+    {
+      "type": "GAME_START",
+      "actors_min": 0,
+      "actors_max": 0,
+      "required_payload_fields": [],
+      "optional_payload_fields": [
+        "home_lineup_id",
+        "away_lineup_id",
+        "scheduled_tip_offset"
+      ],
+      "mutates": [
+        "phase"
+      ],
+      "same_ts_priority_rank": 1,
+      "notes": "Emitted exactly once at game initialization; transitions phase from PRE_GAME to JUMP_BALL."
+    },
+    {
+      "type": "JUMP_BALL_TAP",
+      "actors_min": 1,
+      "actors_max": 2,
+      "required_payload_fields": [
+        "home_jumper_id",
+        "away_jumper_id",
+        "tapping_team"
+      ],
+      "optional_payload_fields": [
+        "tapper_id"
+      ],
+      "mutates": [
+        "ball.holderId",
+        "possession.team"
+      ],
+      "same_ts_priority_rank": 5,
+      "notes": "Result of opening or held-ball tip-off; a jumper taps the ball to a teammate to establish possession."
+    },
+    {
+      "type": "POSSESSION_GAINED",
+      "actors_min": 1,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "team",
+        "player_id"
+      ],
+      "optional_payload_fields": [
+        "source"
+      ],
+      "mutates": [
+        "possession.team",
+        "ball.holderId",
+        "clocks.shot"
+      ],
+      "same_ts_priority_rank": 2,
+      "notes": "Ball control established after a tap, inbound, rebound, or loose-ball recover; resets the shot clock to 24."
+    },
+    {
+      "type": "INBOUND_START",
+      "actors_min": 1,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "inbounder_id",
+        "team",
+        "spot_zone"
+      ],
+      "optional_payload_fields": [
+        "reason"
+      ],
+      "mutates": [
+        "phase"
+      ],
+      "same_ts_priority_rank": 2,
+      "notes": "Begins a dead-ball inbound procedure; phase enters a pending-touch dead state."
+    },
+    {
+      "type": "INBOUND_TOUCH",
+      "actors_min": 2,
+      "actors_max": 2,
+      "required_payload_fields": [
+        "inbounder_id",
+        "receiver_id"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "ball.holderId"
+      ],
+      "same_ts_priority_rank": 2,
+      "notes": "Inbound pass released and first touched by the receiver; legal inbound completion."
+    },
+    {
+      "type": "ADVANCE_BACKCOURT",
+      "actors_min": 1,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "ballHandlerId"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "ball.holderId"
+      ],
+      "same_ts_priority_rank": 6,
+      "notes": "Ball handler advances within the backcourt; cosmetic movement event."
+    },
+    {
+      "type": "CROSS_HALF",
+      "actors_min": 1,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "ballHandlerId"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "ball.holderId"
+      ],
+      "same_ts_priority_rank": 6,
+      "notes": "Ball handler crosses the time line into the frontcourt; cosmetic movement event."
+    },
+    {
+      "type": "ALIGN_HALFCOURT",
+      "actors_min": 1,
+      "actors_max": 5,
+      "required_payload_fields": [
+        "team"
+      ],
+      "optional_payload_fields": [
+        "primary_creator_id"
+      ],
+      "mutates": [],
+      "same_ts_priority_rank": 6,
+      "notes": "Offensive team aligns into its halfcourt set; team structural positioning with no GameState mutation."
+    },
+    {
+      "type": "PASS",
+      "actors_min": 2,
+      "actors_max": 2,
+      "required_payload_fields": [
+        "passer_id",
+        "receiver_id"
+      ],
+      "optional_payload_fields": [
+        "pass_type"
+      ],
+      "mutates": [
+        "ball.holderId"
+      ],
+      "same_ts_priority_rank": 2,
+      "notes": "Live-ball pass from passer to receiver; holder changes on completion."
+    },
+    {
+      "type": "HANDOFF",
+      "actors_min": 2,
+      "actors_max": 2,
+      "required_payload_fields": [
+        "giver_id",
+        "receiver_id"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "ball.holderId"
+      ],
+      "same_ts_priority_rank": 2,
+      "notes": "Ball exchanged between teammates via handoff; holder changes and on-ball defender retargets."
+    },
+    {
+      "type": "SCREEN_SET",
+      "actors_min": 1,
+      "actors_max": 2,
+      "required_payload_fields": [
+        "screener_id"
+      ],
+      "optional_payload_fields": [
+        "screen_target_id"
+      ],
+      "mutates": [],
+      "same_ts_priority_rank": 6,
+      "notes": "Off-ball screen established by a screener; cosmetic positioning event."
+    },
+    {
+      "type": "SCREEN_USE",
+      "actors_min": 2,
+      "actors_max": 2,
+      "required_payload_fields": [
+        "screener_id",
+        "ballHandlerId"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [],
+      "same_ts_priority_rank": 6,
+      "notes": "Ball handler uses a teammate's screen; cosmetic positioning event."
+    },
+    {
+      "type": "DRIVE",
+      "actors_min": 1,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "ballHandlerId"
+      ],
+      "optional_payload_fields": [
+        "target_zone"
+      ],
+      "mutates": [
+        "ball.holderId"
+      ],
+      "same_ts_priority_rank": 6,
+      "notes": "Ball handler drives toward the basket; cosmetic movement event."
+    },
+    {
+      "type": "SHOT_RELEASE",
+      "actors_min": 1,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "shooter_id",
+        "shot_value",
+        "zone"
+      ],
+      "optional_payload_fields": [
+        "assister_id"
+      ],
+      "mutates": [],
+      "same_ts_priority_rank": 3,
+      "notes": "Shot taken; shooter, value (2 or 3), and zone locked in payload; final score impact pending SHOT_RESULT."
+    },
+    {
+      "type": "SHOT_RESULT",
+      "actors_min": 0,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "shooter_id",
+        "shot_value",
+        "made"
+      ],
+      "optional_payload_fields": [
+        "assister_id",
+        "zone"
+      ],
+      "mutates": [
+        "score.home",
+        "score.away"
+      ],
+      "same_ts_priority_rank": 3,
+      "notes": "Resolution of a SHOT_RELEASE; on make, shooting team's score is incremented; on miss, a REBOUND follow-up is emitted."
+    },
+    {
+      "type": "REBOUND",
+      "actors_min": 1,
+      "actors_max": 2,
+      "required_payload_fields": [
+        "rebounder_id",
+        "team",
+        "offensive"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "ball.holderId",
+        "possession.team"
+      ],
+      "same_ts_priority_rank": 5,
+      "notes": "Player gains possession after a missed shot; defensive rebound flips possession and resets the shot clock to 24."
+    },
+    {
+      "type": "LOOSE_BALL_RECOVER",
+      "actors_min": 1,
+      "actors_max": 2,
+      "required_payload_fields": [
+        "recoverer_id",
+        "team"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "ball.holderId",
+        "possession.team"
+      ],
+      "same_ts_priority_rank": 2,
+      "notes": "Player recovers a loose ball; establishes possession for the recovering team."
+    },
+    {
+      "type": "STEAL",
+      "actors_min": 2,
+      "actors_max": 2,
+      "required_payload_fields": [
+        "stealer_id",
+        "victim_id"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "ball.holderId",
+        "possession.team"
+      ],
+      "same_ts_priority_rank": 5,
+      "notes": "Defender legally takes the ball from an offensive player; possession flips to the defensive team."
+    },
+    {
+      "type": "TURNOVER",
+      "actors_min": 1,
+      "actors_max": 2,
+      "required_payload_fields": [
+        "player_id",
+        "team"
+      ],
+      "optional_payload_fields": [
+        "stealer_id",
+        "turnover_type"
+      ],
+      "mutates": [
+        "ball.holderId",
+        "possession.team"
+      ],
+      "same_ts_priority_rank": 5,
+      "notes": "Offensive team loses possession without a recorded steal; may co-emit with STEAL for the same play."
+    },
+    {
+      "type": "FOUL",
+      "actors_min": 2,
+      "actors_max": 2,
+      "required_payload_fields": [
+        "offender_id",
+        "offender_team",
+        "victim_id",
+        "foul_type"
+      ],
+      "optional_payload_fields": [
+        "shooting",
+        "free_throws_awarded"
+      ],
+      "mutates": [
+        "fouls.player",
+        "fouls.team",
+        "fouls.bonus"
+      ],
+      "same_ts_priority_rank": 4,
+      "notes": "Personal foul by offender against victim; updates player and team foul counters; may set bonus and award free throws."
+    },
+    {
+      "type": "VIOLATION",
+      "actors_min": 1,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "violator_id",
+        "team",
+        "violation_type"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "possession.team"
+      ],
+      "same_ts_priority_rank": 4,
+      "notes": "Non-foul rule infraction such as a lane violation or kicked ball; possession awarded per rule."
+    },
+    {
+      "type": "SHOT_CLOCK_VIOLATION",
+      "actors_min": 0,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "team"
+      ],
+      "optional_payload_fields": [
+        "responsible_player_id"
+      ],
+      "mutates": [
+        "clocks.shot",
+        "possession.team"
+      ],
+      "same_ts_priority_rank": 4,
+      "notes": "Shot clock reaches zero without a legal field-goal attempt; possession turns over to the defense."
+    },
+    {
+      "type": "PERIOD_END",
+      "actors_min": 0,
+      "actors_max": 0,
+      "required_payload_fields": [
+        "period"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "clocks.period",
+        "clocks.game",
+        "phase"
+      ],
+      "same_ts_priority_rank": 5,
+      "notes": "Regulation or OT period expires; advances the period counter and transitions toward PERIOD_BREAK, HALFTIME, OVERTIME_SETUP, or POST_GAME."
+    },
+    {
+      "type": "PERIOD_START",
+      "actors_min": 0,
+      "actors_max": 0,
+      "required_payload_fields": [
+        "period"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "phase"
+      ],
+      "same_ts_priority_rank": 1,
+      "notes": "New period begins; phase transitions out of PERIOD_BREAK, HALFTIME, or OVERTIME_SETUP into JUMP_BALL or LIVE."
+    },
+    {
+      "type": "HALFTIME",
+      "actors_min": 0,
+      "actors_max": 0,
+      "required_payload_fields": [],
+      "optional_payload_fields": [],
+      "mutates": [
+        "phase"
+      ],
+      "same_ts_priority_rank": 1,
+      "notes": "Halftime begins after the Q2 PERIOD_END; phase transitions to HALFTIME."
+    },
+    {
+      "type": "TIMEOUT_START",
+      "actors_min": 0,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "team"
+      ],
+      "optional_payload_fields": [
+        "requester"
+      ],
+      "mutates": [
+        "phase",
+        "timeouts.remaining"
+      ],
+      "same_ts_priority_rank": 4,
+      "notes": "Team-initiated timeout begins; phase enters TIMEOUT and the team's remaining allotment is decremented."
+    },
+    {
+      "type": "TIMEOUT_END",
+      "actors_min": 0,
+      "actors_max": 0,
+      "required_payload_fields": [],
+      "optional_payload_fields": [],
+      "mutates": [
+        "phase"
+      ],
+      "same_ts_priority_rank": 4,
+      "notes": "Timeout concludes; phase returns to the prior dead-ball state or inbound setup."
+    },
+    {
+      "type": "SUB",
+      "actors_min": 2,
+      "actors_max": 2,
+      "required_payload_fields": [
+        "player_out_id",
+        "player_in_id",
+        "team"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "lineup.home",
+        "lineup.away"
+      ],
+      "same_ts_priority_rank": 4,
+      "notes": "Substitution at a legal dead-ball window; swaps player_out for player_in on the on-court lineup."
+    },
+    {
+      "type": "FT_START",
+      "actors_min": 1,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "shooter_id",
+        "team",
+        "attempts"
+      ],
+      "optional_payload_fields": [
+        "foul_id"
+      ],
+      "mutates": [
+        "phase"
+      ],
+      "same_ts_priority_rank": 4,
+      "notes": "Free throw sequence begins for the shooter; phase enters FT_SEQUENCE with the specified number of attempts."
+    },
+    {
+      "type": "FT_ATTEMPT",
+      "actors_min": 1,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "shooter_id",
+        "attempt_number"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [],
+      "same_ts_priority_rank": 3,
+      "notes": "Single free throw attempt released; result is resolved by the paired FT_RESULT event."
+    },
+    {
+      "type": "FT_RESULT",
+      "actors_min": 0,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "shooter_id",
+        "attempt_number",
+        "made"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "score.home",
+        "score.away"
+      ],
+      "same_ts_priority_rank": 3,
+      "notes": "Resolution of an FT_ATTEMPT; on make, the shooting team's score is incremented."
+    },
+    {
+      "type": "FT_SEQUENCE_END",
+      "actors_min": 0,
+      "actors_max": 0,
+      "required_payload_fields": [],
+      "optional_payload_fields": [
+        "next_phase"
+      ],
+      "mutates": [
+        "phase"
+      ],
+      "same_ts_priority_rank": 4,
+      "notes": "Free throw sequence completes; phase exits FT_SEQUENCE to inbound setup or live per rule."
+    },
+    {
+      "type": "MADE_BASKET_DEAD",
+      "actors_min": 0,
+      "actors_max": 0,
+      "required_payload_fields": [
+        "scoring_team"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "phase"
+      ],
+      "same_ts_priority_rank": 5,
+      "notes": "Dead ball declared after a made basket; phase transitions to DEAD_MAKE and stoppage rules are evaluated."
+    },
+    {
+      "type": "OOB",
+      "actors_min": 0,
+      "actors_max": 1,
+      "required_payload_fields": [
+        "team_causing"
+      ],
+      "optional_payload_fields": [
+        "player_id"
+      ],
+      "mutates": [
+        "possession.team",
+        "phase"
+      ],
+      "same_ts_priority_rank": 5,
+      "notes": "Ball goes out of bounds; possession awarded to the opposing team and phase enters DEAD_OOB."
+    },
+    {
+      "type": "HELD_BALL",
+      "actors_min": 2,
+      "actors_max": 2,
+      "required_payload_fields": [
+        "player_a_id",
+        "player_b_id"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [
+        "phase"
+      ],
+      "same_ts_priority_rank": 5,
+      "notes": "Two opposing players jointly possess the ball; phase enters DEAD_HELD and is resolved by a jump ball."
+    },
+    {
+      "type": "CLOCK_EXPIRY_ADJUDICATION",
+      "actors_min": 0,
+      "actors_max": 0,
+      "required_payload_fields": [
+        "clock"
+      ],
+      "optional_payload_fields": [
+        "residual_seconds"
+      ],
+      "mutates": [
+        "clocks.shot",
+        "clocks.game"
+      ],
+      "same_ts_priority_rank": 1,
+      "notes": "Authoritative decision when the shot or game clock reaches zero; may emit SHOT_CLOCK_VIOLATION or PERIOD_END at the same t_game."
+    },
+    {
+      "type": "GAME_END",
+      "actors_min": 0,
+      "actors_max": 0,
+      "required_payload_fields": [],
+      "optional_payload_fields": [],
+      "mutates": [
+        "phase"
+      ],
+      "same_ts_priority_rank": 1,
+      "notes": "Final period concludes without a tie; phase transitions to POST_GAME."
+    },
+    {
+      "type": "STATE_NOTE",
+      "actors_min": 0,
+      "actors_max": 0,
+      "required_payload_fields": [
+        "note"
+      ],
+      "optional_payload_fields": [],
+      "mutates": [],
+      "same_ts_priority_rank": 6,
+      "notes": "Cosmetic annotation carrying a debug or replay marker; never mutates GameState."
+    },
+    {
+      "type": "JUMP_CIRCLE_ALIGN",
+      "actors_min": 2,
+      "actors_max": 10,
+      "required_payload_fields": [
+        "context",
+        "players"
+      ],
+      "optional_payload_fields": [
+        "home_jumper_id",
+        "away_jumper_id"
+      ],
+      "mutates": [
+        "alignment",
+        "ball.holderId",
+        "ball.zone"
+      ],
+      "same_ts_priority_rank": 2,
+      "notes": "Tip-off / OT: 2 jumpers in center circle + 8 non-jumpers outside restraining circle (NBA Rule 6)."
+    },
+    {
+      "type": "ALIGNMENT",
+      "actors_min": 0,
+      "actors_max": 10,
+      "required_payload_fields": [
+        "context",
+        "players"
+      ],
+      "optional_payload_fields": [
+        "offense"
+      ],
+      "mutates": [
+        "alignment",
+        "ball.holderId",
+        "ball.zone"
+      ],
+      "same_ts_priority_rank": 6,
+      "notes": "Authoritative 10-player court snapshot (zones + tasks + coords). Spectator must prefer this over heuristics."
+    }
+  ]
+}

@@ -1,0 +1,139 @@
+{
+  "foundation_version": "0.13.0",
+  "resolution_seconds": 0.1,
+  "quantize_rule": "Math.round(delta_raw * 10) / 10",
+  "clocks": {
+    "period_seconds": 720,
+    "overtime_seconds": 300,
+    "shot_clock_full": 24,
+    "shot_clock_reset": 14,
+    "backcourt_seconds": 8
+  },
+  "made_fg_stoppage": {
+    "last_minute_periods_q1_q2_q3": true,
+    "last_two_minutes_q4_ot": true
+  },
+  "durations": [
+    {
+      "id": "jump_tap",
+      "distribution": "uniform",
+      "min": 1,
+      "max": 1.5
+    },
+    {
+      "id": "inbound_setup",
+      "distribution": "uniform",
+      "min": 1.5,
+      "max": 3.5
+    },
+    {
+      "id": "inbound_touch",
+      "distribution": "uniform",
+      "min": 0.6,
+      "max": 1.5
+    },
+    {
+      "id": "advance_backcourt",
+      "distribution": "uniform",
+      "min": 5.2,
+      "max": 7.6
+    },
+    {
+      "id": "advance_transition",
+      "distribution": "uniform",
+      "min": 3,
+      "max": 4.7
+    },
+    {
+      "id": "align_halfcourt",
+      "distribution": "uniform",
+      "min": 1.6,
+      "max": 3.2
+    },
+    {
+      "id": "pass",
+      "distribution": "uniform",
+      "min": 1,
+      "max": 1.7
+    },
+    {
+      "id": "handoff",
+      "distribution": "uniform",
+      "min": 0.65,
+      "max": 1.2
+    },
+    {
+      "id": "screen",
+      "distribution": "uniform",
+      "min": 1.1,
+      "max": 2.4
+    },
+    {
+      "id": "attack_window",
+      "distribution": "uniform",
+      "min": 2.8,
+      "max": 5.4
+    },
+    {
+      "id": "shot_flight",
+      "distribution": "uniform",
+      "min": 0.8,
+      "max": 1.3
+    },
+    {
+      "id": "rebound_window",
+      "distribution": "uniform",
+      "min": 0.6,
+      "max": 1.4
+    },
+    {
+      "id": "loose_ball",
+      "distribution": "uniform",
+      "min": 0.5,
+      "max": 1.2
+    },
+    {
+      "id": "ft_attempt_logic",
+      "distribution": "uniform",
+      "min": 0.5,
+      "max": 1
+    },
+    {
+      "id": "post",
+      "distribution": "uniform",
+      "min": 1.1,
+      "max": 2.4
+    }
+  ],
+  "start_reason_bias": {
+    "after_make": {
+      "mode": "HALFCOURT",
+      "align_extra_seconds": 1.5
+    },
+    "after_defensive_rebound": {
+      "mode": "HALFCOURT",
+      "align_extra_seconds": 0
+    },
+    "after_steal": {
+      "mode": "TRANSITION",
+      "align_extra_seconds": 0
+    },
+    "after_turnover": {
+      "mode": "TRANSITION",
+      "align_extra_seconds": 0
+    },
+    "after_offensive_rebound": {
+      "mode": "HALFCOURT",
+      "align_extra_seconds": 0,
+      "shot_clock_reset_to": 14
+    },
+    "after_inbound": {
+      "mode": "HALFCOURT",
+      "align_extra_seconds": 0
+    },
+    "after_jump_ball": {
+      "mode": "HALFCOURT",
+      "align_extra_seconds": 0
+    }
+  }
+}

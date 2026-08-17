@@ -1,0 +1,303 @@
+{
+  "foundation_version": "0.13.0",
+  "phases": [
+    "PRE_GAME",
+    "JUMP_BALL",
+    "LIVE",
+    "DEAD_OOB",
+    "DEAD_FOUL",
+    "DEAD_VIOLATION",
+    "DEAD_MAKE",
+    "DEAD_HELD",
+    "DEAD_PERIOD_END",
+    "FT_SEQUENCE",
+    "TIMEOUT",
+    "PERIOD_BREAK",
+    "HALFTIME",
+    "OVERTIME_SETUP",
+    "POST_GAME"
+  ],
+  "transitions": [
+    {
+      "from": "PRE_GAME",
+      "trigger": "GAME_START",
+      "to": "JUMP_BALL",
+      "emit_events": [
+        "GAME_START"
+      ],
+      "notes": "Initial game start"
+    },
+    {
+      "from": "JUMP_BALL",
+      "trigger": "JUMP_BALL_TAP",
+      "to": "LIVE",
+      "emit_events": [
+        "JUMP_BALL_TAP",
+        "POSSESSION_GAINED"
+      ],
+      "notes": "Tip-off; winner gains possession; shot clock starts"
+    },
+    {
+      "from": "LIVE",
+      "trigger": "MADE_BASKET",
+      "to": "DEAD_MAKE",
+      "emit_events": [
+        "SHOT_RESULT",
+        "MADE_BASKET_DEAD"
+      ],
+      "notes": "Field goal made; evaluate stoppage rules"
+    },
+    {
+      "from": "LIVE",
+      "trigger": "OOB",
+      "to": "DEAD_OOB",
+      "emit_events": [
+        "OOB"
+      ],
+      "notes": "Ball out of bounds; possession to opponents"
+    },
+    {
+      "from": "LIVE",
+      "trigger": "FOUL_SHOOTING",
+      "to": "DEAD_FOUL",
+      "emit_events": [
+        "FOUL"
+      ],
+      "notes": "Shooting foul; FT sequence follows"
+    },
+    {
+      "from": "LIVE",
+      "trigger": "FOUL_NON_SHOOTING_BONUS",
+      "to": "DEAD_FOUL",
+      "emit_events": [
+        "FOUL"
+      ],
+      "notes": "Non-shooting foul in bonus; FT sequence follows"
+    },
+    {
+      "from": "LIVE",
+      "trigger": "FOUL_NON_SHOOTING_NO_BONUS",
+      "to": "DEAD_FOUL",
+      "emit_events": [
+        "FOUL"
+      ],
+      "notes": "Non-shooting foul not in bonus; inbound follows"
+    },
+    {
+      "from": "LIVE",
+      "trigger": "VIOLATION",
+      "to": "DEAD_VIOLATION",
+      "emit_events": [
+        "VIOLATION"
+      ],
+      "notes": "Rule violation; possession to opponents"
+    },
+    {
+      "from": "LIVE",
+      "trigger": "SHOT_CLOCK_EXPIRY",
+      "to": "DEAD_VIOLATION",
+      "emit_events": [
+        "CLOCK_EXPIRY_ADJUDICATION",
+        "SHOT_CLOCK_VIOLATION"
+      ],
+      "notes": "Shot clock reaches zero"
+    },
+    {
+      "from": "LIVE",
+      "trigger": "HELD_BALL",
+      "to": "DEAD_HELD",
+      "emit_events": [
+        "HELD_BALL"
+      ],
+      "notes": "Two players jointly possess; jump ball follows"
+    },
+    {
+      "from": "LIVE",
+      "trigger": "PERIOD_CLOCK_EXPIRY",
+      "to": "DEAD_PERIOD_END",
+      "emit_events": [
+        "CLOCK_EXPIRY_ADJUDICATION",
+        "PERIOD_END"
+      ],
+      "notes": "Period clock reaches zero"
+    },
+    {
+      "from": "DEAD_MAKE",
+      "trigger": "INBOUND_SETUP",
+      "to": "LIVE",
+      "emit_events": [
+        "INBOUND_START",
+        "INBOUND_TOUCH",
+        "POSSESSION_GAINED"
+      ],
+      "notes": "Inbound after made basket; check stoppage rule first"
+    },
+    {
+      "from": "DEAD_OOB",
+      "trigger": "INBOUND_SETUP",
+      "to": "LIVE",
+      "emit_events": [
+        "INBOUND_START",
+        "INBOUND_TOUCH",
+        "POSSESSION_GAINED"
+      ],
+      "notes": "Inbound after OOB"
+    },
+    {
+      "from": "DEAD_VIOLATION",
+      "trigger": "INBOUND_SETUP",
+      "to": "LIVE",
+      "emit_events": [
+        "INBOUND_START",
+        "INBOUND_TOUCH",
+        "POSSESSION_GAINED"
+      ],
+      "notes": "Inbound after violation"
+    },
+    {
+      "from": "DEAD_FOUL",
+      "trigger": "FT_AWARDED",
+      "to": "FT_SEQUENCE",
+      "emit_events": [
+        "FT_START"
+      ],
+      "notes": "Shooting/bonus foul awards FTs"
+    },
+    {
+      "from": "DEAD_FOUL",
+      "trigger": "INBOUND_SETUP",
+      "to": "LIVE",
+      "emit_events": [
+        "INBOUND_START",
+        "INBOUND_TOUCH",
+        "POSSESSION_GAINED"
+      ],
+      "notes": "Non-shooting non-bonus foul; inbound"
+    },
+    {
+      "from": "FT_SEQUENCE",
+      "trigger": "FT_DONE_SHOOTING_FOUL",
+      "to": "DEAD_FOUL",
+      "emit_events": [
+        "FT_SEQUENCE_END"
+      ],
+      "notes": "FT sequence complete; evaluate possession"
+    },
+    {
+      "from": "DEAD_HELD",
+      "trigger": "JUMP_BALL_SETUP",
+      "to": "JUMP_BALL",
+      "emit_events": [],
+      "notes": "Held ball resolved by jump ball"
+    },
+    {
+      "from": "DEAD_PERIOD_END",
+      "trigger": "PERIOD_ROUTER_Q1",
+      "to": "PERIOD_BREAK",
+      "emit_events": [
+        "PERIOD_START"
+      ],
+      "notes": "Q1 ended → Q2 break (PERIOD_START emitted when break ends)"
+    },
+    {
+      "from": "DEAD_PERIOD_END",
+      "trigger": "PERIOD_ROUTER_Q2",
+      "to": "HALFTIME",
+      "emit_events": [],
+      "notes": "Q2 ended → halftime"
+    },
+    {
+      "from": "DEAD_PERIOD_END",
+      "trigger": "PERIOD_ROUTER_Q3",
+      "to": "PERIOD_BREAK",
+      "emit_events": [],
+      "notes": "Q3 ended → Q4 break"
+    },
+    {
+      "from": "DEAD_PERIOD_END",
+      "trigger": "PERIOD_ROUTER_Q4_TIED",
+      "to": "OVERTIME_SETUP",
+      "emit_events": [],
+      "notes": "Q4 ended tied → OT setup"
+    },
+    {
+      "from": "DEAD_PERIOD_END",
+      "trigger": "PERIOD_ROUTER_Q4_NOT_TIED",
+      "to": "POST_GAME",
+      "emit_events": [
+        "GAME_END"
+      ],
+      "notes": "Q4 ended not tied → game over"
+    },
+    {
+      "from": "DEAD_PERIOD_END",
+      "trigger": "PERIOD_ROUTER_OT_TIED",
+      "to": "OVERTIME_SETUP",
+      "emit_events": [],
+      "notes": "OT ended tied → another OT"
+    },
+    {
+      "from": "DEAD_PERIOD_END",
+      "trigger": "PERIOD_ROUTER_OT_NOT_TIED",
+      "to": "POST_GAME",
+      "emit_events": [
+        "GAME_END"
+      ],
+      "notes": "OT ended not tied → game over"
+    },
+    {
+      "from": "PERIOD_BREAK",
+      "trigger": "BREAK_END",
+      "to": "LIVE",
+      "emit_events": [
+        "PERIOD_START"
+      ],
+      "notes": "Period break ends; next period begins with live ball"
+    },
+    {
+      "from": "HALFTIME",
+      "trigger": "BREAK_END",
+      "to": "LIVE",
+      "emit_events": [
+        "PERIOD_START"
+      ],
+      "notes": "Halftime ends; Q3 begins"
+    },
+    {
+      "from": "OVERTIME_SETUP",
+      "trigger": "BREAK_END",
+      "to": "JUMP_BALL",
+      "emit_events": [
+        "PERIOD_START"
+      ],
+      "notes": "OT setup ends; jump ball for OT"
+    }
+  ],
+  "timeout_allotments": {
+    "regulation_total": 7,
+    "max_in_q4": 4,
+    "overtime_total": 2
+  },
+  "substitution_legality": {
+    "legal_phases": [
+      "DEAD_OOB",
+      "DEAD_FOUL",
+      "DEAD_VIOLATION",
+      "DEAD_MAKE",
+      "DEAD_HELD",
+      "DEAD_PERIOD_END",
+      "TIMEOUT",
+      "PERIOD_BREAK",
+      "HALFTIME",
+      "OVERTIME_SETUP"
+    ],
+    "illegal_phases": [
+      "LIVE",
+      "JUMP_BALL",
+      "FT_SEQUENCE",
+      "PRE_GAME",
+      "POST_GAME"
+    ],
+    "notes": "Subs allowed at any dead ball EXCEPT mid-FT_SEQUENCE before the final attempt. FT_SEQUENCE subs: allow only before first FT or after sequence end (FT_SEQUENCE_END)."
+  }
+}

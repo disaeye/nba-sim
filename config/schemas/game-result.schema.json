@@ -1,0 +1,341 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nba-sim/config/schemas/game-result.schema.json",
+  "title": "NBA Sim GameResult Output (foundation 0.1.0)",
+  "description": "Top-level shape of the object returned by simulateGame(input) -> GameResult (T19). The shape is frozen: meta carries the run provenance; events is the delta-encoded timeline (T2); box_score holds the per-player traditional counting stats for both teams; possession_log summarizes each possession. The PlayerBox field set is the canonical traditional NBA box score (Metis G3.6): 18 counting + identity fields, exactly. Advanced derived stats (TS%, USG%, PER, BPM, etc.) are intentionally excluded from the foundation and must be computed post-hoc by consumers.",
+  "type": "object",
+  "required": [
+    "meta",
+    "events",
+    "box_score",
+    "possession_log"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "meta": {
+      "$ref": "#/$defs/gameMeta"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/timelineEvent"
+      },
+      "description": "Ordered list of timeline events emitted by the engine. Each event MUST be an instance of one of the EventType entries in config/event-catalog.json (T2). Empty array is permitted only for early-abort run shapes; a completed game has events.length > 50 (acceptance criterion T19)."
+    },
+    "snapshots": {
+      "type": "array",
+      "description": "Continuous WorldSnapshot series at tick resolution (position truth for 0.3.0+)."
+    },
+    "box_score": {
+      "type": "object",
+      "required": [
+        "home",
+        "away"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "home": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/playerBox"
+          },
+          "description": "Per-player box stats for the home team. One entry per player who appeared in the game (starter or subbed in)."
+        },
+        "away": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/playerBox"
+          },
+          "description": "Per-player box stats for the away team."
+        }
+      }
+    },
+    "possession_log": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/possessionEntry"
+      },
+      "description": "One entry per terminated possession, in chronological order. Used by the pace regression (T21) to compute per-team mean possession length, pace (possessions per 48 min), and transition share."
+    },
+    "stamina_report": {
+      "type": "object",
+      "description": "§8 stamina report per jersey: ceiling, end-of-game STM, consumption, recovery earned, fatigue F = max(0, consumed − rest).",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "max",
+          "end",
+          "consumed",
+          "rest",
+          "fatigue"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "max": {
+            "type": "number"
+          },
+          "end": {
+            "type": "number"
+          },
+          "consumed": {
+            "type": "number"
+          },
+          "rest": {
+            "type": "number"
+          },
+          "fatigue": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "gameMeta": {
+      "type": "object",
+      "required": [
+        "foundation_version",
+        "seed",
+        "home_team_id",
+        "away_team_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "foundation_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Semver stamp copied from config/foundation.json#foundation_version at simulation time. Two GameResult objects with different foundation_version are not directly comparable."
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "uint32 seed passed to mulberry32 (T12). Identical seed + identical input + identical foundation_version implies byte-identical events and final score (golden fixture T20)."
+        },
+        "home_team_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identifier of the home team (matches config/demo-game.json team id)."
+        },
+        "away_team_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identifier of the away team."
+        },
+        "started_at": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional ISO-8601 timestamp marking when simulateGame was invoked. Used for human-readable provenance only; never consumed by the kernel or by replay (the timeline is fully logical-clock driven)."
+        }
+      }
+    },
+    "timelineEvent": {
+      "type": "object",
+      "required": [
+        "type",
+        "t_game",
+        "period"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "type": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "minLength": 1,
+          "description": "EventType name; must be a member of config/event-catalog.json#events[].type (cross-referenced by the foundation linter, T9)."
+        },
+        "t_game": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Game-clock timestamp in seconds at which the event was emitted. Quantized to 0.1s per docs/foundation/clocks-duration.md (T6)."
+        },
+        "period": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Period number. 1..4 for regulation; >=5 for overtimes (decision M6)."
+        }
+      },
+      "$comment": "Per-event payload fields are intentionally permissive (additionalProperties: true). The required-payload-fields contract for each EventType lives in config/event-catalog.json and is enforced by the foundation linter (T9). The schema here only pins the structural trio (type, t_game, period) common to every event."
+    },
+    "playerBox": {
+      "type": "object",
+      "required": [
+        "playerId",
+        "jersey",
+        "teamId",
+        "points",
+        "fgm",
+        "fga",
+        "tpm",
+        "tpa",
+        "ftm",
+        "fta",
+        "oreb",
+        "dreb",
+        "ast",
+        "tov",
+        "pf",
+        "stl",
+        "blk",
+        "minutes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "playerId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable player identifier; matches the `id` field from config/identity.json (T7)."
+        },
+        "jersey": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Jersey number/string worn by the player for this game."
+        },
+        "teamId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Team identifier the player appeared for in this game."
+        },
+        "points": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total points scored (2*fgm + 3*tpm + ftm). Schema does not enforce the invariant; the engine guarantees it and the linter (T9) may add a runtime check."
+        },
+        "fgm": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Field goals made (includes 3-point makes)."
+        },
+        "fga": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Field goals attempted (includes 3-point attempts)."
+        },
+        "tpm": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "3-point field goals made."
+        },
+        "tpa": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "3-point field goals attempted."
+        },
+        "ftm": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Free throws made."
+        },
+        "fta": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Free throws attempted."
+        },
+        "oreb": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Offensive rebounds."
+        },
+        "dreb": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Defensive rebounds."
+        },
+        "ast": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Assists."
+        },
+        "tov": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Turnovers committed."
+        },
+        "pf": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Personal fouls committed."
+        },
+        "stl": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Steals."
+        },
+        "blk": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Blocks."
+        },
+        "minutes": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Total time played in seconds (or fractional minutes; engine convention documented in T19). Type is number to permit fractional minutes; non-negative."
+        }
+      },
+      "minProperties": 18,
+      "maxProperties": 18,
+      "$comment": "The PlayerBox is the canonical traditional NBA box score for v0.1.0 (Metis G3.6): identity (playerId, jersey, teamId) + traditional counting stats (points, fgm, fga, tpm, tpa, ftm, fta, oreb, dreb, ast, tov, pf, stl, blk) + minutes. Exactly 18 keys are permitted, no more, no less: required lists all 18, additionalProperties: false rejects any extras, and minProperties=maxProperties=18 rejects both missing keys and any future addition. Advanced derived statistics (TS%, eFG%, USG%, PER, BPM, DBPM, OBPM, VORP, win shares, etc.) are OUT of the foundation; downstream consumers compute them from this canonical set. Adding or removing a PlayerBox field is a major foundation_version bump."
+    },
+    "possessionEntry": {
+      "type": "object",
+      "required": [
+        "possession_id",
+        "period",
+        "start_t_game",
+        "end_t_game",
+        "offensive_team_id",
+        "mode",
+        "start_reason",
+        "end_reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "possession_id": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0-indexed sequence number of this possession within the game."
+        },
+        "period": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Period in which the possession began."
+        },
+        "start_t_game": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Game clock (seconds) at possession start."
+        },
+        "end_t_game": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Game clock (seconds) at possession termination."
+        },
+        "offensive_team_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Team that had the ball at the start of the possession."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "TRANSITION",
+            "HALFCOURT"
+          ],
+          "description": "Mode selected by mode_select (T17) at possession start."
+        },
+        "start_reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "minLength": 1,
+          "description": "Why the possession started (JUMP_BALL_TAP, AFTER_MAKE, AFTER_DREB, AFTER_STEAL, AFTER_LIVE_BALL_TURNOVER_RECOVER, AFTER_OREB_CONTINUE, etc.). OREB continuation is represented as a new possession_id for the audit log only; the engine does NOT rebind roles (Metis G1.8)."
+        },
+        "end_reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "minLength": 1,
+          "description": "Terminal state of the possession (MAKE, MISS_DREB, MISS_OREB_CONTINUE, TURNOVER, SHOOTING_FOUL, NON_SHOOTING_FOUL_DEAD, VIOLATION, SHOT_CLOCK_VIOLATION, PERIOD_END, etc.)."
+        }
+      },
+      "$comment": "OREB continuation: per Metis G1.8, when an offensive rebound occurs the same RoleBinding persists (no rebind) and the shot clock resets to 14 (see clocks-duration.md T6). For audit purposes the possession_log may surface either a single possession spanning the OREB or two entries linked by start_reason=AFTER_OREB_CONTINUE; the engine convention is documented in docs/foundation/possession-plays.md (T8). The schema permits both representations."
+    }
+  }
+}

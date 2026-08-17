@@ -1,0 +1,117 @@
+{
+  "$comment": "NBA baseline metrics for simulation realism auditing. Sources: NBA.com/stats, Basketball-Reference, Second Spectrum tracking data, Synergy Sports. Ranges are league-wide 2015-2024 unless noted. These are DIAGNOSTIC bands, not hard targets — use them to find anomalies, not to force-fit. Era matters: pace and 3PA have trended up; use the modern (2020+) band when in doubt.",
+  "meta": {
+    "version": "1.0.0",
+    "created": "2026-08-15",
+    "philosophy": "不教条——指标是发现问题的透镜,不是必须精确匹配的硬指标。超出范围只是'需要解释',不是'错误'。"
+  },
+  "scoring": {
+    "team_ppg": { "band": [105, 120], "median": 113, "note": "per team per game" },
+    "total_ppg": { "band": [210, 240], "median": 226 },
+    "fg_pct": { "band": [0.43, 0.49], "median": 0.46 },
+    "efg_pct": { "band": [0.51, 0.58], "median": 0.545 },
+    "ts_pct": { "band": [0.55, 0.62], "median": 0.58 },
+    "ppp": { "band": [1.00, 1.20], "median": 1.10, "note": "points per possession" }
+  },
+  "shot_profile": {
+    "rim_share": { "band": [0.28, 0.38], "median": 0.33, "note": "FGA within 5ft of basket" },
+    "short_mid_share": { "band": [0.08, 0.15], "median": 0.11, "note": "5-14ft (floater zone)" },
+    "long_mid_share": { "band": [0.08, 0.16], "median": 0.12, "note": "14-22ft" },
+    "three_share": { "band": [0.32, 0.42], "median": 0.38, "note": "3PA / FGA" },
+    "corner_3_share_of_3pa": { "band": [0.25, 0.35], "median": 0.30 },
+    "rim_fg_pct": { "band": [0.60, 0.70], "median": 0.65 },
+    "short_mid_fg_pct": { "band": [0.38, 0.45], "median": 0.42 },
+    "long_mid_fg_pct": { "band": [0.38, 0.44], "median": 0.41 },
+    "three_fg_pct": { "band": [0.33, 0.38], "median": 0.355 },
+    "corner_3_fg_pct": { "band": [0.37, 0.42], "median": 0.39 }
+  },
+  "contest_distribution": {
+    "open_6ft_plus": { "band": [0.28, 0.40], "median": 0.34, "note": "% of FGA with nearest defender 6+ ft" },
+    "tight_2_4ft": { "band": [0.32, 0.42], "median": 0.37 },
+    "very_tight_0_2ft": { "band": [0.08, 0.15], "median": 0.11 },
+    "wide_open_10ft_plus": { "band": [0.10, 0.20], "median": 0.15 }
+  },
+  "ball_movement": {
+    "passes_per_possession": { "band": [2.5, 4.0], "median": 3.2 },
+    "assists_per_game": { "band": [22, 30], "median": 26 },
+    "assist_rate": { "band": [0.55, 0.68], "median": 0.61, "note": "AST/FGM" },
+    "secondary_assists": { "band": [2, 6], "median": 4, "note": "hockey assists per game" },
+    "pass_miles_per_game": { "band": [12, 18], "median": 15 }
+  },
+  "pace_and_timing": {
+    "possessions_per_game": { "band": [96, 104], "median": 100 },
+    "avg_possession_seconds": { "band": [12.5, 15.5], "median": 14.0 },
+    "avg_offensive_rebound_time": { "band": [1.5, 3.5], "median": 2.5, "note": "time from OREB to next action" },
+    "avg_shot_clock_at_release": { "band": [11.0, 15.0], "median": 13.0 },
+    "early_shot_share_16plus_clock": { "band": [0.10, 0.20], "median": 0.15 },
+    "late_shot_share_4less_clock": { "band": [0.04, 0.10], "median": 0.07 },
+    "dead_ball_to_inbound_seconds": { "band": [2.0, 5.0], "median": 3.5, "note": "after made basket" }
+  },
+  "turnovers_and_steals": {
+    "turnovers_per_game": { "band": [12, 17], "median": 14 },
+    "steals_per_game": { "band": [6, 10], "median": 8 },
+    "turnover_rate": { "band": [0.11, 0.16], "median": 0.135, "note": "TOV/poss" },
+    "bad_pass_turnover_share": { "band": [0.35, 0.50], "median": 0.42 }
+  },
+  "rebounds": {
+    "oreb_rate": { "band": [0.22, 0.32], "median": 0.27 },
+    "second_chance_ppp": { "band": [0.95, 1.20], "median": 1.08 },
+    "putback_rate_after_oreb": { "band": [0.50, 0.65], "median": 0.58, "note": "% of OREBs resulting in immediate shot" },
+    "rebounder_rim_distance_median": { "band": [3.0, 7.0], "median": 5.0, "note": "ft from rim at recovery" }
+  },
+  "free_throws": {
+    "fta_per_game": { "band": [17, 25], "median": 21 },
+    "ft_rate": { "band": [0.18, 0.28], "median": 0.23, "note": "FTA/FGA" },
+    "ft_pct": { "band": [0.74, 0.80], "median": 0.78 }
+  },
+  "fouls": {
+    "personal_fouls_per_game": { "band": [17, 22], "median": 19.5 },
+    "shooting_foul_share": { "band": [0.35, 0.50], "median": 0.42 },
+    "and_one_rate": { "band": [0.02, 0.05], "median": 0.03, "note": "AND1 / shooting fouls" }
+  },
+  "movement_and_spatial": {
+    "avg_player_speed_ft_s": { "band": [4.0, 6.0], "median": 5.0, "note": "including stops; offensive players only" },
+    "top_speed_ft_s": { "band": [20, 26], "median": 23, "note": "max sprint observed" },
+    "distance_per_game_miles": { "band": [1.8, 2.6], "median": 2.2 },
+    "offense_nn_spacing_median": { "band": [12, 16], "median": 14, "note": "nearest-neighbor distance among offense, settled halfcourt" },
+    "paint_touches_per_game": { "band": [35, 55], "median": 45 },
+    "drives_per_game": { "band": [35, 55], "median": 45 },
+    "drive_kick_pass_share": { "band": [0.30, 0.45], "median": 0.38 }
+  },
+  "defense": {
+    "defender_rim_side_rate": { "band": [0.72, 0.85], "median": 0.78, "note": "% defenders between man and rim, settled" },
+    "contest_closeout_speed_ft_s": { "band": [15, 20], "median": 17 },
+    "transition_def_retreat_speed_ft_s": { "band": [16, 22], "median": 19 },
+    "blocked_shots_per_game": { "band": [4, 7], "median": 5.5 },
+    "opp_paint_points": { "band": [42, 55], "median": 48 }
+  },
+  "tactics_and_style": {
+    "pnr_possessions_per_game": { "band": [35, 55], "median": 45 },
+    "isolations_per_game": { "band": [8, 16], "median": 12 },
+    "post_ups_per_game": { "band": [5, 12], "median": 8 },
+    "off_ball_screens_per_game": { "band": [30, 50], "median": 40, "note": "pin-downs, curls, floppy" },
+    "handoffs_per_game": { "band": [10, 20], "median": 15 },
+    "spot_up_shots_share": { "band": [0.20, 0.30], "median": 0.25 },
+    "catch_and_shoot_share_of_3pa": { "band": [0.65, 0.80], "median": 0.72 },
+    "roll_man_feed_rate": { "band": [0.40, 0.55], "median": 0.48, "note": "% of screens fed to roller" },
+    "post_entry_rate": { "band": [0.35, 0.55], "median": 0.45, "note": "% of post-ups receiving entry pass" }
+  },
+  "rotation_and_stamina": {
+    "players_used": { "band": [8, 11], "median": 9.5 },
+    "avg_starter_minutes": { "band": [30, 36], "median": 33 },
+    "avg_bench_minutes": { "band": [14, 20], "median": 17 },
+    "fatigue_speed_decline": { "band": [0.03, 0.08], "median": 0.05, "note": "proportional speed loss in 4th vs 1st" }
+  },
+  "game_flow": {
+    "lead_changes_per_game": { "band": [8, 16], "median": 12 },
+    "scoring_runs_8plus": { "band": [3, 7], "median": 5 },
+    "largest_lead_median": { "band": [12, 20], "median": 16 },
+    "close_game_rate": { "band": [0.25, 0.40], "median": 0.32, "note": "within 5 pts in final 3 min" },
+    "overtime_rate": { "band": [0.05, 0.09], "median": 0.07 }
+  },
+  "clutch": {
+    "clutch_3pa_share_trailing": { "band": [0.40, 0.55], "median": 0.48, "note": "trailing by 3-8 in final 3 min" },
+    "clutch_pace_leading": { "band": [0.80, 0.95], "median": 0.88, "note": "relative to normal pace" },
+    "timeout_after_run_rate": { "band": [0.30, 0.50], "median": 0.40 }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MobilityConfig",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "foundation_version",
+    "court_length_unit",
+    "tick_seconds",
+    "arrival_epsilon",
+    "default_action_speeds",
+    "player_overrides",
+    "ball"
+  ],
+  "properties": {
+    "foundation_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "court_length_unit": { "type": "number", "exclusiveMinimum": 0 },
+    "tick_seconds": { "type": "number", "exclusiveMinimum": 0 },
+    "arrival_epsilon": { "type": "number", "exclusiveMinimum": 0 },
+    "default_action_speeds": {
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": 0 }
+    },
+    "player_overrides": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "type": "number", "minimum": 0 }
+      }
+    },
+    "role_action_speeds": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "type": "number", "minimum": 0 }
+      }
+    },
+    "ball": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pass_speed",
+        "shot_flight_min",
+        "shot_flight_max",
+        "intercept_radius",
+        "strip_radius",
+        "loose_pickup_radius"
+      ],
+      "properties": {
+        "pass_speed": { "type": "number", "exclusiveMinimum": 0 },
+        "shot_flight_min": { "type": "number", "exclusiveMinimum": 0 },
+        "shot_flight_max": { "type": "number", "exclusiveMinimum": 0 },
+        "intercept_radius": { "type": "number", "exclusiveMinimum": 0 },
+        "strip_radius": { "type": "number", "exclusiveMinimum": 0 },
+        "loose_pickup_radius": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    }
+  }
+}

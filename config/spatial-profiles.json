@@ -1,0 +1,29 @@
+{
+  "foundation_version": "0.13.0",
+  "description": "Spatial positioning parameters derived from NBA SportVU 2015-16 tracking data. All distances in feet unless noted.",
+  "handler_pocket": {
+    "transition_dist_from_rim_ft": 42,
+    "early_dist_from_rim_ft": 15,
+    "mid_dist_from_rim_ft": 14,
+    "late_dist_from_rim_ft": 8,
+    "y_center_ft": 25,
+    "y_spread_ft": 5
+  },
+  "defense": {
+    "on_ball_gap_ft": 4,
+    "help_dist_from_ball_ft": 16,
+    "tag_dist_from_ball_ft": 14,
+    "weak_side_dist_from_ball_ft": 22,
+    "deny_dist_from_ball_ft": 10
+  },
+  "off_ball": {
+    "teammate_avg_dist_ft": 22,
+    "teammate_dx_bias_ft": 4,
+    "team_spacing_avg_ft": 24
+  },
+  "advance": {
+    "handler_speed_ft_per_s": 7,
+    "off_ball_speed_ft_per_s": 8,
+    "defense_sprint_speed_ft_per_s": 10
+  }
+}

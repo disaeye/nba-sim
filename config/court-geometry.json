@@ -1,0 +1,19 @@
+{
+  "foundation_version": "0.13.0",
+  "description": "NBA full court in feet; sim uses x=length/94, y=width/50. Single source for kernel zone/shot and spectator draw.",
+  "length_ft": 94,
+  "width_ft": 50,
+  "rim_from_baseline_ft": 5.25,
+  "rim_radius_ft": 0.75,
+  "backboard_from_baseline_ft": 4,
+  "backboard_width_ft": 6,
+  "lane_width_ft": 16,
+  "lane_length_ft": 19,
+  "free_throw_circle_radius_ft": 6,
+  "center_circle_radius_ft": 6,
+  "restricted_area_radius_ft": 4,
+  "three_point_arc_ft": 23.75,
+  "three_point_corner_ft": 22,
+  "three_point_corner_from_sideline_ft": 3,
+  "key_hash_marks": true
+}

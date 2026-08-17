@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nba-sim/config/schemas/rng.schema.json",
+  "title": "NBA Sim RNG Contract (foundation 0.1.0)",
+  "description": "Freezes the RNG algorithm, seed type, stream model, and substream policy for the kernel. Foundation 0.1.0 locks mulberry32 with a single explicitly-threaded RNG stream and forbids substreams. Any change to a field pinned by `const` here is a breaking change requiring a foundation_version major bump per docs/foundation/README.md.",
+  "type": "object",
+  "required": [
+    "foundation_version",
+    "algorithm",
+    "seed_type",
+    "stream_model",
+    "substreams"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "foundation_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semver stamp of the RNG contract. Must equal config/foundation.json#foundation_version."
+    },
+    "algorithm": {
+      "type": "string",
+      "const": "mulberry32",
+      "description": "Authoritative PRNG algorithm for v0.1.0. mulberry32 is a 32-bit-state, deterministic, seedable algorithm returning floats in [0,1). Changing algorithm is a major-version bump."
+    },
+    "seed_type": {
+      "type": "string",
+      "const": "uint32",
+      "description": "Seed is an unsigned 32-bit integer. Same seed produces the identical draw sequence across conformant implementations (decision M3)."
+    },
+    "stream_model": {
+      "type": "string",
+      "const": "single",
+      "description": "Exactly one RNG instance is threaded through step() per simulation. Multiple named streams, substreams, or per-module RNGs are forbidden."
+    },
+    "substreams": {
+      "type": "boolean",
+      "const": false,
+      "description": "Hard toggle forbidding substreams (rng.duration(...), rng.resolve(...), etc.). Must remain false for v0.1.0; introducing substreams is a major-version bump."
+    }
+  }
+}

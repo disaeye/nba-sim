@@ -1,0 +1,19 @@
+{
+  "foundation_version": "0.13.0",
+  "zones": [
+    "backcourt",
+    "frontcourt_center",
+    "slot_L",
+    "slot_R",
+    "wing_L",
+    "wing_R",
+    "corner_L",
+    "corner_R",
+    "elbow_L",
+    "elbow_R",
+    "paint",
+    "dunker_L",
+    "dunker_R",
+    "rim"
+  ]
+}

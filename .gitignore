@@ -1,0 +1,23 @@
+node_modules/
+dist/
+*.js
+!vitest.config.ts
+!scripts/*.mjs
+.DS_Store
+coverage/
+.omo/evidence/
+
+# spectator: generated replay artifacts (regenerate via npm run export-game / export-ndjson)
+spectator/game.json
+spectator/game.ticks.ndjson
+spectator/game.ticks.ndjson.gz
+spectator/verify-game.json
+
+# session artifacts accidentally committed (296MB blobs)
+local:
+
+# session/tooling scratch
+.omo/
+.codegraph/
+__pycache__/
+*.pyc

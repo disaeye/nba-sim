@@ -1,0 +1,208 @@
+{
+  "foundation_version": "0.13.0",
+  "court_length_unit": 1,
+  "tick_seconds": 0.1,
+  "arrival_epsilon": 0.02,
+  "default_action_speeds": {
+    "advance": 0.15,
+    "cut": 0.22,
+    "space": 0.12,
+    "screen": 0.08,
+    "ball_handler": 0.14,
+    "on_ball_defend": 0.18,
+    "help": 0.2,
+    "deny": 0.14,
+    "tag": 0.16,
+    "weak_side": 0.12,
+    "box_out": 0.1,
+    "inbound": 0.1,
+    "receive_tip": 0.14,
+    "jump": 0.05,
+    "circle_spot": 0.06,
+    "shoot_ft": 0.05,
+    "idle": 0.04,
+    "pass": 0.1,
+    "drive": 0.2,
+    "triple_threat": 0.025,
+    "back_to_basket": 0.035,
+    "pivot": 0.025,
+    "crossover": 0.16,
+    "pump_fake": 0.02,
+    "shoot": 0.08,
+    "pressure": 0.18,
+    "contain": 0.16,
+    "relocate": 0.14,
+    "hold": 0.06
+  },
+  "player_overrides": {
+    "1": {
+      "advance": 0.15,
+      "drive": 0.22,
+      "cut": 0.24
+    },
+    "2": {
+      "advance": 0.15,
+      "drive": 0.22,
+      "cut": 0.24
+    },
+    "3": {
+      "advance": 0.15,
+      "drive": 0.18,
+      "cut": 0.22
+    },
+    "4": {
+      "advance": 0.12,
+      "drive": 0.15,
+      "cut": 0.25
+    },
+    "5": {
+      "advance": 0.14,
+      "drive": 0.17,
+      "cut": 0.21
+    },
+    "6": {
+      "advance": 0.15,
+      "drive": 0.18,
+      "cut": 0.22
+    },
+    "7": {
+      "advance": 0.15,
+      "drive": 0.22,
+      "cut": 0.24
+    },
+    "8": {
+      "advance": 0.12,
+      "drive": 0.15,
+      "cut": 0.25
+    },
+    "9": {
+      "advance": 0.15,
+      "drive": 0.22,
+      "cut": 0.24
+    },
+    "10": {
+      "advance": 0.14,
+      "drive": 0.17,
+      "cut": 0.21
+    },
+    "11": {
+      "advance": 0.15,
+      "drive": 0.22,
+      "cut": 0.24
+    },
+    "12": {
+      "advance": 0.15,
+      "drive": 0.22,
+      "cut": 0.24
+    },
+    "13": {
+      "advance": 0.15,
+      "drive": 0.18,
+      "cut": 0.22
+    },
+    "14": {
+      "advance": 0.12,
+      "drive": 0.15,
+      "cut": 0.25
+    },
+    "15": {
+      "advance": 0.14,
+      "drive": 0.17,
+      "cut": 0.21
+    },
+    "16": {
+      "advance": 0.15,
+      "drive": 0.18,
+      "cut": 0.22
+    },
+    "17": {
+      "advance": 0.15,
+      "drive": 0.22,
+      "cut": 0.24
+    },
+    "18": {
+      "advance": 0.12,
+      "drive": 0.15,
+      "cut": 0.25
+    },
+    "19": {
+      "advance": 0.15,
+      "drive": 0.22,
+      "cut": 0.24
+    },
+    "20": {
+      "advance": 0.14,
+      "drive": 0.17,
+      "cut": 0.21
+    }
+  },
+  "role_action_speeds": {
+    "ball_handler": {
+      "advance": 0.14,
+      "drive": 0.22,
+      "triple_threat": 0.025,
+      "back_to_basket": 0.035,
+      "pivot": 0.025,
+      "crossover": 0.18,
+      "pump_fake": 0.02,
+      "cut": 0.24,
+      "relocate": 0.15,
+      "ball_handler": 0.15
+    },
+    "screener": {
+      "advance": 0.12,
+      "drive": 0.15,
+      "cut": 0.25,
+      "screen": 0.18,
+      "space": 0.1,
+      "relocate": 0.16
+    },
+    "spacer": {
+      "advance": 0.15,
+      "drive": 0.18,
+      "cut": 0.22,
+      "space": 0.12,
+      "relocate": 0.14
+    },
+    "on_ball_defender": {
+      "on_ball_defend": 0.2,
+      "deny": 0.16,
+      "help": 0.18,
+      "tag": 0.17
+    },
+    "help_defender": {
+      "help": 0.22,
+      "tag": 0.19,
+      "box_out": 0.12,
+      "weak_side": 0.14
+    },
+    "weak_side_defender": {
+      "weak_side": 0.14,
+      "deny": 0.15,
+      "help": 0.18,
+      "box_out": 0.11
+    },
+    "perimeter_defender": {
+      "deny": 0.15,
+      "help": 0.18,
+      "weak_side": 0.13,
+      "box_out": 0.11
+    }
+  },
+  "physical": {
+    "body_radius_ft": 1,
+    "pressure_radius_ft": 6,
+    "pressure_speed_floor": 0.7,
+    "contact_iterations": 4,
+    "dead_ball_speed_scale": 0.75
+  },
+  "ball": {
+    "pass_speed": 0.52,
+    "shot_flight_min": 0.35,
+    "shot_flight_max": 1.5,
+    "shot_flight_speed": 0.22,
+    "intercept_radius": 0.045,
+    "strip_radius": 0.035,
+    "loose_pickup_radius": 0.1
+  }
+}

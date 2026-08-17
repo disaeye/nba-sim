@@ -1,0 +1,2291 @@
+{
+  "foundation_version": "0.13.0",
+  "home_team": {
+    "id": "home",
+    "name": "Generated Hawks",
+    "roster": [
+      {
+        "id": "home1",
+        "jersey": "1",
+        "teamId": "home",
+        "playerData": {
+          "physical": {
+            "H": 196,
+            "WT": 83,
+            "WS": 198,
+            "VJ": 80,
+            "SPD": 83,
+            "LAT": 77,
+            "AGE": 19,
+            "DUR": 54
+          },
+          "ability": {
+            "CS3": 52,
+            "OD3": 74,
+            "CSM": 57,
+            "PUM": 86,
+            "FLT": 40,
+            "POST": 71,
+            "FT": 51,
+            "FINS": 74,
+            "FINW": 53,
+            "FINC": 57,
+            "DUNK": 67,
+            "HND": 42,
+            "PNR": 79,
+            "PASS": 50,
+            "PASM": 42,
+            "POCK": 54,
+            "SCRN": 51,
+            "POBD": 64,
+            "NAVS": 72,
+            "SWCH": 61,
+            "RIM": 50,
+            "STL": 45,
+            "BOX": 51,
+            "ORB": 52
+          },
+          "pot": {
+            "CS3": 72,
+            "OD3": 92,
+            "CSM": 79,
+            "PUM": 99,
+            "FLT": 60,
+            "POST": 98,
+            "FT": 53,
+            "FINS": 95,
+            "FINW": 71,
+            "FINC": 73,
+            "DUNK": 80,
+            "HND": 59,
+            "PNR": 94,
+            "PASS": 82,
+            "PASM": 80,
+            "POCK": 69,
+            "SCRN": 53,
+            "POBD": 80,
+            "NAVS": 90,
+            "SWCH": 78,
+            "RIM": 64,
+            "STL": 66,
+            "BOX": 68,
+            "ORB": 75
+          },
+          "tendency": {
+            "T3": 46,
+            "TMID": 27,
+            "TDRIVE": 22,
+            "TPOST": 5,
+            "PASS1ST": 38,
+            "GAMBLE": 52,
+            "FOUL": 53,
+            "TAKEOVER": 72,
+            "PUSH": 39
+          },
+          "awareness": {
+            "OFFR": 60,
+            "DEFR": 40,
+            "SPC": 61,
+            "PLY": 78
+          }
+        }
+      },
+      {
+        "id": "home2",
+        "jersey": "2",
+        "teamId": "home",
+        "playerData": {
+          "physical": {
+            "H": 196,
+            "WT": 95,
+            "WS": 197,
+            "VJ": 73,
+            "SPD": 75,
+            "LAT": 75,
+            "AGE": 19,
+            "DUR": 51
+          },
+          "ability": {
+            "CS3": 52,
+            "OD3": 75,
+            "CSM": 55,
+            "PUM": 81,
+            "FLT": 49,
+            "POST": 74,
+            "FT": 44,
+            "FINS": 79,
+            "FINW": 68,
+            "FINC": 45,
+            "DUNK": 41,
+            "HND": 67,
+            "PNR": 66,
+            "PASS": 49,
+            "PASM": 51,
+            "POCK": 51,
+            "SCRN": 60,
+            "POBD": 48,
+            "NAVS": 61,
+            "SWCH": 51,
+            "RIM": 46,
+            "STL": 63,
+            "BOX": 54,
+            "ORB": 51
+          },
+          "pot": {
+            "CS3": 71,
+            "OD3": 99,
+            "CSM": 87,
+            "PUM": 92,
+            "FLT": 65,
+            "POST": 93,
+            "FT": 57,
+            "FINS": 99,
+            "FINW": 81,
+            "FINC": 60,
+            "DUNK": 50,
+            "HND": 92,
+            "PNR": 85,
+            "PASS": 63,
+            "PASM": 62,
+            "POCK": 71,
+            "SCRN": 86,
+            "POBD": 53,
+            "NAVS": 78,
+            "SWCH": 66,
+            "RIM": 67,
+            "STL": 86,
+            "BOX": 72,
+            "ORB": 84
+          },
+          "tendency": {
+            "T3": 46,
+            "TMID": 26,
+            "TDRIVE": 25,
+            "TPOST": 3,
+            "PASS1ST": 32,
+            "GAMBLE": 34,
+            "FOUL": 48,
+            "TAKEOVER": 54,
+            "PUSH": 29
+          },
+          "awareness": {
+            "OFFR": 43,
+            "DEFR": 58,
+            "SPC": 49,
+            "PLY": 70
+          }
+        }
+      },
+      {
+        "id": "home3",
+        "jersey": "3",
+        "teamId": "home",
+        "playerData": {
+          "physical": {
+            "H": 225,
+            "WT": 140,
+            "WS": 233,
+            "VJ": 78,
+            "SPD": 48,
+            "LAT": 47,
+            "AGE": 22,
+            "DUR": 64
+          },
+          "ability": {
+            "CS3": 54,
+            "OD3": 56,
+            "CSM": 68,
+            "PUM": 81,
+            "FLT": 58,
+            "POST": 44,
+            "FT": 59,
+            "FINS": 65,
+            "FINW": 53,
+            "FINC": 60,
+            "DUNK": 68,
+            "HND": 76,
+            "PNR": 64,
+            "PASS": 46,
+            "PASM": 58,
+            "POCK": 56,
+            "SCRN": 60,
+            "POBD": 52,
+            "NAVS": 52,
+            "SWCH": 48,
+            "RIM": 84,
+            "STL": 45,
+            "BOX": 74,
+            "ORB": 55
+          },
+          "pot": {
+            "CS3": 61,
+            "OD3": 62,
+            "CSM": 83,
+            "PUM": 87,
+            "FLT": 66,
+            "POST": 46,
+            "FT": 71,
+            "FINS": 75,
+            "FINW": 74,
+            "FINC": 73,
+            "DUNK": 86,
+            "HND": 89,
+            "PNR": 79,
+            "PASS": 64,
+            "PASM": 60,
+            "POCK": 79,
+            "SCRN": 72,
+            "POBD": 74,
+            "NAVS": 60,
+            "SWCH": 51,
+            "RIM": 99,
+            "STL": 55,
+            "BOX": 98,
+            "ORB": 71
+          },
+          "tendency": {
+            "T3": 22,
+            "TMID": 30,
+            "TDRIVE": 24,
+            "TPOST": 24,
+            "PASS1ST": 44,
+            "GAMBLE": 42,
+            "FOUL": 56,
+            "TAKEOVER": 21,
+            "PUSH": 47
+          },
+          "awareness": {
+            "OFFR": 61,
+            "DEFR": 78,
+            "SPC": 70,
+            "PLY": 58
+          }
+        }
+      },
+      {
+        "id": "home4",
+        "jersey": "4",
+        "teamId": "home",
+        "playerData": {
+          "physical": {
+            "H": 209,
+            "WT": 129,
+            "WS": 216,
+            "VJ": 77,
+            "SPD": 59,
+            "LAT": 65,
+            "AGE": 27,
+            "DUR": 47
+          },
+          "ability": {
+            "CS3": 88,
+            "OD3": 66,
+            "CSM": 47,
+            "PUM": 54,
+            "FLT": 48,
+            "POST": 78,
+            "FT": 49,
+            "FINS": 55,
+            "FINW": 36,
+            "FINC": 77,
+            "DUNK": 46,
+            "HND": 44,
+            "PNR": 58,
+            "PASS": 54,
+            "PASM": 60,
+            "POCK": 60,
+            "SCRN": 42,
+            "POBD": 36,
+            "NAVS": 69,
+            "SWCH": 34,
+            "RIM": 51,
+            "STL": 32,
+            "BOX": 76,
+            "ORB": 53
+          },
+          "pot": {
+            "CS3": 90,
+            "OD3": 70,
+            "CSM": 49,
+            "PUM": 56,
+            "FLT": 50,
+            "POST": 86,
+            "FT": 51,
+            "FINS": 57,
+            "FINW": 40,
+            "FINC": 83,
+            "DUNK": 48,
+            "HND": 46,
+            "PNR": 62,
+            "PASS": 56,
+            "PASM": 62,
+            "POCK": 62,
+            "SCRN": 44,
+            "POBD": 40,
+            "NAVS": 71,
+            "SWCH": 40,
+            "RIM": 55,
+            "STL": 40,
+            "BOX": 82,
+            "ORB": 57
+          },
+          "tendency": {
+            "T3": 3,
+            "TMID": 28,
+            "TDRIVE": 26,
+            "TPOST": 43,
+            "PASS1ST": 56,
+            "GAMBLE": 52,
+            "FOUL": 49,
+            "TAKEOVER": 43,
+            "PUSH": 62
+          },
+          "awareness": {
+            "OFFR": 56,
+            "DEFR": 56,
+            "SPC": 45,
+            "PLY": 58
+          }
+        }
+      },
+      {
+        "id": "home5",
+        "jersey": "5",
+        "teamId": "home",
+        "playerData": {
+          "physical": {
+            "H": 223,
+            "WT": 131,
+            "WS": 237,
+            "VJ": 78,
+            "SPD": 53,
+            "LAT": 61,
+            "AGE": 30,
+            "DUR": 72
+          },
+          "ability": {
+            "CS3": 57,
+            "OD3": 45,
+            "CSM": 61,
+            "PUM": 53,
+            "FLT": 65,
+            "POST": 57,
+            "FT": 41,
+            "FINS": 70,
+            "FINW": 50,
+            "FINC": 75,
+            "DUNK": 78,
+            "HND": 67,
+            "PNR": 41,
+            "PASS": 63,
+            "PASM": 54,
+            "POCK": 32,
+            "SCRN": 78,
+            "POBD": 58,
+            "NAVS": 52,
+            "SWCH": 58,
+            "RIM": 67,
+            "STL": 61,
+            "BOX": 42,
+            "ORB": 74
+          },
+          "pot": {
+            "CS3": 59,
+            "OD3": 47,
+            "CSM": 63,
+            "PUM": 58,
+            "FLT": 67,
+            "POST": 59,
+            "FT": 44,
+            "FINS": 72,
+            "FINW": 52,
+            "FINC": 82,
+            "DUNK": 84,
+            "HND": 71,
+            "PNR": 44,
+            "PASS": 65,
+            "PASM": 56,
+            "POCK": 40,
+            "SCRN": 85,
+            "POBD": 60,
+            "NAVS": 55,
+            "SWCH": 61,
+            "RIM": 69,
+            "STL": 65,
+            "BOX": 46,
+            "ORB": 82
+          },
+          "tendency": {
+            "T3": 6,
+            "TMID": 31,
+            "TDRIVE": 30,
+            "TPOST": 33,
+            "PASS1ST": 50,
+            "GAMBLE": 40,
+            "FOUL": 51,
+            "TAKEOVER": 67,
+            "PUSH": 51
+          },
+          "awareness": {
+            "OFFR": 26,
+            "DEFR": 38,
+            "SPC": 68,
+            "PLY": 71
+          }
+        }
+      },
+      {
+        "id": "home6",
+        "jersey": "6",
+        "teamId": "home",
+        "playerData": {
+          "physical": {
+            "H": 208,
+            "WT": 134,
+            "WS": 217,
+            "VJ": 88,
+            "SPD": 78,
+            "LAT": 76,
+            "AGE": 21,
+            "DUR": 51
+          },
+          "ability": {
+            "CS3": 44,
+            "OD3": 67,
+            "CSM": 44,
+            "PUM": 55,
+            "FLT": 54,
+            "POST": 60,
+            "FT": 47,
+            "FINS": 49,
+            "FINW": 49,
+            "FINC": 65,
+            "DUNK": 69,
+            "HND": 57,
+            "PNR": 61,
+            "PASS": 49,
+            "PASM": 63,
+            "POCK": 77,
+            "SCRN": 54,
+            "POBD": 80,
+            "NAVS": 77,
+            "SWCH": 45,
+            "RIM": 71,
+            "STL": 77,
+            "BOX": 49,
+            "ORB": 59
+          },
+          "pot": {
+            "CS3": 57,
+            "OD3": 76,
+            "CSM": 56,
+            "PUM": 63,
+            "FLT": 75,
+            "POST": 73,
+            "FT": 51,
+            "FINS": 61,
+            "FINW": 54,
+            "FINC": 79,
+            "DUNK": 81,
+            "HND": 61,
+            "PNR": 79,
+            "PASS": 58,
+            "PASM": 74,
+            "POCK": 88,
+            "SCRN": 81,
+            "POBD": 92,
+            "NAVS": 94,
+            "SWCH": 53,
+            "RIM": 85,
+            "STL": 86,
+            "BOX": 65,
+            "ORB": 69
+          },
+          "tendency": {
+            "T3": 31,
+            "TMID": 28,
+            "TDRIVE": 16,
+            "TPOST": 25,
+            "PASS1ST": 60,
+            "GAMBLE": 69,
+            "FOUL": 39,
+            "TAKEOVER": 5,
+            "PUSH": 41
+          },
+          "awareness": {
+            "OFFR": 58,
+            "DEFR": 43,
+            "SPC": 73,
+            "PLY": 66
+          }
+        }
+      },
+      {
+        "id": "home7",
+        "jersey": "7",
+        "teamId": "home",
+        "playerData": {
+          "physical": {
+            "H": 203,
+            "WT": 103,
+            "WS": 212,
+            "VJ": 85,
+            "SPD": 77,
+            "LAT": 70,
+            "AGE": 29,
+            "DUR": 77
+          },
+          "ability": {
+            "CS3": 65,
+            "OD3": 67,
+            "CSM": 68,
+            "PUM": 64,
+            "FLT": 64,
+            "POST": 64,
+            "FT": 65,
+            "FINS": 64,
+            "FINW": 66,
+            "FINC": 66,
+            "DUNK": 65,
+            "HND": 65,
+            "PNR": 67,
+            "PASS": 67,
+            "PASM": 66,
+            "POCK": 65,
+            "SCRN": 65,
+            "POBD": 66,
+            "NAVS": 63,
+            "SWCH": 63,
+            "RIM": 62,
+            "STL": 66,
+            "BOX": 63,
+            "ORB": 68
+          },
+          "pot": {
+            "CS3": 67,
+            "OD3": 71,
+            "CSM": 71,
+            "PUM": 67,
+            "FLT": 66,
+            "POST": 66,
+            "FT": 69,
+            "FINS": 68,
+            "FINW": 70,
+            "FINC": 68,
+            "DUNK": 68,
+            "HND": 67,
+            "PNR": 69,
+            "PASS": 70,
+            "PASM": 68,
+            "POCK": 69,
+            "SCRN": 69,
+            "POBD": 68,
+            "NAVS": 65,
+            "SWCH": 66,
+            "RIM": 64,
+            "STL": 68,
+            "BOX": 65,
+            "ORB": 71
+          },
+          "tendency": {
+            "T3": 26,
+            "TMID": 17,
+            "TDRIVE": 27,
+            "TPOST": 30,
+            "PASS1ST": 40,
+            "GAMBLE": 47,
+            "FOUL": 50,
+            "TAKEOVER": 71,
+            "PUSH": 48
+          },
+          "awareness": {
+            "OFFR": 71,
+            "DEFR": 74,
+            "SPC": 59,
+            "PLY": 85
+          }
+        }
+      },
+      {
+        "id": "home8",
+        "jersey": "8",
+        "teamId": "home",
+        "playerData": {
+          "physical": {
+            "H": 213,
+            "WT": 123,
+            "WS": 219,
+            "VJ": 72,
+            "SPD": 64,
+            "LAT": 56,
+            "AGE": 26,
+            "DUR": 79
+          },
+          "ability": {
+            "CS3": 55,
+            "OD3": 67,
+            "CSM": 44,
+            "PUM": 44,
+            "FLT": 68,
+            "POST": 49,
+            "FT": 58,
+            "FINS": 51,
+            "FINW": 75,
+            "FINC": 49,
+            "DUNK": 65,
+            "HND": 77,
+            "PNR": 59,
+            "PASS": 42,
+            "PASM": 60,
+            "POCK": 75,
+            "SCRN": 60,
+            "POBD": 65,
+            "NAVS": 54,
+            "SWCH": 44,
+            "RIM": 96,
+            "STL": 54,
+            "BOX": 76,
+            "ORB": 56
+          },
+          "pot": {
+            "CS3": 62,
+            "OD3": 71,
+            "CSM": 47,
+            "PUM": 50,
+            "FLT": 70,
+            "POST": 60,
+            "FT": 64,
+            "FINS": 61,
+            "FINW": 81,
+            "FINC": 51,
+            "DUNK": 75,
+            "HND": 86,
+            "PNR": 69,
+            "PASS": 48,
+            "PASM": 63,
+            "POCK": 78,
+            "SCRN": 69,
+            "POBD": 75,
+            "NAVS": 57,
+            "SWCH": 53,
+            "RIM": 99,
+            "STL": 60,
+            "BOX": 84,
+            "ORB": 70
+          },
+          "tendency": {
+            "T3": 23,
+            "TMID": 32,
+            "TDRIVE": 24,
+            "TPOST": 21,
+            "PASS1ST": 46,
+            "GAMBLE": 41,
+            "FOUL": 68,
+            "TAKEOVER": 24,
+            "PUSH": 68
+          },
+          "awareness": {
+            "OFFR": 58,
+            "DEFR": 60,
+            "SPC": 45,
+            "PLY": 61
+          }
+        }
+      },
+      {
+        "id": "home9",
+        "jersey": "9",
+        "teamId": "home",
+        "playerData": {
+          "physical": {
+            "H": 215,
+            "WT": 128,
+            "WS": 218,
+            "VJ": 69,
+            "SPD": 69,
+            "LAT": 55,
+            "AGE": 22,
+            "DUR": 44
+          },
+          "ability": {
+            "CS3": 71,
+            "OD3": 48,
+            "CSM": 72,
+            "PUM": 38,
+            "FLT": 64,
+            "POST": 53,
+            "FT": 74,
+            "FINS": 69,
+            "FINW": 54,
+            "FINC": 58,
+            "DUNK": 36,
+            "HND": 58,
+            "PNR": 43,
+            "PASS": 59,
+            "PASM": 41,
+            "POCK": 57,
+            "SCRN": 53,
+            "POBD": 46,
+            "NAVS": 54,
+            "SWCH": 47,
+            "RIM": 69,
+            "STL": 59,
+            "BOX": 53,
+            "ORB": 46
+          },
+          "pot": {
+            "CS3": 76,
+            "OD3": 60,
+            "CSM": 77,
+            "PUM": 48,
+            "FLT": 71,
+            "POST": 70,
+            "FT": 81,
+            "FINS": 71,
+            "FINW": 77,
+            "FINC": 71,
+            "DUNK": 47,
+            "HND": 73,
+            "PNR": 46,
+            "PASS": 79,
+            "PASM": 55,
+            "POCK": 64,
+            "SCRN": 64,
+            "POBD": 48,
+            "NAVS": 68,
+            "SWCH": 49,
+            "RIM": 84,
+            "STL": 67,
+            "BOX": 72,
+            "ORB": 51
+          },
+          "tendency": {
+            "T3": 47,
+            "TMID": 21,
+            "TDRIVE": 18,
+            "TPOST": 14,
+            "PASS1ST": 38,
+            "GAMBLE": 35,
+            "FOUL": 52,
+            "TAKEOVER": 58,
+            "PUSH": 30
+          },
+          "awareness": {
+            "OFFR": 65,
+            "DEFR": 60,
+            "SPC": 65,
+            "PLY": 56
+          }
+        }
+      },
+      {
+        "id": "home10",
+        "jersey": "10",
+        "teamId": "home",
+        "playerData": {
+          "physical": {
+            "H": 215,
+            "WT": 123,
+            "WS": 233,
+            "VJ": 78,
+            "SPD": 63,
+            "LAT": 52,
+            "AGE": 20,
+            "DUR": 61
+          },
+          "ability": {
+            "CS3": 79,
+            "OD3": 51,
+            "CSM": 42,
+            "PUM": 55,
+            "FLT": 60,
+            "POST": 55,
+            "FT": 46,
+            "FINS": 72,
+            "FINW": 60,
+            "FINC": 55,
+            "DUNK": 86,
+            "HND": 48,
+            "PNR": 61,
+            "PASS": 58,
+            "PASM": 45,
+            "POCK": 46,
+            "SCRN": 40,
+            "POBD": 63,
+            "NAVS": 53,
+            "SWCH": 57,
+            "RIM": 89,
+            "STL": 51,
+            "BOX": 68,
+            "ORB": 49
+          },
+          "pot": {
+            "CS3": 99,
+            "OD3": 61,
+            "CSM": 65,
+            "PUM": 83,
+            "FLT": 83,
+            "POST": 63,
+            "FT": 55,
+            "FINS": 85,
+            "FINW": 85,
+            "FINC": 73,
+            "DUNK": 99,
+            "HND": 75,
+            "PNR": 85,
+            "PASS": 69,
+            "PASM": 69,
+            "POCK": 66,
+            "SCRN": 67,
+            "POBD": 90,
+            "NAVS": 77,
+            "SWCH": 84,
+            "RIM": 99,
+            "STL": 78,
+            "BOX": 99,
+            "ORB": 71
+          },
+          "tendency": {
+            "T3": 19,
+            "TMID": 31,
+            "TDRIVE": 23,
+            "TPOST": 27,
+            "PASS1ST": 60,
+            "GAMBLE": 52,
+            "FOUL": 74,
+            "TAKEOVER": 13,
+            "PUSH": 41
+          },
+          "awareness": {
+            "OFFR": 38,
+            "DEFR": 74,
+            "SPC": 63,
+            "PLY": 43
+          }
+        }
+      }
+    ],
+    "lineup_packages": [
+      {
+        "id": "home_starters",
+        "players": [
+          "7",
+          "6",
+          "3",
+          "10",
+          "8"
+        ],
+        "usageProfile": {
+          "creator": [
+            "8",
+            "3"
+          ],
+          "screener": [
+            "7"
+          ],
+          "spacer": [
+            "6",
+            "10"
+          ]
+        },
+        "lineupIdentity": {
+          "primary": "initiator",
+          "assignments": [
+            {
+              "jersey": "7",
+              "roles": [
+                "iso_scorer"
+              ],
+              "capabilities": {
+                "creation": 0.6605068870523415,
+                "pullUp": 0.6616161616161617,
+                "catchShoot": 0.6656565656565657,
+                "rimFinishing": 0.7812082185491276,
+                "passing": 0.6691919191919192,
+                "screening": 0.7722077922077922,
+                "rolling": 0.8367725851589488,
+                "popping": 0.6747474747474748,
+                "postPlay": 0.7592821067821067,
+                "cutting": 0.6974074074074075,
+                "handleSecurity": 0.6462442607897153,
+                "transition": 0.676986531986532,
+                "onBallDefense": 0.7510253662593565,
+                "helpDefense": 0.7453653955265017
+              }
+            },
+            {
+              "jersey": "6",
+              "roles": [
+                "interior_finisher"
+              ],
+              "capabilities": {
+                "creation": 0.595121212121212,
+                "pullUp": 0.6161616161616161,
+                "catchShoot": 0.448989898989899,
+                "rimFinishing": 0.7393333333333333,
+                "passing": 0.601010101010101,
+                "screening": 0.7317748917748919,
+                "rolling": 0.8573475228475227,
+                "popping": 0.4444444444444444,
+                "postPlay": 0.7821746031746031,
+                "cutting": 0.6838518518518518,
+                "handleSecurity": 0.5581818181818181,
+                "transition": 0.6313198653198653,
+                "onBallDefense": 0.8826952908202909,
+                "helpDefense": 0.5660264804639804
+              }
+            },
+            {
+              "jersey": "3",
+              "roles": [
+                "secondary_creator"
+              ],
+              "capabilities": {
+                "creation": 0.6668503213957759,
+                "pullUp": 0.6919191919191919,
+                "catchShoot": 0.5954545454545455,
+                "rimFinishing": 0.7667460973370065,
+                "passing": 0.5202020202020202,
+                "screening": 0.806060606060606,
+                "rolling": 0.8162647689011326,
+                "popping": 0.6303030303030303,
+                "postPlay": 0.6601616161616162,
+                "cutting": 0.6431784511784511,
+                "handleSecurity": 0.7254361799816345,
+                "transition": 0.5276498316498317,
+                "onBallDefense": 0.5615780824114158,
+                "helpDefense": 0.7797474747474747
+              }
+            },
+            {
+              "jersey": "10",
+              "roles": [
+                "cutter"
+              ],
+              "capabilities": {
+                "creation": 0.5041873278236915,
+                "pullUp": 0.5353535353535354,
+                "catchShoot": 0.6358585858585859,
+                "rimFinishing": 0.791813973063973,
+                "passing": 0.5227272727272727,
+                "screening": 0.5652813852813853,
+                "rolling": 0.7920904280904281,
+                "popping": 0.5737373737373738,
+                "postPlay": 0.6937186147186146,
+                "cutting": 0.6957037037037037,
+                "handleSecurity": 0.4571166207529844,
+                "transition": 0.5993670033670033,
+                "onBallDefense": 0.6522004933051444,
+                "helpDefense": 0.7706507936507937
+              }
+            },
+            {
+              "jersey": "8",
+              "roles": [
+                "transition_runner"
+              ],
+              "capabilities": {
+                "creation": 0.669129476584022,
+                "pullUp": 0.5606060606060606,
+                "catchShoot": 0.5267676767676768,
+                "rimFinishing": 0.6894735996326905,
+                "passing": 0.553030303030303,
+                "screening": 0.7673015873015874,
+                "rolling": 0.7315243123879487,
+                "popping": 0.48888888888888893,
+                "postPlay": 0.6307186147186147,
+                "cutting": 0.5561481481481482,
+                "handleSecurity": 0.7529476584022039,
+                "transition": 0.6422154882154884,
+                "onBallDefense": 0.66903202040526,
+                "helpDefense": 0.6873174603174603
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "home_bench",
+        "players": [
+          "5",
+          "9",
+          "4",
+          "2",
+          "1"
+        ],
+        "usageProfile": {
+          "creator": [
+            "2",
+            "5"
+          ],
+          "screener": [
+            "9"
+          ],
+          "spacer": [
+            "4",
+            "1"
+          ]
+        },
+        "lineupIdentity": {
+          "primary": "initiator",
+          "assignments": [
+            {
+              "jersey": "5",
+              "roles": [
+                "interior_finisher"
+              ],
+              "capabilities": {
+                "creation": 0.5474490358126721,
+                "pullUp": 0.4949494949494949,
+                "catchShoot": 0.5636363636363637,
+                "rimFinishing": 0.8446177685950412,
+                "passing": 0.5353535353535354,
+                "screening": 0.9673593073593074,
+                "rolling": 0.9546453277362368,
+                "popping": 0.6000000000000001,
+                "postPlay": 0.782145743145743,
+                "cutting": 0.6724713804713804,
+                "handleSecurity": 0.6374288337924702,
+                "transition": 0.5751245791245791,
+                "onBallDefense": 0.6546386025534008,
+                "helpDefense": 0.56055450874713
+              }
+            },
+            {
+              "jersey": "9",
+              "roles": [
+                "movement_shooter"
+              ],
+              "capabilities": {
+                "creation": 0.4849954086317723,
+                "pullUp": 0.43434343434343436,
+                "catchShoot": 0.7247474747474747,
+                "rimFinishing": 0.6842180899908173,
+                "passing": 0.5454545454545454,
+                "screening": 0.707994227994228,
+                "rolling": 0.6499211705802614,
+                "popping": 0.7232323232323232,
+                "postPlay": 0.6936269841269842,
+                "cutting": 0.7030370370370371,
+                "handleSecurity": 0.5581267217630854,
+                "transition": 0.5878821548821549,
+                "onBallDefense": 0.5811116983791403,
+                "helpDefense": 0.6434382583003091
+              }
+            },
+            {
+              "jersey": "4",
+              "roles": [
+                "post_scorer"
+              ],
+              "capabilities": {
+                "creation": 0.5187107438016529,
+                "pullUp": 0.606060606060606,
+                "catchShoot": 0.7055555555555556,
+                "rimFinishing": 0.7135199724517906,
+                "passing": 0.5757575757575757,
+                "screening": 0.5991630591630591,
+                "rolling": 0.7920460120687394,
+                "popping": 0.6404040404040404,
+                "postPlay": 0.9328722943722944,
+                "cutting": 0.5598181818181818,
+                "handleSecurity": 0.4254178145087236,
+                "transition": 0.6081919191919192,
+                "onBallDefense": 0.5141665458411869,
+                "helpDefense": 0.6033437260506639
+              }
+            },
+            {
+              "jersey": "2",
+              "roles": [
+                "iso_scorer"
+              ],
+              "capabilities": {
+                "creation": 0.633258953168044,
+                "pullUp": 0.7878787878787878,
+                "catchShoot": 0.5222222222222223,
+                "rimFinishing": 0.6809951790633608,
+                "passing": 0.5050505050505051,
+                "screening": 0.7034632034632035,
+                "rolling": 0.5932856377629104,
+                "popping": 0.5434343434343434,
+                "postPlay": 0.7478852813852813,
+                "cutting": 0.7152659932659933,
+                "handleSecurity": 0.6766023875114784,
+                "transition": 0.6364208754208754,
+                "onBallDefense": 0.649861221544895,
+                "helpDefense": 0.5928251183984024
+              }
+            },
+            {
+              "jersey": "1",
+              "roles": [
+                "secondary_creator"
+              ],
+              "capabilities": {
+                "creation": 0.5362892561983471,
+                "pullUp": 0.8080808080808082,
+                "catchShoot": 0.538888888888889,
+                "rimFinishing": 0.7420557851239671,
+                "passing": 0.494949494949495,
+                "screening": 0.5851948051948052,
+                "rolling": 0.7247761380034108,
+                "popping": 0.5555555555555556,
+                "postPlay": 0.7453102453102453,
+                "cutting": 0.7593939393939394,
+                "handleSecurity": 0.4240771349862259,
+                "transition": 0.6988888888888888,
+                "onBallDefense": 0.7194121977795447,
+                "helpDefense": 0.5352852886136745
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "away_team": {
+    "id": "away",
+    "name": "Generated Owls",
+    "roster": [
+      {
+        "id": "away1",
+        "jersey": "11",
+        "teamId": "away",
+        "playerData": {
+          "physical": {
+            "H": 217,
+            "WT": 119,
+            "WS": 220,
+            "VJ": 93,
+            "SPD": 58,
+            "LAT": 65,
+            "AGE": 32,
+            "DUR": 57
+          },
+          "ability": {
+            "CS3": 48,
+            "OD3": 55,
+            "CSM": 64,
+            "PUM": 54,
+            "FLT": 73,
+            "POST": 52,
+            "FT": 56,
+            "FINS": 61,
+            "FINW": 48,
+            "FINC": 80,
+            "DUNK": 83,
+            "HND": 44,
+            "PNR": 53,
+            "PASS": 46,
+            "PASM": 46,
+            "POCK": 47,
+            "SCRN": 68,
+            "POBD": 53,
+            "NAVS": 54,
+            "SWCH": 53,
+            "RIM": 51,
+            "STL": 48,
+            "BOX": 62,
+            "ORB": 78
+          },
+          "pot": {
+            "CS3": 50,
+            "OD3": 58,
+            "CSM": 67,
+            "PUM": 56,
+            "FLT": 76,
+            "POST": 55,
+            "FT": 58,
+            "FINS": 67,
+            "FINW": 50,
+            "FINC": 85,
+            "DUNK": 88,
+            "HND": 46,
+            "PNR": 56,
+            "PASS": 48,
+            "PASM": 48,
+            "POCK": 50,
+            "SCRN": 74,
+            "POBD": 58,
+            "NAVS": 60,
+            "SWCH": 55,
+            "RIM": 55,
+            "STL": 50,
+            "BOX": 65,
+            "ORB": 84
+          },
+          "tendency": {
+            "T3": 3,
+            "TMID": 38,
+            "TDRIVE": 32,
+            "TPOST": 27,
+            "PASS1ST": 39,
+            "GAMBLE": 49,
+            "FOUL": 49,
+            "TAKEOVER": 42,
+            "PUSH": 54
+          },
+          "awareness": {
+            "OFFR": 36,
+            "DEFR": 53,
+            "SPC": 62,
+            "PLY": 65
+          }
+        }
+      },
+      {
+        "id": "away2",
+        "jersey": "12",
+        "teamId": "away",
+        "playerData": {
+          "physical": {
+            "H": 209,
+            "WT": 115,
+            "WS": 228,
+            "VJ": 71,
+            "SPD": 76,
+            "LAT": 89,
+            "AGE": 35,
+            "DUR": 93
+          },
+          "ability": {
+            "CS3": 38,
+            "OD3": 60,
+            "CSM": 51,
+            "PUM": 54,
+            "FLT": 52,
+            "POST": 41,
+            "FT": 52,
+            "FINS": 57,
+            "FINW": 47,
+            "FINC": 56,
+            "DUNK": 47,
+            "HND": 76,
+            "PNR": 51,
+            "PASS": 36,
+            "PASM": 52,
+            "POCK": 68,
+            "SCRN": 54,
+            "POBD": 78,
+            "NAVS": 77,
+            "SWCH": 56,
+            "RIM": 74,
+            "STL": 73,
+            "BOX": 61,
+            "ORB": 33
+          },
+          "pot": {
+            "CS3": 40,
+            "OD3": 62,
+            "CSM": 54,
+            "PUM": 56,
+            "FLT": 58,
+            "POST": 44,
+            "FT": 56,
+            "FINS": 60,
+            "FINW": 49,
+            "FINC": 58,
+            "DUNK": 49,
+            "HND": 78,
+            "PNR": 54,
+            "PASS": 40,
+            "PASM": 56,
+            "POCK": 73,
+            "SCRN": 56,
+            "POBD": 83,
+            "NAVS": 84,
+            "SWCH": 58,
+            "RIM": 77,
+            "STL": 78,
+            "BOX": 66,
+            "ORB": 40
+          },
+          "tendency": {
+            "T3": 24,
+            "TMID": 30,
+            "TDRIVE": 21,
+            "TPOST": 25,
+            "PASS1ST": 52,
+            "GAMBLE": 69,
+            "FOUL": 69,
+            "TAKEOVER": 25,
+            "PUSH": 61
+          },
+          "awareness": {
+            "OFFR": 53,
+            "DEFR": 59,
+            "SPC": 72,
+            "PLY": 78
+          }
+        }
+      },
+      {
+        "id": "away3",
+        "jersey": "13",
+        "teamId": "away",
+        "playerData": {
+          "physical": {
+            "H": 197,
+            "WT": 93,
+            "WS": 208,
+            "VJ": 79,
+            "SPD": 90,
+            "LAT": 71,
+            "AGE": 28,
+            "DUR": 46
+          },
+          "ability": {
+            "CS3": 47,
+            "OD3": 83,
+            "CSM": 77,
+            "PUM": 48,
+            "FLT": 60,
+            "POST": 43,
+            "FT": 74,
+            "FINS": 36,
+            "FINW": 51,
+            "FINC": 67,
+            "DUNK": 41,
+            "HND": 88,
+            "PNR": 79,
+            "PASS": 60,
+            "PASM": 81,
+            "POCK": 59,
+            "SCRN": 41,
+            "POBD": 47,
+            "NAVS": 35,
+            "SWCH": 67,
+            "RIM": 40,
+            "STL": 44,
+            "BOX": 44,
+            "ORB": 82
+          },
+          "pot": {
+            "CS3": 51,
+            "OD3": 91,
+            "CSM": 80,
+            "PUM": 50,
+            "FLT": 62,
+            "POST": 45,
+            "FT": 76,
+            "FINS": 40,
+            "FINW": 56,
+            "FINC": 70,
+            "DUNK": 43,
+            "HND": 97,
+            "PNR": 82,
+            "PASS": 62,
+            "PASM": 84,
+            "POCK": 61,
+            "SCRN": 43,
+            "POBD": 49,
+            "NAVS": 40,
+            "SWCH": 69,
+            "RIM": 42,
+            "STL": 46,
+            "BOX": 47,
+            "ORB": 84
+          },
+          "tendency": {
+            "T3": 27,
+            "TMID": 24,
+            "TDRIVE": 26,
+            "TPOST": 23,
+            "PASS1ST": 58,
+            "GAMBLE": 70,
+            "FOUL": 34,
+            "TAKEOVER": 57,
+            "PUSH": 31
+          },
+          "awareness": {
+            "OFFR": 88,
+            "DEFR": 54,
+            "SPC": 61,
+            "PLY": 66
+          }
+        }
+      },
+      {
+        "id": "away4",
+        "jersey": "14",
+        "teamId": "away",
+        "playerData": {
+          "physical": {
+            "H": 206,
+            "WT": 105,
+            "WS": 231,
+            "VJ": 82,
+            "SPD": 75,
+            "LAT": 58,
+            "AGE": 35,
+            "DUR": 56
+          },
+          "ability": {
+            "CS3": 50,
+            "OD3": 63,
+            "CSM": 67,
+            "PUM": 34,
+            "FLT": 60,
+            "POST": 63,
+            "FT": 56,
+            "FINS": 38,
+            "FINW": 48,
+            "FINC": 77,
+            "DUNK": 72,
+            "HND": 44,
+            "PNR": 67,
+            "PASS": 59,
+            "PASM": 37,
+            "POCK": 67,
+            "SCRN": 73,
+            "POBD": 42,
+            "NAVS": 69,
+            "SWCH": 43,
+            "RIM": 54,
+            "STL": 50,
+            "BOX": 62,
+            "ORB": 70
+          },
+          "pot": {
+            "CS3": 55,
+            "OD3": 66,
+            "CSM": 69,
+            "PUM": 40,
+            "FLT": 63,
+            "POST": 65,
+            "FT": 60,
+            "FINS": 42,
+            "FINW": 51,
+            "FINC": 82,
+            "DUNK": 80,
+            "HND": 48,
+            "PNR": 69,
+            "PASS": 64,
+            "PASM": 42,
+            "POCK": 69,
+            "SCRN": 83,
+            "POBD": 44,
+            "NAVS": 71,
+            "SWCH": 46,
+            "RIM": 56,
+            "STL": 54,
+            "BOX": 64,
+            "ORB": 78
+          },
+          "tendency": {
+            "T3": 7,
+            "TMID": 41,
+            "TDRIVE": 25,
+            "TPOST": 27,
+            "PASS1ST": 63,
+            "GAMBLE": 52,
+            "FOUL": 67,
+            "TAKEOVER": 33,
+            "PUSH": 57
+          },
+          "awareness": {
+            "OFFR": 39,
+            "DEFR": 59,
+            "SPC": 53,
+            "PLY": 68
+          }
+        }
+      },
+      {
+        "id": "away5",
+        "jersey": "15",
+        "teamId": "away",
+        "playerData": {
+          "physical": {
+            "H": 192,
+            "WT": 99,
+            "WS": 207,
+            "VJ": 69,
+            "SPD": 70,
+            "LAT": 72,
+            "AGE": 33,
+            "DUR": 46
+          },
+          "ability": {
+            "CS3": 45,
+            "OD3": 76,
+            "CSM": 57,
+            "PUM": 84,
+            "FLT": 38,
+            "POST": 66,
+            "FT": 64,
+            "FINS": 84,
+            "FINW": 54,
+            "FINC": 63,
+            "DUNK": 42,
+            "HND": 57,
+            "PNR": 48,
+            "PASS": 54,
+            "PASM": 60,
+            "POCK": 61,
+            "SCRN": 44,
+            "POBD": 50,
+            "NAVS": 37,
+            "SWCH": 51,
+            "RIM": 80,
+            "STL": 70,
+            "BOX": 57,
+            "ORB": 52
+          },
+          "pot": {
+            "CS3": 49,
+            "OD3": 83,
+            "CSM": 60,
+            "PUM": 92,
+            "FLT": 40,
+            "POST": 72,
+            "FT": 66,
+            "FINS": 92,
+            "FINW": 57,
+            "FINC": 65,
+            "DUNK": 44,
+            "HND": 59,
+            "PNR": 51,
+            "PASS": 57,
+            "PASM": 62,
+            "POCK": 63,
+            "SCRN": 47,
+            "POBD": 54,
+            "NAVS": 40,
+            "SWCH": 53,
+            "RIM": 82,
+            "STL": 73,
+            "BOX": 61,
+            "ORB": 56
+          },
+          "tendency": {
+            "T3": 49,
+            "TMID": 23,
+            "TDRIVE": 15,
+            "TPOST": 13,
+            "PASS1ST": 27,
+            "GAMBLE": 53,
+            "FOUL": 39,
+            "TAKEOVER": 60,
+            "PUSH": 57
+          },
+          "awareness": {
+            "OFFR": 52,
+            "DEFR": 53,
+            "SPC": 53,
+            "PLY": 81
+          }
+        }
+      },
+      {
+        "id": "away6",
+        "jersey": "16",
+        "teamId": "away",
+        "playerData": {
+          "physical": {
+            "H": 211,
+            "WT": 129,
+            "WS": 214,
+            "VJ": 74,
+            "SPD": 63,
+            "LAT": 59,
+            "AGE": 31,
+            "DUR": 71
+          },
+          "ability": {
+            "CS3": 65,
+            "OD3": 73,
+            "CSM": 56,
+            "PUM": 60,
+            "FLT": 77,
+            "POST": 85,
+            "FT": 55,
+            "FINS": 64,
+            "FINW": 63,
+            "FINC": 73,
+            "DUNK": 61,
+            "HND": 51,
+            "PNR": 50,
+            "PASS": 41,
+            "PASM": 61,
+            "POCK": 71,
+            "SCRN": 56,
+            "POBD": 56,
+            "NAVS": 61,
+            "SWCH": 63,
+            "RIM": 35,
+            "STL": 59,
+            "BOX": 63,
+            "ORB": 54
+          },
+          "pot": {
+            "CS3": 69,
+            "OD3": 75,
+            "CSM": 60,
+            "PUM": 66,
+            "FLT": 80,
+            "POST": 88,
+            "FT": 59,
+            "FINS": 70,
+            "FINW": 65,
+            "FINC": 82,
+            "DUNK": 64,
+            "HND": 53,
+            "PNR": 52,
+            "PASS": 44,
+            "PASM": 63,
+            "POCK": 73,
+            "SCRN": 62,
+            "POBD": 58,
+            "NAVS": 65,
+            "SWCH": 71,
+            "RIM": 40,
+            "STL": 61,
+            "BOX": 69,
+            "ORB": 56
+          },
+          "tendency": {
+            "T3": 8,
+            "TMID": 22,
+            "TDRIVE": 24,
+            "TPOST": 46,
+            "PASS1ST": 48,
+            "GAMBLE": 49,
+            "FOUL": 48,
+            "TAKEOVER": 39,
+            "PUSH": 65
+          },
+          "awareness": {
+            "OFFR": 55,
+            "DEFR": 42,
+            "SPC": 65,
+            "PLY": 61
+          }
+        }
+      },
+      {
+        "id": "away7",
+        "jersey": "17",
+        "teamId": "away",
+        "playerData": {
+          "physical": {
+            "H": 199,
+            "WT": 104,
+            "WS": 211,
+            "VJ": 76,
+            "SPD": 70,
+            "LAT": 67,
+            "AGE": 31,
+            "DUR": 74
+          },
+          "ability": {
+            "CS3": 80,
+            "OD3": 48,
+            "CSM": 66,
+            "PUM": 74,
+            "FLT": 59,
+            "POST": 55,
+            "FT": 91,
+            "FINS": 42,
+            "FINW": 70,
+            "FINC": 57,
+            "DUNK": 73,
+            "HND": 52,
+            "PNR": 59,
+            "PASS": 63,
+            "PASM": 52,
+            "POCK": 58,
+            "SCRN": 68,
+            "POBD": 48,
+            "NAVS": 50,
+            "SWCH": 47,
+            "RIM": 43,
+            "STL": 46,
+            "BOX": 48,
+            "ORB": 73
+          },
+          "pot": {
+            "CS3": 87,
+            "OD3": 50,
+            "CSM": 69,
+            "PUM": 78,
+            "FLT": 61,
+            "POST": 57,
+            "FT": 97,
+            "FINS": 46,
+            "FINW": 72,
+            "FINC": 60,
+            "DUNK": 79,
+            "HND": 54,
+            "PNR": 63,
+            "PASS": 65,
+            "PASM": 57,
+            "POCK": 60,
+            "SCRN": 70,
+            "POBD": 50,
+            "NAVS": 52,
+            "SWCH": 51,
+            "RIM": 45,
+            "STL": 48,
+            "BOX": 50,
+            "ORB": 76
+          },
+          "tendency": {
+            "T3": 56,
+            "TMID": 19,
+            "TDRIVE": 9,
+            "TPOST": 16,
+            "PASS1ST": 43,
+            "GAMBLE": 50,
+            "FOUL": 60,
+            "TAKEOVER": 16,
+            "PUSH": 52
+          },
+          "awareness": {
+            "OFFR": 54,
+            "DEFR": 58,
+            "SPC": 83,
+            "PLY": 80
+          }
+        }
+      },
+      {
+        "id": "away8",
+        "jersey": "18",
+        "teamId": "away",
+        "playerData": {
+          "physical": {
+            "H": 220,
+            "WT": 126,
+            "WS": 245,
+            "VJ": 60,
+            "SPD": 73,
+            "LAT": 72,
+            "AGE": 30,
+            "DUR": 53
+          },
+          "ability": {
+            "CS3": 60,
+            "OD3": 50,
+            "CSM": 47,
+            "PUM": 51,
+            "FLT": 42,
+            "POST": 92,
+            "FT": 61,
+            "FINS": 39,
+            "FINW": 47,
+            "FINC": 71,
+            "DUNK": 51,
+            "HND": 50,
+            "PNR": 67,
+            "PASS": 78,
+            "PASM": 44,
+            "POCK": 50,
+            "SCRN": 33,
+            "POBD": 47,
+            "NAVS": 51,
+            "SWCH": 41,
+            "RIM": 56,
+            "STL": 54,
+            "BOX": 72,
+            "ORB": 72
+          },
+          "pot": {
+            "CS3": 62,
+            "OD3": 53,
+            "CSM": 50,
+            "PUM": 53,
+            "FLT": 47,
+            "POST": 96,
+            "FT": 63,
+            "FINS": 41,
+            "FINW": 51,
+            "FINC": 80,
+            "DUNK": 53,
+            "HND": 54,
+            "PNR": 71,
+            "PASS": 80,
+            "PASM": 46,
+            "POCK": 53,
+            "SCRN": 40,
+            "POBD": 49,
+            "NAVS": 54,
+            "SWCH": 43,
+            "RIM": 58,
+            "STL": 56,
+            "BOX": 77,
+            "ORB": 74
+          },
+          "tendency": {
+            "T3": 3,
+            "TMID": 31,
+            "TDRIVE": 21,
+            "TPOST": 45,
+            "PASS1ST": 60,
+            "GAMBLE": 45,
+            "FOUL": 57,
+            "TAKEOVER": 35,
+            "PUSH": 46
+          },
+          "awareness": {
+            "OFFR": 50,
+            "DEFR": 43,
+            "SPC": 41,
+            "PLY": 74
+          }
+        }
+      },
+      {
+        "id": "away9",
+        "jersey": "19",
+        "teamId": "away",
+        "playerData": {
+          "physical": {
+            "H": 188,
+            "WT": 81,
+            "WS": 194,
+            "VJ": 81,
+            "SPD": 74,
+            "LAT": 99,
+            "AGE": 27,
+            "DUR": 46
+          },
+          "ability": {
+            "CS3": 58,
+            "OD3": 75,
+            "CSM": 48,
+            "PUM": 77,
+            "FLT": 46,
+            "POST": 78,
+            "FT": 59,
+            "FINS": 72,
+            "FINW": 51,
+            "FINC": 49,
+            "DUNK": 59,
+            "HND": 52,
+            "PNR": 60,
+            "PASS": 68,
+            "PASM": 46,
+            "POCK": 61,
+            "SCRN": 67,
+            "POBD": 58,
+            "NAVS": 61,
+            "SWCH": 51,
+            "RIM": 56,
+            "STL": 49,
+            "BOX": 50,
+            "ORB": 58
+          },
+          "pot": {
+            "CS3": 60,
+            "OD3": 82,
+            "CSM": 52,
+            "PUM": 87,
+            "FLT": 52,
+            "POST": 86,
+            "FT": 61,
+            "FINS": 76,
+            "FINW": 53,
+            "FINC": 52,
+            "DUNK": 63,
+            "HND": 54,
+            "PNR": 62,
+            "PASS": 72,
+            "PASM": 48,
+            "POCK": 64,
+            "SCRN": 71,
+            "POBD": 61,
+            "NAVS": 65,
+            "SWCH": 53,
+            "RIM": 58,
+            "STL": 51,
+            "BOX": 52,
+            "ORB": 60
+          },
+          "tendency": {
+            "T3": 45,
+            "TMID": 25,
+            "TDRIVE": 27,
+            "TPOST": 3,
+            "PASS1ST": 61,
+            "GAMBLE": 45,
+            "FOUL": 45,
+            "TAKEOVER": 69,
+            "PUSH": 60
+          },
+          "awareness": {
+            "OFFR": 73,
+            "DEFR": 71,
+            "SPC": 50,
+            "PLY": 82
+          }
+        }
+      },
+      {
+        "id": "away10",
+        "jersey": "20",
+        "teamId": "away",
+        "playerData": {
+          "physical": {
+            "H": 196,
+            "WT": 97,
+            "WS": 203,
+            "VJ": 69,
+            "SPD": 68,
+            "LAT": 74,
+            "AGE": 31,
+            "DUR": 73
+          },
+          "ability": {
+            "CS3": 62,
+            "OD3": 68,
+            "CSM": 70,
+            "PUM": 63,
+            "FLT": 65,
+            "POST": 66,
+            "FT": 65,
+            "FINS": 63,
+            "FINW": 63,
+            "FINC": 66,
+            "DUNK": 65,
+            "HND": 66,
+            "PNR": 63,
+            "PASS": 60,
+            "PASM": 65,
+            "POCK": 65,
+            "SCRN": 63,
+            "POBD": 68,
+            "NAVS": 62,
+            "SWCH": 66,
+            "RIM": 63,
+            "STL": 66,
+            "BOX": 65,
+            "ORB": 66
+          },
+          "pot": {
+            "CS3": 64,
+            "OD3": 70,
+            "CSM": 72,
+            "PUM": 65,
+            "FLT": 68,
+            "POST": 71,
+            "FT": 67,
+            "FINS": 65,
+            "FINW": 65,
+            "FINC": 68,
+            "DUNK": 67,
+            "HND": 68,
+            "PNR": 66,
+            "PASS": 62,
+            "PASM": 68,
+            "POCK": 68,
+            "SCRN": 68,
+            "POBD": 70,
+            "NAVS": 64,
+            "SWCH": 70,
+            "RIM": 65,
+            "STL": 68,
+            "BOX": 69,
+            "ORB": 69
+          },
+          "tendency": {
+            "T3": 18,
+            "TMID": 28,
+            "TDRIVE": 21,
+            "TPOST": 33,
+            "PASS1ST": 46,
+            "GAMBLE": 37,
+            "FOUL": 57,
+            "TAKEOVER": 42,
+            "PUSH": 56
+          },
+          "awareness": {
+            "OFFR": 49,
+            "DEFR": 56,
+            "SPC": 41,
+            "PLY": 75
+          }
+        }
+      }
+    ],
+    "lineup_packages": [
+      {
+        "id": "away_starters",
+        "players": [
+          "12",
+          "20",
+          "19",
+          "16",
+          "15"
+        ],
+        "usageProfile": {
+          "creator": [
+            "20",
+            "12"
+          ],
+          "screener": [
+            "19"
+          ],
+          "spacer": [
+            "16",
+            "15"
+          ]
+        },
+        "lineupIdentity": {
+          "primary": "initiator",
+          "assignments": [
+            {
+              "jersey": "12",
+              "roles": [
+                "cutter"
+              ],
+              "capabilities": {
+                "creation": 0.6227511478420569,
+                "pullUp": 0.5757575757575757,
+                "catchShoot": 0.4444444444444445,
+                "rimFinishing": 0.6460704775022957,
+                "passing": 0.48484848484848486,
+                "screening": 0.6884559884559884,
+                "rolling": 0.6236874262101535,
+                "popping": 0.4626262626262626,
+                "postPlay": 0.5812864357864358,
+                "cutting": 0.698040404040404,
+                "handleSecurity": 0.7486501377410467,
+                "transition": 0.6934646464646465,
+                "onBallDefense": 0.8894693690148235,
+                "helpDefense": 0.6820952708907255
+              }
+            },
+            {
+              "jersey": "20",
+              "roles": [
+                "secondary_creator"
+              ],
+              "capabilities": {
+                "creation": 0.6549761248852158,
+                "pullUp": 0.6616161616161615,
+                "catchShoot": 0.6550505050505051,
+                "rimFinishing": 0.7424749770431588,
+                "passing": 0.6313131313131313,
+                "screening": 0.7383261183261184,
+                "rolling": 0.790654084131357,
+                "popping": 0.6747474747474748,
+                "postPlay": 0.7567799422799423,
+                "cutting": 0.603037037037037,
+                "handleSecurity": 0.6665013774104683,
+                "transition": 0.6494983164983165,
+                "onBallDefense": 0.7636281179138321,
+                "helpDefense": 0.6652318828357789
+              }
+            },
+            {
+              "jersey": "19",
+              "roles": [
+                "hub"
+              ],
+              "capabilities": {
+                "creation": 0.5394921946740129,
+                "pullUp": 0.7676767676767677,
+                "catchShoot": 0.557070707070707,
+                "rimFinishing": 0.686598025711662,
+                "passing": 0.6136363636363635,
+                "screening": 0.7422510822510823,
+                "rolling": 0.6827867090821637,
+                "popping": 0.5252525252525253,
+                "postPlay": 0.7675418470418469,
+                "cutting": 0.6912390572390572,
+                "handleSecurity": 0.5366942148760331,
+                "transition": 0.7132962962962963,
+                "onBallDefense": 0.7000960977556723,
+                "helpDefense": 0.6534479228594314
+              }
+            },
+            {
+              "jersey": "16",
+              "roles": [
+                "interior_finisher"
+              ],
+              "capabilities": {
+                "creation": 0.527505968778696,
+                "pullUp": 0.6717171717171717,
+                "catchShoot": 0.6141414141414142,
+                "rimFinishing": 0.7936558769513314,
+                "passing": 0.5404040404040404,
+                "screening": 0.7405772005772006,
+                "rolling": 0.8194544142725961,
+                "popping": 0.602020202020202,
+                "postPlay": 0.9690490620490619,
+                "cutting": 0.6673131313131313,
+                "handleSecurity": 0.49322314049586774,
+                "transition": 0.6548686868686868,
+                "onBallDefense": 0.6535916716248469,
+                "helpDefense": 0.5667155704891595
+              }
+            },
+            {
+              "jersey": "15",
+              "roles": [
+                "iso_scorer"
+              ],
+              "capabilities": {
+                "creation": 0.5585977961432507,
+                "pullUp": 0.8080808080808081,
+                "catchShoot": 0.5196969696969697,
+                "rimFinishing": 0.7354405417814509,
+                "passing": 0.5782828282828283,
+                "screening": 0.5509668109668109,
+                "rolling": 0.6667225611089247,
+                "popping": 0.5272727272727273,
+                "postPlay": 0.7511089466089464,
+                "cutting": 0.7303097643097644,
+                "handleSecurity": 0.5813957759412305,
+                "transition": 0.705053872053872,
+                "onBallDefense": 0.622889384920635,
+                "helpDefense": 0.6270934322937163
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "away_bench",
+        "players": [
+          "11",
+          "17",
+          "18",
+          "13",
+          "14"
+        ],
+        "usageProfile": {
+          "creator": [
+            "13",
+            "17"
+          ],
+          "screener": [
+            "14"
+          ],
+          "spacer": [
+            "11",
+            "18"
+          ]
+        },
+        "lineupIdentity": {
+          "primary": "initiator",
+          "assignments": [
+            {
+              "jersey": "11",
+              "roles": [
+                "interior_finisher"
+              ],
+              "capabilities": {
+                "creation": 0.46298255280073464,
+                "pullUp": 0.5505050505050505,
+                "catchShoot": 0.5454545454545455,
+                "rimFinishing": 0.8422483164983164,
+                "passing": 0.4671717171717172,
+                "screening": 0.8389898989898991,
+                "rolling": 0.9938324915824917,
+                "popping": 0.5818181818181818,
+                "postPlay": 0.7474090909090909,
+                "cutting": 0.6410572390572391,
+                "handleSecurity": 0.41381083562901744,
+                "transition": 0.5952760942760942,
+                "onBallDefense": 0.6025977018373332,
+                "helpDefense": 0.6180178321306306
+              }
+            },
+            {
+              "jersey": "17",
+              "roles": [
+                "floor_spacer"
+              ],
+              "capabilities": {
+                "creation": 0.5444315886134068,
+                "pullUp": 0.6161616161616161,
+                "catchShoot": 0.7823232323232323,
+                "rimFinishing": 0.6900197428833793,
+                "passing": 0.595959595959596,
+                "screening": 0.8047907647907648,
+                "rolling": 0.8217317547772094,
+                "popping": 0.7232323232323232,
+                "postPlay": 0.6664920634920635,
+                "cutting": 0.6552457912457912,
+                "handleSecurity": 0.5207346189164371,
+                "transition": 0.6069158249158249,
+                "onBallDefense": 0.5753640315574988,
+                "helpDefense": 0.5771913621630388
+              }
+            },
+            {
+              "jersey": "18",
+              "roles": [
+                "post_scorer"
+              ],
+              "capabilities": {
+                "creation": 0.5256703397612488,
+                "pullUp": 0.5101010101010102,
+                "catchShoot": 0.5681818181818182,
+                "rimFinishing": 0.6448558310376492,
+                "passing": 0.6313131313131313,
+                "screening": 0.5014141414141414,
+                "rolling": 0.8094571472298745,
+                "popping": 0.5272727272727273,
+                "postPlay": 0.9630202020202019,
+                "cutting": 0.5164309764309765,
+                "handleSecurity": 0.4700642791551883,
+                "transition": 0.5935690235690235,
+                "onBallDefense": 0.6000528007346189,
+                "helpDefense": 0.5678119834710744
+              }
+            },
+            {
+              "jersey": "13",
+              "roles": [
+                "primary_creator"
+              ],
+              "capabilities": {
+                "creation": 0.8432121212121213,
+                "pullUp": 0.6616161616161615,
+                "catchShoot": 0.6065656565656565,
+                "rimFinishing": 0.611381313131313,
+                "passing": 0.6565656565656566,
+                "screening": 0.506984126984127,
+                "rolling": 0.7860679413179413,
+                "popping": 0.6565656565656566,
+                "postPlay": 0.5943340548340548,
+                "cutting": 0.6265387205387205,
+                "handleSecurity": 0.8872727272727273,
+                "transition": 0.63296632996633,
+                "onBallDefense": 0.5344285128295281,
+                "helpDefense": 0.594175956446261
+              }
+            },
+            {
+              "jersey": "14",
+              "roles": [
+                "hub"
+              ],
+              "capabilities": {
+                "creation": 0.4898613406795225,
+                "pullUp": 0.4898989898989899,
+                "catchShoot": 0.5656565656565657,
+                "rimFinishing": 0.7254575298438934,
+                "passing": 0.5606060606060606,
+                "screening": 0.8575757575757577,
+                "rolling": 0.9060621365166819,
+                "popping": 0.6080808080808081,
+                "postPlay": 0.7877676767676767,
+                "cutting": 0.5665185185185185,
+                "handleSecurity": 0.4297704315886134,
+                "transition": 0.6408350168350169,
+                "onBallDefense": 0.601330048053349,
+                "helpDefense": 0.6168395561974556
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

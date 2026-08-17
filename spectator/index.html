@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f2ede4" />
+    <title>NBA Sim · Spectator</title>
+    <link rel="stylesheet" href="./styles.css?v=20260809b" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="top">
+        <div class="brand">
+          <span class="mark"></span>
+          <div>
+            <h1>NBA Sim Spectator</h1>
+            <p class="sub">Event-driven replay · foundation projection</p>
+          </div>
+        </div>
+        <div class="meta" id="meta">Load a game JSON to begin</div>
+      </header>
+
+      <main class="stage">
+        <section class="scoreboard" id="scoreboard">
+          <div class="team home">
+            <span class="name" id="homeName">HOME</span>
+            <span class="pts" id="homePts">0</span>
+            <span class="period-pts" id="homePeriodPts"></span>
+          </div>
+          <div class="clocks">
+            <div class="period" id="period">Q1</div>
+            <div class="game" id="gameClock">12:00</div>
+            <div class="shot" id="shotClock">24</div>
+            <div class="possession" id="possession"></div>
+          </div>
+          <div class="team away">
+            <span class="name" id="awayName">AWAY</span>
+            <span class="pts" id="awayPts">0</span>
+            <span class="period-pts" id="awayPeriodPts"></span>
+          </div>
+        </section>
+
+        <section class="transport">
+          <button type="button" id="btnPlay" class="primary">Play</button>
+          <button type="button" id="btnStepBack" title="Previous event">‹</button>
+          <button type="button" id="btnStepFwd" title="Next event">›</button>
+          <button type="button" id="btnFullscreen" title="Fullscreen (F)">⛶</button>
+          <label class="speed">
+            Speed
+            <select id="speed">
+              <option value="0.5">0.5×</option>
+              <option value="1" selected>1×</option>
+              <option value="2">2×</option>
+              <option value="4">4×</option>
+              <option value="16">16×</option>
+            </select>
+          </label>
+          <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Scrub timeline" />
+        </section>
+
+        <section class="court-wrap">
+          <div class="court-frame" id="courtFrame">
+            <canvas id="court" width="940" height="500" aria-label="Top-down court replay"></canvas>
+            <div class="pt-float" id="ptFloat" hidden></div>
+            <div class="net-burst" id="netBurst" hidden></div>
+            <div class="load-cover" id="loadCover" hidden>
+              <div class="load-bar"><span id="loadBarFill"></span></div>
+              <div class="load-txt" id="loadTxt">Loading…</div>
+            </div>
+            <div class="tip" id="tip"></div>
+          </div>
+          <div class="legend">
+            <span><i class="dot home"></i> Home</span>
+            <span><i class="dot away"></i> Away</span>
+            <span><i class="dot ball"></i> Ball</span>
+            <span class="legend-push"></span>
+            <span class="key-hint">空格 播放/暂停 · ←→ 单帧 · 1-5 倍速 · L 高亮 · F 全屏</span>
+          </div>
+        </section>
+
+        <aside class="side">
+          <div class="callout" id="callout">—</div>
+          <div class="stamina-alert" id="staminaAlert" hidden></div>
+          <section class="tactics" aria-label="当前战术">
+            <div class="tactics-head"><span>当前战术</span><span id="tacticStage">—</span></div>
+            <div class="tactic-name" id="tacticName">—</div>
+            <div class="tactic-action" id="tacticAction">—</div>
+            <div class="assignments" id="assignments"></div>
+          </section>
+
+          <div class="log-head">
+            <span>Play-by-play</span>
+            <label class="chk"
+              ><input type="checkbox" id="highOnly" /> High intensity only</label
+            >
+          </div>
+          <ol class="log" id="log"></ol>
+
+          <div class="load">
+            <label class="file">
+              Load game.json
+              <input type="file" id="file" accept="application/json,.json" />
+            </label>
+            <div class="load-actions">
+              <button type="button" id="btnDemo">Load demo path</button>
+              <button type="button" id="btnSportvu">Load SportVU replay</button>
+            </div>
+            <p class="hint">
+              Generate: <code>npm run export-ndjson -- --seed 42 --out spectator/game</code>
+              then open this page (or serve the folder).
+            </p>
+          </div>
+        </aside>
+      </main>
+
+      <div class="player-card" id="playerCard" hidden>
+        <div class="pc-head"><span id="pcJersey">#1</span><span id="pcName">—</span></div>
+        <div class="pc-row"><span>体力</span><span id="pcStm">—</span></div>
+        <div class="pc-row"><span>当前任务</span><span id="pcTask">—</span></div>
+        <div class="pc-row"><span>战术角色</span><span id="pcRole">—</span></div>
+      </div>
+    </div>
+    <script type="module" src="./app.js?v=20260809b"></script>
+  </body>
+</html>
