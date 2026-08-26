@@ -358,40 +358,45 @@ body {
     height: auto;
     overflow: visible;
   }
+  .court-workspace {
+    display: flex !important;
+    padding: 6px;
+    width: 100%;
+    order: 1;
+  }
+  .stage-banner {
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px 10px;
+  }
+  .canvas-box {
+    width: 100%;
+    min-height: 200px;
+  }
+  #court {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 940 / 500;
+    display: block;
+  }
   .stage-rail {
-    display: none; /* Controlled by mobile tabs */
-    max-height: 350px;
+    display: none;
+    max-height: 380px;
     border-right: none;
-    border-bottom: 1px solid var(--border);
+    border-top: 1px solid var(--border);
+    order: 2;
   }
   .stage-rail.mobile-active {
     display: flex;
   }
-  .court-workspace {
-    padding: 8px;
-    width: 100%;
-    order: 1;
-  }
-  .court-workspace.mobile-hidden {
-    display: none;
-  }
-  .stage-banner {
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 8px 12px;
-  }
   .decision-panel {
-    display: none; /* Controlled by mobile tabs */
+    display: none;
     border-left: none;
     border-top: 1px solid var(--border);
-    order: 2;
+    order: 3;
   }
   .decision-panel.mobile-active {
     display: flex;
-  }
-  .nav-controls {
-    width: 100%;
-    justify-content: space-between;
   }
   .btn {
     padding: 6px 10px;

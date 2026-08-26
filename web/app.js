@@ -425,27 +425,35 @@ $('btnSubmitAnnotation').addEventListener('click', saveAnnotationFeedback);
 
 // Mobile Tab Switcher Logic
 const mTabs = [
-  { btn: 'mTabStages', panel: '.stage-rail' },
-  { btn: 'mTabCourt', panel: '.court-viewport' },
-  { btn: 'mTabDecision', panel: '.decision-panel' },
-  { btn: 'mTabAnnotate', panel: '.annotation-box' }
+  { btn: 'mTabStages', show: '.stage-rail' },
+  { btn: 'mTabDecision', show: '.decision-panel' },
+  { btn: 'mTabAnnotate', show: '.decision-panel', scroll: '.annotation-box' }
 ];
 
-mTabs.forEach(({ btn, panel }) => {
+mTabs.forEach(({ btn, show, scroll }) => {
   $(btn)?.addEventListener('click', () => {
-    mTabs.forEach(t => $(t.btn)?.classList.remove('active'));
+    document.querySelectorAll('.mobile-tab-btn').forEach(b => b.classList.remove('active'));
     $(btn)?.classList.add('active');
     
-    // Show target section on mobile
-    document.querySelectorAll('.stage-rail, .court-viewport, .decision-panel').forEach(el => el.classList.remove('mobile-active'));
-    if (panel === '.annotation-box') {
-      document.querySelector('.decision-panel')?.classList.add('mobile-active');
-      document.querySelector('.annotation-box')?.scrollIntoView({ behavior: 'smooth' });
-    } else {
-      document.querySelector(panel)?.classList.add('mobile-active');
+    // Toggle panels
+    document.querySelectorAll('.stage-rail, .decision-panel').forEach(el => el.classList.remove('mobile-active'));
+    if (show) {
+      const target = document.querySelector(show);
+      target?.classList.add('mobile-active');
+      if (scroll) {
+        document.querySelector(scroll)?.scrollIntoView({ behavior: 'smooth' });
+      }
     }
   });
 });
+
+$('mTabCourt')?.addEventListener('click', () => {
+  document.querySelectorAll('.mobile-tab-btn').forEach(b => b.classList.remove('active'));
+  $('mTabCourt')?.classList.add('active');
+  document.querySelectorAll('.stage-rail, .decision-panel').forEach(el => el.classList.remove('mobile-active'));
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+
 // Bootstrap
 loadCourtSpec().then(() => {
   loadGameStream();

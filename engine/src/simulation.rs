@@ -92,9 +92,9 @@ impl MatchEngine {
             possession: Possession::Home,
             stage_id: 1,
             stage_type: MatchStageType::HighPickAndRoll,
-            stage_title: "塔图姆弧顶发起高位挡拆".to_string(),
+            stage_title: "回合 1: 凯尔特人高位挡拆突分三分战术 (完整回合)".to_string(),
             stage_elapsed: 0.0,
-            stage_duration: 6.0,
+            stage_duration: 16.0, // 16秒完整战术回合
             shot_clock: 24.0,
             game_clock: 720.0,
             period: 1,
@@ -132,21 +132,49 @@ impl MatchEngine {
             self.stage_id += 1;
             
             // 阶段轮转调度 (Stage Sequencer)
-            let (next_stage, next_dur, next_title) = match self.stage_type {
-                MatchStageType::JumpBall => (MatchStageType::HighPickAndRoll, 7.0, "塔图姆弧顶发起高位挡拆".to_string()),
-                MatchStageType::HighPickAndRoll => (MatchStageType::DriveAndKick, 5.5, "突分战术：分球底角大空位".to_string()),
-                MatchStageType::DriveAndKick => (MatchStageType::PostBasketInbound, 4.0, "进球死球：底线发球全队推进".to_string()),
-                MatchStageType::PostBasketInbound => (MatchStageType::IsolationDrive, 6.0, "詹姆斯强侧单打突破突破造犯规".to_string()),
-                MatchStageType::IsolationDrive => (MatchStageType::FreeThrow, 5.0, "裁判鸣哨执行罚球序列".to_string()),
-                MatchStageType::FreeThrow => (MatchStageType::Timeout, 4.0, "教练席请求战术暂停与人员调整".to_string()),
-                MatchStageType::SidelineInbound => (MatchStageType::HighPickAndRoll, 6.5, "霍勒迪二次组织高位挡拆".to_string()),
-                MatchStageType::FiveOutMotion => (MatchStageType::DriveAndKick, 5.5, "五外突分底角射手".to_string()),
-                MatchStageType::FastBreakTransition => (MatchStageType::IsolationDrive, 4.5, "快攻前场单打攻筐".to_string()),
-                MatchStageType::Timeout => (MatchStageType::SidelineInbound, 4.0, "暂停结束边线发球".to_string()),
+            let (next_stage, next_dur, next_title, next_poss) = match self.stage_type {
+                MatchStageType::HighPickAndRoll => (
+                    MatchStageType::PostBasketInbound,
+                    8.0,
+                    "死球推进: 湖人底线发球与防守回防落位".to_string(),
+                    Possession::Away,
+                ),
+                MatchStageType::PostBasketInbound => (
+                    MatchStageType::IsolationDrive,
+                    16.0,
+                    "回合 2: 詹姆斯弧顶持球强攻与突分".to_string(),
+                    Possession::Away,
+                ),
+                MatchStageType::IsolationDrive => (
+                    MatchStageType::FreeThrow,
+                    10.0,
+                    "死球判罚: 戴维斯制造犯规执行罚球序列".to_string(),
+                    Possession::Away,
+                ),
+                MatchStageType::FreeThrow => (
+                    MatchStageType::Timeout,
+                    10.0,
+                    "战术死球: 绿军请求暂停并布置边线球".to_string(),
+                    Possession::Home,
+                ),
+                MatchStageType::Timeout => (
+                    MatchStageType::FiveOutMotion,
+                    18.0,
+                    "回合 3: 边线发球五外动态传切进攻".to_string(),
+                    Possession::Home,
+                ),
+                _ => (
+                    MatchStageType::HighPickAndRoll,
+                    16.0,
+                    "回合 4: 霍勒迪发起二次高位挡拆".to_string(),
+                    Possession::Home,
+                ),
             };
             self.stage_type = next_stage;
             self.stage_duration = next_dur;
             self.stage_title = next_title.clone();
+            self.possession = next_poss;
+            self.shot_clock = 24.0;
             
             event_type = Some("STAGE_CHANGE".to_string());
             callout = Some(format!("▶ 进入阶段 #{}: {}", self.stage_id, next_title));
