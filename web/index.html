@@ -1,247 +1,111 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#f2ede4" />
-    <title>NBA Sim · Spectator</title>
-    <link rel="stylesheet" href="./styles.css?v=20260809b" />
-  </head>
-  <body>
-    <div class="app">
-      <header class="top">
-        <div class="brand">
-          <span class="mark"></span>
-          <div>
-            <h1>NBA Sim Spectator</h1>
-            <p class="sub">Event-driven replay · foundation projection</p>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NBA Sim · 战术阶段调试与 RLHF 人工标注工作台</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="stage-debugger">
+  <div class="workbench">
+    <!-- Top Header -->
+    <header class="top-nav">
+      <div class="brand">
+        <span class="logo">🏀</span>
+        <strong>NBA-Sim</strong>
+        <span class="badge">Micro-Stage & Annotation Lab</span>
+      </div>
+      <div class="match-info">
+        <span class="team home"><span class="pill" style="background:#007A33"></span> Celtics <b id="homeScore">0</b></span>
+        <span class="vs">VS</span>
+        <span class="team away"><b id="awayScore">0</b> Lakers <span class="pill" style="background:#552583"></span></span>
+        <span class="clock-badge" id="matchClock">Q1 12:00</span>
+      </div>
+      <div class="nav-controls">
+        <button id="btnPlay" class="btn primary">▶ 播放</button>
+        <button id="btnPrevFrame" class="btn">⏮ 上一帧</button>
+        <button id="btnNextFrame" class="btn">⏭ 下一帧</button>
+        <button id="btnLoopStage" class="btn active">🔁 单阶段循环: 开</button>
+      </div>
+    </header>
+
+    <div class="main-layout">
+      <!-- Left Rail: Stage List -->
+      <aside class="stage-rail">
+        <div class="panel-header">
+          <h3>战术与死球阶段序列 (<span id="stageCount">0</span>)</h3>
+          <span class="sub">点击直接定位与单阶段循环调试</span>
+        </div>
+        <div class="stage-list" id="stageList">
+          <!-- Dynamically populated stages -->
+        </div>
+      </aside>
+
+      <!-- Center: Court Workspace -->
+      <main class="court-workspace">
+        <div class="stage-banner" id="currentStageBanner">
+          <div class="tag" id="currentStageType">HALF_COURT_OFFENSE</div>
+          <div class="title" id="currentStageTitle">加载中...</div>
+          <div class="time" id="currentStageTime">阶段用时: 0.0s / 0.0s</div>
+        </div>
+
+        <div class="canvas-box" id="courtContainer">
+          <canvas id="court" width="940" height="500"></canvas>
+        </div>
+
+        <div class="timeline-bar">
+          <input type="range" id="frameSlider" min="0" max="7199" value="0" />
+          <div class="slider-info">
+            <span id="frameLabel">Tick: 0 / 7200</span>
+            <span id="speedLabel">采样: 10Hz (Rapier2D 刚体物理)</span>
           </div>
-        </div>
-        <div class="meta" id="meta">Load a game JSON to begin</div>
-      </header>
-
-      <main class="stage">
-        <div class="court-column">
-          <!-- Tactical Banner: 顶部战术看板（战术体系一目了然） -->
-          <section class="tactical-banner" id="tacticalBanner" aria-label="实时战术与防守体系">
-            <div class="tb-main">
-              <div class="tb-offense">
-                <span class="tb-badge offense" id="tbOffBadge">进攻战术</span>
-                <span class="tb-title" id="tacticName">—</span>
-              </div>
-              <div class="tb-defense">
-                <span class="tb-badge defense" id="tbDefBadge">防守策略</span>
-                <span class="tb-def-desc" id="tacticDefense">—</span>
-              </div>
-            </div>
-            <div class="tb-flow">
-              <div class="tb-stage-indicator" id="tbStageIndicator">
-                <div class="tb-step" data-stage="ADVANCE"><span class="step-num">1</span><span class="step-txt">推进发起</span></div>
-                <div class="tb-line"></div>
-                <div class="tb-step" data-stage="SET"><span class="step-num">2</span><span class="step-txt">半场落位</span></div>
-                <div class="tb-line"></div>
-                <div class="tb-step" data-stage="SCREEN_APPROACH"><span class="step-num">3</span><span class="step-txt">掩护发起</span></div>
-                <div class="tb-line"></div>
-                <div class="tb-step" data-stage="SCREEN_USE"><span class="step-num">4</span><span class="step-txt">战术展开</span></div>
-                <div class="tb-line"></div>
-                <div class="tb-step" data-stage="ADVANTAGE"><span class="step-num">5</span><span class="step-txt">制造优势</span></div>
-                <div class="tb-line"></div>
-                <div class="tb-step" data-stage="TERMINAL"><span class="step-num">6</span><span class="step-txt">终结回合</span></div>
-              </div>
-              <div class="tb-action-pill" id="tacticAction">—</div>
-            </div>
-          </section>
-
-          <section class="court-wrap">
-            <div class="court-frame" id="courtFrame">
-              <canvas id="court" width="940" height="500" aria-label="Top-down court replay"></canvas>
-              <div class="pt-float" id="ptFloat" hidden></div>
-              <div class="net-burst" id="netBurst" hidden></div>
-              <div class="load-cover" id="loadCover" hidden>
-                <div class="load-bar"><span id="loadBarFill"></span></div>
-                <div class="load-txt" id="loadTxt">Loading…</div>
-              </div>
-              <div class="tip" id="tip"></div>
-            </div>
-            <div class="legend">
-              <span><i class="dot home"></i> Home</span>
-              <span><i class="dot away"></i> Away</span>
-              <span><i class="dot ball"></i> Ball</span>
-              <span class="legend-tactic-hint"><i class="tactic-dot screener"></i>掩护 <i class="tactic-dot roll"></i>顺下 <i class="tactic-dot space"></i>拉开</span>
-              <span class="legend-push"></span>
-              <span class="key-hint">空格 播放/暂停 · ←→ 单帧 · 1-5 倍速 · F 全屏</span>
-            </div>
-            <div class="transport">
-              <button id="play" type="button" aria-label="Play or pause">Play</button>
-              <button id="step-back" type="button" aria-label="Step back">◀</button>
-              <button id="step-forward" type="button" aria-label="Step forward">▶</button>
-              <label class="speed">
-                Speed
-                <select id="speed">
-                  <option value="0.25">0.25× 超慢放</option>
-                  <option value="0.5">0.5× 慢速</option>
-                  <option value="0.75" selected>0.75× 沉浸</option>
-                  <option value="1">1.0× 标准</option>
-                  <option value="1.5">1.5× 快速</option>
-                  <option value="2">2.0× 极速</option>
-                  <option value="4">4.0×</option>
-                </select>
-              </label>
-              <label class="cam-toggle" style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);cursor:pointer;">
-                <input type="checkbox" id="directorCam" checked /> 导播特写
-              </label>
-              <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Scrub timeline" />
-            </div>
-          </section>
-        </div>
-
-        <div class="side-column">
-          <!-- 广播级即时比分与时钟卡片 -->
-          <section class="scoreboard" id="scoreboard">
-            <div class="team home">
-              <span class="name" id="homeName">HOME</span>
-              <span class="pts" id="homePts">0</span>
-              <span class="period-pts" id="homePeriodPts"></span>
-            </div>
-            <div class="clocks">
-              <div class="period" id="period">Q1</div>
-              <div class="game" id="gameClock">12:00</div>
-              <div class="shot" id="shotClock">24</div>
-              <div class="possession" id="possession"></div>
-            </div>
-            <div class="team away">
-              <span class="name" id="awayName">AWAY</span>
-              <span class="pts" id="awayPts">0</span>
-              <span class="period-pts" id="awayPeriodPts"></span>
-            </div>
-          </section>
-
-          <!-- 攻防博弈与对位透视卡片 (Chess Match & Matchups) -->
-          <section class="tactics" aria-label="战术与对位">
-            <div class="side-tab-head">
-              <span class="active">🛡️ 实时攻防博弈与对位</span>
-              <span id="tacticStage" style="margin-left: auto; font-weight: normal; color: var(--muted); font-size: 11px;"></span>
-            </div>
-            <div class="assignments" id="assignments"></div>
-            <div class="tactics-stats" id="tacticsStats" style="margin-top: 8px; font-size: 11px; color: var(--muted); border-top: 1px dashed var(--border); padding-top: 6px;">
-              <div style="display: flex; justify-content: space-between;"><span>回合战术渗透率</span><span id="tacticRate" style="font-weight: bold; color: var(--fg);">88%</span></div>
-              <div style="display: flex; justify-content: space-between; margin-top: 2px;"><span>借掩护效率 (Rub-off)</span><span id="screenEff" style="font-weight: bold; color: #16a34a;">1.18 PPP</span></div>
-            </div>
-          </section>
-
-          <!-- 场上阵容与体能状态 -->
-          <section class="lineups" id="lineupsSection" aria-label="场上阵容">
-            <div class="side-tab-head">
-              <span class="active">⚡ 场上阵容与体能</span>
-            </div>
-            <div class="lineup-list" id="lineupList">
-              <div id="homeLineupList"></div>
-              <div id="awayLineupList" style="margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 6px;"></div>
-            </div>
-          </section>
         </div>
       </main>
 
-      <!-- 底部全功能深度分析工作台 (Comprehensive Analytics Dock) -->
-      <section class="analytics-dock" id="analyticsDock">
-        <div class="dock-tabs">
-          <button class="dock-tab active" data-tab="tab-boxscore">📊 完整技术统计 (Box Score)</button>
-          <button class="dock-tab" data-tab="tab-strategy">⚙️ 战术与轮换配置 (Strategy & Rotation)</button>
-          <button class="dock-tab" data-tab="tab-audit">🛡️ 金字塔质量体检 (Pyramid Audit)</button>
-          <button class="dock-tab" data-tab="tab-query">🔍 战术专项诊断 (Film Room)</button>
-          <button class="dock-tab" data-tab="tab-violations">⚠️ 违例嗅探 (<span id="violCount">0</span>)</button>
-          <button class="dock-tab" data-tab="tab-possessions">📋 逐回合审计 (<span id="possCount">0</span>)</button>
-        </div>
-        <!-- Tab 1: Boxscore 完整统计表 -->
-        <div class="dock-panel active" id="tab-boxscore">
-          <div class="boxscore-view" id="boxscoreView"></div>
+      <!-- Right: Decision Trace & Annotation Panel -->
+      <aside class="decision-panel">
+        <div class="panel-header">
+          <h3>微观决策实时溯源 (Decision Trace)</h3>
+          <span class="sub">当前帧持球人行为效用与物理依据</span>
         </div>
 
-        <!-- Tab Strategy: 战术与轮换配置管理 -->
-        <div class="dock-panel" id="tab-strategy">
-          <div class="strategy-view" id="strategyView">
-            <div class="strategy-grid">
-              <div class="strategy-team-col" id="strategyHomeCol">
-                <div class="st-col-title">主队战术哲学与轮换调度</div>
-                <div class="st-card" id="homeCoachCard"></div>
-                <div class="st-card" id="homeRotationCard"></div>
-              </div>
-              <div class="strategy-team-col" id="strategyAwayCol">
-                <div class="st-col-title">客队战术哲学与轮换调度</div>
-                <div class="st-card" id="awayCoachCard"></div>
-                <div class="st-card" id="awayRotationCard"></div>
-              </div>
+        <div class="decision-card" id="decisionCard">
+          <div class="card-empty">当前时刻无持球人决策</div>
+        </div>
+
+        <!-- Annotation / Feedback Component -->
+        <div class="annotation-box">
+          <div class="panel-header" style="padding: 8px 0 6px 0; border: none;">
+            <h3 style="color: #f59e0b;">✍️ 本阶段人工反馈标注 (RLHF / Debug)</h3>
+            <span class="sub">评价该战术阶段的拟真度，沉淀训练与调优样本</span>
+          </div>
+          
+          <div class="annotate-form">
+            <div class="rating-group">
+              <label><input type="radio" name="stageRating" value="GOOD" checked /> ✅ 拟真自然</label>
+              <label><input type="radio" name="stageRating" value="FLAW" /> ⚠️ 存在瑕疵</label>
+              <label><input type="radio" name="stageRating" value="BAD" /> ❌ 严重违和</label>
             </div>
-          </div>
-        </div>
-        <div class="dock-panel" id="tab-audit">
-          <div class="audit-summary-box" id="auditSummaryBox">
-            <div class="audit-score-row">
-              <div class="audit-score-badge" id="auditScoreBadge">--</div>
-              <div class="audit-score-meta">
-                <div class="audit-grade" id="auditGrade">正在就绪…</div>
-                <div class="audit-status" id="auditStatus">已自动加载比赛流数据，点击右侧「⚡ 立即评估」生成完整体检报告</div>
-              </div>
-              <div style="margin-left: auto; display: flex; gap: 8px;">
-                <button class="ra-btn-run" id="btnRunAudit">⚡ 立即评估</button>
-                <button class="ra-btn-export" id="btnExportAudit">📥 导出报告</button>
-              </div>
+            
+            <textarea id="annotationFeedback" placeholder="输入你对当前阶段/跑位/决策的看法与修改建议（例如：塔图姆突破时底角大空位应该分球；死球时中锋回防太慢等）..."></textarea>
+            
+            <div class="annotate-actions">
+              <button id="btnSubmitAnnotation" class="btn primary" style="width: 100%;">💾 提交并落地标注数据</button>
             </div>
-            <div class="dim-scores-mini" id="dimScoresMini" style="margin-top: 12px;"></div>
+            <div id="annotationStatus" class="annotation-status"></div>
           </div>
         </div>
 
-        <!-- Tab 3: 战术专项诊断与问答 -->
-        <div class="dock-panel" id="tab-query">
-          <div class="audit-query-wrap">
-            <div class="query-header-label">🔍 战术专项深度透视 (点击预设标签查看时空数据与 AI 决策依据)</div>
-            <div class="query-presets" id="queryPresets">
-              <span class="qp-chip active" data-q="得分与节奏">得分与节奏</span>
-              <span class="qp-chip" data-q="掩护与挡拆">掩护与挡拆</span>
-              <span class="qp-chip" data-q="投篮合理性">投篮合理性 (qSQ)</span>
-              <span class="qp-chip" data-q="战术丰富度">战术类型分布</span>
-              <span class="qp-chip" data-q="五人空间几何">空间拉开与拥挤</span>
-              <span class="qp-chip" data-q="防守轮转">防守轮转与漏人</span>
-            </div>
-            <div class="query-answer-box" id="queryAnswerBox"></div>
-          </div>
+        <div class="panel-header" style="margin-top: 10px;">
+          <h3>实时攻防事件流 (Play-by-Play)</h3>
         </div>
-
-        <!-- Tab 4: 违例嗅探列表 -->
-        <div class="dock-panel" id="tab-violations">
-          <div class="audit-list-view" id="auditViolationsList">
-            <div class="empty-audit-hint">点击“⚡ 立即评估”进行全维度物理与战术审计</div>
-          </div>
+        <div class="event-stream" id="eventStream">
+          <!-- Populated by events -->
         </div>
-
-        <!-- Tab 5: 逐回合列表 -->
-        <div class="dock-panel" id="tab-possessions">
-          <div class="audit-list-view" id="auditPossessionsList"></div>
-        </div>
-      </section>
-
-      <!-- 球员真实建模能力卡片 (Player Profile & Attributes Modal) -->
-      <div class="player-modal" id="playerModal" hidden>
-        <div class="pm-card">
-          <button class="pm-close" id="pmClose">×</button>
-          <div class="pm-header">
-            <div class="pm-avatar" id="pmBadge">#1</div>
-            <div class="pm-info">
-              <div class="pm-name-row"><span class="pm-name" id="pmName">Player</span><span class="pm-team" id="pmTeam">HOME</span></div>
-              <div class="pm-role" id="pmArchetype">持球核心 · 空间发起人</div>
-              <div class="pm-body-info" id="pmPhysique">201cm · 98kg · 臂展 215cm · 26岁</div>
-            </div>
-          </div>
-          <div class="pm-body">
-            <div class="pm-section-title">4大功能支柱与空间重力 (4-PILLAR ROLES & GRAVITY)</div>
-            <div class="pm-pillars-row" id="pmPillarsRow" style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px;"></div>
-            <div class="pm-section-title">真实能力档位 (CORE RATINGS)</div>
-            <div class="pm-attrs-grid" id="pmAttrsGrid"></div>
-            <div class="pm-section-title" style="margin-top: 10px;">战术倾向与对位压制 (TENDENCIES & MISMATCH)</div>
-            <div class="pm-tendencies" id="pmTendencies"></div>
-          </div>
-      </div>
+      </aside>
     </div>
-    <script type="module" src="./app.js?v=20260824_v19"></script>
-  </body>
+  </div>
+
+  <script src="app.js"></script>
+</body>
 </html>

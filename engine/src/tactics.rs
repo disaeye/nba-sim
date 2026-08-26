@@ -8,19 +8,43 @@ pub enum Possession {
     Away,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlaySegment {
-    // 活球阵地战术
-    HighPickAndRoll,
-    FiveOutMotion,
-    IsolationDrive,
-    FastBreakTransition,
-    // 死球与过渡
-    PostBasketInbound,
-    SidelineInbound,
-    FreeThrowSetup,
+#[derive(Debug, Clone)]
+pub struct PlayerProfile {
+    pub name: String,
+    pub jersey: String,
+    pub shot_range_max_ft: f32,
+    pub catch_and_shoot_fg: f32,
+    pub vision_fov_degrees: f32,
+    pub shoot_tendency: f32,
+    pub pass_first_tendency: f32,
+    pub drive_tendency: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchStageType {
+    JumpBall,
+    HighPickAndRoll,
+    DriveAndKick,
+    IsolationDrive,
+    FiveOutMotion,
+    FastBreakTransition,
+    PostBasketInbound,
+    SidelineInbound,
+    FreeThrow,
+    Timeout,
+}
+
+pub type PlaySegment = MatchStageType;
+
+#[derive(Debug, Clone)]
+pub struct DecisionResult {
+    pub action: String,
+    pub reason: String,
+    pub target_jersey: Option<String>,
+    pub shot_openness: f32,
+    pub pass_openness: f32,
+    pub drive_lane_space: f32,
+}
 pub struct TacticalPlanner;
 
 impl TacticalPlanner {
@@ -128,6 +152,78 @@ impl TacticalPlanner {
             (off_res, def_res)
         } else {
             (def_res, off_res)
+        }
+    }
+
+    /// 核心决策函数 (Decision Function): 根据物理空间计算投/传/突的效用
+    pub fn evaluate_ballhandler_decision(
+        profile: &PlayerProfile,
+        ball_pos_ft: Vec2,
+        hoop_ft: Vec2,
+        defender_pos_ft: Vec2,
+        teammates: &[(String, Vec2)], // (jersey, pos)
+        opponents: &[Vec2],
+    ) -> DecisionResult {
+        let dist_to_hoop = (ball_pos_ft - hoop_ft).length();
+        let dist_to_defender = (ball_pos_ft - defender_pos_ft).length();
+        
+        // 1. 投篮窗口评估 (Shot Openness)
+        let in_range = dist_to_hoop <= profile.shot_range_max_ft;
+        let shot_openness = if in_range {
+            ((dist_to_defender - 2.5) / 5.0).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        // 2. 传球窗口评估 (Pass Openness) - 寻找最空位队友
+        let mut best_pass_target: Option<String> = None;
+        let mut max_pass_openness: f32 = 0.0;
+        for (jersey, t_pos) in teammates {
+            let min_opp_dist = opponents.iter()
+                .map(|opp| (*t_pos - *opp).length())
+                .fold(f32::INFINITY, f32::min);
+            let openness = ((min_opp_dist - 3.0) / 6.0).clamp(0.0, 1.0);
+            if openness > max_pass_openness {
+                max_pass_openness = openness;
+                best_pass_target = Some(jersey.clone());
+            }
+        }
+
+        // 3. 突破空间评估 (Drive Lane Space)
+        let drive_lane_space = ((dist_to_defender - 3.0) / 4.0).clamp(0.0, 1.0);
+
+        // 决策效用函数比较 (Utility Competition)
+        let shot_utility = shot_openness * profile.shoot_tendency * profile.catch_and_shoot_fg * 2.5;
+        let pass_utility = max_pass_openness * profile.pass_first_tendency * 2.0;
+        let drive_utility = drive_lane_space * profile.drive_tendency * 1.8;
+
+        if shot_utility >= pass_utility && shot_utility >= drive_utility && shot_openness > 0.4 {
+            DecisionResult {
+                action: "SHOT".to_string(),
+                reason: format!("空位窗口 {:.1}ft，出手效用 {:.2} 触发投篮", dist_to_defender, shot_utility),
+                target_jersey: None,
+                shot_openness,
+                pass_openness: max_pass_openness,
+                drive_lane_space,
+            }
+        } else if pass_utility > drive_utility && max_pass_openness > 0.5 {
+            DecisionResult {
+                action: "PASS".to_string(),
+                reason: format!("队友 #{} 处于高价值大空位 (开阔度 {:.0}%)", best_pass_target.as_deref().unwrap_or(""), max_pass_openness * 100.0),
+                target_jersey: best_pass_target,
+                shot_openness,
+                pass_openness: max_pass_openness,
+                drive_lane_space,
+            }
+        } else {
+            DecisionResult {
+                action: "DRIVE".to_string(),
+                reason: format!("寻找内线突破与挡拆缝隙 (突进空间 {:.0}%)", drive_lane_space * 100.0),
+                target_jersey: None,
+                shot_openness,
+                pass_openness: max_pass_openness,
+                drive_lane_space,
+            }
         }
     }
 }
