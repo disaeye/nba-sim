@@ -2284,30 +2284,31 @@ async function loadDemoGame() {
  * 34185 帧全量在 JS 堆里会膨胀到 300MB+。这里只保留 drawTick/render
  * 实际读取的字段，players 每项只留渲染必需项，体积约省 60-70%。
  */
-function slimTick(t) {
+function slimTick(raw) {
+  const t = raw.frame ? raw.frame : raw;
   const players = (t.players ?? []).map((p) => ({
-    jersey: p.jersey,
+    jersey: String(p.jersey),
     team: p.team,
     x: p.x,
     y: p.y,
-    hasBall: p.hasBall,
+    hasBall: !!p.has_ball || !!p.hasBall,
     action: p.action,
     task: p.task,
-    stm: p.stm,
-    stmMax: p.stmMax,
+    stm: p.stm ?? 100,
+    stmMax: p.stm_max ?? p.stmMax ?? 100,
   }));
   return {
-    t: t.t,
-    period: t.period,
-    gameClock: t.gameClock,
-    shotClock: t.shotClock,
-    phase: t.phase,
-    score: t.score,
+    t: t.t ?? 0,
+    period: t.period ?? 1,
+    gameClock: t.gameClock ?? t.game_clock ?? t.t_game ?? 720.0,
+    shotClock: t.shotClock ?? t.shot_clock ?? 24.0,
+    phase: t.phase ?? 'HALF_COURT',
+    score: t.score ?? { home: 0, away: 0 },
     players,
     ball: t.ball,
-    eventType: t.eventType,
-    eventSeq: t.eventSeq,
-    eventPayload: t.eventPayload,
+    eventType: t.eventType ?? t.event_type,
+    eventSeq: t.eventSeq ?? t.event_seq,
+    eventPayload: t.eventPayload ?? t.event_payload,
     callout: t.callout,
     intensity: t.intensity,
     tactical: t.tactical,
