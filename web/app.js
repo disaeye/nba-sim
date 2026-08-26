@@ -1207,8 +1207,10 @@ function drawTick(tick) {
   const offY = Math.max(-maxOffY, Math.min(maxOffY, camOffY));
   ctx.save();
   if (cam.scale !== 1) {
+    // Correct 2D camera centered transform: translate to center, scale, translate focus point back
     ctx.translate(w / 2 - offX, h / 2 - offY);
     ctx.scale(cam.scale, cam.scale);
+    ctx.translate(-w / 2, -h / 2);
   }
 
   hitRects = [];
