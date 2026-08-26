@@ -4,12 +4,18 @@ import type { RelationKind } from '../court/relations.js';
 import type { Intent } from '../decision/types.js';
 import type { LiveCourtSense } from '../perception/live-court.js';
 import type { TeamId } from '../state/types.js';
-import type { TeamAssignment, TeamPlan, TeamPlanKind, TacticalRoute } from '../tactics/team-plan.js';
+import type { TeamAssignment, TeamPlan, TacticalRoute } from '../tactics/team-plan.js';
+import type { TeamPlanKind } from '../tactics/types.js';
 import type { MovementRole } from '../court/mobility.js';
+import { getFormationSlotPosition } from '../tactics/formations.js';
+import { loadDecisionConfig } from '../policy/config.js';
+import { coordinateWeaksideMotion } from '../strategy/dual-track-coordinator.js';
+import { evaluateDefensiveScheme } from '../strategy/defense-schemes.js';
 import { loadResolveConfig, makeResolveContext } from '../resolve/index.js';
-
 /** Rate model for the coverage threat math (open 3PT expected points). */
 const RESOLVE = makeResolveContext(loadResolveConfig());
+const SPATIAL = loadDecisionConfig().spatial;
+const TACTICS_SPACER_DENY_FT = loadDecisionConfig().tactics.spacer_denied_distance_ft;
 export interface PlannedPlayer {
   readonly jersey: string;
   readonly team: TeamId;
@@ -29,10 +35,66 @@ export interface SpatialPlan {
 }
 
 const COURT_MARGIN = 0.02;
-const MIN_TEAM_SEPARATION_FT = 6;
+// L4 (reality law): real NBA halfcourt spacing holds ~25ft mean pairwise
+// distance at every shot-clock phase (p25 22.1 / med 25.0). A 9ft floor
+// let two spacers share one pocket; config owns the value now
+// (decision.json spatial.min_team_separation_ft).
+const MIN_TEAM_SEPARATION_FT = SPATIAL.min_team_separation_ft ?? 13.5;
 
 function clampCourt(value: number): number {
   return Math.max(COURT_MARGIN, Math.min(1 - COURT_MARGIN, value));
+}
+
+/**
+ * Transition-retreat anchor for one defender.
+ *
+ * Real transition defense is a continuous gradient, not a mode switch:
+ * the further the ball has advanced toward the offensive rim, the closer
+ * the defender may sit to their man. The old implementation used a fixed
+ * 0.65 paint / 0.35 man blend while the ball was in the backcourt and
+ * snapped to man coverage at half court — defenders were still 15-20ft
+ * from their assignment when the offense crossed, so every transition
+ * conceded a free look (user report: 攻守转换防守漏勺).
+ *
+ * Geometry drives the blend here:
+ *   - `ballDepthFt` = how far the ball has advanced past the defensive
+ *     baseline toward the offensive rim (0 = own baseline, 47 = half
+ *     court, 94 = offensive rim).
+ *   - `paintWeight` = configured start weight at ballDepth 0, decaying
+ *     linearly to 0 by `transition_settle_depth_ft` (ball already in
+ *     scoring range → pure man coverage). No step function, no mode
+ *     switch, no clock proxy.
+ *   - A hard cap keeps the defender within `transition_max_gap_ft` of
+ *     their assignment at all times — retreat without abandonment.
+ *
+ * Pure: same inputs → same point. The policy numbers live in
+ * config/decision.json#spatial, never inlined at call sites.
+ */
+function transitionRetreatPoint(
+  attackerX: number,
+  attackerY: number,
+  defRimX: number,
+  defRimY: number,
+  ballDepthFt: number,
+): { readonly x: number; readonly y: number } {
+  // Paint-First Transition Anchor:
+  // When transitioning, defenders prioritize securing the central paint/rim corridor first (0.75+ weight)
+  // before expanding out to pick up assignments as the ball crosses into the halfcourt.
+  // When attack direction is 1 (toward right/x=0.94), defense rim is at left (x=0.06).
+  // Anchor point should be in front of defensive rim (towards midcourt x=0.5):
+  // if defRimX < 0.5 (left rim), anchor is at x = defRimX + 16ft = 0.23
+  // if defRimX > 0.5 (right rim), anchor is at x = defRimX - 16ft = 0.77
+  const paintAnchorX = defRimX < 0.5 ? defRimX + 16 / 94.0 : defRimX - 16 / 94.0;
+  const paintAnchorY = 0.5;
+  const progress = Math.min(1, Math.max(0, (ballDepthFt - 15) / 35.0)); // 0 = backcourt, 1 = frontcourt
+  const paintWeight = 0.85 * (1 - progress);
+  const manWeight = 1 - paintWeight;
+  const ax = paintAnchorX * paintWeight + attackerX * manWeight;
+  const ay = paintAnchorY * paintWeight + attackerY * manWeight;
+  return {
+    x: clampCourt(ax),
+    y: clampCourt(ay),
+  };
 }
 
 function offenseTask(assignment: TeamAssignment): PlayerTask {
@@ -52,6 +114,11 @@ function offenseTask(assignment: TeamAssignment): PlayerTask {
 function movementRoleForOffense(assignment: TeamAssignment): MovementRole {
   if (assignment.role === 'handler') return 'ball_handler';
   if (assignment.role === 'screener') return 'screener';
+  // P7: a cutter/interior_finisher's rim routes use the screener burst
+  // profile (hard rim runs), not the spacer shuffle.
+  if (assignment.offenseRole === 'cutter' || assignment.offenseRole === 'interior_finisher') {
+    return 'screener';
+  }
   return 'spacer';
 }
 
@@ -147,6 +214,16 @@ function routeForOffense(
       }
       return { kind: 'spacing', points: [current, arcBend, target] };
     }
+    case 'spot_up':
+      return { kind: 'spacing', points: [current, target] };
+    case 'flare':
+      return { kind: 'relocate', points: [current, arcBend, target] };
+    case 'fill':
+      return { kind: 'relocate', points: [current, arcBend, target] };
+    case 'flash':
+      return { kind: 'cut', points: [current, target] };
+    case 'seal':
+      return { kind: 'post_seal', points: [current, target] };
     default:
       // Holding, shooting, and handling beats are intentionally stationary;
       // a route would suggest movement the kernel does not authorize.
@@ -193,39 +270,156 @@ function slotForAssignment(assignment: TeamAssignment): RelationKind {
 function desiredOffenseTarget(
   assignment: TeamAssignment,
   sense: LiveCourtSense,
-  planKind: TeamPlanKind,
+  plan: TeamPlan,
   matchups: Readonly<Record<string, string>>,
   feedTarget: string | null = null,
 ): { readonly x: number; readonly y: number } {
-  // The offense attacks `sense.rim`. The "back" direction points from rim
+  const planKind = plan.kind;
   // toward mid-court — it is FIXED by which basket is attacked, never by
   // the handler's current x. This prevents all spacing targets from
   // flipping to the wrong half when a driver crosses the rim line.
   const back = sense.rim.x < 0.5 ? 1 : -1;
   const handler = sense.offensePlayers.find((p) => p.jersey === sense.handler)?.pose;
   const rim = sense.rim;
-  // Transition lane fill: while the break is live (handler still in the
-  // backcourt), the wings/corners SPRINT to frontcourt lanes — the wide
-  // lanes 22-24ft from the rim and the deep corners. Without this the
-  // spacers stood next to the handler in the backcourt (measured: mates
-  // at x≈0.13-0.21 beside the ball, 2 outlet passes per game, 0 fast-break
-  // shots). The lane runners are what make outlet passes and early
-  // offense possible.
+
+  // If we are in initial formation setup (stage is ADVANCE or SET, and not transition push),
+  // use the distinctive formation geometry setup slots
+  if ((plan.stage === 'ADVANCE' || plan.stage === 'SET') && planKind !== 'TRANSITION_PUSH' && plan.formation) {
+    const formationTarget = getFormationSlotPosition(plan.formation, assignment.role, rim, back);
+    if (formationTarget) {
+      return formationTarget;
+    }
+  }
+
   const handlerInBackcourt = handler ? (sense.rim.x > 0.5 ? handler.x < 0.5 : handler.x > 0.5) : false;
   if (planKind === 'TRANSITION_PUSH' && handlerInBackcourt && assignment.role !== 'handler') {
     if (assignment.role === 'screener') {
-      // The big runs the rim lane — a deep post target ahead of the ball.
-      return { x: clampCourt(rim.x + back * nx(4)), y: clampCourt(0.5 + ((handler?.y ?? 0.5) > 0.5 ? -0.08 : 0.08)) };
+      // Rim Runner: runs directly to the rim slot ahead of the ball to pin the deep protector.
+      return { x: clampCourt(rim.x + back * nx(5.5)), y: clampCourt(0.5 + ((handler?.y ?? 0.5) > 0.5 ? -0.06 : 0.06)) };
     }
     const laneSide = assignment.role === 'strong_corner' ? 1 : -1;
     const side = sense.ball.y >= 0.5 ? laneSide : -laneSide;
     if (assignment.role === 'slot') {
-      // Trailer: behind the ball at the top for the swing.
-      return { x: clampCourt(0.5 - back * nx(6)), y: 0.5 };
+      // Early Offense Trailer / Drag Screener: trails ball at top of key (28ft) for transition pullup or quick drag screen.
+      return { x: clampCourt(rim.x + back * nx(28.0)), y: 0.5 };
     }
+    // Wing Fillers: sprint wide down the sidelines into deep corners to stretch the break defense horizontally.
     return {
-      x: clampCourt(rim.x + back * nx(24)),
-      y: clampCourt(side > 0 ? 0.5 + ny(13) : 0.5 - ny(13)),
+      x: clampCourt(rim.x + back * nx(23.5)),
+      y: clampCourt(side > 0 ? 0.90 : 0.10),
+    };
+  }
+  // ── P7 role-based off-ball routing (behavior identity) ───────────────
+  // TeamRole remains the geometric slot; offenseRole owns the behavioral
+  // destination. Public corner roles must stay on a corner-three locus even
+  // when the player is a cutter/interior finisher in another possession.
+  const offenseRole = assignment.offenseRole;
+  const role = offenseRole ?? (assignment.role === 'screener'
+    ? planKind === 'POST_UP' ? 'post_scorer' : 'interior_finisher'
+    : planKind === 'TRANSITION_PUSH' ? 'transition_runner' : 'floor_spacer');
+  // L4 (reality law): an NBA corner shooter stands IN the corner — 2-3ft
+  // from the sideline, 1-2ft from the baseline plane of the rim, 22ft from
+  // the basket (SportVU: real set-offense mean pairwise spacing 25ft vs
+  // the sim's 15-18ft). The old corner solved the arc equation with
+  // y only 5ft from the sideline, pushing x 10ft upcourt — a "corner" at
+  // the foul-line extended. Park the corner at the true baseline corner:
+  // y 3ft from the sideline, x 2ft beyond the rim along the baseline.
+  // L4/semantic fix: corner SIDES are sticky per player, not derived from the
+  // live ball. Ball-relative sides flipped every time the handler probed
+  // across mid-lane — corners crossed 30ft repeatedly and the set never
+  // settled (organizedShare 0; real sets hold their corners). The strong
+  // corner takes the side the PLAYER already occupies; the weak corner the
+  // other. Only a genuine possession start (no history) falls back to the
+  // ball side.
+  const cornerYFor = (side: 'strong' | 'weak'): number => {
+    const current = sense.offensePlayers.find((p) => p.jersey === assignment.jersey)?.pose;
+    const ownSideHigh = current ? current.y >= 0.5 : sense.ball.y >= 0.5;
+    const y = side === 'strong' ? (ownSideHigh ? 0.94 : 0.06) : (ownSideHigh ? 0.06 : 0.94);
+    return clampCourt(y);
+  };
+  const cornerTarget = (side: 'strong' | 'weak'): RoutePoint => {
+    const y = cornerYFor(side);
+    const x = rim.x + back * nx(2);
+    return routePoint(x, y);
+  };
+  const arcTarget = (side: 'strong' | 'weak'): RoutePoint => {
+    const y = cornerYFor(side) === 0.9 ? 0.72 : 0.28;
+    const yOffsetFt = Math.abs(y - 0.5) * 50;
+    const x = rim.x + back * nx(loadCourtGeometryFt().three_point_arc_ft - 0.5);
+    return routePoint(x, yOffsetFt > 0 ? y : 0.5);
+  };
+  // A public corner assignment is a corner responsibility first. Only a
+  // declared movement/cut route may leave the corner, and even then the
+  // target is the named action's route rather than a generic spacer pocket.
+  if ((assignment.role === 'strong_corner' || assignment.role === 'weak_corner')
+    && role !== 'cutter' && role !== 'interior_finisher'
+    && assignment.action !== 'cut' && assignment.action !== 'relocate') {
+    return cornerTarget(assignment.role === 'strong_corner' ? 'strong' : 'weak');
+  }
+  // Screener geometry is tactic-specific: an interior_finisher or hub role
+  // still has to occupy the screen, roll, or pop target before its generic
+  // role destination can apply. Letting the behavior role win here sent a
+  // PNR screener directly to the rim/low-post target, leaving the handler
+  // twenty feet away while the assignment still claimed `screen`.
+  const isScreener = assignment.role === 'screener';
+  if (!isScreener && (role === 'cutter' || role === 'interior_finisher')) {
+    if (planKind === 'TRANSITION_PUSH' && handlerInBackcourt) {
+      return { x: clampCourt(rim.x + back * nx(4)), y: clampCourt(0.5 + ((handler?.y ?? 0.5) > 0.5 ? -0.08 : 0.08)) };
+    }
+    if (assignment.action === 'cut') {
+      return { x: clampCourt(rim.x + back * nx(3)), y: rim.y };
+    }
+    // L4 (reality law): between rolls/cuts the finisher spaces to the WEAK
+    // CORNER (22ft) — real NBA bigs occupy the corner between actions
+    // (drop-coverage era five-out). The short corner at 14ft still parked
+    // one man inside the arc and held mean-pairwise at ~19ft vs real 25.
+    const side = sense.ball.y >= 0.5 ? -1 : 1;
+    return {
+      x: clampCourt(rim.x + back * nx(2)),
+      y: clampCourt(0.5 + side * 0.44),
+    };
+  }
+  // L4 (reality law): real NBA set offenses keep only 0-1 players inside
+  // 10ft of the rim (SportVU: 55.6% of set-offense frames have ZERO paint
+  // residents; the sim had 2 permanent ones — measured mean pairwise
+  // spacing 15-18ft vs real 25ft). The hub is a TRAILER/playmaker, not a
+  // nail occupant: hold the top of the arc (24ft, y=0.5) unless actively
+  // sealing. The post_scorer keeps a genuine post position at 11ft only
+  // while a post play is live (cut/relocate); between post touches he
+  // holds the elbow-extended 15ft flash.
+  if (!isScreener && role === 'hub') {
+    if (assignment.action === 'cut') {
+      const sealSide = sense.ball.y >= 0.5 ? 1 : -1;
+      return {
+        x: clampCourt(rim.x + back * nx(6)),
+        y: clampCourt(0.5 + sealSide * ny(5)),
+      };
+    }
+    // L4: break to the 45° weak-side wing — the old y=0.5 trailer stacked
+    // three men on the top ray with the handler and slot.
+    const weakSide = sense.ball.y >= 0.5 ? -1 : 1;
+    return { x: clampCourt(rim.x + back * nx(23)), y: clampCourt(0.5 + weakSide * ny(12)) };
+  }
+  if (!isScreener && role === 'post_scorer') {
+    if (assignment.action === 'cut' || assignment.action === 'relocate') {
+      const sealSide = sense.ball.y >= 0.5 ? 1 : -1;
+      return {
+        x: clampCourt(rim.x + back * nx(assignment.action === 'cut' ? 6 : 9)),
+        y: clampCourt(0.5 + sealSide * ny(assignment.action === 'cut' ? 5 : 8)),
+      };
+    }
+    return { x: clampCourt(rim.x + back * nx(15)), y: clampCourt(0.5 + (sense.ball.y >= 0.5 ? -0.12 : 0.12)) };
+  }
+  if (!isScreener && role === 'movement_shooter' && assignment.action !== 'space') {
+    const side = assignment.role === 'strong_corner' ? 'strong' : 'weak';
+    if (assignment.action === 'cut') return arcTarget(side);
+    if (assignment.action === 'relocate') return arcTarget(side);
+  }
+  if (role === 'transition_runner' && planKind === 'TRANSITION_PUSH' && handlerInBackcourt) {
+    const laneSide = assignment.jersey.charCodeAt(0) % 2 === 0 ? 1 : -1;
+    return {
+      x: clampCourt(rim.x + back * nx(22)),
+      y: clampCourt(0.5 + laneSide * ny(12)),
     };
   }
   if (assignment.role === 'handler') {
@@ -246,7 +440,11 @@ function desiredOffenseTarget(
       // makes paceBias visible in the frame stream.
       const pace = sense.coach?.[sense.offense]?.paceBias ?? 0.5;
       const strideFt = 8 + (pace - 0.5) * 6; // 5ft (grind) .. 11ft (run)
-      const strikeDeep = 0.52 + pace * 0.12; // 0.46 (settle early) .. 0.64
+      // L4: the strike cap feeds directly into set spacing — a handler
+      // settling at 30+ft drags mean-pairwise down 3-4ft. Real NBA
+      // handlers initiate at 24-27ft ( SportVU handler rim-dist median
+      // 25.9 at clock 18-12). Cap deeper for run pace, shallower for grind.
+      const strikeDeep = 0.56 + pace * 0.08; // 0.56 (run) .. 0.64 was 0.52-0.64
       const x = toward === 1
         ? Math.min(strikeDeep, Math.max(handlerX + nx(strideFt), 0.52))
         : Math.max(1 - strikeDeep, Math.min(handlerX - nx(strideFt), 0.48));
@@ -255,7 +453,20 @@ function desiredOffenseTarget(
         y: clampCourt(handlerY + (0.5 - handlerY) * 0.18),
       };
     }
-    if (assignment.action === 'drive' || assignment.action === 'crossover') return { x: clampCourt(rim.x + back * nx(4)), y: rim.y };
+    if (assignment.action === 'drive' || assignment.action === 'crossover') {
+      if (plan.stage === 'SCREEN_USE' || plan.stage === 'ADVANTAGE') {
+        const screenerJersey = plan.assignments.find((a) => a.role === 'screener')?.jersey;
+        const screener = screenerJersey ? sense.offensePlayers.find((p) => p.jersey === screenerJersey)?.pose : undefined;
+        if (screener) {
+          // Rub-off: attack tightly around the screener's shoulder toward the paint
+          const shoulderSide = screener.y > (handler?.y ?? 0.5) ? 1 : -1;
+          const rubY = screener.y + shoulderSide * ny(3.5);
+          const rubX = screener.x - back * nx(5.0);
+          return { x: clampCourt(rubX), y: clampCourt(rubY) };
+        }
+      }
+      return { x: clampCourt(rim.x + back * nx(4)), y: rim.y };
+    }
     if (assignment.action === 'back_to_basket') {
       const hy = handler?.y ?? sense.ball.y;
       return { x: clampCourt(rim.x + back * nx(8)), y: clampCourt(hy) };
@@ -359,18 +570,26 @@ function desiredOffenseTarget(
     // screener's defender-facing approach geometry.
     // A screener in 'relocate' or 'screen' (approaching the screen point)
     // stands BETWEEN the handler and the on-ball defender — that is the
-    // physical definition of a screen. The defender-relative geometry is
-    // required by the alignment tests (screener closer to the defender
-    // than to the handler). When the defender is genuinely out of position
-    // wrong wing.
+    // physical definition of a screen. Once the screen is set, the target
+    // must remain at the recorded anchor until SCREEN_USE; otherwise the
+    // live on-ball defender can move toward the handler and pull the target
+    // across the floor, making a committed screen chase a moving defender.
     if ((assignment.action === 'relocate' || assignment.action === 'screen') && handler) {
+      // Semantic fix (eternal-approach bug): a real screener PICKS A SPOT
+      // and plants — the target must not be recomputed from the live
+      // defender every tick (the moving point made screeners wander 8-20ft
+      // from the handler for entire possessions; the set never formed).
+      // If the plan carries a locked anchor, walk to it and STAND THERE.
+      if (plan.screenAnchor) {
+        return { x: clampCourt(plan.screenAnchor.x), y: clampCourt(plan.screenAnchor.y) };
+      }
       const obd = sense.defensePlayers.find((player) => player.jersey === sense.onBallDefender);
       const obdDist = obd ? Math.hypot((obd.pose.x - handler.x) * 94, (obd.pose.y - handler.y) * 50) : Infinity;
       if (obd && obdDist <= 10) {
         // Defender engaged: screen body between handler and defender.
         const dxFt = (obd.pose.x - handler.x) * 94;
         const dyFt = (obd.pose.y - handler.y) * 50;
-        const distance = Math.hypot(dxFt, dyFt);
+        const distance = Math.hypot(dxFt, dyFt) || 1;
         const screenDepthFt = Math.max(distance - 1.2, 1.8);
         const side = Math.sign(handler.y - obd.pose.y) || 1;
         const perpX = -(dyFt / distance);
@@ -386,8 +605,6 @@ function desiredOffenseTarget(
     }
     // cut = roll to the rim
     if (assignment.action === 'cut') return { x: clampCourt(rim.x + back * nx(3)), y: rim.y };
-    // default spacing: park ON the 3pt arc, not mid-range — a screener
-    // default spacing: park just outside the configured three-point arc.
     const geometry = loadCourtGeometryFt();
     const dYOff = 10;
     return {
@@ -396,37 +613,6 @@ function desiredOffenseTarget(
     };
   }
   const current = sense.offensePlayers.find((player) => player.jersey === assignment.jersey)?.pose;
-  const pressure = current
-    ? sense.defensePlayers.reduce((best, defender) => {
-        const distance = Math.hypot((defender.pose.x - current.x) * 94, (defender.pose.y - current.y) * 50);
-        return distance < best.distance ? { distance, defender } : best;
-      }, { distance: Infinity, defender: null as typeof sense.defensePlayers[number] | null })
-    : { distance: Infinity, defender: null as typeof sense.defensePlayers[number] | null };
-  const escape = pressure.defender && pressure.distance < 10
-    ? Math.min(6, (10 - pressure.distance) * 0.6)
-    : 0;
-  // Escape slides ALONG the 3pt line, never deeper: pushing x away from
-  // the rim (away from the defender on the pass line) parked corner
-  // spacers 8ft beyond the arc, where they then jacked 30ft+ threes.
-  // Real spacers slide toward the baseline or the wing, keeping their
-  // depth on the arc. escapeY keeps the sign of the defender-relative
-  // push; escapeX is capped at ±3ft of lateral shuffle.
-  //
-  // The first-principles audit found the escape direction corrupting the
-  // corner structure: a corner spacer's defender pressure pushed the
-  // escapeY sign toward the MIDDLE of the floor (both corner spacers
-  // drifted into the same wing — 8k+ frames/game of space/space pairs
-  // within 5ft). A corner's escape lane is ALONG the baseline: the
-  // y-offset must stay within the corner band and never cross the
-  // mid-line, otherwise "deny escape" reads as a weak-side rotation.
-  const escapeY = pressure.defender && current && escape > 0
-    ? (current.y - pressure.defender.pose.y) * 50 / Math.max(1, pressure.distance) * ny(escape)
-    : 0;
-  const escapeX = pressure.defender && current && escape > 0
-    ? (current.y - pressure.defender.pose.y) * 50 / Math.max(1, pressure.distance) * nx(Math.min(3, escape * 0.5))
-    : 0;
-  const strongY = sense.ball.y >= 0.5 ? 0.90 : 0.10;
-  const weakY = 1 - strongY;
   // Corner escape is baseline-bound: the corner's y-offset is clamped to
   // its own corner band (0.02..0.34 for the bottom corner, 0.66..0.98 for
   // the top). A defender pressing a corner spacer pushes them ALONG the
@@ -494,7 +680,16 @@ function desiredOffenseTarget(
     a: { readonly x: number; readonly y: number },
     b: { readonly x: number; readonly y: number },
   ): { readonly x: number; readonly y: number } => (ballDistFt(a.x, a.y) >= ballDistFt(b.x, b.y) ? a : b);
-  // Designed-feed families: the FEED TARGET gets a designed second action —
+  const escapeX = 0;
+  const escapeY = 0;
+  // L4: true corner band (3ft from sideline) — see cornerYFor note above.
+  // L4/semantic: sticky side — see cornerYFor. The spacer pocket's strong/
+  // weak bands must not flip with the live ball either (same 30ft-crossing
+  // bug as the corner target).
+  const pocketPose = sense.offensePlayers.find((p) => p.jersey === assignment.jersey)?.pose;
+  const pocketSideHigh = pocketPose ? pocketPose.y >= 0.5 : sense.ball.y >= 0.5;
+  const strongY = pocketSideHigh ? 0.94 : 0.06;
+  const weakY = strongY === 0.94 ? 0.06 : 0.94;
   // OFF_BALL_SCREEN curls off the pin to the wing at SCREEN_USE; POST_UP
   // seals at the low block. These replace the generic pocket for that ONE
   // player (measured before: pins formed but the freed man never curled;
@@ -511,6 +706,41 @@ function desiredOffenseTarget(
       // Seal on the low block, ball-side: 6ft from rim toward the handler's side.
       const hy = sense.offensePlayers.find((p) => p.jersey === sense.handler)?.pose.y ?? 0.5;
       return { x: clampCourt(rim.x + back * nx(6)), y: clampCourt(0.5 + (hy >= 0.5 ? ny(5) : -ny(5))) };
+    }
+  }
+  // ── Defensive-read relocation (L4 semantic subsystem) ─────────────────
+  // Real off-ball players READ their defender and relocate when denied:
+  // a corner pressed tight flashes to the wing (stay on your side), a
+  // wing run off the line drifts to the corner. This is a READ, not a
+  // constant — it fires only when the nearest defender is inside the deny
+  // distance, and the escape stays on the player's own side.
+  const nearestDefToFt = (x: number, y: number): number => Math.min(
+    ...sense.defensePlayers.map((d) => Math.hypot((d.pose.x - x) * 94, (d.pose.y - y) * 50)),
+  );
+  const defensiveReadEscape = (spot: { x: number; y: number }, ownSideHigh: boolean): { x: number; y: number } | null => {
+    if (nearestDefToFt(spot.x, spot.y) >= TACTICS_SPACER_DENY_FT + 0.5) return null;
+    // Denied: slide 6-8ft ALONG the arc away from the defender, staying on
+    // the same side (a real flash, not a floor-crossing).
+    const def = sense.defensePlayers.reduce((best, d) => {
+      const dd = Math.hypot((d.pose.x - spot.x) * 94, (d.pose.y - spot.y) * 50);
+      const bd = Math.hypot((best.pose.x - spot.x) * 94, (best.pose.y - spot.y) * 50);
+      return dd < bd ? d : best;
+    });
+    const awayY = def.pose.y >= spot.y ? spot.y - ny(7) : spot.y + ny(7);
+    const clampedY = ownSideHigh ? Math.max(0.55, awayY) : Math.min(0.45, awayY);
+    const yOffFt = Math.abs(clampedY - 0.5) * 50;
+    const x = rim.x + back * nx(Math.sqrt(Math.max(4, loadCourtGeometryFt().three_point_arc_ft ** 2 - yOffFt ** 2)) + 0.5);
+    return { x: clampCourt(x), y: clampCourt(clampedY) };
+  };
+
+  // ── Weak-side dual-track secondary tactical targets ───────────────────
+  if (plan.weaksideAction) {
+    const ws = plan.weaksideAction;
+    if (ws.screenerId === assignment.jersey && ws.screenerTarget) {
+      return { x: clampCourt(ws.screenerTarget.x), y: clampCourt(ws.screenerTarget.y) };
+    }
+    if (ws.cutterId === assignment.jersey && ws.cutterTarget) {
+      return { x: clampCourt(ws.cutterTarget.x), y: clampCourt(ws.cutterTarget.y) };
     }
   }
   if (assignment.role === 'strong_corner') {
@@ -546,11 +776,13 @@ function desiredOffenseTarget(
       const slide = { x: cornerX(Math.abs(slideY - 0.5) * 50), y: clampCornerY(slideY, driftY * 0.5) };
       return laneClear(slide);
     }
-    // NOTE: no clampToArc for corners — the corner three line is the
-    // STRAIGHT sideline segment 22ft from the baseline, not a rim-radius
-    // arc. The cornerX composition above places the spot ON that segment.
-    return laneClear(strong);
+    // Defensive-read relocation: a pressed corner flashes up the arc on
+    // its own side (real NBA deny reads).
+    const denied = defensiveReadEscape(strong, strongY >= 0.5);
+    if (denied) return clampToArc(denied.x, denied.y, rim.x, rim.y);
+    return clampToArc(laneClear(strong).x, laneClear(strong).y, rim.x, rim.y);
   }
+
   if (assignment.role === 'weak_corner') {
     const cornerX2 = (yBandFt: number): number =>
       clampCourt(rim.x + back * nx(Math.sqrt(Math.max(9, loadCourtGeometryFt().three_point_corner_ft ** 2 - yBandFt ** 2)) - 2) + escapeX + driftX);
@@ -561,9 +793,14 @@ function desiredOffenseTarget(
       // probes its side.
       const slideY = weakY < 0.5 ? weakY + ny(8) : weakY - ny(8);
       const slide = { x: cornerX2(Math.abs(slideY - 0.5) * 50), y: clampCornerY(slideY, driftY * 0.5) };
-      return laneClear(slide);
+      const cleared = laneClear(slide);
+      return clampToArc(cleared.x, cleared.y, rim.x, rim.y);
     }
-    return laneClear(weak);
+    // Defensive-read relocation for the weak corner too.
+    const denied2 = defensiveReadEscape(weak, weakY >= 0.5);
+    if (denied2) return clampToArc(denied2.x, denied2.y, rim.x, rim.y);
+    const cleared2 = laneClear(weak);
+    return clampToArc(cleared2.x, cleared2.y, rim.x, rim.y);
   }
   // Slot stays weak-side but rejects a closeout as a consequence of pressure.
   // Wing slots sit ON the 3pt arc: the arc is a 23.75ft circle, so the
@@ -592,37 +829,37 @@ function desiredOffenseTarget(
   // player at the short corner / elbow (~1/8 of the time) for the
   // short-roll and dribble-handoff game. The rest of the time the slot
   // holds the wing line; NBA mid-range shot share is ~8-12%, not 25%.
-  const midBucket = Math.floor(sense.gameClock / 10) + assignment.jersey.charCodeAt(0);
-  if (midBucket % 8 === 1) {
-    const midSpot = { x: clampCourt(rim.x + back * nx(17) + escapeX * 0.5), y: clampSlotY(0.5 + (weakY - 0.5) * 0.5, driftY * 0.5) };
-    const m = fartherFromBall(midSpot, slotWeak); const cleared = laneClear(m); return clampToArc(cleared.x, cleared.y, rim.x, rim.y);
-  }
-  // The slot takes the farther-from-ball side of its two band-clamped
-  // pockets: with the corner escapes confined to their own sides, the
-  // slot settles weak-side without entering corner bands (y 0.30-0.70).
-  // A ball-side lean experiment (r → +0.09 flow) collapsed the diet to
-  // floater-heavy (rim 37→6%): parking the slot next to the ball clogs
-  // the strong pocket and the drive lane. Spacing beats tilt — NBA
-  // offenses achieve tilt through the BALL moving, not the weak wing.
-  const s = fartherFromBall(slotStrong, slotWeak); const clearedSlot = laneClear(s); return clampToArc(clearedSlot.x, clearedSlot.y, rim.x, rim.y);
+  // L4 (reality law): the slot's side must be STABLE — fartherFromBall
+  // flips the pocket every time the ball crosses mid-lane, so the set
+  // ended up with two corners + top + ONE wing + a post (measured angle
+  // histogram: +30..+120 rays empty; mean pairwise 18ft vs real 25).
+  // Real five-out fills BOTH 45° wings: the slot takes the weak-side wing
+  // (opposite the ball) and stays there for the possession.
+  const weakWingY = weakY === 0.06 ? 0.32 : 0.68;
+  const slotSide = { x: clampCourt(rim.x + back * nx(arcStrong(Math.abs(weakWingY - 0.5) * 50) + 0.5) + escapeX + driftX), y: clampSlotY(weakWingY, escapeY * 0.3) };
+  const s = fartherFromBall(slotSide, slotWeak); const clearedSlot = laneClear(s); return clampToArc(clearedSlot.x, clearedSlot.y, rim.x, rim.y);
 }
-
-// Clamp a spacer spot to ~0.5ft beyond the NBA three-point arc so players
-// stand ON the line, not 6-10ft deep. Without this, escapeX + driftX + the
-// fartherFromBall heuristic accumulated to 28-34ft rim distances (measured
-// p50=25.9ft), which the EV layer penalizes via the deep-range discount
-// and kills the catch-and-shoot three entirely (11% 3pt rate vs 35-40%
-// NBA). The arc is 22ft in the corners, 23.75ft at the top.
+// Clamp a spacer spot to the arc ring: ON the line (22-24ft), never deep
+// inside (the old clamp only capped the far side — inside-arc "wings" at
+// 12-19ft collapsed the set). L4 reality law; see basketball_laws.json.
 function clampToArc(x: number, y: number, rimX: number, rimY: number): { x: number; y: number } {
   const dx = (x - rimX) * 94;
   const dy = (y - rimY) * 50;
   const dist = Math.hypot(dx, dy);
   const corner = Math.abs(y - 0.5) * 50 > 19;
   const maxDist = (corner ? loadCourtGeometryFt().three_point_corner_ft : loadCourtGeometryFt().three_point_arc_ft) + 0.5;
-  if (dist <= maxDist) return { x, y };
-  const scale = maxDist / dist;
+  if (dist <= maxDist && dist >= 21) return { x, y };
+  // L4 (reality law): a settled spacer stands ON the arc ring — 21ft+
+  // from the rim. Targets inside 21ft (the old 12-19ft slot/wing pockets)
+  // pushed OUT to the ring; targets beyond the max pulled IN. The real
+  // NBA set holds mean pairwise spacing of 25ft because all four spacers
+  // occupy the ring, not a scattered 17-30ft fan.
+  const targetDist = Math.max(21.5, Math.min(maxDist, dist));
+  if (dist <= 0.01) return { x: clampCourt(rimX + nx(21.5) / 94), y };
+  const scale = targetDist / dist;
   return { x: clampCourt(rimX + (dx * scale) / 94), y: clampCourt(rimY + (dy * scale) / 50) };
 }
+
 
 /** Distance from a matchup's defender to the attacker (feet). */
 function matchupDefenderDistance(
@@ -642,8 +879,15 @@ function matchupDefenderDistance(
 }
 
 function solveTeamSeparation(players: PlannedPlayer[]): PlannedPlayer[] {
+  // Perf (calibration loop): this runs every planning tick and was 7% of the
+  // game's CPU. The pair scan is 8 Gauss-Seidel iterations over 45 pairs —
+  // but a relaxation pass only needs a second sweep when a push actually
+  // moved someone into a NEW violation. Early-exit when a full iteration
+  // makes no changes; in the common steady state (formation already legal)
+  // that's ONE pass instead of eight.
   const result = players.map((player) => ({ ...player }));
   for (let iteration = 0; iteration < 8; iteration += 1) {
+    let moved = false;
     for (let a = 0; a < result.length; a += 1) {
       for (let b = a + 1; b < result.length; b += 1) {
         const first = result[a]!;
@@ -662,14 +906,20 @@ function solveTeamSeparation(players: PlannedPlayer[]): PlannedPlayer[] {
         // other teammates; live steering owns any transient crossing.
         const requiredFt = isScreenPair ? 2.2 : MIN_TEAM_SEPARATION_FT;
         if (distanceFt >= requiredFt) continue;
+        moved = true;
         const length = Math.hypot(dx, dy) || 1;
-        const displacement = (requiredFt - distanceFt) / 94 / 2;
+        // Unit fix: the push converts the missing FEET into per-axis
+        // normalized offsets — x divides by 94, y by 50 (the old single
+        // /94 made every y-axis push 47% short, so vertical separation
+        // converged far slower than horizontal).
         const ux = dx / length;
         const uy = dy / length;
-        result[a] = { ...first, x: clampCourt(first.x - ux * displacement), y: clampCourt(first.y - uy * displacement) };
-        result[b] = { ...second, x: clampCourt(second.x + ux * displacement), y: clampCourt(second.y + uy * displacement) };
+        const pushFt = (requiredFt - distanceFt) / 2;
+        result[a] = { ...first, x: clampCourt(first.x - ux * pushFt / 94), y: clampCourt(first.y - uy * pushFt / 50) };
+        result[b] = { ...second, x: clampCourt(second.x + ux * pushFt / 94), y: clampCourt(second.y + uy * pushFt / 50) };
       }
     }
+    if (!moved) break;
   }
   return result;
 }
@@ -912,30 +1162,55 @@ function defenseTarget(args: {
   // 落位(paint-first settle)的基础。球过半场后自动切换回正常盯人。
   // 旧逻辑在 TRANSITION_PUSH 全程直接追对位人,导致"防守人从一开始
   // 就只跟着进攻方跑、没有落位过程"(用户反馈)。
+  const ballInBackcourt = sense.attackDirection === 1 ? sense.ball.x < 0.5 : sense.ball.x > 0.5;
+  // First-principles transition retreat:
+  // Whenever the ball is in the backcourt and not an inbound set in frontcourt,
+  // ALL defenders MUST prioritize retreating to protect the defensive halfcourt and paint,
+  // regardless of whether the offensive plan kind is tagged TRANSITION_PUSH or a set play!
+  // Defensive settle (L9/L6 semantics): for the first ~5s of a halfcourt
+  // possession the defense is still organizing — off-ball defenders shade
+  // the passing lanes (gap 5ft) instead of hugging their matchup, so the
+  // first kick-out is contested like real NBA (early catch-and-shoot ran
+  // 60% of attempts; the settle window halves the clean early look).
+  const possessionAgeSec = 24 - sense.shotClock;
+  const defenseSettling = possessionAgeSec < 5 && sense.shotClock > 17;
+  const retreating = ballInBackcourt && !sense.inbound;
   if (isOnBall) {
-    const ballInBackcourt = sense.attackDirection === 1 ? sense.ball.x < 0.5 : sense.ball.x > 0.5;
-    const retreating = plan?.kind === 'TRANSITION_PUSH' && ballInBackcourt;
     if (retreating) {
-      // 锚点:防守方己方油漆区(自己防守的篮,不是进攻篮!)。落位在
-      // 己方篮与对位人之间、权重 0.65 偏向己方篮——"先回防、再找人"
-      // 的退防姿态。旧版用了 sense.rim(进攻篮),导致防守人退向对方
-      // 篮,与真实退防方向完全相反。
+      // 退防落位:先退向己方油漆区锚点,再随球推进连续过渡到盯人。
+      // 几何信号(球越过己方底线的深度)驱动权重,间距上限防止放弃
+      // 对位人——转换期不再漏空位/空篮。单一纯函数,见
+      // transitionRetreatPoint。
       const defRimX = 1 - sense.rim.x;
       const defRimY = sense.rim.y;
-      const ax = defRimX * 0.65 + attackerX * 0.35;
-      const ay = defRimY * 0.65 + attackerY * 0.35;
+      const ballDepthFt = sense.attackDirection === 1 ? sense.ball.x * 94 : (1 - sense.ball.x) * 94;
+      const retreat = transitionRetreatPoint(attackerX, attackerY, defRimX, defRimY, ballDepthFt);
       return {
         jersey: defenderJersey,
         team: sense.defense,
-        x: clampCourt(ax),
-        y: clampCourt(ay),
+        x: retreat.x,
+        y: retreat.y,
         task: 'on_ball_defend',
         slot: 'defend_ball',
         targetJersey: sense.handler,
         movementRole: 'on_ball_defender',
       };
     }
-    gapFt = 4;
+    // L1 (reality law): on-ball pressure has a containment GRADIENT — real
+    // NBA nearest-defender medians run 10.9ft (clock 24-18) → 6.0 (18-12) →
+    // 5.2 (12-6) → 4.6 (6-0). The defense closes as the possession
+    // organizes; a fixed 4ft gap from second zero produced a flat
+    // 4.8/4.8/4.45/5.94 profile (measured seed 42) — no transition window.
+    // Late-clock compression: past 16s of possession age the defense clamps
+    // (real 6-0 remaining = 4.6ft) — the aged U-curve (measured 4.0-4.9ft
+    // at age 12-18s from defender lag on handler probes) flattens back.
+    const possessionAgeSec = 24 - sense.shotClock;
+    const settleT = SPATIAL.onball_gap_settle_sec ?? 5;
+    const earlyGap = SPATIAL.onball_gap_early_ft ?? 6.5;
+    const setGap = SPATIAL.onball_gap_set_ft ?? 3.5;
+    const settle = Math.max(0, Math.min(1, possessionAgeSec / settleT));
+    const lateClamp = possessionAgeSec >= 16 ? Math.max(0, (possessionAgeSec - 16) / 8) * 2.0 : 0;
+    gapFt = Math.max(2.8, earlyGap + (setGap - earlyGap) * settle - lateClamp);
     shadeX = sense.rim.x;
     shadeY = sense.rim.y;
     task = 'on_ball_defend';
@@ -989,19 +1264,18 @@ function defenseTarget(args: {
         }
       }
     }
-  } else if (!isOnBall && plan?.kind === 'TRANSITION_PUSH'
-    && (sense.attackDirection === 1 ? sense.ball.x < 0.5 : sense.ball.x > 0.5)) {
+  } else if (!isOnBall && retreating) {
     // Off-ball retreat: same paint-first anchor for the other four — stand
-    // between the DEFENSIVE basket and the assigned man, weighted 0.65
-    // toward the defensive paint until the ball crosses. This is the "落位"
-    // the user is asking for.
-    const ax = (1 - sense.rim.x) * 0.65 + attackerX * 0.35;
-    const ay = sense.rim.y * 0.65 + attackerY * 0.35;
+    // between the DEFENSIVE basket and the assigned man, weighted toward
+    // the defensive paint until the ball crosses. Same pure function as
+    // the on-ball branch — one geometric model, two call sites.
+    const ballDepthFt = sense.attackDirection === 1 ? sense.ball.x * 94 : (1 - sense.ball.x) * 94;
+    const retreat = transitionRetreatPoint(attackerX, attackerY, 1 - sense.rim.x, sense.rim.y, ballDepthFt);
     return {
       jersey: defenderJersey,
       team: sense.defense,
-      x: clampCourt(ax),
-      y: clampCourt(ay),
+      x: retreat.x,
+      y: retreat.y,
       task: 'weak_side',
       slot: 'defend_weak',
       targetJersey: attacker.jersey,
@@ -1094,7 +1368,10 @@ function defenseTarget(args: {
         // defender home (corner 3s stay contested), a wing/elbow man's
         // defender sags hard. Anchor = 7ft-ish rim-side point shaded
         // toward the man's side.
-        const sag = Math.max(0, Math.min(0.55, (rl * 94 - 14) / 22));
+        // L5 (reality law): real paint touches draw 1-3 rim-area defenders
+        // (median 2, p75 3) — the weak side keeps a body out of the collapse
+        // (sim measured: median 4). Cap the deepest sag.
+        const sag = Math.max(0, Math.min(0.42, (rl * 94 - 14) / 22));
         // Cap: the sag anchor may never be more than 10ft from the
         // assigned man. The old blend left weak-side defenders 16ft from
         // their matchup (measured: slot mate at 16ft open through an
@@ -1159,169 +1436,179 @@ function defenseTarget(args: {
   }
   return { jersey: defenderJersey, team: sense.defense, x: clampCourt(x), y: clampCourt(y), task, slot, targetJersey: attacker.jersey, movementRole: movementRoleForDefense(task, slot) };
 }
-
 export function planSpatialTargets(sense: LiveCourtSense, plan: TeamPlan): SpatialPlan {
+  return planTeamSpatial(plan, sense);
+}
+
+export function planTeamSpatial(plan: TeamPlan, sense: LiveCourtSense): SpatialPlan {
   const offense = plan.assignments.map((assignment) => {
-    const target = desiredOffenseTarget(assignment, sense, plan.kind, plan.matchups, plan.feedTargetJersey ?? null);
+    const rawTarget = desiredOffenseTarget(assignment, sense, plan, plan.matchups, plan.feedTargetJersey ?? null);
+    const isSpacerRole = assignment.role === 'strong_corner' || assignment.role === 'weak_corner' || assignment.role === 'slot';
+    const target = isSpacerRole
+      ? clampToArc(rawTarget.x, rawTarget.y, sense.rim.x, sense.rim.y)
+      : rawTarget;
     return {
       jersey: assignment.jersey,
       team: sense.offense,
       x: target.x,
       y: target.y,
       task: offenseTask(assignment),
-      slot: slotForAssignment(assignment),
-      targetJersey: assignment.targetJersey,
+      slot: assignment.role === 'handler' ? 'ball_handler_pocket' : 'space_perimeter',
+      targetJersey: null,
       movementRole: movementRoleForOffense(assignment),
     };
   });
-  const matchups = new Map(Object.entries(plan.matchups));
-  // P3.6: 2-3 zone — the defense abandons man matchups for fixed slots:
-  // two wings on the perimeter (top + strong side), three across the
-  // paint (weak elbow, strong elbow, rim anchor). The ball-side wing
-  // pressures the handler; everyone else holds zone slots that slide
-  // with the ball.
-  if (plan.screenDefense?.zone === 'ZONE_2_3') {
-    const attackSide = sense.attack;
-    const back = attackSide === 'right' ? -1 : 1; // toward own basket
-    const rim = sense.rim;
-    const handlerPose = sense.offensePlayers.find((p) => p.jersey === sense.handler)?.pose;
-    // 联防的翼位侧不随球每帧翻转:球横穿半场线时,0.12↔0.88的翻转
-    // 让翼位防守人满场横穿(审计:68%联防帧球员未到位,阵型塌缩)。
-    // 真实2-3联防的翼位是固定的左右两侧,球移动时只做小幅滑步。
-    // 用"球所在的半场"决定强侧,但用平滑后的ballY(量化到0.5的
-    // 半场桶)避免中线附近的抖动翻转。
-    const ballY = sense.ball.y;
-    const strongSide = ballY >= 0.5;
-    // 低位肘区的y跟随也量化:球在强侧半场时,肘区slot固定
-    // (0.6/0.4),避免球每帧微动导致目标微移、球员永远追不上
-    // (审计:联防球员arrived在true/false间抖动,阵型14%帧才稳定)。
-    const elbowY = strongSide ? 0.6 : 0.4;
-    const zoneSlots: Array<{ x: number; y: number; task: PlayerTask }> = [
-      // Top guard pressures the handler; wings own the perimeter corridors;
-      // the interior defenders protect elbows and the rim.
-      { x: clampCourt(handlerPose?.x ?? 0.5), y: clampCourt(handlerPose?.y ?? 0.5), task: 'on_ball_defend' },
-      { x: clampCourt(rim.x + back * nx(20)), y: clampCourt(strongSide ? 0.88 : 0.12), task: 'deny' },
-      { x: clampCourt(rim.x + back * nx(20)), y: clampCourt(strongSide ? 0.12 : 0.88), task: 'weak_side' },
-      { x: clampCourt(rim.x + back * nx(10)), y: clampCourt(elbowY), task: 'help' },
-      { x: clampCourt(rim.x + back * nx(4)), y: 0.5, task: 'help' },
-    ];
-    const defense = sense.defensePlayers.map((d, i) => {
-      const slot = zoneSlots[i] ?? zoneSlots[zoneSlots.length - 1]!;
-      const relation: RelationKind = slot.task === 'on_ball_defend'
-        ? 'defend_ball'
-        : slot.task === 'help'
-          ? 'defend_help'
-          : slot.task === 'deny'
-            ? 'defend_deny'
-            : 'defend_weak';
-      // 联防滑步必须快:perimeter/weak_side角色的deny/weak_side速度
-      // (0.13-0.15,约7ft/s横向)让翼位从一侧滑到另一侧要5秒,
-      // 阵型68%时间未成形(审计ZONE_COLLAPSED)。help_defender角色的
-      // help/tag速度为0.18-0.22(约9-11ft/s横向),接近真实联防滑步。
-      // 只有on_ball_defend保持原角色(贴防不需要高速滑步)。
-      const zoneRole: MovementRole = slot.task === 'on_ball_defend'
-        ? 'on_ball_defender'
-        : 'help_defender';
-      return {
-        jersey: d.jersey,
-        team: sense.defense,
-        x: slot.x,
-        y: slot.y,
-        task: slot.task,
-        slot: relation,
-        targetJersey: slot.task === 'on_ball_defend' ? sense.handler : null,
-        movementRole: zoneRole,
-      };
-    });
-    const players = solveTeamSeparation([...offense, ...defense]);
-    return {
-      players,
-      routes: routesForOffense(plan.assignments, sense, players, plan.kind, plan.feedTargetJersey ?? null),
-      onBallDefender: null,
-    };
-  }
-  // Pass-flight re-allocation: while the ball is in the air the RECEIVER
-  // draws the nearest defender NOW (real rotations start before the
-  // catch). Without this the old matchup holds until the catch decision,
-  // and a catch-and-shoot fires with the closest defender 14ft away.
-  const effectiveMatchups = new Map(matchups);
-  // SWITCH换防:matchup层交换,而非defenseTarget内的视觉转移。
-  // 当SWITCH生效(掩护物理设置或SCREEN_USE/ADVANTAGE)时,handler的
-  // matchup换成screenerDefender(8),screener的matchup换成原on-ball
-  // (10)——defenseTarget的isOnBall分支据此让8守handler、10守
-  // screener。之前只在defenseTarget里做视觉转移,但matchups没变:
-  // 原on-ball(10)被686转移走,screenerDefender(8)的matchup仍是
-  // screener(走isScreenDefender分支),handler(19)无人防守
-  // (审计SCREEN_BEAT_TOO_EASILY:SWITCH后5人全在弱侧,on_ball_defend
-  // 标签消失,handler距最近防守人8-20ft)。
-  const switchDef = plan?.screenDefense;
-  const switchScreen = plan?.assignments.find((assignment) => assignment.role === 'screener');
-  const switchScreenPose = switchScreen ? sense.offensePlayers.find((p) => p.jersey === switchScreen.jersey)?.pose : null;
-  const switchHandlerPose = sense.offensePlayers.find((p) => p.jersey === sense.handler)?.pose;
-  const switchPhysicallySet = switchScreenPose && switchHandlerPose
-    && Math.hypot((switchScreenPose.x - switchHandlerPose.x) * 94, (switchScreenPose.y - switchHandlerPose.y) * 50) <= 4;
-  const switchLive = plan?.stage === 'SCREEN_USE' || plan?.stage === 'ADVANTAGE';
-  if (switchDef?.mode === 'SWITCH' && (switchPhysicallySet || switchLive)) {
-    const oldHandlerDef = effectiveMatchups.get(sense.handler);
-    const screenerDef = switchDef.screenerDefender;
-    const screenJersey = switchScreen?.jersey;
-    if (oldHandlerDef && screenerDef && screenJersey && oldHandlerDef !== screenerDef) {
-      effectiveMatchups.set(sense.handler, screenerDef);
-      effectiveMatchups.set(screenJersey, oldHandlerDef);
+  // ── 独立防守决策 (per-defender live decision) ──────────────────────
+  // 每个防守人每帧独立决策自己的站位,没有"分配对位"的概念:
+  //   1. 最近者贴持球人 (on-ball)
+  //   2. 其余防守人按"距离×威胁+接球轮转+掩护角色"贪心选定主防对象
+  //   3. 未选中的防守人按协防模型落位 (弱侧收篮/油漆区)
+  // 战术层的 plan.matchups 只服务于进攻战术选择,不再约束防守站位;
+  // 转换/换人/传球飞行中的覆盖由几何自然涌现,不存在"无对位=漏人"。
+  const offensePlayers = sense.offensePlayers;
+  const handlerJersey = sense.handler;
+  const handlerPose = offensePlayers.find((p) => p.jersey === handlerJersey)?.pose ?? null;
+  // 1) On-ball defender: the closest defender to the ball.
+  let onBallDefender: string | null = null;
+  let onBallDist = Infinity;
+  for (const d of sense.defensePlayers) {
+    const dist = handlerPose
+      ? Math.hypot((d.pose.x - handlerPose.x) * 94, (d.pose.y - handlerPose.y) * 50)
+      : Infinity;
+    if (dist < onBallDist) {
+      onBallDist = dist;
+      onBallDefender = d.jersey;
     }
   }
-  if (sense.passTarget) {
-    const target = sense.passTarget;
-    let nearestDef: string | null = null;
-    let nearestD = Infinity;
-    const targetPose = sense.offensePlayers.find((p) => p.jersey === target)?.pose;
-    if (targetPose) {
-      for (const defender of sense.defensePlayers) {
-        const d = Math.hypot(
-          (defender.pose.x - targetPose.x) * 94,
-          (defender.pose.y - targetPose.y) * 50,
-        );
-        if (d < nearestD) {
-          nearestD = d;
-          nearestDef = defender.jersey;
+  // Dual-track defensive scheme resolution (Drop / Switch / Blitz)
+  const schemeDecision = evaluateDefensiveScheme(sense, onBallDefender);
+  const primaryCover = new Map<string, string>(); // attackerJersey -> defenderJersey
+  if (onBallDefender !== null) primaryCover.set(handlerJersey, onBallDefender);
+  // Greedy by ATTACKER urgency, not defender preference: the attacker
+  // farthest from any defender is the most open, and must be covered
+  // first — otherwise defenders cluster on the nearest threats and the
+  // weak side leaks (the pre-fix 29ft open shooter).
+  const remainingDefenders = sense.defensePlayers.filter((d) => d.jersey !== onBallDefender);
+  const unattended = offensePlayers.filter((p) => p.jersey !== handlerJersey);
+  const coverBy = new Map<string, string>(); // attackerJersey -> defenderJersey
+  // Urgency of an attacker = how far they are from the nearest UNUSED
+  // defender; pass targets and cutters get a boost (rotation priority).
+  const urgencyOf = (attacker: (typeof offensePlayers)[number], pool: readonly (typeof sense.defensePlayers)[number][]): number => {
+    const nearest = Math.min(
+      ...pool.map((def) => Math.hypot((def.pose.x - attacker.pose.x) * 94, (def.pose.y - attacker.pose.y) * 50)),
+    );
+    let u = nearest;
+    if (sense.passTarget === attacker.jersey) u += 6; // rotation priority
+    const assignment = plan.assignments.find((a) => a.jersey === attacker.jersey);
+    if (assignment?.role === 'screener' || assignment?.action === 'cut') u += 3;
+    return u;
+  };
+  const pool = [...remainingDefenders];
+  while (pool.length > 0 && unattended.length > 0) {
+    // Pick the most-urgent unattended attacker.
+    let bestAttacker: (typeof offensePlayers)[number] | null = null;
+    let bestUrgency = -Infinity;
+    for (const attacker of unattended) {
+      if (coverBy.has(attacker.jersey)) continue;
+      const u = urgencyOf(attacker, pool);
+      if (u > bestUrgency) {
+        bestUrgency = u;
+        bestAttacker = attacker;
+      }
+    }
+    if (bestAttacker === null) break;
+    // Assign the defender closest to that attacker.
+    let bestDef: (typeof sense.defensePlayers)[number] | null = null;
+    let bestD = Infinity;
+    for (const def of pool) {
+      const d = Math.hypot((def.pose.x - bestAttacker.pose.x) * 94, (def.pose.y - bestAttacker.pose.y) * 50);
+      if (d < bestD) {
+        bestD = d;
+        bestDef = def;
+      }
+    }
+    if (bestDef === null) break;
+    coverBy.set(bestAttacker.jersey, bestDef.jersey);
+    pool.splice(pool.indexOf(bestDef), 1);
+  }
+  for (const [attacker, defender] of coverBy) primaryCover.set(attacker, defender);
+  // 3) Build defensive targets: every defender gets a role by live decision.
+  const defense = sense.defensePlayers.flatMap((d) => {
+    // The on-ball defender guards the handler.
+    if (d.jersey === onBallDefender && handlerPose) {
+      const attacker: PlannedPlayer = {
+        jersey: handlerJersey,
+        team: sense.offense,
+        x: handlerPose.x,
+        y: handlerPose.y,
+        task: 'ball_handler',
+        slot: 'ball_handler_pocket',
+        targetJersey: null,
+        movementRole: 'ball_handler',
+      };
+      return [defenseTarget({ attacker, defenderJersey: d.jersey, sense, plan })];
+    }
+    // A defender with a primary target guards that attacker.
+    const covered = [...primaryCover.entries()].find(([, def]) => def === d.jersey)?.[0];
+    if (covered) {
+      const pose = offensePlayers.find((p) => p.jersey === covered)?.pose;
+      if (pose) {
+        const attacker: PlannedPlayer = {
+          jersey: covered,
+          team: sense.offense,
+          x: pose.x,
+          y: pose.y,
+          task: plan.assignments.find((a) => a.jersey === covered)?.action === 'cut' ? 'cut' : 'space',
+          slot: 'defend_deny',
+          targetJersey: null,
+          movementRole: 'spacer',
+        };
+        return [defenseTarget({ attacker, defenderJersey: d.jersey, sense, plan })];
+      }
+    }
+    // Otherwise: help defense — hold the closest unattended attacker's
+    // pass lane while shading the ball (real help defends man+space, not
+    // a rim anchor). Fallback: ball-side pocket.
+    const rimX = sense.rim.x;
+    const rimY = sense.rim.y;
+    const helpAnchor = (() => {
+      let best: (typeof offensePlayers)[number] | null = null;
+      let bestD = Infinity;
+      for (const op of offensePlayers) {
+        if (op.jersey === handlerJersey) continue;
+        if (primaryCover.has(op.jersey)) continue;
+        const dd = Math.hypot((d.pose.x - op.pose.x) * 94, (d.pose.y - op.pose.y) * 50);
+        if (dd < bestD) {
+          bestD = dd;
+          best = op;
         }
       }
-    }
-    if (nearestDef) {
-      // The old on-ball defender (guarding the passer) keeps the passer;
-      // the receiver's previous matchup takes the passer's man.
-      // A one-sided set() left the receiver's nearest defender double-booked
-      // when that defender WAS the on-ball man: handler→nearestDef stayed in
-      // the map while nearestDef also took the receiver, so one defender
-      // guarded two attackers and TWO defenders carried the on_ball_defend
-      // label on the passer (the TRAP_LABEL_LEAK audit: 365 transition
-      // frames/game with the ball in flight). The exchange must move the
-      // nearest defender OFF the handler matchup when they were the on-ball
-      // man — the handler's coverage hands to the receiver's old defender.
-      const oldTargetDef = matchups.get(target);
-      const oldHandlerDef = matchups.get(sense.handler);
-      effectiveMatchups.set(target, nearestDef);
-      if (nearestDef === oldHandlerDef) {
-        // The receiver's nearest defender was guarding the passer: the
-        // passer is now covered by the receiver's previous defender.
-        if (oldTargetDef) effectiveMatchups.set(sense.handler, oldTargetDef);
-      } else if (oldTargetDef && oldTargetDef !== nearestDef) {
-        effectiveMatchups.set(sense.handler, oldTargetDef);
-      }
-    }
-  }
-  const defense = offense.flatMap((attacker) => {
-    const defender = effectiveMatchups.get(attacker.jersey);
-    return defender ? [defenseTarget({ attacker, defenderJersey: defender, sense, plan })] : [];
+      return best;
+    })();
+    // L5: a 50/50 man↔rim anchor put every free helper inside 15ft of the
+    // rim during paint touches. Blend man-ward (0.65 man) so help holds the
+    // LANE, not the rim itself.
+    const anchorX = helpAnchor ? (helpAnchor.pose.x - rimX) * 0.65 + rimX : rimX + (sense.ball.x - rimX) * 0.15;
+    const anchorY = helpAnchor ? (helpAnchor.pose.y - rimY) * 0.65 + rimY : rimY + (sense.ball.y - rimY) * 0.15;
+    const helpPlayer: PlannedPlayer = {
+      jersey: d.jersey,
+      team: sense.defense,
+      x: clampCourt(anchorX),
+      y: clampCourt(anchorY),
+      task: 'help',
+      slot: 'defend_help',
+      targetJersey: helpAnchor?.jersey ?? handlerJersey,
+      movementRole: 'help_defender',
+    };
+    return [helpPlayer];
   });
   const players = solveTeamSeparation([...offense, ...defense]);
   return {
     players,
     routes: routesForOffense(plan.assignments, sense, players, plan.kind, plan.feedTargetJersey ?? null),
-    onBallDefender: effectiveMatchups.get(sense.handler) ?? null,
+    onBallDefender,
   };
 }
-
 
 export function intentsFromSpatialPlan(args: {
   readonly spatial: SpatialPlan;

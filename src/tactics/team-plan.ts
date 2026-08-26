@@ -1,13 +1,57 @@
 import type { LineupPackage, RoleBinding } from '../identity/types.js';
-import { resolveLineupIdentity, capabilitiesForJersey } from '../identity/roles.js';
 import type { ActionKind } from '../decision/types.js';
 import type { TeamId } from '../state/types.js';
 import type { LiveCourtSense } from '../perception/live-court.js';
-import type { Rng } from '../rng/types.js';
-import { weighted } from '../rng/helpers.js';
-import { familyForSystem, systemForKind, type TacticalSystemId } from './system-select.js';
-import { TACTICAL_SYSTEMS, systemFitness } from './systems.js';
+import { systemForKind, type TacticalSystemId } from './system-select.js';
+import { loadDecisionConfig } from '../policy/config.js';
 import { decideHandlerAction } from '../decision/expected-value.js';
+import { selectPossessionCall } from '../strategy/call-selector.js';
+import { emptyTeamStrategyMemory, type RuntimeRoleProfile, type GameSituation, type TeamStrategyMemory, type StrategyObjective } from '../strategy/types.js';
+import { evaluateDefensiveRead, routeTacticalBranch } from '../strategy/play-graph.js';
+import { coordinateWeaksideMotion, type WeaksideActionState } from '../strategy/dual-track-coordinator.js';
+import { evaluateDefensiveScheme } from '../strategy/defense-schemes.js';
+import type { OffenseRoleId } from '../playerdata/types.js';
+import type { FormationKind, TacticalPassWindow } from './types.js';
+import { getFormationForSystem } from './formations.js';
+const TACTICS = loadDecisionConfig().tactics;
+
+/**
+ * Deterministic neutral role profile for senses without roleProfiles
+ * (legacy fixtures / direct tests). Neutral factors keep the policy
+ * transparent: role policy still applies, but at neutral 1.0×.
+ */
+export function fallbackProfile(jersey: string): RuntimeRoleProfile {
+  return {
+    jersey,
+    role: 'SECONDARY_CREATOR',
+    possessionShare: 0.184,
+    executionEfficiency: 1,
+    deviationFactor: 1,
+  };
+}
+
+/** Minimal situation for senses without a derived situation (legacy tests). */
+export function deriveGameSituationForSense(sense: LiveCourtSense): GameSituation {
+  return {
+    period: sense.period ?? 1,
+    gameClock: sense.gameClock,
+    shotClock: sense.shotClock,
+    scoreDiff: sense.scoreDiff ?? 0,
+    urgency: 'NORMAL',
+    possessionValue: 'NORMAL',
+    scoringRunPoints: 0,
+    scoringRunPossessions: 0,
+    scorelessPossessions: 0,
+    timeoutsRemaining: 7,
+    teamFouls: 0,
+    bonus: false,
+    foulTroublePlayers: [],
+  };
+}
+
+function emptyMemory(): TeamStrategyMemory {
+  return emptyTeamStrategyMemory();
+}
 
 /**
  * Real-time matchup fit for a tactic: how favourable the CURRENT on-court
@@ -29,26 +73,27 @@ function matchupFit(
   const screenerDefId = matchups[screener] ?? null;
   const screenerDefAb = screenerDefId ? (sense.abilities[screenerDefId] ?? null) : null;
   const screenerGap = 0.5 - (screenerDefAb?.onBallDefense ?? 0.5);
-  const rimOpen = sense.paintDefenders <= 1 ? 0.3 : 0;
-  const openShooters = sense.openTeammates.length * 0.22;
+  const rimOpen = sense.paintDefenders <= 1 ? TACTICS.matchup_pnr_rim_open_bonus : 0;
+  const openShooters = sense.openTeammates.length * TACTICS.matchup_drive_open_shooter_weight;
   switch (kind) {
     case 'ISO':
-      return handlerGap * 1.2 + (handlerAb?.pullUp ?? 0.5) * 0.4;
+      return handlerGap * TACTICS.matchup_iso_handler_weight + (handlerAb?.pullUp ?? 0.5) * TACTICS.matchup_iso_pullup_weight;
     case 'PNR_ROLL':
     case 'PNR_POP':
       // P3.x: the screener-gap term is genuinely matchup-driven (weak
       // screener defender → PNR), but creation must not be a flat bonus —
       // it made PNR's fit always-positive and the mix collapsed to it.
-      return handlerGap * 0.6 + Math.max(0, screenerGap) + rimOpen + (handlerAb?.creation ?? 0.5) * 0.15;
+      return handlerGap * TACTICS.matchup_pnr_handler_weight + Math.max(0, screenerGap) + rimOpen
+        + (handlerAb?.creation ?? 0.5) * TACTICS.matchup_pnr_creation_weight;
     case 'DRIVE_KICK':
-      return Math.max(0, 1 - sense.paintDefenders * 0.35) * 0.8 + openShooters
-        + (handlerAb?.rimFinishing ?? 0.5) * 0.3 + handlerGap * 0.5;
+      return Math.max(0, 1 - sense.paintDefenders * TACTICS.matchup_drive_paint_weight) * TACTICS.matchup_drive_base_weight + openShooters
+        + (handlerAb?.rimFinishing ?? 0.5) * TACTICS.matchup_drive_finishing_weight + handlerGap * TACTICS.matchup_drive_handler_weight;
     case 'POST_UP':
-      return ((sense.abilities[screener]?.postPlay ?? 0.5) - (screenerDefAb?.postPlay ?? 0.5)) * 1.2 + rimOpen;
+      return ((sense.abilities[screener]?.postPlay ?? 0.5) - (screenerDefAb?.postPlay ?? 0.5)) * TACTICS.matchup_post_weight + rimOpen;
     case 'OFF_BALL_SCREEN':
-      return openShooters + (handlerAb?.passing ?? 0.5) * 0.5 + handlerGap * 0.3;
+      return openShooters + (handlerAb?.passing ?? 0.5) * TACTICS.matchup_offball_passing_weight + handlerGap * TACTICS.matchup_offball_handler_weight;
     case 'HANDOFF':
-      return handlerGap * 0.8 + (handlerAb?.creation ?? 0.5) * 0.3;
+      return handlerGap * TACTICS.matchup_handoff_handler_weight + (handlerAb?.creation ?? 0.5) * TACTICS.matchup_handoff_creation_weight;
     default:
       return 0;
   }
@@ -56,22 +101,13 @@ function matchupFit(
 
 // ─── tactic catalog ─────────────────────────────────────────────────────────
 
-export type TeamPlanKind =
-  | 'TRANSITION_PUSH'
-  | 'PNR_ROLL'
-  | 'PNR_POP'
-  | 'DRIVE_KICK'
-  | 'POST_UP'
-  | 'OFF_BALL_SCREEN'
-  | 'ISO'
-  | 'HANDOFF';
+import type { ScreenCoverage, TeamPlanKind, TeamPlanStage, TeamRole } from './types.js';
 
-/** Back-compat aliases — older code may still check for 'PNR'. */
-export type TeamPlanKindLegacy = 'PNR' | 'ISO' | 'BROKEN_PLAY';
+// Shared unions live in `./types.js` (TeamPlanKind, TeamPlanStage, TeamRole,
+// ScreenCoverage) so the strategy call selector and decision layer import
+// them without dragging in the plan builder.
 
-export type TeamPlanStage = 'ADVANCE' | 'SET' | 'SCREEN_APPROACH' | 'SCREEN_USE' | 'ADVANTAGE' | 'TERMINAL';
-export type TeamRole = 'handler' | 'screener' | 'strong_corner' | 'weak_corner' | 'slot';
-export type ScreenCoverage = 'DROP' | 'SWITCH' | 'BLITZ' | 'HEDGE' | 'ICE';
+export type { TeamPlanKind, TeamPlanStage, TeamRole, ScreenCoverage } from './types.js';
 
 export interface ScreenDefensePlan {
   readonly mode: ScreenCoverage;
@@ -88,6 +124,8 @@ export interface TeamAssignment {
   readonly action: ActionKind;
   readonly targetJersey: string | null;
   readonly lane: 'middle' | 'strong' | 'weak' | 'rim';
+  /** P7 behavior identity from the runtime role profile (role for geometry). */
+  readonly offenseRole?: import('../playerdata/types.js').OffenseRoleId;
 }
 
 /** Compact, normalized waypoints for one offensive movement. */
@@ -106,6 +144,14 @@ export interface TeamPlan {
   readonly assignments: readonly TeamAssignment[];
   readonly matchups: Readonly<Record<string, string>>;
   readonly screenDefense: ScreenDefensePlan | null;
+  /** Locked screen point (real screeners pick a spot and plant; they do
+ * not chase a live defender). Pinned by the tick loop, honored by the
+ * spatial planner until SCREEN_SET or TTL expiry. */
+  readonly screenAnchor?: { readonly x: number; readonly y: number } | null;
+  /** Tactical formation shell actively shaping the floor geometry. */
+  readonly formation?: import('./types.js').FormationKind;
+  /** Tactical pass window if an action has created an advantage. */
+  readonly passWindow?: import('./types.js').TacticalPassWindow | null;
   /** Tactical screen lifecycle retained after the set fact for snapshot/audit. */
   readonly screenActive?: boolean;
   /** Coverage chosen for this physical PNR; stable until the possession changes. */
@@ -115,8 +161,18 @@ export interface TeamPlan {
   /** Designed FEED target for the family's second action: the curling shooter
    * (OFF_BALL_SCREEN) or the sealed post hub (POST_UP). */
   readonly feedTargetJersey?: string | null;
+  /** P7 possession objective chosen by the call selector. */
+  readonly objective?: import('../strategy/types.js').StrategyObjective;
+  /** P7 called initiator (highest-share creator); first pass target. */
+  readonly initiator?: string;
+  /** P7 matchup the call attacks (offense:defense). */
+  readonly targetMatchup?: { readonly offenseId: string; readonly defenseId: string } | null;
+  /** P7 pure decision audit trail for this handler decision. */
+  readonly decisionTrace?: import('../decision/types.js').DecisionTrace;
   /** Action-specific spatial routes generated with the current live read. */
   readonly routes?: Readonly<Record<string, TacticalRoute>>;
+  /** Coordinated weak-side secondary action (stagger, flare, split, etc.). */
+  readonly weaksideAction?: WeaksideActionState | null;
 }
 export interface ScreenExecution {
   readonly screenerId: string;
@@ -169,14 +225,14 @@ function chooseScreenDefense(
   // the coverage remains a conservative switch/contain state, so snapshots
   // cannot advertise a drop while the defender is still attached to the
   // perimeter matchup.
-  const switchBias = kind === 'PNR_POP' ? 6 : 5.5;
+  const switchBias = kind === 'PNR_POP' ? TACTICS.screen_switch_bias_pop_sec : TACTICS.screen_switch_bias_roll_sec;
   const screenerDefenderPose = screenerDefender
     ? sense.defensePlayers.find((player) => player.jersey === screenerDefender)?.pose
     : undefined;
   const defenderRimDistance = screenerDefenderPose
     ? Math.hypot((sense.rim.x - screenerDefenderPose.x) * 94, (sense.rim.y - screenerDefenderPose.y) * 50)
     : Infinity;
-  const canPhysicallyDrop = defenderRimDistance <= 20;
+  const canPhysicallyDrop = defenderRimDistance <= TACTICS.screen_drop_defender_rim_distance_ft;
   // P3.1 coverage catalog — the choice is defensive-identity driven:
   //   DROP: screener defender sinks to the rim (soft coverage); chosen
   //     when the rim protector is close and the handler is not an elite
@@ -200,15 +256,11 @@ function chooseScreenDefense(
   // the zone flag earlier.
   const defCoach = sense.coach?.[sense.defense] ?? undefined;
   const blitzBias = defCoach?.blitzBias ?? 0.5;
-  const blitzThreshold = 0.45 + (blitzBias - 0.5) * 0.2; // 0.35..0.55
+  const blitzThreshold = TACTICS.blitz_handle_threshold_base + (blitzBias - 0.5) * TACTICS.blitz_bias_scale; // 0.35..0.55
   // ICE targets strong pull-up creators going downhill — the pullUp
-  // capability IS the definition (elite pull-up guards like Morant get
-  // ICE'd regardless of raw three-point volume). An earlier T3>55
-  // tendency refinement made the path depend on playerData presence and
-  // on generated rosters never having both high T3 and high pullUp
-  // (measured: zero ICE frames across 7 seeds even with 0.8+ pullUp
-  // handlers). The pick-and-roll handler's pullUp alone gates ICE now.
-  const iceThreat = handlerPullup >= 0.75;
+  // capability IS the definition (elite pull-up guards get ICE'd regardless
+  // of raw three-point volume).
+  const iceThreat = handlerPullup >= TACTICS.ice_pullup_threshold;
   let mode: ScreenCoverage;
   if (handlerHandle < blitzThreshold) {
     // BLITZ: trap a weak-handle creator anywhere on the floor — the
@@ -220,7 +272,7 @@ function chooseScreenDefense(
     // screener depth) — the old drop-range gate tied it to the screener
     // being ≤18ft from the rim and made it structurally rare.
     mode = 'ICE';
-  } else if (handlerDistance <= switchBias && rimDistance <= 18 && canPhysicallyDrop) {
+  } else if (handlerDistance <= switchBias && rimDistance <= TACTICS.screen_drop_rim_distance_ft && canPhysicallyDrop) {
     // In drop range: soft coverage — the rim protector sinks.
     mode = 'DROP';
   } else if (screenerCanPop) {
@@ -245,30 +297,28 @@ function chooseScreenDefense(
   if (!isScreenTactic(kind) && !isBallCarryTactic) {
     const rimProtector = sense.defensePlayers.some((d) => {
       const ab = sense.abilities[d.jersey] ?? null;
-      return (ab?.helpDefense ?? 0.5) >= 0.75;
+      return (ab?.helpDefense ?? 0.5) >= TACTICS.zone_rim_protector_threshold;
     });
     const switchable = sense.defensePlayers.every((d) => {
       const ab = sense.abilities[d.jersey] ?? null;
-      return (ab?.onBallDefense ?? 0.5) >= 0.6;
+      return (ab?.onBallDefense ?? 0.5) >= TACTICS.zone_switchable_defender_threshold;
     });
     // Coach zone bias: a zone-heavy coach plays the 2-3 regardless of
-    // personnel (Syracuse/Miami heritage) — the bias shifts the structural
-    // trigger so scheme identity expresses in the frame stream. A man
-    // coach (bias ≤ 0.2) never zones. (The old trigger ignored zoneBias
-    // entirely — the coach field was validated on input and never read,
-    // so scheme identity was dead config.)
+    // personnel — the bias shifts the structural trigger so scheme identity
+    // expresses in the frame stream. A man coach never zones.
     const zoneBias = defCoach?.zoneBias ?? 0.5;
-    const structuralZone = !rimProtector && !switchable && sense.paintDefenders <= 1 && sense.shotClock <= 18;
-    if (structuralZone || zoneBias >= 0.7) {
+    const structuralZone = !rimProtector && !switchable
+      && sense.paintDefenders <= TACTICS.zone_paint_defender_max
+      && sense.shotClock <= TACTICS.zone_shot_clock_sec;
+    if (structuralZone || zoneBias >= TACTICS.zone_bias_threshold) {
       zone = 'ZONE_2_3';
     }
-    if (zoneBias <= 0.2) zone = 'MAN';
+    if (zoneBias <= TACTICS.man_bias_threshold) zone = 'MAN';
   }
   return { mode, onBallDefender, screenerDefender, switchesAtUse: mode === 'SWITCH' || mode === 'HEDGE', zone };
 }
 
 type MatchupRole = 'creator' | 'screener' | 'spacer';
-
 function roleForBinding(jersey: string, binding: RoleBinding): MatchupRole {
   if (jersey === binding.screener) return 'screener';
   if (jersey === binding.spacer_strong || jersey === binding.spacer_weak) return 'spacer';
@@ -533,25 +583,22 @@ export function buildTeamPlan(args: {
   readonly screenReady: boolean;
   /** Optional fixed target retained while a PNR pop/roll develops. */
   readonly screenExecution?: ScreenExecution | null;
+  /** Recent DHO pair guard; blocks an immediate reverse exchange. */
   readonly handoffGuard?: { readonly giverId: string; readonly receiverId: string } | null;
-  readonly rng?: Rng | null;
+  /** Active play id remains available for legal binding/geometry. */
+  readonly playId?: string | null;
   readonly catchWindowTicks?: number;
   /** Ticks since EXECUTE began — gates the immediate shot (P3.x). */
   readonly executeCooldownTicks?: number;
-  /** Active play id — the play's family becomes the tactic while active. */
-  readonly playId?: string | null;
   /** Most recent first-class handling beat. */
   readonly lastHandlingAction?: import('../decision/types.js').HandlingActionKind | null;
   /** Cooldown preventing immediate repeat of a handling beat. */
   readonly handlingActionCooldownTicks?: number;
-  /** Committed pass/handoff in flight: the plan must keep displaying the
-   * promised receiver until the ball is released — a re-read that argmaxes
-   * a different target every 0.1s makes the drawn execution line lie. */
+  /** Committed pass/handoff in flight: preserve the promised receiver. */
   readonly committedExchange?: { readonly fromJersey: string; readonly toJersey: string } | null;
-  /** Live drive lifecycle for the handler: the re-plan must keep the
-   * drive action (commitment) instead of re-argmaxing into a pass/hold. */
+  /** Live drive lifecycle for the handler. */
   readonly driveCommitment?: { readonly jersey: string } | null;
-  /** Consecutive passes without an attack — the EV layer prices the chain. */
+  /** Consecutive passes without an attack. */
   readonly passChainSinceAttack?: number;
 }): TeamPlan {
   const {
@@ -566,10 +613,8 @@ export function buildTeamPlan(args: {
     screenReady,
     screenExecution = null,
     handoffGuard = null,
-    rng = null,
     catchWindowTicks = 0,
     executeCooldownTicks = 0,
-    playId = null,
     lastHandlingAction = null,
     handlingActionCooldownTicks = 0,
     committedExchange = null,
@@ -577,13 +622,7 @@ export function buildTeamPlan(args: {
     passChainSinceAttack = 0,
   } = args;
   const handler = sense.handler;
-  const handlerRole = roleForBinding(handler, binding);
   const frontcourt = sense.attackDirection === 1 ? sense.ball.x >= 0.5 : sense.ball.x <= 0.5;
-
-  // Resolve role jerseys
-  // Resolve role jerseys. A binding may name a BENCHED jersey: staggered
-  // substitutions create mixed lineups that match no lineup package, so
-  // syncPackagesToLineups cannot refresh the binding and the old unit's
   // screener stays referenced while sitting on the bench (measured: a
   // PNR_ROLL SCREEN_APPROACH stalled 12s — screener 18 off-court, lineup
   // 16,12,13,14,15, SCREEN_SET never fired). Any binding slot not in the
@@ -599,7 +638,6 @@ export function buildTeamPlan(args: {
   };
   const usage = lineupPackage.usageProfile;
   const screener = resolveSlot(binding.screener, [...usage.screener, ...usage.creator], [handler]);
-  const candidates = remainingLineup(lineup, [handler, screener]);
   const strongCorner = resolveSlot(binding.spacer_strong, usage.spacer, [handler, screener]);
   const weakCorner = resolveSlot(binding.spacer_weak, usage.spacer, [handler, screener, strongCorner]);
   const slotPlayer = remainingLineup(lineup, [handler, screener, strongCorner, weakCorner])[0] ?? handler;
@@ -608,78 +646,47 @@ export function buildTeamPlan(args: {
   const matchups = stableMatchups(sense, previous, binding, defenseLineupPackage);
 
   // ── tactic kind selection ─────────────────────────────────────────────
-  // The halfcourt system is chosen by ADAPTIVE FIT, not a weighted draw:
-  //   fit = systemFitness(role/capability baseline) + matchupFit(real-time
-  //   matchups — who guards whom, is the rim open, are shooters open).
-  // A lineup draws ISO when its creator owns the matchup, PNR when the
-  // screener's defender is weak, DRIVE_KICK when the paint is open — the
-  // tactic MIX is an emergent property of the matchups on the floor, not
-  // a fixed table of weights.
+  // Halfcourt calls come from the deterministic selector at EXECUTE; the
+  // setup placeholder only supplies legal geometry until that call exists.
+  // The possession-start play remains available for binding/formation, but
+  // never forces the live tactic kind.
   let kind: TeamPlanKind;
   let systemId: TacticalSystemId;
   let selected = false;
-  // The playbook's family is the tactic WHEN a halfcourt set is running —
-  // but ADVANCE stays TRANSITION_PUSH (the break is the break). The
-  // old dual selection made OFF_BALL_SCREEN plans flip stage every 0.1s
-  // against a pnr play; binding the kind to the active play keeps the
-  // plan and the playbook in agreement for the halfcourt phase.
-  const PLAY_ID_KIND: Record<string, TeamPlanKind> = {
-    pnr_high: 'PNR_ROLL',
-    early_drag: 'PNR_POP',
-    handoff_wing: 'HANDOFF',
-    iso_clear: 'ISO',
-    transition_push: 'TRANSITION_PUSH',
-    pin_down_flare: 'OFF_BALL_SCREEN',
-    post_isolation: 'POST_UP',
-  };
-  const hasHalfCourtTactic = previous?.selected === true;
+  let objective: StrategyObjective = 'NORMAL_FLOW';
+  let initiatorId = sense.handler;
+  let targetMatchup: { readonly offenseId: string; readonly defenseId: string } | null = null;
+  const hasHalfCourtTactic = previous?.selected === true && previous.kind !== 'TRANSITION_PUSH';
   if (possessionPhase === 'ADVANCE' || !frontcourt) {
     kind = 'TRANSITION_PUSH';
     systemId = 'PUSH_PACE';
-  } else if (playId && playId !== 'transition_push' && PLAY_ID_KIND[playId]) {
-    kind = PLAY_ID_KIND[playId]!;
-    systemId = systemForKind(kind);
-    selected = true;
-  } else if (hasHalfCourtTactic) {
-    // Sticky: keep the possession's chosen tactic across passes and ticks.
-    kind = previous.kind;
-    systemId = previous.systemId;
-    selected = true;
-  } else if (possessionPhase === 'EXECUTE' && rng) {
-    // Soft selection: fit → weight → one draw. The weights come from the
-    // LIVE matchups every possession (a weak screener defender raises PNR,
-    // a dominated creator matchup raises ISO), so the tactic mix is an
-    // emergent property of the floor — but low-fit tactics keep a floor
-    // weight so the offense is not perfectly predictable.
-    const identity = resolveLineupIdentity(lineupPackage, sense.playerData, sense.abilities);
-    const roles = identity.assignments.flatMap((assignment) => assignment.roles);
-    const caps = identity.assignments.map((assignment) => assignment.capabilities);
-    const candidates: Array<{ id: TacticalSystemId; fit: number }> = [];
-    for (const spec of TACTICAL_SYSTEMS) {
-      if (spec.id === 'PUSH_PACE') continue; // transition only
-      const fit = systemFitness(spec, roles, caps)
-        + matchupFit(spec.families[0] ?? 'ISO', sense, matchups, screener);
-      candidates.push({ id: spec.id, fit });
-    }
-    // P3.x: fit FILTERS, uniform draw selects. Systems below the fit
-    // floor (a genuinely bad matchup, e.g. POST_UP with no post threat)
-    // are excluded; every viable system then draws equally. This keeps
-    // the mix diverse (real teams run 5+ families per game) while fit
-    // still stops the truly wrong calls. The floor is low on purpose —
-    // most families are playable, and the EV layer + coverage reads make
-    // the actual quality of the look.
-    const fitFloor = 0.9; // systemFitness baseline is 1.0; below 0.9 = clearly wrong
-    const pool = candidates.filter((c) => c.fit >= fitFloor);
-    const viable = pool.length > 0 ? pool : candidates.slice(0, 3);
-    const chosen = viable[Math.floor(rng.next() * viable.length)]!;
-    systemId = chosen.id;
-    kind = familyForSystem(systemId);
+    objective = 'PUSH_PACE';
+  } else if (!hasHalfCourtTactic || possessionPhase === 'EXECUTE') {
+    const call = selectPossessionCall({
+      sense,
+      situation: sense.situation ?? deriveGameSituationForSense(sense),
+      teamMemory: sense.teamMemory ?? emptyMemory(),
+      roleProfiles: sense.roleProfiles ?? {},
+      lineupPackage,
+      matchups,
+    });
+    const read = evaluateDefensiveRead(sense, call.kind);
+    const nextKind = routeTacticalBranch(call.kind, read);
+    kind = nextKind;
+    systemId = systemForKind(nextKind);
+    objective = call.objective;
+    initiatorId = call.initiatorId;
+    targetMatchup = call.targetMatchup ?? null;
     selected = true;
   } else {
-    // SETUP before tactic selection: placeholder formation derived from
-    // the lineup's role identity (screener-present → PNR, else ISO).
-    systemId = systemForKind(lineupPackage.usageProfile.screener.length > 0 ? 'PNR_ROLL' : 'ISO');
-    kind = lineupPackage.usageProfile.screener.length > 0 ? 'PNR_ROLL' : 'ISO';
+    const read = evaluateDefensiveRead(sense, previous.kind);
+    const nextKind = routeTacticalBranch(previous.kind, read);
+    kind = nextKind;
+    systemId = systemForKind(nextKind);
+    objective = previous.objective ?? 'NORMAL_FLOW';
+    initiatorId = previous.initiator ?? sense.handler;
+    targetMatchup = previous.targetMatchup ?? null;
+    selected = true;
   }
   // ── stage resolution ──────────────────────────────────────────────────
   // The STAGE MACHINE (possessionPhase) is the authoritative time model:
@@ -739,12 +746,19 @@ export function buildTeamPlan(args: {
     // Screen tactics organize toward the screen (approach/use). Non-screen
     // tactics (ISO/HANDOFF/DRIVE_KICK) organize in a neutral SET — there
     // is no screen to approach, so SCREEN_APPROACH is semantically wrong.
+    const used = screenExecution?.phase === 'USE' || screenExecution?.phase === 'EXIT';
+    // A formation-ready signal is not a physical screen. Until SCREEN_SET
+    // is committed, the PNR remains in approach; otherwise the handler gets
+    // an ADVANTAGE/hold-dead read while the screener is still 20ft away.
+    const screenSet = screenExecution?.phase === 'SET' || used;
     const ready = kind === 'POST_UP' ? postSealed : screenReady;
-    stage = isScreenTactic(kind) ? (ready && feedReady ? 'SCREEN_USE' : 'SCREEN_APPROACH') : 'SET';
+    stage = isScreenTactic(kind) ? (screenSet && (used || (ready && feedReady)) ? 'ADVANTAGE' : 'SCREEN_APPROACH') : 'SET';
   } else if (possessionPhase === 'EXECUTE') {
     if (isScreenTactic(kind)) {
       const ready = kind === 'POST_UP' ? postSealed : screenReady;
-      stage = ready && feedReady ? 'ADVANTAGE' : 'SCREEN_APPROACH';
+      const used = screenExecution?.phase === 'USE' || screenExecution?.phase === 'EXIT';
+      const screenSet = screenExecution?.phase === 'SET' || used;
+      stage = screenSet && (used || (ready && feedReady)) ? 'ADVANTAGE' : 'SCREEN_APPROACH';
     } else {
       // Non-screen tactics (ISO/HANDOFF/DRIVE_KICK) execute as soon as
       // EXECUTE begins. The old `previous.stage` flip alternated
@@ -790,7 +804,35 @@ export function buildTeamPlan(args: {
   const effectiveScreenDefense = screenActive
     ? committedDefense
     : screenDefense;
-  const decision = decideHandlerAction(sense, handler, possessionPhase, stage, mode, catchWindowTicks, kind, screenActive ? (committedScreenCoverage ?? screenDefense.mode) : null, executeCooldownTicks, screenExecution?.phase ?? null, feedTargetJersey ?? screener, handoffGuard, driveCommitment?.jersey === handler, lastHandlingAction, handlingActionCooldownTicks, passChainSinceAttack);
+  // P7: the handler decision runs through the context API — role profile,
+  // game situation, plan (kind/objective/initiator/target matchup), and
+  // the live execution state. The trace rides the plan for the audit.
+  const roleProfiles = sense.roleProfiles ?? {};
+  const handlerRoleProfile = roleProfiles[handler] ?? fallbackProfile(handler);
+  const decisionResult = decideHandlerAction({
+    sense,
+    handlerId: handler,
+    roleProfile: handlerRoleProfile,
+    situation: sense.situation ?? deriveGameSituationForSense(sense),
+    plan: { kind, objective, initiatorId, targetMatchup },
+    execution: {
+      possessionPhase,
+      stage,
+      mode,
+      catchWindowTicks,
+      coverage: screenActive ? (committedScreenCoverage ?? screenDefense.mode) : null,
+      executeCooldownTicks,
+      screenExecutionPhase: screenExecution?.phase ?? null,
+      screenTargetId: feedTargetJersey ?? screener,
+      recentHandoff: handoffGuard,
+      activeDrive: driveCommitment?.jersey === handler,
+      lastHandlingAction,
+      handlingActionCooldownTicks,
+      passChainSinceAttack,
+    },
+  });
+  const decision = decisionResult.decision;
+  const decisionTrace = decisionResult.trace;
   const exchangeFrom = committedExchange?.fromJersey === handler ? committedExchange : null;
   const handlerAction: ActionKind = decision.kind === 'pass'
     ? 'pass'
@@ -803,13 +845,23 @@ export function buildTeamPlan(args: {
       : decision.kind === 'pass' || decision.kind === 'handoff' ? decision.targetJersey : null)
     : null;
 
+  // In the backcourt (ADVANCE phase), the primary ball handler brings the ball up alone.
+  // Do NOT force an initiator pass in the backcourt — this avoids unnatural ping-pong passes.
+  const initiatorIsMate = possessionPhase !== 'ADVANCE'
+    && frontcourt
+    && initiatorId !== handler
+    && lineup.includes(initiatorId)
+    && handlerAction !== 'pass'
+    && handlerAction !== 'handoff';
+  const firstPassTarget = initiatorIsMate ? initiatorId : passTarget;
   const assignments: TeamAssignment[] = [
     {
       jersey: handler,
       role: 'handler',
       action: handlerAction,
-      targetJersey: handlerAction === 'pass' || handlerAction === 'handoff' ? passTarget : null,
+      targetJersey: handlerAction === 'pass' || handlerAction === 'handoff' ? firstPassTarget : null,
       lane: stage === 'ADVANCE' ? 'middle' : 'strong',
+      offenseRole: handlerRoleProfile.role,
     },
     {
       jersey: screener,
@@ -818,6 +870,7 @@ export function buildTeamPlan(args: {
       targetJersey: kind === 'PNR_ROLL' && stage === 'SCREEN_APPROACH' ? handler
         : kind === 'POST_UP' ? handler : null,
       lane: screenerAction === 'cut' ? 'rim' : 'strong',
+      offenseRole: roleProfiles[screener]?.role ?? fallbackProfile(screener).role,
     },
     {
       jersey: strongCorner,
@@ -825,6 +878,7 @@ export function buildTeamPlan(args: {
       action: actionForSpacer('strong_corner', stage, kind, sense, strongCorner),
       targetJersey: null,
       lane: 'strong',
+      offenseRole: roleProfiles[strongCorner]?.role ?? fallbackProfile(strongCorner).role,
     },
     {
       jersey: weakCorner,
@@ -832,6 +886,7 @@ export function buildTeamPlan(args: {
       action: actionForSpacer('weak_corner', stage, kind, sense, weakCorner),
       targetJersey: null,
       lane: 'weak',
+      offenseRole: roleProfiles[weakCorner]?.role ?? fallbackProfile(weakCorner).role,
     },
     {
       jersey: slotPlayer,
@@ -839,9 +894,68 @@ export function buildTeamPlan(args: {
       action: actionForSpacer('slot', stage, kind, sense, slotPlayer),
       targetJersey: null,
       lane: 'weak',
+      offenseRole: roleProfiles[slotPlayer]?.role ?? fallbackProfile(slotPlayer).role,
     },
   ];
 
+  const formation = getFormationForSystem(systemId);
 
-  return { kind, systemId, stage, offense: sense.offense, handler, assignments, matchups, screenDefense: effectiveScreenDefense, screenActive, committedScreenCoverage, selected, feedTargetJersey };
+  // Dual-Track off-ball coordination (weak-side stagger / flare / split / pin-down / clear-out)
+  const weaksideJerseys = [weakCorner, slotPlayer, strongCorner].filter(
+    (j): j is string => Boolean(j && j !== handler && j !== screener && j !== feedTargetJersey)
+  );
+  const weaksideAction = coordinateWeaksideMotion(sense, weaksideJerseys, kind, formation);
+
+  let passWindow: TacticalPassWindow | null = null;
+  if (stage === 'ADVANTAGE' || stage === 'SCREEN_USE') {
+    if (screenerAction === 'cut') {
+      passWindow = {
+        intendedReceiverJersey: screener,
+        windowKind: 'POCKET_ROLL',
+        leadFt: { x: 4, y: 0 },
+        priorityBoost: 1.25,
+      };
+    } else if (screenerAction === 'space' && kind === 'PNR_POP') {
+      passWindow = {
+        intendedReceiverJersey: screener,
+        windowKind: 'POP_ARC',
+        leadFt: { x: 0, y: 0 },
+        priorityBoost: 1.15,
+      };
+    } else if (feedTargetJersey) {
+      passWindow = {
+        intendedReceiverJersey: feedTargetJersey,
+        windowKind: 'PIN_CURL',
+        leadFt: { x: 2, y: 0 },
+        priorityBoost: 1.2,
+      };
+    } else if (weaksideAction.targetReceiverId) {
+      passWindow = {
+        intendedReceiverJersey: weaksideAction.targetReceiverId,
+        windowKind: weaksideAction.type === 'BACKDOOR_DIVE' ? 'BACKDOOR_CUT' : 'SKIP_CORNER',
+        leadFt: weaksideAction.leadFt,
+        priorityBoost: 1.18,
+      };
+    }
+  }
+  return {
+    kind,
+    systemId,
+    stage,
+    offense: sense.offense,
+    handler,
+    assignments,
+    matchups,
+    screenDefense: effectiveScreenDefense,
+    screenAnchor: previous?.screenAnchor ?? null,
+    committedScreenCoverage,
+    selected,
+    formation,
+    passWindow,
+    objective,
+    initiator: initiatorId,
+    targetMatchup,
+    decisionTrace,
+    weaksideAction,
+  };
 }
