@@ -1340,7 +1340,9 @@ function drawTick(tick) {
     const wRatio = (body.wt_kg ? Math.max(0.4, Math.min(1.2, (body.wt_kg - 70) / 55)) : 0.5);
     const r = (p.hasBall ? 14 : 10) + hRatio * 4;
     const baseR = 10 + hRatio * 4;
-    const color = p.team === 'home' ? '#2f6fd0' : '#d64550';
+    const homeColor = window.game?.home?.color || '#007A33';
+    const awayColor = window.game?.away?.color || '#552583';
+    const color = p.team === 'home' ? homeColor : awayColor;
 
     if (prevTick && !reduceMotion) {
       const before = playerByJersey(prevTick, p.jersey);
@@ -1523,12 +1525,10 @@ function drawTick(tick) {
     }
 
     // High-contrast Jersey Number
-    ctx.font = 'bold 12px "IBM Plex Mono", monospace';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 11px "IBM Plex Sans", -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#ffffff';
-    ctx.shadowColor = 'rgba(0,0,0,0.8)';
-    ctx.shadowBlur = 3;
     ctx.fillText(p.jersey, x, y);
     ctx.shadowBlur = 0;
 
