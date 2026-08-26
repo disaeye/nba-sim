@@ -90,6 +90,12 @@
     "sanity_bands": {
       "type": "object",
       "required": [
+        "pace_per_team_min",
+        "pace_per_team_max",
+        "mean_possession_length_seconds_min",
+        "mean_possession_length_seconds_max",
+        "transition_share_min",
+        "transition_share_max",
         "fg_pct_min",
         "fg_pct_max",
         "tp_pct_min",
@@ -97,10 +103,20 @@
         "score_per_team_min",
         "score_per_team_max",
         "oreb_pct_min",
-        "oreb_pct_max"
+        "oreb_pct_max",
+        "scv_rate_min",
+        "scv_rate_max",
+        "turnover_rate_min",
+        "turnover_rate_max"
       ],
       "additionalProperties": false,
       "properties": {
+        "pace_per_team_min": { "type": "number", "minimum": 0, "description": "Lower bound on per-team possessions per 48 minutes (M8 pace band)." },
+        "pace_per_team_max": { "type": "number", "minimum": 0, "description": "Upper bound on per-team possessions per 48 minutes." },
+        "mean_possession_length_seconds_min": { "type": "number", "minimum": 0, "description": "Lower bound on mean live-ball possession length." },
+        "mean_possession_length_seconds_max": { "type": "number", "minimum": 0, "description": "Upper bound on mean live-ball possession length." },
+        "transition_share_min": { "type": "number", "minimum": 0, "maximum": 1, "description": "Lower bound on TRANSITION possession share." },
+        "transition_share_max": { "type": "number", "minimum": 0, "maximum": 1, "description": "Upper bound on TRANSITION possession share." },
         "fg_pct_min": { "type": "number", "minimum": 0, "maximum": 1, "description": "Lower bound on aggregate field-goal percentage across the seeds 1..256 pace regression (T21)." },
         "fg_pct_max": { "type": "number", "minimum": 0, "maximum": 1, "description": "Upper bound on aggregate field-goal percentage." },
         "tp_pct_min": { "type": "number", "minimum": 0, "maximum": 1, "description": "Lower bound on aggregate 3-point percentage." },
@@ -108,9 +124,13 @@
         "score_per_team_min": { "type": "number", "minimum": 0, "description": "Lower bound on mean per-team final score." },
         "score_per_team_max": { "type": "number", "minimum": 0, "description": "Upper bound on mean per-team final score." },
         "oreb_pct_min": { "type": "number", "minimum": 0, "maximum": 1, "description": "Lower bound on aggregate offensive-rebound percentage." },
-        "oreb_pct_max": { "type": "number", "minimum": 0, "maximum": 1, "description": "Upper bound on aggregate offensive-rebound percentage." }
+        "oreb_pct_max": { "type": "number", "minimum": 0, "maximum": 1, "description": "Upper bound on aggregate offensive-rebound percentage." },
+        "scv_rate_min": { "type": "number", "minimum": 0, "description": "Lower bound on shot-clock-violation rate (P0 structural health diagnostic)." },
+        "scv_rate_max": { "type": "number", "minimum": 0, "description": "Upper bound on shot-clock-violation rate." },
+        "turnover_rate_min": { "type": "number", "minimum": 0, "description": "Lower bound on turnover rate." },
+        "turnover_rate_max": { "type": "number", "minimum": 0, "description": "Upper bound on turnover rate." }
       },
-      "$comment": "The `*_max >= *_min` invariants (fg_pct_max >= fg_pct_min, tp_pct_max >= tp_pct_min, score_per_team_max >= score_per_team_min, oreb_pct_max >= oreb_pct_min) are NOT expressed here because ajv-cli strict mode without the --data flag rejects the $data keyword. They are enforced by scripts/check-foundation.mjs (todo 9 linter) and by the visual jq audit `jq '.sanity_bands' config/resolve.json`."
+      "$comment": "sanity_bands is the single runtime authority for every diagnostic band (reality-scan, pace-check). The `*_max >= *_min` invariants are enforced by scripts/check-foundation.mjs and the visual jq audit. A pace_band_note string was considered and dropped: documentation belongs in docs, not the data contract."
     },
     "ft_taxonomy_v0_1": {
       "type": "object",

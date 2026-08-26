@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://nba-sim/config/schemas/event-catalog.schema.json",
-  "title": "NBA Sim Event Catalog (foundation 0.1.0)",
-  "description": "Closed catalog of every EventType for v0.2. Each event declares the GameState dot-paths it mutates, the actors it requires, and its same-timestamp priority rank (1=highest, 6=lowest). Catalog size is fixed at 40 for foundation 0.2.0; adding or removing an event requires a foundation_version bump per docs/foundation/README.md semver policy.",
+  "title": "NBA Sim Event Catalog (foundation 0.15.0)",
+  "description": "Closed catalog of every EventType for v0.2. Each event declares the GameState dot-paths it mutates, the actors it requires, and its same-timestamp priority rank (1=highest, 6=lowest). Catalog size is fixed at 41 for foundation 0.15.0; additive payload fields remain backward compatible and are validated by the kernel event contract.",
   "type": "object",
   "required": ["foundation_version", "events"],
   "additionalProperties": false,
@@ -14,8 +14,8 @@
     },
     "events": {
       "type": "array",
-      "minItems": 40,
-      "maxItems": 40,
+      "minItems": 41,
+      "maxItems": 41,
       "items": { "$ref": "#/$defs/eventEntry" },
       "$comment": "Uniqueness of each item's `type` is enforced by scripts/check-foundation.mjs (todo 9 linter) and by the `jq '.events[].type' | sort -u | wc -l` verification gate, not by this schema. JSON Schema (draft-07) has no portable keyword for cross-item unique property values; the ajv-keywords `uniqueItemProperties` extension is intentionally omitted to keep ajv-cli strict-mode validation clean."
     }

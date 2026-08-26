@@ -125,7 +125,7 @@ When two events share a `t_game`, the fold applies them in ascending `same_ts_pr
 | 3 | `SHOT_RELEASE`, `SHOT_RESULT`, `FT_ATTEMPT`, `FT_RESULT` | Shot / free-throw release and resolution. The result is known before any rank-4 foul is classified (this is the basis of the AND-ONE rule). |
 | 4 | `FOUL`, `VIOLATION`, `SHOT_CLOCK_VIOLATION`, `SUB`, `TIMEOUT_START`, `TIMEOUT_END`, `FT_START`, `FT_SEQUENCE_END` | Fouls, violations, substitutions, timeouts, and free-throw machinery. These react to the already-resolved shot outcome when applicable. |
 | 5 | `REBOUND`, `HELD_BALL`, `JUMP_BALL_TAP`, `STEAL`, `TURNOVER`, `PERIOD_END`, `MADE_BASKET_DEAD`, `OOB` | Possession outcomes and dead-ball triggers. They become the input to the next possession. |
-| 6 | `ADVANCE_BACKCOURT`, `CROSS_HALF`, `ALIGN_HALFCOURT`, `SCREEN_SET`, `SCREEN_USE`, `DRIVE`, `STATE_NOTE` | Cosmetic movement and annotation markers. Never affect `GameState` (their `mutates` is empty); always last. |
+| 6 | `ADVANCE_BACKCOURT`, `CROSS_HALF`, `ALIGN_HALFCOURT`, `SCREEN_SET`, `SCREEN_USE`, `DRIVE`, `STATE_NOTE`, `ALIGNMENT`, `STRATEGY_UPDATE` | Cosmetic movement/annotation markers and the strategy memory fold. `STRATEGY_UPDATE` is last so it observes every score/possession fact of the finished possession; it mutates only `strategy`. |
 
 > **Authoritative source.** If this table disagrees with `config/event-catalog.json`, **the JSON catalog is authoritative**. The catalog was cross-checked against this table at freeze time using:
 >
@@ -249,6 +249,30 @@ This matches the Rank 1 row of the Same-Timestamp Priority table exactly. **No d
 
 ### All-ranks cross-check
 
-For each rank 1–6, the set of event types pulled from the catalog by `same_ts_priority_rank` was compared against the corresponding row of the table above. The total event count across all six ranks equals 38, matching `jq '.events|length' config/event-catalog.json`. Every event in the catalog appears in exactly one row of the table, and every row of the table contains exactly the catalog's events for that rank.
+For each rank 1–6, the set of event types pulled from the catalog by `same_ts_priority_rank` was compared against the corresponding row of the table above. The total event count across all six ranks equals 41, matching `jq '.events|length' config/event-catalog.json`. Every event in the catalog appears in exactly one row of the table, and every row of the table contains exactly the catalog's events for that rank.
+
+## 7. Basketball continuity gates
+
+The event stream is not merely a statistical record. A replayable possession must
+preserve these causal gates:
+
+1. **One ball, one owner.** A held ball has exactly one owner, and a transfer
+   names both the player giving up the ball and the player receiving it.
+2. **Actions need a physical precondition.** A shot follows a live holder or an
+   explicit shooter; a rebound follows a shot/loose-ball chain; a foul names
+   two players who can physically contact one another in the corresponding
+   snapshot.
+3. **Possession has a terminal cause.** A live possession ends through a made or
+   missed shot, turnover/steal, foul, period end, or a legal dead-ball event. A
+   second terminal action cannot silently overwrite the first one.
+4. **Same-timestamp events are a chain, not a bag.** Rank ordering may compress
+   adjudication into one clock instant, but `SHOT_RESULT -> MADE_BASKET_DEAD`,
+   `REBOUND -> LOOSE_BALL_RECOVER`, and `INBOUND_TOUCH -> POSSESSION_GAINED`
+   remain causally ordered in the event sequence.
+5. **Movement explains the label.** A player action is only credible when the
+   player's position, target, and nearby opponents support it; a screen must
+   create contact pressure, a drive must advance toward the attacked rim, and a
+   defensive label must not survive after its player owns the ball.
+***END
 
 **No discrepancies at v0.1.0 freeze.** The table and the catalog are in full parity.

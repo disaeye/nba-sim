@@ -7,7 +7,7 @@
     "foundation_version",
     "court_length_unit",
     "tick_seconds",
-    "arrival_epsilon",
+    "arrival_epsilon_ft",
     "default_action_speeds",
     "player_overrides",
     "ball"
@@ -16,7 +16,20 @@
     "foundation_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
     "court_length_unit": { "type": "number", "exclusiveMinimum": 0 },
     "tick_seconds": { "type": "number", "exclusiveMinimum": 0 },
-    "arrival_epsilon": { "type": "number", "exclusiveMinimum": 0 },
+    "speed_units": { "type": "string" },
+    "arrival_epsilon_ft": { "type": "number", "exclusiveMinimum": 0 },
+    "max_accel_fts2": { "type": "number", "exclusiveMinimum": 0 },
+    "physical": {
+      "additionalProperties": false,
+      "required": ["body_radius_ft", "pressure_radius_ft", "pressure_speed_floor", "contact_iterations", "dead_ball_speed_scale"],
+      "properties": {
+        "body_radius_ft": { "type": "number", "exclusiveMinimum": 0 },
+        "pressure_radius_ft": { "type": "number", "exclusiveMinimum": 0 },
+        "pressure_speed_floor": { "type": "number", "minimum": 0 },
+        "contact_iterations": { "type": "integer", "minimum": 1 },
+        "dead_ball_speed_scale": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      }
+    },
     "default_action_speeds": {
       "type": "object",
       "additionalProperties": { "type": "number", "minimum": 0 }
@@ -42,6 +55,7 @@
         "pass_speed",
         "shot_flight_min",
         "shot_flight_max",
+        "shot_flight_speed",
         "intercept_radius",
         "strip_radius",
         "loose_pickup_radius"
@@ -50,6 +64,7 @@
         "pass_speed": { "type": "number", "exclusiveMinimum": 0 },
         "shot_flight_min": { "type": "number", "exclusiveMinimum": 0 },
         "shot_flight_max": { "type": "number", "exclusiveMinimum": 0 },
+        "shot_flight_speed": { "type": "number", "exclusiveMinimum": 0 },
         "intercept_radius": { "type": "number", "exclusiveMinimum": 0 },
         "strip_radius": { "type": "number", "exclusiveMinimum": 0 },
         "loose_pickup_radius": { "type": "number", "exclusiveMinimum": 0 }

@@ -1,5 +1,5 @@
 {
-  "foundation_version": "0.13.0",
+  "foundation_version": "0.15.0",
   "phases": [
     "PRE_GAME",
     "JUMP_BALL",

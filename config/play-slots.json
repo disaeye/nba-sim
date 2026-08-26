@@ -1,5 +1,5 @@
 {
-  "foundation_version": "0.13.0",
+  "foundation_version": "0.15.0",
   "description": "Offense role → geometric SlotRelation kind per play. Defense uses fixed live relations.",
   "default_halfcourt": {
     "primary_creator": "weak_wing",

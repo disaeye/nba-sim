@@ -3,6 +3,7 @@ dist/
 *.js
 !vitest.config.ts
 !scripts/*.mjs
+!spectator/*.js
 .DS_Store
 coverage/
 .omo/evidence/
@@ -16,8 +17,20 @@ spectator/verify-game.json
 # session artifacts accidentally committed (296MB blobs)
 local:
 
-# session/tooling scratch
-.omo/
-.codegraph/
-__pycache__/
-*.pyc
+# Temporary analysis / benchmark artifacts
+.omo/tmp/
+NBA-Player-Movements/
+reality-baseline/pbp-final-2023.csv
+reality-baseline/pbp-final-2024.csv
+reality-baseline/possessions2023.csv
+reality-baseline/possessions2024.csv
+reality-baseline/0021500492.json
+
+# Rust build targets
+target/
+engine/target/
+
+# Web generated ticks
+web/*.ndjson
+web/*.ndjson.gz
+!web/app.js

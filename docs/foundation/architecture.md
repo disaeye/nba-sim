@@ -385,7 +385,7 @@ These are preserved across migration — the single-axis architecture is additiv
 
 | Preserved | Why |
 |---|---|
-| Event catalog (38 types) | Events remain the log projection; no types added or removed |
+| Event catalog (41 types) | Events remain the log projection; `STRATEGY_UPDATE` added for the replayable strategy fold |
 | FSM transition table | Phases and legal transitions unchanged |
 | RNG single-stream contract | `rng.next()` threading unchanged; draw order revised per §1 |
 | Identity/role model | `usageProfile`, `RoleBinding`, bind algorithm untouched |
@@ -397,7 +397,7 @@ These are preserved across migration — the single-axis architecture is additiv
 
 ## 10. Cross-References
 
-- **events.md** — Event catalog (38 types); §7 amends event semantics without changing the closed set.
+- **events.md** — Event catalog (41 types); §7 amends event semantics without changing the closed set.
 - **rng.md** — Single-stream contract; draw-order revisions in Adjudicate (§1.4) are additive (extra draws for new completion facts), not reordered.
 - **invariants.md** — I1–I6 preserved; I3 (clamp) becomes "predicate fires when clock reaches zero via tick integration."
 - **fsm.md** — 15 phases, 28 transitions unchanged. SCV now properly routes `DEAD_VIOLATION → INBOUND_SETUP` with correct possession flip.

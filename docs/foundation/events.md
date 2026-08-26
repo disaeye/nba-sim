@@ -1,6 +1,6 @@
 # Event Catalog & Delta Encoding
 
-`foundation_version: 0.4.0` · `catalog_size: 38`
+`foundation_version: 0.15.0` · `catalog_size: 41`
 
 This document is the **sole authority** for every event the NBA simulator kernel may emit, and for how those events reconstruct `GameState`. The closed machine-readable catalog lives at [`config/event-catalog.json`](../../config/event-catalog.json) and is validated by [`config/schemas/event-catalog.schema.json`](../../config/schemas/event-catalog.schema.json). If prose here ever disagrees with the JSON catalog or schema, the JSON wins.
 
@@ -50,15 +50,15 @@ When two events share a `t_game`, the fold applies them in ascending `same_ts_pr
 | Rank | Events |
 |---|---|
 | 1 | `CLOCK_EXPIRY_ADJUDICATION`, `GAME_START`, `GAME_END`, `PERIOD_START`, `HALFTIME` |
-| 2 | `PASS`, `HANDOFF`, `LOOSE_BALL_RECOVER`, `POSSESSION_GAINED`, `INBOUND_START`, `INBOUND_TOUCH` |
+| 2 | `PASS`, `HANDOFF`, `LOOSE_BALL_RECOVER`, `POSSESSION_GAINED`, `INBOUND_START`, `INBOUND_TOUCH`, `JUMP_CIRCLE_ALIGN` |
 | 3 | `SHOT_RELEASE`, `SHOT_RESULT`, `FT_ATTEMPT`, `FT_RESULT` |
 | 4 | `FOUL`, `VIOLATION`, `SHOT_CLOCK_VIOLATION`, `SUB`, `TIMEOUT_START`, `TIMEOUT_END`, `FT_START`, `FT_SEQUENCE_END` |
 | 5 | `REBOUND`, `HELD_BALL`, `JUMP_BALL_TAP`, `STEAL`, `TURNOVER`, `PERIOD_END`, `MADE_BASKET_DEAD`, `OOB` |
-| 6 | `ADVANCE_BACKCOURT`, `CROSS_HALF`, `ALIGN_HALFCOURT`, `SCREEN_SET`, `SCREEN_USE`, `DRIVE`, `STATE_NOTE` |
+| 6 | `ADVANCE_BACKCOURT`, `CROSS_HALF`, `ALIGN_HALFCOURT`, `SCREEN_SET`, `SCREEN_USE`, `DRIVE`, `STATE_NOTE`, `ALIGNMENT`, `STRATEGY_UPDATE` |
 
 ## Closed Catalog
 
-The v0.1.0 catalog is **closed** at exactly 38 events. Adding or removing any event requires a `foundation_version` bump (see Version Discipline below) and a parallel update to this list, the JSON catalog, the schema's `minItems`/`maxItems`, and the invariants priority table (todo 4). One-line purpose for each:
+The catalog is **closed** at exactly 41 events (foundation 0.15.0). Adding or removing any event requires a `foundation_version` bump (see Version Discipline below) and a parallel update to this list, the JSON catalog, the schema's `minItems`/`maxItems`, and the invariants priority table (todo 4). One-line purpose for each:
 
 | # | Type | Purpose |
 |---|---|---|
@@ -75,8 +75,8 @@ The v0.1.0 catalog is **closed** at exactly 38 events. Adding or removing any ev
 | 11 | `SCREEN_SET` | Off-ball screener establishes a screen (cosmetic). |
 | 12 | `SCREEN_USE` | Ball handler uses a teammate's screen (cosmetic). |
 | 13 | `DRIVE` | Ball handler drives toward the basket (cosmetic). |
-| 14 | `SHOT_RELEASE` | Shot taken; shooter, value, and zone locked; result pending. |
-| 15 | `SHOT_RESULT` | Resolution of a shot; on make increments score, on miss triggers rebound. |
+| 14 | `SHOT_RELEASE` | Shot taken; shooter, value, zone, and optional method are locked; result pending. |
+| 15 | `SHOT_RESULT` | Resolution of a shot; on make increments score, on miss triggers rebound; payload preserves method and block outcome. |
 | 16 | `REBOUND` | Player gains possession after a missed shot. |
 | 17 | `LOOSE_BALL_RECOVER` | Player recovers a loose ball and establishes possession. |
 | 18 | `STEAL` | Defender legally takes the ball from an offensive player. |
@@ -87,8 +87,8 @@ The v0.1.0 catalog is **closed** at exactly 38 events. Adding or removing any ev
 | 23 | `PERIOD_END` | A period expires; advances period counter and transitions phase. |
 | 24 | `PERIOD_START` | A new period begins; transitions out of a break phase. |
 | 25 | `HALFTIME` | Halftime begins after Q2. |
-| 26 | `TIMEOUT_START` | Team-called timeout begins; decrements allotment. |
-| 27 | `TIMEOUT_END` | Timeout concludes; phase returns to prior dead state. |
+| 26 | `TIMEOUT_START` | Team-called timeout begins; decrements allotment and records `resume_phase` for replayable restoration. |
+| 27 | `TIMEOUT_END` | Timeout concludes; phase returns to the recorded resume phase. |
 | 28 | `SUB` | Substitution at a legal dead-ball window. |
 | 29 | `FT_START` | Free throw sequence begins for a shooter with N attempts. |
 | 30 | `FT_ATTEMPT` | A single free throw attempt released. |
@@ -100,13 +100,16 @@ The v0.1.0 catalog is **closed** at exactly 38 events. Adding or removing any ev
 | 36 | `CLOCK_EXPIRY_ADJUDICATION` | Authoritative decision when a clock reaches zero; may emit follow-up events. |
 | 37 | `GAME_END` | Final period concludes without a tie; transitions to `POST_GAME`. |
 | 38 | `STATE_NOTE` | Cosmetic annotation; never mutates `GameState`. |
+| 39 | `JUMP_CIRCLE_ALIGN` | Tip-off / OT jump-circle alignment: 2 jumpers in the center circle + 8 outside. |
+| 40 | `ALIGNMENT` | Authoritative 10-player court snapshot (zones + tasks + coords). |
+| 41 | `STRATEGY_UPDATE` | Per-possession strategy memory fold: run ledger, touch/call/matchup/coverage exposure, last-possession outcome. Emitted last in the possession-end fact batch; replay reconstructs the strategy layer exactly. |
 
 ## Version Discipline
 
 The catalog is the spine of every downstream wave. Version discipline follows the policy in [`docs/foundation/README.md`](README.md) and is summarized here for the event surface specifically:
 
-- **Patch** (`0.1.0` → `0.1.1`): prose or `notes` clarifications, doc fixes. No new event types, no priority changes, no `mutates` shape changes.
-- **Minor** (`0.1.0` → `0.2.0`): additive and backward compatible. New `EventType`, new optional payload field on an existing event, or a new `mutates` path on an existing event. Existing event semantics must remain intact. The schema's `minItems: 38` / `maxItems: 38` constraints must be widened at the same time, and the new event must be added to this doc's Closed Catalog table.
-- **Major** (`0.1.0` → `1.0.0`): breaking. Renaming or removing an event, changing a `same_ts_priority_rank`, removing a `mutates` path, or changing the meaning of an existing payload field. Requires regenerating the golden seed (todo 20) and re-running the pace gate (todo 21).
+- **Patch** (`0.14.0` → `0.14.1`): prose or `notes` clarifications, doc fixes. No new event types, no priority changes, no `mutates` shape changes.
+- **Minor** (`0.14.0` → `0.15.0`): additive and backward compatible. New `EventType`, new optional payload field on an existing event, or a new `mutates` path on an existing event. Existing event semantics must remain intact. The schema's `minItems: 41` / `maxItems: 41` constraints must be widened at the same time, and the new event must be added to this doc's Closed Catalog table.
+- **Major** (`0.15.0` → `1.0.0`): breaking. Renaming or removing an event, changing a `same_ts_priority_rank`, removing a `mutates` path, or changing the meaning of an existing payload field. Requires regenerating the golden seed (todo 20) and re-running the pace gate (todo 21).
 
 Any change to `config/event-catalog.json` without a matching `foundation_version` bump in `config/foundation.json` is a contract violation and will fail the foundation linter (todo 9).

@@ -1,5 +1,5 @@
 {
-  "foundation_version": "0.13.0",
+  "foundation_version": "0.15.0",
   "modes": [
     "TRANSITION",
     "HALFCOURT"
@@ -45,7 +45,7 @@
           "on_fail": "END"
         }
       ],
-      "weight": 1.0
+      "weight": 1
     },
     {
       "id": "handoff_wing",

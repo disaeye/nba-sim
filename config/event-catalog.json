@@ -1,5 +1,5 @@
 {
-  "foundation_version": "0.13.0",
+  "foundation_version": "0.15.0",
   "events": [
     {
       "type": "GAME_START",
@@ -215,15 +215,17 @@
         "zone"
       ],
       "optional_payload_fields": [
-        "assister_id"
+        "assister_id",
+        "shot_method",
+        "shot_clock"
       ],
       "mutates": [],
       "same_ts_priority_rank": 3,
-      "notes": "Shot taken; shooter, value (2 or 3), and zone locked in payload; final score impact pending SHOT_RESULT."
+      "notes": "Shot taken; shooter, value, zone, and optional method locked in payload; final score impact pending SHOT_RESULT."
     },
     {
       "type": "SHOT_RESULT",
-      "actors_min": 0,
+      "actors_min": 1,
       "actors_max": 1,
       "required_payload_fields": [
         "shooter_id",
@@ -232,7 +234,12 @@
       ],
       "optional_payload_fields": [
         "assister_id",
-        "zone"
+        "zone",
+        "shot_method",
+        "shot_clock",
+        "x",
+        "y",
+        "blocked"
       ],
       "mutates": [
         "score.home",
@@ -414,14 +421,16 @@
         "team"
       ],
       "optional_payload_fields": [
-        "requester"
+        "requester",
+        "resume_phase"
       ],
       "mutates": [
         "phase",
-        "timeouts.remaining"
+        "timeouts.remaining",
+        "strategy.timeoutResumePhase"
       ],
       "same_ts_priority_rank": 4,
-      "notes": "Team-initiated timeout begins; phase enters TIMEOUT and the team's remaining allotment is decremented."
+      "notes": "Team-initiated timeout begins; phase enters TIMEOUT and the team's remaining allotment is decremented. resume_phase records the dead-ball phase to restore on TIMEOUT_END so replay reconstructs the resume deterministically."
     },
     {
       "type": "TIMEOUT_END",
@@ -639,6 +648,36 @@
       ],
       "same_ts_priority_rank": 6,
       "notes": "Authoritative 10-player court snapshot (zones + tasks + coords). Spectator must prefer this over heuristics."
+    },
+    {
+      "type": "STRATEGY_UPDATE",
+      "actors_min": 0,
+      "actors_max": 0,
+      "required_payload_fields": [
+        "team",
+        "outcome"
+      ],
+      "optional_payload_fields": [
+        "opponent_team",
+        "plan_kind",
+        "objective",
+        "handler_id",
+        "role",
+        "action_kind",
+        "coverage",
+        "matchup_offense_id",
+        "matchup_defense_id",
+        "shot_value",
+        "shot_zone",
+        "points",
+        "success",
+        "reason"
+      ],
+      "mutates": [
+        "strategy"
+      ],
+      "same_ts_priority_rank": 6,
+      "notes": "Per-possession strategy memory fold: run ledger, touch/call/matchup/coverage exposure, and last-possession outcome. Emitted last in the possession-end fact batch; replay reconstructs the strategy layer exactly."
     }
   ]
 }

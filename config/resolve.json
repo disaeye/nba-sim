@@ -1,5 +1,5 @@
 {
-  "foundation_version": "0.13.0",
+  "foundation_version": "0.15.0",
   "model": "homogeneous_v0_1",
   "base_rates": {
     "pass_success": 0.94,
@@ -27,25 +27,35 @@
     "post": 1.2,
     "catch_shoot": 0.7,
     "pull_up": 0.8,
-    "other": 1.0
+    "other": 1
   },
   "sanity_bands": {
-    "fg_pct_min": 0.25,
-    "fg_pct_max": 0.65,
+    "pace_per_team_min": 97,
+    "pace_per_team_max": 103,
+    "mean_possession_length_seconds_min": 13.5,
+    "mean_possession_length_seconds_max": 15.5,
+    "transition_share_min": 0.12,
+    "transition_share_max": 0.18,
     "tp_pct_min": 0.2,
     "tp_pct_max": 0.55,
+    "fg_pct_min": 0.25,
+    "fg_pct_max": 0.65,
     "score_per_team_min": 60,
     "score_per_team_max": 160,
-    "oreb_pct_min": 0.1,
-    "oreb_pct_max": 0.4
+    "oreb_pct_min": 0.18,
+    "oreb_pct_max": 0.32,
+    "scv_rate_min": 0,
+    "scv_rate_max": 0.12,
+    "turnover_rate_min": 0.08,
+    "turnover_rate_max": 0.22
   },
   "zone_modifiers_3pt": {
-    "wing_L": 1.0,
-    "wing_R": 1.0,
+    "wing_L": 1,
+    "wing_R": 1,
     "corner_L": 1.08,
     "corner_R": 1.08,
-    "slot_L": 1.0,
-    "slot_R": 1.0,
+    "slot_L": 1,
+    "slot_R": 1,
     "frontcourt_center": 0.98,
     "backcourt": 0.05
   },

@@ -1,5 +1,5 @@
 {
-  "foundation_version": "0.13.0",
+  "foundation_version": "0.15.0",
   "description": "NBA full court in feet; sim uses x=length/94, y=width/50. Single source for kernel zone/shot and spectator draw.",
   "length_ft": 94,
   "width_ft": 50,

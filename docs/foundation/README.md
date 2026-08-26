@@ -1,6 +1,6 @@
 # NBA Sim Foundation
 
-`foundation_version: 0.5.0` · `ruleset: nba-subset-v0`
+`foundation_version: 0.15.0` · `ruleset: nba-subset-v0`
 
 ## Foundation Authority
 
@@ -32,6 +32,22 @@ Foundation docs and configs (all created across T2–T10):
 - [possession-plays.md](possession-plays.md) — possession and plays model (T8)
 - [resolve.md](resolve.md) — resolve engine (T8)
 - [timeline-io.md](timeline-io.md) — timeline I/O (T8)
+
+- **Movement unit contract (0.14.0)**: `config/mobility.json` speed tables are
+  REAL FEET PER SECOND — one unit system for both axes. `arrival_epsilon_ft`
+  is an isotropic real-feet radius; `max_accel_fts2` bounds the steering
+  controller's implied acceleration. The movement layer (`src/court/poses.ts`)
+  converts normalized court coordinates (x∈[0,1]·94ft, y∈[0,1]·50ft) to feet
+  at its boundary and back only when integrating. A config still carrying the
+  legacy normalized `arrival_epsilon` is converted once at load (x-axis
+  semantics). Pinned by `tests/court/movement-invariants.test.ts`.
+- **Decision time model (0.14.0)**: `LiveCourtSense.formationReadiness`
+  (+ per-teammate `teammateEtasSec`) is the single ETA owner; every
+  decision-time consumer (hold's organization value, pass continuation,
+  the marginal early-shot gate, SCREEN_USE execution discipline) reads it.
+  Genuine opportunities (open three, rim attempt, catch-and-shoot window,
+  ≤4s heave) price readiness-free by contract — see
+  `tests/decision/formation-readiness.test.ts`.
 
 Config artifacts:
 - [fsm.json](../../config/fsm.json) — FSM transition table

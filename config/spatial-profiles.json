@@ -1,5 +1,5 @@
 {
-  "foundation_version": "0.13.0",
+  "foundation_version": "0.15.0",
   "description": "Spatial positioning parameters derived from NBA SportVU 2015-16 tracking data. All distances in feet unless noted.",
   "handler_pocket": {
     "transition_dist_from_rim_ft": 42,
