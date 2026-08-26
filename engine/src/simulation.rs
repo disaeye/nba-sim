@@ -91,9 +91,13 @@ impl MatchEngine {
         self.game_clock = (self.game_clock - dt).max(0.0);
         self.shot_clock = (self.shot_clock - dt).max(0.0);
 
-        // 2. High-level Basketball Tactics & Decision
+        let mut event_type: Option<String> = None;
+        let mut callout: Option<String> = None;
+        let mut intensity: Option<f32> = None;
+
+        // 2. High-level Basketball Adjudication & Action State Machine
         if self.shot_clock <= 0.2 {
-            // Turnover or Shot clock reset
+            // 24s Shot Clock Turnover
             self.possession = match self.possession {
                 Possession::Home => Possession::Away,
                 Possession::Away => Possession::Home,
@@ -103,17 +107,65 @@ impl MatchEngine {
                 Possession::Home => Some("H_1".to_string()),
                 Possession::Away => Some("A_1".to_string()),
             };
-        }
+            event_type = Some("TURNOVER".to_string());
+            callout = Some("24秒进攻违例，球权转换！".to_string());
+            intensity = Some(0.8);
+        } else if frame_idx > 0 && frame_idx % 120 == 0 {
+            // Shot Attempt & Resolution
+            let is_three = self.rng.gen_bool(0.4);
+            let is_made = self.rng.gen_bool(0.48);
+            let shooter_id = self.ball_carrier.clone().unwrap_or_else(|| "H_1".to_string());
+            let shooter_name = match shooter_id.as_str() {
+                "H_1" => "Jayson Tatum",
+                "H_2" => "Jaylen Brown",
+                "H_3" => "Jrue Holiday",
+                "H_4" => "Kristaps Porziņģis",
+                "H_5" => "Derrick White",
+                "A_1" => "LeBron James",
+                "A_2" => "Anthony Davis",
+                "A_3" => "Austin Reaves",
+                "A_4" => "D'Angelo Russell",
+                "A_5" => "Rui Hachimura",
+                _ => "Shooter",
+            };
 
-        // Occasional pass
-        if frame_idx % 40 == 0 && frame_idx > 0 {
+            if is_made {
+                let pts = if is_three { 3 } else { 2 };
+                match self.possession {
+                    Possession::Home => self.home_score += pts,
+                    Possession::Away => self.away_score += pts,
+                }
+                event_type = Some("MADE_SHOT".to_string());
+                callout = Some(format!("{} 迎着防守干拔跳投命中！(+{}分)", shooter_name, pts));
+                intensity = Some(0.95);
+
+                // Switch possession after make
+                self.possession = match self.possession {
+                    Possession::Home => Possession::Away,
+                    Possession::Away => Possession::Home,
+                };
+                self.shot_clock = 24.0;
+                self.ball_carrier = match self.possession {
+                    Possession::Home => Some("H_1".to_string()),
+                    Possession::Away => Some("A_1".to_string()),
+                };
+            } else {
+                event_type = Some("MISSED_SHOT".to_string());
+                callout = Some(format!("{} 出手不中，篮下展开激烈卡位拼抢！", shooter_name));
+                intensity = Some(0.75);
+                self.shot_clock = (self.shot_clock - 5.0).max(4.0);
+            }
+        } else if frame_idx > 0 && frame_idx % 45 == 0 {
+            // Tactical Pass
             let r = self.rng.gen_range(1..=5);
             self.ball_carrier = match self.possession {
                 Possession::Home => Some(format!("H_{}", r)),
                 Possession::Away => Some(format!("A_{}", r)),
             };
+            event_type = Some("PASS".to_string());
+            callout = Some("精准战术导球，迅速转移至空位队友".to_string());
+            intensity = Some(0.4);
         }
-
         self.physics.set_ball_holder(self.ball_carrier.as_deref());
 
         // 3. Tactical Target Generation
@@ -189,9 +241,9 @@ impl MatchEngine {
                 status: "HELD".to_string(),
                 holder_id: self.ball_carrier.clone(),
             },
-            event_type: None,
-            callout: None,
-            intensity: None,
+            event_type,
+            callout,
+            intensity,
         };
 
         StreamTick {

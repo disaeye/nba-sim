@@ -1837,11 +1837,23 @@ function buildLog() {
     return;
   }
   const onlyHigh = highOnly?.checked ?? false;
-  const summary = pack.broadcastSummary?.length ? pack.broadcastSummary : null;
-  const source = summary ?? (pack.broadcast ?? []).map((text, eventSeq) => ({ text, eventSeq, period: 0, gameClock: 0 }));
+  // Extract broadcast events from loaded ticks stream or package broadcast
+  let source = [];
+  if (ticks.length > 0) {
+    ticks.forEach((tick, frameIdx) => {
+      if (tick.callout || tick.eventType) {
+        const timeStr = fmtClock(tick.gameClock);
+        const text = `[Q${tick.period} ${timeStr}] ${tick.callout || tick.eventType}`;
+        source.push({ text, eventSeq: frameIdx, period: tick.period, gameClock: tick.gameClock });
+      }
+    });
+  }
+  if (source.length === 0) {
+    const summary = pack.broadcastSummary?.length ? pack.broadcastSummary : null;
+    source = summary ?? (pack.broadcast ?? []).map((text, eventSeq) => ({ text, eventSeq, period: 0, gameClock: 0 }));
+  }
   const lines = source.map((entry) => ({ line: entry.text, eventSeq: entry.eventSeq, period: entry.period, gameClock: entry.gameClock }))
-    .filter(({ line }) => line.length > 0)
-    .filter(({ line }) => !onlyHigh || line.includes('失误') || line.includes('投') || line.includes('犯规') || line.includes('抢断') || line.includes('篮板') || line.includes('过半场') || line.includes('突破') || line.includes('出界'));
+    .filter(({ line }) => line.length > 0);
   const appendRow = (li, eventSeq, period, gameClock, cls) => {
     if (cls) li.classList.add(cls);
     li.addEventListener('click', () => {
@@ -2366,11 +2378,12 @@ async function loadTicksFromUrl(url, data) {
   ticks = all;
   window.ticks = ticks;
 
+  const TOTAL_MATCH_TICKS = 7200; // Fixed 1-quarter match duration (720s)
+  scrub.max = String(TOTAL_MATCH_TICKS - 1);
   const report = () => {
-    scrub.max = String(Math.max(0, all.length - 1));
-    meta.textContent = `foundation ${data?.meta?.foundation_version ?? ''} · seed ${data?.meta?.seed ?? ''} · 缓冲中 (${all.length} 帧)...`;
+    const percent = Math.min(100, Math.round((all.length / TOTAL_MATCH_TICKS) * 100));
+    meta.textContent = `NBA Sim · 缓冲进度 ${percent}% (${all.length}/${TOTAL_MATCH_TICKS} 帧)`;
   };
-
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
