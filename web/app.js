@@ -1207,10 +1207,11 @@ function drawTick(tick) {
   const offY = Math.max(-maxOffY, Math.min(maxOffY, camOffY));
   ctx.save();
   if (cam.scale !== 1) {
-    // Correct 2D camera centered transform: translate to center, scale, translate focus point back
-    ctx.translate(w / 2 - offX, h / 2 - offY);
+    const cx = w / 2;
+    const cy = h / 2;
+    ctx.translate(cx, cy);
     ctx.scale(cam.scale, cam.scale);
-    ctx.translate(-w / 2, -h / 2);
+    ctx.translate(-cx - cam.x * 0.4, -cy - cam.y * 0.4);
   }
 
   hitRects = [];
@@ -2062,10 +2063,11 @@ function loadPackage(data) {
   if (status) status.textContent = '正在流式接收事件与轨迹帧...';
   resetVisualHistory();
   scrub.max = String(Math.max(0, ticks.length - 1));
-  selectedEventSeq = null;
+  const homeNameStr = data.meta?.home_name ?? data.home?.name ?? data.meta?.home_team_id ?? 'BOS';
+  const awayNameStr = data.meta?.away_name ?? data.away?.name ?? data.meta?.away_team_id ?? 'LAL';
+  if (homeName) homeName.textContent = homeNameStr;
+  if (awayName) awayName.textContent = awayNameStr;
   if (data.meta) {
-    homeName.textContent = data.meta.home_name ?? data.meta.home_team_id ?? 'HOME';
-    awayName.textContent = data.meta.away_name ?? data.meta.away_team_id ?? 'AWAY';
     meta.textContent = `foundation ${data.meta.foundation_version} · seed ${data.meta.seed} · ${ticks.length} frames`;
     playerBodies = (data.meta.player_bodies ?? {});
   }
