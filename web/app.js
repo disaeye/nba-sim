@@ -183,48 +183,55 @@ function render(index) {
     const elapsedInStage = ((currentTickIndex - stage.startTick) * 0.1).toFixed(1);
     $('currentStageTime').textContent = `阶段用时: ${elapsedInStage}s / ${stage.duration.toFixed(1)}s`;
     
-    // Highlight left rail
     document.querySelectorAll('.stage-item').forEach(el => {
       const isCur = el.dataset.stageId === String(stage.id);
       el.classList.toggle('selected', isCur);
     });
   }
   
-  // Update Decision Trace Card
-  updateDecisionCard(tick.decisionTrace);
+  // Update all 10 players decision trace
+  updateDecisionCard(tick);
 }
 
-function updateDecisionCard(trace) {
-  const card = $('decisionCard');
-  if (!trace) {
-    card.innerHTML = `<div class="card-empty">当前时刻无独立战术决策事件 (连续运动学推进中)</div>`;
-    return;
-  }
+function updateDecisionCard(tick) {
+  const container = $('allPlayersDecision');
+  if (!container || !tick || !tick.players) return;
   
-  const isHome = trace.actor_jersey === "0" || trace.actor_jersey === "7" || trace.actor_jersey === "4" || trace.actor_jersey === "8" || trace.actor_jersey === "9";
-  const name = (isHome ? homeNameMap[trace.actor_jersey] : awayNameMap[trace.actor_jersey]) || `#${trace.actor_jersey}`;
+  const pMeta = pack?.meta?.players_meta || {};
+  const ballHolder = tick.players.find(p => p.hasBall);
+  const trace = tick.decisionTrace;
   
-  card.innerHTML = `
-    <div class="decision-head">
-      <span class="actor">#${trace.actor_jersey} ${name}</span>
-      <span class="action-pill">${trace.action}</span>
-    </div>
-    <div class="decision-reason">${trace.reason}</div>
-    <div class="metric-row">
-      <div class="metric-item">
-        <span>投篮空间 (Shot Openness)</span>
-        <div class="metric-bar-bg"><div class="metric-bar-fill" style="width: ${(trace.shot_openness || 0) * 100}%;"></div></div>
+  container.innerHTML = tick.players.map(p => {
+    const name = pMeta[p.jersey]?.name || `#${p.jersey}`;
+    const isHolder = p.hasBall;
+    let reason = p.team === 'home' ? '进攻落位与拉开空间' : '紧贴对位人，阻断传球路线';
+    
+    if (isHolder && trace) {
+      reason = `【持球决策】${trace.reason}`;
+    } else if (p.action === 'SCREEN') {
+      reason = '【掩护】为持球人设立高位刚体挡拆';
+    } else if (p.action === 'CUT') {
+      reason = '【空切】观察到防守人盲区，空切篮下';
+    } else if (p.action === 'DEFEND') {
+      reason = '【防守】保持防守滑步，卡在对手与篮筐中线';
+    }
+    
+    const teamColor = p.team === 'home' ? '#007A33' : '#552583';
+    
+    return `
+      <div class="player-decision-row ${isHolder ? 'has-ball' : ''}">
+        <div class="p-head">
+          <div class="p-name">
+            <span class="pill" style="width:8px;height:8px;border-radius:50%;background:${teamColor};display:inline-block;"></span>
+            <b>#${p.jersey} ${name}</b>
+            ${isHolder ? '<span style="color:#fbbf24;font-size:10px;margin-left:4px;">🏀 持球核心</span>' : ''}
+          </div>
+          <span class="p-action-tag" style="${isHolder ? 'background:#b45309;color:#fff;' : ''}">${p.action || 'MOVE'}</span>
+        </div>
+        <div class="p-reason">${reason}</div>
       </div>
-      <div class="metric-item">
-        <span>传球窗口 (Pass Window)</span>
-        <div class="metric-bar-bg"><div class="metric-bar-fill" style="width: ${(trace.pass_openness || 0) * 100}%; background: #10b981;"></div></div>
-      </div>
-      <div class="metric-item">
-        <span>突破走廊 (Drive Lane)</span>
-        <div class="metric-bar-bg"><div class="metric-bar-fill" style="width: ${(trace.drive_lane_space || 0) * 100}%; background: #f59e0b;"></div></div>
-      </div>
-    </div>
-  `;
+    `;
+  }).join('');
 }
 
 function extractStagesFromTicks(allTicks) {
@@ -416,6 +423,29 @@ $('frameSlider').addEventListener('input', (e) => {
 });
 $('btnSubmitAnnotation').addEventListener('click', saveAnnotationFeedback);
 
+// Mobile Tab Switcher Logic
+const mTabs = [
+  { btn: 'mTabStages', panel: '.stage-rail' },
+  { btn: 'mTabCourt', panel: '.court-viewport' },
+  { btn: 'mTabDecision', panel: '.decision-panel' },
+  { btn: 'mTabAnnotate', panel: '.annotation-box' }
+];
+
+mTabs.forEach(({ btn, panel }) => {
+  $(btn)?.addEventListener('click', () => {
+    mTabs.forEach(t => $(t.btn)?.classList.remove('active'));
+    $(btn)?.classList.add('active');
+    
+    // Show target section on mobile
+    document.querySelectorAll('.stage-rail, .court-viewport, .decision-panel').forEach(el => el.classList.remove('mobile-active'));
+    if (panel === '.annotation-box') {
+      document.querySelector('.decision-panel')?.classList.add('mobile-active');
+      document.querySelector('.annotation-box')?.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      document.querySelector(panel)?.classList.add('mobile-active');
+    }
+  });
+});
 // Bootstrap
 loadCourtSpec().then(() => {
   loadGameStream();

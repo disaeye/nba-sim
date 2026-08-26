@@ -29,8 +29,15 @@
       </div>
     </header>
 
+    <!-- Mobile Navigation Switcher Bar -->
+    <nav class="mobile-tab-bar">
+      <button class="mobile-tab-btn" id="mTabStages">📋 战术阶段</button>
+      <button class="mobile-tab-btn active" id="mTabCourt">🏀 球场沙盒</button>
+      <button class="mobile-tab-btn" id="mTabDecision">🧠 全员决策</button>
+      <button class="mobile-tab-btn" id="mTabAnnotate">✍️ 反馈标注</button>
+    </nav>
+
     <div class="main-layout">
-      <!-- Left Rail: Stage List -->
       <aside class="stage-rail">
         <div class="panel-header">
           <h3>战术与死球阶段序列 (<span id="stageCount">0</span>)</h3>
@@ -65,12 +72,13 @@
       <!-- Right: Decision Trace & Annotation Panel -->
       <aside class="decision-panel">
         <div class="panel-header">
-          <h3>微观决策实时溯源 (Decision Trace)</h3>
-          <span class="sub">当前帧持球人行为效用与物理依据</span>
+          <h3>场上 10 人微观决策全景 (All 10 Players Trace)</h3>
+          <span class="sub">实时评估所有球员当前意图、战术职责与空间效用</span>
         </div>
 
-        <div class="decision-card" id="decisionCard">
-          <div class="card-empty">当前时刻无持球人决策</div>
+        <!-- 10 Players Decision Grid -->
+        <div class="all-players-decision" id="allPlayersDecision">
+          <!-- Populated dynamically with all 10 players -->
         </div>
 
         <!-- Annotation / Feedback Component -->
