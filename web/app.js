@@ -101,63 +101,10 @@ function setCameraFocus(now, target, holdT) {
   camEndT = now + holdT;
 }
 
-/** 每帧推进镜头状态（now = tick.t，stream 时间） */
+/** 每帧推进镜头状态（保持 1:1 稳定全场视图，严禁镜头越界位移） */
 function updateCamera(now, currentTick = null) {
-  if (reduceMotion) return;
-  const directorOn = document.getElementById('directorCam')?.checked ?? true;
-  
-  // 1. 如果有明确的高光镜头目标（暴扣/压哨/盖帽），优先执行高光特写
-  if (camTarget) {
-    if (now >= camEndT + CAM_RECOVER_DURATION) {
-      cam = { x: 0, y: 0, scale: 1 };
-      camTarget = null;
-      camBase = null;
-      return;
-    }
-    if (now >= camEndT) {
-      const p = Math.min(1, (now - camEndT) / CAM_RECOVER_DURATION);
-      const e = easeOutCubic(p);
-      cam = {
-        x: camBase.x * (1 - e),
-        y: camBase.y * (1 - e),
-        scale: camBase.scale + (1 - camBase.scale) * e,
-      };
-      return;
-    }
-    if (!camBase) camBase = { x: 0, y: 0, scale: 1 };
-    const t = Math.min(1, 0.35);
-    const c = 1 - t;
-    const targetX = (camTarget.x - 0.5) * 2, targetY = (camTarget.y - 0.5) * 2;
-    cam = {
-      x: cam.x * c + targetX * t,
-      y: cam.y * c + targetY * t,
-      scale: cam.scale * c + camTarget.scale * t,
-    };
-    return;
-  }
-
-  // 2. 常规导播视角：平滑聚焦到前场持球攻防半区 (Broadcast Director Follow-Cam)
-  if (directorOn && currentTick) {
-    const ballX = currentTick.ball?.x ?? 0.5;
-    const ballY = currentTick.ball?.y ?? 0.5;
-    const targetHalfX = (ballX - 0.5) * 1.2; // 适度平滑侧移
-    const targetHalfY = (ballY - 0.5) * 0.6;
-    const smoothT = 0.08;
-    cam = {
-      x: cam.x * (1 - smoothT) + targetHalfX * smoothT,
-      y: cam.y * (1 - smoothT) + targetHalfY * smoothT,
-      scale: cam.scale * (1 - smoothT) + 1.22 * smoothT,
-    };
-  } else {
-    const resetT = 0.1;
-    cam = {
-      x: cam.x * (1 - resetT),
-      y: cam.y * (1 - resetT),
-      scale: cam.scale * (1 - resetT) + 1.0 * resetT,
-    };
-  }
+  cam = { x: 0, y: 0, scale: 1 };
 }
-
 function animProgress(animation, now) {
   return Math.max(0, Math.min(1, (now - animation.startT) / animation.duration));
 }
