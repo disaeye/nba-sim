@@ -185,6 +185,7 @@ impl MatchEngine {
             ball: RenderBall {
                 x: ball_norm.x,
                 y: ball_norm.y,
+                z: Some(0.0),
                 status: "HELD".to_string(),
                 holder_id: self.ball_carrier.clone(),
             },
