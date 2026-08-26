@@ -7,12 +7,14 @@ use std::io::{BufWriter, Write};
 use crate::court::Court;
 use crate::movement::{PhysicsWorld, PlayerPhysicsState};
 use crate::protocol::{RenderBall, RenderFrame, RenderPlayer, RenderScore, StreamTick};
-use crate::tactics::{Phase, Possession, TacticalPlanner};
+use crate::tactics::{PlaySegment, Possession, TacticalPlanner};
 
 pub struct MatchEngine {
     physics: PhysicsWorld,
     possession: Possession,
-    phase: Phase,
+    segment: PlaySegment,
+    segment_elapsed: f32,
+    segment_duration: f32,
     shot_clock: f32,
     game_clock: f32,
     period: u32,
@@ -64,11 +66,12 @@ impl MatchEngine {
                 max_stamina: 100.0,
             });
         }
-
         Self {
             physics,
             possession: Possession::Home,
-            phase: Phase::HalfCourtSet,
+            segment: PlaySegment::FiveOutMotion,
+            segment_elapsed: 0.0,
+            segment_duration: 6.0,
             shot_clock: 24.0,
             game_clock: 720.0,
             period: 1,
@@ -145,6 +148,10 @@ impl MatchEngine {
                     Possession::Away => Possession::Home,
                 };
                 self.shot_clock = 24.0;
+                // 进入死球进球后过渡单元 (PostBasketInbound)
+                self.segment = PlaySegment::PostBasketInbound;
+                self.segment_elapsed = 0.0;
+                self.segment_duration = 3.5; // 给定 3.5 秒让防守回防、进攻发球
                 self.ball_carrier = match self.possession {
                     Possession::Home => Some("H_1".to_string()),
                     Possession::Away => Some("A_1".to_string()),
@@ -163,30 +170,61 @@ impl MatchEngine {
                 Possession::Away => Some(format!("A_{}", r)),
             };
             event_type = Some("PASS".to_string());
-            callout = Some("精准战术导球，迅速转移至空位队友".to_string());
+            callout = Some("战术导球转移".to_string());
             intensity = Some(0.4);
         }
-        self.physics.set_ball_holder(self.ball_carrier.as_deref());
 
-        // 3. Tactical Target Generation
-        let (home_targets, away_targets) = TacticalPlanner::plan_targets(
+        self.segment_elapsed += dt;
+        if self.segment_elapsed >= self.segment_duration {
+            // Transition to next segment
+            self.segment_elapsed = 0.0;
+            self.segment = match self.segment {
+                PlaySegment::PostBasketInbound => {
+                    self.segment_duration = 5.0;
+                    PlaySegment::HighPickAndRoll
+                }
+                PlaySegment::HighPickAndRoll => {
+                    self.segment_duration = 4.5;
+                    PlaySegment::IsolationDrive
+                }
+                _ => {
+                    self.segment_duration = 5.5;
+                    PlaySegment::FiveOutMotion
+                }
+            };
+        }
+
+        // Extract current positions for dynamic speed planning
+        let mut curr_positions = [Vec2::ZERO; 10];
+        for i in 0..5 {
+            let h_id = format!("H_{}", i + 1);
+            let a_id = format!("A_{}", i + 1);
+            if let Some(p) = self.physics.get_player(&h_id) {
+                curr_positions[i] = p.pos_ft;
+            }
+            if let Some(p) = self.physics.get_player(&a_id) {
+                curr_positions[5 + i] = p.pos_ft;
+            }
+        }
+
+        // 3. Tactical Target & Adaptive Dynamic Speed Generation
+        let (home_targets, away_targets) = TacticalPlanner::plan_segment(
             self.possession,
-            self.phase,
-            self.ball_pos_ft,
-            self.shot_clock,
+            self.segment,
+            self.segment_elapsed,
+            self.segment_duration,
+            &curr_positions,
             &mut self.rng,
         );
 
-        for (i, t) in home_targets.into_iter().enumerate() {
+        for (i, (t, speed)) in home_targets.into_iter().enumerate() {
             let pid = format!("H_{}", i + 1);
-            let speed = if self.ball_carrier.as_deref() == Some(&pid) { 15.0 } else { 12.0 };
             let action = if self.ball_carrier.as_deref() == Some(&pid) { "DRIBBLE" } else { "MOVE" };
             self.physics.set_player_target(&pid, t, speed, action);
         }
 
-        for (i, t) in away_targets.into_iter().enumerate() {
+        for (i, (t, speed)) in away_targets.into_iter().enumerate() {
             let pid = format!("A_{}", i + 1);
-            let speed = if self.ball_carrier.as_deref() == Some(&pid) { 15.0 } else { 12.0 };
             let action = if self.ball_carrier.as_deref() == Some(&pid) { "DRIBBLE" } else { "DEFEND" };
             self.physics.set_player_target(&pid, t, speed, action);
         }
@@ -201,6 +239,7 @@ impl MatchEngine {
             }
         }
 
+        self.physics.set_ball_holder(self.ball_carrier.as_deref());
         // 6. Pack StreamTick and Serialize
         let ball_norm = Court::ft_to_norm(self.ball_pos_ft);
         let mut render_players = Vec::with_capacity(10);
