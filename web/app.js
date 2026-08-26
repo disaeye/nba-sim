@@ -859,6 +859,7 @@ async function loadCourtSpec() {
     const res = await fetch('./court-draw-spec.json');
     if (!res.ok) return;
     courtSpec = await res.json();
+    courtCanvas = null; // Invalidate cached layer so it cleanly redraws once
   } catch { /* ignore */ }
 }
 
@@ -1145,21 +1146,7 @@ function drawTick(tick) {
   drawCourt();
 
   // 镜头变换（F）：wrap 整个场景绘制。缩放/平移后 clamp 焦点偏移防出界。
-  const focusPx = camFocusPx(w, h);
-  const camOffX = focusPx.x * cam.scale;
-  const camOffY = focusPx.y * cam.scale;
-  const maxOffX = Math.max(0, (w / 2) * (1 - 1 / cam.scale));
-  const maxOffY = Math.max(0, (h / 2) * (1 - 1 / cam.scale));
-  const offX = Math.max(-maxOffX, Math.min(maxOffX, camOffX));
-  const offY = Math.max(-maxOffY, Math.min(maxOffY, camOffY));
   ctx.save();
-  if (cam.scale !== 1) {
-    const cx = w / 2;
-    const cy = h / 2;
-    ctx.translate(cx, cy);
-    ctx.scale(cam.scale, cam.scale);
-    ctx.translate(-cx - cam.x * 0.4, -cy - cam.y * 0.4);
-  }
 
   hitRects = [];
   const players = (tick.players ?? []).map((p) => ({
