@@ -7,11 +7,11 @@
     "fg": "#FFFFFF",
     "pts": 0,
     "roster": [
-      { "id": "H_1", "jersey": "#0", "name": "Jayson Tatum", "pos": "SF" },
-      { "id": "H_2", "jersey": "#7", "name": "Jaylen Brown", "pos": "SG" },
-      { "id": "H_3", "jersey": "#4", "name": "Jrue Holiday", "pos": "PG" },
-      { "id": "H_4", "jersey": "#8", "name": "Kristaps Porzingis", "pos": "C" },
-      { "id": "H_5", "jersey": "#9", "name": "Derrick White", "pos": "PG" }
+      { "id": "H_1", "jersey": "0", "name": "Jayson Tatum", "pos": "SF" },
+      { "id": "H_2", "jersey": "7", "name": "Jaylen Brown", "pos": "SG" },
+      { "id": "H_3", "jersey": "4", "name": "Jrue Holiday", "pos": "PG" },
+      { "id": "H_4", "jersey": "8", "name": "Kristaps Porzingis", "pos": "C" },
+      { "id": "H_5", "jersey": "9", "name": "Derrick White", "pos": "PG" }
     ]
   },
   "away": {
@@ -22,12 +22,28 @@
     "fg": "#FDB927",
     "pts": 0,
     "roster": [
-      { "id": "A_1", "jersey": "#23", "name": "LeBron James", "pos": "SF" },
-      { "id": "A_2", "jersey": "#3", "name": "Anthony Davis", "pos": "C" },
-      { "id": "A_3", "jersey": "#15", "name": "Austin Reaves", "pos": "SG" },
-      { "id": "A_4", "jersey": "#1", "name": "D'Angelo Russell", "pos": "PG" },
-      { "id": "A_5", "jersey": "#28", "name": "Rui Hachimura", "pos": "PF" }
+      { "id": "A_1", "jersey": "23", "name": "LeBron James", "pos": "SF" },
+      { "id": "A_2", "jersey": "3", "name": "Anthony Davis", "pos": "C" },
+      { "id": "A_3", "jersey": "15", "name": "Austin Reaves", "pos": "SG" },
+      { "id": "A_4", "jersey": "1", "name": "D'Angelo Russell", "pos": "PG" },
+      { "id": "A_5", "jersey": "28", "name": "Rui Hachimura", "pos": "PF" }
     ]
+  },
+  "meta": {
+    "foundation_version": "2.0-rust",
+    "seed": 42,
+    "players_meta": {
+      "0": { "name": "Jayson Tatum", "pos": "SF", "team": "home", "archetype": "3-Level Scorer" },
+      "7": { "name": "Jaylen Brown", "pos": "SG", "team": "home", "archetype": "Two-Way Slasher" },
+      "4": { "name": "Jrue Holiday", "pos": "PG", "team": "home", "archetype": "Lockdown Playmaker" },
+      "8": { "name": "Kristaps Porzingis", "pos": "C", "team": "home", "archetype": "Stretch Big" },
+      "9": { "name": "Derrick White", "pos": "PG", "team": "home", "archetype": "Combo Guard" },
+      "23": { "name": "LeBron James", "pos": "SF", "team": "away", "archetype": "All-Around Point Forward" },
+      "3": { "name": "Anthony Davis", "pos": "C", "team": "away", "archetype": "Paint Beast" },
+      "15": { "name": "Austin Reaves", "pos": "SG", "team": "away", "archetype": "Shot Creator" },
+      "1": { "name": "D'Angelo Russell", "pos": "PG", "team": "away", "archetype": "Playmaker" },
+      "28": { "name": "Rui Hachimura", "pos": "PF", "team": "away", "archetype": "Mid-Range Specialist" }
+    }
   },
   "stream": {
     "ticksUrl": "game.ticks.ndjson",

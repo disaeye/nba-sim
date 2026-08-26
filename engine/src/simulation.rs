@@ -30,7 +30,7 @@ impl MatchEngine {
         let rng = StdRng::seed_from_u64(seed);
 
         // Register Home Lineup
-        let home_jerseys = ["#H1", "#H2", "#H3", "#H4", "#H5"];
+        let home_jerseys = ["0", "7", "4", "8", "9"];
         for (i, jersey) in home_jerseys.iter().enumerate() {
             physics.register_player(PlayerPhysicsState {
                 id: format!("H_{}", i + 1),
@@ -48,7 +48,7 @@ impl MatchEngine {
         }
 
         // Register Away Lineup
-        let away_jerseys = ["#A1", "#A2", "#A3", "#A4", "#A5"];
+        let away_jerseys = ["23", "3", "15", "1", "28"];
         for (i, jersey) in away_jerseys.iter().enumerate() {
             physics.register_player(PlayerPhysicsState {
                 id: format!("A_{}", i + 1),
