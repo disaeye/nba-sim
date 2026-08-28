@@ -11,6 +11,11 @@ fi
 
 SEED="${1:-42}"
 OUT_FILE="${2:-$DIR/web/game.ticks.ndjson}"
-TICKS="${3:-7200}"
+SCOPE="${3:-1q}"
 
-exec "$DIR/engine/target/release/nba-sim-engine" "$SEED" "$OUT_FILE" "$TICKS"
+"$DIR/engine/target/release/nba-sim-engine" "$SEED" "$OUT_FILE" "$SCOPE"
+
+# Generate gzip-compressed stream for high-performance web spectator
+if command -v gzip >/dev/null 2>&1; then
+    gzip -f -k -9 "$OUT_FILE" 2>/dev/null || true
+fi

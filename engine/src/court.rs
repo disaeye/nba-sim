@@ -16,8 +16,8 @@ impl Court {
     /// Convert court feet to normalized coords [0.0, 1.0]
     pub fn ft_to_norm(ft: Vec2) -> Vec2 {
         Vec2::new(
-            (ft.x / COURT_WIDTH_FT).clamp(0.0, 1.0),
-            (ft.y / COURT_HEIGHT_FT).clamp(0.0, 1.0),
+            ft.x / COURT_WIDTH_FT,
+            ft.y / COURT_HEIGHT_FT,
         )
     }
 

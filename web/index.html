@@ -40,22 +40,21 @@
     <div class="main-layout">
       <aside class="stage-rail">
         <div class="panel-header">
-          <h3>战术与死球阶段序列 (<span id="stageCount">0</span>)</h3>
-          <span class="sub">点击直接定位与单阶段循环调试</span>
+          <h3>比赛宏观回合序列 (<span id="possessionCount">0</span>)</h3>
+          <span class="sub">点击按回合（Possession）直达与循环调试</span>
         </div>
-        <div class="stage-list" id="stageList">
-          <!-- Dynamically populated stages -->
+        <div class="stage-list" id="possessionList">
+          <!-- Dynamically populated possessions -->
         </div>
       </aside>
 
       <!-- Center: Court Workspace -->
       <main class="court-workspace">
         <div class="stage-banner" id="currentStageBanner">
-          <div class="tag" id="currentStageType">HALF_COURT_OFFENSE</div>
-          <div class="title" id="currentStageTitle">加载中...</div>
-          <div class="time" id="currentStageTime">阶段用时: 0.0s / 0.0s</div>
+          <div class="tag" id="currentPossessionTag">POSSESSION #1</div>
+          <div class="title" id="currentPossessionTitle">加载中...</div>
+          <div class="time" id="currentPossessionTime">回合用时: 0.0s / 0.0s</div>
         </div>
-
         <div class="canvas-box" id="courtContainer">
           <canvas id="court" width="940" height="500"></canvas>
         </div>
