@@ -245,10 +245,7 @@ impl Constraint {
 
 fn eval_shot_clock(_ctx: &ConstraintContext, action: &CandidateAction) -> ConstraintResult {
     // 出手在时钟归零前离手则有效；持球/传/停顿在归零后即违例
-    let expired = match action {
-        CandidateAction::Shoot { .. } => false,
-        _ => true,
-    };
+    let expired = !matches!(action, CandidateAction::Shoot { .. });
     if expired {
         ConstraintResult::violate("SHOT_CLOCK_VIOLATION")
     } else {

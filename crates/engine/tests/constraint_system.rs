@@ -197,11 +197,11 @@ fn test_simulation_decision_trace_present_in_stream() {
     }
     assert!(traces > 0, "决策追踪必须出现在流中, got {traces}");
     assert!(
-        events.contains(&"PASS".to_string()),
+        events.contains("PASS"),
         "约束驱动决策必须产生传球事件, got {events:?}"
     );
     assert!(
-        events.contains(&"SHOT_RELEASE".to_string()),
+        events.contains("SHOT_RELEASE"),
         "决策系统必须产生出手, got {events:?}"
     );
 }

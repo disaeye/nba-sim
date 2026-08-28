@@ -73,7 +73,14 @@ pub struct PhysicsWorld {
     players: HashMap<String, PlayerPhysicsState>,
 }
 
+impl Default for PhysicsWorld {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PhysicsWorld {
+    /// 构建带场地边界墙的物理世界。
     pub fn new() -> Self {
         let rigid_body_set = RigidBodySet::new();
         let mut collider_set = ColliderSet::new();
@@ -262,8 +269,10 @@ impl PhysicsWorld {
         let gravity = vector![0.0, 0.0];
         let sub_steps = 4;
         let sub_dt = dt / (sub_steps as f32);
-        let mut integration_parameters = IntegrationParameters::default();
-        integration_parameters.dt = sub_dt;
+        let integration_parameters = IntegrationParameters {
+            dt: sub_dt,
+            ..Default::default()
+        };
 
         for _ in 0..sub_steps {
             self.physics_pipeline.step(

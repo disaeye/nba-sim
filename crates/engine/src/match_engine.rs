@@ -292,16 +292,13 @@ impl MatchEngine {
         // 0. 世界级 Runtime 约束检查（24 秒违例等，文档 §4.2.1）
         // ============================================================
         let ctx = self.constraint_ctx();
-        if let Some((constraint, enforcement)) = self.decision.registry.evaluate_world(&ctx) {
-            match enforcement {
-                EnforcementAction::Violation { kind } => {
-                    self.current_event = Some("VIOLATION".to_string());
-                    self.current_callout = Some(format!("{}！{} 失去球权", constraint.id, team_name_zh(is_home)));
-                    self.start_violation_turnover(kind);
-                    return self.build_tick();
-                }
-                _ => {}
-            }
+        if let Some((constraint, EnforcementAction::Violation { kind })) =
+            self.decision.registry.evaluate_world(&ctx)
+        {
+            self.current_event = Some("VIOLATION".to_string());
+            self.current_callout = Some(format!("{}！{} 失去球权", constraint.id, team_name_zh(is_home)));
+            self.start_violation_turnover(kind);
+            return self.build_tick();
         }
 
         // ============================================================
@@ -533,16 +530,16 @@ impl MatchEngine {
         // ============================================================
         // 5. 调制状态推进（体力/士气反馈环，modulation 接线）
         // ============================================================
-        for (i, p) in self.physics.get_players().iter().enumerate() {
-            let ordered: Vec<&PlayerPhysicsState> = {
-                let mut v: Vec<&PlayerPhysicsState> = self.physics.get_players().values().collect();
-                v.sort_by(|a, b| a.id.cmp(&b.id));
-                v
-            };
-            let idx = ordered.iter().position(|p| p.id == p.id).unwrap_or(i);
-            let _ = idx;
-            let speed = p.1.vel_ft.length();
-            self.modulation[i.min(9)].update_stamina(speed, dt);
+        // 体力/士气按玩家 id 排序后与调制状态一一对应（A_1..A_5, H_1..H_5）
+        let mut ordered_players: Vec<&PlayerPhysicsState> =
+            self.physics.get_players().values().collect();
+        ordered_players.sort_by(|a, b| a.id.cmp(&b.id));
+        let modulation = &mut self.modulation;
+        for (i, p) in ordered_players.iter().enumerate() {
+            let speed = p.vel_ft.length();
+            if let Some(m) = modulation.get_mut(i) {
+                m.update_stamina(speed, dt);
+            }
         }
 
         // 同步调制状态回物理体（体力/士气渲染 + 决策输入）
