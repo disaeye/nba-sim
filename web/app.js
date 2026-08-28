@@ -1,6 +1,6 @@
 /**
- * NBA-Sim Micro-Stage & Annotation Workbench v3.0
- * Professional 2D NBA Court Renderer + Dynamic Tactical Plays & Decision Trace
+ * TraceLab Replay Console v3.1 (stealth-capable)
+ * Professional court renderer with neutral-skin mode & collapsible scene card.
  */
 
 function $(id) {
@@ -19,9 +19,81 @@ let isLoopStage = true;
 let rafHandle = null;
 let courtSpec = null;
 
-const COURT_W = 940;
-const COURT_H = 500;
-const PAD = 15;
+// ---------------------------------------------------------------------------
+// Display modes: 'stealth' = neutral skin (default), 'full' = basketball view
+// ---------------------------------------------------------------------------
+let displayMode = localStorage.getItem('trace.displayMode') === 'full' ? 'full' : 'stealth';
+let sceneCollapsed = localStorage.getItem('trace.sceneCollapsed') === '1';
+
+const STEALTH_TEXT = {
+  title: '数据回放台 · Trace Replay Console',
+  brandName: 'TraceLab',
+  brandBadge: 'Replay & Annotation',
+  logo: '◍',
+  homeTeam: 'A 组',
+  awayTeam: 'B 组',
+  railTitle: '阶段序列',
+  decisionTitle: '10 个代理微观决策全景',
+  annotationTitle: '✍️ 本阶段人工反馈标注',
+  eventTitle: '实时事件流',
+  homeColor: '#3b82f6',
+  awayColor: '#a855f7',
+};
+const FULL_TEXT = {
+  title: 'NBA Sim · 战术阶段调试与 RLHF 人工标注工作台',
+  brandName: 'NBA-Sim',
+  brandBadge: 'Micro-Stage & Annotation Lab',
+  logo: '🏀',
+  homeTeam: 'Celtics',
+  awayTeam: 'Lakers',
+  railTitle: '比赛宏观回合序列',
+  decisionTitle: '场上 10 人微观决策全景 (All 10 Players Trace)',
+  annotationTitle: '✍️ 本阶段人工反馈标注 (RLHF / Debug)',
+  eventTitle: '实时攻防事件流 (Play-by-Play)',
+  homeColor: '#007A33',
+  awayColor: '#552583',
+};
+
+function applyDisplayMode() {
+  const t = displayMode === 'stealth' ? STEALTH_TEXT : FULL_TEXT;
+  document.body.classList.toggle('stealth', displayMode === 'stealth');
+  document.title = t.title;
+  if ($('brandLogo')) $('brandLogo').textContent = t.logo;
+  if ($('brandName')) $('brandName').textContent = t.brandName;
+  if ($('brandBadge')) $('brandBadge').textContent = t.brandBadge;
+  if ($('homeTeamName')) $('homeTeamName').textContent = t.homeTeam;
+  if ($('awayTeamName')) $('awayTeamName').textContent = t.awayTeam;
+  if ($('homePill')) $('homePill').style.background = t.homeColor;
+  if ($('awayPill')) $('awayPill').style.background = t.awayColor;
+  if ($('railTitleLabel')) $('railTitleLabel').textContent = t.railTitle;
+  if ($('decisionHeaderTitle')) $('decisionHeaderTitle').textContent = t.decisionTitle;
+  if ($('annotationHeaderTitle')) $('annotationHeaderTitle').textContent = t.annotationTitle;
+  if ($('eventHeaderTitle')) $('eventHeaderTitle').textContent = t.eventTitle;
+  if ($('btnStealth')) {
+    $('btnStealth').textContent = displayMode === 'stealth' ? '◍ 极简: 开' : '◍ 极简: 关';
+    $('btnStealth').classList.toggle('active', displayMode === 'stealth');
+  }
+  localStorage.setItem('trace.displayMode', displayMode);
+  // Redraw current frame in the new skin
+  if (ticks.length > 0) render(currentTickIndex);
+  renderPossessionList();
+}
+
+// Neutral team label in stealth mode (jersey → neutral agent id)
+function teamLabelFor(team) {
+  return displayMode === 'stealth' ? (team === 'home' ? 'A' : 'B') : (team === 'home' ? 'BOS' : 'LAL');
+}
+
+function playerColorFor(team) {
+  if (displayMode === 'stealth') {
+    return team === 'home' ? '#3b82f6' : '#a855f7';
+  }
+  return team === 'home' ? '#007A33' : '#552583';
+}
+
+const COURT_W = 760;
+const COURT_H = 405;
+const PAD = 12;
 
 const homeNameMap = {
   "0": "Jayson Tatum",
@@ -45,6 +117,19 @@ const awayNameMap = {
   "5": "Anthony Davis"
 };
 
+// Neutral agent labels for stealth mode: home A1..A5, away B1..B5
+function agentLabel(p) {
+  if (displayMode === 'full') {
+    const isHome = p.team === 'home';
+    const jNum = String(p.jersey || '').replace('#', '');
+    const name = (isHome ? homeNameMap[jNum] : awayNameMap[jNum]) || `#${p.jersey}`;
+    return name.split(' ').pop();
+  }
+  const prefix = p.team === 'home' ? 'A' : 'B';
+  const idx = Number(String(p.jersey || '0').replace(/\D/g, '')) || 0;
+  return `${prefix}${idx}`;
+}
+
 function fmtClock(seconds) {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
@@ -64,7 +149,64 @@ async function loadCourtSpec() {
 
 function drawCourt() {
   ctx.clearRect(0, 0, COURT_W, COURT_H);
+  if (displayMode === 'stealth') {
+    drawNeutralGrid();
+  } else {
+    drawBasketballCourt();
+  }
+}
 
+/// Neutral skin: abstract dark grid — reads as generic motion-capture space.
+function drawNeutralGrid() {
+  ctx.fillStyle = '#0b0e15';
+  ctx.fillRect(0, 0, COURT_W, COURT_H);
+
+  const courtPxW = COURT_W - 2 * PAD;
+  const courtPxH = COURT_H - 2 * PAD;
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.10)';
+  ctx.lineWidth = 1;
+  for (let gx = PAD; gx <= COURT_W - PAD; gx += courtPxW / 12) {
+    ctx.beginPath();
+    ctx.moveTo(gx, PAD);
+    ctx.lineTo(gx, COURT_H - PAD);
+    ctx.stroke();
+  }
+  for (let gy = PAD; gy <= COURT_H - PAD; gy += courtPxH / 6) {
+    ctx.beginPath();
+    ctx.moveTo(PAD, gy);
+    ctx.lineTo(COURT_W - PAD, gy);
+    ctx.stroke();
+  }
+
+  // Outer frame
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(PAD, PAD, courtPxW, courtPxH);
+
+  // Center divider + two neutral anchor zones (left/right)
+  const midX = PAD + courtPxW / 2;
+  const midY = PAD + courtPxH / 2;
+  ctx.beginPath();
+  ctx.moveTo(midX, PAD);
+  ctx.lineTo(midX, COURT_H - PAD);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(midX, midY, 26, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Anchor marks: small squares near both ends
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.5)';
+  const a1x = PAD + courtPxW * 0.075;
+  const a2x = COURT_W - PAD - courtPxW * 0.075;
+  for (const ax of [a1x, a2x]) {
+    ctx.strokeRect(ax - 9, midY - 30, 18, 60);
+  }
+}
+
+/// Full skin: official hardwood basketball court.
+function drawBasketballCourt() {
   // Floor Base / Apron
   ctx.fillStyle = '#0b0f19';
   ctx.fillRect(0, 0, COURT_W, COURT_H);
@@ -92,7 +234,7 @@ function drawCourt() {
     ctx.stroke();
   }
 
-  // Outer Boundary Lines (Official 2-inch solid white lines)
+  // Outer Boundary Lines
   ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 3;
   ctx.strokeRect(PAD, PAD, courtPxW, courtPxH);
@@ -106,7 +248,7 @@ function drawCourt() {
   ctx.lineTo(midX, COURT_H - PAD);
   ctx.stroke();
 
-  // Center Circle (6 ft radius inner, 2 ft radius center jump circle)
+  // Center Circle
   ctx.beginPath();
   ctx.arc(midX, midY, 6.0 * scaleX, 0, Math.PI * 2);
   ctx.stroke();
@@ -114,29 +256,26 @@ function drawCourt() {
   ctx.arc(midX, midY, 2.0 * scaleX, 0, Math.PI * 2);
   ctx.stroke();
 
-  // NBA Keys: 16 ft wide (y: 17ft to 33ft, height 16ft), 19 ft long (from baseline to FT line)
+  // NBA Keys
   const laneLengthPx = 19.0 * scaleX;
   const laneWidthPx = 16.0 * scaleY;
   const laneTopY = midY - laneWidthPx / 2;
 
-  // Left Paint (Celtics Green Fill)
   ctx.fillStyle = 'rgba(0, 122, 51, 0.35)';
   ctx.fillRect(PAD, laneTopY, laneLengthPx, laneWidthPx);
   ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 2.5;
   ctx.strokeRect(PAD, laneTopY, laneLengthPx, laneWidthPx);
 
-  // Right Paint (Lakers Purple Fill)
   ctx.fillStyle = 'rgba(85, 37, 131, 0.35)';
   ctx.fillRect(COURT_W - PAD - laneLengthPx, laneTopY, laneLengthPx, laneWidthPx);
   ctx.strokeRect(COURT_W - PAD - laneLengthPx, laneTopY, laneLengthPx, laneWidthPx);
 
-  // Free Throw Circles (6 ft radius at 19 ft from baseline)
+  // Free Throw Circles
   const leftFtX = PAD + 19.0 * scaleX;
   const rightFtX = COURT_W - PAD - 19.0 * scaleX;
   const ftRadius = 6.0 * scaleX;
 
-  // Left FT Circle (Solid towards midcourt, dashed towards baseline)
   ctx.beginPath();
   ctx.arc(leftFtX, midY, ftRadius, -Math.PI / 2, Math.PI / 2, false);
   ctx.stroke();
@@ -146,7 +285,6 @@ function drawCourt() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Right FT Circle
   ctx.beginPath();
   ctx.arc(rightFtX, midY, ftRadius, Math.PI / 2, Math.PI * 1.5, false);
   ctx.stroke();
@@ -156,7 +294,7 @@ function drawCourt() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // NBA Restricted Area Arcs (4 ft radius from hoop center)
+  // Restricted Area Arcs
   const leftHoopX = PAD + 5.25 * scaleX;
   const rightHoopX = COURT_W - PAD - 5.25 * scaleX;
   const restrictedR = 4.0 * scaleX;
@@ -169,14 +307,11 @@ function drawCourt() {
   ctx.arc(rightHoopX, midY, restrictedR, Math.PI / 2, Math.PI * 1.5, false);
   ctx.stroke();
 
-  // Official NBA 3-Point Line:
-  // Corner 3: 22 ft from hoop (3 ft from sideline, extends 14 ft from baseline)
-  // Arc: 23.75 ft radius from hoop center
+  // NBA 3-Point Line
   const cornerDistY = 3.0 * scaleY;
   const cornerStraightLen = 14.0 * scaleX;
   const threeRadius = 23.75 * scaleX;
 
-  // Left 3PT Line
   ctx.beginPath();
   ctx.moveTo(PAD, PAD + cornerDistY);
   ctx.lineTo(PAD + cornerStraightLen, PAD + cornerDistY);
@@ -186,7 +321,6 @@ function drawCourt() {
   ctx.lineTo(PAD, COURT_H - PAD - cornerDistY);
   ctx.stroke();
 
-  // Right 3PT Line
   ctx.beginPath();
   ctx.moveTo(COURT_W - PAD, PAD + cornerDistY);
   ctx.lineTo(COURT_W - PAD - cornerStraightLen, PAD + cornerDistY);
@@ -196,7 +330,7 @@ function drawCourt() {
   ctx.lineTo(COURT_W - PAD, COURT_H - PAD - cornerDistY);
   ctx.stroke();
 
-  // Backboards (6 ft wide, 4 ft from baseline) & Rims (18-inch diameter, 5.25 ft from baseline)
+  // Backboards & Rims
   const backboardLen = 6.0 * scaleY;
   const backboardXLeft = PAD + 4.0 * scaleX;
   const backboardXRight = COURT_W - PAD - 4.0 * scaleX;
@@ -213,16 +347,65 @@ function drawCourt() {
   ctx.lineTo(backboardXRight, midY + backboardLen / 2);
   ctx.stroke();
 
-  // Orange Rims
   ctx.strokeStyle = '#ff6b35';
   ctx.lineWidth = 3;
-  const rimR = 0.75 * scaleX; // 9 inch radius
+  const rimR = 0.75 * scaleX;
   ctx.beginPath();
   ctx.arc(leftHoopX, midY, rimR * 2.2, 0, Math.PI * 2);
   ctx.stroke();
 
   ctx.beginPath();
   ctx.arc(rightHoopX, midY, rimR * 2.2, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+/// Ball marker: neutral glowing dot in stealth, orange basketball in full.
+function drawBallMarker(b) {
+  const bx = px(b.x, COURT_W, PAD);
+  const by = px(b.y, COURT_H, PAD);
+  const bz = b.z || 0.0;
+
+  // Ground shadow (scales with height)
+  const shadowR = Math.max(3, 8 - bz * 0.4);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(bx, by + 4, shadowR, shadowR * 0.45, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  const ballY = by - bz * 2.5;
+  const ballR = 7.5 + Math.min(3, bz * 0.3);
+
+  if (displayMode === 'stealth') {
+    const grad = ctx.createRadialGradient(bx - 2, ballY - 2, 1, bx, ballY, ballR);
+    grad.addColorStop(0, '#fde68a');
+    grad.addColorStop(1, '#d97706');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(bx, ballY, ballR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#92400e';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    return;
+  }
+
+  const grad = ctx.createRadialGradient(bx - 2, ballY - 2, 1, bx, ballY, ballR);
+  grad.addColorStop(0, '#fb923c');
+  grad.addColorStop(1, '#c2410c');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(bx, ballY, ballR, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = '#7c2d12';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(67, 20, 7, 0.6)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(bx - ballR, ballY);
+  ctx.lineTo(bx + ballR, ballY);
   ctx.stroke();
 }
 
@@ -248,22 +431,20 @@ function drawTick(tick) {
         }
       }
     }
-    ctx.strokeStyle = 'rgba(234, 88, 12, 0.45)';
+    ctx.strokeStyle = displayMode === 'stealth' ? 'rgba(217, 119, 6, 0.5)' : 'rgba(234, 88, 12, 0.45)';
     ctx.lineWidth = 3;
     ctx.setLineDash([4, 4]);
     ctx.stroke();
     ctx.setLineDash([]);
   }
-  
+
   // 2. Draw Players
   const players = tick.players || tick.frame?.players || [];
   for (const p of players) {
     const x = px(p.x, COURT_W, PAD);
     const y = px(p.y, COURT_H, PAD);
-    const isHome = p.team === 'home';
-    const color = isHome ? '#007A33' : '#552583';
-    const jNum = String(p.jersey || '').replace('#', '').replace('A', '').replace('H', '');
-    const name = (isHome ? homeNameMap[jNum] : awayNameMap[jNum]) || `#${p.jersey}`;
+    const color = playerColorFor(p.team);
+    const label = agentLabel(p);
     
     // Shadow
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
@@ -295,62 +476,25 @@ function drawTick(tick) {
     ctx.lineWidth = p.hasBall ? 3.5 : 1.5;
     ctx.stroke();
     
-    // Jersey Number
+    // Agent id in circle
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 11px -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(jNum || p.jersey, x, y);
-    
-    // Player Name Tag & Tactical Slot Label
+    ctx.fillText(displayMode === 'stealth' ? label : (String(p.jersey || '').replace('#', '') || label), x, y);
+
+    // Agent label & slot tag
     ctx.font = '10px -apple-system, sans-serif';
-    const displayName = p.slot ? `${name.split(' ').pop()} (${p.slot})` : name.split(' ').pop();
+    const displayName = p.slot ? `${label} · ${p.slot}` : label;
     const nameWidth = ctx.measureText(displayName).width + 10;
     ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
     ctx.fillRect(x - nameWidth / 2, y + 15, nameWidth, 14);
     ctx.fillStyle = '#ffffff';
     ctx.fillText(displayName, x, y + 22);
   }
-  
-  // 3. Draw Basketball with 3D Height Shadow
+  // 3. Draw tracked marker (basketball / neutral dot)
   const b = tick.ball || tick.frame?.ball;
-  if (b) {
-    const bx = px(b.x, COURT_W, PAD);
-    const by = px(b.y, COURT_H, PAD);
-    const bz = b.z || 0.0;
-    
-    // Ground Shadow (scales with height)
-    const shadowR = Math.max(3, 8 - bz * 0.4);
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    ctx.beginPath();
-    ctx.ellipse(bx, by + 4, shadowR, shadowR * 0.45, 0, 0, Math.PI * 2);
-    ctx.fill();
-    
-    // Ball Body (height offset on y axis)
-    const ballY = by - bz * 2.5;
-    const ballR = 7.5 + Math.min(3, bz * 0.3);
-    
-    // Ball Gradient
-    const grad = ctx.createRadialGradient(bx - 2, ballY - 2, 1, bx, ballY, ballR);
-    grad.addColorStop(0, '#fb923c');
-    grad.addColorStop(1, '#c2410c');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(bx, ballY, ballR, 0, Math.PI * 2);
-    ctx.fill();
-    
-    ctx.strokeStyle = '#7c2d12';
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-    
-    // Ball Seams
-    ctx.strokeStyle = 'rgba(67, 20, 7, 0.6)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(bx - ballR, ballY);
-    ctx.lineTo(bx + ballR, ballY);
-    ctx.stroke();
-  }
+  if (b) drawBallMarker(b);
 
   // 4. Draw Callout if present
   const frame = tick.frame || tick;
@@ -380,19 +524,25 @@ function render(index) {
   const frame = tick.frame || tick;
   if ($('homeScore')) $('homeScore').textContent = String(frame.score?.home ?? 0);
   if ($('awayScore')) $('awayScore').textContent = String(frame.score?.away ?? 0);
-  if ($('matchClock')) $('matchClock').textContent = `Q${frame.period ?? 1} ${fmtClock(frame.t_game ?? frame.game_clock ?? 720.0)}`;
-  
+  if ($('matchClock')) {
+    const q = frame.period ?? 1;
+    const time = fmtClock(frame.t_game ?? frame.game_clock ?? 720.0);
+    $('matchClock').textContent = displayMode === 'stealth' ? `T${q} ${time}` : `Q${q} ${time}`;
+  }
+
   if ($('frameSlider')) $('frameSlider').value = String(currentTickIndex);
   if ($('frameLabel')) $('frameLabel').textContent = `Tick: ${currentTickIndex + 1} / ${ticks.length}`;
-  
+
   // Update Macro Possession & Sub-Phase Banner
   const pos = stages.find(s => currentTickIndex >= s.startTick && currentTickIndex <= s.endTick) || stages[0];
   if (pos) {
     currentStageId = pos.id;
-    if ($('currentPossessionTag')) $('currentPossessionTag').textContent = `回合 #${pos.id} [${pos.offenseTeam || 'OFF'}] · ${frame.phase || tick.possessionSubPhase || '战术组织'}`;
-    if ($('currentPossessionTitle')) $('currentPossessionTitle').textContent = `${pos.tacticalSet || pos.title || '战术推进'}`;
+    const seqWord = displayMode === 'stealth' ? 'SEQ' : '回合';
+    const teamTag = displayMode === 'stealth' ? teamLabelFor(pos.offenseTeam === 'BOS' ? 'home' : 'away') : (pos.offenseTeam || 'OFF');
+    if ($('currentPossessionTag')) $('currentPossessionTag').textContent = `${seqWord} #${pos.id} [${teamTag}] · ${frame.phase || '...'}`;
+    if ($('currentPossessionTitle')) $('currentPossessionTitle').textContent = `${pos.tacticalSet || pos.title || '...'}`;
     const elapsedInPos = ((currentTickIndex - pos.startTick) * (1.0 / simTicksPerSecond)).toFixed(1);
-    if ($('currentPossessionTime')) $('currentPossessionTime').textContent = `起因: ${pos.originReason || '发球'} | 回合耗时: ${elapsedInPos}s / ${pos.duration.toFixed(1)}s`;
+    if ($('currentPossessionTime')) $('currentPossessionTime').textContent = `耗时: ${elapsedInPos}s / ${pos.duration.toFixed(1)}s`;
     
     document.querySelectorAll('.stage-item').forEach(el => {
       const isCur = el.dataset.stageId === String(pos.id);
@@ -412,13 +562,11 @@ function updateDecisionCard(tick) {
   const ballHolder = players.find(p => p.hasBall);
   
   container.innerHTML = players.map(p => {
-    const isHome = p.team === 'home';
-    const jNum = String(p.jersey || '').replace('#', '').replace('A', '').replace('H', '');
-    const name = (isHome ? homeNameMap[jNum] : awayNameMap[jNum]) || `#${p.jersey}`;
+    const label = agentLabel(p);
     const isCarrier = ballHolder && (ballHolder.jersey === p.jersey);
     return `
       <div class="decision-row ${isCarrier ? 'carrier' : ''}">
-        <div class="player-tag ${p.team}">#${jNum} ${name}</div>
+        <div class="player-tag ${p.team}">${label}</div>
         <div class="action-tag">${p.action || 'MOVE'}</div>
         <div class="slot-tag">${p.slot || 'SLOT'}</div>
         <div class="morale-tag ${p.morale || 'Normal'}">${p.morale || 'Normal'}</div>
@@ -468,26 +616,29 @@ function renderPossessionList() {
   const container = $('possessionList');
   if (!container) return;
   if ($('possessionCount')) $('possessionCount').textContent = String(stages.length);
-  container.innerHTML = stages.map(s => `
+  container.innerHTML = stages.map(s => {
+    const teamBadge = displayMode === 'stealth'
+      ? `SEQ #${s.id}`
+      : `${s.offenseTeam} #${s.id}`;
+    return `
     <div class="stage-item ${s.id === currentStageId ? 'selected' : ''}" data-stage-id="${s.id}">
       <div class="stage-header">
-        <span class="team-badge ${s.offenseTeam.toLowerCase()}">${s.offenseTeam} #${s.id}</span>
+        <span class="team-badge ${s.offenseTeam.toLowerCase()}">${teamBadge}</span>
         <span class="stage-time">${s.duration.toFixed(1)}s</span>
       </div>
       <div class="stage-title">${s.tacticalSet}</div>
-      <div class="stage-reason">起因: ${s.originReason}</div>
+      <div class="stage-reason">${displayMode === 'stealth' ? '来源: SEQUENCE_START' : `起因: ${s.originReason}`}</div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   container.querySelectorAll('.stage-item').forEach(el => {
-    el.addEventListener('click', () => {
-      const sId = Number(el.dataset.stageId);
-      const target = stages.find(s => s.id === sId);
-      if (target) {
-        currentStageId = target.id;
-        seekToTick(target.startTick);
-      }
-    });
+    const sId = Number(el.dataset.stageId);
+    const target = stages.find(s => s.id === sId);
+    if (target) {
+      currentStageId = target.id;
+      seekToTick(target.startTick);
+    }
   });
 }
 
@@ -617,8 +768,36 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('btnLoopStage')?.addEventListener('click', () => {
     isLoopStage = !isLoopStage;
     $('btnLoopStage').classList.toggle('active', isLoopStage);
-    $('btnLoopStage').textContent = isLoopStage ? '🔁 单阶段循环: 开' : '🔁 单阶段循环: 关';
+    $('btnLoopStage').textContent = isLoopStage ? '🔁 循环: 开' : '🔁 循环: 关';
   });
+
+  // Display mode switch (stealth <-> full)
+  $('btnStealth')?.addEventListener('click', () => {
+    displayMode = displayMode === 'stealth' ? 'full' : 'stealth';
+    applyDisplayMode();
+  });
+
+  // Collapse / expand scene card by clicking the banner
+  function applySceneCollapsed() {
+    const workspace = $('courtWorkspace');
+    const container = $('courtContainer');
+    const timeline = document.querySelector('.timeline-bar');
+    const hint = $('collapseHint');
+    if (!workspace) return;
+    workspace.classList.toggle('collapsed', sceneCollapsed);
+    if (container) container.style.display = sceneCollapsed ? 'none' : 'flex';
+    if (timeline) timeline.style.display = sceneCollapsed ? 'none' : 'flex';
+    if (hint) hint.textContent = sceneCollapsed ? '▸ 展开视图' : '▾ 隐藏视图';
+    localStorage.setItem('trace.sceneCollapsed', sceneCollapsed ? '1' : '0');
+  }
+  $('currentStageBanner')?.addEventListener('click', (e) => {
+    // 避免与 banner 内未来可能出现的按钮冲突
+    if (e.target.closest('button')) return;
+    sceneCollapsed = !sceneCollapsed;
+    applySceneCollapsed();
+  });
+  applySceneCollapsed();
+  applyDisplayMode();
 
   // Mobile navigation tabs
   const mTabStages = $('mTabStages');
@@ -659,9 +838,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     const rating = document.querySelector('input[name="stageRating"]:checked')?.value || 'GOOD';
     const status = $('annotationStatus');
     if (status) {
-      status.textContent = `已成功保存对 回合 #${currentStageId} 的反馈 [${rating}]！`;
+      status.textContent = `已保存对 SEQ #${currentStageId} 的反馈 [${rating}]`;
       status.style.color = '#10b981';
-      setTimeout(() => { status.textContent = ''; }, 3000);
     }
   });
 

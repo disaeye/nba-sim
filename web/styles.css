@@ -82,6 +82,33 @@ body {
   overflow: hidden;
 }
 
+.brand .logo { font-size: 18px; }
+.collapse-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.stage-banner { cursor: pointer; }
+.stage-banner:hover { border-color: #475569; }
+.stage-banner:hover .collapse-hint { color: #93c5fd; }
+
+/* Collapsed scene card: only the banner strip remains */
+.court-workspace.collapsed .stage-banner {
+  border-radius: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.court-workspace.collapsed { padding: 16px 16px 0 16px; justify-content: flex-start; }
+
+/* Stealth (neutral) skin: muted, non-sport palette overrides */
+body.stealth .team.home .pill, body.stealth .team.away .pill { opacity: 0.85; }
+body.stealth .stage-banner .tag { background: #1e293b; color: #94a3b8; }
+body.stealth .clock-badge { color: #94a3b8; }
+body.stealth .stage-item .team-badge.bos { background: #1e3a8a; color: #93c5fd; }
+body.stealth .stage-item .team-badge.lal { background: #3b0764; color: #d8b4fe; }
+
+
 .panel-header {
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
@@ -143,7 +170,7 @@ body {
 
 .stage-banner {
   width: 100%;
-  max-width: 940px;
+  max-width: 780px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 8px 8px 0 0;
@@ -158,7 +185,7 @@ body {
 
 .canvas-box {
   width: 100%;
-  max-width: 940px;
+  max-width: 780px;
   background: #111;
   border-left: 1px solid var(--border);
   border-right: 1px solid var(--border);
@@ -175,7 +202,7 @@ body {
 
 .timeline-bar {
   width: 100%;
-  max-width: 940px;
+  max-width: 780px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 0 0 8px 8px;
@@ -376,7 +403,7 @@ body {
   #court {
     width: 100%;
     height: auto;
-    aspect-ratio: 940 / 500;
+    aspect-ratio: 760 / 405;
     display: block;
   }
   .stage-rail {
