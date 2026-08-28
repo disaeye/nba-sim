@@ -5,7 +5,7 @@ use nba_sim_engine::MatchEngine;
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let seed = args.get(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(42);
-    let out_path = args.get(2).cloned().unwrap_or_else(|| "web/game.ticks.ndjson".to_string());
+    let out_path = args.get(2).cloned().unwrap_or_else(|| "output/game.ticks.ndjson".to_string());
     let scope = args.get(3).cloned().unwrap_or_else(|| "1q".to_string());
 
     println!("🏀 Initializing NBA-Sim Rust Engine with Rapier2D Physics...");

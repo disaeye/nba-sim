@@ -10,7 +10,7 @@ if [ ! -f "$DIR/engine/target/release/nba-sim-engine" ]; then
 fi
 
 SEED="${1:-42}"
-OUT_FILE="${2:-$DIR/web/game.ticks.ndjson}"
+OUT_FILE="${2:-$DIR/output/game.ticks.ndjson}"
 SCOPE="${3:-1q}"
 
 "$DIR/engine/target/release/nba-sim-engine" "$SEED" "$OUT_FILE" "$SCOPE"
