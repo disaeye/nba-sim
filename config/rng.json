@@ -1,7 +1,0 @@
-{
-  "foundation_version": "0.15.0",
-  "algorithm": "mulberry32",
-  "seed_type": "uint32",
-  "stream_model": "single",
-  "substreams": false
-}
