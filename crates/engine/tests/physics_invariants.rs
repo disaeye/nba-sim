@@ -1,5 +1,5 @@
-use nba_sim_engine::simulation::MatchEngine;
-use nba_sim_engine::movement::MAX_PLAYER_SPEED_FTPS;
+use nba_engine::MatchEngine;
+use nba_physics::movement::MAX_PLAYER_SPEED_FTPS;
 use std::collections::HashMap;
 
 #[test]

@@ -1,6 +1,6 @@
 use glam::Vec2;
 use std::collections::HashMap;
-use crate::court::{COURT_HEIGHT_FT, COURT_WIDTH_FT};
+use nba_domain::court::{COURT_HEIGHT_FT, COURT_WIDTH_FT};
 use crate::movement::{PlayerPhysicsState, PLAYER_RADIUS_FT};
 
 #[derive(Debug, Clone)]
@@ -174,5 +174,12 @@ impl SpatialGeometry {
             && pos.x <= COURT_WIDTH_FT - margin
             && pos.y >= margin
             && pos.y <= COURT_HEIGHT_FT - margin
+    }
+}
+
+impl OpennessMetric {
+    /// 空位分：contest_intensity 的反向映射到 [0,1]（决策层效用输入）。
+    pub fn contest_free_score(&self) -> f32 {
+        (1.0 - self.contest_intensity).clamp(0.0, 1.0)
     }
 }

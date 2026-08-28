@@ -1,6 +1,6 @@
 use glam::Vec2;
 use rand::Rng;
-use crate::court::{COURT_HEIGHT_FT, COURT_WIDTH_FT, HOOP_LEFT_FT, HOOP_RIGHT_FT};
+use nba_domain::court::{COURT_HEIGHT_FT, COURT_WIDTH_FT, HOOP_LEFT_FT, HOOP_RIGHT_FT};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Possession {

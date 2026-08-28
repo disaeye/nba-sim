@@ -1,0 +1,11 @@
+[package]
+name = "nba-physics"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+nba-domain.workspace = true
+glam.workspace = true
+rapier2d.workspace = true
+serde.workspace = true
+rand.workspace = true

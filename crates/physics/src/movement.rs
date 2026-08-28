@@ -3,7 +3,7 @@ use rapier2d::prelude::*;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::court::{COURT_HEIGHT_FT, COURT_WIDTH_FT};
+use nba_domain::court::{COURT_HEIGHT_FT, COURT_WIDTH_FT};
 
 // Physical body radius: 1.8ft gives a 3.6ft diameter rigid body envelope, guaranteeing min separation >= 3.6ft
 pub const PLAYER_RADIUS_FT: f32 = 1.8;

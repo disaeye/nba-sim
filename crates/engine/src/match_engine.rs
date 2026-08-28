@@ -15,19 +15,19 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::collections::HashMap;
 
-use crate::adjudication::ResolveConfig;
-use crate::ballistics::{BallisticsEngine, BallTrajectoryKind};
-use crate::constraint::{CandidateAction, ConstraintContext, EnforcementAction, PhaseType, ViolationKind};
-use crate::court::Court;
-use crate::decision::{DecisionSystem, DecisionOutput};
-use crate::events::PhysicsEvent;
-use crate::movement::{PhysicsWorld, PlayerPhysicsState, LocomotionState};
-use crate::action_window::ActionTimeWindow;
-use crate::modulation::{CoachStrategy, PlayerModulationState};
-use crate::protocol::*;
-use crate::resolution::{ResolutionLayer, ResolutionOutcome};
-use crate::tactics::{TacticalPlanner, TacticalSet, SubPhase, Possession};
-use crate::spatial::SpatialGeometry;
+use nba_officiating::config::ResolveConfig;
+use nba_physics::ballistics::{BallisticsEngine, BallTrajectoryKind};
+use nba_decision::constraint::{CandidateAction, ConstraintContext, EnforcementAction, PhaseType, ViolationKind};
+use nba_domain::court::Court;
+use nba_decision::pipeline::{DecisionSystem, DecisionOutput};
+use nba_domain::event::PhysicsEvent;
+use nba_physics::movement::{PhysicsWorld, PlayerPhysicsState, LocomotionState};
+use nba_domain::action_window::ActionTimeWindow;
+use nba_decision::modulation::{CoachStrategy, PlayerModulationState};
+use nba_protocol::*;
+use nba_officiating::resolution::{ResolutionLayer, ResolutionOutcome};
+use nba_decision::tactics::{TacticalPlanner, TacticalSet, SubPhase, Possession};
+use nba_physics::spatial::SpatialGeometry;
 
 /// 主模拟状态。每个 possession 是阶段事件流的最小产出单位。
 pub struct MatchEngine {
@@ -570,11 +570,11 @@ impl MatchEngine {
         let idx = player_index(player_id);
         match self.modulation.get(idx) {
             Some(m) => match m.morale {
-                crate::modulation::MoraleState::HotHand => 0.10,
-                crate::modulation::MoraleState::Clutch => 0.08,
-                crate::modulation::MoraleState::Normal => 0.0,
-                crate::modulation::MoraleState::Frustrated => -0.05,
-                crate::modulation::MoraleState::Exhausted => -0.12,
+                nba_decision::modulation::MoraleState::HotHand => 0.10,
+                nba_decision::modulation::MoraleState::Clutch => 0.08,
+                nba_decision::modulation::MoraleState::Normal => 0.0,
+                nba_decision::modulation::MoraleState::Frustrated => -0.05,
+                nba_decision::modulation::MoraleState::Exhausted => -0.12,
             },
             None => 0.0,
         }
@@ -959,7 +959,7 @@ fn player_index(id: &str) -> usize {
 }
 
 /// 转换决策追踪到协议调试层。
-fn convert_trace(trace: &crate::decision::DecisionTrace) -> DecisionDebug {
+fn convert_trace(trace: &nba_decision::pipeline::DecisionTrace) -> DecisionDebug {
     DecisionDebug {
         player: trace.player_id.clone(),
         chosen: trace.chosen_kind.to_string(),

@@ -2,8 +2,8 @@ use glam::Vec2;
 use rand::Rng;
 use std::collections::HashMap;
 
-use crate::events::PhysicsEvent;
-use crate::movement::PlayerPhysicsState;
+use nba_domain::event::PhysicsEvent;
+use nba_physics::movement::PlayerPhysicsState;
 
 #[derive(Debug, Clone)]
 pub enum ResolutionOutcome {

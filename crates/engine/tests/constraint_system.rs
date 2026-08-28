@@ -5,11 +5,11 @@ use std::collections::HashMap;
 
 use glam::Vec2;
 
-use nba_sim_engine::constraint::{
+use nba_decision::constraint::{
     CandidateAction, ConstraintContext, ConstraintRegistry, PhaseType,
 };
-use nba_sim_engine::movement::PlayerPhysicsState;
-use nba_sim_engine::simulation::MatchEngine;
+use nba_physics::movement::PlayerPhysicsState;
+use nba_engine::MatchEngine;
 
 fn make_player(id: &str, team: &str, x: f32, y: f32) -> PlayerPhysicsState {
     PlayerPhysicsState {
@@ -27,7 +27,7 @@ fn make_player(id: &str, team: &str, x: f32, y: f32) -> PlayerPhysicsState {
         morale: "Normal".to_string(),
         stamina: 100.0,
         max_stamina: 100.0,
-        locomotion: nba_sim_engine::movement::LocomotionState::Idle,
+        locomotion: nba_physics::movement::LocomotionState::Idle,
         facing_dir: Vec2::X,
         turn_decel_timer: 0.0,
         is_locked_kinematics: false,

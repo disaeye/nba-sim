@@ -1,0 +1,10 @@
+[package]
+name = "nba-decision"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+nba-domain.workspace = true
+nba-physics.workspace = true
+glam.workspace = true
+rand.workspace = true

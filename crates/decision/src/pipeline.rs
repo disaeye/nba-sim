@@ -9,7 +9,7 @@
 use rand::Rng;
 
 use crate::constraint::{CandidateAction, ConstraintContext, ConstraintRegistry, ScoredCandidate};
-use crate::spatial::{OpennessMetric, SpatialGeometry};
+use nba_physics::spatial::SpatialGeometry;
 
 /// 决策效用权重（数据驱动，可调参）。
 #[derive(Debug, Clone)]
@@ -59,13 +59,6 @@ pub struct DecisionOutput {
     pub trace: DecisionTrace,
 }
 
-impl OpennessMetric {
-    /// 空位分：contest_intensity 的反向映射到 [0,1]。
-    pub fn contest_free_score(&self) -> f32 {
-        (1.0 - self.contest_intensity).clamp(0.0, 1.0)
-    }
-}
-
 /// 决策系统：候选生成 → 约束管线 → 效用评分 → softmax 采样。
 pub struct DecisionSystem {
     pub registry: ConstraintRegistry,
@@ -100,7 +93,7 @@ impl DecisionSystem {
         let carrier_pos = carrier.pos_ft;
         let offense_team = carrier.team.clone();
 
-        let hoop = crate::court::Court::hoop_pos(offense_team == "home");
+        let hoop = nba_domain::court::Court::hoop_pos(offense_team == "home");
         let dist_to_hoop = (carrier_pos - hoop).length();
         let is_three = dist_to_hoop >= 23.75;
 
@@ -118,7 +111,7 @@ impl DecisionSystem {
 
         for p in ctx.players.values() {
             if p.team == offense_team && p.id != carrier_id {
-                let to_pos = crate::ballistics::BallisticsEngine::extrapolate_receiver_pos(p, 0.65);
+                let to_pos = nba_physics::ballistics::BallisticsEngine::extrapolate_receiver_pos(p, 0.65);
                 candidates.push(CandidateAction::Pass {
                     passer_id: carrier_id.to_string(),
                     receiver_id: p.id.clone(),

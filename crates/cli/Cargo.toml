@@ -1,0 +1,11 @@
+[package]
+name = "nba-sim-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "nba-sim"
+path = "src/main.rs"
+
+[dependencies]
+nba-engine.workspace = true

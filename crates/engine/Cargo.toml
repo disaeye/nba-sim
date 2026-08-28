@@ -1,0 +1,14 @@
+[package]
+name = "nba-engine"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+nba-domain.workspace = true
+nba-physics.workspace = true
+nba-decision.workspace = true
+nba-officiating.workspace = true
+nba-protocol.workspace = true
+glam.workspace = true
+rand.workspace = true
+serde_json.workspace = true

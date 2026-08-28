@@ -1,7 +1,7 @@
 use glam::Vec2;
 use rand::Rng;
 use std::collections::HashMap;
-use crate::court::{COURT_HEIGHT_FT, COURT_WIDTH_FT};
+use nba_domain::court::{COURT_HEIGHT_FT, COURT_WIDTH_FT};
 use crate::movement::PlayerPhysicsState;
 
 pub const GRAVITY_FTPS2: f32 = 32.174;

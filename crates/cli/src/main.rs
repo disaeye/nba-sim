@@ -1,6 +1,6 @@
 use std::env;
 use std::time::Instant;
-use nba_sim_engine::MatchEngine;
+use nba_engine::MatchEngine;
 
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();

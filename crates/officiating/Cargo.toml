@@ -1,0 +1,11 @@
+[package]
+name = "nba-officiating"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+nba-domain.workspace = true
+nba-physics.workspace = true
+rand.workspace = true
+serde.workspace = true
+glam.workspace = true

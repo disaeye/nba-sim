@@ -10,9 +10,9 @@
 
 use glam::Vec2;
 
-use crate::court::{COURT_HEIGHT_FT, COURT_WIDTH_FT};
-use crate::movement::PlayerPhysicsState;
-use crate::spatial::SpatialGeometry;
+use nba_domain::court::{COURT_HEIGHT_FT, COURT_WIDTH_FT};
+use nba_physics::movement::PlayerPhysicsState;
+use nba_physics::spatial::SpatialGeometry;
 use std::collections::HashMap;
 
 // ============================================================================

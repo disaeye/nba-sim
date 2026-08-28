@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/domain",
+    "crates/physics",
+    "crates/decision",
+    "crates/officiating",
+    "crates/engine",
+    "crates/protocol",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+glam = "0.24"
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rapier2d = "0.18"
+
+# Internal crates
+nba-domain = { path = "crates/domain" }
+nba-physics = { path = "crates/physics" }
+nba-decision = { path = "crates/decision" }
+nba-officiating = { path = "crates/officiating" }
+nba-engine = { path = "crates/engine" }
+nba-protocol = { path = "crates/protocol" }
