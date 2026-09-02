@@ -7,9 +7,9 @@ pub mod ballistics;
 pub mod movement;
 pub mod spatial;
 
-pub use ballistics::{BallisticsEngine, BallTrajectoryKind, ReboundLandingSpot};
+pub use ballistics::{BallTrajectoryKind, BallisticsEngine, ReboundLandingSpot};
 pub use movement::{
-    LocomotionState, PhysicsWorld, PlayerPhysicsState, MAX_PLAYER_ACCEL_FTPS2,
-    MAX_PLAYER_SPEED_FTPS, PLAYER_RADIUS_FT,
+    EntityFilter, LocomotionState, PhysicsBackend, PhysicsFact, PhysicsWorld, PlayerPhysicsState,
+    RawContact, RayHit, ShapeCastHit, SimpleCirclePhysics, SpatialPhysics,
 };
 pub use spatial::{OpennessMetric, PassCorridorStatus, SpatialGeometry};

@@ -9,10 +9,13 @@ pub mod pipeline;
 pub mod tactics;
 
 pub use constraint::{
-    CandidateAction, Constraint, ConstraintContext, ConstraintDomain, ConstraintRegistry,
-    ConstraintResult, ConstraintScope, ConstraintStatus, ConstraintTiming, EnforcementAction,
-    PhaseType, ScoredCandidate, Severity, ViolationKind,
+    CandidateAction, Constraint, ConstraintContext, ConstraintDomain, ConstraintFinding,
+    ConstraintRegistry, ConstraintResult, ConstraintScope, ConstraintStatus, ConstraintTiming,
+    EnforcementAction, PhaseType, ScoredCandidate, Severity, ViolationKind,
 };
 pub use modulation::{CoachStrategy, MoraleState, PlayerModulationState};
 pub use pipeline::{DecisionOutput, DecisionSystem, DecisionTrace, DecisionWeights};
-pub use tactics::{OffensiveRole, DefensiveRole, SubPhase as TacticsSubPhase, TacticalPlanner, TacticalSet, TeamIntent, Possession as TacticsPossession};
+pub use tactics::{
+    DefensiveRole, DefensiveTactic, OffensiveRole, TacticalPlanner, TacticalSet, TeamIntent,
+};
+// Domain owns the canonical phase, possession, and lifecycle vocabulary.

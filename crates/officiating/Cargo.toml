@@ -7,5 +7,6 @@ edition.workspace = true
 nba-domain.workspace = true
 nba-physics.workspace = true
 rand.workspace = true
+nba-semantics.workspace = true
 serde.workspace = true
 glam.workspace = true

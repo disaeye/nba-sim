@@ -1,0 +1,37 @@
+{
+  "version": "fiba.v1",
+  "league": "FIBA",
+  "court_width_ft": 91.86,
+  "court_height_ft": 49.21,
+  "pass_corridor_radius_ft": 4.0,
+  "duration_bands": {
+    "score": { "min": 2.0, "max": 26.0 },
+    "rebound": { "min": 2.0, "max": 56.0 },
+    "turnover": { "min": 0.5, "max": 29.0 }
+  },
+  "passes_bands": {
+    "score": { "min": 0.0, "max": 9.0 },
+    "rebound": { "min": 0.0, "max": 10.0 },
+    "turnover": { "min": 0.0, "max": 10.0 }
+  },
+  "turnover_rate_band": { "min": 0.05, "max": 0.35 },
+  "three_attempt_rate_band": { "min": 0.15, "max": 0.65 },
+  "heavy_contest_threshold": 0.75,
+  "phase_dwell_max_seconds": {
+    "Initiation": 6.5,
+    "ActionExecution": 20.0,
+    "ShotAttempt": 2.5,
+    "FlightAndRebound": 3.5,
+    "DeadBallReset": 6.0,
+    "FreeThrow": 15.0,
+    "Rebound": 3.5
+  },
+  "phase_transitions": {
+    "Initiation": ["ActionExecution", "DeadBallReset", "ShotAttempt"],
+    "ActionExecution": ["Initiation", "ShotAttempt", "FlightAndRebound", "DeadBallReset"],
+    "ShotAttempt": ["FlightAndRebound", "Initiation", "DeadBallReset"],
+    "FlightAndRebound": ["Initiation", "ActionExecution", "DeadBallReset", "ShotAttempt"],
+    "DeadBallReset": ["Initiation", "ActionExecution", "FreeThrow", "FlightAndRebound", "ShotAttempt"],
+    "FreeThrow": ["DeadBallReset", "Initiation", "FlightAndRebound"]
+  }
+}

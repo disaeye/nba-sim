@@ -1,0 +1,616 @@
+//! 开发调试服务器：内嵌静态页 + 模拟流/规则编辑 HTTP API。
+//!
+//! 只服务于本地开发调试（P0–P2 调试工作台），不是生产服务。
+//! std-only：手写最小 HTTP/1.1 解析，避免引入 web 框架依赖。
+
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::{Arc, Mutex};
+
+use nba_domain::{FixedDt, GameRules};
+use nba_engine::{MatchEngine, MatchService};
+use serde_json::Value;
+
+mod static_page;
+
+type SharedSession = Arc<Mutex<MatchService>>;
+type Response = (&'static str, &'static str, Vec<u8>);
+
+const MAX_REQUEST_BODY_BYTES: usize = 8 * 1024 * 1024;
+const MAX_SIMULATION_TICKS: usize = 500_000;
+#[allow(clippy::arc_with_non_send_sync)]
+fn main() {
+    let port: u16 = std::env::args()
+        .nth(1)
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(4173);
+    let listener = TcpListener::bind(("127.0.0.1", port)).expect("bind debug server port");
+    let session = Arc::new(Mutex::new(MatchService::new()));
+    println!("nba-debug-server listening on http://127.0.0.1:{}", port);
+    for stream in listener.incoming().flatten() {
+        // MatchService currently contains a backend trait object without a Send
+        // bound. Keep ownership on this accept thread until the engine boundary
+        // opts into cross-thread execution; each request still locks the session
+        // so route code cannot alias mutable simulation state.
+        if let Err(e) = handle(stream, &session) {
+            eprintln!("request error: {}", e);
+        }
+    }
+}
+
+fn handle(mut stream: TcpStream, session: &SharedSession) -> std::io::Result<()> {
+    let req = match read_request(&mut stream) {
+        Ok(Some(r)) => r,
+        Ok(None) => return Ok(()),
+        Err(e) => {
+            write_response(
+                &mut stream,
+                "400 Bad Request",
+                "application/json; charset=utf-8",
+                format!(r#"{{"error":{}}}"#, serde_json::json!(e.to_string())).as_bytes(),
+            )?;
+            return Ok(());
+        }
+    };
+    let (status, content_type, body) = route(&req, session);
+    write_response(&mut stream, status, content_type, &body)
+}
+
+struct Request {
+    method: String,
+    path: String,
+    query: String,
+    body: Vec<u8>,
+}
+
+fn write_response(
+    stream: &mut TcpStream,
+    status: &str,
+    content_type: &str,
+    body: &[u8],
+) -> std::io::Result<()> {
+    let head = format!(
+        "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n\r\n",
+        status,
+        content_type,
+        body.len()
+    );
+    stream.write_all(head.as_bytes())?;
+    stream.write_all(body)?;
+    stream.flush()
+}
+
+fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
+    // A cloned socket shares the receive queue with the original socket. Keeping
+    // parsing in a buffered reader prevents partial header reads without adding
+    // a third-party HTTP dependency; the original socket remains for the reply.
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut line = String::new();
+    if reader.read_line(&mut line)? == 0 {
+        return Ok(None);
+    }
+    let mut parts = line.split_whitespace();
+    let method = parts.next().unwrap_or("GET").to_ascii_uppercase();
+    let target = parts.next().unwrap_or("/").to_string();
+    let (path, query) = match target.split_once('?') {
+        Some((p, q)) => (p.to_string(), q.to_string()),
+        None => (target, String::new()),
+    };
+
+    let mut content_length = 0usize;
+    loop {
+        let mut header = String::new();
+        if reader.read_line(&mut header)? == 0 {
+            break;
+        }
+        let trimmed = header.trim();
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = trimmed.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                content_length = value.trim().parse::<usize>().map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid content-length")
+                })?;
+            }
+        }
+    }
+    if content_length > MAX_REQUEST_BODY_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "request body too large",
+        ));
+    }
+    let mut body = vec![0u8; content_length];
+    if content_length > 0 {
+        reader.read_exact(&mut body)?;
+    }
+    Ok(Some(Request {
+        method,
+        path,
+        query,
+        body,
+    }))
+}
+
+fn route(req: &Request, session: &SharedSession) -> Response {
+    match (req.method.as_str(), req.path.as_str()) {
+        ("GET", "/") => (
+            "200 OK",
+            "text/html; charset=utf-8",
+            static_page::HTML.as_bytes().to_vec(),
+        ),
+        ("GET", "/style.css") => (
+            "200 OK",
+            "text/css; charset=utf-8",
+            static_page::CSS.as_bytes().to_vec(),
+        ),
+        ("GET", "/app.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            static_page::JS.as_bytes().to_vec(),
+        ),
+        ("GET", "/api/rules") => match serde_json::to_vec_pretty(&GameRules::default()) {
+            Ok(json) => ("200 OK", "application/json; charset=utf-8", json),
+            Err(e) => internal_error(e.to_string()),
+        },
+        ("GET", "/api/simulate") | ("POST", "/api/simulate") => api_simulate(req),
+        ("POST", "/api/session/setup") => api_session_setup(req, session),
+        ("GET", "/api/session") | ("GET", "/api/session/state") => api_session_state(session),
+        ("GET", "/api/session/snapshot") => api_session_snapshot(session),
+        ("GET", "/api/session/events") => api_session_events(req, session),
+        ("POST", "/api/session/start") => api_session_command(session, "start", req),
+        ("POST", "/api/session/pause") => api_session_command(session, "pause", req),
+        ("POST", "/api/session/resume") => api_session_command(session, "resume", req),
+        ("POST", "/api/session/tick") => api_session_command(session, "tick", req),
+        ("POST", "/api/session/fast-forward") | ("POST", "/api/session/fast_forward") => {
+            api_session_command(session, "fast-forward", req)
+        }
+        ("POST", "/api/session/next-possession") | ("POST", "/api/session/next_possession") => {
+            api_session_command(session, "next-possession", req)
+        }
+        ("OPTIONS", _) => ("204 No Content", "text/plain; charset=utf-8", Vec::new()),
+        _ => (
+            "404 Not Found",
+            "text/plain; charset=utf-8",
+            b"not found".to_vec(),
+        ),
+    }
+}
+
+fn internal_error(msg: String) -> Response {
+    (
+        "500 Internal Server Error",
+        "application/json; charset=utf-8",
+        serde_json::json!({ "error": msg }).to_string().into_bytes(),
+    )
+}
+
+fn conflict(msg: String) -> Response {
+    (
+        "409 Conflict",
+        "application/json; charset=utf-8",
+        serde_json::json!({ "error": msg }).to_string().into_bytes(),
+    )
+}
+
+fn session_lock(
+    session: &SharedSession,
+) -> Result<std::sync::MutexGuard<'_, MatchService>, Response> {
+    session
+        .lock()
+        .map_err(|_| internal_error("match session lock poisoned".to_string()))
+}
+
+fn api_session_setup(req: &Request, session: &SharedSession) -> Response {
+    if req.body.is_empty() {
+        return bad_request("match setup JSON body is required".to_string());
+    }
+    let body = match std::str::from_utf8(&req.body) {
+        Ok(body) => body,
+        Err(_) => return bad_request("match setup body must be valid UTF-8".to_string()),
+    };
+    let mut service = match session_lock(session) {
+        Ok(service) => service,
+        Err(response) => return response,
+    };
+    match service.setup_match_json(body) {
+        Ok(info) => (
+            "200 OK",
+            "application/json; charset=utf-8",
+            info.into_bytes(),
+        ),
+        Err(error) => bad_request(error),
+    }
+}
+
+fn api_session_state(session: &SharedSession) -> Response {
+    let service = match session_lock(session) {
+        Ok(service) => service,
+        Err(response) => return response,
+    };
+    api_session_state_from_service(&service)
+}
+
+fn api_session_state_from_service(service: &MatchService) -> Response {
+    let body = serde_json::json!({
+        "state": service.state(),
+        "configured": service.is_configured(),
+        "seed": service.seed(),
+    });
+    (
+        "200 OK",
+        "application/json; charset=utf-8",
+        body.to_string().into_bytes(),
+    )
+}
+
+fn api_session_snapshot(session: &SharedSession) -> Response {
+    let service = match session_lock(session) {
+        Ok(service) => service,
+        Err(response) => return response,
+    };
+    match service.snapshot() {
+        Some(snapshot) => snapshot_response(snapshot),
+        None => conflict("cannot read snapshot before match setup".to_string()),
+    }
+}
+
+fn api_session_events(req: &Request, session: &SharedSession) -> Response {
+    let sequence = match query_u64(&req.query, "since") {
+        Ok(sequence) => sequence,
+        Err(error) => return bad_request(error),
+    };
+    let service = match session_lock(session) {
+        Ok(service) => service,
+        Err(response) => return response,
+    };
+    match service.events_since_json(sequence) {
+        Ok(body) => (
+            "200 OK",
+            "application/json; charset=utf-8",
+            body.into_bytes(),
+        ),
+        Err(error) => internal_error(error),
+    }
+}
+
+fn api_session_command(session: &SharedSession, command: &str, req: &Request) -> Response {
+    let duration = match command {
+        "tick" => match parse_duration(req, &["dt", "seconds", "duration"]) {
+            Ok(duration) => Some(duration),
+            Err(error) => return bad_request(error),
+        },
+        "fast-forward" => match parse_duration(req, &["seconds", "duration", "dt"]) {
+            Ok(duration) => Some(duration),
+            Err(error) => return bad_request(error),
+        },
+        _ => None,
+    };
+    let mut service = match session_lock(session) {
+        Ok(service) => service,
+        Err(response) => return response,
+    };
+    match command {
+        "start" => match service.start() {
+            Ok(()) => api_session_state_from_service(&service),
+            Err(error) => conflict(error),
+        },
+        "pause" => {
+            service.pause();
+            api_session_state_from_service(&service)
+        }
+        "resume" => match service.resume() {
+            Ok(()) => api_session_state_from_service(&service),
+            Err(error) => conflict(error),
+        },
+        "tick" => match service.tick(FixedDt(duration.expect("validated tick duration"))) {
+            Ok(snapshot) => snapshot_response(snapshot),
+            Err(error) => conflict(error),
+        },
+        "fast-forward" => {
+            match service.fast_forward(duration.expect("validated fast-forward duration")) {
+                Ok(snapshot) => snapshot_response(snapshot),
+                Err(error) => conflict(error),
+            }
+        }
+        "next-possession" => match service.next_possession() {
+            Ok(snapshot) => snapshot_response(snapshot),
+            Err(error) => conflict(error),
+        },
+        _ => internal_error(format!("unknown session command: {command}")),
+    }
+}
+
+fn snapshot_response(snapshot: nba_protocol::StreamTick) -> Response {
+    match serde_json::to_vec(&snapshot) {
+        Ok(body) => ("200 OK", "application/json; charset=utf-8", body),
+        Err(error) => internal_error(format!("snapshot serialization failed: {error}")),
+    }
+}
+
+fn parse_duration(req: &Request, keys: &[&str]) -> Result<f32, String> {
+    if req.body.is_empty() {
+        return Err("JSON body with a non-negative duration is required".to_string());
+    }
+    let value: Value = serde_json::from_slice(&req.body)
+        .map_err(|error| format!("request JSON invalid: {error}"))?;
+    let raw = match value {
+        Value::Number(number) => number
+            .as_f64()
+            .ok_or_else(|| "duration must be a finite JSON number".to_string())?,
+        Value::Object(object) => {
+            let value = keys.iter().find_map(|key| object.get(*key));
+            let Some(value) = value else {
+                return Err(format!(
+                    "JSON body must contain one of: {}",
+                    keys.join(", ")
+                ));
+            };
+            value
+                .as_f64()
+                .ok_or_else(|| "duration must be a finite JSON number".to_string())?
+        }
+        _ => return Err("duration must be a JSON number or object".to_string()),
+    };
+    if !raw.is_finite() || raw < 0.0 || raw > f32::MAX as f64 {
+        return Err("duration must be finite, non-negative, and fit in f32".to_string());
+    }
+    Ok(raw as f32)
+}
+
+fn query_u64(query: &str, expected_key: &str) -> Result<u64, String> {
+    let mut result = 0;
+    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+        let (key, value) = match pair.split_once('=') {
+            Some(pair) => pair,
+            None => continue,
+        };
+        if key == expected_key {
+            let value = url_decode(value)?;
+            result = value
+                .parse::<u64>()
+                .map_err(|_| format!("{expected_key} must be an unsigned integer"))?;
+        }
+    }
+    Ok(result)
+}
+
+fn bad_request(msg: String) -> (&'static str, &'static str, Vec<u8>) {
+    (
+        "400 Bad Request",
+        "application/json; charset=utf-8",
+        serde_json::json!({ "error": msg }).to_string().into_bytes(),
+    )
+}
+
+fn api_simulate(req: &Request) -> (&'static str, &'static str, Vec<u8>) {
+    let run = match parse_run_request(req) {
+        Ok(run) => run,
+        Err(e) => return bad_request(e),
+    };
+    match run_simulation(run.seed, &run.scope, run.rules) {
+        Ok(body) => ("200 OK", "application/x-ndjson; charset=utf-8", body),
+        Err(e) => bad_request(e),
+    }
+}
+
+struct RunRequest {
+    seed: u64,
+    scope: String,
+    rules: GameRules,
+}
+
+fn parse_run_request(req: &Request) -> Result<RunRequest, String> {
+    let defaults = GameRules::default();
+    let mut seed = 42u64;
+    let mut scope = "5p".to_string();
+    let mut rules_value: Option<Value> = None;
+
+    if req.method == "POST" {
+        let value: Value = serde_json::from_slice(&req.body)
+            .map_err(|e| format!("request JSON invalid: {}", e))?;
+        if let Some(v) = value.get("seed") {
+            seed = v
+                .as_u64()
+                .ok_or_else(|| "seed must be an unsigned integer".to_string())?;
+        }
+        if let Some(v) = value.get("scope") {
+            scope = v
+                .as_str()
+                .ok_or_else(|| "scope must be a string".to_string())?
+                .to_string();
+        }
+        rules_value = value.get("rules").cloned();
+    } else {
+        for pair in req.query.split('&').filter(|s| !s.is_empty()) {
+            let (key, value) = match pair.split_once('=') {
+                Some(pair) => pair,
+                None => continue,
+            };
+            let value = url_decode(value)?;
+            match key {
+                "seed" => {
+                    seed = value
+                        .parse()
+                        .map_err(|_| "seed must be an unsigned integer".to_string())?
+                }
+                "scope" => scope = value,
+                "rules" => {
+                    rules_value = Some(
+                        serde_json::from_str(&value)
+                            .map_err(|e| format!("rules JSON invalid: {}", e))?,
+                    )
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let rules = match rules_value {
+        None | Some(Value::Null) => defaults,
+        Some(Value::String(json)) => serde_json::from_str::<GameRules>(&json)
+            .map_err(|e| format!("rules JSON invalid: {}", e))?,
+        Some(value) => serde_json::from_value::<GameRules>(value)
+            .map_err(|e| format!("rules object invalid: {}", e))?,
+    };
+    validate_rules(&rules)?;
+    Ok(RunRequest { seed, scope, rules })
+}
+
+fn validate_rules(rules: &GameRules) -> Result<(), String> {
+    rules.validate()
+}
+
+fn run_simulation(seed: u64, scope: &str, rules: GameRules) -> Result<Vec<u8>, String> {
+    let mut engine = MatchEngine::with_rules(seed, rules);
+    engine.set_scope(scope)?;
+    let mut body = Vec::with_capacity(1024 * 1024);
+    let mut ticks = 0usize;
+    while !engine.is_finished() {
+        let tick = engine.step();
+        serde_json::to_writer(&mut body, &tick).map_err(|e| e.to_string())?;
+        body.push(b'\n');
+        ticks += 1;
+        if ticks > MAX_SIMULATION_TICKS {
+            return Err(format!(
+                "simulation exceeded the {} tick safety limit",
+                MAX_SIMULATION_TICKS
+            ));
+        }
+    }
+    Ok(body)
+}
+
+fn url_decode(input: &str) -> Result<String, String> {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b'%' => {
+                if i + 2 >= bytes.len() {
+                    return Err("invalid percent escape in query".to_string());
+                }
+                let high = hex_value(bytes[i + 1])
+                    .ok_or_else(|| "invalid percent escape in query".to_string())?;
+                let low = hex_value(bytes[i + 2])
+                    .ok_or_else(|| "invalid percent escape in query".to_string())?;
+                out.push((high << 4) | low);
+                i += 3;
+            }
+            byte => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).map_err(|_| "query is not valid UTF-8".to_string())
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nba_engine::MatchSetup;
+
+    fn request(method: &str, path: &str, body: Vec<u8>) -> Request {
+        Request {
+            method: method.to_string(),
+            path: path.to_string(),
+            query: String::new(),
+            body,
+        }
+    }
+
+    fn json_body(value: Value) -> Vec<u8> {
+        serde_json::to_vec(&value).expect("test JSON should serialize")
+    }
+    #[test]
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn session_routes_preserve_setup_and_lifecycle() {
+        let session = Arc::new(Mutex::new(MatchService::new()));
+        let setup = MatchSetup::builtin(GameRules::default());
+        let setup_body = serde_json::to_vec(&setup).expect("builtin setup should serialize");
+        let (status, content_type, body) =
+            route(&request("POST", "/api/session/setup", setup_body), &session);
+        assert_eq!(status, "200 OK");
+        assert_eq!(content_type, "application/json; charset=utf-8");
+        let info: Value = serde_json::from_slice(&body).expect("setup response should be JSON");
+        assert_eq!(info["seed"], 42);
+        assert!(info["home_team_id"].as_str().is_some());
+
+        let (status, _, body) = route(&request("GET", "/api/session/state", Vec::new()), &session);
+        assert_eq!(status, "200 OK");
+        let state: Value = serde_json::from_slice(&body).expect("state response should be JSON");
+        assert_eq!(state["state"], "Ready");
+        assert_eq!(state["configured"], true);
+
+        let (status, _, body) = route(
+            &request("GET", "/api/session/snapshot", Vec::new()),
+            &session,
+        );
+        assert_eq!(status, "200 OK");
+        let snapshot: Value = serde_json::from_slice(&body).expect("snapshot should be JSON");
+        assert!(snapshot["t"].as_f64().is_some());
+
+        let (status, _, body) = route(&request("POST", "/api/session/start", Vec::new()), &session);
+        assert_eq!(status, "200 OK");
+        let state: Value = serde_json::from_slice(&body).expect("start response should be JSON");
+        assert_eq!(state["state"], "Running");
+
+        let (status, _, body) = route(
+            &request(
+                "POST",
+                "/api/session/tick",
+                json_body(serde_json::json!({ "dt": 0.04 })),
+            ),
+            &session,
+        );
+        assert_eq!(status, "200 OK");
+        let tick: Value = serde_json::from_slice(&body).expect("tick response should be JSON");
+        assert!(tick["t"].as_f64().is_some());
+
+        let (status, _, body) = route(&request("GET", "/api/session/events", Vec::new()), &session);
+        assert_eq!(status, "200 OK");
+        assert!(serde_json::from_slice::<Value>(&body)
+            .expect("events response should be JSON")
+            .is_array());
+    }
+    #[test]
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn session_routes_reject_invalid_duration_before_engine_call() {
+        let session = Arc::new(Mutex::new(MatchService::new()));
+        let invalid_request = request(
+            "POST",
+            "/api/session/tick",
+            json_body(serde_json::json!({ "dt": -1.0 })),
+        );
+        let (status, content_type, body) = route(&invalid_request, &session);
+        assert_eq!(status, "400 Bad Request");
+        assert_eq!(content_type, "application/json; charset=utf-8");
+        let error: Value = serde_json::from_slice(&body).expect("error should be JSON");
+        assert!(error["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("duration"));
+
+        let (status, _, _) = route(
+            &request("GET", "/api/session/snapshot", Vec::new()),
+            &session,
+        );
+        assert_eq!(status, "409 Conflict");
+    }
+}

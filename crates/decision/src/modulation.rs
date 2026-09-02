@@ -2,15 +2,15 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MoraleState {
     Normal,
-    HotHand,     // Made multiple consecutive shots: boosts confidence & shot utility
-    Frustrated,  // Turnovers/blocked: increases error rate and erratic decision-making
-    Exhausted,   // Low stamina: heavily dampens explosive drive & sprint weights
-    Clutch,      // High focus in tight 4th quarter moments
+    HotHand,    // Made multiple consecutive shots: boosts confidence & shot utility
+    Frustrated, // Turnovers/blocked: increases error rate and erratic decision-making
+    Exhausted,  // Low stamina: heavily dampens explosive drive & sprint weights
+    Clutch,     // High focus in tight 4th quarter moments
 }
 
 #[derive(Debug, Clone)]
 pub struct PlayerModulationState {
-    pub stamina: f32,          // 0.0 to 1.0 (1.0 = fresh)
+    pub stamina: f32, // 0.0 to 1.0 (1.0 = fresh)
     pub morale: MoraleState,
     pub consecutive_makes: u32,
     pub consecutive_misses: u32,
@@ -32,31 +32,42 @@ impl Default for PlayerModulationState {
 }
 
 impl PlayerModulationState {
-    /// Update stamina based on current movement speed.
-    pub fn update_stamina(&mut self, speed: f32, dt: f32) {
-        if speed > 15.0 {
-            // Sprint drain
-            self.stamina = (self.stamina - 0.015 * dt).max(0.2);
-        } else if speed < 6.0 {
-            // Recovery while jogging / standing
-            self.stamina = (self.stamina + 0.02 * dt).min(1.0);
+    /// Update stamina, reception recovery, and morale from the match policy.
+    pub fn update_stamina_with_rules(
+        &mut self,
+        speed: f32,
+        dt: f32,
+        rules: &nba_domain::GameRules,
+    ) {
+        if speed > rules.stamina_sprint_speed_ftps {
+            self.stamina =
+                (self.stamina - rules.stamina_drain_per_second * dt).max(rules.stamina_floor);
+        } else if speed < rules.stamina_recovery_speed_ftps {
+            self.stamina = (self.stamina + rules.stamina_recovery_per_second * dt).min(1.0);
         }
 
-        // Catch equilibrium restores over time
         if self.catch_equilibrium < 1.0 {
-            self.catch_equilibrium = (self.catch_equilibrium + 0.8 * dt).min(1.0);
+            let recovery = rules.stamina_recovery_per_second * dt;
+            self.catch_equilibrium = (self.catch_equilibrium + recovery).min(1.0);
         }
 
-        // Evaluate Morale State
-        if self.stamina < 0.35 {
+        let policy = &rules.modulation;
+        if self.stamina < rules.stamina_exhausted_threshold {
             self.morale = MoraleState::Exhausted;
-        } else if self.consecutive_makes >= 2 {
+        } else if self.consecutive_makes >= policy.hot_hand_makes {
             self.morale = MoraleState::HotHand;
-        } else if self.consecutive_misses >= 3 || self.turnover_count >= 2 {
+        } else if self.consecutive_misses >= policy.frustrated_misses
+            || self.turnover_count >= policy.frustrated_turnovers
+        {
             self.morale = MoraleState::Frustrated;
         } else {
             self.morale = MoraleState::Normal;
         }
+    }
+
+    /// Compatibility wrapper for callers that use the default policy.
+    pub fn update_stamina(&mut self, speed: f32, dt: f32) {
+        self.update_stamina_with_rules(speed, dt, &nba_domain::GameRules::default());
     }
 
     /// Record a shot result to modulate psychological feedback loop.
@@ -76,12 +87,12 @@ impl PlayerModulationState {
     }
 }
 
-/// Coach AI: Monitors game state and applies macro strategy modulations.
+/// Coach AI: monitors game state and applies configured macro strategy modulations.
 #[derive(Debug, Clone)]
 pub struct CoachStrategy {
-    pub pace_factor: f32,         // 1.0 = normal, 1.3 = fast break push, 0.8 = slow down
-    pub three_point_bias: f32,    // 1.0 = normal, 1.5 = trailing by 10 in 4th quarter
-    pub defense_aggression: f32,  // 1.0 = base, 1.4 = full court press / blitz
+    pub pace_factor: f32,
+    pub three_point_bias: f32,
+    pub defense_aggression: f32,
 }
 
 impl Default for CoachStrategy {
@@ -95,21 +106,25 @@ impl Default for CoachStrategy {
 }
 
 impl CoachStrategy {
-    pub fn evaluate(score_diff: i32, period: u32, time_remaining_s: f32) -> Self {
-        let mut strat = CoachStrategy::default();
-        if period == 4 && time_remaining_s < 120.0 {
-            if score_diff < -6 {
-                // Trailing late: shoot more 3s and push pace
-                strat.pace_factor = 1.35;
-                strat.three_point_bias = 1.6;
-                strat.defense_aggression = 1.4;
-            } else if score_diff > 6 {
-                // Leading late: slow down and control clock
-                strat.pace_factor = 0.75;
-                strat.three_point_bias = 0.8;
-                strat.defense_aggression = 1.0;
+    pub fn evaluate(
+        score_diff: i32,
+        period: u32,
+        time_remaining_s: f32,
+        rules: &nba_domain::GameRules,
+    ) -> Self {
+        let mut strategy = Self::default();
+        let policy = &rules.modulation;
+        if period == policy.late_game_period && time_remaining_s < policy.late_game_seconds {
+            if score_diff <= -policy.trailing_score_margin {
+                strategy.pace_factor = policy.trailing_pace_factor;
+                strategy.three_point_bias = policy.trailing_three_point_bias;
+                strategy.defense_aggression = policy.trailing_defense_aggression;
+            } else if score_diff >= policy.leading_score_margin {
+                strategy.pace_factor = policy.leading_pace_factor;
+                strategy.three_point_bias = policy.leading_three_point_bias;
+                strategy.defense_aggression = policy.leading_defense_aggression;
             }
         }
-        strat
+        strategy
     }
 }

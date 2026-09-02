@@ -1,0 +1,13 @@
+[package]
+name = "nba-evaluator"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+nba-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+nba-engine.workspace = true
+nba-domain.workspace = true

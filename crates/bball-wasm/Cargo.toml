@@ -1,0 +1,13 @@
+[package]
+name = "nba-wasm"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+nba-domain.workspace = true
+nba-engine.workspace = true
+serde_json.workspace = true
+wasm-bindgen.workspace = true

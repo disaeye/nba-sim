@@ -1,0 +1,496 @@
+//! 比赛生命周期、阶段与球状态词汇。
+//!
+//! 这些类型只描述比赛世界的事实，不包含决策、物理或裁判实现。
+
+use glam::Vec2;
+use serde::{Deserialize, Serialize};
+use crate::possession::Possession;
+
+/// 比赛生命周期。它决定时钟和活球动作是否推进。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GameFlowState {
+    Pregame,
+    TipOff,
+    LiveBall,
+    DeadBall,
+    Timeout,
+    FreeThrow,
+    QuarterEnd,
+    Halftime,
+    Overtime,
+    GameEnd,
+}
+
+impl GameFlowState {
+    /// 活球动作是否允许发生。
+    pub fn allows_live_ball_actions(self) -> bool {
+        matches!(self, Self::LiveBall | Self::Overtime)
+    }
+
+    /// 比赛时钟只在实际活球期间推进；罚球和死球均停表。
+    pub fn advances_game_clock(self) -> bool {
+        matches!(self, Self::LiveBall | Self::Overtime)
+    }
+
+    /// 进攻时钟只在活球期间推进。
+    pub fn advances_shot_clock(self) -> bool {
+        matches!(self, Self::LiveBall | Self::Overtime)
+    }
+
+    pub fn is_terminal(self) -> bool {
+        self == Self::GameEnd
+    }
+
+    /// Current lifecycle states in which no live-ball action may execute.
+    pub fn is_dead_ball(self) -> bool {
+        matches!(
+            self,
+            Self::Pregame
+                | Self::TipOff
+                | Self::DeadBall
+                | Self::Timeout
+                | Self::FreeThrow
+                | Self::QuarterEnd
+                | Self::Halftime
+                | Self::GameEnd
+        )
+    }
+
+    pub fn allows_dead_ball_setup(self) -> bool {
+        matches!(
+            self,
+            Self::DeadBall | Self::Timeout | Self::QuarterEnd | Self::Halftime
+        )
+    }
+
+    /// Legal macro-lifecycle edges. Same-state assignment is idempotent.
+    pub fn can_transition_to(self, next: Self) -> bool {
+        if self == next {
+            return true;
+        }
+        matches!(
+            (self, next),
+            (Self::Pregame, Self::TipOff | Self::GameEnd)
+                | (
+                    Self::TipOff,
+                    Self::LiveBall | Self::DeadBall | Self::GameEnd
+                )
+                | (
+                    Self::LiveBall,
+                    Self::DeadBall
+                        | Self::Timeout
+                        | Self::FreeThrow
+                        | Self::QuarterEnd
+                        | Self::Halftime
+                        | Self::Overtime
+                        | Self::GameEnd
+                )
+                | (
+                    Self::DeadBall,
+                    Self::LiveBall
+                        | Self::Timeout
+                        | Self::FreeThrow
+                        | Self::QuarterEnd
+                        | Self::Halftime
+                        | Self::Overtime
+                        | Self::GameEnd
+                )
+                | (
+                    Self::Timeout,
+                    Self::DeadBall | Self::LiveBall | Self::GameEnd
+                )
+                | (
+                    Self::FreeThrow,
+                    Self::LiveBall
+                        | Self::DeadBall
+                        | Self::QuarterEnd
+                        | Self::Halftime
+                        | Self::GameEnd,
+                )
+                | (
+                    Self::QuarterEnd,
+                    Self::Halftime
+                        | Self::LiveBall
+                        | Self::Overtime
+                        | Self::DeadBall
+                        | Self::GameEnd,
+                )
+                | (
+                    Self::Halftime,
+                    Self::DeadBall | Self::LiveBall | Self::GameEnd
+                )
+                | (
+                    Self::Overtime,
+                    Self::DeadBall | Self::Timeout | Self::QuarterEnd | Self::GameEnd,
+                )
+        )
+    }
+}
+
+/// 比赛时钟状态（architecture.md §4.3 时钟子结构契约）。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MatchClockState {
+    pub quarter: u8,
+    pub game_clock: f32,
+    pub shot_clock: f32,
+    pub current_time: f32,
+}
+
+impl MatchClockState {
+    pub fn new(quarter_seconds: f32, shot_clock_seconds: f32) -> Self {
+        Self {
+            quarter: 1,
+            game_clock: quarter_seconds,
+            shot_clock: shot_clock_seconds,
+            current_time: 0.0,
+        }
+    }
+
+    pub fn advance(&mut self, dt: f32, flow: GameFlowState) {
+        self.current_time += dt;
+        if flow.advances_game_clock() {
+            self.game_clock = (self.game_clock - dt).max(0.0);
+        }
+        if flow.advances_shot_clock() {
+            self.shot_clock = (self.shot_clock - dt).max(0.0);
+        }
+    }
+
+    pub fn reset_shot_clock(&mut self, seconds: f32) {
+        self.shot_clock = seconds;
+    }
+}
+
+/// 比赛比分与犯规状态（architecture.md §4.3 比分子结构契约）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct MatchScoreState {
+    pub home_score: u32,
+    pub away_score: u32,
+    pub home_fouls: u32,
+    pub away_fouls: u32,
+    pub home_timeouts_remaining: u8,
+    pub away_timeouts_remaining: u8,
+}
+
+impl MatchScoreState {
+    pub fn new(timeouts: u8) -> Self {
+        Self {
+            home_score: 0,
+            away_score: 0,
+            home_fouls: 0,
+            away_fouls: 0,
+            home_timeouts_remaining: timeouts,
+            away_timeouts_remaining: timeouts,
+        }
+    }
+}
+
+/// possession 内的阶段。阶段是约束激活和决策目标的边界。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PhaseType {
+    TipOff,
+    Inbound,
+    Transition,
+    SetPlay,
+    Resolution,
+    Rebound,
+    FreeThrow,
+    Timeout,
+    DeadBallReset,
+}
+
+impl PhaseType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TipOff => "TIP_OFF",
+            Self::Inbound => "INBOUND",
+            Self::Transition => "TRANSITION",
+            Self::SetPlay => "SET_PLAY",
+            Self::Resolution => "RESOLUTION",
+            Self::Rebound => "REBOUND",
+            Self::FreeThrow => "FREE_THROW",
+            Self::Timeout => "TIMEOUT",
+            Self::DeadBallReset => "DEAD_BALL_RESET",
+        }
+    }
+}
+
+/// 球的归属状态 · 单一事实源（architecture 统一规范）。
+///
+/// 归属语义连同飞行/落点参数一起住在领域层；physics 只把该状态当作
+/// 采样参数载体（闭式采样位置是时间的纯函数），不再承载任何归属判断。
+/// `has_ball` 标志、持球人、球权队全部由此派生（P1）。
+///
+/// 宏观态映射：Held/Drive/ControlTransfer = 持球族；
+/// InboundTransfer/InboundReady = 发球准备；Pass/Shot = 飞行族；
+/// LooseBall/RimRebound = 松球族；Dead = 死球。
+#[derive(Debug, Clone)]
+pub enum BallState {
+    /// 持球（突破中的持球亦是 Held，突破由 Drive 描述运动细节）。
+    Held {
+        carrier_id: String,
+    },
+    /// 死球发球准备：球从原位飞向界外发球点。
+    InboundTransfer {
+        from_pos: Vec2,
+        from_z: f32,
+        baseline_pos: Vec2,
+        inbounder_id: String,
+        start_time: f32,
+        duration: f32,
+    },
+    /// 死球发球准备完成：球停在界外发球点，等待发球人释放。
+    InboundReady {
+        baseline_pos: Vec2,
+        inbounder_id: String,
+    },
+    /// 突破：球仍由突破者控制，语义结果由裁决层决定。
+    Drive {
+        driver_id: String,
+        from_pos: Vec2,
+        target_pos: Vec2,
+        start_time: f32,
+        duration: f32,
+        successful: bool,
+        finish_made: bool,
+        fouler_id: Option<String>,
+    },
+    /// 控球交接 / 发球递交的短飞行。
+    ControlTransfer {
+        from_pos: Vec2,
+        from_z: f32,
+        carrier_id: String,
+        start_time: f32,
+        duration: f32,
+    },
+    /// 传球飞行（含界外发球传球，inbound = true）。
+    Pass {
+        from_pos: Vec2,
+        to_pos: Vec2,
+        target_id: String,
+        start_time: f32,
+        duration: f32,
+        peak_z: f32,
+        inbound: bool,
+        /// 出手时刻裁定、到达时刻回放。
+        receive_success: bool,
+    },
+    /// 投篮飞行。
+    Shot {
+        shooter_id: String,
+        from_pos: Vec2,
+        hoop_pos: Vec2,
+        start_time: f32,
+        duration: f32,
+        is_made: bool,
+        is_three: bool,
+        peak_z: f32,
+    },
+    /// 松球（传球掉落/篮板弹地）。`last_touch_team` 记录最后触球方
+    /// （architecture：InFlight/Loose→最后触球队），是飞行期
+    /// possession 派生的唯一依据。
+    LooseBall {
+        pos: Vec2,
+        vel: Vec2,
+        z: f32,
+        vel_z: f32,
+        last_touch_team: Possession,
+    },
+    /// 打铁触筐后的篮板飞行。`last_touch_team` 为出手方（触筐不改 Team control）。
+    RimRebound {
+        from_pos: Vec2,
+        from_z: f32,
+        hoop_pos: Vec2,
+        target_landing: Vec2,
+        start_time: f32,
+        duration: f32,
+        peak_z: f32,
+        last_touch_team: Possession,
+    },
+    /// 终局冻结的死球位置。死球期 possession 由上一个回合的归属决定，
+    /// `last_touch_team` 在进入死球时快照。
+    Dead {
+        pos: Vec2,
+        z: f32,
+        last_touch_team: Possession,
+    },
+}
+
+/// 球的宏观相位标签（由 [`BallState`] 派生，供决策上下文等窄消费面使用）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BallPhase {
+    Held,
+    PassFlight,
+    ShotFlight,
+    Drive,
+    Loose,
+    Rebound,
+    InboundTransfer,
+    Dead,
+}
+
+impl BallState {
+    /// 当前持球人（仅持球族有值）。
+    pub fn carried_by(&self) -> Option<&str> {
+        match self {
+            BallState::Held { carrier_id }
+            | BallState::Drive {
+                driver_id: carrier_id,
+                ..
+            }
+            | BallState::ControlTransfer { carrier_id, .. } => Some(carrier_id.as_str()),
+            _ => None,
+        }
+    }
+
+    /// 持球/飞行族的关联球员（M2：取代 `carrier_idx` 的读取方）。
+    ///
+    /// - 持球族（Held/Drive/ControlTransfer）→ 持球人；
+    /// - Pass → 接球人；Shot → 出手人；
+    /// - InboundTransfer/InboundReady → 发球人；
+    /// - Loose/RimRebound/Dead → 无关联球员（possession 由
+    ///   [`BallState::possessing_team`] 从最后触球方派生）。
+    pub fn associated_player(&self) -> Option<&str> {
+        match self {
+            BallState::Held { carrier_id }
+            | BallState::Drive {
+                driver_id: carrier_id,
+                ..
+            }
+            | BallState::ControlTransfer { carrier_id, .. } => Some(carrier_id.as_str()),
+            BallState::Pass { target_id, .. } => Some(target_id.as_str()),
+            BallState::Shot { shooter_id, .. } => Some(shooter_id.as_str()),
+            BallState::InboundTransfer { inbounder_id, .. }
+            | BallState::InboundReady { inbounder_id, .. } => Some(inbounder_id.as_str()),
+            BallState::LooseBall { .. }
+            | BallState::RimRebound { .. }
+            | BallState::Dead { .. } => None,
+        }
+    }
+
+    /// 派生球权归属（architecture：取代 `Possession` 独立字段的读取方）。
+    ///
+    /// - 持球/交接/突破 → 持球人所在队；
+    /// - 传球飞行 → 接球人所在队（进攻方内部转移不改归属）；被抢断时
+    ///   抢断即是一次状态转移（→ Held{defender}），不在此处体现；
+    /// - 投篮/篮板/松球 → 最后触球方（`last_touch_team` 载荷）；
+    /// - 发球族 → 发球人所在队；
+    /// - 死球 → 进入死球时快照的 `last_touch_team`。
+    ///
+    /// 注意：防守方碰掉球进入 LooseBall 时 `last_touch_team` 记防守方
+    /// （物理上确实最后触球），但引擎的 team possession 语义按 FIBA
+    /// 14-3 的 deflection 不结束控制处理——该语义在引擎层由写入口
+    /// 构造载荷时决定，本派生只忠实回放载荷。
+    pub fn possessing_team(&self) -> Option<Possession> {
+        match self {
+            BallState::Held { .. }
+            | BallState::Drive { .. }
+            | BallState::ControlTransfer { .. }
+            | BallState::Pass { .. }
+            | BallState::Shot { .. }
+            | BallState::InboundTransfer { .. }
+            | BallState::InboundReady { .. } => None,
+            BallState::LooseBall { last_touch_team, .. }
+            | BallState::RimRebound { last_touch_team, .. }
+            | BallState::Dead { last_touch_team, .. } => Some(*last_touch_team),
+        }
+    }
+
+    /// 派生相位标签。
+    pub fn phase(&self) -> BallPhase {
+        match self {
+            BallState::Held { .. } | BallState::ControlTransfer { .. } => BallPhase::Held,
+            BallState::InboundTransfer { .. } | BallState::InboundReady { .. } => {
+                BallPhase::InboundTransfer
+            }
+            BallState::Pass { .. } => BallPhase::PassFlight,
+            BallState::Drive { .. } => BallPhase::Drive,
+            BallState::Shot { .. } => BallPhase::ShotFlight,
+            BallState::LooseBall { .. } => BallPhase::Loose,
+            BallState::RimRebound { .. } => BallPhase::Rebound,
+            BallState::Dead { .. } => BallPhase::Dead,
+        }
+    }
+}
+
+/// 唯一写入口的纯函数转换表（architecture 状态机规范）。
+///
+/// 输入当前状态与事实驱动的下一状态；非法边被拒绝并给出原因。
+/// 非法 = 语义上不可能的归属跃迁（如飞行中的投篮被直接拿住、死球直接
+/// 进入活球飞行而不经发球程序）。合法边覆盖引擎当前产出的全部转移。
+pub fn transition_ball_state(cur: &BallState, next: BallState) -> Result<BallState, String> {
+    if edge_allowed(cur, &next) {
+        Ok(next)
+    } else {
+        Err(format!("{:?} -> {:?}", cur.phase(), next.phase()))
+    }
+}
+
+fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
+    use BallState as B;
+    matches!(
+        (cur, next),
+        // 持球：可继续持球（重持）、突破、传球、投篮、交接、死球、
+        // 或进入发球程序（持球违例，如 5 秒/8 秒/走步——死球化与发球
+        // 转移合并为单步，见下注）。
+            (B::Held { .. }, B::Held { .. })
+            | (B::Held { .. }, B::Drive { .. })
+            | (B::Held { .. }, B::Pass { .. })
+            | (B::Held { .. }, B::Shot { .. })
+            | (B::Held { .. }, B::ControlTransfer { .. })
+            | (B::Held { .. }, B::Dead { .. })
+            | (B::Held { .. }, B::InboundTransfer { .. })
+        // 罚球特殊路径：罚球出手为瞬时结算，不中直接进入罚球篮板
+        // （architecture 的 InFlight{FreeThrow}→Loose 语义）。
+        // 罚球程序内两次尝试之间球为死球，不中同样直接进篮板。
+            | (B::Held { .. }, B::RimRebound { .. })
+            | (B::Dead { .. }, B::RimRebound { .. })
+        // 突破：结算为持球 / 攻框命中后的发球转移（合并建模，同上）/
+        // 篮板飞行 / 松球 / 死球。
+            | (B::Drive { .. }, B::Held { .. })
+            | (B::Drive { .. }, B::RimRebound { .. })
+            | (B::Drive { .. }, B::InboundTransfer { .. })
+            | (B::Drive { .. }, B::LooseBall { .. })
+            | (B::Drive { .. }, B::Dead { .. })
+        // 传球飞行：到达 / 被断（持球）/ 掉落（松球）/ 出界或持球违例
+        // 判罚直接进入对方发球程序（出界即失球权，合并建模同上）。
+            | (B::Pass { .. }, B::Held { .. })
+            | (B::Pass { .. }, B::LooseBall { .. })
+            | (B::Pass { .. }, B::Dead { .. })
+            | (B::Pass { .. }, B::InboundTransfer { .. })
+        // 投篮飞行：命中 / 打铁触筐（篮板飞行）/ 出界。
+        // 命中后"回场发球转移"是 Dead{MadeBasket} 瞬时态与发球飞行
+        // 的合并建模（引擎单步完成，状态机摘要表的等价展开）。
+            | (B::Shot { .. }, B::InboundTransfer { .. })
+            | (B::Shot { .. }, B::Dead { .. })
+            | (B::Shot { .. }, B::RimRebound { .. })
+            | (B::Shot { .. }, B::LooseBall { .. })
+        // 篮板飞行：被收下（持球）/ 直接一传（outlet，收下即传的原子转移）
+        // / 弹出界。
+            | (B::RimRebound { .. }, B::Held { .. })
+            | (B::RimRebound { .. }, B::Pass { .. })
+            | (B::RimRebound { .. }, B::LooseBall { .. })
+            | (B::RimRebound { .. }, B::Dead { .. })
+            | (B::RimRebound { .. }, B::InboundTransfer { .. })
+        // 松球：被收下 / 交接拾取 / 继续弹跳 / 出界。
+            | (B::LooseBall { .. }, B::Held { .. })
+            | (B::LooseBall { .. }, B::ControlTransfer { .. })
+            | (B::LooseBall { .. }, B::LooseBall { .. })
+            | (B::LooseBall { .. }, B::Dead { .. })
+            | (B::LooseBall { .. }, B::InboundTransfer { .. })
+        // 交接短飞行：到达即持球；持球违例判罚时死球化与发球程序
+        // 合并为单步（否则拒绝写回会让引擎楔死在"死球+持球"无出口状态，
+        // 2026-09-02 GAP 复审 seed 2/4 实证）。
+            | (B::ControlTransfer { .. }, B::Held { .. })
+            | (B::ControlTransfer { .. }, B::InboundTransfer { .. })
+        // 死球：只允许进入发球程序或保持死球。
+            | (B::Dead { .. }, B::InboundTransfer { .. })
+            | (B::Dead { .. }, B::Dead { .. })
+        // 发球转移：到达发球点就绪，或被中断回死球。
+            | (B::InboundTransfer { .. }, B::InboundReady { .. })
+            | (B::InboundTransfer { .. }, B::Dead { .. })
+        // 发球就绪：发球人传出（Pass{inbound}）或回死球。
+            | (B::InboundReady { .. }, B::Pass { .. })
+            | (B::InboundReady { .. }, B::Dead { .. })
+    )
+}

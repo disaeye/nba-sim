@@ -1,0 +1,10 @@
+[package]
+name = "nba-debug-server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+nba-domain.workspace = true
+nba-engine.workspace = true
+nba-protocol.workspace = true
+serde_json.workspace = true

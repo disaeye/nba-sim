@@ -1,3 +1,4 @@
+use crate::rules::GameRules;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,57 +34,66 @@ pub struct ActionTimeWindow {
 }
 
 impl ActionTimeWindow {
-    pub fn new_jump_shot(player_id: &str, start_time: f32) -> Self {
-        let prep_dur = 0.28;
-        let exec_dur = 0.22;
-        let follow_dur = 0.35;
-        Self {
-            player_id: player_id.to_string(),
-            action_type: ActionType::JumpShot,
-            phase: ActionPhase::Preparation,
+    pub fn new_jump_shot(player_id: &str, start_time: f32, rules: &GameRules) -> Self {
+        Self::new(
+            player_id,
+            ActionType::JumpShot,
             start_time,
-            prep_duration: prep_dur,
-            exec_duration: exec_dur,
-            follow_duration: follow_dur,
-            lock_kinematics: true,
-            interference_start: start_time + prep_dur * 0.5,
-            interference_end: start_time + prep_dur + exec_dur,
-        }
+            rules.jump_shot_prep_seconds,
+            rules.jump_shot_exec_seconds,
+            rules.jump_shot_follow_seconds,
+            true,
+            rules.jump_shot_prep_seconds * 0.5,
+        )
     }
 
-    pub fn new_pass(player_id: &str, start_time: f32) -> Self {
-        let prep_dur = 0.16;
-        let exec_dur = 0.12;
-        let follow_dur = 0.16;
-        Self {
-            player_id: player_id.to_string(),
-            action_type: ActionType::PassRelease,
-            phase: ActionPhase::Preparation,
+    pub fn new_pass(player_id: &str, start_time: f32, rules: &GameRules) -> Self {
+        Self::new(
+            player_id,
+            ActionType::PassRelease,
             start_time,
-            prep_duration: prep_dur,
-            exec_duration: exec_dur,
-            follow_duration: follow_dur,
-            lock_kinematics: false,
-            interference_start: start_time,
-            interference_end: start_time + prep_dur + exec_dur,
-        }
+            rules.pass_prep_seconds,
+            rules.pass_exec_seconds,
+            rules.pass_follow_seconds,
+            false,
+            0.0,
+        )
     }
 
-    pub fn new_rebound_jump(player_id: &str, start_time: f32) -> Self {
-        let prep_dur = 0.20;
-        let exec_dur = 0.30;
-        let follow_dur = 0.30;
+    pub fn new_rebound_jump(player_id: &str, start_time: f32, rules: &GameRules) -> Self {
+        Self::new(
+            player_id,
+            ActionType::ReboundJump,
+            start_time,
+            rules.rebound_prep_seconds,
+            rules.rebound_exec_seconds,
+            rules.rebound_follow_seconds,
+            true,
+            rules.rebound_prep_seconds,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        player_id: &str,
+        action_type: ActionType,
+        start_time: f32,
+        prep_duration: f32,
+        exec_duration: f32,
+        follow_duration: f32,
+        lock_kinematics: bool,
+        interference_offset: f32,
+    ) -> Self {
         Self {
             player_id: player_id.to_string(),
-            action_type: ActionType::ReboundJump,
+            action_type,
             phase: ActionPhase::Preparation,
             start_time,
-            prep_duration: prep_dur,
-            exec_duration: exec_dur,
-            follow_duration: follow_dur,
-            lock_kinematics: true,
-            interference_start: start_time + prep_dur,
-            interference_end: start_time + prep_dur + exec_dur,
+            prep_duration,
+            exec_duration,
+            follow_duration,
+            lock_kinematics,
+            interference_start: start_time + interference_offset,
+            interference_end: start_time + prep_duration + exec_duration,
         }
     }
 
@@ -100,8 +110,8 @@ impl ActionTimeWindow {
     }
 
     pub fn is_finished(&self, current_time: f32) -> bool {
-        let total_duration = self.prep_duration + self.exec_duration + self.follow_duration;
-        current_time >= self.start_time + total_duration
+        current_time
+            >= self.start_time + self.prep_duration + self.exec_duration + self.follow_duration
     }
 
     pub fn is_in_interference_window(&self, current_time: f32) -> bool {

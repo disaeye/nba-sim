@@ -5,5 +5,11 @@
 //! 弹道裁决 → 阶段转换 → 协议输出。业务规则全部下沉到各子系统 crate。
 
 pub mod match_engine;
+pub mod service;
+pub mod setup;
 
-pub use match_engine::{MatchEngine, Simulation};
+pub use service::{MatchInfo, MatchService, SessionState};
+
+pub use setup::{LineupConfig, MatchSetup};
+
+pub use match_engine::{ExportSummary, MatchBoxScore, MatchEngine, Simulation};

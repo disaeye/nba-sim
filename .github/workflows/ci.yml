@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (debug)
+        run: cargo build --workspace
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # 黄金哈希在测试套件内：任何逐 tick 分歧立即变红（quality.md §5）。
+      - name: Test (含黄金哈希 / 不变量 / 评判)
+        run: cargo test --workspace --release
+
+  stage-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build CLI (release)
+        run: cargo build --release -p nba-sim-cli
+      # 缩减种子集的统计 sanity net（quality.md §2.5；统计基线测试
+      # stats_baseline.rs 亦在 test job 内运行）。
+      - name: Batch statistics (sanity net)
+        run: cargo run --release -p nba-sim-cli -- --seeds 0..7 batch full --out /tmp/stats.jsonl
+
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Inline constant guard (charter C1)
+        run: python3 scripts/check_inline_constants.py
+      - name: Doc cross-reference guard
+        run: python3 scripts/check_doc_refs.py
+      - name: Build debug-server and run full UI card alignment check
+        run: |
+          cargo build --release -p nba-debug-server
+          ./target/release/nba-debug-server 4173 &
+          sleep 2
+          python3 scripts/verify_ui_alignment.py

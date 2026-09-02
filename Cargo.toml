@@ -8,8 +8,12 @@ members = [
     "crates/engine",
     "crates/protocol",
     "crates/cli",
+    "crates/debug-server",
+    "crates/semantics",
+    "crates/invariants",
+    "crates/evaluator",
+    "crates/bball-wasm",
 ]
-
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
@@ -20,6 +24,8 @@ rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rapier2d = "0.18"
+rand_chacha = "0.3"
+wasm-bindgen = "0.2"
 
 # Internal crates
 nba-domain = { path = "crates/domain" }
@@ -27,4 +33,13 @@ nba-physics = { path = "crates/physics" }
 nba-decision = { path = "crates/decision" }
 nba-officiating = { path = "crates/officiating" }
 nba-engine = { path = "crates/engine" }
+nba-evaluator = { path = "crates/evaluator" }
 nba-protocol = { path = "crates/protocol" }
+nba-semantics = { path = "crates/semantics" }
+nba-invariants = { path = "crates/invariants" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
