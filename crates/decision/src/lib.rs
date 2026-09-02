@@ -16,6 +16,7 @@ pub use constraint::{
 pub use modulation::{CoachStrategy, MoraleState, PlayerModulationState};
 pub use pipeline::{DecisionOutput, DecisionSystem, DecisionTrace, DecisionWeights};
 pub use tactics::{
-    DefensiveRole, DefensiveTactic, OffensiveRole, TacticalPlanner, TacticalSet, TeamIntent,
+    DefensiveRole, DefensiveScheme, DefensiveTactic, OffensiveRole, TacticalPlanner, TacticalSet,
+    TeamIntent,
 };
 // Domain owns the canonical phase, possession, and lifecycle vocabulary.

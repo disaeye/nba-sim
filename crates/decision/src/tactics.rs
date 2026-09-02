@@ -12,6 +12,35 @@ pub enum TacticalSet {
     FastBreakTransition,
 }
 
+/// 防守战术策略体系（tactics.md §2.2 防守覆盖模型）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefensiveScheme {
+    /// 人盯人防守伴随弱侧协防刷（Man-to-Man Shell）。
+    ManToManShell,
+    /// 2-3 联防（Two-Three Zone）：双后卫高位封锁，三锋线保护油漆区与底角。
+    TwoThreeZone,
+    /// 全员无限换防（Switch-All Aggressive）：防守人紧贴并切断传球线路。
+    SwitchAllAggressive,
+}
+
+impl DefensiveScheme {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::ManToManShell => "def_man_shell",
+            Self::TwoThreeZone => "def_23_zone",
+            Self::SwitchAllAggressive => "def_switch_all",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::ManToManShell => "人盯人协防体系 (Man-to-Man Shell)",
+            Self::TwoThreeZone => "2-3 区域联防体系 (2-3 Zone)",
+            Self::SwitchAllAggressive => "无限换防体系 (Switch-All Aggressive)",
+        }
+    }
+}
+
 impl TacticalSet {
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
@@ -584,6 +613,70 @@ impl TacticalPlanner {
     pub fn bind_targets(targets: &mut [TargetAssignment], roster_ids: &[String]) {
         for (target, player_id) in targets.iter_mut().zip(roster_ids.iter()) {
             target.player_id = Some(player_id.clone());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    #[test]
+    fn tactical_sets_roundtrip_ids_and_names() {
+        let sets = [
+            TacticalSet::HighPickAndRoll,
+            TacticalSet::FiveOutMotion,
+            TacticalSet::IsolationDrive,
+            TacticalSet::DriveAndKick,
+            TacticalSet::PostUp,
+            TacticalSet::FastBreakTransition,
+        ];
+        for set in sets {
+            let id = set.id();
+            assert_eq!(TacticalSet::from_id(id), Some(set));
+            assert!(!set.name_zh().is_empty());
+        }
+    }
+
+    #[test]
+    fn defensive_schemes_have_valid_ids_and_display_names() {
+        let schemes = [
+            DefensiveScheme::ManToManShell,
+            DefensiveScheme::TwoThreeZone,
+            DefensiveScheme::SwitchAllAggressive,
+        ];
+        for s in schemes {
+            assert!(!s.id().is_empty());
+            assert!(!s.display_name().is_empty());
+        }
+    }
+
+    #[test]
+    fn plan_possession_targets_generates_five_on_five_slots() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let rules = GameRules::default();
+        for set in [
+            TacticalSet::HighPickAndRoll,
+            TacticalSet::FiveOutMotion,
+            TacticalSet::IsolationDrive,
+            TacticalSet::DriveAndKick,
+            TacticalSet::PostUp,
+            TacticalSet::FastBreakTransition,
+        ] {
+            let (home, away) = TacticalPlanner::plan_possession_targets_with_rules(
+                set,
+                SubPhase::Initiation,
+                Possession::Home,
+                Vec2::ZERO,
+                0,
+                0.0,
+                &mut rng,
+                &rules,
+            );
+            assert_eq!(home.len(), 5);
+            assert_eq!(away.len(), 5);
         }
     }
 }
