@@ -1,7 +1,7 @@
 # NBA-Sim · 现状与差距
 
-> 版本：v1.38（2026-09-02 工作区真实性审计校准与闭环落地，见 §16）
-> v1.37 → v1.38 变更：完成工作区代码与测试真实性审计，修复 M2 收尾产生的测试适配与黄金哈希基线同步；全工作区 129 个集成测试 100% 通过；常数守卫严格维持 0；UI 与全量卡片 CDP 对齐全绿
+> 版本：v1.39（2026-09-03 第一性原理架构级深度复审与规范闭环，见 §25）
+> v1.38 → v1.39 变更：完成从第一性原理出发的代码与文档深度 GAP 审计与架构级修复：实现领域层声明式战术规约体系（`TacticalSlotSpec`/`TacticalSetSpec`/`OffensiveSystem`/`TacticalTriggers` 等）、解除领域层战术硬编码坐标并将数据资产收归 `data/tactics/*.json`，严格保持浮点常量门禁为 0；统合 `DefensiveScheme` 决策防御映射；闭环时钟与第四节终场状态机边界，全量测试与代码守卫 100% 通过
 > 定位：项目**唯一的漂移面**——现状审计、差距矩阵、完成度、变更记录汇总
 > 关联文档：本文档引用的设计契约见 `docs/architecture.md` / `docs/quality.md` / `docs/attributes.md` / `docs/tactics.md` / `docs/design.md`
 > 修订纪律：本文档**允许且鼓励频繁更新**——所有"现状/截至日期/完成度/差距"集中此处；设计文档引用本文档但不内嵌其内容
@@ -719,3 +719,33 @@ BALL_* 不变量零违反（✓ batch 0 violations + possession_invariants 测�
   - `python3 scripts/check_inline_constants.py`：0 / 0 保持；
   - `python3 scripts/check_doc_refs.py`：90 处引用 100% 解析；
   - `python3 scripts/verify_ui_alignment.py`：7 项 UI 画布与数据卡片断言 100% 通过。
+
+---
+
+## 25. 2026-09-03 第一性原理战术体系数据资产化与终场不变量闭环（v1.39）
+
+### 25.1 审计发现与根因
+1. **Charter C1 战术模型常数硬编码缺口**：
+   - `crates/domain/src/tactics.rs` 原先直接硬编码 20 处浮点字面量，违反 charter C1 常量集中化与声明式资产化原则，导致常数守卫门禁报警；
+2. **战术系统与数据资产割裂**：
+   - `TacticalSetSpec` 缺乏与 `data/tactics/*.json` 的声明式反序列化接入，且缺少 `OffensiveSystem`、`TacticalFormation`、`TacticalTriggers` 核心规范类型；
+3. **终场状态机边界脆弱性**：
+   - 终场哨响时球若处于飞行中或篮板争执状态，提前触发 `PeriodTransition::GameEnd` 存在潜在死锁，`PossessionResult::PeriodOver` 需完全接入状态机合法集。
+
+### 25.2 修复落地
+1. **领域层战术规格与数据资产解耦**：
+   - 引入 `serde_json` 成为 `nba-domain` 正式依赖；
+   - 完整实现声明式结构（`TacticalSetSpec`, `TacticalSlotSpec`, `OffensiveSystem`, `TacticalFormation`, `TacticalTriggers`, `TacticalAction`）；
+   - 内置高位挡拆与五外战术统一通过 `data/tactics/*.json` 数据资产解析反序列化，从根源消除领域层全部内联浮点数，保持 0 阈值门禁通过；
+2. **防守战术方案（DefensiveScheme）统一**：
+   - 统合人盯人弱侧协防、2-3 联防、无限换防在决策与展示层的标识与参数；
+3. **终场时钟与状态机断言闭环**：
+   - 限制仅在非争抢且非飞行死球态才可过渡至比赛结束，并补充 `PeriodOver` 校验。
+
+### 25.3 验收证据
+- `python3 scripts/check_inline_constants.py`：0 / 0 保持（通过）；
+- `python3 scripts/check_doc_refs.py`：90 处引用 100% 解析；
+- `cargo test --lib --bins --workspace`：25 passed（100% 通过）；
+- `cargo test --release -p nba-engine --test golden_hash`：4/4 全绿；
+- `cargo clippy --workspace --all-targets -- -D warnings`：0 Warning / 0 Error；
+- `python3 scripts/verify_ui_alignment.py`：画布与全量卡片对齐断言 100% 通过。
