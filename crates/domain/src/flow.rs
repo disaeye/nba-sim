@@ -448,6 +448,7 @@ fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
         // 突破：结算为持球 / 攻框命中后的发球转移（合并建模，同上）/
         // 篮板飞行 / 松球 / 死球。
             | (B::Drive { .. }, B::Held { .. })
+            | (B::Drive { .. }, B::Shot { .. })
             | (B::Drive { .. }, B::RimRebound { .. })
             | (B::Drive { .. }, B::InboundTransfer { .. })
             | (B::Drive { .. }, B::LooseBall { .. })
@@ -466,8 +467,9 @@ fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
             | (B::Shot { .. }, B::RimRebound { .. })
             | (B::Shot { .. }, B::LooseBall { .. })
         // 篮板飞行：被收下（持球）/ 直接一传（outlet，收下即传的原子转移）
-        // / 弹出界。
+        // / 弹出界 / 过渡交接给抢板人（ControlTransfer 合球平滑）。
             | (B::RimRebound { .. }, B::Held { .. })
+            | (B::RimRebound { .. }, B::ControlTransfer { .. })
             | (B::RimRebound { .. }, B::Pass { .. })
             | (B::RimRebound { .. }, B::LooseBall { .. })
             | (B::RimRebound { .. }, B::Dead { .. })

@@ -1,0 +1,52 @@
+{
+  "id": "off_motion_spacing",
+  "name_zh": "五外动态进攻 (5-Out Motion)",
+  "spacing_style": "PerimeterFiveOut",
+  "slots": [
+    {
+      "role": "Playmaker",
+      "name_zh": "弧顶组织者",
+      "base_offset_x": 29.0,
+      "base_offset_y": 25.0,
+      "is_screener": false,
+      "is_corner_spacer": false,
+      "is_wing_relocate": false
+    },
+    {
+      "role": "WingCutter",
+      "name_zh": "左侧 45° 侧翼",
+      "base_offset_x": 24.0,
+      "base_offset_y": 11.0,
+      "is_screener": false,
+      "is_corner_spacer": false,
+      "is_wing_relocate": true
+    },
+    {
+      "role": "WingCutter",
+      "name_zh": "右侧 45° 侧翼",
+      "base_offset_x": 24.0,
+      "base_offset_y": 39.0,
+      "is_screener": false,
+      "is_corner_spacer": false,
+      "is_wing_relocate": true
+    },
+    {
+      "role": "CornerSpacer",
+      "name_zh": "左底角射手",
+      "base_offset_x": 8.0,
+      "base_offset_y": 4.0,
+      "is_screener": false,
+      "is_corner_spacer": true,
+      "is_wing_relocate": false
+    },
+    {
+      "role": "CornerSpacer",
+      "name_zh": "右底角射手",
+      "base_offset_x": 8.0,
+      "base_offset_y": 46.0,
+      "is_screener": false,
+      "is_corner_spacer": true,
+      "is_wing_relocate": false
+    }
+  ]
+}

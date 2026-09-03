@@ -447,11 +447,16 @@ function eventClass(name) {
   function updateTimelineCursor() {
     let current = null;
     for (const row of state.eventElements) {
-      const active = Number(row.dataset.index) <= state.idx;
-      row.classList.toggle("current", active);
-      if (active) current = row;
+      const rowIdx = Number(row.dataset.index);
+      const isPassed = rowIdx <= state.idx;
+      row.classList.toggle("passed", isPassed);
+      row.classList.remove("current");
+      if (isPassed) current = row;
     }
-    if (current && state.playing) current.scrollIntoView({ block: "nearest" });
+    if (current) {
+      current.classList.add("current");
+      if (state.playing) current.scrollIntoView({ block: "nearest" });
+    }
   }
   function renderAnomalies() {
     const count = state.anomalies.length;
@@ -496,6 +501,16 @@ function eventClass(name) {
     $("awayTeamName").textContent = awayTeam.short_name || awayTeam.name || "AWAY";
     $("tacticalSet").textContent = tick.tactical_set || "—";
     $("phaseLabel").textContent = String(tick.phase || "—").replaceAll("_", " ").toUpperCase();
+    const names = eventNames(tick);
+    const chip = $("eventChip");
+    if (chip) {
+      if (names.length) {
+        chip.textContent = names.join(" · ");
+        chip.style.display = "";
+      } else {
+        chip.style.display = "none";
+      }
+    }
     $("possessionLabel").textContent = `POS #${tick.possession_id ?? "—"}`;
     $("homeScore").textContent = finite(tick.score?.home).toFixed(0);
     $("awayScore").textContent = finite(tick.score?.away).toFixed(0);

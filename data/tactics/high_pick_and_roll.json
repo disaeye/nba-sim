@@ -1,0 +1,52 @@
+{
+  "id": "off_horns_pnr",
+  "name_zh": "高位挡拆战术 (High Pick and Roll)",
+  "spacing_style": "Spread",
+  "slots": [
+    {
+      "role": "Playmaker",
+      "name_zh": "持球发起人",
+      "base_offset_x": 28.0,
+      "base_offset_y": 25.0,
+      "is_screener": false,
+      "is_corner_spacer": false,
+      "is_wing_relocate": false
+    },
+    {
+      "role": "CornerSpacer",
+      "name_zh": "强侧底角射手",
+      "base_offset_x": 10.0,
+      "base_offset_y": 4.0,
+      "is_screener": false,
+      "is_corner_spacer": true,
+      "is_wing_relocate": false
+    },
+    {
+      "role": "WingCutter",
+      "name_zh": "弱侧翼位拉开",
+      "base_offset_x": 10.0,
+      "base_offset_y": 46.0,
+      "is_screener": false,
+      "is_corner_spacer": true,
+      "is_wing_relocate": false
+    },
+    {
+      "role": "CornerSpacer",
+      "name_zh": "弱侧底角拉开",
+      "base_offset_x": 20.0,
+      "base_offset_y": 6.0,
+      "is_screener": false,
+      "is_corner_spacer": false,
+      "is_wing_relocate": true
+    },
+    {
+      "role": "ScreenAndRoll",
+      "name_zh": "高位掩护中锋",
+      "base_offset_x": 18.0,
+      "base_offset_y": 25.0,
+      "is_screener": true,
+      "is_corner_spacer": false,
+      "is_wing_relocate": false
+    }
+  ]
+}

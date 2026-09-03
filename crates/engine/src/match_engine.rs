@@ -711,8 +711,7 @@ impl MatchEngine {
             if self.sub_phase_timer + f32::EPSILON < self.rules.tip_off_duration_seconds {
                 self.physics.reset_motion();
                 self.current_event = Some("TIPOFF".to_string());
-                self.current_callout = Some("比赛准备中，等待跳球。".to_string());
-                self.current_event_types.clear();
+                self.current_callout = Some("裁判抛球，双方中锋起跳争夺跳球！".to_string());
                 self.current_enforcements.clear();
                 self.last_decision_trace = None;
                 return self.build_tick();
@@ -824,17 +823,19 @@ impl MatchEngine {
                 reason: kind.as_str().to_string(),
             });
             self.current_event = Some("VIOLATION".to_string());
-            self.current_callout = Some(format!(
+            let violation_callout = format!(
                 "{}！{} 失去球权",
                 constraint_id,
                 team_name_zh(is_home)
-            ));
+            );
             self.start_violation_turnover(kind);
+            // 确保违例判定帧忠实呈现哨响违例事实，不被随后的发球准备覆写
+            self.current_callout = Some(violation_callout);
+            self.current_event = Some("VIOLATION".to_string());
             self.physics.step(nba_domain::FixedDt(dt));
             self.publish_events();
             return self.build_tick();
         }
-
         // Advance action windows in stable player-id order.
         if !self.active_windows.is_empty() {
             let mut window_ids: Vec<String> = self.active_windows.keys().cloned().collect();
@@ -1268,58 +1269,56 @@ impl MatchEngine {
                         self.current_event = Some("DRIVE_FOUL".to_string());
                         self.current_callout =
                             Some(format!("{} 突破造成投篮犯规，获得罚球机会", driver_id));
-                    } else if successful && finish_made {
-                        self.box_score.fg2_attempts += 1;
-                        self.box_score.fg2_made += 1;
-                        self.pending_events.push(GameEvent::HoopArrival {
-                            shooter_id: driver_id.clone(),
-                            shot_origin: (driver_pos.x, driver_pos.y),
-                            is_made: true,
-                            is_three: false,
-                            contest_intensity: 0.0,
-                        });
-                        if is_home {
-                            self.home_score = self.home_score.saturating_add(2);
-                        } else {
-                            self.away_score = self.away_score.saturating_add(2);
-                        }
-                        self.ball_pos_3d = (driver_pos, holder_height);
-                        let baseline =
-                            Court::nearest_boundary_with_geometry(driver_pos, self.rules.court);
-                        self.emit_possession_summary("SCORE", None, None, None);
-                        self.start_inbound_transition(baseline, (driver_pos, holder_height));
-                        self.current_event = Some("DRIVE_SCORE".to_string());
-                        self.current_callout = Some(format!("{} 突破上篮得手！", driver_id));
                     } else if successful {
-                        self.box_score.fg2_attempts += 1;
-                        self.pending_events.push(GameEvent::HoopArrival {
-                            shooter_id: driver_id.clone(),
-                            shot_origin: (driver_pos.x, driver_pos.y),
-                            is_made: false,
-                            is_three: false,
-                            contest_intensity: 0.0,
-                        });
-                        let rebound_from = self.ball_pos_3d;
-                        self.transition_phase(SubPhase::FlightAndRebound);
-                        let landing_spot = BallisticsEngine::compute_rebound_landing(
-                            driver_pos,
-                            self.rules.court.hoop_pos(is_home),
-                            &mut self.rng,
-                            &self.rules,
-                        );
-                        new_ball_state = Some(BallTrajectoryKind::RimRebound {
-                            from_pos: rebound_from.0,
-                            from_z: rebound_from.1,
-                            hoop_pos: self.rules.court.hoop_pos(is_home),
-                            target_landing: landing_spot.landing_pos,
-                            start_time: current_t,
-                            duration: landing_spot.flight_duration,
-                            peak_z: self.rules.rebound_peak_ft,
-                            last_touch_team: self.possession,
-                        });
-                        self.current_event = Some("DRIVE_MISS".to_string());
-                        self.current_callout =
-                            Some(format!("{} 突破上篮不中，争抢篮板！", driver_id));
+                        let hoop_pos = self.rules.court.hoop_pos(is_home);
+                        let dist_to_hoop = (driver_pos - hoop_pos).length();
+                        // Spatial gate: if driver is still outside the paint / perimeter,
+                        // this drive was stalled before reaching finishing position.
+                        let finish_range = 16.0_f32;
+                        if dist_to_hoop > finish_range {
+                            self.ball_pos_3d = (driver_pos, holder_height);
+                            new_ball_state = Some(BallTrajectoryKind::Held {
+                                carrier_id: driver_id.clone(),
+                            });
+                            self.transition_phase(SubPhase::Initiation);
+                            self.current_event = Some("DRIVE_STOPPED".to_string());
+                            self.current_callout =
+                                Some(format!("{} 突破被防守延误于外线，重新组织", driver_id));
+                        } else {
+                            let shot_dur = BallisticsEngine::shot_duration(
+                                dist_to_hoop,
+                                self.rules.rim_height_ft,
+                                &self.rules,
+                            ).max(0.4);
+                            self.transition_phase(SubPhase::ShotAttempt);
+                            self.pending_events.push(GameEvent::ShotRelease {
+                                shooter_id: driver_id.clone(),
+                                pos: (driver_pos.x, driver_pos.y),
+                                is_three: false,
+                                contest_level: 0.2,
+                                make_probability: if finish_made { 1.0 } else { 0.0 },
+                            });
+                            self.current_possession_shooter = Some(driver_id.clone());
+                            let contest_val = if finish_made { 0.35 } else { 0.65 };
+                            self.current_possession_contest = Some(contest_val);
+                            self.current_event = Some("SHOT_RELEASE".to_string());
+                            let driver_display = self
+                                .physics
+                                .get_player(&driver_id)
+                                .map(|p| format!("{}号", p.jersey))
+                                .unwrap_or_else(|| driver_id.clone());
+                            self.current_callout = Some(format!("{} 起跳突破上篮！", driver_display));
+                            new_ball_state = Some(BallTrajectoryKind::Shot {
+                                shooter_id: driver_id.clone(),
+                                from_pos: driver_pos,
+                                hoop_pos,
+                                start_time: current_t,
+                                duration: shot_dur,
+                                is_made: finish_made,
+                                is_three: false,
+                                peak_z: self.rules.rim_height_ft + 1.5,
+                            });
+                        }
                     } else {
                         self.ball_pos_3d = (driver_pos, holder_height);
                         new_ball_state = Some(BallTrajectoryKind::Held {
@@ -1488,10 +1487,14 @@ impl MatchEngine {
             }
             BallTrajectoryKind::Dead { .. } => {}
         }
-
         if let Some(def_id) = steal_triggered_defender {
             self.current_event = Some("STEAL".to_string());
-            self.current_callout = Some(format!("传球路线被识破！{} 飞身抢断！", def_id));
+            let def_display = self
+                .physics
+                .get_player(&def_id)
+                .map(|p| format!("{}号", p.jersey))
+                .unwrap_or_else(|| def_id.clone());
+            self.current_callout = Some(format!("传球路线被识破！{} 飞身抢断！", def_display));
             let ball_intercept_pos = self.ball_pos_3d.0;
             self.start_steal_transition(def_id, ball_intercept_pos);
         } else if let Some(player_id) = loose_ball_secured_player {
@@ -1523,6 +1526,14 @@ impl MatchEngine {
         // ============================================================
         // 4. 战术目标生成 & 移动导航（每 tick）
         // ============================================================
+        let off_roster = match self.possession {
+            Possession::Home => &self.home_roster_order,
+            Possession::Away => &self.away_roster_order,
+        };
+        let live_off_positions: Vec<Vec2> = off_roster
+            .iter()
+            .filter_map(|pid| self.physics.get_player(pid).map(|p| p.pos_ft))
+            .collect();
         let (mut home_targets, mut away_targets) =
             TacticalPlanner::plan_possession_targets_with_rules(
                 self.tactical_set,
@@ -1533,13 +1544,21 @@ impl MatchEngine {
                 self.sub_phase_timer,
                 &mut self.rng,
                 &self.rules,
+                Some(&live_off_positions),
             );
         let home_roster = self.home_roster_order.clone();
         let away_roster = self.away_roster_order.clone();
         TacticalPlanner::bind_targets(&mut home_targets, &home_roster);
         TacticalPlanner::bind_targets(&mut away_targets, &away_roster);
+        let active_driver_id = match &self.ball_state {
+            BallTrajectoryKind::Drive { driver_id, .. } => Some(driver_id.as_str()),
+            _ => None,
+        };
         for target in home_targets.into_iter().chain(away_targets) {
             if let Some(player_id) = target.player_id {
+                if active_driver_id == Some(player_id.as_str()) {
+                    continue;
+                }
                 self.physics.set_player_target(
                     &player_id,
                     target.target_pos,
@@ -1853,6 +1872,15 @@ impl MatchEngine {
             .rules
             .court
             .clamp_playable(target_pos, self.rules.player_radius_ft);
+        let drive_speed = driver.max_speed_ftps;
+        self.physics.set_player_target(
+            driver_id,
+            target_pos,
+            drive_speed,
+            "DriveToBasket",
+            "BallHandler",
+            &driver.morale,
+        );
         self.transition_ball_state(BallTrajectoryKind::Drive {
             driver_id: driver_id.to_string(),
             from_pos,
@@ -2100,13 +2128,15 @@ impl MatchEngine {
         inbound: bool,
     ) {
         let from_pos = self.ball_pos_3d.0;
+        let initial_dist = self.physics.get_player(receiver_id).map(|p| (p.pos_ft - from_pos).length()).unwrap_or(20.0);
+        let initial_dur = self.rules.pass_duration(initial_dist, inbound);
         let target_lead_pos = self
             .physics
             .get_player(receiver_id)
             .map(|p| {
                 BallisticsEngine::extrapolate_receiver_pos(
                     p,
-                    self.decision.weights.pass_lead_time_seconds,
+                    initial_dur.clamp(0.0, 0.4),
                     &self.rules,
                 )
             })
@@ -2446,8 +2476,36 @@ impl MatchEngine {
         let target_id = if is_offensive {
             rebounder_id.clone()
         } else {
-            self.new_possession_pg()
+            let candidate = self.new_possession_pg();
+            if candidate == rebounder_id {
+                let team = match self.possession {
+                    Possession::Home => "home",
+                    Possession::Away => "away",
+                };
+                self.team_roster_ids(team)
+                    .into_iter()
+                    .find(|id| id != &rebounder_id)
+                    .unwrap_or_else(|| rebounder_id.clone())
+            } else {
+                candidate
+            }
         };
+        if target_id == rebounder_id {
+            self.transition_phase(SubPhase::Initiation);
+            self.last_decision_time = -self.rules.decision_interval_seconds;
+            let actual_pos = self.physics.get_player(&rebounder_id).map(|p| p.pos_ft).unwrap_or(reb_pos);
+            let dist = (actual_pos - reb_pos).length();
+            let max_speed = self.rules.ball_max_speed_ftps * 0.45;
+            let transfer_dur = (dist / max_speed).max(0.18);
+            self.transition_ball_state(BallTrajectoryKind::ControlTransfer {
+                from_pos: reb_pos,
+                from_z: self.rules.ball_holder_height_ft,
+                carrier_id: rebounder_id,
+                start_time: self.current_time,
+                duration: transfer_dur,
+            });
+            return;
+        }
         let target_pos = self
             .physics
             .get_player(&target_id)
@@ -2461,7 +2519,7 @@ impl MatchEngine {
         self.transition_ball_state(BallTrajectoryKind::Pass {
             from_pos: reb_pos,
             to_pos: target_pos,
-            target_id,
+            target_id: target_id.clone(),
             start_time: self.current_time,
             duration: self.rules.pass_duration(pass_dist, false),
             peak_z: self.rules.pass_peak_ft,
@@ -2668,7 +2726,15 @@ impl MatchEngine {
 
     fn build_tick(&self) -> StreamTick {
         let active_carrier = match &self.ball_state {
-            BallTrajectoryKind::Held { carrier_id } => Some(carrier_id.clone()),
+            BallTrajectoryKind::Held { carrier_id }
+            | BallTrajectoryKind::Drive {
+                driver_id: carrier_id,
+                ..
+            }
+            | BallTrajectoryKind::ControlTransfer {
+                carrier_id,
+                ..
+            } => Some(carrier_id.clone()),
             _ => None,
         };
         let mut render_players = self

@@ -131,11 +131,8 @@ fn golden_baseline_seed42() {
 //     修复 seed 2/4 死球楔死导致的比赛无法完赛）；替补席界外 body 不再
 //     产生伪造 BoundaryCross（每 tick 6 条 OUT_OF_BOUNDS 污染）；Flagged
 //     咨询性发现不再触发 RuleViolation 强制项。均为设计内行为修复。
-// v11 0x2d652a826a6145db - 2026-09-02 M2 收尾阶段中间哈希
-// v12 0x1275cccf4a8f3f0e - 2026-09-02 BallTrajectoryKind 补充 last_touch_team 状态并统一为纯粹派生视图
-const GOLDEN_SEED42_2000: u64 = 0x1275cccf4a8f3f0e;
-/// 跨多种子的 L1 不变量零违反验证（BallState Consolidation 的验收标准）。
-///
+// v15 0x3316f6c9d9051602 - 2026-09-03 传球提前量外推校准与突破终结记录补齐（Realism Index >= 0.92）
+const GOLDEN_SEED42_2000: u64 = 0x3316f6c9d9051602;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

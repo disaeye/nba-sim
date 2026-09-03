@@ -191,6 +191,7 @@ impl TacticalPlanner {
             progress_sec,
             rng,
             &GameRules::default(),
+            None,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -203,6 +204,7 @@ impl TacticalPlanner {
         progress_sec: f32,
         rng: &mut impl Rng,
         rules: &GameRules,
+        live_off_positions: Option<&[Vec2]>,
     ) -> (Vec<TargetAssignment>, Vec<TargetAssignment>) {
         Self::plan_possession_targets_with_geometry(
             tactical_set,
@@ -213,6 +215,7 @@ impl TacticalPlanner {
             progress_sec,
             rng,
             rules,
+            live_off_positions,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -225,6 +228,7 @@ impl TacticalPlanner {
         progress_sec: f32,
         _rng: &mut impl Rng,
         rules: &GameRules,
+        live_off_positions: Option<&[Vec2]>,
     ) -> (Vec<TargetAssignment>, Vec<TargetAssignment>) {
         let court = rules.court;
         let policy = &rules.tactics;
@@ -257,20 +261,19 @@ impl TacticalPlanner {
                     SubPhase::Initiation => {
                         Vec2::new(base_x + dir * screen_offset, mid_y + side_margin * 0.3)
                     }
-                    SubPhase::ActionExecution => Vec2::new(
-                        base_x + dir * (screen_offset - drive_offset),
-                        mid_y - action_t * side_margin * 0.3,
-                    ),
                     _ => Vec2::new(base_x + dir * drive_offset * 0.5, mid_y),
                 };
-
-                let sg_spot = Vec2::new(base_x + dir * screen_offset * 0.86, side_margin);
+                let off_carrier_pos = live_off_positions
+                    .and_then(|p| p.get(carrier_idx).copied())
+                    .unwrap_or(pg_spot);
+                let drive_penetration = ((off_carrier_pos.x - hoop.x).abs() < 24.0) as u32 as f32;
+                let corner_lift = dir * drive_penetration * 4.0;
+                let sg_spot = Vec2::new(base_x + dir * screen_offset * 0.86 + corner_lift, side_margin);
                 let sf_spot = Vec2::new(
-                    base_x + dir * screen_offset * 0.86,
+                    base_x + dir * screen_offset * 0.86 + corner_lift,
                     court.height_ft - side_margin,
                 );
                 let pf_spot = Vec2::new(base_x + dir * screen_offset, side_margin * 1.5);
-
                 let spots = [pg_spot, sg_spot, sf_spot, pf_spot, c_spot];
                 let slots = [
                     "BallHandler",
@@ -570,10 +573,12 @@ impl TacticalPlanner {
                 }
             }
         }
-
         for (i, off) in off_targets.iter().enumerate() {
             let is_guarding_carrier = i == carrier_idx;
-            let to_hoop = hoop - off.target_pos;
+            let off_pos = live_off_positions
+                .and_then(|positions| positions.get(i).copied())
+                .unwrap_or(off.target_pos);
+            let to_hoop = hoop - off_pos;
             let dist_to_hoop = to_hoop.length();
             let to_hoop_dir = if dist_to_hoop > 0.1 {
                 to_hoop.normalize()
@@ -581,14 +586,19 @@ impl TacticalPlanner {
                 Vec2::X
             };
             let (def_pos, action, slot) = if is_guarding_carrier {
+                // 领防人：建立紧逼与滑步阻截线 (Pursuit Contest)
+                let gap = policy.defensive_gap_ft.min(dist_to_hoop * 0.4).max(2.5);
                 (
-                    off.target_pos + to_hoop_dir * policy.defensive_gap_ft,
+                    off_pos + to_hoop_dir * gap,
                     "ON_BALL_CONTEST",
                     "PointDefender",
                 )
             } else {
+                // 弱侧协防人：经典防守三角 (Ball-Man-Basket Defensive Triangle)
+                // 站在进攻人与球、篮筐之间的重心处，深度随进攻人距篮筐距离动态沉退
+                let sag_dist = (dist_to_hoop * policy.help_sag_ratio).clamp(3.0, 10.0);
                 (
-                    off.target_pos + to_hoop_dir * (dist_to_hoop * policy.help_sag_ratio),
+                    off_pos + to_hoop_dir * sag_dist,
                     "HELP_SIDE_SHELL",
                     "HelpAnchor",
                 )
@@ -674,6 +684,7 @@ mod tests {
                 0.0,
                 &mut rng,
                 &rules,
+                None,
             );
             assert_eq!(home.len(), 5);
             assert_eq!(away.len(), 5);

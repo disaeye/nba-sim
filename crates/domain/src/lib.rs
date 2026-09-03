@@ -15,7 +15,11 @@ pub mod league;
 pub mod possession;
 pub mod resolve;
 pub mod rules;
-pub use action_window::{ActionPhase, ActionTimeWindow, ActionType};
+pub mod tactics;
+pub use tactics::{
+    OffensiveSystem, TacticalAction, TacticalFormation, TacticalSetSpec, TacticalSlot,
+    TacticalSlotSpec, TacticalTriggers,
+};
 pub use capability::{
     drive_finishing_delta, effective_decision_risk_tolerance, effective_defense_factor,
     effective_max_accel, effective_max_speed, free_throw_probability,

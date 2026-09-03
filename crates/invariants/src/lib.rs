@@ -254,7 +254,28 @@ impl InvariantChecker {
         // 4. 球运动边界：持球时球贴着人，非持球时速度受弹道上限约束。
         let ball_ft = (frame.ball.x * court_w, frame.ball.y * court_h, frame.ball.z);
         if let Some(holder_id) = &frame.ball.holder_id {
-            if let Some(holder) = frame.players.iter().find(|p| &p.id == holder_id) {
+            // 在合球或交接过渡期 (CONTROL_TRANSFER)，球正在向持球人飞行平滑合拢，不施加静态持球贴身 leash 约束
+            if frame.ball.status == "CONTROL_TRANSFER" {
+                // 仅验证过渡期速度上限
+                if let Some(prev) = self.prev_ball {
+                    let dx = ball_ft.0 - prev.0;
+                    let dy = ball_ft.1 - prev.1;
+                    let dz = ball_ft.2 - prev.2;
+                    let ball_speed = (dx * dx + dy * dy + dz * dz).sqrt() / dt;
+                    let ball_max = rules.ball_max_speed_ftps * 1.05;
+                    if ball_speed > ball_max {
+                        out.push(Violation {
+                            tick_index: self.tick_index,
+                            rule: "BALL_SPEED",
+                            severity: ViolationSeverity::Hard,
+                            detail: format!(
+                                "control transfer ball speed {:.2} ft/s exceeds limit {:.2}",
+                                ball_speed, ball_max
+                            ),
+                        });
+                    }
+                }
+            } else if let Some(holder) = frame.players.iter().find(|p| &p.id == holder_id) {
                 let hx = holder.x * court_w;
                 let hy = holder.y * court_h;
                 let dx = ball_ft.0 - hx;
