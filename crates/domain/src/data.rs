@@ -237,6 +237,70 @@ impl Default for TeamTraits {
     }
 }
 
+/// 教练策略档案（tactics.md §2.4 CoachProfile）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CoachProfile {
+    pub id: String,
+    pub name: String,
+    pub pace_bias: f32,
+    pub timeout_threshold_run: u8,
+    pub offensive_system_preference: Vec<String>,
+    pub defensive_system_preference: Vec<String>,
+    pub substitution_tendency: f32,
+    pub garbage_time_margin: u8,
+}
+
+impl Default for CoachProfile {
+    fn default() -> Self {
+        Self {
+            id: "coach_default".to_string(),
+            name: "Default Coach".to_string(),
+            pace_bias: 0.5,
+            timeout_threshold_run: 8,
+            offensive_system_preference: vec!["off_horns_pnr".to_string()],
+            defensive_system_preference: vec!["def_drop_coverage".to_string()],
+            substitution_tendency: 0.5,
+            garbage_time_margin: 20,
+        }
+    }
+}
+
+/// 槽位能力需求（tactics.md §2.3.1 SlotRequirement）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SlotRequirement {
+    pub slot_id: String,
+    pub required_attributes: Vec<(String, f32)>,
+    pub min_fitness: f32,
+}
+
+/// 轮换表配置项（tactics.md §2.3.3 RotationEntry）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RotationEntry {
+    pub player_id: String,
+    pub target_minutes: u8,
+    pub stint_max_sec: u16,
+    pub foul_trouble_threshold: u8,
+}
+
+/// 换人原因（tactics.md §2.3.3 SubstitutionReason）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SubstitutionReason {
+    FoulTrouble,
+    StaminaExhaustion,
+    TacticalAdjustment,
+    GarbageTime,
+    Injury,
+}
+
+/// 换人事件定义（tactics.md §2.3.3 SubstitutionEvent）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubstitutionEvent {
+    pub team_id: String,
+    pub player_out: String,
+    pub player_in: String,
+    pub reason: SubstitutionReason,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeamData {
     pub id: String,

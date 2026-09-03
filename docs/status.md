@@ -728,14 +728,14 @@ BALL_* 不变量零违反（✓ batch 0 violations + possession_invariants 测�
 1. **Charter C1 战术模型常数硬编码缺口**：
    - `crates/domain/src/tactics.rs` 原先直接硬编码 20 处浮点字面量，违反 charter C1 常量集中化与声明式资产化原则，导致常数守卫门禁报警；
 2. **战术系统与数据资产割裂**：
-   - `TacticalSetSpec` 缺乏与 `data/tactics/*.json` 的声明式反序列化接入，且缺少 `OffensiveSystem`、`TacticalFormation`、`TacticalTriggers` 核心规范类型；
+   - `TacticalSetSpec` 缺乏与 `data/tactics/*.json` 的声明式反序列化接入，且缺少 `OffensiveSystem`、`TacticalFormation`、`TacticalTriggers`、`DefensiveSystem`、`SituationalTactics`、`CoachProfile` 等核心规范契约类型；
 3. **终场状态机边界脆弱性**：
    - 终场哨响时球若处于飞行中或篮板争执状态，提前触发 `PeriodTransition::GameEnd` 存在潜在死锁，`PossessionResult::PeriodOver` 需完全接入状态机合法集。
 
 ### 25.2 修复落地
 1. **领域层战术规格与数据资产解耦**：
    - 引入 `serde_json` 成为 `nba-domain` 正式依赖；
-   - 完整实现声明式结构（`TacticalSetSpec`, `TacticalSlotSpec`, `OffensiveSystem`, `TacticalFormation`, `TacticalTriggers`, `TacticalAction`）；
+   - 完整实现声明式结构（`TacticalSetSpec`, `TacticalSlotSpec`, `OffensiveSystem`, `DefensiveSystem`, `SituationalTactics`, `TacticalFormation`, `TacticalTriggers`, `TacticalAction`, `CoachProfile`, `SlotRequirement`, `RotationEntry`, `SubstitutionEvent`）；
    - 内置高位挡拆与五外战术统一通过 `data/tactics/*.json` 数据资产解析反序列化，从根源消除领域层全部内联浮点数，保持 0 阈值门禁通过；
 2. **防守战术方案（DefensiveScheme）统一**：
    - 统合人盯人弱侧协防、2-3 联防、无限换防在决策与展示层的标识与参数；

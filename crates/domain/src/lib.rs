@@ -17,15 +17,19 @@ pub mod resolve;
 pub mod rules;
 pub mod tactics;
 pub use tactics::{
-    OffensiveSystem, TacticalAction, TacticalFormation, TacticalSetSpec, TacticalSlot,
-    TacticalSlotSpec, TacticalTriggers,
+    DefensiveSystem, HelpDefenseConfig, MatchupRule, OffensiveSystem, OnBallDefenseConfig,
+    ScreenDefenseConfig, SituationalTactics, TacticalAction, TacticalFormation, TacticalSetSpec,
+    TacticalSlot, TacticalSlotSpec, TacticalTriggers,
 };
 pub use capability::{
     drive_finishing_delta, effective_decision_risk_tolerance, effective_defense_factor,
     effective_max_accel, effective_max_speed, free_throw_probability,
 };
 pub use court::CourtGeometry;
-pub use data::{PlayerAttributes, PlayerData, PlayerRole, PlayerTendencies, TeamData, TeamTraits};
+pub use data::{
+    CoachProfile, PlayerAttributes, PlayerData, PlayerRole, PlayerTendencies, RotationEntry,
+    SlotRequirement, SubstitutionEvent, SubstitutionReason, TeamData, TeamTraits,
+};
 pub use event::{GameEvent, PossessionSummary, TimedGameEvent};
 pub use flow::{transition_ball_state, BallPhase, BallState, GameFlowState, MatchClockState, MatchScoreState, PhaseType};
 pub use league::{LeagueId, LeagueProfile};

@@ -54,6 +54,63 @@ pub struct OffensiveSystem {
     pub triggers: TacticalTriggers,
 }
 
+/// 防守体系策略参数（tactics.md §2 节）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct OnBallDefenseConfig {
+    pub pressure: f32,
+    pub contest_height_penalty: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct HelpDefenseConfig {
+    pub help_aggressiveness: f32,
+    pub rotation_speed: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ScreenDefenseConfig {
+    pub strategy: String,
+    pub switch_threshold: f32,
+    pub mismatch_tolerance: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct MatchupRule {
+    pub condition: String,
+    pub action: String,
+}
+
+/// 防守体系声明式档案（tactics.md §2 节 DefensiveSystem）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DefensiveSystem {
+    pub id: String,
+    pub name: String,
+    pub base_scheme: String,
+    #[serde(default)]
+    pub on_ball: OnBallDefenseConfig,
+    #[serde(default)]
+    pub help: HelpDefenseConfig,
+    #[serde(default)]
+    pub screen_defense: ScreenDefenseConfig,
+    #[serde(default)]
+    pub matchup_rules: Vec<MatchupRule>,
+}
+
+impl DefensiveSystem {
+    pub fn from_json(json_str: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json_str)
+    }
+}
+
+/// 特殊情境战术覆盖（tactics.md §2 节 SituationalTactics）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct SituationalTactics {
+    pub context_name: String,
+    pub trigger_condition: String,
+    pub pace_override: Option<f32>,
+    pub preferred_play_type: Option<String>,
+    pub foul_tactic_enabled: bool,
+}
 impl OffensiveSystem {
     pub fn from_json(json_str: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json_str)
