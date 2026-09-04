@@ -2947,6 +2947,11 @@ impl MatchEngine {
             .values()
             .map(|p| {
                 let norm = Court::ft_to_norm_with_geometry(p.pos_ft, self.rules.court);
+                let target_norm = if p.on_court {
+                    Some(Court::ft_to_norm_with_geometry(p.target_pos_ft, self.rules.court))
+                } else {
+                    None
+                };
                 RenderPlayer {
                     id: p.id.clone(),
                     jersey: p.jersey.clone(),
@@ -2969,6 +2974,8 @@ impl MatchEngine {
                     stm: (p.stamina * 10.0).round() / 10.0,
                     stm_max: p.max_stamina,
                     foul_count: p.foul_count,
+                    target_x: target_norm.map(|t| (t.x * 1_000_000.0).round() / 1_000_000.0),
+                    target_y: target_norm.map(|t| (t.y * 1_000_000.0).round() / 1_000_000.0),
                 }
             })
             .collect::<Vec<_>>();

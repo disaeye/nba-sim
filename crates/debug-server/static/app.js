@@ -554,11 +554,46 @@ function eventClass(name) {
     ctx.setLineDash([4, 4]); ctx.strokeStyle = "rgba(247,239,214,.32)";
     ctx.beginPath(); ctx.moveTo(10, 40); ctx.lineTo(950, 40); ctx.moveTo(10, 480); ctx.lineTo(950, 480); ctx.stroke(); ctx.setLineDash([]);
     drawTrails(ctx, point);
-    state.hitPlayers = [];
     for (const player of tick.players || []) {
       if (player.onCourt === false) continue;
       const playerPoint = point(finite(player.x) * rules.courtWidth, finite(player.y) * rules.courtHeight);
       state.hitPlayers.push({ player, x: playerPoint.x, y: playerPoint.y });
+
+      // 2K 风格战术路线与目标站位标识（Play-art route & spacing spot）
+      if (player.target_x !== undefined && player.target_x !== null && player.target_y !== undefined && player.target_y !== null) {
+        const targetPt = point(finite(player.target_x) * rules.courtWidth, finite(player.target_y) * rules.courtHeight);
+        const distToTarget = Math.hypot(targetPt.x - playerPoint.x, targetPt.y - playerPoint.y);
+        if (distToTarget > 6) {
+          ctx.save();
+          // 1. 战术跑位虚线/箭头
+          ctx.beginPath();
+          ctx.moveTo(playerPoint.x, playerPoint.y);
+          ctx.lineTo(targetPt.x, targetPt.y);
+          ctx.strokeStyle = player.team === "home" ? "rgba(44, 229, 155, 0.35)" : "rgba(245, 189, 69, 0.35)";
+          ctx.lineWidth = 1.6;
+          ctx.setLineDash([4, 4]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // 2. 目标落位点（2K 圆环准星）
+          ctx.beginPath();
+          ctx.arc(targetPt.x, targetPt.y, 7, 0, Math.PI * 2);
+          ctx.strokeStyle = player.team === "home" ? "rgba(44, 229, 155, 0.6)" : "rgba(245, 189, 69, 0.6)";
+          ctx.lineWidth = 1.4;
+          ctx.stroke();
+
+          // 3. 槽位缩写标识
+          if (player.slot) {
+            const abbr = player.slot.replace(/([a-z])/g, "").slice(0, 3) || player.slot.slice(0, 2);
+            ctx.fillStyle = player.team === "home" ? "rgba(44, 229, 155, 0.75)" : "rgba(245, 189, 69, 0.75)";
+            ctx.font = "600 7px IBM Plex Mono, monospace";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(abbr, targetPt.x, targetPt.y);
+          }
+          ctx.restore();
+        }
+      }
       const color = player.team === "home" ? "#2ce59b" : "#f5bd45";
       const dark = player.team === "home" ? "#087b57" : "#a96f15";
       const radius = 17;

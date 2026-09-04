@@ -24,6 +24,11 @@ pub struct RenderPlayer {
     /// Personal fouls are part of the authoritative player projection.
     #[serde(default)]
     pub foul_count: u8,
+    /// Tactical target position for spatial play routing (2K-style play-art visualization).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_x: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_y: Option<f32>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderBall {
