@@ -418,9 +418,58 @@ function eventClass(name) {
     return "bad";
   }
 
+  function getEventDetail(event) {
+    const tick = event.tick;
+    const name = event.name;
+    switch (name) {
+      case "TIPOFF":
+        return "中圈垂直抛球，比赛正式开始";
+      case "TIPOFF_SECURED":
+        return tick.callout || "跳球点拍争顶成功";
+      case "CONTACT_BUMP":
+        return "身体对抗碰撞 / 防守贴防阻截";
+      case "ACTION_WINDOW_SHIFT":
+        return "动作窗口时钟推进";
+      case "PHASE_TRANSITION":
+        return `阶段流转 ➔ ${tick.phase || ""}`;
+      case "PASS":
+        return "持球人传球转移出球";
+      case "PASS_RECEIVED":
+        return "队友稳妥接球";
+      case "SHOT_RELEASE":
+        return "投篮出手！";
+      case "SCORE":
+        return "球进！得分生效！";
+      case "SHOT_MISS":
+        return "投篮不中，争抢篮板";
+      case "REBOUND":
+        return "争顶抢下篮板球";
+      case "STEAL":
+        return "防守截断球路抢断！";
+      case "OUT_OF_BOUNDS":
+        return "球出界，死球交换球权";
+      case "VIOLATION":
+        return tick.callout || "违例发生";
+      case "FOUL":
+        return tick.callout || "裁判吹罚犯规";
+      case "SCREEN_CONTACT":
+        return "设立掩护，发生身体挡人接触";
+      case "POSSESSION_SUMMARY":
+        return `回合结束总结 · #${tick.possession_id}`;
+      default:
+        return tick.callout || tick.phase || "";
+    }
+  }
+
   function renderTimeline() {
     const names = [...new Set(state.events.map((event) => event.name))];
-    names.forEach((name) => state.filters.add(name));
+    if (state.filters.size === 0) {
+      // 默认排除高频物理底层事件（如单纯的每 tick 碰撞与动作窗口微调），默认呈现比赛核心技术与战术事件
+      const defaultHidden = new Set(["CONTACT_BUMP", "ACTION_WINDOW_SHIFT"]);
+      names.forEach((name) => {
+        if (!defaultHidden.has(name)) state.filters.add(name);
+      });
+    }
     $("eventFilters").innerHTML = names.map((name) => `<button class="filter-button ${state.filters.has(name) ? "active" : ""}" data-filter="${esc(name)}">${esc(name)}</button>`).join("");
     $("eventFilters").querySelectorAll("[data-filter]").forEach((button) => button.addEventListener("click", () => {
       const name = button.dataset.filter;
@@ -435,7 +484,8 @@ function eventClass(name) {
       const row = document.createElement("div");
       row.className = "event-row";
       row.dataset.index = String(event.index);
-      row.innerHTML = `<span class="event-time">${timeClock(event.tick.t_game)}</span><span class="event-possession">#${esc(event.tick.possession_id)}</span><span class="event-tag ${eventClass(event.name)}">${esc(event.name)}</span><span class="event-detail">${esc(event.tick.callout || event.tick.phase || "")}</span>`;
+      const detail = getEventDetail(event);
+      row.innerHTML = `<span class="event-time">${timeClock(event.tick.t_game)}</span><span class="event-possession">#${esc(event.tick.possession_id)}</span><span class="event-tag ${eventClass(event.name)}">${esc(event.name)}</span><span class="event-detail">${esc(detail)}</span>`;
       row.addEventListener("click", () => seek(event.index));
       fragment.appendChild(row);
       state.eventElements.push(row);

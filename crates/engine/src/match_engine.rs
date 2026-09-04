@@ -757,8 +757,13 @@ impl MatchEngine {
                     let base_z = 4.0;
                     let z = base_z + 4.0 * (peak_z - base_z) * progress * (1.0 - progress);
                     self.ball_pos_3d = (Vec2::new(center_x, center_y), z);
-                    self.current_event = Some("TIPOFF".to_string());
-                    self.current_event_types = vec!["TIPOFF".to_string()];
+                    if self.sub_phase_timer <= dt + f32::EPSILON {
+                        self.current_event = Some("TIPOFF".to_string());
+                        self.current_event_types = vec!["TIPOFF".to_string()];
+                    } else {
+                        self.current_event = None;
+                        self.current_event_types.clear();
+                    }
                     self.current_callout = Some("裁判中圈垂直抛球，双方中锋起跳争顶！".to_string());
                     self.current_enforcements.clear();
                     self.last_decision_trace = None;
