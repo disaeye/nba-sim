@@ -1541,35 +1541,50 @@ impl MatchEngine {
                 };
                 if tau >= 1.0 {
                     let reb_pos = *target_landing;
-                    let reb_id = self.resolve_rebounder(reb_pos);
-                    let reb_name = self
-                        .physics
-                        .get_player(&reb_id)
-                        .map(|p| p.jersey.clone())
-                        .unwrap_or(reb_id.clone());
-                    let original_offense = if is_home { "home" } else { "away" };
-                    let is_offensive = self
-                        .physics
-                        .get_player(&reb_id)
-                        .map(|p| p.team == original_offense)
-                        .unwrap_or(false);
-                    self.pending_events.push(GameEvent::ReboundContest {
-                        rebounder_id: reb_id.clone(),
-                        landing_pos: (reb_pos.x, reb_pos.y),
-                        is_offensive,
-                    });
-                    self.current_event = Some("REBOUND".to_string());
-                    self.current_callout = Some(format!(
-                        "{} 抢到{}篮板，重新组织进攻！",
-                        reb_name,
-                        if is_offensive { "前场" } else { "防守" }
-                    ));
-                    if !is_offensive {
-                        let p_pos = self.physics.get_player(&reb_id).map(|p| p.pos_ft).unwrap_or(reb_pos);
-                        let dist = (p_pos - reb_pos).length();
-                        self.emit_possession_summary("DEFENSIVE_REBOUND", Some(reb_id.clone()), None, Some(dist));
+                    let max_reach = self.rules.player_radius_ft + self.rules.defender_reach_ft + 1.5;
+                    let maybe_reb_id = self.try_resolve_rebounder(reb_pos, max_reach);
+
+                    if let Some(reb_id) = maybe_reb_id {
+                        let reb_name = self
+                            .physics
+                            .get_player(&reb_id)
+                            .map(|p| p.jersey.clone())
+                            .unwrap_or(reb_id.clone());
+                        let original_offense = if is_home { "home" } else { "away" };
+                        let is_offensive = self
+                            .physics
+                            .get_player(&reb_id)
+                            .map(|p| p.team == original_offense)
+                            .unwrap_or(false);
+                        self.pending_events.push(GameEvent::ReboundContest {
+                            rebounder_id: reb_id.clone(),
+                            landing_pos: (reb_pos.x, reb_pos.y),
+                            is_offensive,
+                        });
+                        self.current_event = Some("REBOUND".to_string());
+                        self.current_callout = Some(format!(
+                            "{} 抢到{}篮板，重新组织进攻！",
+                            reb_name,
+                            if is_offensive { "前场" } else { "防守" }
+                        ));
+                        if !is_offensive {
+                            let p_pos = self.physics.get_player(&reb_id).map(|p| p.pos_ft).unwrap_or(reb_pos);
+                            let dist = (p_pos - reb_pos).length();
+                            self.emit_possession_summary("DEFENSIVE_REBOUND", Some(reb_id.clone()), None, Some(dist));
+                        }
+                        self.start_rebound_outlet(reb_id, reb_pos, is_offensive);
+                    } else {
+                        // 无人在有效范围内保护篮板，球弹落变地板球
+                        new_ball_state = Some(BallTrajectoryKind::LooseBall {
+                            pos: reb_pos,
+                            vel: Vec2::ZERO,
+                            z: self.ball_pos_3d.1,
+                            vel_z: 0.0,
+                            last_touch_team: self.possession,
+                        });
+                        self.current_event = Some("LOOSE_BALL".to_string());
+                        self.current_callout = Some("篮板球弹出无人抢到，双方争夺地板球！".to_string());
                     }
-                    self.start_rebound_outlet(reb_id, reb_pos, is_offensive);
                 }
             }
             BallTrajectoryKind::LooseBall { pos, vel, z, vel_z, .. } => {
@@ -1687,6 +1702,11 @@ impl MatchEngine {
             }
             _ => None,
         };
+        let rebound_chase_target = match &self.ball_state {
+            BallTrajectoryKind::RimRebound { target_landing, .. } => Some(*target_landing),
+            BallTrajectoryKind::LooseBall { pos, .. } => Some(*pos),
+            _ => None,
+        };
         for target in home_targets.into_iter().chain(away_targets) {
             if let Some(player_id) = target.player_id {
                 if active_driver_id == Some(player_id.as_str()) {
@@ -1707,6 +1727,13 @@ impl MatchEngine {
                 } else if let Some((rx_id, rx_pos)) = &pass_receiver_override {
                     if rx_id == &player_id {
                         (*rx_pos, 20.0, "RECEIVE_CUT".to_string())
+                    } else {
+                        (target.target_pos, target.speed, target.action)
+                    }
+                } else if let Some(reb_spot) = rebound_chase_target {
+                    let cur_dist = self.physics.get_player(&player_id).map(|p| (p.pos_ft - reb_spot).length()).unwrap_or(99.0);
+                    if cur_dist <= 25.0 {
+                        (reb_spot, 16.0, "REBOUND_CRASH".to_string())
                     } else {
                         (target.target_pos, target.speed, target.action)
                     }
@@ -2374,7 +2401,7 @@ impl MatchEngine {
 
     /// Resolves the rebound winner from the landing window, then delegates
     /// the contest probability to the officiating layer.
-    fn resolve_rebounder(&mut self, landing: Vec2) -> String {
+    fn try_resolve_rebounder(&mut self, landing: Vec2, max_reach: f32) -> Option<String> {
         let defensive_team = match self.possession {
             Possession::Home => "away",
             Possession::Away => "home",
@@ -2383,11 +2410,10 @@ impl MatchEngine {
             Possession::Home => "home",
             Possession::Away => "away",
         };
-        let search_radius = self.rules.court.width_ft.hypot(self.rules.court.height_ft);
         let mut offensive_candidates =
-            self.rebound_candidates(landing, offensive_team, search_radius);
+            self.rebound_candidates(landing, offensive_team, max_reach);
         let mut defensive_candidates =
-            self.rebound_candidates(landing, defensive_team, search_radius);
+            self.rebound_candidates(landing, defensive_team, max_reach);
         offensive_candidates.sort_by(|left, right| {
             left.1
                 .total_cmp(&right.1)
@@ -2399,20 +2425,20 @@ impl MatchEngine {
                 .then_with(|| left.0.cmp(&right.0))
         });
 
+        if offensive_candidates.is_empty() && defensive_candidates.is_empty() {
+            return None;
+        }
         let Some((offensive_id, offensive_distance)) = offensive_candidates.first() else {
-            return defensive_candidates
-                .first()
-                .map(|(id, _)| id.clone())
-                .unwrap_or_else(|| self.new_possession_pg());
+            return defensive_candidates.first().map(|(id, _)| id.clone());
         };
         let Some((defensive_id, defensive_distance)) = defensive_candidates.first() else {
-            return offensive_id.clone();
+            return Some(offensive_id.clone());
         };
         let Some(offensive_player) = self.physics.get_player(offensive_id).cloned() else {
-            return defensive_id.clone();
+            return Some(defensive_id.clone());
         };
         let Some(defensive_player) = self.physics.get_player(defensive_id).cloned() else {
-            return offensive_id.clone();
+            return Some(offensive_id.clone());
         };
 
         match ResolutionLayer::resolve_rebound(
@@ -2423,9 +2449,19 @@ impl MatchEngine {
             &self.rules.resolve.rebound,
             &mut self.rng,
         ) {
-            ResolutionOutcome::ReboundSecured { rebounder_id, .. } => rebounder_id,
-            _ => defensive_id.clone(),
+            ResolutionOutcome::ReboundSecured { rebounder_id, .. } => Some(rebounder_id),
+            _ => Some(defensive_id.clone()),
         }
+    }
+
+    fn resolve_rebounder(&mut self, landing: Vec2) -> String {
+        let max_r = self.rules.player_radius_ft + self.rules.defender_reach_ft + 1.5;
+        self.try_resolve_rebounder(landing, max_r)
+            .or_else(|| {
+                let search_radius = self.rules.court.width_ft.hypot(self.rules.court.height_ft);
+                self.try_resolve_rebounder(landing, search_radius)
+            })
+            .unwrap_or_else(|| self.new_possession_pg())
     }
 
     fn rebound_candidates(
@@ -2623,7 +2659,9 @@ impl MatchEngine {
         } else {
             self.rules.league.shot_clock_seconds
         };
-        self.carrier_idx = self.player_index_for_id(&rebounder_id).unwrap_or(0);
+        self.transition_phase(SubPhase::Initiation);
+        self.set_game_flow(GameFlowState::LiveBall);
+        self.last_decision_time = -self.rules.decision_interval_seconds;
         let target_id = if is_offensive {
             rebounder_id.clone()
         } else {
@@ -2641,15 +2679,18 @@ impl MatchEngine {
                 candidate
             }
         };
+        let rebounder_pos = self
+            .physics
+            .get_player(&rebounder_id)
+            .map(|p| p.pos_ft)
+            .unwrap_or(reb_pos);
+        self.ball_pos_3d = (rebounder_pos, self.rules.chest_height_ft);
         if target_id == rebounder_id {
-            self.transition_phase(SubPhase::Initiation);
-            self.last_decision_time = -self.rules.decision_interval_seconds;
-            let actual_pos = self.physics.get_player(&rebounder_id).map(|p| p.pos_ft).unwrap_or(reb_pos);
-            let dist = (actual_pos - reb_pos).length();
+            let dist = (rebounder_pos - reb_pos).length();
             let max_speed = self.rules.ball_max_speed_ftps * 0.45;
             let transfer_dur = (dist / max_speed).max(0.18);
             self.transition_ball_state(BallTrajectoryKind::ControlTransfer {
-                from_pos: reb_pos,
+                from_pos: rebounder_pos,
                 from_z: self.rules.ball_holder_height_ft,
                 carrier_id: rebounder_id,
                 start_time: self.current_time,
@@ -2662,13 +2703,13 @@ impl MatchEngine {
             .get_player(&target_id)
             .map(|p| p.pos_ft)
             .unwrap_or_else(|| {
-                reb_pos + Vec2::new(self.rules.rebound_outlet_fallback_distance_ft, 0.0)
+                rebounder_pos + Vec2::new(self.rules.rebound_outlet_fallback_distance_ft, 0.0)
             });
-        let pass_dist = (target_pos - reb_pos).length();
+        let pass_dist = (target_pos - rebounder_pos).length();
         let receive_success =
-            self.resolve_pass_success(&rebounder_id, &target_id, reb_pos, target_pos);
+            self.resolve_pass_success(&rebounder_id, &target_id, rebounder_pos, target_pos);
         self.transition_ball_state(BallTrajectoryKind::Pass {
-            from_pos: reb_pos,
+            from_pos: rebounder_pos,
             to_pos: target_pos,
             target_id: target_id.clone(),
             start_time: self.current_time,
@@ -2680,10 +2721,9 @@ impl MatchEngine {
         self.pending_events.push(GameEvent::PassRelease {
             passer_id: rebounder_id.clone(),
             receiver_id: target_id.clone(),
-            from_pos: (reb_pos.x, reb_pos.y),
+            from_pos: (rebounder_pos.x, rebounder_pos.y),
             to_pos: (target_pos.x, target_pos.y),
         });
-        self.last_passer_id = Some(rebounder_id);
         self.transition_phase(SubPhase::Initiation);
         self.set_game_flow(GameFlowState::LiveBall);
         self.last_decision_time = -self.rules.decision_interval_seconds;
