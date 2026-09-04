@@ -490,9 +490,11 @@ fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
             | (B::Dead { .. }, B::Dead { .. })
         // 发球转移：到达发球点就绪，或被中断回死球。
             | (B::InboundTransfer { .. }, B::InboundReady { .. })
+            | (B::InboundTransfer { .. }, B::InboundTransfer { .. })
             | (B::InboundTransfer { .. }, B::Dead { .. })
-        // 发球就绪：发球人传出（Pass{inbound}）或回死球。
+        // 发球就绪：发球人传出（Pass{inbound}）、违例换边或回死球。
             | (B::InboundReady { .. }, B::Pass { .. })
+            | (B::InboundReady { .. }, B::InboundTransfer { .. })
             | (B::InboundReady { .. }, B::Dead { .. })
     )
 }

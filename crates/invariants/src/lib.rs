@@ -12,7 +12,9 @@ use std::collections::HashMap;
 
 pub mod causal_graph;
 pub mod taxonomy;
-use causal_graph::CausalEventGraph;
+pub use causal_graph::{
+    ActiveShotTracking, CausalEventGraph, LifecycleTransitionTarget, PreconditionEvaluator,
+};
 pub use taxonomy::{ViolationCategory, ViolationSeverity, ViolationTaxonomy};
 /// 单条不变量违反记录。
 #[derive(Debug, Clone, Serialize)]
@@ -88,8 +90,9 @@ impl InvariantChecker {
         let ball_max = rules.ball_max_speed_ftps;
         let min_sep = rules.min_player_separation_ft;
         // 阶段语义：发球/死球重置阶段，持球者（发球人）可站界外。
+        let phase_upper = frame.phase.to_ascii_uppercase();
         let inbound_phase =
-            frame.phase == "INBOUND" || frame.phase == "DEAD_BALL_RESET";
+            phase_upper == "INBOUND" || phase_upper == "DEAD_BALL_RESET" || (phase_upper == "INITIATION" && frame.game_flow == "DeadBall");
         let holder_id = frame.ball.holder_id.as_deref();
 
         // --------------------------------------------------------------
@@ -175,9 +178,10 @@ impl InvariantChecker {
             if !p.on_court {
                 continue;
             }
-            let is_inbounding_holder =
-                inbound_phase && holder_id == Some(p.id.as_str());
-            if is_inbounding_holder {
+            let is_inbounding_player = (inbound_phase && holder_id == Some(p.id.as_str()))
+                || p.action == "INBOUND_SETUP"
+                || p.action == "InboundPositioning";
+            if is_inbounding_player {
                 continue;
             }
             if !(0.0..=1.0).contains(&p.x) || !(0.0..=1.0).contains(&p.y) {
@@ -295,20 +299,26 @@ impl InvariantChecker {
                 }
             }
         } else if let Some(prev) = self.prev_ball {
-            let dx = ball_ft.0 - prev.0;
-            let dy = ball_ft.1 - prev.1;
-            let dz = ball_ft.2 - prev.2;
-            let ball_speed = (dx * dx + dy * dy + dz * dz).sqrt() / dt_safe;
-            if ball_speed > ball_max + rules.speed_tolerance_ftps {
-                out.push(Violation {
-                    tick_index: self.tick_index,
-                    rule: "BALL_SPEED",
-                    severity: ViolationSeverity::Hard,
-                    detail: format!(
-                        "free ball 3D speed {:.2} ft/s exceeds limit {:.2}",
-                        ball_speed, ball_max
-                    ),
-                });
+            let is_dead_ball = frame.ball.status == "DEAD" || frame.phase == "FreeThrow" || frame.phase == "DeadBallReset";
+            let was_rebound_start = frame.events.iter().any(|e| e == "FREE_THROW");
+            if is_dead_ball || was_rebound_start {
+                // 死球、罚球准备或罚球刚结束时不计算速度跳变
+            } else {
+                let dx = ball_ft.0 - prev.0;
+                let dy = ball_ft.1 - prev.1;
+                let dz = ball_ft.2 - prev.2;
+                let ball_speed = (dx * dx + dy * dy + dz * dz).sqrt() / dt_safe;
+                if ball_speed > ball_max + rules.speed_tolerance_ftps {
+                    out.push(Violation {
+                        tick_index: self.tick_index,
+                        rule: "BALL_SPEED",
+                        severity: ViolationSeverity::Hard,
+                        detail: format!(
+                            "free ball 3D speed {:.2} ft/s exceeds limit {:.2}",
+                            ball_speed, ball_max
+                        ),
+                    });
+                }
             }
         }
         self.prev_ball = Some(ball_ft);

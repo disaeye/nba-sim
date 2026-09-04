@@ -411,15 +411,29 @@ fn builtin_players(prefix: &str, geometry: CourtGeometry) -> Vec<PlayerData> {
     home_positions
         .into_iter()
         .enumerate()
-        .map(|(index, (x, y))| {
+        .map(|(index, (_x, _y))| {
             let initial_position_ft = if index < 5 {
-                if is_home {
-                    (x, y)
+                let center_x = geometry.width_ft * 0.5;
+                let center_y = geometry.height_ft * 0.5;
+                let tipoff_positions = if is_home {
+                    [
+                        (center_x - 18.0, center_y),       // PG: 后方弧顶卡位
+                        (center_x - 12.0, center_y - 14.0), // SG: 边线侧翼
+                        (center_x - 12.0, center_y + 14.0), // SF: 边线侧翼
+                        (center_x - 7.0, center_y - 8.0),   // PF: 中圈弧顶外围
+                        (center_x - 1.5, center_y),         // C: 中圈跳球点（主队半圆）
+                    ]
                 } else {
-                    (geometry.width_ft - x, y)
-                }
+                    [
+                        (center_x + 18.0, center_y),       // PG: 客队后方弧顶卡位
+                        (center_x + 12.0, center_y - 14.0), // SG: 边线侧翼
+                        (center_x + 12.0, center_y + 14.0), // SF: 边线侧翼
+                        (center_x + 7.0, center_y + 8.0),   // PF: 中圈弧顶外围
+                        (center_x + 1.5, center_y),         // C: 中圈跳球点（客队半圆）
+                    ]
+                };
+                tipoff_positions[index]
             } else {
-                // 替补球员（6/7/8 号）严格位于场外替补席
                 let bench_offset_x = (index - 5) as f32 * 6.0;
                 if is_home {
                     (geometry.width_ft * 0.20 + bench_offset_x, -4.0)

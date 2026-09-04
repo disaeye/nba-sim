@@ -144,6 +144,7 @@ pub trait SpatialPhysics {
     fn get_player(&self, id: &str) -> Option<&PlayerPhysicsState>;
     fn get_player_mut(&mut self, id: &str) -> Option<&mut PlayerPhysicsState>;
     fn set_ball_holder(&mut self, holder_id: Option<&str>);
+    fn teleport_player(&mut self, id: &str, pos: Vec2);
     fn query_nearby(&self, center: Vec2, radius: f32, filter: &EntityFilter) -> Vec<String>;
     fn overlap_circle(&self, center: Vec2, radius: f32) -> Vec<String>;
     fn cast_capsule(
@@ -276,6 +277,10 @@ impl PhysicsWorld {
     pub fn set_ball_holder(&mut self, holder_id: Option<&str>) {
         self.backend.set_ball_holder(holder_id);
     }
+    pub fn teleport_player(&mut self, id: &str, pos: Vec2) {
+        self.backend.teleport_player(id, pos);
+    }
+
 
     pub fn query_nearby(&self, center: Vec2, radius: f32, filter: &EntityFilter) -> Vec<String> {
         self.backend.query_nearby(center, radius, filter)
@@ -366,6 +371,9 @@ impl SpatialPhysics for PhysicsWorld {
     }
     fn get_player_mut(&mut self, id: &str) -> Option<&mut PlayerPhysicsState> {
         self.backend.get_player_mut(id)
+    }
+    fn teleport_player(&mut self, id: &str, pos: Vec2) {
+        self.backend.teleport_player(id, pos);
     }
     fn set_ball_holder(&mut self, holder_id: Option<&str>) {
         self.backend.set_ball_holder(holder_id);
@@ -652,6 +660,19 @@ impl SpatialPhysics for RapierSpatialPhysics {
         self.players.get_mut(id)
     }
 
+    fn teleport_player(&mut self, id: &str, pos: Vec2) {
+        if let Some(player) = self.players.get_mut(id) {
+            player.pos_ft = pos;
+            player.target_pos_ft = pos;
+            player.vel_ft = Vec2::ZERO;
+        }
+        if let Some((body_handle, _)) = self.player_handles.get(id).copied() {
+            if let Some(body) = self.rigid_body_set.get_mut(body_handle) {
+                body.set_translation(vector![pos.x, pos.y], true);
+                body.set_next_kinematic_translation(vector![pos.x, pos.y]);
+            }
+        }
+    }
     fn set_ball_holder(&mut self, holder_id: Option<&str>) {
         for (id, player) in &mut self.players {
             player.has_ball =
@@ -809,6 +830,13 @@ impl SpatialPhysics for SimpleCirclePhysics {
     fn get_player_mut(&mut self, id: &str) -> Option<&mut PlayerPhysicsState> {
         self.players.get_mut(id)
     }
+    fn teleport_player(&mut self, id: &str, pos: Vec2) {
+        if let Some(player) = self.players.get_mut(id) {
+            player.pos_ft = pos;
+            player.target_pos_ft = pos;
+            player.vel_ft = Vec2::ZERO;
+        }
+    }
 
     fn set_ball_holder(&mut self, holder_id: Option<&str>) {
         for (id, player) in &mut self.players {
@@ -953,7 +981,13 @@ fn make_motion_proposals(
             } else {
                 LocomotionState::Shuffling
             };
-            if speed > 0.5 {
+            let is_defense = is_defensive_action(&player.action);
+            if is_defense {
+                let target_vec = player.target_pos_ft - current_pos;
+                if target_vec.length() > 0.2 {
+                    player.facing_dir = target_vec.normalize_or_zero();
+                }
+            } else if speed > 0.5 {
                 player.facing_dir = next_vel.normalize_or_zero();
             }
 
@@ -1194,7 +1228,6 @@ fn apply_motion_proposals(
         if !player.on_court {
             continue;
         }
-
         let raw_pos = proposal.next_pos;
         let next_pos = rules.court.clamp_playable(raw_pos, margin);
         player.pos_ft = next_pos;

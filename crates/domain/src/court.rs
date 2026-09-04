@@ -214,14 +214,11 @@ impl Court {
 
     /// Whether a point is a legal near-boundary location for an inbound release.
     pub fn is_inbound_release(pos: Vec2, tolerance_ft: f32, geometry: CourtGeometry) -> bool {
-        let within_y = pos.y >= 0.0 && pos.y <= geometry.height_ft;
-        let within_x = pos.x >= 0.0 && pos.x <= geometry.width_ft;
-        (within_y && pos.x < 0.0 && -pos.x <= tolerance_ft)
-            || (within_y && pos.x > geometry.width_ft && pos.x - geometry.width_ft <= tolerance_ft)
-            || (within_x && pos.y < 0.0 && -pos.y <= tolerance_ft)
-            || (within_x
-                && pos.y > geometry.height_ft
-                && pos.y - geometry.height_ft <= tolerance_ft)
+        let near_left = (pos.x - 0.0).abs() <= tolerance_ft && pos.y >= -tolerance_ft && pos.y <= geometry.height_ft + tolerance_ft;
+        let near_right = (pos.x - geometry.width_ft).abs() <= tolerance_ft && pos.y >= -tolerance_ft && pos.y <= geometry.height_ft + tolerance_ft;
+        let near_bottom = (pos.y - 0.0).abs() <= tolerance_ft && pos.x >= -tolerance_ft && pos.x <= geometry.width_ft + tolerance_ft;
+        let near_top = (pos.y - geometry.height_ft).abs() <= tolerance_ft && pos.x >= -tolerance_ft && pos.x <= geometry.width_ft + tolerance_ft;
+        near_left || near_right || near_bottom || near_top
     }
 
     /// Free throw line position for the attacking side.

@@ -283,3 +283,61 @@ fn violations_carry_severity() {
         nba_invariants::ViolationSeverity::Soft
     )), "separation violations must be Soft: {:?}", v2);
 }
+#[test]
+fn test_metamorphic_continuity_axiom_flags_teleportation() {
+    let mut causal = nba_invariants::CausalEventGraph::new();
+    let mut tick1 = base_tick(valid_5v5_players(), ball(0.2, 0.5, Some("H1")));
+    tick1.frame.ball.status = "HELD".to_string();
+    let violations1 = causal.validate_tick(&tick1, 1);
+    assert!(violations1.is_empty());
+
+    // 模拟恶意瞬移（瞬移了 0.6 归一化球场坐标，换算超过 50 英尺）
+    let mut tick2 = base_tick(valid_5v5_players(), ball(0.8, 0.5, Some("H1")));
+    tick2.frame.ball.status = "HELD".to_string();
+    let violations2 = causal.validate_tick(&tick2, 2);
+    assert!(
+        violations2.iter().any(|v| v.rule == "BALL_POSITION_DISCONTINUITY"),
+        "Teleporting ball must violate BALL_POSITION_DISCONTINUITY axiom: {:?}",
+        violations2
+    );
+}
+
+#[test]
+fn test_impulse_origin_axiom_flags_ghost_shot() {
+    let mut causal = nba_invariants::CausalEventGraph::new();
+    let mut tick1 = base_tick(valid_5v5_players(), ball(0.5, 0.5, None));
+    tick1.frame.ball.status = "DEAD".to_string();
+    causal.validate_tick(&tick1, 1);
+
+    // 模拟中圈无源投篮发射（死球直接变成投篮且周围无任何球员）
+    let mut tick2 = base_tick(valid_5v5_players(), ball(0.5, 0.5, None));
+    tick2.frame.ball.status = "SHOT".to_string();
+    // 让所有球员远离中圈
+    for p in &mut tick2.frame.players {
+        p.x = 0.1;
+        p.y = 0.1;
+    }
+    let violations = causal.validate_tick(&tick2, 2);
+    assert!(
+        violations.iter().any(|v| v.rule == "BALL_IMPULSE_WITHOUT_SOURCE"),
+        "Spontaneous flight without holder must violate BALL_IMPULSE_WITHOUT_SOURCE: {:?}",
+        violations
+    );
+}
+
+#[test]
+fn test_score_causal_precondition_flags_telepathic_points() {
+    let mut causal = nba_invariants::CausalEventGraph::new();
+    let tick1 = base_tick(valid_5v5_players(), ball(0.2, 0.5, Some("H1")));
+    causal.validate_tick(&tick1, 1);
+
+    // 比分无源增加（没有任何前置投篮或罚球动作）
+    let mut tick2 = base_tick(valid_5v5_players(), ball(0.2, 0.5, Some("H1")));
+    tick2.frame.score.home = 2;
+    let violations = causal.validate_tick(&tick2, 2);
+    assert!(
+        violations.iter().any(|v| v.rule == "UNCAUSED_SCORE_DELTA"),
+        "Score modification without prior score event must be flagged: {:?}",
+        violations
+    );
+}

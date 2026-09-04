@@ -328,17 +328,27 @@ fn eval_out_of_bounds_action(
 ) -> ConstraintResult {
     let in_bounds = match action {
         CandidateAction::Shoot { from_pos, .. } => ctx.rules.court.contains(*from_pos, 0.0),
-        CandidateAction::Drive {
-            from_pos,
-            target_pos,
-            ..
-        } => ctx.rules.court.contains(*from_pos, 0.0) && ctx.rules.court.contains(*target_pos, 0.0),
-        // An inbound pass is released from out of bounds by design: only the
-        // landing spot must be inside the court.
-        CandidateAction::InboundPass { to_pos, .. } => ctx.rules.court.contains(*to_pos, 0.0),
-        CandidateAction::Pass {
-            from_pos, to_pos, ..
-        } => ctx.rules.court.contains(*from_pos, 0.0) && ctx.rules.court.contains(*to_pos, 0.0),
+        CandidateAction::Drive { target_pos, .. } => ctx.rules.court.contains(*target_pos, 0.0),
+        CandidateAction::Pass { to_pos, .. } => ctx.rules.court.contains(*to_pos, 0.0),
+        CandidateAction::InboundPass { passer_id, to_pos, .. } => {
+            // 接球点必须在界内
+            let to_in_bounds = ctx.rules.court.contains(*to_pos, 0.0);
+            // 发球人必须在场且身体在界外底线附近（与发球点/球距离不超过阈值）
+            let passer_ready = ctx
+                .physics
+                .get_player(passer_id)
+                .map(|p| {
+                    let is_legal_oob = nba_domain::court::Court::is_inbound_release(
+                        p.pos_ft,
+                        ctx.rules.inbound_boundary_tolerance_ft,
+                        ctx.rules.court,
+                    );
+                    let near_ball = (p.pos_ft - ctx.ball_pos).length() <= ctx.rules.inbound_boundary_tolerance_ft;
+                    is_legal_oob && near_ball
+                })
+                .unwrap_or(false);
+            to_in_bounds && passer_ready
+        }
         CandidateAction::Dwell { .. } => true,
     };
     if in_bounds {
@@ -353,15 +363,27 @@ fn eval_out_of_bounds_event(ctx: &ConstraintContext, event: &GameEvent) -> Const
     if !is_boundary_cross {
         return ConstraintResult::pass();
     }
-    let is_ball_carrier = match event {
-        GameEvent::BoundaryCross { player_id, .. } => ctx
-            .physics
-            .get_player(player_id)
-            .map(|player| player.has_ball)
-            .unwrap_or(false),
-        _ => false,
+    let (is_ball_carrier, is_inbounding) = match event {
+        GameEvent::BoundaryCross { player_id, pos, .. } => {
+            let player = ctx.physics.get_player(player_id);
+            let has_ball = player.map(|p| p.has_ball).unwrap_or(false);
+            let is_inbound_action = player
+                .map(|p| p.action == "INBOUND_SETUP" || p.action == "InboundPositioning")
+                .unwrap_or(false);
+            let inbounding = (ctx.is_dead_ball() || ctx.phase == PhaseType::Inbound)
+                && (is_inbound_action
+                    || nba_domain::court::Court::is_inbound_release(
+                        glam::Vec2::new(pos.0, pos.1),
+                        ctx.rules.inbound_boundary_tolerance_ft,
+                        ctx.rules.court,
+                    ));
+            (has_ball, inbounding)
+        }
+        _ => (false, false),
     };
-    if is_ball_carrier || ctx.ball_phase == BallPhase::Dead {
+    if is_inbounding {
+        ConstraintResult::pass()
+    } else if is_ball_carrier {
         ConstraintResult::violate("OUT_OF_BOUNDS")
     } else {
         ConstraintResult::flagged("BOUNDARY_CROSSING", 0.0, 0.0)
@@ -579,13 +601,16 @@ fn eval_shot_clock_urgency(ctx: &ConstraintContext, action: &CandidateAction) ->
             ctx.rules.decision.urgency_drive_boost * urgency,
             0.0,
         ),
-        CandidateAction::Pass { .. } | CandidateAction::InboundPass { .. } => {
-            ConstraintResult::flagged(
-                "CLOCK_URGENCY_PASS_DEPRIORITIZE",
-                -ctx.rules.decision.urgency_pass_penalty * urgency,
-                0.0,
-            )
-        }
+        CandidateAction::InboundPass { .. } => ConstraintResult::flagged(
+            "CLOCK_URGENCY_INBOUND_PASS",
+            ctx.rules.decision.urgency_pass_penalty * urgency,
+            0.0,
+        ),
+        CandidateAction::Pass { .. } => ConstraintResult::flagged(
+            "CLOCK_URGENCY_PASS_DEPRIORITIZE",
+            0.0 - ctx.rules.decision.urgency_pass_penalty * urgency,
+            0.0,
+        ),
         CandidateAction::Dwell { .. } => ConstraintResult::flagged(
             "CLOCK_URGENCY_NO_HESITATE",
             -ctx.rules.decision.urgency_dwell_penalty * urgency,
@@ -743,8 +768,8 @@ constraint!(
     pass_action,
     pass_world,
     eval_out_of_bounds_event,
-    |_ctx| EnforcementAction::Violation {
-        kind: ViolationKind::OutOfBounds
+    |_ctx| EnforcementAction::Turnover {
+        reason: "OUT_OF_BOUNDS".to_string(),
     }
 );
 constraint!(

@@ -230,75 +230,113 @@ fn evaluate_possessions(
         if frame.rules.tick_seconds > 0.0 {
             rules_cache = Some(frame.rules.clone());
         }
-        // 事件窗口收集
-        for d in event_data(frame, "PASS") {
-            if let Ok(ev) = serde_json::from_value::<PassReleaseData>(d) {
-                window.pass_releases.push((
-                    ev.passer_id,
-                    ev.receiver_id,
-                    ev.from_pos,
-                    ev.to_pos,
-                ));
-            }
-        }
-        for d in event_data(frame, "PASS_RECEIVED") {
-            if let Ok(ev) = serde_json::from_value::<PassReceivedData>(d) {
-                // 接球时刻取接球人当前位置（quality 接球可达规范）。
-                // 传球走廊可达范围）。
-                if let Some(p) = frame.players.iter().find(|p| p.id == ev.receiver_id) {
-                    window
-                        .pass_received
-                        .push((ev.receiver_id.clone(), (p.x, p.y)));
+        // POSSESSION_SUMMARY = 回合边界：在此事件之前发生的归前一回合，之后的归新回合
+        let _summary_seq = frame
+            .event_log
+            .iter()
+            .find(|e| e.kind == "POSSESSION_SUMMARY")
+            .map(|e| e.sequence);
+
+        for entry in &frame.event_log {
+            let raw_d = match &entry.data {
+                Some(v) => v,
+                None => continue,
+            };
+            let d = raw_d
+                .as_object()
+                .and_then(|o| if o.len() == 1 { o.values().next() } else { None })
+                .unwrap_or(raw_d);
+
+            if entry.kind == "POSSESSION_SUMMARY" {
+                for e in &frame.events {
+                    match e.as_str() {
+                        "SCORE" | "DRIVE_SCORE" => window.made_arrivals += 1,
+                        "REBOUND" => window.rebounds += 1,
+                        "PASS_DROPPED" => window.drops += 1,
+                        "VIOLATION" => window.violations += 1,
+                        _ => {}
+                    }
                 }
+                if let Ok(summary) = serde_json::from_value::<PossessionSummaryData>(d.clone()) {
+                    if window_open {
+                        judgments.extend(evaluate_possession_window(
+                            &window, &summary, fixture, tick_idx,
+                        ));
+                    }
+                    window = PossessionWindow::default();
+                    window_open = true;
+                }
+                continue;
+            }
+
+            let raw_d = match &entry.data {
+                Some(v) => v,
+                None => continue,
+            };
+            let d = raw_d
+                .as_object()
+                .and_then(|o| if o.len() == 1 { o.values().next() } else { None })
+                .unwrap_or(raw_d);
+            match entry.kind.as_str() {
+                "PASS" => {
+                    if let Ok(ev) = serde_json::from_value::<PassReleaseData>(d.clone()) {
+                        window.pass_releases.push((
+                            ev.passer_id,
+                            ev.receiver_id,
+                            ev.from_pos,
+                            ev.to_pos,
+                        ));
+                    }
+                }
+                "PASS_RECEIVED" => {
+                    if let Ok(ev) = serde_json::from_value::<PassReceivedData>(d.clone()) {
+                        if let Some(p) = frame.players.iter().find(|p| p.id == ev.receiver_id) {
+                            window
+                                .pass_received
+                                .push((ev.receiver_id.clone(), (p.x, p.y)));
+                        }
+                    }
+                }
+                "STEAL" => {
+                    if let Ok(ev) = serde_json::from_value::<PassInterceptedData>(d.clone()) {
+                        window.steals.push((
+                            ev.passer_id,
+                            ev.receiver_id,
+                            ev.defender_id,
+                            ev.position,
+                        ));
+                    }
+                }
+                "PASS_DROPPED" => {
+                    window.drops += 1;
+                    window.pass_releases.pop();
+                }
+                "SHOT_RELEASE" => {
+                    if let Ok(ev) = serde_json::from_value::<ShotReleaseData>(d.clone()) {
+                        window.shot_releases.push((ev.shooter_id, ev.is_three, ev.contest_level));
+                    }
+                }
+                "FREE_THROW" => {
+                    if let Ok(ev) = serde_json::from_value::<FreeThrowData>(d.clone()) {
+                        if ev.made {
+                            window.ft_made += 1;
+                        }
+                    }
+                }
+                _ => {}
             }
         }
-        for d in event_data(frame, "STEAL") {
-            if let Ok(ev) = serde_json::from_value::<PassInterceptedData>(d) {
-                window.steals.push((
-                    ev.passer_id,
-                    ev.receiver_id,
-                    ev.defender_id,
-                    ev.position,
-                ));
-            }
-        }
-        for d in event_data(frame, "SHOT_RELEASE") {
-            if let Ok(ev) = serde_json::from_value::<ShotReleaseData>(d) {
-                window.shot_releases.push((ev.shooter_id, ev.is_three, ev.contest_level));
-            }
-        }
+
         for e in &frame.events {
             match e.as_str() {
                 "SCORE" | "DRIVE_SCORE" => window.made_arrivals += 1,
-                "FREE_THROW" => {}
                 "REBOUND" => window.rebounds += 1,
                 "PASS_DROPPED" => window.drops += 1,
                 "VIOLATION" => window.violations += 1,
                 _ => {}
             }
         }
-        for d in event_data(frame, "FREE_THROW") {
-            if let Ok(ev) = serde_json::from_value::<FreeThrowData>(d) {
-                if ev.made {
-                    window.ft_made += 1;
-                }
-            }
-        }
 
-        // POSSESSION_SUMMARY = 回合边界：对刚关闭的窗口出裁决。
-        let summaries: Vec<PossessionSummaryData> = event_data(frame, "POSSESSION_SUMMARY")
-            .iter()
-            .filter_map(|d| serde_json::from_value(d.clone()).ok())
-            .collect();
-        for summary in summaries {
-            if window_open {
-                judgments.extend(evaluate_possession_window(
-                    &window, &summary, fixture, tick_idx,
-                ));
-            }
-            window = PossessionWindow::default();
-            window_open = true;
-        }
         let _ = rules_cache;
     }
     judgments
@@ -331,13 +369,10 @@ fn evaluate_possession_window(
 
     // 接球人走廊可达：PASS_RECEIVED 位置与释放目标 to_pos 的距离。
     let corridor = fixture.pass_corridor_radius_ft;
+    let mut remaining_received = window.pass_received.clone();
     for (passer, receiver, from, to) in &window.pass_releases {
-        if let Some((rx, ry)) = window
-            .pass_received
-            .iter()
-            .find(|(id, _)| id == receiver)
-            .map(|(_, p)| *p)
-        {
+        if let Some(pos_idx) = remaining_received.iter().position(|(id, _)| id == receiver) {
+            let (_, (rx, ry)) = remaining_received.remove(pos_idx);
             // 接球人帧坐标为归一化，乘场地尺寸转英尺；
             // 走廊判定 = 接球点到传球线段 from->to 的距离（quality 传球走廊规范）。
             let dist = point_segment_distance_ft(

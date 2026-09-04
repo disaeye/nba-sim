@@ -107,6 +107,7 @@ pub struct MatchEngine {
     /// Per-tick invariant checker; validates every emitted frame against the
     /// physical/basketball rules that must always hold, regardless of tactics.
     pub invariant_checker: InvariantChecker,
+    pub causal_graph: nba_invariants::causal_graph::CausalEventGraph,
     /// Violations produced by the most recent `step()`; exported for callers
     /// that want a single aggregated report rather than per-tick stderr.
     pub last_tick_violations: Vec<Violation>,
@@ -294,15 +295,36 @@ impl MatchEngine {
             period: 1,
             home_score: 0,
             away_score: 0,
-            ball_pos_3d: (initial_pos, rules.ball_bounce_base_ft),
-            ball_state: BallTrajectoryKind::Held {
-                carrier_id: initial_carrier_id,
+            ball_pos_3d: if rules.tip_off_duration_seconds > 0.0 {
+                (Vec2::new(rules.court.width_ft * 0.5, rules.court.height_ft * 0.5), 4.0)
+            } else {
+                (initial_pos, rules.ball_bounce_base_ft)
+            },
+            ball_state: if rules.tip_off_duration_seconds > 0.0 {
+                BallTrajectoryKind::LooseBall {
+                    pos: Vec2::new(rules.court.width_ft * 0.5, rules.court.height_ft * 0.5),
+                    vel: Vec2::ZERO,
+                    z: 4.0,
+                    vel_z: 0.0,
+                    last_touch_team: Possession::Home,
+                }
+            } else {
+                BallTrajectoryKind::Held {
+                    carrier_id: initial_carrier_id,
+                }
             },
             last_passer_id: None,
             active_windows: HashMap::new(),
-            current_event: Some("TIPOFF".to_string()),
-            current_callout: Some("比赛开始，跳球后主队获得第一攻球权。".to_string()),
-
+            current_event: if rules.tip_off_duration_seconds > 0.0 {
+                Some("TIPOFF".to_string())
+            } else {
+                None
+            },
+            current_callout: if rules.tip_off_duration_seconds > 0.0 {
+                Some("裁判中圈垂直抛球，双方中锋起跳争顶！".to_string())
+            } else {
+                Some("比赛开始，跳球后主队获得第一攻球权。".to_string())
+            },
             rng: ChaCha8Rng::seed_from_u64(seed),
             current_intensity: Some("BuildUp".to_string()),
             target_possessions: 10,
@@ -316,9 +338,14 @@ impl MatchEngine {
             coach: CoachStrategy::default(),
             home_team: setup.home_team,
             away_team: setup.away_team,
-            team_traits,
             home_roster_order: setup.home_lineup.starters.to_vec(),
             away_roster_order: setup.away_lineup.starters.to_vec(),
+            team_traits,
+            game_flow: if rules.tip_off_duration_seconds > 0.0 {
+                GameFlowState::TipOff
+            } else {
+                GameFlowState::LiveBall
+            },
             home_offense_tactic: home_tactic,
             away_offense_tactic: away_tactic,
             home_defensive_tactic: home_defense,
@@ -337,13 +364,13 @@ impl MatchEngine {
             free_throw_attempt: 0,
             free_throw_shooter: None,
             inbound_baseline: Vec2::new(0.0, rules.court.hoop_y_ft),
-            game_flow: GameFlowState::TipOff,
             inbound_elapsed: 0.0,
 
             backcourt_elapsed: 0.0,
             period_break_elapsed: 0.0,
             last_decision_time: -rules.decision_interval_seconds,
             invariant_checker: InvariantChecker::new(),
+            causal_graph: nba_invariants::causal_graph::CausalEventGraph::new(),
             last_tick_violations: Vec::new(),
             box_score: MatchBoxScore::default(),
             last_possession_summary_index: None,
@@ -521,7 +548,7 @@ impl MatchEngine {
             SubPhase::DeadBallReset => PhaseType::DeadBallReset,
         }
     }
-    fn constraint_ctx<'a>(&'a self) -> ConstraintContext<'a> {
+    pub fn constraint_ctx<'a>(&'a self) -> ConstraintContext<'a> {
         let possession_team = match self.possession {
             Possession::Home => "home",
             Possession::Away => "away",
@@ -553,17 +580,19 @@ impl MatchEngine {
     fn carrier_id(&self) -> String {
         match &self.ball_state {
             BallTrajectoryKind::Held { carrier_id }
+            | BallTrajectoryKind::InboundReady { inbounder_id: carrier_id, .. }
             | BallTrajectoryKind::ControlTransfer { carrier_id, .. } => carrier_id.clone(),
-            _ => self
-                .player_id_for_team_index(
-                    if self.possession == Possession::Home {
-                        "home"
-                    } else {
-                        "away"
-                    },
-                    self.carrier_idx,
-                )
-                .unwrap_or_default(),
+            BallTrajectoryKind::InboundTransfer { inbounder_id, .. } => inbounder_id.clone(),
+            _ => {
+                let roster = match self.possession {
+                    Possession::Home => &self.home_roster_order,
+                    Possession::Away => &self.away_roster_order,
+                };
+                roster
+                    .get(self.carrier_idx)
+                    .cloned()
+                    .unwrap_or_else(|| roster.first().cloned().unwrap_or_default())
+            }
         }
     }
     /// Keeps the active offensive scheme derived from the configured team
@@ -607,6 +636,7 @@ impl MatchEngine {
     fn sync_ball_holder(&mut self) {
         let holder: Option<&str> = match &self.ball_state {
             BallTrajectoryKind::Held { carrier_id }
+            | BallTrajectoryKind::InboundReady { inbounder_id: carrier_id, .. }
             | BallTrajectoryKind::Drive {
                 driver_id: carrier_id,
                 ..
@@ -621,12 +651,16 @@ impl MatchEngine {
         if self.game_flow == flow {
             return;
         }
-        if !self.game_flow.can_transition_to(flow) {
-            self.current_enforcements.push(format!(
-                "ILLEGAL_FLOW_TRANSITION:{:?}->{:?}",
-                self.game_flow, flow
-            ));
-            return;
+        // 当试图进入活球阶段时，执行严格的因果前置图前置条件校验
+        if flow == GameFlowState::LiveBall {
+            let active_count = self.physics.get_players().values().filter(|p| p.on_court).count();
+            if active_count != 10 {
+                eprintln!(
+                    "[CAUSAL_DAG] Transition to LiveBall rejected: strictly 10 on-court players required, found {}",
+                    active_count
+                );
+                return;
+            }
         }
         self.game_flow = flow;
     }
@@ -674,7 +708,10 @@ impl MatchEngine {
     /// discovered only by post-hoc log analysis.
     pub fn step(&mut self) -> StreamTick {
         let tick = self.step_inner();
-        self.last_tick_violations = self.invariant_checker.check_tick(&tick);
+        let mut violations = self.invariant_checker.check_tick(&tick);
+        // 第一性原理因果与连续性图全局在线校验
+        violations.extend(self.causal_graph.validate_tick(&tick, self.tick_index));
+        self.last_tick_violations = violations;
         for v in &self.last_tick_violations {
             eprintln!("[INVARIANT] {}", v);
         }
@@ -708,18 +745,60 @@ impl MatchEngine {
         if was_tip_off {
             self.current_time += dt;
             self.sub_phase_timer += dt;
-            if self.sub_phase_timer + f32::EPSILON < self.rules.tip_off_duration_seconds {
-                self.physics.reset_motion();
-                self.current_event = Some("TIPOFF".to_string());
-                self.current_callout = Some("裁判抛球，双方中锋起跳争夺跳球！".to_string());
-                self.current_enforcements.clear();
-                self.last_decision_trace = None;
+            if self.rules.tip_off_duration_seconds > 0.0 {
+                if self.sub_phase_timer + f32::EPSILON < self.rules.tip_off_duration_seconds {
+                    self.publish_events();
+                    self.physics.reset_motion();
+                    let center_x = self.rules.court.width_ft * 0.5;
+                    let center_y = self.rules.court.height_ft * 0.5;
+                    let total_time = self.rules.tip_off_duration_seconds;
+                    let progress = (self.sub_phase_timer / total_time).clamp(0.0, 1.0);
+                    let peak_z = 11.5;
+                    let base_z = 4.0;
+                    let z = base_z + 4.0 * (peak_z - base_z) * progress * (1.0 - progress);
+                    self.ball_pos_3d = (Vec2::new(center_x, center_y), z);
+                    self.current_event = Some("TIPOFF".to_string());
+                    self.current_event_types = vec!["TIPOFF".to_string()];
+                    self.current_callout = Some("裁判中圈垂直抛球，双方中锋起跳争顶！".to_string());
+                    self.current_enforcements.clear();
+                    self.last_decision_trace = None;
+                    return self.build_tick();
+                }
+                // 真实跳球争顶物理：两名中锋在中圈争顶，球被拨向争顶获胜方后场，成为自由活球（LooseBall）
+                let home_c_id = self.home_team.players.get(4).map(|p| p.id.clone()).unwrap_or_else(|| "H_5".to_string());
+                let away_c_id = self.away_team.players.get(4).map(|p| p.id.clone()).unwrap_or_else(|| "A_5".to_string());
+                let winner_is_home = self.possession == Possession::Home;
+                let tapping_player = if winner_is_home { &home_c_id } else { &away_c_id };
+                let center_x = self.rules.court.width_ft * 0.5;
+                let center_y = self.rules.court.height_ft * 0.5;
+                let tap_target = if winner_is_home {
+                    Vec2::new(center_x - 14.0, center_y)
+                } else {
+                    Vec2::new(center_x + 14.0, center_y)
+                };
+                self.set_game_flow(GameFlowState::LiveBall);
+                self.transition_phase(SubPhase::Initiation);
+                self.transition_ball_state(BallTrajectoryKind::Pass {
+                    from_pos: Vec2::new(center_x, center_y),
+                    to_pos: tap_target,
+                    target_id: self.new_possession_pg(),
+                    start_time: self.current_time,
+                    duration: 0.45,
+                    peak_z: 7.5,
+                    receive_success: true,
+                    inbound: false,
+                });
+                self.current_event_types = vec!["TIPOFF_SECURED".to_string()];
+                self.current_callout = Some(format!(
+                    "中锋 {} 起跳率先触球，将球点拍向后场！第一攻展开！",
+                    tapping_player
+                ));
                 return self.build_tick();
             }
             self.set_game_flow(GameFlowState::LiveBall);
             self.transition_phase(SubPhase::Initiation);
+            self.current_callout = Some("比赛开始，跳球后主队获得第一攻球权。".to_string());
         }
-
         if was_period_break
             && !matches!(
                 self.game_flow,
@@ -1036,7 +1115,7 @@ impl MatchEngine {
         let mut new_ball_state = None;
         let mut steal_triggered_defender = None;
         let mut loose_ball_secured_player = None;
-
+        let mut live_ball_triggered = false;
         match &self.ball_state {
             BallTrajectoryKind::Held { carrier_id } => {
                 let cid = carrier_id.clone();
@@ -1080,15 +1159,30 @@ impl MatchEngine {
                 duration,
                 ..
             } => {
-                if current_t - start_time >= *duration {
-                    self.ball_pos_3d = (*baseline_pos, self.rules.chest_height_ft);
+                let ball_arrived = current_t - start_time >= *duration;
+                let inbounder_dist = self
+                    .physics
+                    .get_player(inbounder_id)
+                    .map(|p| (p.pos_ft - *baseline_pos).length())
+                    .unwrap_or(0.0);
+                let inbounder_arrived = inbounder_dist <= self.rules.inbound_boundary_tolerance_ft;
+                if ball_arrived && inbounder_arrived {
+                    let inb_pos = self.physics.get_player(inbounder_id).map(|p| p.pos_ft).unwrap_or(*baseline_pos);
+                    self.ball_pos_3d = (inb_pos, self.rules.chest_height_ft);
                     new_ball_state = Some(BallTrajectoryKind::InboundReady {
-                        baseline_pos: *baseline_pos,
+                        baseline_pos: inb_pos,
                         inbounder_id: inbounder_id.clone(),
                     });
                 }
             }
-            BallTrajectoryKind::InboundReady { .. } => {}
+            BallTrajectoryKind::InboundReady { baseline_pos, inbounder_id } => {
+                // 球随发球员移动保持在胸高位置
+                if let Some(inbounder) = self.physics.get_player(inbounder_id) {
+                    self.ball_pos_3d = (inbounder.pos_ft, self.rules.chest_height_ft);
+                } else {
+                    self.ball_pos_3d = (*baseline_pos, self.rules.chest_height_ft);
+                }
+            }
 
             BallTrajectoryKind::Pass {
                 target_id,
@@ -1100,6 +1194,9 @@ impl MatchEngine {
                 receive_success,
                 ..
             } => {
+                let duration_val = *duration;
+                let is_inbound_pass = *inbound;
+                let will_receive = *receive_success;
                 let tau = ((current_t - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
                 let def_team = if is_home { "away" } else { "home" };
                 let mut defender_ids: Vec<String> = self
@@ -1179,6 +1276,9 @@ impl MatchEngine {
                             defender_id,
                             position: (position.x, position.y),
                         });
+                        if is_inbound_pass {
+                            live_ball_triggered = true;
+                        }
                         new_ball_state = Some(BallTrajectoryKind::LooseBall {
                             pos: position,
                             vel: segment / duration.max(f32::EPSILON),
@@ -1189,21 +1289,36 @@ impl MatchEngine {
                     }
                 } else if tau >= 1.0 {
                     let receiver_id = target_id.clone();
-                    if *receive_success {
+                    if will_receive {
                         self.current_possession_passes += 1;
                         self.pending_events.push(GameEvent::PassReceived {
                             receiver_id: receiver_id.clone(),
                         });
-                        if *inbound {
+                        if is_inbound_pass {
                             self.transition_phase(SubPhase::Initiation);
                             self.set_game_flow(GameFlowState::LiveBall);
+                            self.sub_phase_timer = 0.0;
                             self.last_decision_time = -self.rules.decision_interval_seconds;
+                        }
+                        let catch_pos = self.ball_pos_3d.0;
+                        let should_snap = self
+                            .physics
+                            .get_player(&receiver_id)
+                            .map(|rx_p| (rx_p.pos_ft - catch_pos).length() < 8.0)
+                            .unwrap_or(false);
+                        if should_snap {
+                            self.physics.teleport_player(&receiver_id, catch_pos);
                         }
                         new_ball_state = Some(BallTrajectoryKind::Held {
                             carrier_id: receiver_id,
                         });
                         self.last_passer_id = None;
                     } else {
+                        if is_inbound_pass {
+                            self.transition_phase(SubPhase::Initiation);
+                            self.set_game_flow(GameFlowState::LiveBall);
+                            self.last_decision_time = -self.rules.decision_interval_seconds;
+                        }
                         self.pending_events.push(GameEvent::PassDropped {
                             passer_id,
                             receiver_id,
@@ -1211,7 +1326,7 @@ impl MatchEngine {
                         });
                         new_ball_state = Some(BallTrajectoryKind::LooseBall {
                             pos: self.ball_pos_3d.0,
-                            vel: segment / duration.max(f32::EPSILON),
+                            vel: segment / duration_val.max(f32::EPSILON),
                             z: self.ball_pos_3d.1,
                             vel_z: 0.0,
                             last_touch_team: self.possession,
@@ -1512,6 +1627,11 @@ impl MatchEngine {
             self.ball_pos_3d = (from_pos, from_z);
         } else if let Some(nbs) = new_ball_state {
             self.transition_ball_state(nbs);
+            if live_ball_triggered {
+                self.transition_phase(SubPhase::Initiation);
+                self.set_game_flow(GameFlowState::LiveBall);
+                self.last_decision_time = -self.rules.decision_interval_seconds;
+            }
             if !matches!(self.ball_state, BallTrajectoryKind::Held { .. }) {
                 self.ball_pos_3d = BallisticsEngine::sample_ball_position(
                     &self.ball_state,
@@ -1554,16 +1674,50 @@ impl MatchEngine {
             BallTrajectoryKind::Drive { driver_id, .. } => Some(driver_id.as_str()),
             _ => None,
         };
+        let inbounder_override = match &self.ball_state {
+            BallTrajectoryKind::InboundTransfer { inbounder_id, baseline_pos, .. }
+            | BallTrajectoryKind::InboundReady { inbounder_id, baseline_pos, .. } => {
+                Some((inbounder_id.clone(), *baseline_pos))
+            }
+            _ => None,
+        };
+        let pass_receiver_override = match &self.ball_state {
+            BallTrajectoryKind::Pass { target_id, to_pos, .. } => {
+                Some((target_id.clone(), *to_pos))
+            }
+            _ => None,
+        };
         for target in home_targets.into_iter().chain(away_targets) {
             if let Some(player_id) = target.player_id {
                 if active_driver_id == Some(player_id.as_str()) {
                     continue;
                 }
+                let (target_pos, speed, action) = if let Some((inb_id, inb_pos)) = &inbounder_override {
+                    if inb_id == &player_id {
+                        (*inb_pos, 15.0, "INBOUND_SETUP".to_string())
+                    } else if let Some((rx_id, rx_pos)) = &pass_receiver_override {
+                        if rx_id == &player_id {
+                            (*rx_pos, 20.0, "RECEIVE_CUT".to_string())
+                        } else {
+                            (target.target_pos, target.speed, target.action)
+                        }
+                    } else {
+                        (target.target_pos, target.speed, target.action)
+                    }
+                } else if let Some((rx_id, rx_pos)) = &pass_receiver_override {
+                    if rx_id == &player_id {
+                        (*rx_pos, 20.0, "RECEIVE_CUT".to_string())
+                    } else {
+                        (target.target_pos, target.speed, target.action)
+                    }
+                } else {
+                    (target.target_pos, target.speed, target.action)
+                };
                 self.physics.set_player_target(
                     &player_id,
-                    target.target_pos,
-                    target.speed,
-                    &target.action,
+                    target_pos,
+                    speed,
+                    &action,
                     &target.slot,
                     &target.morale,
                 );
@@ -1571,6 +1725,7 @@ impl MatchEngine {
         }
         let active_carrier = match &self.ball_state {
             BallTrajectoryKind::Held { carrier_id }
+            | BallTrajectoryKind::InboundReady { inbounder_id: carrier_id, .. }
             | BallTrajectoryKind::Drive {
                 driver_id: carrier_id,
                 ..
@@ -2021,6 +2176,8 @@ impl MatchEngine {
             .unwrap_or(self.possession == Possession::Home);
         let attempt = self.free_throw_attempt.saturating_add(1);
         let ft_pos = Court::free_throw_pos(shooter_is_home, &self.rules);
+        let hoop_pos = self.rules.court.hoop_pos(shooter_is_home);
+        self.ball_pos_3d = (hoop_pos, self.rules.rim_height_ft);
         self.pending_events.push(GameEvent::FreeThrowAttempt {
             shooter_id: shooter_id.clone(),
             attempt,
@@ -2051,16 +2208,16 @@ impl MatchEngine {
             }
         }
     }
-
     fn start_free_throw_rebound(&mut self, shooter_is_home: bool, ft_pos: Vec2) {
         let hoop = self.rules.court.hoop_pos(shooter_is_home);
-        let rebound_from = self.ball_pos_3d;
+        let rebound_from = (hoop, self.rules.rim_height_ft);
         let landing_spot =
             BallisticsEngine::compute_rebound_landing(ft_pos, hoop, &mut self.rng, &self.rules);
+        self.ball_pos_3d = (rebound_from.0, rebound_from.1);
         self.shot_clock = self.rules.league.offensive_rebound_shot_clock_seconds;
         self.set_game_flow(GameFlowState::LiveBall);
         self.transition_phase(SubPhase::FlightAndRebound);
-        self.transition_ball_state(BallTrajectoryKind::RimRebound {
+        let next_state = BallTrajectoryKind::RimRebound {
             from_pos: rebound_from.0,
             from_z: rebound_from.1,
             hoop_pos: hoop,
@@ -2069,7 +2226,9 @@ impl MatchEngine {
             duration: landing_spot.flight_duration,
             peak_z: self.rules.rebound_peak_ft,
             last_touch_team: self.possession,
-        });
+        };
+        self.ball_state = next_state;
+        self.sync_ball_holder();
     }
 
     /// Test/diagnostic hook: resolve the current free throw with a forced outcome.
@@ -2110,6 +2269,8 @@ impl MatchEngine {
                 self.set_game_flow(GameFlowState::DeadBall);
                 self.start_inbound_transition(Court::hoop_pos(shooter_is_home), self.ball_pos_3d);
             } else {
+                let hoop = self.rules.court.hoop_pos(shooter_is_home);
+                self.ball_pos_3d = (hoop, self.rules.rim_height_ft);
                 self.start_free_throw_rebound(
                     shooter_is_home,
                     Court::free_throw_pos(shooter_is_home, &self.rules),
@@ -2128,25 +2289,13 @@ impl MatchEngine {
         inbound: bool,
     ) {
         let from_pos = self.ball_pos_3d.0;
-        let initial_dist = self.physics.get_player(receiver_id).map(|p| (p.pos_ft - from_pos).length()).unwrap_or(20.0);
-        let initial_dur = self.rules.pass_duration(initial_dist, inbound);
-        let target_lead_pos = self
-            .physics
-            .get_player(receiver_id)
-            .map(|p| {
-                BallisticsEngine::extrapolate_receiver_pos(
-                    p,
-                    initial_dur.clamp(0.0, 0.4),
-                    &self.rules,
-                )
-            })
-            .unwrap_or(to_pos);
 
+        let _initial_dist = self.physics.get_player(receiver_id).map(|p| (p.pos_ft - from_pos).length()).unwrap_or(20.0);
+        let target_lead_pos = to_pos;
         self.active_windows.insert(
             passer_id.to_string(),
             ActionTimeWindow::new_pass(passer_id, current_t, &self.rules),
         );
-
         let pass_dist = (target_lead_pos - from_pos).length();
         let duration = self.rules.pass_duration(pass_dist, inbound);
         let receive_success =
@@ -2386,13 +2535,17 @@ impl MatchEngine {
         }
         if let Some(p) = self.physics.get_player_mut(&in_player_id) {
             p.on_court = true;
-            p.action = "SetPosition".to_string();
+            p.action = "EnterCourt".to_string();
             p.pos_ft = out_pos;
             p.target_pos_ft = out_pos;
             p.target_speed_ftps = 0.0;
             p.vel_ft = Vec2::ZERO;
             p.slot = out_action_slot;
         }
+        self.current_callout = Some(format!(
+            "球员 {} 犯满离场，替补 {} 死球登场入位！",
+            out_player_id, in_player_id
+        ));
         // 战术绑定名册同步（slot 绑定按名册顺序索引）。
         for roster in [&mut self.home_roster_order, &mut self.away_roster_order] {
             if let Some(slot_ref) = roster.iter_mut().find(|id| *id == out_player_id) {
@@ -2418,7 +2571,7 @@ impl MatchEngine {
     }
 
     // 阶段转换器
-    fn start_violation_turnover(&mut self, _kind: ViolationKind) {
+    fn start_violation_turnover(&mut self, kind: ViolationKind) {
         self.box_score.turnovers += 1;
         self.emit_possession_summary("TURNOVER_VIOLATION", None, None, None);
         let current_ball_3d = self.ball_pos_3d;
@@ -2439,11 +2592,9 @@ impl MatchEngine {
         self.update_coach_strategy();
         self.sync_team_tactics();
         self.shot_clock = self.rules.league.shot_clock_seconds;
-        self.carrier_idx = self.player_index_for_id(&stealer_id).unwrap_or(0);
+        self.sub_phase_timer = 0.0;
+        self.transition_phase(SubPhase::ActionExecution);
         self.set_game_flow(GameFlowState::LiveBall);
-        self.transition_phase(SubPhase::Initiation);
-        self.last_decision_time = -self.rules.decision_interval_seconds;
-        self.ball_pos_3d = (intercept_pos, self.rules.ball_holder_height_ft);
         self.transition_ball_state(BallTrajectoryKind::Held {
             carrier_id: stealer_id,
         });
@@ -2526,6 +2677,12 @@ impl MatchEngine {
             inbound: false,
             receive_success,
         });
+        self.pending_events.push(GameEvent::PassRelease {
+            passer_id: rebounder_id.clone(),
+            receiver_id: target_id.clone(),
+            from_pos: (reb_pos.x, reb_pos.y),
+            to_pos: (target_pos.x, target_pos.y),
+        });
         self.last_passer_id = Some(rebounder_id);
         self.transition_phase(SubPhase::Initiation);
         self.set_game_flow(GameFlowState::LiveBall);
@@ -2554,6 +2711,7 @@ impl MatchEngine {
         };
         let possession_changed = secured_possession != self.possession;
         if possession_changed {
+            self.emit_possession_summary("TURNOVER_STEAL", Some(player_id.clone()), None, None);
             self.complete_possession();
             if self.simulation_complete {
                 self.settle_scope_ball((position, self.rules.ball_holder_height_ft));
@@ -2597,9 +2755,14 @@ impl MatchEngine {
             self.rules.inbound_release_depth_ft,
             self.rules.court,
         );
+        if let Some(player) = self.physics.get_player_mut(&inbounder_id) {
+            player.target_pos_ft = release_pos;
+            player.action = "InboundPositioning".to_string();
+        }
         let duration = self
             .rules
-            .pass_duration((release_pos - current_ball_3d.0).length(), true);
+            .pass_duration((release_pos - current_ball_3d.0).length(), true)
+            .max(self.rules.inbound_setup_seconds);
         self.transition_ball_state(BallTrajectoryKind::InboundTransfer {
             from_pos: current_ball_3d.0,
             from_z: current_ball_3d.1,
@@ -2727,6 +2890,7 @@ impl MatchEngine {
     fn build_tick(&self) -> StreamTick {
         let active_carrier = match &self.ball_state {
             BallTrajectoryKind::Held { carrier_id }
+            | BallTrajectoryKind::InboundReady { inbounder_id: carrier_id, .. }
             | BallTrajectoryKind::Drive {
                 driver_id: carrier_id,
                 ..

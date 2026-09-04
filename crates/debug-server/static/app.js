@@ -562,6 +562,79 @@ function eventClass(name) {
       const color = player.team === "home" ? "#2ce59b" : "#f5bd45";
       const dark = player.team === "home" ? "#087b57" : "#a96f15";
       const radius = 17;
+      const action = String(player.action || "").toUpperCase();
+      const isShooting = action.includes("SHOT") || action.includes("JUMP") || action.includes("PULLUP") || action.includes("HOOK");
+      const isDriving = action.includes("DRIVE") || action.includes("LAYUP") || action.includes("DUNK") || action.includes("PENETRATE");
+      const isPassing = action.includes("PASS");
+      const isContesting = action.includes("CONTEST") || action.includes("BLOCK") || action.includes("DENY");
+      const isTripleThreat = action.includes("TRIPLE") || action.includes("ISOLATION") || action.includes("POST");
+      const isSprinting = Math.hypot(player.vx || 0, player.vy || 0) > 12.0 || action.includes("FAST") || action.includes("TRANSITION") || action.includes("CUT");
+
+      // 特效1：起跳/投篮光环与蓄力脉冲
+      if (isShooting) {
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, radius + 11 + Math.sin(finite(tick.t) * 16) * 3, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255, 105, 50, 0.88)";
+        ctx.lineWidth = 3;
+        ctx.setLineDash([4, 2]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // 特效2：强力攻筐/突破/扣篮烈焰尾迹
+      if (isDriving) {
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, radius + 8, 0, Math.PI * 2);
+        ctx.strokeStyle = "#ff3b30";
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        // 运动方向动量尾羽
+        const vx = Number(player.vx || (player.target_x - player.x) || 0);
+        const vy = Number(player.vy || (player.target_y - player.y) || 0);
+        if (Math.hypot(vx, vy) > 0.1) {
+          const angle = Math.atan2(vy, vx);
+          ctx.beginPath();
+          ctx.moveTo(playerPoint.x - Math.cos(angle) * (radius + 2), playerPoint.y - Math.sin(angle) * (radius + 2));
+          ctx.lineTo(playerPoint.x - Math.cos(angle) * (radius + 20), playerPoint.y - Math.sin(angle) * (radius + 20));
+          ctx.strokeStyle = "rgba(255, 69, 58, 0.75)";
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        }
+      }
+      // 特效3：传球雷达波
+      if (isPassing) {
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, radius + 6, 0, Math.PI * 2);
+        ctx.strokeStyle = "#5ac8fa";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      // 特效4：防守封盖/干扰防守盾形或波纹
+      if (isContesting) {
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, radius + 9, 0, Math.PI * 2);
+        ctx.strokeStyle = "#af52de";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      // 特效5：三威胁/试探步金色专注环
+      if (isTripleThreat) {
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, radius + 5, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255, 214, 10, 0.7)";
+        ctx.lineWidth = 1.8;
+        ctx.setLineDash([2, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // 特效6：加速快攻/切入速度尾迹
+      if (isSprinting && !isDriving) {
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, radius + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+
       if (player.hasBall) {
         ctx.beginPath(); ctx.arc(playerPoint.x, playerPoint.y, radius + 7, 0, Math.PI * 2); ctx.strokeStyle = "rgba(255,255,255,.92)"; ctx.lineWidth = 2; ctx.stroke();
       }

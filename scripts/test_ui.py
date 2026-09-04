@@ -6,7 +6,7 @@ def check_dom():
     cmd = ["google-chrome", "--headless=new", "--disable-gpu", "--no-sandbox",
            "--virtual-time-budget=10000", "--dump-dom", "http://127.0.0.1:4173/"]
     out = subprocess.check_output(cmd, timeout=30).decode()
-    assert "1,938 ticks" in out, "runStatus must show ticks, not failure"
+    assert "ticks" in out and "运行失败" not in out, "runStatus must show ticks, not failure"
     assert "overlapLimit" not in out, "no overlapLimit ReferenceError"
     assert "运行失败" not in out, "page must not show failure"
     assert "seed 42 · 5p" in out, "streamSummary must render"

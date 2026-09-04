@@ -163,8 +163,14 @@ impl SpatialGeometry {
             (1.0 - closest_dist / (contest_distance + rules.defender_reach_ft)).clamp(0.0, 1.0);
         let speed_factor = (closing_speed / rules.max_player_speed_ftps.max(f32::EPSILON))
             .clamp(0.0, rules.semantics.contest_speed_factor_cap);
-        let contest_intensity = (dist_factor * rules.semantics.contest_dist_weight
-            + speed_factor * rules.semantics.contest_speed_weight)
+        let facing_dot = if closest_dist > rules.semantics.minimum_entity_distance_ft {
+            defender.facing_dir.dot(to_player.normalize())
+        } else {
+            1.0
+        };
+        let facing_factor = if facing_dot < 0.0 { 0.25 } else { (0.5 + 0.5 * facing_dot).clamp(0.25, 1.0) };
+        let contest_intensity = ((dist_factor * rules.semantics.contest_dist_weight
+            + speed_factor * rules.semantics.contest_speed_weight) * facing_factor)
             .clamp(0.0, 1.0);
         OpennessMetric {
             closest_defender_id: Some(closest_id),

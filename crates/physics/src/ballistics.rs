@@ -146,8 +146,12 @@ impl BallisticsEngine {
                 let z = from_z + (rules.chest_height_ft - *from_z) * progress;
                 (xy, z)
             }
-            BallTrajectoryKind::InboundReady { baseline_pos, .. } => {
-                (*baseline_pos, rules.chest_height_ft)
+            BallTrajectoryKind::InboundReady { baseline_pos, inbounder_id } => {
+                if let Some(inbounder) = players.get(inbounder_id) {
+                    (inbounder.pos_ft, rules.chest_height_ft)
+                } else {
+                    (*baseline_pos, rules.chest_height_ft)
+                }
             }
             BallTrajectoryKind::Drive { driver_id, .. } => {
                 if let Some(driver) = players.get(driver_id) {
