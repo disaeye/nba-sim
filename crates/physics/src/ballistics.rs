@@ -92,12 +92,26 @@ impl BallisticsEngine {
         match state {
             BallTrajectoryKind::Held { carrier_id } => {
                 if let Some(carrier) = players.get(carrier_id) {
-                    let offset = if carrier.vel_ft.length() > 0.5 {
-                        carrier.vel_ft.normalize() * rules.ball_holder_offset_ft
+                    let speed = carrier.vel_ft.length();
+                    let forward = if speed > 0.5 {
+                        carrier.vel_ft / speed
                     } else {
-                        Vec2::new(rules.ball_holder_offset_ft, 0.0)
+                        Vec2::new(1.0, 0.0)
                     };
-                    (carrier.pos_ft + offset, rules.ball_holder_height_ft)
+                    let lateral = Vec2::new(-forward.y, forward.x);
+                    let freq = if speed > 0.5 {
+                        rules.ball_bounce_frequency_hz * 1.2
+                    } else {
+                        rules.ball_bounce_frequency_hz
+                    };
+                    let cycle = (current_time * freq * std::f32::consts::TAU).sin();
+                    let side_offset = lateral * (cycle * rules.ball_holder_offset_ft * 0.45);
+                    let forward_offset = forward * rules.ball_holder_offset_ft;
+                    let bounce_progress = ((current_time * freq * std::f32::consts::PI).sin()).abs();
+                    let min_z = rules.ball_holder_height_ft * 0.70;
+                    let max_z = rules.ball_holder_height_ft;
+                    let bounce_z = min_z + bounce_progress * (max_z - min_z);
+                    (carrier.pos_ft + forward_offset + side_offset, bounce_z)
                 } else {
                     (
                         Vec2::new(rules.court.width_ft / 2.0, rules.court.height_ft / 2.0),
@@ -155,18 +169,22 @@ impl BallisticsEngine {
             }
             BallTrajectoryKind::Drive { driver_id, .. } => {
                 if let Some(driver) = players.get(driver_id) {
-                    let offset = if driver.vel_ft.length() > 0.5 {
-                        driver.vel_ft.normalize() * rules.ball_holder_offset_ft
+                    let speed = driver.vel_ft.length();
+                    let forward = if speed > 0.5 {
+                        driver.vel_ft / speed
                     } else {
-                        Vec2::new(rules.ball_holder_offset_ft * 0.5, 0.0)
+                        Vec2::new(1.0, 0.0)
                     };
-                    let bounce = rules.ball_bounce_base_ft
-                        + rules.ball_bounce_amplitude_ft
-                            * (current_time
-                                * rules.ball_bounce_frequency_hz
-                                * std::f32::consts::TAU)
-                                .sin();
-                    (driver.pos_ft + offset, bounce)
+                    let lateral = Vec2::new(-forward.y, forward.x);
+                    let freq = rules.ball_bounce_frequency_hz * (1.0 + (speed / 15.0).min(0.6));
+                    let cycle = (current_time * freq * std::f32::consts::TAU).sin();
+                    let side_offset = lateral * (cycle * rules.ball_holder_offset_ft * 0.6);
+                    let forward_offset = forward * (rules.ball_holder_offset_ft * 1.15);
+                    let bounce_progress = ((current_time * freq * std::f32::consts::PI).sin()).abs();
+                    let min_z = rules.ball_holder_height_ft * 0.65;
+                    let max_z = rules.ball_holder_height_ft;
+                    let bounce_z = min_z + bounce_progress * (max_z - min_z);
+                    (driver.pos_ft + forward_offset + side_offset, bounce_z)
                 } else {
                     (
                         Vec2::new(rules.court.width_ft / 2.0, rules.court.height_ft / 2.0),

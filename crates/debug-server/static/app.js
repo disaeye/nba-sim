@@ -682,8 +682,36 @@ function eventClass(name) {
     if (tick.ball) {
       const ballPoint = point(finite(tick.ball.x) * rules.courtWidth, finite(tick.ball.y) * rules.courtHeight);
       const z = Math.max(0, finite(tick.ball.z));
-      ctx.beginPath(); ctx.ellipse(ballPoint.x, ballPoint.y, 7 + z * .14, 3 + z * .05, 0, 0, Math.PI * 2); ctx.fillStyle = "rgba(20,18,12,.3)"; ctx.fill();
-      ctx.beginPath(); ctx.arc(ballPoint.x, ballPoint.y - z * 2.6, 5.5 + z * .06, 0, Math.PI * 2); ctx.fillStyle = "#e87530"; ctx.fill(); ctx.strokeStyle = "#ffd08c"; ctx.lineWidth = 1; ctx.stroke();
+      // 动态逼真地面阴影：高度低（触地）时阴影聚拢深黑，高度高时发散淡化
+      const shadowAlpha = Math.max(0.12, 0.48 - z * 0.035);
+      const shadowRx = Math.max(3.5, 6.0 + z * 0.35);
+      const shadowRy = Math.max(1.8, 2.6 + z * 0.16);
+      ctx.beginPath();
+      ctx.ellipse(ballPoint.x, ballPoint.y, shadowRx, shadowRy, 0, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(15, 12, 8, ${shadowAlpha.toFixed(3)})`;
+      ctx.fill();
+
+      // 球体本体渲染（根据 3D 高度立体上浮）
+      const ballRadius = Math.max(4.5, 5.4 + z * 0.08);
+      const ballCenterY = ballPoint.y - z * 2.8;
+      ctx.beginPath();
+      ctx.arc(ballPoint.x, ballCenterY, ballRadius, 0, Math.PI * 2);
+      const grad = ctx.createRadialGradient(ballPoint.x - ballRadius * 0.35, ballCenterY - ballRadius * 0.35, ballRadius * 0.1, ballPoint.x, ballCenterY, ballRadius);
+      grad.addColorStop(0, "#f58c42");
+      grad.addColorStop(0.7, "#d45d1b");
+      grad.addColorStop(1, "#8e3407");
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.strokeStyle = "#4a1902";
+      ctx.lineWidth = 0.9;
+      ctx.stroke();
+
+      // 篮球黑色接缝线（立体十字圆弧）
+      ctx.beginPath();
+      ctx.ellipse(ballPoint.x, ballCenterY, ballRadius * 0.85, ballRadius * 0.35, Math.PI / 4, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(45, 15, 2, 0.65)";
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
     }
     const holderTeam = (tick.players || []).find((player) => player.hasBall)?.team;
     const attacksRight = (holderTeam || state.possessionTeams.get(tick.possession_id) || "home") === "home";

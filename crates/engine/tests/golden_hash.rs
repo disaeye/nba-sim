@@ -139,7 +139,8 @@ fn golden_baseline_seed42() {
 // v20 0x76b89910652c44cf - 2026-09-04 统一边界容差与出界判罚语义闭环，消灭死球死锁回归
 // v21 0x91419840ef413b0c - 2026-09-04 发球落位持球因果闭环、被阻截转活球、失误类型精确溯源
 // v22 0x688f76c83ad7ead2 - 2026-09-04 真实篮板冲抢与卡位、触达有效范围物理拦截、传球手部锚定零跳变
-const GOLDEN_SEED42_2000: u64 = 0x688f76c83ad7ead2;
+// v23 0x2370512ecdf7e6f4 - 2026-09-05 真实运球动力学与球体阴影视觉增强（Dribble Bounce Kinematics + Dynamic Shadow）
+const GOLDEN_SEED42_2000: u64 = 0x2370512ecdf7e6f4;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。
