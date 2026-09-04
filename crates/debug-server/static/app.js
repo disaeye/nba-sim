@@ -447,7 +447,7 @@ function eventClass(name) {
       case "STEAL":
         return "防守截断球路抢断！";
       case "OUT_OF_BOUNDS":
-        return "球出界，死球交换球权";
+        return tick.callout && tick.callout.includes("出界") ? tick.callout : "无球跑位触碰边线（归位中）";
       case "VIOLATION":
         return tick.callout || "违例发生";
       case "FOUL":
@@ -476,14 +476,17 @@ function eventClass(name) {
       if (state.filters.has(name)) state.filters.delete(name); else state.filters.add(name);
       renderTimeline();
     }));
-    const visible = state.events.filter((event) => state.filters.has(event.name));
+    const visible = state.events.filter((event) => {
+      if (!state.filters.has(event.name)) return false;
+      // 物理层 BoundaryCross 针对无球踩线不属于失误，只有持球出界才展示在默认技术统计中
+      if (event.name === "OUT_OF_BOUNDS" && event.tick.callout && !event.tick.callout.includes("出界")) return false;
+      return true;
+    });
     $("timelineCount").textContent = `${visible.length} events`;
     const fragment = document.createDocumentFragment();
-    state.eventElements = [];
     for (const event of visible) {
       const row = document.createElement("div");
-      row.className = "event-row";
-      row.dataset.index = String(event.index);
+      row.className = `event-item ${event.index === state.idx ? "current" : ""}`;
       const detail = getEventDetail(event);
       row.innerHTML = `<span class="event-time">${timeClock(event.tick.t_game)}</span><span class="event-possession">#${esc(event.tick.possession_id)}</span><span class="event-tag ${eventClass(event.name)}">${esc(event.name)}</span><span class="event-detail">${esc(detail)}</span>`;
       row.addEventListener("click", () => seek(event.index));
