@@ -2928,6 +2928,9 @@ impl MatchEngine {
         };
         team.players
             .iter()
+            .filter(|p| {
+                self.physics.get_player(&p.id).map(|phys| phys.on_court).unwrap_or(true)
+            })
             .max_by(|a, b| {
                 let reach_a = a.height_cm as f32 * 0.5 + a.attributes.vertical * 0.5;
                 let reach_b = b.height_cm as f32 * 0.5 + b.attributes.vertical * 0.5;
