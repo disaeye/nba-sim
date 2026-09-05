@@ -770,11 +770,12 @@ impl MatchEngine {
                     self.last_decision_trace = None;
                     return self.build_tick();
                 }
-                // 真实跳球争顶物理：两名中锋在中圈争顶，球被拨向争顶获胜方后场，成为自由活球（LooseBall）
-                let home_c_id = self.home_team.players.get(4).map(|p| p.id.clone()).unwrap_or_else(|| "H_5".to_string());
-                let away_c_id = self.away_team.players.get(4).map(|p| p.id.clone()).unwrap_or_else(|| "A_5".to_string());
+                // 严格遵循宪章 Positionless 原则：跳球代表绝无固定位置硬编码，
+                // 由场上摸高上限最高的球员（身高 height_cm + 垂直弹跳 vertical）纯函数涌现产生
+                let home_jumper_id = self.select_jumper_id(Possession::Home);
+                let away_jumper_id = self.select_jumper_id(Possession::Away);
                 let winner_is_home = self.possession == Possession::Home;
-                let tapping_player = if winner_is_home { &home_c_id } else { &away_c_id };
+                let tapping_player = if winner_is_home { &home_jumper_id } else { &away_jumper_id };
                 let center_x = self.rules.court.width_ft * 0.5;
                 let center_y = self.rules.court.height_ft * 0.5;
                 let tap_target = if winner_is_home {
@@ -783,11 +784,10 @@ impl MatchEngine {
                     Vec2::new(center_x + 14.0, center_y)
                 };
                 self.set_game_flow(GameFlowState::LiveBall);
-                // 两名跳球员点球后处于滞空与下落缓冲，暂不朝点球方向扑抢，由外围 8 名争抢球员全力扑抢
-                if let Some(p) = self.physics.get_player_mut(&home_c_id) {
+                if let Some(p) = self.physics.get_player_mut(&home_jumper_id) {
                     p.target_pos_ft = Vec2::new(center_x - 3.0, center_y);
                 }
-                if let Some(p) = self.physics.get_player_mut(&away_c_id) {
+                if let Some(p) = self.physics.get_player_mut(&away_jumper_id) {
                     p.target_pos_ft = Vec2::new(center_x + 3.0, center_y);
                 }
                 let tap_dir = (tap_target - Vec2::new(center_x, center_y)).normalize();
@@ -800,7 +800,7 @@ impl MatchEngine {
                 });
                 self.current_event_types = vec!["TIPOFF_SECURED".to_string()];
                 self.current_callout = Some(format!(
-                    "中锋 {} 起跳率先触球，将球点拍向后场！第一攻展开！",
+                    "{} 起跳率先触球，将球点拍向后场！第一攻展开！",
                     tapping_player
                 ));
                 return self.build_tick();
@@ -1602,15 +1602,22 @@ impl MatchEngine {
                     .rules
                     .court
                     .clamp_playable(*pos + *vel * dt, self.rules.player_radius_ft);
-                let next_z = (*z + *vel_z * dt).max(0.0);
+                let mut next_vel_z = *vel_z - self.rules.ball_gravity_ftps2 * dt;
+                let mut next_z = *z + next_vel_z * dt;
+                let mut next_vel = *vel * self.rules.ball_velocity_retention;
+                if next_z <= 0.0 {
+                    // 地面碰撞反弹：反弹恢复系数 e = 0.70，地面摩擦衰减
+                    next_z = 0.0;
+                    next_vel_z = (-next_vel_z * 0.70).max(0.0);
+                    next_vel *= 0.85;
+                }
                 let reach = self.rules.player_radius_ft + self.rules.defender_reach_ft;
-                let is_recent_tipoff = self.current_time < self.rules.tip_off_duration_seconds + 0.6;
-                let home_jumper = self.home_team.players.get(4).map(|p| p.id.as_str()).unwrap_or("H_5");
-                let away_jumper = self.away_team.players.get(4).map(|p| p.id.as_str()).unwrap_or("A_5");
+                let home_jumper = self.select_jumper_id(Possession::Home);
+                let away_jumper = self.select_jumper_id(Possession::Away);
                 let mut candidates = self.physics.query_nearby(*pos, reach, &nba_physics::EntityFilter::Any);
-                if is_recent_tipoff {
-                    // 真实规则：跳球双方跳球员不得在球被其他8人或地面触及前直接抓球
-                    candidates.retain(|id| id != home_jumper && id != away_jumper);
+                // 真实规则：跳球员在球触地或被其他人触及前，严禁直接控球
+                if *z > 0.5 {
+                    candidates.retain(|id| *id != home_jumper && *id != away_jumper);
                 }
                 candidates.sort();
                 if let Some(player_id) = candidates.into_iter().next() {
@@ -1622,9 +1629,9 @@ impl MatchEngine {
                 } else {
                     new_ball_state = Some(BallTrajectoryKind::LooseBall {
                         pos: next_pos,
-                        vel: *vel * self.rules.ball_velocity_retention,
+                        vel: next_vel,
                         z: next_z,
-                        vel_z: *vel_z,
+                        vel_z: next_vel_z,
                         last_touch_team: self.possession,
                     });
                 }
@@ -1721,6 +1728,8 @@ impl MatchEngine {
             BallTrajectoryKind::LooseBall { pos, .. } => Some(*pos),
             _ => None,
         };
+        let home_jumper = self.select_jumper_id(Possession::Home);
+        let away_jumper = self.select_jumper_id(Possession::Away);
         for target in home_targets.into_iter().chain(away_targets) {
             if let Some(player_id) = target.player_id {
                 if active_driver_id == Some(player_id.as_str()) {
@@ -1746,7 +1755,9 @@ impl MatchEngine {
                     }
                 } else if let Some(reb_spot) = rebound_chase_target {
                     let cur_dist = self.physics.get_player(&player_id).map(|p| (p.pos_ft - reb_spot).length()).unwrap_or(99.0);
-                    if cur_dist <= 25.0 {
+                    let is_tipoff_jumper = matches!(&self.ball_state, BallTrajectoryKind::LooseBall { z, .. } if *z > 0.5)
+                        && (player_id == home_jumper || player_id == away_jumper);
+                    if cur_dist <= 25.0 && !is_tipoff_jumper {
                         (reb_spot, 16.0, "REBOUND_CRASH".to_string())
                     } else {
                         (target.target_pos, target.speed, target.action)
@@ -2907,6 +2918,28 @@ impl MatchEngine {
 
     pub fn new_possession_pg_for_test(&self) -> String {
         self.new_possession_pg()
+    }
+    /// 遵循宪章 Positionless 原则：由场上实际摸高上限最高的球员担当跳球代表
+    /// 摸高分数 = 身高 height_cm * 0.5 + 垂直弹跳 vertical * 0.5
+    pub fn select_jumper_id(&self, possession: Possession) -> String {
+        let team = match possession {
+            Possession::Home => &self.home_team,
+            Possession::Away => &self.away_team,
+        };
+        team.players
+            .iter()
+            .max_by(|a, b| {
+                let reach_a = a.height_cm as f32 * 0.5 + a.attributes.vertical * 0.5;
+                let reach_b = b.height_cm as f32 * 0.5 + b.attributes.vertical * 0.5;
+                reach_a.partial_cmp(&reach_b).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|p| p.id.clone())
+            .unwrap_or_else(|| {
+                match possession {
+                    Possession::Home => "H_1".to_string(),
+                    Possession::Away => "A_1".to_string(),
+                }
+            })
     }
 
     #[doc(hidden)]
