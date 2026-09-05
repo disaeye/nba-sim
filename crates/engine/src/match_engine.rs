@@ -783,11 +783,19 @@ impl MatchEngine {
                     Vec2::new(center_x + 14.0, center_y)
                 };
                 self.set_game_flow(GameFlowState::LiveBall);
+                // 两名跳球员点球后处于滞空与下落缓冲，暂不朝点球方向扑抢，由外围 8 名争抢球员全力扑抢
+                if let Some(p) = self.physics.get_player_mut(&home_c_id) {
+                    p.target_pos_ft = Vec2::new(center_x - 3.0, center_y);
+                }
+                if let Some(p) = self.physics.get_player_mut(&away_c_id) {
+                    p.target_pos_ft = Vec2::new(center_x + 3.0, center_y);
+                }
+                let tap_dir = (tap_target - Vec2::new(center_x, center_y)).normalize();
                 self.transition_ball_state(BallTrajectoryKind::LooseBall {
                     pos: Vec2::new(center_x, center_y),
-                    vel: (tap_target - Vec2::new(center_x, center_y)).normalize() * 22.0,
+                    vel: tap_dir * 28.0,
                     z: 5.5,
-                    vel_z: 8.0,
+                    vel_z: 6.0,
                     last_touch_team: if winner_is_home { Possession::Home } else { Possession::Away },
                 });
                 self.current_event_types = vec!["TIPOFF_SECURED".to_string()];
@@ -1595,12 +1603,16 @@ impl MatchEngine {
                     .court
                     .clamp_playable(*pos + *vel * dt, self.rules.player_radius_ft);
                 let next_z = (*z + *vel_z * dt).max(0.0);
-                self.ball_pos_3d = (next_pos, next_z);
-                let candidates = self.physics.query_nearby(
-                    next_pos,
-                    self.rules.player_radius_ft + self.rules.defender_reach_ft,
-                    &nba_physics::EntityFilter::Any,
-                );
+                let reach = self.rules.player_radius_ft + self.rules.defender_reach_ft;
+                let is_recent_tipoff = self.current_time < self.rules.tip_off_duration_seconds + 0.6;
+                let home_jumper = self.home_team.players.get(4).map(|p| p.id.as_str()).unwrap_or("H_5");
+                let away_jumper = self.away_team.players.get(4).map(|p| p.id.as_str()).unwrap_or("A_5");
+                let mut candidates = self.physics.query_nearby(*pos, reach, &nba_physics::EntityFilter::Any);
+                if is_recent_tipoff {
+                    // 真实规则：跳球双方跳球员不得在球被其他8人或地面触及前直接抓球
+                    candidates.retain(|id| id != home_jumper && id != away_jumper);
+                }
+                candidates.sort();
                 if let Some(player_id) = candidates.into_iter().next() {
                     self.pending_events.push(GameEvent::LooseBallSecured {
                         player_id: player_id.clone(),

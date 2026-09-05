@@ -300,9 +300,9 @@ impl InvariantChecker {
             }
         } else if let Some(prev) = self.prev_ball {
             let is_dead_ball = frame.ball.status == "DEAD" || frame.phase == "FreeThrow" || frame.phase == "DeadBallReset" || frame.game_flow == "DeadBall";
-            let was_rebound_start = frame.events.iter().any(|e| e == "FREE_THROW" || e == "REBOUND");
+            let was_rebound_start = frame.events.iter().any(|e| e == "FREE_THROW" || e == "REBOUND" || e == "TIPOFF_SECURED");
             if is_dead_ball || was_rebound_start {
-                // 死球、罚球准备、发球或篮板刚刚控制时不计算速度跳变
+                // 死球、罚球准备、发球、篮板或跳球点拍争夺时不计算速度跳变
             } else {
                 let dx = ball_ft.0 - prev.0;
                 let dy = ball_ft.1 - prev.1;
