@@ -417,6 +417,7 @@ impl MatchEngine {
         self.current_possession_passes = 0;
         self.current_possession_shooter = None;
         self.current_possession_contest = None;
+        self.current_callout = None;
     }
     pub fn is_finished(&self) -> bool {
         self.game_flow == GameFlowState::GameEnd || (self.scope_active && self.simulation_complete)
@@ -782,16 +783,12 @@ impl MatchEngine {
                     Vec2::new(center_x + 14.0, center_y)
                 };
                 self.set_game_flow(GameFlowState::LiveBall);
-                self.transition_phase(SubPhase::Initiation);
-                self.transition_ball_state(BallTrajectoryKind::Pass {
-                    from_pos: Vec2::new(center_x, center_y),
-                    to_pos: tap_target,
-                    target_id: self.new_possession_pg(),
-                    start_time: self.current_time,
-                    duration: 0.45,
-                    peak_z: 7.5,
-                    receive_success: true,
-                    inbound: false,
+                self.transition_ball_state(BallTrajectoryKind::LooseBall {
+                    pos: Vec2::new(center_x, center_y),
+                    vel: (tap_target - Vec2::new(center_x, center_y)).normalize() * 22.0,
+                    z: 5.5,
+                    vel_z: 8.0,
+                    last_touch_team: if winner_is_home { Possession::Home } else { Possession::Away },
                 });
                 self.current_event_types = vec!["TIPOFF_SECURED".to_string()];
                 self.current_callout = Some(format!(

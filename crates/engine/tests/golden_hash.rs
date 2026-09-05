@@ -142,7 +142,8 @@ fn golden_baseline_seed42() {
 // v23 0x2370512ecdf7e6f4 - 2026-09-05 真实运球动力学与球体阴影视觉增强（Dribble Bounce Kinematics + Dynamic Shadow）
 // v24 0x58f092e69d840430 - 2026-09-05 跳球事件单次发射（消除持续 37 tick 的重复事件轰炸）与语义化事件流
 // v25 0xbea84d43c5695873 - 2026-09-05 APF人造势能场多体动力学转向、防守球人筐外心三角、空间拥挤效用惩罚
-const GOLDEN_SEED42_2000: u64 = 0xbea84d43c5695873;
+// v26 0x7da066b2809fc440 - 2026-09-05 真实跳球LooseBall点拍飞行争夺、彻底消除必中假传球与回合总结描述残留
+const GOLDEN_SEED42_2000: u64 = 0x7da066b2809fc440;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。
