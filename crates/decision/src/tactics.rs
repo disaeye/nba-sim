@@ -573,6 +573,10 @@ impl TacticalPlanner {
                 }
             }
         }
+        let carrier_pos = live_off_positions
+            .and_then(|positions| positions.get(carrier_idx).copied())
+            .or_else(|| off_targets.get(carrier_idx).map(|t| t.target_pos))
+            .unwrap_or(hoop);
         for (i, off) in off_targets.iter().enumerate() {
             let is_guarding_carrier = i == carrier_idx;
             let off_pos = live_off_positions
@@ -594,11 +598,21 @@ impl TacticalPlanner {
                     "PointDefender",
                 )
             } else {
-                // 弱侧协防人：经典防守三角 (Ball-Man-Basket Defensive Triangle)
-                // 站在进攻人与球、篮筐之间的重心处，深度随进攻人距篮筐距离动态沉退
-                let sag_dist = (dist_to_hoop * policy.help_sag_ratio).clamp(3.0, 10.0);
+                // 弱侧协防人：真实球-人-筐三角 (Ball-Man-Basket Defensive Triangle)
+                // 防守人目标点位于对位人与篮筐、持球人位置的外心，绝不盲目扎堆禁区中心
+                let to_carrier = carrier_pos - off_pos;
+                let to_carrier_dir = if to_carrier.length() > 0.1 {
+                    to_carrier.normalize()
+                } else {
+                    Vec2::ZERO
+                };
+                // 综合人-筐方向与人-球方向，保持在传球拦截视野与回防扑防（Closeout）边界
+                let bisector_dir = (to_hoop_dir * 0.7 + to_carrier_dir * 0.3).normalize_or_zero();
+                let effective_sag = (dist_to_hoop * policy.help_sag_ratio)
+                    .min(policy.defensive_gap_ft * 2.0)
+                    .max(rules.player_radius_ft * 2.0);
                 (
-                    off_pos + to_hoop_dir * sag_dist,
+                    off_pos + bisector_dir * effective_sag,
                     "HELP_SIDE_SHELL",
                     "HelpAnchor",
                 )

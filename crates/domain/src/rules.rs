@@ -424,6 +424,12 @@ pub struct TacticalRules {
     pub screener_speed_ratio: f32,
     pub support_speed_ratio: f32,
     pub defender_speed_ratio: f32,
+    /// APF 动态排斥场有效感应距离（呎）
+    pub apf_repulsion_radius_ft: f32,
+    /// APF 队友间空间拉开斥力系数（ft/s^2）
+    pub apf_teammate_repulsion_accel: f32,
+    /// APF 对手障碍斥力系数（ft/s^2）
+    pub apf_opponent_repulsion_accel: f32,
 }
 
 impl Default for TacticalRules {
@@ -440,6 +446,9 @@ impl Default for TacticalRules {
             screener_speed_ratio: 0.64,
             support_speed_ratio: 0.45,
             defender_speed_ratio: 0.73,
+            apf_repulsion_radius_ft: 12.0,
+            apf_teammate_repulsion_accel: 15.0,
+            apf_opponent_repulsion_accel: 10.0,
         }
     }
 }

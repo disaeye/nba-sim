@@ -910,6 +910,20 @@ fn make_motion_proposals(
     let dt = dt.0.max(f32::EPSILON);
     let mut ids: Vec<String> = players.keys().cloned().collect();
     ids.sort();
+
+    // 预收集场上球员物理状态快照，用于人造势能场（APF）多体排斥合力计算
+    let on_court_snapshots: Vec<(String, String, Vec2, bool)> = ids
+        .iter()
+        .filter_map(|id| {
+            let p = players.get(id)?;
+            if p.on_court {
+                Some((p.id.clone(), p.team.clone(), p.pos_ft, p.has_ball))
+            } else {
+                None
+            }
+        })
+        .collect();
+
     ids.into_iter()
         .filter_map(|id| {
             let player = players.get_mut(&id)?;
@@ -953,14 +967,47 @@ fn make_motion_proposals(
             } else {
                 Vec2::ZERO
             };
+            // 人造势能场（APF）：计算周围球员对当前球员的平滑排斥加速度
+            let mut apf_repulsion_accel = Vec2::ZERO;
+            let rep_radius = rules.tactics.apf_repulsion_radius_ft;
+            if !player.is_locked_kinematics && rep_radius > f32::EPSILON {
+                for (other_id, other_team, other_pos, other_has_ball) in &on_court_snapshots {
+                    if other_id == &player.id {
+                        continue;
+                    }
+                    let diff = current_pos - *other_pos;
+                    let dist = diff.length();
+                    if dist < rep_radius && dist > 0.1 {
+                        let is_teammate = other_team == &player.team;
+                        // 距离越近排斥越强，随距离平滑二次衰减：(1 - d/R)^2
+                        let decay = (1.0 - dist / rep_radius).powi(2);
+                        let base_accel = if is_teammate {
+                            // 队友间：若对方持球，自身必须让出进攻走廊，增加额外斥力
+                            if *other_has_ball {
+                                rules.tactics.apf_teammate_repulsion_accel * 1.5
+                            } else {
+                                rules.tactics.apf_teammate_repulsion_accel
+                            }
+                        } else {
+                            // 对手：作为动态障碍物产生回避斥力
+                            rules.tactics.apf_opponent_repulsion_accel
+                        };
+                        apf_repulsion_accel += (diff / dist) * (base_accel * decay);
+                    }
+                }
+            }
 
-            let velocity_delta = next_vel - current_vel;
+            // 将 APF 斥力加速度叠加进速度积分
+            let apf_steered_vel = next_vel + apf_repulsion_accel * dt;
+
+            let velocity_delta = apf_steered_vel - current_vel;
             let max_delta = max_accel * dt;
             if velocity_delta.length() > max_delta {
                 next_vel = current_vel + velocity_delta.normalize() * max_delta;
+            } else {
+                next_vel = apf_steered_vel;
             }
             next_vel = next_vel.clamp_length_max(max_speed);
-
             let speed = next_vel.length();
             player.locomotion = if player.is_locked_kinematics {
                 LocomotionState::Airborne

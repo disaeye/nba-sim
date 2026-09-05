@@ -335,6 +335,7 @@ impl DecisionSystem {
                     + (openness.contest_free_score() - 0.5) * self.weights.team_style_weight
                     + centered(style.rim_pressure) * self.weights.team_style_weight
                     + drive_distance.min(ctx.rules.court.width_ft) * 0.001
+                    - (1.0 - openness.contest_free_score()) * self.weights.team_style_weight * 0.5
             }
             CandidateAction::Pass { receiver_id, .. }
             | CandidateAction::InboundPass { receiver_id, .. } => {
