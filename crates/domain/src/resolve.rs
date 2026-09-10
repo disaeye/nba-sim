@@ -92,8 +92,8 @@ pub struct ContactPolicy {
 impl Default for ContactPolicy {
     fn default() -> Self {
         Self {
-            foul_rate: 0.08,
-            threshold_speed_ftps: 16.0,
+            foul_rate: 0.12,
+            threshold_speed_ftps: 9.0,
             impact_scale_ftps: 16.0,
             screen_foul_multiplier: 1.0,
             defender_skill_foul_scale: 0.35,
@@ -217,13 +217,13 @@ impl Default for ResolveConfig {
                 foul_on_drive_rate: 0.10,
                 offensive_rebound_rate: 0.26,
                 block_rate: 0.05,
-                intercept_steal_slope: 0.25,
-                intercept_tip_slope: 0.40,
+                intercept_steal_slope: 0.12,
+                intercept_tip_slope: 0.20,
                 intercept_clearance_scale_ft: 2.5,
-                intercept_steal_floor: 0.05,
-                intercept_steal_ceiling: 0.40,
-                intercept_tip_floor: 0.10,
-                intercept_tip_ceiling: 0.60,
+                intercept_steal_floor: 0.01,
+                intercept_steal_ceiling: 0.25,
+                intercept_tip_floor: 0.02,
+                intercept_tip_ceiling: 0.40,
             },
             shot_type_rates: ShotTypeRates {
                 catch_shoot_2pt: 0.46,

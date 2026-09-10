@@ -122,8 +122,7 @@ pub fn attribution_report(judgments: &[Judgment], fixture_version: &str) -> Attr
     let mut total_w = 0.0f32;
     let mut defect_w = 0.0f32;
     let mut defect_count = 0usize;
-    let mut by_criterion: BTreeMap<(String, &'static str), (usize, usize, usize)> =
-        BTreeMap::new();
+    let mut by_criterion: BTreeMap<(String, &'static str), (usize, usize, usize)> = BTreeMap::new();
     for j in judgments {
         let w = weight(&j.severity);
         total_w += w;
@@ -148,13 +147,15 @@ pub fn attribution_report(judgments: &[Judgment], fixture_version: &str) -> Attr
     };
     let mut defects_by_criterion: Vec<CriterionRow> = by_criterion
         .into_iter()
-        .map(|((criterion, attribution), (count, hard, soft))| CriterionRow {
-            criterion,
-            attribution: attribution.to_string(),
-            count,
-            hard,
-            soft,
-        })
+        .map(
+            |((criterion, attribution), (count, hard, soft))| CriterionRow {
+                criterion,
+                attribution: attribution.to_string(),
+                count,
+                hard,
+                soft,
+            },
+        )
         .collect();
     defects_by_criterion.sort_by(|a, b| b.count.cmp(&a.count).then(a.criterion.cmp(&b.criterion)));
     AttributionReport {
@@ -183,10 +184,12 @@ struct PossessionWindow {
     pass_releases: Vec<PassRelease>,
     pass_received: Vec<(String, (f32, f32))>,
     steals: Vec<(String, String, String, (f32, f32))>,
+    tipped_passes: usize,
+    loose_ball_secures: Vec<String>,
     shot_releases: Vec<(String, bool, f32)>,
     made_arrivals: usize,
     ft_made: usize,
-    rebounds: usize,
+    _rebounds: usize,
     drops: usize,
     violations: usize,
 }
@@ -208,17 +211,13 @@ fn event_data(frame: &RenderFrame, kind: &str) -> Vec<serde_json::Value> {
         .filter_map(|e| e.data.clone())
         // GameEvent 是外挂标签枚举（{"PassRelease": {...}}），剥掉标签层。
         .filter_map(|d| {
-            d.as_object().and_then(|o| {
-                o.values().next().cloned().filter(|_| o.len() == 1)
-            })
+            d.as_object()
+                .and_then(|o| o.values().next().cloned().filter(|_| o.len() == 1))
         })
         .collect()
 }
 
-fn evaluate_possessions(
-    ticks: &[StreamTick],
-    fixture: &ReferenceDistributions,
-) -> Vec<Judgment> {
+fn evaluate_possessions(ticks: &[StreamTick], fixture: &ReferenceDistributions) -> Vec<Judgment> {
     let mut judgments = Vec::new();
     let mut window = PossessionWindow::default();
     // 首个回合（index 0）从流开始就已开窗：第一条 summary 关闭并裁决它。
@@ -244,19 +243,16 @@ fn evaluate_possessions(
             };
             let d = raw_d
                 .as_object()
-                .and_then(|o| if o.len() == 1 { o.values().next() } else { None })
+                .and_then(|o| {
+                    if o.len() == 1 {
+                        o.values().next()
+                    } else {
+                        None
+                    }
+                })
                 .unwrap_or(raw_d);
 
             if entry.kind == "POSSESSION_SUMMARY" {
-                for e in &frame.events {
-                    match e.as_str() {
-                        "SCORE" | "DRIVE_SCORE" => window.made_arrivals += 1,
-                        "REBOUND" => window.rebounds += 1,
-                        "PASS_DROPPED" => window.drops += 1,
-                        "VIOLATION" => window.violations += 1,
-                        _ => {}
-                    }
-                }
                 if let Ok(summary) = serde_json::from_value::<PossessionSummaryData>(d.clone()) {
                     if window_open {
                         judgments.extend(evaluate_possession_window(
@@ -275,7 +271,13 @@ fn evaluate_possessions(
             };
             let d = raw_d
                 .as_object()
-                .and_then(|o| if o.len() == 1 { o.values().next() } else { None })
+                .and_then(|o| {
+                    if o.len() == 1 {
+                        o.values().next()
+                    } else {
+                        None
+                    }
+                })
                 .unwrap_or(raw_d);
             match entry.kind.as_str() {
                 "PASS" => {
@@ -290,11 +292,7 @@ fn evaluate_possessions(
                 }
                 "PASS_RECEIVED" => {
                     if let Ok(ev) = serde_json::from_value::<PassReceivedData>(d.clone()) {
-                        if let Some(p) = frame.players.iter().find(|p| p.id == ev.receiver_id) {
-                            window
-                                .pass_received
-                                .push((ev.receiver_id.clone(), (p.x, p.y)));
-                        }
+                        window.pass_received.push((ev.receiver_id, ev.position));
                     }
                 }
                 "STEAL" => {
@@ -313,7 +311,9 @@ fn evaluate_possessions(
                 }
                 "SHOT_RELEASE" => {
                     if let Ok(ev) = serde_json::from_value::<ShotReleaseData>(d.clone()) {
-                        window.shot_releases.push((ev.shooter_id, ev.is_three, ev.contest_level));
+                        window
+                            .shot_releases
+                            .push((ev.shooter_id, ev.is_three, ev.contest_level));
                     }
                 }
                 "FREE_THROW" => {
@@ -323,16 +323,17 @@ fn evaluate_possessions(
                         }
                     }
                 }
-                _ => {}
-            }
-        }
-
-        for e in &frame.events {
-            match e.as_str() {
-                "SCORE" | "DRIVE_SCORE" => window.made_arrivals += 1,
-                "REBOUND" => window.rebounds += 1,
-                "PASS_DROPPED" => window.drops += 1,
-                "VIOLATION" => window.violations += 1,
+                "PASS_TIPPED" => {
+                    window.tipped_passes += 1;
+                }
+                "LOOSE_BALL_SECURED" => {
+                    if let Ok(ev) = serde_json::from_value::<LooseBallSecuredData>(d.clone()) {
+                        window.loose_ball_secures.push(ev.player_id);
+                    }
+                }
+                "VIOLATION" | "RULE_VIOLATION" | "ENFORCEMENT_APPLIED" => {
+                    window.violations += 1;
+                }
                 _ => {}
             }
         }
@@ -367,19 +368,13 @@ fn evaluate_possession_window(
         out.push(Judgment::pass("POSSESSION_DURATION_BOUNDS", "engine", idx));
     }
 
-    // 接球人走廊可达：PASS_RECEIVED 位置与释放目标 to_pos 的距离。
+    // 接球人走廊可达：release 的冻结线段与 arrival 事实位置一致。
     let corridor = fixture.pass_corridor_radius_ft;
     let mut remaining_received = window.pass_received.clone();
     for (passer, receiver, from, to) in &window.pass_releases {
         if let Some(pos_idx) = remaining_received.iter().position(|(id, _)| id == receiver) {
-            let (_, (rx, ry)) = remaining_received.remove(pos_idx);
-            // 接球人帧坐标为归一化，乘场地尺寸转英尺；
-            // 走廊判定 = 接球点到传球线段 from->to 的距离（quality 传球走廊规范）。
-            let dist = point_segment_distance_ft(
-                (rx * fixture.court_width_ft, ry * fixture.court_height_ft),
-                *from,
-                *to,
-            );
+            let (_, receiver_pos) = remaining_received.remove(pos_idx);
+            let dist = point_segment_distance_ft(receiver_pos, *from, *to);
             if dist > corridor + 1.0 {
                 out.push(Judgment::defect(
                     "PASS_CORRIDOR_REACHABLE",
@@ -396,7 +391,6 @@ fn evaluate_possession_window(
             }
         }
     }
-
     // 抢断走廊：抢断位置必须在 passer→receiver 连线走廊半径内。
     for (passer, receiver, defender, pos) in &window.steals {
         if let Some((_p, _r, from, to)) = window
@@ -432,31 +426,75 @@ fn evaluate_possession_window(
             idx,
         ));
     } else if summary.terminal_event == "SCORE" {
-        out.push(Judgment::pass("SCORE_SOURCE_CAUSALITY", "engine+invariants", idx));
-    }
-
-    // 失误归因：每个失误回合必须有归因（被断/掉球/违例）。
-    if summary.terminal_event.starts_with("TURNOVER")
-        && window.steals.is_empty()
-        && window.drops == 0
-        && window.violations == 0
-    {
-        out.push(Judgment::defect(
-            "TURNOVER_ATTRIBUTION",
-            "hard",
-            format!("possession {} turnover without attributable cause", idx),
+        out.push(Judgment::pass(
+            "SCORE_SOURCE_CAUSALITY",
             "engine+invariants",
             idx,
         ));
-    } else if summary.terminal_event.starts_with("TURNOVER") {
-        out.push(Judgment::pass("TURNOVER_ATTRIBUTION", "engine+invariants", idx));
+    }
+
+    // 失误归因：终端标签必须与同一回合内的原因事实一致；不能用
+    // “有任意一个失误事件”掩盖 PASS_TIPPED/STEAL/PASS_DROPPED 的错配。
+    if summary.terminal_event.starts_with("TURNOVER") {
+        let cause_present = match summary.terminal_event.as_str() {
+            "TURNOVER_STEAL" => !window.steals.is_empty(),
+            "TURNOVER_PASS_TIPPED" => window.tipped_passes > 0,
+            "TURNOVER_PASS_DROPPED" => window.drops > 0,
+            "TURNOVER_VIOLATION" => window.violations > 0,
+            "TURNOVER_LOOSE_BALL" => !window.loose_ball_secures.is_empty(),
+            _ => {
+                !window.steals.is_empty()
+                    || window.drops > 0
+                    || window.tipped_passes > 0
+                    || window.violations > 0
+                    || !window.loose_ball_secures.is_empty()
+            }
+        };
+        if cause_present {
+            out.push(Judgment::pass(
+                "TURNOVER_ATTRIBUTION",
+                "engine+invariants",
+                idx,
+            ));
+        } else {
+            out.push(Judgment::defect(
+                "TURNOVER_ATTRIBUTION",
+                "hard",
+                format!(
+                    "possession {} terminal {} has no matching cause fact",
+                    idx, summary.terminal_event
+                ),
+                "engine+invariants",
+                idx,
+            ));
+        }
+
+        if summary.turnover_player_id.is_some() {
+            out.push(Judgment::pass(
+                "TURNOVER_ACTOR_CONSISTENCY",
+                "engine+invariants",
+                idx,
+            ));
+        } else {
+            out.push(Judgment::defect(
+                "TURNOVER_ACTOR_CONSISTENCY",
+                "hard",
+                format!("possession {} turnover has no turnover_player_id", idx),
+                "engine+invariants",
+                idx,
+            ));
+        }
     }
 
     // 出手质量记录一致性：得分回合必须带出手者与 contest 记录（quality 防守干扰规范）。
     if summary.terminal_event == "SCORE" {
         match (&summary.shooter_id, summary.shot_contest_intensity) {
             (Some(_), Some(c)) if (0.0..=1.0).contains(&c) => {
-                out.push(Judgment::pass("CONTEST_CONSISTENCY", "physics+semantics", idx));
+                out.push(Judgment::pass(
+                    "CONTEST_CONSISTENCY",
+                    "physics+semantics",
+                    idx,
+                ));
             }
             (Some(_), None) => out.push(Judgment::defect(
                 "CONTEST_CONSISTENCY",
@@ -533,11 +571,7 @@ fn evaluate_possession_window(
     out
 }
 
-fn point_segment_distance_ft(
-    p: (f32, f32),
-    a: (f32, f32),
-    b: (f32, f32),
-) -> f32 {
+fn point_segment_distance_ft(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
     let abx = b.0 - a.0;
     let aby = b.1 - a.1;
     let apx = p.0 - a.0;
@@ -564,8 +598,7 @@ fn evaluate_phases(ticks: &[StreamTick], fixture: &ReferenceDistributions) -> Ve
         let phase = frame.phase.clone();
         if Some(&phase) != prev_phase.as_ref() {
             // 出上一阶段的停留裁决
-            if let (Some(prev), Some(band)) =
-                (prev_phase.clone(), fixture.phase_dwell_band(&phase))
+            if let (Some(prev), Some(band)) = (prev_phase.clone(), fixture.phase_dwell_band(&phase))
             {
                 let dwell = frame.t_game - phase_start_t;
                 if dwell > band.1 {
@@ -601,10 +634,7 @@ fn evaluate_phases(ticks: &[StreamTick], fixture: &ReferenceDistributions) -> Ve
 }
 
 /// 比赛级聚合准则（回合裁决的分布对照，宪章 C2 允许的聚合形式）。
-fn evaluate_game_level(
-    ticks: &[StreamTick],
-    fixture: &ReferenceDistributions,
-) -> Vec<Judgment> {
+fn evaluate_game_level(ticks: &[StreamTick], fixture: &ReferenceDistributions) -> Vec<Judgment> {
     let mut out = Vec::new();
     let mut turnovers = 0usize;
     let mut possessions = 0usize;
@@ -618,7 +648,11 @@ fn evaluate_game_level(
         idx = idx.or(Some(tick_idx as u64));
         if let Some(debug) = &tick.frame.debug {
             total_decisions += 1;
-            if debug.enforcement.iter().any(|e| e.starts_with("INTENT_REVALIDATION_BLOCKED")) {
+            if debug
+                .enforcement
+                .iter()
+                .any(|e| e.starts_with("INTENT_REVALIDATION_BLOCKED"))
+            {
                 intent_revalidation_blocked += 1;
             }
         }
@@ -648,7 +682,11 @@ fn evaluate_game_level(
                 idx.unwrap_or(0),
             ));
         } else {
-            out.push(Judgment::pass("TURNOVER_RATE", "decision", idx.unwrap_or(0)));
+            out.push(Judgment::pass(
+                "TURNOVER_RATE",
+                "decision",
+                idx.unwrap_or(0),
+            ));
         }
         if shot_attempts >= 10 {
             let three_rate = three_attempts as f32 / shot_attempts as f32;
@@ -664,7 +702,11 @@ fn evaluate_game_level(
                     idx.unwrap_or(0),
                 ));
             } else {
-                out.push(Judgment::pass("THREE_ATTEMPT_RATE", "decision", idx.unwrap_or(0)));
+                out.push(Judgment::pass(
+                    "THREE_ATTEMPT_RATE",
+                    "decision",
+                    idx.unwrap_or(0),
+                ));
             }
         }
     }
@@ -686,7 +728,11 @@ fn evaluate_game_level(
                 idx.unwrap_or(0),
             ));
         } else {
-            out.push(Judgment::pass("INTENT_DOWNGRADE_RATE", "decision", idx.unwrap_or(0)));
+            out.push(Judgment::pass(
+                "INTENT_DOWNGRADE_RATE",
+                "decision",
+                idx.unwrap_or(0),
+            ));
         }
     }
 
@@ -725,6 +771,11 @@ struct PassReleaseData {
 #[derive(Deserialize)]
 struct PassReceivedData {
     receiver_id: String,
+    position: (f32, f32),
+}
+#[derive(Deserialize)]
+struct LooseBallSecuredData {
+    player_id: String,
 }
 #[derive(Deserialize)]
 struct PassInterceptedData {
@@ -753,6 +804,8 @@ struct PossessionSummaryData {
     shooter_id: Option<String>,
     #[serde(default)]
     shot_contest_intensity: Option<f32>,
+    #[serde(default)]
+    turnover_player_id: Option<String>,
 }
 
 /// 判定已见事件集合（用于覆盖性检查的测试辅助）。

@@ -2,9 +2,9 @@
 //!
 //! 这些类型只描述比赛世界的事实，不包含决策、物理或裁判实现。
 
+use crate::possession::Possession;
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
-use crate::possession::Possession;
 
 /// 比赛生命周期。它决定时钟和活球动作是否推进。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,7 +73,7 @@ impl GameFlowState {
             (Self::Pregame, Self::TipOff | Self::GameEnd)
                 | (
                     Self::TipOff,
-                    Self::LiveBall | Self::DeadBall | Self::GameEnd
+                    Self::LiveBall | Self::DeadBall | Self::FreeThrow | Self::GameEnd
                 )
                 | (
                     Self::LiveBall,
@@ -221,15 +221,13 @@ impl PhaseType {
 /// 采样参数载体（闭式采样位置是时间的纯函数），不再承载任何归属判断。
 /// `has_ball` 标志、持球人、球权队全部由此派生（P1）。
 ///
-/// 宏观态映射：Held/Drive/ControlTransfer = 持球族；
+/// 宏观态映射：Held/Drive = 持球族；ControlTransfer = 合球飞行；
 /// InboundTransfer/InboundReady = 发球准备；Pass/Shot = 飞行族；
 /// LooseBall/RimRebound = 松球族；Dead = 死球。
 #[derive(Debug, Clone)]
 pub enum BallState {
     /// 持球（突破中的持球亦是 Held，突破由 Drive 描述运动细节）。
-    Held {
-        carrier_id: String,
-    },
+    Held { carrier_id: String },
     /// 死球发球准备：球从原位飞向界外发球点。
     InboundTransfer {
         from_pos: Vec2,
@@ -254,11 +252,15 @@ pub enum BallState {
         successful: bool,
         finish_made: bool,
         fouler_id: Option<String>,
+        move_kind: Option<crate::action_window::DribbleMoveKind>,
     },
     /// 控球交接 / 发球递交的短飞行。
     ControlTransfer {
         from_pos: Vec2,
         from_z: f32,
+        /// Frozen receiving point captured when the transfer is created.
+        target_pos: Vec2,
+        target_z: f32,
         carrier_id: String,
         start_time: f32,
         duration: f32,
@@ -320,6 +322,7 @@ pub enum BallState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BallPhase {
     Held,
+    ControlTransfer,
     PassFlight,
     ShotFlight,
     Drive,
@@ -337,9 +340,8 @@ impl BallState {
             | BallState::Drive {
                 driver_id: carrier_id,
                 ..
-            }
-            | BallState::ControlTransfer { carrier_id, .. } => Some(carrier_id.as_str()),
-            _ => None,
+            } => Some(carrier_id.as_str()),
+            BallState::ControlTransfer { .. } | _ => None,
         }
     }
 
@@ -356,15 +358,15 @@ impl BallState {
             | BallState::Drive {
                 driver_id: carrier_id,
                 ..
-            }
-            | BallState::ControlTransfer { carrier_id, .. } => Some(carrier_id.as_str()),
+            } => Some(carrier_id.as_str()),
+            BallState::ControlTransfer { .. } => None,
             BallState::Pass { target_id, .. } => Some(target_id.as_str()),
             BallState::Shot { shooter_id, .. } => Some(shooter_id.as_str()),
             BallState::InboundTransfer { inbounder_id, .. }
             | BallState::InboundReady { inbounder_id, .. } => Some(inbounder_id.as_str()),
-            BallState::LooseBall { .. }
-            | BallState::RimRebound { .. }
-            | BallState::Dead { .. } => None,
+            BallState::LooseBall { .. } | BallState::RimRebound { .. } | BallState::Dead { .. } => {
+                None
+            }
         }
     }
 
@@ -390,16 +392,23 @@ impl BallState {
             | BallState::Shot { .. }
             | BallState::InboundTransfer { .. }
             | BallState::InboundReady { .. } => None,
-            BallState::LooseBall { last_touch_team, .. }
-            | BallState::RimRebound { last_touch_team, .. }
-            | BallState::Dead { last_touch_team, .. } => Some(*last_touch_team),
+            BallState::LooseBall {
+                last_touch_team, ..
+            }
+            | BallState::RimRebound {
+                last_touch_team, ..
+            }
+            | BallState::Dead {
+                last_touch_team, ..
+            } => Some(*last_touch_team),
         }
     }
 
     /// 派生相位标签。
     pub fn phase(&self) -> BallPhase {
         match self {
-            BallState::Held { .. } | BallState::ControlTransfer { .. } => BallPhase::Held,
+            BallState::Held { .. } => BallPhase::Held,
+            BallState::ControlTransfer { .. } => BallPhase::ControlTransfer,
             BallState::InboundTransfer { .. } | BallState::InboundReady { .. } => {
                 BallPhase::InboundTransfer
             }
@@ -433,7 +442,7 @@ fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
         // 持球：可继续持球（重持）、突破、传球、投篮、交接、死球、
         // 或进入发球程序（持球违例，如 5 秒/8 秒/走步——死球化与发球
         // 转移合并为单步，见下注）。
-            (B::Held { .. }, B::Held { .. })
+        (B::Held { .. }, B::Held { .. })
             | (B::Held { .. }, B::Drive { .. })
             | (B::Held { .. }, B::Pass { .. })
             | (B::Held { .. }, B::Shot { .. })
@@ -445,9 +454,10 @@ fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
         // 罚球程序内两次尝试之间球为死球，不中同样直接进篮板。
             | (B::Held { .. }, B::RimRebound { .. })
             | (B::Dead { .. }, B::RimRebound { .. })
-        // 突破：结算为持球 / 攻框命中后的发球转移（合并建模，同上）/
+        // 突破：结算为持球 / 突分传球 / 急停投篮 / 攻框命中后的发球转移（合并建模，同上）/
         // 篮板飞行 / 松球 / 死球。
             | (B::Drive { .. }, B::Held { .. })
+            | (B::Drive { .. }, B::Pass { .. })
             | (B::Drive { .. }, B::Shot { .. })
             | (B::Drive { .. }, B::RimRebound { .. })
             | (B::Drive { .. }, B::InboundTransfer { .. })
@@ -455,6 +465,8 @@ fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
             | (B::Drive { .. }, B::Dead { .. })
         // 传球飞行：到达 / 被断（持球）/ 掉落（松球）/ 出界或持球违例
         // 判罚直接进入对方发球程序（出界即失球权，合并建模同上）。
+            | (B::Pass { .. }, B::Pass { .. })
+            | (B::Pass { .. }, B::ControlTransfer { .. })
             | (B::Pass { .. }, B::Held { .. })
             | (B::Pass { .. }, B::LooseBall { .. })
             | (B::Pass { .. }, B::Dead { .. })
@@ -484,6 +496,7 @@ fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
         // 合并为单步（否则拒绝写回会让引擎楔死在"死球+持球"无出口状态，
         // 2026-09-02 GAP 复审 seed 2/4 实证）。
             | (B::ControlTransfer { .. }, B::Held { .. })
+            | (B::ControlTransfer { .. }, B::Dead { .. })
             | (B::ControlTransfer { .. }, B::InboundTransfer { .. })
         // 死球：只允许进入发球程序或保持死球。
             | (B::Dead { .. }, B::InboundTransfer { .. })

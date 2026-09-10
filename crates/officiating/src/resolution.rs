@@ -10,8 +10,8 @@ pub struct DriveResolution {
     pub successful: bool,
     pub finish_made: bool,
     pub shooting_foul: bool,
+    pub finish_kind: nba_domain::action_window::RimFinishKind,
 }
-
 impl DriveResolution {
     /// Resolve the semantic outcome of a drive from spatial facts and policy.
     ///
@@ -49,11 +49,19 @@ impl DriveResolution {
             - contest_intensity * policy.finish_contest_penalty * finish_block_bias)
             .clamp(0.0, 1.0);
         let finish_made = successful && !shooting_foul && rng.gen_bool(finish_probability as f64);
+        let finish_kind = if contest_intensity > 0.65 {
+            nba_domain::action_window::RimFinishKind::Floater
+        } else if finishing_skill > 0.75 && lane_density < 0.3 {
+            nba_domain::action_window::RimFinishKind::Dunk
+        } else {
+            nba_domain::action_window::RimFinishKind::Layup
+        };
 
         Self {
             successful,
             finish_made,
             shooting_foul,
+            finish_kind,
         }
     }
 }
@@ -174,7 +182,8 @@ impl ResolutionLayer {
     ) -> ResolutionOutcome {
         let total_distance = (offensive_distance + defensive_distance).max(f32::EPSILON);
         let distance_advantage = (defensive_distance - offensive_distance) / total_distance;
-        let attribute_advantage = offensive.attributes.offensive_rebound - defensive.attributes.defensive_rebound;
+        let attribute_advantage =
+            offensive.attributes.offensive_rebound - defensive.attributes.defensive_rebound;
         let stamina_advantage = normalized_stamina(offensive) - normalized_stamina(defensive);
         let positioning_advantage =
             offensive.attributes.off_ball_sense - defensive.attributes.off_ball_sense;
@@ -332,6 +341,13 @@ impl ResolutionLayer {
             * (1.0 + (0.5 - fouler_skill) * policy.defender_skill_foul_scale))
             .clamp(0.0, 1.0);
         if rng.gen::<f32>() < probability {
+            if let (Some(fouled_p), Some(fouler_p)) =
+                (players.get(&fouled_id), players.get(&fouler_id))
+            {
+                if fouled_p.team == fouler_p.team {
+                    return ResolutionOutcome::NoChange;
+                }
+            }
             ResolutionOutcome::Foul {
                 fouled_player_id: fouled_id,
                 fouler_id,
@@ -384,6 +400,12 @@ impl ResolutionLayer {
                 * (1.0 + (0.5 - defender_skill) * policy.defender_skill_foul_scale))
                 .clamp(0.0, 1.0);
             if rng.gen::<f32>() < foul_probability {
+                if let (Some(p_a), Some(p_b)) = (players.get(player_a_id), players.get(player_b_id))
+                {
+                    if p_a.team == p_b.team {
+                        return ResolutionOutcome::NoChange;
+                    }
+                }
                 let (fouled, fouler) = if is_screen {
                     (player_a_id.to_string(), player_b_id.to_string())
                 } else {
@@ -410,7 +432,10 @@ fn normalized_stamina(player: &PlayerPhysicsState) -> f32 {
     (player.stamina / player.max_stamina.max(f32::EPSILON)).clamp(0.0, 1.0)
 }
 
-fn rebound_strength(player: &PlayerPhysicsState, policy: &nba_domain::resolve::ReboundPolicy) -> f32 {
+fn rebound_strength(
+    player: &PlayerPhysicsState,
+    policy: &nba_domain::resolve::ReboundPolicy,
+) -> f32 {
     player.attributes.defensive_rebound * policy.strength_rebound_weight
         + player.attributes.off_ball_sense * policy.strength_positioning_weight
         + normalized_stamina(player) * policy.strength_stamina_weight
@@ -419,8 +444,8 @@ fn rebound_strength(player: &PlayerPhysicsState, policy: &nba_domain::resolve::R
 #[cfg(test)]
 mod tests {
     use super::{ResolutionLayer, ResolutionOutcome};
-    use nba_domain::resolve::{ContactPolicy, PassPolicy, ReboundPolicy};
     use glam::Vec2;
+    use nba_domain::resolve::{ContactPolicy, PassPolicy, ReboundPolicy};
     use nba_domain::PlayerAttributes;
     use nba_physics::movement::{LocomotionState, PlayerPhysicsState};
     use rand::rngs::StdRng;

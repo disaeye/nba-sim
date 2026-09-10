@@ -134,6 +134,7 @@ pub struct TacticalSlotSpec {
     pub name_zh: String,
     pub base_offset_x: f32,
     pub base_offset_y: f32,
+    #[serde(default)]
     pub target_lane: u8,
 }
 
@@ -159,5 +160,13 @@ impl TacticalSetSpec {
     pub fn five_out_motion() -> Self {
         const JSON: &str = include_str!("../../../data/tactics/five_out_motion.json");
         Self::from_json(JSON).expect("内置 five_out_motion.json 必须合法")
+    }
+
+    pub fn builtin(id: &str) -> Option<Self> {
+        match id {
+            "off_horns_pnr" | "high_pick_and_roll" => Some(Self::high_pick_and_roll()),
+            "off_motion_spacing" | "five_out_motion" => Some(Self::five_out_motion()),
+            _ => None,
+        }
     }
 }

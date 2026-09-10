@@ -101,9 +101,16 @@ pub enum CandidateAction {
         shooter_id: String,
         from_pos: Vec2,
         is_three: bool,
+        jumper_kind: Option<nba_domain::action_window::JumperKind>,
     },
     Drive {
         driver_id: String,
+        from_pos: Vec2,
+        target_pos: Vec2,
+        move_kind: Option<nba_domain::action_window::DribbleMoveKind>,
+    },
+    PostUp {
+        player_id: String,
         from_pos: Vec2,
         target_pos: Vec2,
     },
@@ -120,6 +127,11 @@ pub enum CandidateAction {
         from_pos: Vec2,
         to_pos: Vec2,
     },
+    TripleThreatJab {
+        player_id: String,
+        pivot_pos: Vec2,
+        jab_dir: Vec2,
+    },
     Dwell {
         player_id: String,
     },
@@ -130,8 +142,9 @@ impl CandidateAction {
         match self {
             Self::Shoot { shooter_id, .. } => shooter_id,
             Self::Drive { driver_id, .. } => driver_id,
+            Self::PostUp { player_id, .. } => player_id,
             Self::Pass { passer_id, .. } | Self::InboundPass { passer_id, .. } => passer_id,
-            Self::Dwell { player_id } => player_id,
+            Self::Dwell { player_id } | Self::TripleThreatJab { player_id, .. } => player_id,
         }
     }
 
@@ -139,8 +152,10 @@ impl CandidateAction {
         match self {
             Self::Shoot { .. } => "SHOOT",
             Self::Drive { .. } => "DRIVE",
+            Self::PostUp { .. } => "POST_UP",
             Self::Pass { .. } => "PASS",
             Self::InboundPass { .. } => "INBOUND_PASS",
+            Self::TripleThreatJab { .. } => "TRIPLE_THREAT_JAB",
             Self::Dwell { .. } => "DWELL",
         }
     }
@@ -148,7 +163,12 @@ impl CandidateAction {
     pub fn is_ball_action(&self) -> bool {
         matches!(
             self,
-            Self::Shoot { .. } | Self::Drive { .. } | Self::Pass { .. } | Self::InboundPass { .. }
+            Self::Shoot { .. }
+                | Self::Drive { .. }
+                | Self::PostUp { .. }
+                | Self::Pass { .. }
+                | Self::InboundPass { .. }
+                | Self::TripleThreatJab { .. }
         )
     }
 
@@ -186,7 +206,11 @@ impl<'a> ConstraintContext<'a> {
     pub fn is_ball_in_flight(&self) -> bool {
         matches!(
             self.ball_phase,
-            BallPhase::PassFlight | BallPhase::ShotFlight | BallPhase::Loose | BallPhase::Rebound
+            BallPhase::ControlTransfer
+                | BallPhase::PassFlight
+                | BallPhase::ShotFlight
+                | BallPhase::Loose
+                | BallPhase::Rebound
         )
     }
 
@@ -328,9 +352,13 @@ fn eval_out_of_bounds_action(
 ) -> ConstraintResult {
     let in_bounds = match action {
         CandidateAction::Shoot { from_pos, .. } => ctx.rules.court.contains(*from_pos, 0.0),
-        CandidateAction::Drive { target_pos, .. } => ctx.rules.court.contains(*target_pos, 0.0),
+        CandidateAction::Drive { target_pos, .. } | CandidateAction::PostUp { target_pos, .. } => {
+            ctx.rules.court.contains(*target_pos, 0.0)
+        }
         CandidateAction::Pass { to_pos, .. } => ctx.rules.court.contains(*to_pos, 0.0),
-        CandidateAction::InboundPass { passer_id, to_pos, .. } => {
+        CandidateAction::InboundPass {
+            passer_id, to_pos, ..
+        } => {
             // 接球点必须在界内
             let to_in_bounds = ctx.rules.court.contains(*to_pos, 0.0);
             // 发球人必须在场且身体在界外底线附近（与发球点/球距离不超过阈值）
@@ -343,11 +371,15 @@ fn eval_out_of_bounds_action(
                         ctx.rules.inbound_boundary_tolerance_ft,
                         ctx.rules.court,
                     );
-                    let near_ball = (p.pos_ft - ctx.ball_pos).length() <= ctx.rules.inbound_boundary_tolerance_ft;
+                    let near_ball = (p.pos_ft - ctx.ball_pos).length()
+                        <= ctx.rules.inbound_boundary_tolerance_ft;
                     is_legal_oob && near_ball
                 })
                 .unwrap_or(false);
             to_in_bounds && passer_ready
+        }
+        CandidateAction::TripleThreatJab { pivot_pos, .. } => {
+            ctx.rules.court.contains(*pivot_pos, 0.0)
         }
         CandidateAction::Dwell { .. } => true,
     };
@@ -393,10 +425,13 @@ fn eval_out_of_bounds_event(ctx: &ConstraintContext, event: &GameEvent) -> Const
 fn eval_dead_ball_action(ctx: &ConstraintContext, action: &CandidateAction) -> ConstraintResult {
     if ctx.is_dead_ball()
         && !action.is_inbound()
-        && !matches!(action, CandidateAction::Dwell { .. })
+        && !matches!(
+            action,
+            CandidateAction::Dwell { .. } | CandidateAction::TripleThreatJab { .. }
+        )
     {
         ConstraintResult::violate("DEAD_BALL_ACTION")
-    } else if action.is_inbound() && ctx.phase != PhaseType::Inbound {
+    } else if action.is_inbound() && ctx.phase != PhaseType::Inbound && !ctx.is_dead_ball() {
         ConstraintResult::violate("INBOUND_NOT_ALLOWED_IN_PHASE")
     } else {
         ConstraintResult::pass()
@@ -433,11 +468,13 @@ fn eval_action_eligibility(ctx: &ConstraintContext, action: &CandidateAction) ->
     }
     ConstraintResult::pass()
 }
+
 fn eval_drive(ctx: &ConstraintContext, action: &CandidateAction) -> ConstraintResult {
     let CandidateAction::Drive {
         driver_id,
         from_pos,
         target_pos,
+        ..
     } = action
     else {
         return ConstraintResult::pass();
@@ -461,8 +498,16 @@ fn eval_drive(ctx: &ConstraintContext, action: &CandidateAction) -> ConstraintRe
     let density = density.len() as f32 / ctx.rules.teammate_density_capacity.max(1.0);
     let density = density.clamp(0.0, 1.0);
     let openness = ctx.physics.openness(driver_id);
+    let target_depth = (start_distance - target_distance) / start_distance.max(f32::EPSILON);
+    let depth_penalty = if target_depth > ctx.rules.tactics.drive_distance_ratio {
+        (target_depth - ctx.rules.tactics.drive_distance_ratio)
+            * ctx.rules.tactics.drive_distance_ratio
+    } else {
+        0.0
+    };
     let penalty = -(density * ctx.rules.tactics.drive_distance_ratio
-        + openness.contest_intensity * ctx.rules.shot_contest_sensitivity);
+        + openness.contest_intensity * ctx.rules.shot_contest_sensitivity
+        + depth_penalty);
     ConstraintResult::flagged(
         if density > ctx.rules.teammate_density_capacity.recip().min(1.0) {
             "DRIVE_PAINT_CROWDED"
@@ -596,11 +641,13 @@ fn eval_shot_clock_urgency(ctx: &ConstraintContext, action: &CandidateAction) ->
             ctx.rules.decision.urgency_shoot_boost * urgency,
             0.0,
         ),
-        CandidateAction::Drive { .. } => ConstraintResult::flagged(
-            "CLOCK_URGENCY_DRIVE",
-            ctx.rules.decision.urgency_drive_boost * urgency,
-            0.0,
-        ),
+        CandidateAction::Drive { .. } | CandidateAction::PostUp { .. } => {
+            ConstraintResult::flagged(
+                "CLOCK_URGENCY_DRIVE",
+                ctx.rules.decision.urgency_drive_boost * urgency,
+                0.0,
+            )
+        }
         CandidateAction::InboundPass { .. } => ConstraintResult::flagged(
             "CLOCK_URGENCY_INBOUND_PASS",
             ctx.rules.decision.urgency_pass_penalty * urgency,
@@ -611,11 +658,13 @@ fn eval_shot_clock_urgency(ctx: &ConstraintContext, action: &CandidateAction) ->
             0.0 - ctx.rules.decision.urgency_pass_penalty * urgency,
             0.0,
         ),
-        CandidateAction::Dwell { .. } => ConstraintResult::flagged(
-            "CLOCK_URGENCY_NO_HESITATE",
-            -ctx.rules.decision.urgency_dwell_penalty * urgency,
-            0.0,
-        ),
+        CandidateAction::Dwell { .. } | CandidateAction::TripleThreatJab { .. } => {
+            ConstraintResult::flagged(
+                "CLOCK_URGENCY_NO_HESITATE",
+                -ctx.rules.decision.urgency_dwell_penalty * urgency,
+                0.0,
+            )
+        }
     }
 }
 
@@ -1056,10 +1105,17 @@ impl ConstraintRegistry {
     }
     /// 意图执行重校验（docs/architecture.md §5.2）：
     /// 当决策意图在当前 tick 真正执行时，基于最新物理几何快照重新检验硬约束可行性。
-    pub fn revalidate_intent(&self, ctx: &ConstraintContext, action: &CandidateAction) -> Result<(), String> {
+    pub fn revalidate_intent(
+        &self,
+        ctx: &ConstraintContext,
+        action: &CandidateAction,
+    ) -> Result<(), String> {
         let scored = self.evaluate_candidate(ctx, action);
         if !scored.feasible {
-            Err(scored.blocked_by.unwrap_or("BLOCKED_BY_HARD_CONSTRAINT").to_string())
+            Err(scored
+                .blocked_by
+                .unwrap_or("BLOCKED_BY_HARD_CONSTRAINT")
+                .to_string())
         } else {
             Ok(())
         }

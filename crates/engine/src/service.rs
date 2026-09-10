@@ -166,6 +166,9 @@ impl MatchService {
         }
 
         let step_seconds = engine.rules.tick_seconds;
+        if !step_seconds.is_finite() || step_seconds <= 0.0 {
+            return Err("configured logic tick must be finite and positive".to_string());
+        }
         let accumulated = self.accumulator_seconds + dt.0;
         if !accumulated.is_finite() {
             return Err("tick duration exceeds the service accumulator range".to_string());

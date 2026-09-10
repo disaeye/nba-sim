@@ -104,7 +104,10 @@ fn end_to_end_real_stream_is_fully_judged() {
         .filter(|j| j.criterion == "POSSESSION_DURATION_BOUNDS")
         .filter_map(|j| j.possession)
         .collect();
-    assert_eq!(duration_judged, seen, "every possession must be duration-judged");
+    assert_eq!(
+        duration_judged, seen,
+        "every possession must be duration-judged"
+    );
 
     // 得分回合必须有得分来源裁决（非得分回合不适用该准则）。
     let scoring: std::collections::HashSet<u64> = ticks
@@ -120,7 +123,9 @@ fn end_to_end_real_stream_is_fully_judged() {
                     v.get("terminal_event")
                         .and_then(|t| t.as_str().map(String::from))
                         .and_then(|te| {
-                            v.get("possession_index").and_then(|i| i.as_u64()).map(|i| (i, te))
+                            v.get("possession_index")
+                                .and_then(|i| i.as_u64())
+                                .map(|i| (i, te))
                         })
                 })
                 .filter(|(_, te)| te == "SCORE")
@@ -180,7 +185,8 @@ fn shot_quality_contest_pass_judgment_is_emitted() {
             "speed_tolerance_ftps": 1.5, "ball_z_max_ft": 35.0
         },
         "tactical_set": "T", "gameClock": 720.0, "keyframeIndex": null
-    }).to_string();
+    })
+    .to_string();
     let ticks = parse_stream(&tick_json);
     let judgments = evaluate_stream(&ticks, &fixture);
     assert!(
@@ -189,6 +195,126 @@ fn shot_quality_contest_pass_judgment_is_emitted() {
             .any(|j| j.criterion == "SHOT_QUALITY_CONTEST" && j.verdict == Verdict::Pass),
         "SHOT_QUALITY_CONTEST pass judgment should be emitted when contest <= threshold"
     );
+}
+
+#[test]
+fn tipped_pass_is_a_valid_turnover_attribution() {
+    let fixture = ReferenceDistributions::nba_v1();
+    let tick = serde_json::json!({
+        "t": 1.0, "t_game": 719.0, "shotClock": 23.0, "period": 1,
+        "phase": "Initiation", "possession_id": 1, "possession_team": "home",
+        "score": {"home": 0, "away": 0}, "players": [],
+        "ball": {"x": 0.5, "y": 0.5, "z": 2.0, "status": "LOOSE_BALL", "holderId": null},
+        "events": ["PASS_TIPPED"],
+        "event_log": [
+            {"sequence": 1, "time": 1.0, "kind": "PASS_TIPPED", "data": {"PassTipped": {
+                "passer_id": "H_1", "receiver_id": "H_2", "defender_id": "A_1", "position": [47.0, 25.0]
+            }}},
+            {"sequence": 2, "time": 1.0, "kind": "POSSESSION_SUMMARY", "data": {"PossessionSummary": {
+                "possession_index": 0, "offense_team": "home", "start_clock": 720.0,
+                "end_clock": 719.0, "duration_seconds": 1.0, "passes_count": 0,
+                "terminal_event": "TURNOVER_PASS_TIPPED"
+            }}}
+        ],
+        "rules": {"tick_seconds": 0.04, "court_width_ft": 94.0, "court_height_ft": 50.0,
+            "hoop_left_x_ft": 5.25, "hoop_right_x_ft": 88.75, "hoop_y_ft": 25.0,
+            "player_radius_ft": 1.0, "min_player_separation_ft": 3.6,
+            "max_player_speed_ftps": 22.0, "max_player_accel_ftps2": 35.0,
+            "ball_max_speed_ftps": 85.0, "three_point_distance_ft": 23.75,
+            "shot_clock_seconds": 24.0, "holder_leash_ft": 3.0,
+            "speed_tolerance_ftps": 1.5, "ball_z_max_ft": 35.0},
+        "tactical_set": "T", "gameClock": 719.0, "keyframeIndex": null
+    }).to_string();
+    let judgments = evaluate_stream(&parse_stream(&tick), &fixture);
+    assert!(judgments.iter().any(|judgment| {
+        judgment.criterion == "TURNOVER_ATTRIBUTION"
+            && judgment.verdict == Verdict::Pass
+            && judgment.possession == Some(0)
+    }));
+}
+
+#[test]
+fn frame_event_fallback_does_not_leak_across_possession_boundary() {
+    let fixture = ReferenceDistributions::nba_v1();
+    let rules = serde_json::json!({
+        "tick_seconds": 0.04, "court_width_ft": 94.0, "court_height_ft": 50.0,
+        "hoop_left_x_ft": 5.25, "hoop_right_x_ft": 88.75, "hoop_y_ft": 25.0,
+        "player_radius_ft": 1.0, "min_player_separation_ft": 3.6,
+        "max_player_speed_ftps": 22.0, "max_player_accel_ftps2": 35.0,
+        "ball_max_speed_ftps": 85.0, "three_point_distance_ft": 23.75,
+        "shot_clock_seconds": 24.0, "holder_leash_ft": 3.0,
+        "speed_tolerance_ftps": 1.5, "ball_z_max_ft": 35.0
+    });
+    let summary = |index: u64, terminal: &str| {
+        serde_json::json!({
+            "possession_index": index, "offense_team": "home",
+            "start_clock": 720.0 - index as f32, "end_clock": 719.0 - index as f32,
+            "duration_seconds": 1.0, "passes_count": 0,
+            "terminal_event": terminal, "turnover_player_id": "H_1"
+        })
+    };
+    let first = serde_json::json!({
+        "t": 1.0, "t_game": 719.0, "shotClock": 23.0, "period": 1,
+        "phase": "ActionExecution", "possession_id": 1, "possession_team": "home",
+        "score": {"home": 0, "away": 0}, "players": [],
+        "ball": {"x": 0.5, "y": 0.5, "z": 2.0, "status": "LOOSE_BALL", "holderId": null},
+        "events": ["PASS_DROPPED"],
+        "event_log": [
+            {"sequence": 1, "time": 1.0, "kind": "PASS_DROPPED", "data": {"PassDropped": {
+                "passer_id": "H_1", "receiver_id": "H_2", "position": [47.0, 25.0]
+            }}},
+            {"sequence": 2, "time": 1.0, "kind": "POSSESSION_SUMMARY", "data": {"PossessionSummary": summary(0, "TURNOVER_PASS_DROPPED")}}
+        ],
+        "rules": rules, "tactical_set": "T", "gameClock": 719.0, "keyframeIndex": null
+    });
+    let second = serde_json::json!({
+        "t": 2.0, "t_game": 718.0, "shotClock": 22.0, "period": 1,
+        "phase": "ActionExecution", "possession_id": 2, "possession_team": "home",
+        "score": {"home": 0, "away": 0}, "players": [],
+        "ball": {"x": 0.5, "y": 0.5, "z": 2.0, "status": "HELD", "holderId": "H_1"},
+        "events": [],
+        "event_log": [{"sequence": 3, "time": 2.0, "kind": "POSSESSION_SUMMARY", "data": {"PossessionSummary": summary(1, "TURNOVER_PASS_DROPPED")}}],
+        "rules": rules, "tactical_set": "T", "gameClock": 718.0, "keyframeIndex": null
+    });
+    let stream = format!("{}\n{}", first, second);
+    let judgments = evaluate_stream(&parse_stream(&stream), &fixture);
+    assert!(judgments.iter().any(|judgment| {
+        judgment.criterion == "TURNOVER_ATTRIBUTION"
+            && judgment.possession == Some(1)
+            && judgment.verdict == Verdict::Defect
+    }));
+}
+
+#[test]
+fn turnover_actor_consistency_is_judged_from_summary() {
+    let fixture = ReferenceDistributions::nba_v1();
+    let tick = serde_json::json!({
+        "t": 1.0, "t_game": 719.0, "shotClock": 23.0, "period": 1,
+        "phase": "ActionExecution", "possession_id": 1, "possession_team": "home",
+        "score": {"home": 0, "away": 0}, "players": [],
+        "ball": {"x": 0.5, "y": 0.5, "z": 2.0, "status": "LOOSE_BALL", "holderId": null},
+        "event_log": [{
+            "sequence": 1, "time": 1.0, "kind": "POSSESSION_SUMMARY",
+            "data": {"PossessionSummary": {
+                "possession_index": 0, "offense_team": "home", "start_clock": 720.0,
+                "end_clock": 719.0, "duration_seconds": 1.0, "passes_count": 0,
+                "terminal_event": "TURNOVER_PASS_DROPPED", "turnover_player_id": "H_1"
+            }}
+        }],
+        "rules": {"tick_seconds": 0.04, "court_width_ft": 94.0, "court_height_ft": 50.0,
+            "hoop_left_x_ft": 5.25, "hoop_right_x_ft": 88.75, "hoop_y_ft": 25.0,
+            "player_radius_ft": 1.0, "min_player_separation_ft": 3.6,
+            "max_player_speed_ftps": 22.0, "max_player_accel_ftps2": 35.0,
+            "ball_max_speed_ftps": 85.0, "three_point_distance_ft": 23.75,
+            "shot_clock_seconds": 24.0, "holder_leash_ft": 3.0,
+            "speed_tolerance_ftps": 1.5, "ball_z_max_ft": 35.0},
+        "tactical_set": "T", "gameClock": 719.0, "keyframeIndex": null
+    })
+    .to_string();
+    let judgments = evaluate_stream(&parse_stream(&tick), &fixture);
+    assert!(judgments.iter().any(|judgment| {
+        judgment.criterion == "TURNOVER_ACTOR_CONSISTENCY" && judgment.verdict == Verdict::Pass
+    }));
 }
 
 #[test]
@@ -229,7 +355,8 @@ fn pbp_converter_generates_valid_distributions() {
         },
     ];
 
-    let fixture = nba_evaluator::convert_pbp_events_to_fixture(&sample_events, "pbp.test.v1", "NBA");
+    let fixture =
+        nba_evaluator::convert_pbp_events_to_fixture(&sample_events, "pbp.test.v1", "NBA");
     assert_eq!(fixture.version, "pbp.test.v1");
     assert_eq!(fixture.league, "NBA");
     assert!(fixture.duration_bands.score.min <= 14.5);

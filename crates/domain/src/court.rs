@@ -187,6 +187,21 @@ impl Court {
             .unwrap_or(Vec2::ZERO)
     }
 
+    /// Projects a court position to the defensive baseline of the team being awarded possession.
+    pub fn defensive_baseline_with_geometry(
+        is_home_possession: bool,
+        pos: Vec2,
+        geometry: CourtGeometry,
+    ) -> Vec2 {
+        let baseline_x = if is_home_possession {
+            0.0
+        } else {
+            geometry.width_ft
+        };
+        let y = pos.y.clamp(0.0, geometry.height_ft);
+        Vec2::new(baseline_x, y)
+    }
+
     /// Out-of-bounds release spot for an inbounder, pushed outward from a boundary point.
     pub fn inbound_release_pos(boundary_pos: Vec2, depth_ft: f32) -> Vec2 {
         Self::inbound_release_pos_with_geometry(boundary_pos, depth_ft, CourtGeometry::default())
@@ -214,10 +229,18 @@ impl Court {
 
     /// Whether a point is a legal near-boundary location for an inbound release.
     pub fn is_inbound_release(pos: Vec2, tolerance_ft: f32, geometry: CourtGeometry) -> bool {
-        let near_left = (pos.x - 0.0).abs() <= tolerance_ft && pos.y >= -tolerance_ft && pos.y <= geometry.height_ft + tolerance_ft;
-        let near_right = (pos.x - geometry.width_ft).abs() <= tolerance_ft && pos.y >= -tolerance_ft && pos.y <= geometry.height_ft + tolerance_ft;
-        let near_bottom = (pos.y - 0.0).abs() <= tolerance_ft && pos.x >= -tolerance_ft && pos.x <= geometry.width_ft + tolerance_ft;
-        let near_top = (pos.y - geometry.height_ft).abs() <= tolerance_ft && pos.x >= -tolerance_ft && pos.x <= geometry.width_ft + tolerance_ft;
+        let near_left = (pos.x - 0.0).abs() <= tolerance_ft
+            && pos.y >= -tolerance_ft
+            && pos.y <= geometry.height_ft + tolerance_ft;
+        let near_right = (pos.x - geometry.width_ft).abs() <= tolerance_ft
+            && pos.y >= -tolerance_ft
+            && pos.y <= geometry.height_ft + tolerance_ft;
+        let near_bottom = (pos.y - 0.0).abs() <= tolerance_ft
+            && pos.x >= -tolerance_ft
+            && pos.x <= geometry.width_ft + tolerance_ft;
+        let near_top = (pos.y - geometry.height_ft).abs() <= tolerance_ft
+            && pos.x >= -tolerance_ft
+            && pos.x <= geometry.width_ft + tolerance_ft;
         near_left || near_right || near_bottom || near_top
     }
 

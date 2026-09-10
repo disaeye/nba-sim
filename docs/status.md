@@ -259,13 +259,16 @@ nba-sim audit [path]                           # 离线不变量审计
 
 ## 7. 下一步（按 design.md §3.1 顺序）
 
-当前所处阶段：**检测网（M1/M3）、校准通道（M7）与评判闭环（M8）已建，M2/M4 核心完成**。
+当前所处阶段：**检测网（M1/M3）、校准通道（M7）与评判闭环（M8）已建；M2/M4/M5/M9/M10 具备主要实现，但当前回归证据仍有未通过门，不能按历史快照宣称全里程碑验收完成。**
 
-下一步动作（按优先级）：
-1. **M4 细化**：World 细粒度子结构拆分（architecture.md §4.3）；
-2. **性能调优**：优化 build_tick String 克隆与 modulation HashMap。
+当前验证结论（本轮续审）：
+1. 已修复并验证控制交接速度、Drive holder leash、PassReceived 坐标载荷、单调回合时长、罚球得分回合总结，以及 PASS_TIPPED/PASS_DROPPED/VIOLATION 的终端归因字段；针对性测试通过，`cargo check -p nba-sim-cli` 通过。
+2. seed 49 与 seed 54 的 1q 重放均返回码 0、各为 0 Axiom Violations；seed 0 1q 为 24,542 ticks、74 summaries、0 Axiom Violations，且本次输出中无 `UNATTRIBUTED_END`、无缺失 `turnover_player_id`。
+3. 这不是完整验收：尚未重跑 seed 0..99 矩阵；full stats sanity gate、失误率、节奏/走廊缺陷、FIBA 全场、性能与全 workspace 测试仍未通过或未验证。不得以本轮 smoke 结果宣称里程碑完成。
 
+证据与未通过门见 `docs/problem.md`；历史 status 中的“全里程碑绿”不覆盖当前工作区结果。
 ---
+详尽的失败输出、已通过命令与清理边界见 `docs/problem.md §12`；该节是本次续审的证据索引。
 
 ## 8. 2026-09-02 GAP 修复复审（对照 2026-09-01 审计报告）
 

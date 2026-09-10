@@ -81,6 +81,10 @@ pub struct GameRules {
     pub turnaround_min_decel_seconds: f32,
     pub player_linear_damping: f32,
     pub contact_margin_ft: f32,
+    /// 最大转体角速度（弧度/秒，真实人体转向速率上限）
+    pub max_player_turn_rate_rad_per_sec: f32,
+    /// 轴心脚允许微小滑动容差（呎，防止数值浮点误差触发走步）
+    pub pivot_foot_tolerance_ft: f32,
     /// 地球标准重力加速度（呎/秒^2，用于自由球与弹跳抛物线计算）
     pub ball_gravity_ftps2: f32,
     pub ball_velocity_retention: f32,
@@ -88,6 +92,10 @@ pub struct GameRules {
     pub pass_corridor_radius_ft: f32,
     /// Reference clearance used to normalize pass-lane risk scores.
     pub pass_lane_clearance_reference_ft: f32,
+    /// 飞行中传球拦截判定半径（球心-防守人心距，含臂展与跨步）。
+    pub flight_intercept_radius_ft: f32,
+    /// 防守人主动扑向传球路线的判定半径（行为层触发距离）。
+    pub intercept_lane_radius_ft: f32,
     pub teammate_density_radius_ft: f32,
     pub teammate_density_capacity: f32,
     pub court_side_margin_ratio: f32,
@@ -123,6 +131,18 @@ pub struct GameRules {
     pub rebound_prep_seconds: f32,
     pub rebound_exec_seconds: f32,
     pub rebound_follow_seconds: f32,
+    pub layup_prep_seconds: f32,
+    pub layup_exec_seconds: f32,
+    pub layup_follow_seconds: f32,
+    pub dunk_prep_seconds: f32,
+    pub dunk_exec_seconds: f32,
+    pub dunk_follow_seconds: f32,
+    pub screen_prep_seconds: f32,
+    pub screen_exec_seconds: f32,
+    pub screen_follow_seconds: f32,
+    pub contest_prep_seconds: f32,
+    pub contest_exec_seconds: f32,
+    pub contest_follow_seconds: f32,
     pub rebound_peak_ft: f32,
     /// Tactical movement policy shared by every built-in scheme.
     #[serde(default)]
@@ -169,6 +189,24 @@ pub struct DecisionRules {
     pub urgency_pass_penalty: f32,
     /// 24 秒倒计时迫近时的持球组织惩罚。
     pub urgency_dwell_penalty: f32,
+    /// 传球效用距离衰减起点（ft）：低于此距离不施加衰减。
+    pub pass_distance_free_ft: f32,
+    /// 传球效用距离衰减参考距离（ft）：超过 free 距离后线性衰减到此处的参考强度。
+    pub pass_distance_decay_reference_ft: f32,
+    /// 传球衰减最大比例（衰减因子下限 = 1 - 此值）。
+    pub pass_distance_max_decay: f32,
+    /// 传球走廊内每名防守人对效用的乘数惩罚。
+    pub pass_lane_defender_penalty: f32,
+    /// 走廊被判定 blocked 时传球效用的乘数（近于硬禁）。
+    pub pass_lane_blocked_multiplier: f32,
+    /// 防守自主体基础效用乘数（由规则层提供基准，严禁决策层硬编码）。
+    pub def_steal_gamble_base: f32,
+    pub def_steal_risk_penalty: f32,
+    pub def_rim_help_base: f32,
+    pub def_corner_threat_weight: f32,
+    pub def_drop_contain_base: f32,
+    pub def_hedge_contain_base: f32,
+    pub def_switch_base: f32,
 }
 
 impl Default for DecisionRules {
@@ -176,7 +214,7 @@ impl Default for DecisionRules {
         Self {
             shoot_base: 0.60,
             pass_base: 0.82,
-            dwell_base: 0.72,
+            dwell_base: 0.82,
             stamina_sensitivity: 0.5,
             temperature: 0.30,
             pass_lead_time_seconds: 0.65,
@@ -191,6 +229,18 @@ impl Default for DecisionRules {
             urgency_drive_boost: 0.10,
             urgency_pass_penalty: 0.10,
             urgency_dwell_penalty: 0.20,
+            pass_distance_free_ft: 20.0,
+            pass_distance_decay_reference_ft: 55.0,
+            pass_distance_max_decay: 0.75,
+            pass_lane_defender_penalty: 0.45,
+            pass_lane_blocked_multiplier: 0.10,
+            def_steal_gamble_base: 0.70,
+            def_steal_risk_penalty: 0.85,
+            def_rim_help_base: 0.80,
+            def_corner_threat_weight: 0.90,
+            def_drop_contain_base: 0.75,
+            def_hedge_contain_base: 0.72,
+            def_switch_base: 0.65,
         }
     }
 }
@@ -215,6 +265,18 @@ impl DecisionRules {
             self.urgency_drive_boost,
             self.urgency_pass_penalty,
             self.urgency_dwell_penalty,
+            self.pass_distance_free_ft,
+            self.pass_distance_decay_reference_ft,
+            self.pass_distance_max_decay,
+            self.pass_lane_defender_penalty,
+            self.pass_lane_blocked_multiplier,
+            self.def_steal_gamble_base,
+            self.def_steal_risk_penalty,
+            self.def_rim_help_base,
+            self.def_corner_threat_weight,
+            self.def_drop_contain_base,
+            self.def_hedge_contain_base,
+            self.def_switch_base,
         ];
         if values.iter().any(|value| !value.is_finite())
             || self.shoot_base < 0.0
@@ -226,6 +288,18 @@ impl DecisionRules {
             || self.risk_aversion < 0.0
             || self.tendency_weight < 0.0
             || self.team_style_weight < 0.0
+            || self.pass_distance_free_ft < 0.0
+            || self.pass_distance_decay_reference_ft <= self.pass_distance_free_ft
+            || !(0.0..=1.0).contains(&self.pass_distance_max_decay)
+            || !(0.0..=1.0).contains(&self.pass_lane_defender_penalty)
+            || !(0.0..=1.0).contains(&self.pass_lane_blocked_multiplier)
+            || self.def_steal_gamble_base < 0.0
+            || self.def_steal_risk_penalty < 0.0
+            || self.def_rim_help_base < 0.0
+            || self.def_corner_threat_weight < 0.0
+            || self.def_drop_contain_base < 0.0
+            || self.def_hedge_contain_base < 0.0
+            || self.def_switch_base < 0.0
         {
             return Err("decision policy contains an invalid value".to_string());
         }
@@ -374,7 +448,7 @@ impl Default for SemanticRules {
         Self {
             contact_minor_speed_ratio: 0.25,
             contact_positional_speed_ratio: 0.50,
-            contact_foul_candidate_speed_ratio: 0.70,
+            contact_foul_candidate_speed_ratio: 0.58,
             screen_stationary_speed_ratio: 0.20,
             spacing_corner_weight: 0.30,
             spacing_weak_side_weight: 0.30,
@@ -417,7 +491,23 @@ impl Default for SemanticRules {
 pub struct TacticalRules {
     pub initiation_distance_ratio: f32,
     pub action_duration_seconds: f32,
+    pub drive_min_duration_seconds: f32,
     pub drive_distance_ratio: f32,
+    pub drive_max_duration_seconds: f32,
+    pub drive_speed_ratio: f32,
+    pub drive_early_finish_dist_ft: f32,
+    pub drive_mid_range_pullup_dist_ft: f32,
+    pub drive_kickout_pass_dist_ft: f32,
+    pub drive_lane_offset_ft: f32,
+    pub drive_finish_range_ft: f32,
+    pub drive_dunk_max_dist_ft: f32,
+    pub drive_floater_min_dist_ft: f32,
+    pub drive_dunk_min_finishing: f32,
+    pub drive_dunk_max_lane_density: f32,
+    pub drive_kickout_max_crowding: f32,
+    pub drive_kickout_min_defender_dist_ft: f32,
+    pub drive_pullup_min_crowding: f32,
+    pub drive_decision_check_interval_seconds: f32,
     pub screen_distance_ratio: f32,
     pub defensive_gap_ft: f32,
     pub help_sag_ratio: f32,
@@ -432,14 +522,39 @@ pub struct TacticalRules {
     pub apf_teammate_repulsion_accel: f32,
     /// APF 对手障碍斥力系数（ft/s^2）
     pub apf_opponent_repulsion_accel: f32,
+    /// 攻防转换退守判定距离与半场长度之比（进攻人未越过此边界前防守全员退回前场阵地）
+    pub transition_defense_threshold_ratio: f32,
+    /// 转换推进期间前场空间拉开速度系数（全速冲刺拉开）
+    pub transition_sprint_ratio: f32,
+    /// 掩护人身位卡位距离（ft）：持球人与掩护人距离小于此值时判定掩护墙确立
+    pub screen_hold_separation_ft: f32,
+    /// 掩护人顺下触发的持球人纵向摆脱距离（ft）：持球人越过掩护人此距离后触发顺下
+    pub screen_roll_separation_ft: f32,
+    /// 沉退防守中锋纵深距筐距离（ft）
+    pub drop_coverage_depth_ft: f32,
 }
-
 impl Default for TacticalRules {
     fn default() -> Self {
         Self {
             initiation_distance_ratio: 0.30,
-            action_duration_seconds: 7.5,
+            action_duration_seconds: 9.5,
             drive_distance_ratio: 0.15,
+            drive_min_duration_seconds: 0.8,
+            drive_max_duration_seconds: 2.2,
+            drive_speed_ratio: 1.15,
+            drive_early_finish_dist_ft: 4.5,
+            drive_mid_range_pullup_dist_ft: 14.0,
+            drive_kickout_pass_dist_ft: 22.0,
+            drive_lane_offset_ft: 4.0,
+            drive_finish_range_ft: 16.0,
+            drive_dunk_max_dist_ft: 4.0,
+            drive_floater_min_dist_ft: 7.0,
+            drive_dunk_min_finishing: 0.70,
+            drive_dunk_max_lane_density: 0.35,
+            drive_kickout_max_crowding: 0.40,
+            drive_kickout_min_defender_dist_ft: 6.0,
+            drive_pullup_min_crowding: 0.55,
+            drive_decision_check_interval_seconds: 0.25,
             screen_distance_ratio: 0.272,
             defensive_gap_ft: 4.0,
             help_sag_ratio: 0.35,
@@ -451,6 +566,11 @@ impl Default for TacticalRules {
             apf_repulsion_radius_ft: 12.0,
             apf_teammate_repulsion_accel: 15.0,
             apf_opponent_repulsion_accel: 10.0,
+            transition_defense_threshold_ratio: 0.38,
+            transition_sprint_ratio: 0.88,
+            screen_hold_separation_ft: 6.0,
+            screen_roll_separation_ft: 8.0,
+            drop_coverage_depth_ft: 14.0,
         }
     }
 }
@@ -469,9 +589,9 @@ impl Default for GameRules {
             inbound_setup_seconds: 2.2,
             backcourt_seconds: 8.0,
             period_break_seconds: 15.0,
-            tactical_initiation_seconds: 5.2,
-            decision_interval_seconds: 1.45,
-            free_throw_interval_seconds: 0.8,
+            tactical_initiation_seconds: 6.5,
+            decision_interval_seconds: 2.4,
+            free_throw_interval_seconds: 2.2,
             pass_speed_ftps: 32.0,
             inbound_pass_speed_ftps: 30.0,
             shot_speed_ftps: 26.0,
@@ -518,11 +638,15 @@ impl Default for GameRules {
             turnaround_min_decel_seconds: 0.12,
             player_linear_damping: 4.0,
             contact_margin_ft: 0.6,
+            max_player_turn_rate_rad_per_sec: 18.0,
+            pivot_foot_tolerance_ft: 0.35,
             ball_gravity_ftps2: 32.17,
             ball_velocity_retention: 0.85,
-            defender_reach_ft: 1.2,
-            pass_corridor_radius_ft: 1.0,
+            defender_reach_ft: 4.0,
+            pass_corridor_radius_ft: 3.5,
             pass_lane_clearance_reference_ft: 8.0,
+            flight_intercept_radius_ft: 3.8,
+            intercept_lane_radius_ft: 6.0,
             teammate_density_radius_ft: 8.0,
             teammate_density_capacity: 4.0,
             court_side_margin_ratio: 0.16,
@@ -552,6 +676,18 @@ impl Default for GameRules {
             rebound_exec_seconds: 0.30,
             rebound_follow_seconds: 0.30,
             rebound_peak_ft: 11.5,
+            layup_prep_seconds: 0.20,
+            layup_exec_seconds: 0.25,
+            layup_follow_seconds: 0.25,
+            dunk_prep_seconds: 0.22,
+            dunk_exec_seconds: 0.20,
+            dunk_follow_seconds: 0.30,
+            screen_prep_seconds: 0.25,
+            screen_exec_seconds: 1.50,
+            screen_follow_seconds: 0.20,
+            contest_prep_seconds: 0.15,
+            contest_exec_seconds: 0.35,
+            contest_follow_seconds: 0.25,
             tactics: TacticalRules::default(),
             modulation: ModulationRules::default(),
         }
@@ -671,6 +807,8 @@ impl GameRules {
             self.defender_reach_ft,
             self.pass_corridor_radius_ft,
             self.pass_lane_clearance_reference_ft,
+            self.flight_intercept_radius_ft,
+            self.intercept_lane_radius_ft,
             self.rebound_outlet_fallback_distance_ft,
             self.rebound_min_arc_ft,
             self.teammate_density_radius_ft,
@@ -796,6 +934,8 @@ impl GameRules {
             || self.defender_reach_ft < 0.0
             || self.pass_corridor_radius_ft < 0.0
             || self.pass_lane_clearance_reference_ft <= 0.0
+            || self.flight_intercept_radius_ft <= 0.0
+            || self.intercept_lane_radius_ft < self.flight_intercept_radius_ft
             || self.rebound_outlet_fallback_distance_ft < 0.0
             || self.rebound_min_arc_ft < 0.0
             || self.teammate_density_radius_ft <= 0.0
@@ -856,6 +996,22 @@ impl GameRules {
         if !(0.0..=1.0).contains(&self.tactics.initiation_distance_ratio)
             || self.tactics.action_duration_seconds <= 0.0
             || !(0.0..=1.0).contains(&self.tactics.drive_distance_ratio)
+            || self.tactics.drive_min_duration_seconds <= 0.0
+            || self.tactics.drive_max_duration_seconds < self.tactics.drive_min_duration_seconds
+            || self.tactics.drive_speed_ratio <= 0.0
+            || self.tactics.drive_early_finish_dist_ft <= 0.0
+            || self.tactics.drive_mid_range_pullup_dist_ft
+                <= self.tactics.drive_early_finish_dist_ft
+            || self.tactics.drive_lane_offset_ft < 0.0
+            || self.tactics.drive_finish_range_ft <= 0.0
+            || self.tactics.drive_dunk_max_dist_ft <= 0.0
+            || self.tactics.drive_floater_min_dist_ft <= self.tactics.drive_dunk_max_dist_ft
+            || !(0.0..=1.0).contains(&self.tactics.drive_dunk_min_finishing)
+            || !(0.0..=1.0).contains(&self.tactics.drive_dunk_max_lane_density)
+            || !(0.0..=1.0).contains(&self.tactics.drive_kickout_max_crowding)
+            || self.tactics.drive_kickout_min_defender_dist_ft <= 0.0
+            || !(0.0..=1.0).contains(&self.tactics.drive_pullup_min_crowding)
+            || self.tactics.drive_decision_check_interval_seconds <= 0.0
             || !(0.0..=1.0).contains(&self.tactics.screen_distance_ratio)
             || self.tactics.defensive_gap_ft < 0.0
             || !(0.0..=1.0).contains(&self.tactics.help_sag_ratio)
@@ -864,6 +1020,11 @@ impl GameRules {
             || !(0.0..=1.0).contains(&self.tactics.screener_speed_ratio)
             || !(0.0..=1.0).contains(&self.tactics.support_speed_ratio)
             || !(0.0..=1.0).contains(&self.tactics.defender_speed_ratio)
+            || !(0.0..=1.0).contains(&self.tactics.transition_defense_threshold_ratio)
+            || !(0.0..=1.0).contains(&self.tactics.transition_sprint_ratio)
+            || self.tactics.screen_hold_separation_ft <= 0.0
+            || self.tactics.screen_roll_separation_ft <= 0.0
+            || self.tactics.drop_coverage_depth_ft <= 0.0
         {
             return Err("tactical movement policy contains an invalid value".to_string());
         }
@@ -875,7 +1036,7 @@ impl GameRules {
             || self.rebound_flight_base_seconds <= 0.0
             || self.rebound_flight_distance_factor < 0.0
             || self.rebound_distance_scale_ft <= 0.0
-            || self.inbound_boundary_tolerance_ft < 0.0
+            || self.inbound_boundary_tolerance_ft < self.player_radius_ft
             || self.inbound_release_depth_ft <= 0.0
             || self.stamina_floor < 0.0
             || self.stamina_floor > 1.0
@@ -966,6 +1127,15 @@ mod tests {
 
         let rules = GameRules {
             rebound_min_arc_ft: -0.1,
+            ..GameRules::default()
+        };
+        assert!(rules.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_inbound_tolerance_smaller_than_player_radius() {
+        let rules = GameRules {
+            inbound_boundary_tolerance_ft: 0.5,
             ..GameRules::default()
         };
         assert!(rules.validate().is_err());

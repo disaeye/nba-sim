@@ -6,6 +6,7 @@
 //!   FinalUtility = BaseValue × Feasibility × TacticalFit × RoleFit
 //!                  − SoftPenalty − RiskPenalty + PreferenceBonus
 
+use glam::Vec2;
 use rand::Rng;
 
 use crate::constraint::{CandidateAction, ConstraintContext, ConstraintRegistry, ScoredCandidate};
@@ -117,23 +118,66 @@ impl DecisionSystem {
                 });
             }
         } else if ctx.ball_available_for_action() {
-            let drive_target = if dist_to_hoop
-                > ctx.rules.tactics.drive_distance_ratio * ctx.rules.court.width_ft
-            {
-                hoop
+            // 3. 突破通道选择：评估中路、左侧与右侧走廊，避开主防人正面阻挡，寻找进攻切入角度
+            let drive_target = Self::select_drive_lane(
+                ctx.physics.get_players(),
+                ctx.rules,
+                carrier_pos,
+                hoop,
+                &offense_team,
+            );
+            let carrier_skill = carrier.attributes.ball_handling;
+            let closest_def_dist = ctx
+                .physics
+                .get_players()
+                .values()
+                .filter(|p| p.on_court && p.team != offense_team)
+                .map(|d| (d.pos_ft - carrier_pos).length())
+                .fold(f32::MAX, f32::min);
+            let move_kind = if carrier_skill > 0.75 && closest_def_dist < 4.5 {
+                Some(nba_domain::action_window::DribbleMoveKind::Crossover)
+            } else if carrier_skill > 0.65 && closest_def_dist < 6.0 {
+                Some(nba_domain::action_window::DribbleMoveKind::BetweenTheLegs)
             } else {
-                carrier_pos
+                Some(nba_domain::action_window::DribbleMoveKind::DirectDrive)
             };
             candidates.push(CandidateAction::Drive {
                 driver_id: carrier_id.to_string(),
                 from_pos: carrier_pos,
                 target_pos: drive_target,
+                move_kind,
             });
+            let jumper_kind = if is_three {
+                if closest_def_dist < 4.0 && carrier_skill > 0.7 {
+                    Some(nba_domain::action_window::JumperKind::StepBack)
+                } else {
+                    Some(nba_domain::action_window::JumperKind::CatchAndShoot)
+                }
+            } else if dist_to_hoop > 12.0 {
+                Some(nba_domain::action_window::JumperKind::PullUp)
+            } else {
+                Some(nba_domain::action_window::JumperKind::CatchAndShoot)
+            };
             candidates.push(CandidateAction::Shoot {
                 shooter_id: carrier_id.to_string(),
                 from_pos: carrier_pos,
                 is_three,
+                jumper_kind,
             });
+            let jab_dir = (hoop - carrier_pos).normalize_or_zero();
+            candidates.push(CandidateAction::TripleThreatJab {
+                player_id: carrier_id.to_string(),
+                pivot_pos: carrier_pos,
+                jab_dir,
+            });
+            let post_target = hoop + (carrier_pos - hoop).normalize_or_zero() * 8.0;
+            if (carrier_pos - hoop).length() < 18.0 {
+                candidates.push(CandidateAction::PostUp {
+                    player_id: carrier_id.to_string(),
+                    from_pos: carrier_pos,
+                    target_pos: post_target,
+                });
+            }
 
             let mut ordered_teammates: Vec<&nba_physics::movement::PlayerPhysicsState> = ctx
                 .physics
@@ -179,6 +223,7 @@ impl DecisionSystem {
                     format!("{}→{}", c.kind_str(), receiver_id)
                 }
                 CandidateAction::Dwell { player_id } => format!("DWELL({})", player_id),
+                _ => "OTHER".to_string(),
             }
         };
 
@@ -322,6 +367,7 @@ impl DecisionSystem {
                 driver_id,
                 from_pos,
                 target_pos,
+                ..
             } => {
                 let drive_distance = (*target_pos - *from_pos).length();
                 let openness = ctx.physics.openness(driver_id);
@@ -358,8 +404,96 @@ impl DecisionSystem {
                         .clamp(0.0, self.weights.dwell_decay_max);
                 self.weights.dwell_base * decay / coach.pace_factor.max(0.1)
             }
+            CandidateAction::TripleThreatJab { .. } => {
+                let time_used = (ctx.rules.league.shot_clock_seconds - ctx.shot_clock)
+                    .clamp(0.0, ctx.rules.league.shot_clock_seconds);
+                let decay = 1.0
+                    - (time_used / ctx.rules.league.shot_clock_seconds.max(1.0))
+                        .clamp(0.0, self.weights.dwell_decay_max);
+                let early_clock_bonus = if time_used < 4.0 { 1.1 } else { 0.1 };
+                self.weights.dwell_base * decay * early_clock_bonus / coach.pace_factor.max(0.1)
+            }
+            CandidateAction::PostUp { target_pos, .. } => {
+                let hoop = ctx.rules.court.hoop_pos(ctx.possession_team == "home");
+                let dist = (*target_pos - hoop).length();
+                let finishing_skill = attributes.map(|a| a.finishing).unwrap_or(0.5);
+                self.weights.drive_base * finishing_skill * (1.0 - (dist / 15.0).clamp(0.0, 0.8))
+            }
         };
         base * s.feasibility_score * stamina_mult + morale_bias + s.constraint_penalty
             - s.risk * self.weights.risk_aversion
+    }
+
+    /// 根据防守人分布采样中路与两侧突破走廊，避免无脑直冲篮下中心
+    fn select_drive_lane(
+        players: &std::collections::HashMap<String, nba_physics::movement::PlayerPhysicsState>,
+        rules: &nba_domain::GameRules,
+        carrier_pos: Vec2,
+        hoop: Vec2,
+        offense_team: &str,
+    ) -> Vec2 {
+        let to_hoop = hoop - carrier_pos;
+        let dist = to_hoop.length();
+        if dist <= rules.tactics.drive_early_finish_dist_ft {
+            return hoop;
+        }
+
+        let forward = to_hoop.normalize_or_zero();
+        // 侧向垂直向量
+        let perp = Vec2::new(-forward.y, forward.x);
+        let lane_offset = rules.tactics.drive_lane_offset_ft;
+
+        // 不把所有突破都锁到篮筐中心：中路/两侧先攻击到肘区或罚球线附近，
+        // 只有对应走廊足够干净时才选择真正的冲框终点。
+        let entry_dist = rules
+            .tactics
+            .drive_mid_range_pullup_dist_ft
+            .min(dist - rules.tactics.drive_early_finish_dist_ft)
+            .max(rules.tactics.drive_early_finish_dist_ft);
+        let entry_center = carrier_pos + forward * (dist - entry_dist);
+        let candidate_targets = [
+            hoop,
+            entry_center + perp * lane_offset,
+            entry_center - perp * lane_offset,
+        ];
+
+        let mut best_target = hoop;
+        let mut min_congestion = f32::INFINITY;
+
+        for &target in &candidate_targets {
+            let clamped_target = rules.court.clamp_playable(target, rules.player_radius_ft);
+
+            // 评估走廊沿线防守拥挤度
+            let seg_dir = clamped_target - carrier_pos;
+            let seg_len = seg_dir.length();
+            if seg_len <= f32::EPSILON {
+                continue;
+            }
+            let seg_norm = seg_dir / seg_len;
+
+            let mut congestion = 0.0;
+            for p in players.values() {
+                if !p.on_court || p.team == offense_team {
+                    continue;
+                }
+                let to_p = p.pos_ft - carrier_pos;
+                let proj = to_p.dot(seg_norm);
+                if proj > 0.0 && proj < seg_len {
+                    let perp_dist = (to_p - seg_norm * proj).length();
+                    if perp_dist < rules.tactics.apf_repulsion_radius_ft {
+                        let factor = (rules.tactics.apf_repulsion_radius_ft - perp_dist)
+                            / rules.tactics.apf_repulsion_radius_ft;
+                        congestion += factor;
+                    }
+                }
+            }
+
+            if congestion < min_congestion {
+                min_congestion = congestion;
+                best_target = clamped_target;
+            }
+        }
+
+        best_target
     }
 }

@@ -29,6 +29,11 @@ pub struct RenderPlayer {
     pub target_x: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_y: Option<f32>,
+    /// Physical facing direction vector for 2K-style player posture and stance rendering.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub facing_x: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub facing_y: Option<f32>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderBall {

@@ -169,6 +169,17 @@ pub struct TargetAssignment {
     pub slot: String,
     pub morale: String,
 }
+impl TargetAssignment {
+    pub fn off_ball_kind(&self) -> Option<nba_domain::action_window::OffBallActionKind> {
+        match self.action.as_str() {
+            "SET_HIGH_SCREEN" => Some(nba_domain::action_window::OffBallActionKind::SetScreen),
+            "ROLL_TO_RIM" => Some(nba_domain::action_window::OffBallActionKind::RollToRim),
+            "SPOT_UP_3PT" => Some(nba_domain::action_window::OffBallActionKind::SpotUpRelocate),
+            "PERIMETER_CUT" => Some(nba_domain::action_window::OffBallActionKind::VCut),
+            _ => None,
+        }
+    }
+}
 
 pub struct TacticalPlanner;
 
@@ -268,7 +279,10 @@ impl TacticalPlanner {
                     .unwrap_or(pg_spot);
                 let drive_penetration = ((off_carrier_pos.x - hoop.x).abs() < 24.0) as u32 as f32;
                 let corner_lift = dir * drive_penetration * 4.0;
-                let sg_spot = Vec2::new(base_x + dir * screen_offset * 0.86 + corner_lift, side_margin);
+                let sg_spot = Vec2::new(
+                    base_x + dir * screen_offset * 0.86 + corner_lift,
+                    side_margin,
+                );
                 let sf_spot = Vec2::new(
                     base_x + dir * screen_offset * 0.86 + corner_lift,
                     court.height_ft - side_margin,
@@ -644,8 +658,8 @@ impl TacticalPlanner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn tactical_sets_roundtrip_ids_and_names() {

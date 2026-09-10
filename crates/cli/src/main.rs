@@ -46,7 +46,10 @@ fn write_judgment_artifacts(
             let _ = writeln!(w, "{}", serde_json::to_string(j).unwrap_or_default());
         }
     }
-    fs::write(&report_path, serde_json::to_string_pretty(&report).unwrap_or_default())?;
+    fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&report).unwrap_or_default(),
+    )?;
     Ok(report)
 }
 
@@ -120,7 +123,10 @@ fn run_single_simulation(
             for v in &summary.violations {
                 let _ = writeln!(writer, "{}", serde_json::to_string(v).unwrap_or_default());
             }
-            println!("   📁 Exported structured violation ledger to: {}", violation_file);
+            println!(
+                "   📁 Exported structured violation ledger to: {}",
+                violation_file
+            );
         }
         for v in &summary.violations {
             println!("   {}", v);
@@ -130,7 +136,10 @@ fn run_single_simulation(
         let tps = (summary.ticks as f64 / elapsed.as_secs_f64().max(0.001)) as u64;
         println!(
             "\n✅ Completed {} ({} ticks) in {:.2}s ({} ticks/sec): 0 Axiom Violations.\n",
-            summary.scope_desc, summary.ticks, elapsed.as_secs_f64(), tps
+            summary.scope_desc,
+            summary.ticks,
+            elapsed.as_secs_f64(),
+            tps
         );
     }
 
@@ -196,7 +205,11 @@ fn run_batch_simulation(
 
         let pts = engine.home_score + engine.away_score;
         let poss = engine.completed_possessions;
-        let dur = if poss > 0 { engine.current_time / poss as f32 } else { 0.0 };
+        let dur = if poss > 0 {
+            engine.current_time / poss as f32
+        } else {
+            0.0
+        };
         let game_violations = summary.violations.len();
         total_violations += game_violations;
 
@@ -288,12 +301,23 @@ fn run_batch_simulation(
     avg_dur_list.sort_by(|a, b| a.partial_cmp(b).unwrap());
     fg3_pct_list.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
+    if total_points_list.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "batch requires at least one seed",
+        ));
+    }
     let median_pts = total_points_list[total_points_list.len() / 2];
     let median_dur = avg_dur_list[avg_dur_list.len() / 2];
     let median_3p = fg3_pct_list[fg3_pct_list.len() / 2];
 
     println!("\n📈 Batch Summary (N={}):", seeds.len());
-    println!("   Median Total Points: {:.1} (Min: {:.1}, Max: {:.1})", median_pts, total_points_list[0], total_points_list[total_points_list.len() - 1]);
+    println!(
+        "   Median Total Points: {:.1} (Min: {:.1}, Max: {:.1})",
+        median_pts,
+        total_points_list[0],
+        total_points_list[total_points_list.len() - 1]
+    );
     println!("   Median Poss Duration: {:.2}s", median_dur);
     println!("   Median 3P Accuracy: {:.1}%", median_3p);
     println!("   Total Axiom Violations: {}", total_violations);
@@ -301,7 +325,10 @@ fn run_batch_simulation(
         "   Realism Index: {:.3} ({} judgments, {} defects) — fixture {}",
         report.realism_index, report.total_judgments, report.defect_count, report.fixture_version
     );
-    println!("   Elapsed Wall Time: {:.2}s\n", start.elapsed().as_secs_f64());
+    println!(
+        "   Elapsed Wall Time: {:.2}s\n",
+        start.elapsed().as_secs_f64()
+    );
 
     if total_violations > 0 {
         std::process::exit(1);
@@ -316,17 +343,29 @@ fn run_evaluate(stream_path: &str) -> std::io::Result<()> {
     let fixture = nba_evaluator::ReferenceDistributions::nba_v1();
     let judgments = nba_evaluator::evaluate_stream(&ticks, &fixture);
     let report = write_judgment_artifacts(stream_path, &judgments, &fixture)?;
-    println!("🧾 Evaluated {} ticks: {} judgments, {} defects",
-        ticks.len(), report.total_judgments, report.defect_count);
+    println!(
+        "🧾 Evaluated {} ticks: {} judgments, {} defects",
+        ticks.len(),
+        report.total_judgments,
+        report.defect_count
+    );
     for row in report.defects_by_criterion.iter().take(5) {
-        println!("   [{:>3}x] {} ({})", row.count, row.criterion, row.attribution);
+        println!(
+            "   [{:>3}x] {} ({})",
+            row.count, row.criterion, row.attribution
+        );
     }
     println!("   Realism index: {:.3}", report.realism_index);
     Ok(())
 }
 
 /// 转换外部 PBP 数据为 ReferenceDistributions fixture（M8 扩展位）。
-fn run_pbp_convert(input_path: &str, out_path: &str, league: &str, version: &str) -> std::io::Result<()> {
+fn run_pbp_convert(
+    input_path: &str,
+    out_path: &str,
+    league: &str,
+    version: &str,
+) -> std::io::Result<()> {
     let content = fs::read_to_string(input_path)?;
     let events: Vec<nba_evaluator::PbpEvent> = if content.trim_start().starts_with('[') {
         serde_json::from_str(&content)
@@ -335,7 +374,10 @@ fn run_pbp_convert(input_path: &str, out_path: &str, league: &str, version: &str
         content
             .lines()
             .filter(|l| !l.trim().is_empty())
-            .map(|l| serde_json::from_str(l).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
+            .map(|l| {
+                serde_json::from_str(l)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            })
             .collect::<Result<Vec<_>, _>>()?
     };
 
@@ -343,7 +385,13 @@ fn run_pbp_convert(input_path: &str, out_path: &str, league: &str, version: &str
     let serialized = serde_json::to_string_pretty(&fixture)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     fs::write(out_path, serialized)?;
-    println!("📊 Converted {} PBP events → {} (version: {}, league: {})", events.len(), out_path, version, league);
+    println!(
+        "📊 Converted {} PBP events → {} (version: {}, league: {})",
+        events.len(),
+        out_path,
+        version,
+        league
+    );
     Ok(())
 }
 /// release 模式下跑固定 tick 数，对照 ≥ 20,000 ticks/s 预算。
@@ -365,7 +413,10 @@ fn run_benchmark(ticks: usize) -> std::io::Result<()> {
     let tps = completed as f64 / elapsed;
 
     println!("   Completed {} ticks in {:.2}s", completed, elapsed);
-    println!("   Throughput: {:.0} ticks/sec (budget ≥ {:.0})", tps, BUDGET_TICKS_PER_SEC);
+    println!(
+        "   Throughput: {:.0} ticks/sec (budget ≥ {:.0})",
+        tps, BUDGET_TICKS_PER_SEC
+    );
     if tps >= BUDGET_TICKS_PER_SEC {
         println!("   ✅ Within performance budget.");
     } else {
@@ -402,7 +453,10 @@ fn parse_seed_range(spec: &str) -> Result<Vec<u64>, String> {
 }
 
 fn run_audit_stream(file_path: &str) -> std::io::Result<()> {
-    println!("🔍 Starting Offline Event Stream Semantic Audit: {}\n", file_path);
+    println!(
+        "🔍 Starting Offline Event Stream Semantic Audit: {}\n",
+        file_path
+    );
     let start = Instant::now();
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
@@ -435,7 +489,10 @@ fn run_audit_stream(file_path: &str) -> std::io::Result<()> {
     println!("   Total Ticks Scanned: {}", total_ticks);
     println!("   Total Invariant Violations: {}", all_violations.len());
     println!("   Taxonomy Breakdown: {:?}", taxonomy);
-    println!("   Scan Speed: {} ticks/sec\n", (total_ticks as f64 / elapsed.as_secs_f64().max(0.001)) as u64);
+    println!(
+        "   Scan Speed: {} ticks/sec\n",
+        (total_ticks as f64 / elapsed.as_secs_f64().max(0.001)) as u64
+    );
 
     if !all_violations.is_empty() {
         println!("❌ Audit Failed with Violations:");
@@ -457,12 +514,18 @@ fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
 
     if args.len() > 1 && args[1] == "audit" {
-        let path = args.get(2).map(|s| s.as_str()).unwrap_or("output/game.ticks.ndjson");
+        let path = args
+            .get(2)
+            .map(|s| s.as_str())
+            .unwrap_or("output/game.ticks.ndjson");
         return run_audit_stream(path);
     }
 
     if args.len() > 1 && args[1] == "evaluate" {
-        let path = args.get(2).map(|s| s.as_str()).unwrap_or("output/game.ticks.ndjson");
+        let path = args
+            .get(2)
+            .map(|s| s.as_str())
+            .unwrap_or("output/game.ticks.ndjson");
         return run_evaluate(path);
     }
 
@@ -596,12 +659,8 @@ fn main() -> std::io::Result<()> {
     };
 
     // 目标形态（quality 批处理规范）：`nba-sim --rules X --seeds A..B batch --out Y`
-    let batch_mode =
-        seeds.is_some() || positional.first().copied() == Some("batch");
-    let positional: Vec<&str> = positional
-        .into_iter()
-        .filter(|p| *p != "batch")
-        .collect();
+    let batch_mode = seeds.is_some() || positional.first().copied() == Some("batch");
+    let positional: Vec<&str> = positional.into_iter().filter(|p| *p != "batch").collect();
 
     if batch_mode {
         let seeds = seeds.unwrap_or_else(|| (1..=10).collect());

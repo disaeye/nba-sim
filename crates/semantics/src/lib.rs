@@ -236,7 +236,11 @@ impl SemanticEvaluator {
             && defender_speed
                 <= rules.max_player_speed_ftps * rules.semantics.screen_stationary_speed_ratio;
         let contact_kind = if screen {
-            if relative_speed
+            let screener = if screen_a { a } else { b };
+            let screener_speed = screener
+                .map(|s| s.vel_ft.length())
+                .unwrap_or(relative_speed);
+            if screener_speed
                 <= rules.max_player_speed_ftps * rules.semantics.screen_stationary_speed_ratio
             {
                 ContactKind::LegalScreen

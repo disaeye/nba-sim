@@ -17,6 +17,10 @@ fn base_player(id: &str, team: &str, x: f32, y: f32, on_court: bool) -> RenderPl
         stm: 100.0,
         stm_max: 100.0,
         foul_count: 0,
+        target_x: None,
+        target_y: None,
+        facing_x: None,
+        facing_y: None,
     }
 }
 
@@ -136,7 +140,12 @@ fn holder_off_court_flagged() {
     players[5].on_court = false;
     let tick = base_tick(players, ball(0.2, 0.5, Some("H6")));
     let v = checker.check_tick(&tick);
-    assert!(v.iter().any(|x| x.rule == "BALL_HOLDER_ON_COURT" || x.rule == "TEAM_ON_COURT_COUNT"), "{:?}", v);
+    assert!(
+        v.iter()
+            .any(|x| x.rule == "BALL_HOLDER_ON_COURT" || x.rule == "TEAM_ON_COURT_COUNT"),
+        "{:?}",
+        v
+    );
 }
 
 #[test]
@@ -215,7 +224,11 @@ fn uncaused_score_increase_flagged() {
     t2.frame.score.home = 22;
     t2.frame.events = vec![]; // 空事件流
     let v = checker.check_tick(&t2);
-    assert!(v.iter().any(|x| x.rule == "UNCAUSED_SCORE_DELTA"), "{:?}", v);
+    assert!(
+        v.iter().any(|x| x.rule == "UNCAUSED_SCORE_DELTA"),
+        "{:?}",
+        v
+    );
 }
 
 #[test]
@@ -264,10 +277,8 @@ fn violations_carry_severity() {
         }
     }
     let v = checker.check_tick(&tick);
-    assert!(v.iter().any(|x| x.rule == "PLAYER_IN_BOUNDS" && matches!(
-        x.severity,
-        nba_invariants::ViolationSeverity::Hard
-    )));
+    assert!(v.iter().any(|x| x.rule == "PLAYER_IN_BOUNDS"
+        && matches!(x.severity, nba_invariants::ViolationSeverity::Hard)));
     // PLAYER_SEPARATION 是唯一 Soft 规则。
     let mut checker2 = InvariantChecker::new();
     let mut tick2 = base_tick(valid_5v5_players(), ball(0.2, 0.5, Some("H1")));
@@ -278,10 +289,12 @@ fn violations_carry_severity() {
         }
     }
     let v2 = checker2.check_tick(&tick2);
-    assert!(v2.iter().any(|x| x.rule == "PLAYER_SEPARATION" && matches!(
-        x.severity,
-        nba_invariants::ViolationSeverity::Soft
-    )), "separation violations must be Soft: {:?}", v2);
+    assert!(
+        v2.iter().any(|x| x.rule == "PLAYER_SEPARATION"
+            && matches!(x.severity, nba_invariants::ViolationSeverity::Soft)),
+        "separation violations must be Soft: {:?}",
+        v2
+    );
 }
 #[test]
 fn test_metamorphic_continuity_axiom_flags_teleportation() {
@@ -296,7 +309,9 @@ fn test_metamorphic_continuity_axiom_flags_teleportation() {
     tick2.frame.ball.status = "HELD".to_string();
     let violations2 = causal.validate_tick(&tick2, 2);
     assert!(
-        violations2.iter().any(|v| v.rule == "BALL_POSITION_DISCONTINUITY"),
+        violations2
+            .iter()
+            .any(|v| v.rule == "BALL_POSITION_DISCONTINUITY"),
         "Teleporting ball must violate BALL_POSITION_DISCONTINUITY axiom: {:?}",
         violations2
     );
@@ -319,7 +334,9 @@ fn test_impulse_origin_axiom_flags_ghost_shot() {
     }
     let violations = causal.validate_tick(&tick2, 2);
     assert!(
-        violations.iter().any(|v| v.rule == "BALL_IMPULSE_WITHOUT_SOURCE"),
+        violations
+            .iter()
+            .any(|v| v.rule == "BALL_IMPULSE_WITHOUT_SOURCE"),
         "Spontaneous flight without holder must violate BALL_IMPULSE_WITHOUT_SOURCE: {:?}",
         violations
     );

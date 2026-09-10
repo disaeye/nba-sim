@@ -486,7 +486,8 @@ function eventClass(name) {
     const fragment = document.createDocumentFragment();
     for (const event of visible) {
       const row = document.createElement("div");
-      row.className = `event-item ${event.index === state.idx ? "current" : ""}`;
+      row.className = `event-row ${event.index === state.idx ? "current" : ""}`;
+      row.dataset.index = String(event.index);
       const detail = getEventDetail(event);
       row.innerHTML = `<span class="event-time">${timeClock(event.tick.t_game)}</span><span class="event-possession">#${esc(event.tick.possession_id)}</span><span class="event-tag ${eventClass(event.name)}">${esc(event.name)}</span><span class="event-detail">${esc(detail)}</span>`;
       row.addEventListener("click", () => seek(event.index));
@@ -651,14 +652,20 @@ function eventClass(name) {
       const dark = player.team === "home" ? "#087b57" : "#a96f15";
       const radius = 17;
       const action = String(player.action || "").toUpperCase();
-      const isShooting = action.includes("SHOT") || action.includes("JUMP") || action.includes("PULLUP") || action.includes("HOOK");
-      const isDriving = action.includes("DRIVE") || action.includes("LAYUP") || action.includes("DUNK") || action.includes("PENETRATE");
+      const isShooting = action.includes("SHOT") || action.includes("JUMP") || action.includes("PULLUP") || action.includes("HOOK") || action.includes("STEPBACK");
+      const isDriving = action.includes("DRIVE") || action.includes("LAYUP") || action.includes("DUNK") || action.includes("FLOATER") || action.includes("PENETRATE");
       const isPassing = action.includes("PASS");
-      const isContesting = action.includes("CONTEST") || action.includes("BLOCK") || action.includes("DENY");
-      const isTripleThreat = action.includes("TRIPLE") || action.includes("ISOLATION") || action.includes("POST");
-      const isSprinting = Math.hypot(player.vx || 0, player.vy || 0) > 12.0 || action.includes("FAST") || action.includes("TRANSITION") || action.includes("CUT");
+      const isContesting = action.includes("CONTEST") || action.includes("BLOCK") || action.includes("CLOSEOUT");
+      const isScreening = action.includes("SCREEN");
+      const isBoxOut = action.includes("BOX_OUT") || action.includes("BOXOUT");
+      const isPostUp = action.includes("POST");
+      const isTripleThreat = action.includes("TRIPLE");
+      const isTakeCharge = action.includes("CHARGE");
+      const isDive = action.includes("DIVE");
+      const isSlide = action.includes("SLIDE") || action.includes("PRESSURE");
+      const isSprinting = Math.hypot(player.vx || 0, player.vy || 0) > 12.0 || action.includes("FAST") || action.includes("TRANSITION") || action.includes("CUT") || action.includes("CRASH");
 
-      // 特效1：起跳/投篮光环与蓄力脉冲
+      // 动作1：投篮/起跳与滞空光环脉冲
       if (isShooting) {
         ctx.beginPath();
         ctx.arc(playerPoint.x, playerPoint.y, radius + 11 + Math.sin(finite(tick.t) * 16) * 3, 0, Math.PI * 2);
@@ -668,14 +675,13 @@ function eventClass(name) {
         ctx.stroke();
         ctx.setLineDash([]);
       }
-      // 特效2：强力攻筐/突破/扣篮烈焰尾迹
+      // 动作2：突破/攻筐/暴扣动量尾羽
       if (isDriving) {
         ctx.beginPath();
         ctx.arc(playerPoint.x, playerPoint.y, radius + 8, 0, Math.PI * 2);
         ctx.strokeStyle = "#ff3b30";
         ctx.lineWidth = 2.5;
         ctx.stroke();
-        // 运动方向动量尾羽
         const vx = Number(player.vx || (player.target_x - player.x) || 0);
         const vy = Number(player.vy || (player.target_y - player.y) || 0);
         if (Math.hypot(vx, vy) > 0.1) {
@@ -688,34 +694,82 @@ function eventClass(name) {
           ctx.stroke();
         }
       }
-      // 特效3：传球雷达波
+      // 动作3：掩护设立（方形刚体防御屏障）
+      if (isScreening) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(255, 214, 10, 0.9)";
+        ctx.lineWidth = 2.4;
+        ctx.strokeRect(playerPoint.x - radius - 5, playerPoint.y - radius - 5, (radius + 5) * 2, (radius + 5) * 2);
+        ctx.restore();
+      }
+      // 动作4：篮下卡位推搡（后方背身弧面波纹）
+      if (isBoxOut) {
+        ctx.save();
+        const facingAngle = Math.atan2(Number(player.facing_y || 0), Number(player.facing_x || 1));
+        const backAngle = facingAngle + Math.PI;
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, radius + 8, backAngle - Math.PI / 3, backAngle + Math.PI / 3);
+        ctx.strokeStyle = "rgba(255, 149, 0, 0.85)";
+        ctx.lineWidth = 3.5;
+        ctx.stroke();
+        ctx.restore();
+      }
+      // 动作5：低位背身单打（背身推搡盾形）
+      if (isPostUp) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, radius + 6, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(175, 82, 222, 0.85)";
+        ctx.lineWidth = 2.2;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+      // 动作6：三威胁试探步（金色专注环与脚步探针）
+      if (isTripleThreat) {
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, radius + 5, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255, 214, 10, 0.75)";
+        ctx.lineWidth = 2.0;
+        ctx.setLineDash([2, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // 动作7：外线防守滑步与造撞人
+      if (isSlide || isTakeCharge) {
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, radius + 7, 0, Math.PI * 2);
+        ctx.strokeStyle = isTakeCharge ? "rgba(255, 59, 48, 0.9)" : "rgba(88, 86, 214, 0.75)";
+        ctx.lineWidth = 2.2;
+        ctx.stroke();
+      }
+      // 动作8：扑防扬手起跳与封盖
+      if (isContesting) {
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, radius + 9, 0, Math.PI * 2);
+        ctx.strokeStyle = "#af52de";
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
+      // 动作9：鱼跃扑地抢球
+      if (isDive) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(playerPoint.x, playerPoint.y, radius + 10, radius + 4, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(50, 215, 75, 0.85)";
+        ctx.lineWidth = 2.0;
+        ctx.stroke();
+        ctx.restore();
+      }
+      // 动作10：传球与切入冲刺
       if (isPassing) {
         ctx.beginPath();
         ctx.arc(playerPoint.x, playerPoint.y, radius + 6, 0, Math.PI * 2);
         ctx.strokeStyle = "#5ac8fa";
         ctx.lineWidth = 2;
         ctx.stroke();
-      }
-      // 特效4：防守封盖/干扰防守盾形或波纹
-      if (isContesting) {
-        ctx.beginPath();
-        ctx.arc(playerPoint.x, playerPoint.y, radius + 9, 0, Math.PI * 2);
-        ctx.strokeStyle = "#af52de";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
-      // 特效5：三威胁/试探步金色专注环
-      if (isTripleThreat) {
-        ctx.beginPath();
-        ctx.arc(playerPoint.x, playerPoint.y, radius + 5, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255, 214, 10, 0.7)";
-        ctx.lineWidth = 1.8;
-        ctx.setLineDash([2, 3]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-      // 特效6：加速快攻/切入速度尾迹
-      if (isSprinting && !isDriving) {
+      } else if (isSprinting && !isDriving) {
         ctx.beginPath();
         ctx.arc(playerPoint.x, playerPoint.y, radius + 4, 0, Math.PI * 2);
         ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
@@ -723,12 +777,45 @@ function eventClass(name) {
         ctx.stroke();
       }
 
+      // 肢体朝向与探步投影矢量 (Facing / Jab Limb Vector)
+      if (player.facing_x !== undefined && player.facing_y !== undefined) {
+        const fx = Number(player.facing_x);
+        const fy = Number(player.facing_y);
+        if (Math.hypot(fx, fy) > 0.1) {
+          const fAngle = Math.atan2(fy, fx);
+          ctx.beginPath();
+          ctx.moveTo(playerPoint.x, playerPoint.y);
+          ctx.lineTo(playerPoint.x + Math.cos(fAngle) * (radius + 6), playerPoint.y + Math.sin(fAngle) * (radius + 6));
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+          ctx.lineWidth = 2.0;
+          ctx.stroke();
+        }
+      }
       if (player.hasBall) {
         ctx.beginPath(); ctx.arc(playerPoint.x, playerPoint.y, radius + 7, 0, Math.PI * 2); ctx.strokeStyle = "rgba(255,255,255,.92)"; ctx.lineWidth = 2; ctx.stroke();
       }
-      ctx.beginPath(); ctx.arc(playerPoint.x, playerPoint.y, radius, 0, Math.PI * 2); ctx.fillStyle = dark; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
-      ctx.fillStyle = "#07130f"; ctx.font = "700 10px IBM Plex Mono, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(player.jersey || "?", playerPoint.x, playerPoint.y + 1);
-      ctx.fillStyle = "rgba(7,19,15,.82)"; ctx.font = "8px IBM Plex Mono, monospace"; ctx.fillText(player.slot || player.action || "", playerPoint.x, playerPoint.y + 28);
+      ctx.beginPath(); ctx.arc(playerPoint.x, playerPoint.y, radius, 0, Math.PI * 2); ctx.fillStyle = dark; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.stroke();
+      // 球衣号码（高对比度深底+清晰白色粗体）
+      ctx.fillStyle = "#ffffff"; ctx.font = "700 11px IBM Plex Mono, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(player.jersey || "?", playerPoint.x, playerPoint.y + 0.5);
+      // 球员角色战术标签（增加暗色胶囊半透明背景，彻底杜绝在木地板上字迹模糊辨识困难）
+      const labelText = player.slot || player.action || "";
+      if (labelText) {
+        ctx.font = "600 9px IBM Plex Mono, -apple-system, sans-serif";
+        const textWidth = ctx.measureText(labelText).width;
+        const pillW = textWidth + 8;
+        const pillH = 14;
+        const pillX = playerPoint.x - pillW / 2;
+        const pillY = playerPoint.y + radius + 5;
+        ctx.fillStyle = "rgba(10, 18, 24, 0.85)";
+        ctx.beginPath();
+        ctx.roundRect(pillX, pillY, pillW, pillH, 3);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(190, 215, 224, 0.35)";
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+        ctx.fillStyle = player.team === "home" ? "#4ade80" : "#fbbf24";
+        ctx.fillText(labelText, playerPoint.x, pillY + pillH / 2 + 0.5);
+      }
       const stamina = clamp(finite(player.stm) / Math.max(1, finite(player.stmMax, 100)), 0, 1);
       ctx.beginPath(); ctx.arc(playerPoint.x, playerPoint.y, radius + 3, -Math.PI / 2, -Math.PI / 2 + stamina * Math.PI * 2); ctx.strokeStyle = stamina > .45 ? "rgba(255,255,255,.72)" : "#ff6f7e"; ctx.lineWidth = 2; ctx.stroke();
     }

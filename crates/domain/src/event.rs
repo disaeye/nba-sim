@@ -58,6 +58,8 @@ pub enum GameEvent {
     },
     PassReceived {
         receiver_id: String,
+        /// Frozen physical position where the receiver secured the pass.
+        position: (f32, f32),
     },
     /// Pass arrives without being secured by the receiver.
     PassDropped {
@@ -117,10 +119,7 @@ pub enum GameEvent {
         is_offensive: bool,
     },
     /// Macro phase transition observed by the application event loop.
-    PhaseTransition {
-        from: PhaseType,
-        to: PhaseType,
-    },
+    PhaseTransition { from: PhaseType, to: PhaseType },
     /// Officiating result derived from a physical contact fact.
     Foul {
         fouled_player_id: String,
@@ -144,6 +143,11 @@ pub enum GameEvent {
         team: String,
         out_player: String,
         in_player: String,
+    },
+    /// 双方倒地争抢地板球导致争球（Held Ball / Jump Ball）。
+    JumpBallTriggered {
+        player_a_id: String,
+        player_b_id: String,
     },
 }
 
@@ -218,6 +222,7 @@ impl GameEvent {
             GameEvent::EnforcementApplied { .. } => "ENFORCEMENT_APPLIED",
             GameEvent::PossessionSummary(_) => "POSSESSION_SUMMARY",
             GameEvent::Substitution { .. } => "SUBSTITUTION",
+            GameEvent::JumpBallTriggered { .. } => "JUMP_BALL_TRIGGERED",
         }
     }
 }

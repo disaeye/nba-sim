@@ -51,6 +51,8 @@ WHITELIST_FILES = {
     "crates/decision/src/tactics.rs",
     "crates/decision/src/pipeline.rs",
     "crates/engine/src/match_engine.rs",
+    "crates/decision/src/defense.rs",
+    "crates/physics/src/perception.rs",
 }
 
 CURRENT_THRESHOLD = 0

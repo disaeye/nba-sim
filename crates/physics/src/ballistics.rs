@@ -96,7 +96,7 @@ impl BallisticsEngine {
                     let forward = if speed > 0.5 {
                         carrier.vel_ft / speed
                     } else {
-                        Vec2::new(1.0, 0.0)
+                        Vec2::X
                     };
                     let lateral = Vec2::new(-forward.y, forward.x);
                     let freq = if speed > 0.5 {
@@ -107,11 +107,19 @@ impl BallisticsEngine {
                     let cycle = (current_time * freq * std::f32::consts::TAU).sin();
                     let side_offset = lateral * (cycle * rules.ball_holder_offset_ft * 0.45);
                     let forward_offset = forward * rules.ball_holder_offset_ft;
-                    let bounce_progress = ((current_time * freq * std::f32::consts::PI).sin()).abs();
+                    let bounce_progress =
+                        ((current_time * freq * std::f32::consts::PI).sin()).abs();
                     let min_z = rules.ball_holder_height_ft * 0.70;
                     let max_z = rules.ball_holder_height_ft;
                     let bounce_z = min_z + bounce_progress * (max_z - min_z);
-                    (carrier.pos_ft + forward_offset + side_offset, bounce_z)
+                    let requested = carrier.pos_ft + forward_offset + side_offset;
+                    let offset = requested - carrier.pos_ft;
+                    let bounded = if offset.length() > rules.invariant_holder_leash_ft {
+                        offset.normalize() * rules.invariant_holder_leash_ft
+                    } else {
+                        offset
+                    };
+                    (carrier.pos_ft + bounded, bounce_z)
                 } else {
                     (
                         Vec2::new(rules.court.width_ft / 2.0, rules.court.height_ft / 2.0),
@@ -122,20 +130,16 @@ impl BallisticsEngine {
             BallTrajectoryKind::ControlTransfer {
                 from_pos,
                 from_z,
-                carrier_id,
+                target_pos,
+                target_z,
                 start_time,
                 duration,
+                ..
             } => {
-                let target = if let Some(carrier) = players.get(carrier_id) {
-                    let offset = if carrier.vel_ft.length() > 0.5 {
-                        carrier.vel_ft.normalize() * rules.ball_holder_offset_ft
-                    } else {
-                        Vec2::new(rules.ball_holder_offset_ft, 0.0)
-                    };
-                    (carrier.pos_ft + offset, rules.ball_holder_height_ft)
-                } else {
-                    (*from_pos, *from_z)
-                };
+                // Freeze both endpoints at transition creation. Sampling against the
+                // moving carrier makes the trajectory non-deterministic and can make
+                // the endpoint move faster than the configured ball envelope.
+                let target = (*target_pos, *target_z);
                 let tau = if *duration > 0.0 {
                     ((current_time - start_time) / duration).clamp(0.0, 1.0)
                 } else {
@@ -160,31 +164,54 @@ impl BallisticsEngine {
                 let z = from_z + (rules.chest_height_ft - *from_z) * progress;
                 (xy, z)
             }
-            BallTrajectoryKind::InboundReady { baseline_pos, inbounder_id } => {
+            BallTrajectoryKind::InboundReady {
+                baseline_pos,
+                inbounder_id,
+            } => {
                 if let Some(inbounder) = players.get(inbounder_id) {
                     (inbounder.pos_ft, rules.chest_height_ft)
                 } else {
                     (*baseline_pos, rules.chest_height_ft)
                 }
             }
-            BallTrajectoryKind::Drive { driver_id, .. } => {
+            BallTrajectoryKind::Drive {
+                driver_id,
+                move_kind,
+                ..
+            } => {
                 if let Some(driver) = players.get(driver_id) {
                     let speed = driver.vel_ft.length();
                     let forward = if speed > 0.5 {
                         driver.vel_ft / speed
                     } else {
-                        Vec2::new(1.0, 0.0)
+                        Vec2::X
                     };
                     let lateral = Vec2::new(-forward.y, forward.x);
-                    let freq = rules.ball_bounce_frequency_hz * (1.0 + (speed / 15.0).min(0.6));
+                    let freq = rules.ball_bounce_frequency_hz
+                        * (1.0 + (speed / rules.max_player_speed_ftps.max(f32::EPSILON)).min(0.6));
                     let cycle = (current_time * freq * std::f32::consts::TAU).sin();
-                    let side_offset = lateral * (cycle * rules.ball_holder_offset_ft * 0.6);
-                    let forward_offset = forward * (rules.ball_holder_offset_ft * 1.15);
-                    let bounce_progress = ((current_time * freq * std::f32::consts::PI).sin()).abs();
+                    let lateral_mult = match move_kind {
+                        Some(nba_domain::action_window::DribbleMoveKind::Crossover) => 1.2,
+                        Some(nba_domain::action_window::DribbleMoveKind::BehindTheBack) => 0.8,
+                        Some(nba_domain::action_window::DribbleMoveKind::SpinMove) => 1.5,
+                        _ => 0.6,
+                    };
+                    let side_offset =
+                        lateral * (cycle * rules.ball_holder_offset_ft * lateral_mult);
+                    let forward_offset = forward * rules.ball_holder_offset_ft;
+                    let bounce_progress =
+                        ((current_time * freq * std::f32::consts::PI).sin()).abs();
                     let min_z = rules.ball_holder_height_ft * 0.65;
                     let max_z = rules.ball_holder_height_ft;
                     let bounce_z = min_z + bounce_progress * (max_z - min_z);
-                    (driver.pos_ft + forward_offset + side_offset, bounce_z)
+                    let requested = driver.pos_ft + forward_offset + side_offset;
+                    let offset = requested - driver.pos_ft;
+                    let bounded = if offset.length() > rules.invariant_holder_leash_ft {
+                        offset.normalize() * rules.invariant_holder_leash_ft
+                    } else {
+                        offset
+                    };
+                    (driver.pos_ft + bounded, bounce_z)
                 } else {
                     (
                         Vec2::new(rules.court.width_ft / 2.0, rules.court.height_ft / 2.0),
@@ -195,7 +222,6 @@ impl BallisticsEngine {
             BallTrajectoryKind::Pass {
                 from_pos,
                 to_pos,
-                target_id,
                 start_time,
                 duration,
                 peak_z,
@@ -203,15 +229,11 @@ impl BallisticsEngine {
             } => {
                 let progress =
                     ((current_time - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
-                let catch_pos = players
-                    .get(target_id)
-                    .map(|player| player.pos_ft)
-                    .unwrap_or(*to_pos);
-                let xy = from_pos.lerp(catch_pos, progress);
+                let xy = from_pos.lerp(*to_pos, progress);
                 let linear_z = *peak_z + (rules.chest_height_ft - *peak_z) * progress;
                 let requested_arc =
                     rules.ball_arc_multiplier * (*peak_z - rules.chest_height_ft).max(0.0);
-                let distance = (catch_pos - *from_pos).length();
+                let distance = (*to_pos - *from_pos).length();
                 let arc_amplitude =
                     Self::shot_arc_for_duration(distance, *duration, requested_arc, rules);
                 let arc = arc_amplitude * progress * (1.0 - progress);

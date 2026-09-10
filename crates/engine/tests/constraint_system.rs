@@ -110,6 +110,7 @@ fn test_dead_ball_blocks_shot() {
         shooter_id: "H_1".to_string(),
         from_pos: Vec2::new(40.0, 25.0),
         is_three: false,
+        jumper_kind: None,
     };
     let scored = ConstraintRegistry::default().evaluate_candidate(&ctx, &action);
     assert!(!scored.feasible);
@@ -144,7 +145,16 @@ fn test_seed4_diagnostic() {
     for i in 0..12085 {
         let tick = engine.step();
         if i >= 12065 && i <= 12082 {
-            eprintln!("TICK {}: flow={:?} sub={:?} ball={:?} holder={:?} events={:?} event_log={:?}", i, engine.game_flow, engine.sub_phase, engine.ball_state, tick.frame.ball.holder_id, tick.frame.events, tick.frame.event_log);
+            eprintln!(
+                "TICK {}: flow={:?} sub={:?} ball={:?} holder={:?} events={:?} event_log={:?}",
+                i,
+                engine.game_flow,
+                engine.sub_phase,
+                engine.ball_state,
+                tick.frame.ball.holder_id,
+                tick.frame.events,
+                tick.frame.event_log
+            );
         }
     }
 }
@@ -175,6 +185,7 @@ fn test_ball_flight_is_not_available_for_second_action() {
         shooter_id: "H_1".to_string(),
         from_pos: Vec2::new(40.0, 25.0),
         is_three: false,
+        jumper_kind: None,
     };
     let scored = ConstraintRegistry::default().evaluate_candidate(&ctx, &action);
     assert!(!scored.feasible);
@@ -202,6 +213,7 @@ fn test_game_clock_expired_blocks_shot_only() {
         shooter_id: "H_1".to_string(),
         from_pos: Vec2::new(40.0, 25.0),
         is_three: false,
+        jumper_kind: None,
     };
     let scored = ConstraintRegistry::default().evaluate_candidate(&ctx, &shot);
     assert!(!scored.feasible);
@@ -236,6 +248,7 @@ fn test_clock_urgency_preference_boosts_shot() {
         shooter_id: "H_1".to_string(),
         from_pos: Vec2::new(40.0, 25.0),
         is_three: false,
+        jumper_kind: None,
     };
     let scored = ConstraintRegistry::default().evaluate_candidate(&ctx, &shot);
     assert!(scored.feasible);
@@ -375,8 +388,8 @@ fn test_game_flow_transition_table_rejects_impossible_edges() {
 
 #[test]
 fn test_contact_fact_is_adjudicated_into_foul_fact() {
-    use nba_domain::GameEvent;
     use nba_domain::resolve::ContactPolicy;
+    use nba_domain::GameEvent;
     use nba_officiating::{ResolutionLayer, ResolutionOutcome};
     let event = GameEvent::Contact {
         player_a: "H_1".to_string(),
@@ -721,7 +734,7 @@ fn test_shot_clock_violation_starts_continuous_inbound_transfer() {
         carrier_id: "H_1".to_string(),
     };
     let source = engine.ball_pos_3d.0;
-    let tick = engine.step();
+    let _tick = engine.step();
     assert_eq!(engine.possession(), nba_domain::Possession::Away);
     assert!(matches!(
         engine.ball_state,
@@ -1095,6 +1108,29 @@ fn event_log_retains_replayable_domain_payloads() {
 }
 
 #[test]
+fn possession_summary_uses_elapsed_time_and_turnover_actor() {
+    let mut engine = MatchEngine::new(918);
+    engine.current_possession_start_clock = 100.0;
+    engine.game_clock = 97.5;
+    engine.current_possession_start_time = 10.0;
+    engine.current_time = 12.5;
+    engine.current_possession_turnover_player = Some("H_1".to_string());
+
+    engine.emit_possession_summary("TURNOVER_VIOLATION", None, Some("H_1".to_string()), None);
+
+    let summary = engine
+        .pending_events
+        .iter()
+        .find_map(|event| match event {
+            nba_domain::GameEvent::PossessionSummary(summary) => Some(summary),
+            _ => None,
+        })
+        .expect("summary should be emitted");
+    assert!((summary.duration_seconds - 2.5).abs() < f32::EPSILON);
+    assert_eq!(summary.turnover_player_id.as_deref(), Some("H_1"));
+}
+
+#[test]
 fn setup_rejects_players_outside_configured_geometry() {
     let mut setup = nba_engine::MatchSetup::builtin(nba_domain::GameRules::default());
     setup.home_team.players[0].initial_position_ft = (200.0, 25.0);
@@ -1256,7 +1292,13 @@ fn test_configured_tip_off_duration_produces_physical_tipoff_phase() {
             break;
         }
     }
-    assert!(saw_tipoff, "should emit TIPOFF events during configured tip off duration");
-    assert!(saw_tipoff_secured, "should emit TIPOFF_SECURED after duration completes");
+    assert!(
+        saw_tipoff,
+        "should emit TIPOFF events during configured tip off duration"
+    );
+    assert!(
+        saw_tipoff_secured,
+        "should emit TIPOFF_SECURED after duration completes"
+    );
     assert_eq!(engine.game_flow, nba_domain::GameFlowState::LiveBall);
 }

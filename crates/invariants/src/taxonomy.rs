@@ -1,6 +1,6 @@
+use crate::Violation;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::Violation;
 
 /// 违例严重度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,13 +53,16 @@ impl ViolationTaxonomy {
         for v in violations {
             let cat = categorize_rule(v.rule);
             let sev = v.severity;
-            
+
             match sev {
                 ViolationSeverity::Hard => taxonomy.hard_count += 1,
                 ViolationSeverity::Soft => taxonomy.soft_count += 1,
             }
-            
-            *taxonomy.by_category.entry(format!("{:?}", cat)).or_insert(0) += 1;
+
+            *taxonomy
+                .by_category
+                .entry(format!("{:?}", cat))
+                .or_insert(0) += 1;
             *taxonomy.by_rule.entry(v.rule.to_string()).or_insert(0) += 1;
         }
 
@@ -69,20 +72,29 @@ impl ViolationTaxonomy {
 
 pub fn categorize_rule(rule: &str) -> ViolationCategory {
     match rule {
-        "TEAM_ON_COURT_COUNT" | "BENCH_DEEP_IN_COURT" | "BALL_HOLDER_EXISTS" | "BALL_HOLDER_ON_COURT" => {
-            ViolationCategory::RosterAndEntity
+        "TEAM_ON_COURT_COUNT"
+        | "BENCH_DEEP_IN_COURT"
+        | "BALL_HOLDER_EXISTS"
+        | "BALL_HOLDER_ON_COURT"
+        | "FOUL_PLAYER_EXISTS" => ViolationCategory::RosterAndEntity,
+        "PLAYER_IN_BOUNDS" | "PLAYER_SEPARATION" | "FOUL_SAME_TEAM" => {
+            ViolationCategory::SpatialTopology
         }
-        "PLAYER_IN_BOUNDS" | "PLAYER_SEPARATION" => ViolationCategory::SpatialTopology,
         "PLAYER_SPEED" | "BALL_SPEED" | "BALL_HEIGHT_BOUNDS" | "BALL_TELEPORT" => {
             ViolationCategory::Kinematics
         }
         "BALL_SINGLE_HOLDER" | "BALL_WITH_HOLDER" | "BALL_HOLDER_MISMATCH" => {
             ViolationCategory::PossessionMutex
         }
-        "CLOCK_MONOTONIC" | "SHOT_CLOCK_BOUNDS" => ViolationCategory::ClockAndFlow,
-        "SCORE_MONOTONIC" | "SCORE_EVENT_WITHOUT_POINTS" | "UNCAUSED_SCORE_DELTA" | "SCORE_DELTA_VALIDITY" => {
-            ViolationCategory::ScoreCausality
-        }
+        "CLOCK_MONOTONIC"
+        | "SHOT_CLOCK_BOUNDS"
+        | "TEAM_FOULS_MONOTONIC"
+        | "TEAM_FOUL_COUNT_MISMATCH" => ViolationCategory::ClockAndFlow,
+        "SCORE_MONOTONIC"
+        | "SCORE_EVENT_WITHOUT_POINTS"
+        | "UNCAUSED_SCORE_DELTA"
+        | "SCORE_DELTA_VALIDITY" => ViolationCategory::ScoreCausality,
+        "FOUL_PAYLOAD_MISSING" | "FOUL_PAYLOAD_INVALID" => ViolationCategory::NarrativeConsistency,
         _ => ViolationCategory::NarrativeConsistency,
     }
 }

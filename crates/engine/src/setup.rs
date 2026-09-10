@@ -1,6 +1,6 @@
 use glam::Vec2;
-use nba_decision::tactics::{DefensiveTactic, TacticalSet};
-use nba_domain::{GameRules, TeamData};
+use nba_decision::tactics::DefensiveTactic;
+use nba_domain::{GameRules, TacticalSetSpec, TeamData};
 use nba_physics::PhysicsBackend;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -58,15 +58,15 @@ impl MatchSetup {
         validate_team(&self.away_team, self.rules.court)?;
         validate_lineup(&self.home_team, &self.home_lineup, "home")?;
         validate_lineup(&self.away_team, &self.away_lineup, "away")?;
-        TacticalSet::from_id(&self.home_lineup.offense_tactic).ok_or_else(|| {
+        TacticalSetSpec::builtin(&self.home_lineup.offense_tactic).ok_or_else(|| {
             format!(
-                "home lineup has unknown offense tactic: {}",
+                "home lineup has unknown offense tactic profile: {}",
                 self.home_lineup.offense_tactic
             )
         })?;
-        TacticalSet::from_id(&self.away_lineup.offense_tactic).ok_or_else(|| {
+        TacticalSetSpec::builtin(&self.away_lineup.offense_tactic).ok_or_else(|| {
             format!(
-                "away lineup has unknown offense tactic: {}",
+                "away lineup has unknown offense tactic profile: {}",
                 self.away_lineup.offense_tactic
             )
         })?;

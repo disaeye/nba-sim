@@ -18,7 +18,48 @@ pub enum ActionType {
     CloseoutContest,
     ReboundJump,
 }
-
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DribbleMoveKind {
+    DirectDrive,
+    Crossover,
+    BetweenTheLegs,
+    BehindTheBack,
+    SpinMove,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum JumperKind {
+    CatchAndShoot,
+    PullUp,
+    StepBack,
+    TurnaroundFadeaway,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RimFinishKind {
+    Layup,
+    Dunk,
+    Floater,
+    ReverseLayup,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OffBallActionKind {
+    SetScreen,
+    RollToRim,
+    PopToThree,
+    SlipScreen,
+    BackdoorCut,
+    VCut,
+    FlashToNail,
+    SpotUpRelocate,
+    DribbleHandOffReceive,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PostMoveKind {
+    DropStep,
+    UpAndUnder,
+    HookShot,
+    Fadeaway,
+    Backdown,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionTimeWindow {
     pub player_id: String,
@@ -70,6 +111,58 @@ impl ActionTimeWindow {
             rules.rebound_follow_seconds,
             true,
             rules.rebound_prep_seconds,
+        )
+    }
+
+    pub fn new_layup(player_id: &str, start_time: f32, rules: &GameRules) -> Self {
+        Self::new(
+            player_id,
+            ActionType::Layup,
+            start_time,
+            rules.layup_prep_seconds,
+            rules.layup_exec_seconds,
+            rules.layup_follow_seconds,
+            true,
+            rules.layup_prep_seconds * 0.5,
+        )
+    }
+
+    pub fn new_dunk(player_id: &str, start_time: f32, rules: &GameRules) -> Self {
+        Self::new(
+            player_id,
+            ActionType::Dunk,
+            start_time,
+            rules.dunk_prep_seconds,
+            rules.dunk_exec_seconds,
+            rules.dunk_follow_seconds,
+            true,
+            rules.dunk_prep_seconds * 0.5,
+        )
+    }
+
+    pub fn new_screen_set(player_id: &str, start_time: f32, rules: &GameRules) -> Self {
+        Self::new(
+            player_id,
+            ActionType::ScreenSet,
+            start_time,
+            rules.screen_prep_seconds,
+            rules.screen_exec_seconds,
+            rules.screen_follow_seconds,
+            true,
+            0.0,
+        )
+    }
+
+    pub fn new_closeout_contest(player_id: &str, start_time: f32, rules: &GameRules) -> Self {
+        Self::new(
+            player_id,
+            ActionType::CloseoutContest,
+            start_time,
+            rules.contest_prep_seconds,
+            rules.contest_exec_seconds,
+            rules.contest_follow_seconds,
+            false,
+            0.0,
         )
     }
     #[allow(clippy::too_many_arguments)]

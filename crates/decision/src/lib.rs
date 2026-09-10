@@ -4,6 +4,7 @@
 //! 效用评分 → softmax 个性化采样；以及战术规划与体能/士气调制。
 
 pub mod constraint;
+pub mod defense;
 pub mod modulation;
 pub mod pipeline;
 pub mod tactics;
