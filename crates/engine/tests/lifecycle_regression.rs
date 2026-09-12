@@ -28,9 +28,9 @@ fn full_game_completes_on_formerly_wedged_seeds() {
              (dead-ball lifelock regression; see 2026-09-02 GAP review)"
         );
         assert!(
-            engine.completed_possessions >= 150,
+            engine.completed_possessions() >= 150,
             "seed {seed} finished with only {} possessions — implausible full game",
-            engine.completed_possessions
+            engine.completed_possessions()
         );
     }
 }

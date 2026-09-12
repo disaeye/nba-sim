@@ -39,8 +39,10 @@ pub struct LeagueProfile {
     pub bonus_free_throws: u8,
     /// 单节球队犯规达到该值后进入 bonus。
     pub bonus_fouls_per_period: u32,
-    /// 三分线距离（ft）。
+    /// 三分线距离（ft，弧顶/翼位）。
     pub three_point_distance_ft: f32,
+    /// 底角三分距离（ft）。NBA 为 22.0，FIBA 为 22.15（等半径，无特例时置 0）。
+    pub corner_three_distance_ft: f32,
     /// 场地几何。
     pub court: CourtGeometry,
 }
@@ -61,6 +63,7 @@ impl LeagueProfile {
             bonus_free_throws: 2,
             bonus_fouls_per_period: 5,
             three_point_distance_ft: 23.75,
+            corner_three_distance_ft: 22.0,
             court: CourtGeometry::default(),
         }
     }
@@ -81,6 +84,7 @@ impl LeagueProfile {
             bonus_fouls_per_period: 4,
             // 6.75 m ≈ 22.15 ft；FIBA 场地 28m × 15m ≈ 91.86 × 49.21 ft。
             three_point_distance_ft: 22.15,
+            corner_three_distance_ft: 0.0,
             court: CourtGeometry::fiba(),
         }
     }

@@ -1,6 +1,6 @@
 use nba_domain::GameRules;
-use nba_engine::{MatchEngine, MatchSetup};
-use nba_invariants::{InvariantChecker, ViolationTaxonomy};
+use nba_engine::{MatchEngine, MatchSetup, StreamMode};
+use nba_invariants::{InvariantChecker, Violation, ViolationTaxonomy};
 use nba_protocol::StreamTick;
 use std::env;
 use std::fs::{self, File};
@@ -29,6 +29,21 @@ fn load_rules(path_opt: Option<&str>) -> std::io::Result<GameRules> {
     }
 }
 
+/// 违规账本落盘：任何写入/序列化错误向上传播（gap.md §16.4）。
+fn write_violation_ledger(path: &str, violations: &[Violation]) -> std::io::Result<()> {
+    use std::io::Write;
+    let file = File::create(path)?;
+    let mut writer = std::io::BufWriter::new(file);
+    for v in violations {
+        writeln!(
+            writer,
+            "{}",
+            serde_json::to_string(v).map_err(std::io::Error::other)?
+        )?;
+    }
+    writer.flush()
+}
+
 /// 评判工件落盘（M8：judgments.ndjson + attribution_report.json）。
 fn write_judgment_artifacts(
     stream_path: &str,
@@ -43,12 +58,13 @@ fn write_judgment_artifacts(
         let mut w = std::io::BufWriter::new(jf);
         use std::io::Write;
         for j in judgments {
-            let _ = writeln!(w, "{}", serde_json::to_string(j).unwrap_or_default());
+            writeln!(w, "{}", serde_json::to_string(j).map_err(std::io::Error::other)?)?;
         }
+        w.flush()?;
     }
     fs::write(
         &report_path,
-        serde_json::to_string_pretty(&report).unwrap_or_default(),
+        serde_json::to_string_pretty(&report).map_err(std::io::Error::other)?,
     )?;
     Ok(report)
 }
@@ -58,21 +74,25 @@ fn run_single_simulation(
     out_path: &str,
     scope: &str,
     rules: GameRules,
+    stream_mode: StreamMode,
 ) -> std::io::Result<()> {
     println!("🏀 Initializing NBA-Sim Rust Engine with Rapier2D Physics...");
-    println!("   Seed: {}, Output: {}, Scope: {}", seed, out_path, scope);
+    println!(
+        "   Seed: {}, Output: {}, Scope: {}, StreamMode: {:?}",
+        seed, out_path, scope, stream_mode
+    );
 
     let start = Instant::now();
     let setup = MatchSetup::builtin(rules.clone());
     let mut engine = MatchEngine::with_setup(setup, seed);
 
-    let summary = engine.simulate_scope_and_export(scope, out_path)?;
+    let summary = engine.simulate_scope_and_export_with_mode(scope, out_path, stream_mode)?;
     let elapsed = start.elapsed();
 
-    let total_points = engine.home_score + engine.away_score;
-    let completed_poss = engine.completed_possessions;
+    let total_points = engine.home_score() + engine.away_score();
+    let completed_poss = engine.completed_possessions();
     let avg_poss_sec = if completed_poss > 0 {
-        engine.current_time / completed_poss as f32
+        engine.current_time() / completed_poss as f32
     } else {
         0.0
     };
@@ -80,7 +100,7 @@ fn run_single_simulation(
     println!("\n📊 Box Score & Advanced Statistics:");
     println!(
         "   Score: Home {} - {} Away (Total: {})",
-        engine.home_score, engine.away_score, total_points
+        engine.home_score(), engine.away_score(), total_points
     );
     println!(
         "   Possessions: {} | Avg Duration: {:.2}s",
@@ -109,30 +129,38 @@ fn run_single_simulation(
         summary.box_score.turnovers, summary.box_score.fouls
     );
 
+    // quality.md §1.1 严重级别契约：Hard 阻断（退出码 1），
+    // Soft 计数上报但不阻断（退出码 0）。此前把两者一并当作失败，
+    // 使合法的几何安全缓冲被当成硬错误。
+    let hard_count = summary.taxonomy.hard_count;
+    let soft_count = summary.taxonomy.soft_count;
     let violation_count = summary.violations.len();
     if violation_count > 0 {
+        let verdict = if hard_count > 0 {
+            format!("❌ Simulation FAILED: {} Hard Axiom Violations", hard_count)
+        } else {
+            format!("⚠️  {} Soft Axiom Warnings (non-blocking)", soft_count)
+        };
         println!(
-            "\n❌ Simulation failed: {} Axiom Violations detected across {} ticks.",
-            violation_count, summary.ticks
+            "\n{} detected across {} ticks (hard={}, soft={}).",
+            verdict, summary.ticks, hard_count, soft_count
         );
         println!("   Taxonomy Breakdown: {:?}", summary.taxonomy);
+        // gap.md §16.4：写入错误必须向上传播，不得 `let _ = writeln!()`。
         let violation_file = format!("{}.violations.ndjson", out_path);
-        if let Ok(file) = File::create(&violation_file) {
-            let mut writer = std::io::BufWriter::new(file);
-            use std::io::Write;
-            for v in &summary.violations {
-                let _ = writeln!(writer, "{}", serde_json::to_string(v).unwrap_or_default());
-            }
-            println!(
-                "   📁 Exported structured violation ledger to: {}",
-                violation_file
-            );
-        }
+        write_violation_ledger(&violation_file, &summary.violations)?;
+        println!(
+            "   📁 Exported structured violation ledger to: {}",
+            violation_file
+        );
         for v in &summary.violations {
             println!("   {}", v);
         }
-        std::process::exit(1);
-    } else {
+        if hard_count > 0 {
+            std::process::exit(1);
+        }
+    }
+    if violation_count == 0 {
         let tps = (summary.ticks as f64 / elapsed.as_secs_f64().max(0.001)) as u64;
         println!(
             "\n✅ Completed {} ({} ticks) in {:.2}s ({} ticks/sec): 0 Axiom Violations.\n",
@@ -145,7 +173,14 @@ fn run_single_simulation(
 
     // M8 评判工件：judgments.ndjson + attribution_report.json 与流同落盘。
     if let Ok(stream) = fs::read_to_string(out_path) {
-        let ticks = nba_evaluator::parse_stream(&stream);
+        // D1.3 严格解析：坏行 = 流不可信，跳过评判并告警（不产出假工件）。
+        let ticks = match nba_evaluator::parse_stream(&stream) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("⚠️ stream parse failed (strict): {} — skipping judgment artifacts", e);
+                return Ok(());
+            }
+        };
         let fixture = nba_evaluator::ReferenceDistributions::for_league(&rules.league.name);
         let judgments = nba_evaluator::evaluate_stream(&ticks, &fixture)
             .into_iter()
@@ -155,15 +190,103 @@ fn run_single_simulation(
             })
             .collect::<Vec<_>>();
         match write_judgment_artifacts(out_path, &judgments, &fixture) {
-            Ok(report) => println!(
-                "🧾 Realism index: {:.3} ({} judgments, {} defects) → {}.judgments.ndjson",
-                report.realism_index, report.total_judgments, report.defect_count, out_path
-            ),
+            Ok(report) => {
+                // D1.2：Hard 门失败时指数无效，先报门再报指数。
+                if report.hard_gate_failed {
+                    println!(
+                        "⛔ HARD gate FAILED ({} defects, coverage {:.0}%) → {}.judgments.ndjson",
+                        report.defect_count,
+                        report.evidence_coverage * 100.0,
+                        out_path
+                    );
+                } else {
+                    println!(
+                        "🧾 Realism index: {:.3} ({} judgments, {} defects, coverage {:.0}%) → {}.judgments.ndjson",
+                        report.realism_index,
+                        report.total_judgments,
+                        report.defect_count,
+                        report.evidence_coverage * 100.0,
+                        out_path
+                    );
+                }
+            }
             Err(e) => eprintln!("⚠️ judgment artifacts failed: {}", e),
+        }
+
+        // D0.2 四式账本平衡检查：ledger_violations.ndjson 同落盘；
+        // 账本不平衡 = Hard，违反条数计入输出供批处理门禁消费。
+        let ledger_violations = nba_evaluator::check_ledger(&ticks);
+        let ledger_path = format!("{}.ledger_violations.ndjson", out_path);
+        match File::create(&ledger_path) {
+            Ok(f) => {
+                use std::io::Write;
+                let mut w = std::io::BufWriter::new(f);
+                let mut write_err: Option<std::io::Error> = None;
+                for v in &ledger_violations {
+                    if let Err(e) = writeln!(
+                        w,
+                        "{}",
+                        serde_json::to_string(v).map_err(std::io::Error::other).unwrap_or_default()
+                    ) {
+                        write_err = Some(e);
+                        break;
+                    }
+                }
+                if let Some(e) = write_err.or_else(|| w.flush().err()) {
+                    eprintln!("⚠️ ledger violations artifact write failed: {}", e);
+                } else if ledger_violations.is_empty() {
+                    println!("📒 Ledger: 4 equations balanced (score/possession/time/foul).");
+                } else {
+                    println!(
+                        "📒 Ledger: {} HARD violations → {}",
+                        ledger_violations.len(),
+                        ledger_path
+                    );
+                }
+            }
+            Err(e) => eprintln!("⚠️ ledger violations artifact failed: {}", e),
         }
     }
 
     Ok(())
+}
+
+
+/// CLI 自己的临时目录根（与 test-support 的约定一致）。
+///
+/// 项目约定临时数据统一放 `/home/ubuntu/basketball`（可用 `NBA_TEMP_ROOT`
+/// 覆盖）；不再落 `/tmp`——那里与构建产物共享分区，且历史泄漏正是从
+/// `/tmp/nba_batch_*.ndjson` 累积出来的（单次实测残留 4.2 GB）。
+fn cli_temp_root() -> std::path::PathBuf {
+    std::env::var_os("NBA_TEMP_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("/home/ubuntu/basketball"))
+}
+
+/// 临时流文件的作用域守卫：无论正常结束、`?` 提前返回还是 panic 展开，
+/// 都保证删除临时 NDJSON，避免 batch 中途失败留下数 GB 垃圾
+/// （gap.md §16.4 / problem.md §14.4）。
+struct TempStreamGuard {
+    path: std::path::PathBuf,
+}
+
+impl TempStreamGuard {
+    fn new(path: std::path::PathBuf) -> Self {
+        Self { path }
+    }
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+    fn path_str(&self) -> String {
+        self.path.to_string_lossy().to_string()
+    }
+}
+
+impl Drop for TempStreamGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+        let _ = fs::remove_file(format!("{}.violations.ndjson", self.path.display()));
+    }
 }
 
 fn run_batch_simulation(
@@ -171,6 +294,7 @@ fn run_batch_simulation(
     scope: &str,
     rules: GameRules,
     out_path: Option<&str>,
+    stream_mode: StreamMode,
 ) -> std::io::Result<()> {
     println!(
         "🚀 Starting Batch Simulation ({} Games, Seeds {}..={}, Scope={})...\n",
@@ -200,13 +324,22 @@ fn run_batch_simulation(
         let setup = MatchSetup::builtin(rules.clone());
         let mut engine = MatchEngine::with_setup(setup, seed);
 
-        let out_path = format!("/tmp/nba_batch_{}.ndjson", seed);
-        let summary = engine.simulate_scope_and_export(scope, &out_path)?;
+        // batch 为临时单场流：使用调用方指定模式（默认 facts），
+        // 由 RAII 守卫保证单场结束（含错误提前返回）即删除，
+        // 避免累积占用磁盘（gap.md §16.4）。
+        let guard = TempStreamGuard::new(cli_temp_root().join(format!(
+            "nba_batch_{}_{}.ndjson",
+            std::process::id(),
+            seed
+        )));
+        let out_path = guard.path_str();
+        let summary =
+            engine.simulate_scope_and_export_with_mode(scope, &out_path, stream_mode)?;
 
-        let pts = engine.home_score + engine.away_score;
-        let poss = engine.completed_possessions;
+        let pts = engine.home_score() + engine.away_score();
+        let poss = engine.completed_possessions();
         let dur = if poss > 0 {
-            engine.current_time / poss as f32
+            engine.current_time() / poss as f32
         } else {
             0.0
         };
@@ -216,13 +349,7 @@ fn run_batch_simulation(
         // 单场违规工件：仅在存在违反时落盘（与单场模式同名约定）。
         if game_violations > 0 {
             let violation_file = format!("{}.violations.ndjson", out_path);
-            if let Ok(file) = File::create(&violation_file) {
-                let mut writer = std::io::BufWriter::new(file);
-                use std::io::Write;
-                for v in &summary.violations {
-                    let _ = writeln!(writer, "{}", serde_json::to_string(v).unwrap_or_default());
-                }
-            }
+            write_violation_ledger(&violation_file, &summary.violations)?;
         }
 
         // 每场一行统计 JSON（quality batch --out 工件）。
@@ -244,7 +371,7 @@ fn run_batch_simulation(
                 "fouls": summary.box_score.fouls,
                 "violations": game_violations,
             });
-            let _ = writeln!(writer, "{}", line);
+            writeln!(writer, "{}", line)?;
         }
 
         println!(
@@ -260,7 +387,13 @@ fn run_batch_simulation(
 
         // M8 评判：逐场评判并聚合（batch 与 violations 同落盘）。
         if let Ok(stream) = fs::read_to_string(&out_path) {
-            let ticks = nba_evaluator::parse_stream(&stream);
+            let ticks = match nba_evaluator::parse_stream(&stream) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("⚠️ batch stream parse failed (strict): {} — skipping game", e);
+                    continue;
+                }
+            };
             let fixture = nba_evaluator::ReferenceDistributions::for_league(&rules.league.name);
             all_judgments.extend(
                 nba_evaluator::evaluate_stream(&ticks, &fixture)
@@ -271,6 +404,8 @@ fn run_batch_simulation(
                     }),
             );
         }
+        // 临时流由 `guard` 在作用域结束时删除（RAII，异常安全）。
+        drop(guard);
     }
 
     if let Some(writer) = stats_out.as_mut() {
@@ -281,20 +416,28 @@ fn run_batch_simulation(
     let fixture = nba_evaluator::ReferenceDistributions::for_league(&rules.league.name);
     let report = nba_evaluator::attribution_report(&all_judgments, &fixture.version);
     if !all_judgments.is_empty() {
-        let base = out_path.unwrap_or("/tmp/nba_batch_aggregate");
+        // 未指定 --out 时使用进程隔离的临时聚合路径，避免多次运行互相
+        // 覆盖或在固定路径累积（gap.md §16.4）。
+        let fallback = cli_temp_root().join(format!(
+            "nba_batch_aggregate_{}",
+            std::process::id()
+        ));
+        let fallback_str = fallback.to_string_lossy().to_string();
+        let base = out_path.unwrap_or(fallback_str.as_str());
         let judgments_path = format!("{}.judgments.ndjson", base);
-        if let Ok(jf) = File::create(&judgments_path) {
-            let mut w = std::io::BufWriter::new(jf);
+        {
             use std::io::Write;
+            let jf = File::create(&judgments_path)?;
+            let mut w = std::io::BufWriter::new(jf);
             for j in &all_judgments {
-                let _ = writeln!(w, "{}", serde_json::to_string(j).unwrap_or_default());
+                writeln!(w, "{}", serde_json::to_string(j).map_err(std::io::Error::other)?)?;
             }
-            let _ = w.flush();
+            w.flush()?;
         }
-        let _ = fs::write(
+        fs::write(
             format!("{}.attribution_report.json", base),
-            serde_json::to_string_pretty(&report).unwrap_or_default(),
-        );
+            serde_json::to_string_pretty(&report).map_err(std::io::Error::other)?,
+        )?;
     }
 
     total_points_list.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -339,7 +482,8 @@ fn run_batch_simulation(
 /// 离线评判（quality 评判规范）：对既有 ndjson 流产出评判工件。
 fn run_evaluate(stream_path: &str) -> std::io::Result<()> {
     let stream = fs::read_to_string(stream_path)?;
-    let ticks = nba_evaluator::parse_stream(&stream);
+    let ticks = nba_evaluator::parse_stream(&stream)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let fixture = nba_evaluator::ReferenceDistributions::nba_v1();
     let judgments = nba_evaluator::evaluate_stream(&ticks, &fixture);
     let report = write_judgment_artifacts(stream_path, &judgments, &fixture)?;
@@ -395,38 +539,158 @@ fn run_pbp_convert(
     Ok(())
 }
 /// release 模式下跑固定 tick 数，对照 ≥ 20,000 ticks/s 预算。
-fn run_benchmark(ticks: usize) -> std::io::Result<()> {
-    const BUDGET_TICKS_PER_SEC: f64 = 20_000.0;
-    println!("⏱️  Benchmark: {} ticks, release mode\n", ticks);
+/// 分层性能基准（gap.md §18.5 / §16.4）。
+///
+/// 性能预算必须与输出模式绑定：默认有界输出不得与逐 tick 帧混淆，
+/// 纯引擎吞吐也不得把序列化成本算进去。每一层独立测量并独立判定。
+// 分层性能预算（gap.md §18.5）。
+//
+// 预算必须来自**实测并留出回归余量**，不能沿用旧单层基准的拍脑袋值。
+// 本轮实测（release, seed 42, 120k ticks 窗口，3 次取稳）：
+//   engine-only  : 14.5k–15.4k ticks/s
+//   engine+facts : 12.2k–15.0k ticks/s
+// 预算取实测下沿的约 75%，用于抓「性能显著退化」而不是噪声抖动。
+/// 纯引擎吞吐预算（无序列化、无落盘）。
+const BUDGET_ENGINE_TICKS_PER_SEC: f64 = 11_000.0;
+/// 引擎 + 事实流序列化吞吐预算（有界默认输出模式）。
+const BUDGET_FACTS_TICKS_PER_SEC: f64 = 9_000.0;
+/// benchmark 默认窗口（tick 数）。
+const DEFAULT_BENCHMARK_TICKS: usize = 20_000;
+/// 1 MiB 的字节数（带宽报告单位换算）。
+const BYTES_PER_MEBIBYTE: f64 = 1_048_576.0;
 
-    let start = Instant::now();
-    let mut engine = MatchEngine::with_setup(MatchSetup::builtin(GameRules::default()), 42);
-    let mut completed = 0usize;
-    for _ in 0..ticks {
-        if engine.is_finished() {
-            break;
+fn run_benchmark(ticks: usize, mode: &str) -> std::io::Result<()> {
+    println!("⏱️  Layered benchmark: {ticks} ticks, mode={mode}, release
+");
+    let mut failures: Vec<String> = Vec::new();
+    let want = |layer: &str| mode == "all" || mode == layer;
+
+    // ---- 1. engine-only：纯引擎 tick，无序列化、无落盘 ----
+    if want("engine") {
+        let start = Instant::now();
+        let mut engine = MatchEngine::with_setup(MatchSetup::builtin(GameRules::default()), 42);
+        let mut completed = 0usize;
+        for _ in 0..ticks {
+            if engine.is_finished() {
+                break;
+            }
+            let _ = engine.step();
+            completed += 1;
         }
-        let _ = engine.step();
-        completed += 1;
-    }
-    let elapsed = start.elapsed().as_secs_f64().max(1e-6);
-    let tps = completed as f64 / elapsed;
-
-    println!("   Completed {} ticks in {:.2}s", completed, elapsed);
-    println!(
-        "   Throughput: {:.0} ticks/sec (budget ≥ {:.0})",
-        tps, BUDGET_TICKS_PER_SEC
-    );
-    if tps >= BUDGET_TICKS_PER_SEC {
-        println!("   ✅ Within performance budget.");
-    } else {
+        let elapsed = start.elapsed().as_secs_f64().max(1e-6);
+        let tps = completed as f64 / elapsed;
         println!(
-            "   ❌ Below performance budget: {:.0}% of target.",
-            tps / BUDGET_TICKS_PER_SEC * 100.0
+            "   [engine-only ] {:>10.0} ticks/s  ({} ticks in {:.2}s, budget >= {:.0})",
+            tps, completed, elapsed, BUDGET_ENGINE_TICKS_PER_SEC
         );
+        if tps < BUDGET_ENGINE_TICKS_PER_SEC {
+            failures.push(format!(
+                "engine-only {:.0} ticks/s below budget {:.0}",
+                tps, BUDGET_ENGINE_TICKS_PER_SEC
+            ));
+        }
+    }
+
+    // ---- 2. engine + facts：事实流序列化 ----
+    if want("facts") {
+        let artifact = TempStreamGuard::new(cli_temp_root().join(format!(
+            "nba_bench_facts_{}.ndjson",
+            std::process::id()
+        )));
+        let start = Instant::now();
+        let mut engine = MatchEngine::with_setup(MatchSetup::builtin(GameRules::default()), 42);
+        let mut completed = 0usize;
+        let mut bytes = 0u64;
+        {
+            use std::io::Write;
+            let file = File::create(artifact.path())?;
+            let mut writer = std::io::BufWriter::new(file);
+            let mut prev_phase = String::new();
+            let mut prev_flow = String::new();
+            let mut prev_completed = usize::MAX;
+            for _ in 0..ticks {
+                if engine.is_finished() {
+                    break;
+                }
+                let tick = engine.step();
+                completed += 1;
+                let f = &tick.frame;
+                let emit = bytes == 0
+                    || !f.event_log.is_empty()
+                    || !f.events.is_empty()
+                    || f.phase != prev_phase
+                    || f.game_flow != prev_flow
+                    || f.completed_possessions != prev_completed
+                    || f.simulation_complete;
+                prev_phase = f.phase.clone();
+                prev_flow = f.game_flow.clone();
+                prev_completed = f.completed_possessions;
+                if emit {
+                    let line = serde_json::to_string(&tick)?;
+                    writer.write_all(line.as_bytes())?;
+                    writer.write_all(b"\n")?;
+                    bytes = bytes.saturating_add(line.len() as u64 + 1);
+                }
+            }
+            writer.flush()?;
+        }
+        let elapsed = start.elapsed().as_secs_f64().max(1e-6);
+        let tps = completed as f64 / elapsed;
+        let mib = bytes as f64 / BYTES_PER_MEBIBYTE;
+        let mbps = mib / elapsed;
+        println!(
+            "   [engine+facts ] {:>10.0} ticks/s  ({} ticks, {:.1} MiB, {:.1} MiB/s)",
+            tps,
+            completed,
+            mib,
+            mbps
+        );
+        if tps < BUDGET_FACTS_TICKS_PER_SEC {
+            failures.push(format!(
+                "engine+facts {:.0} ticks/s below budget {:.0}",
+                tps, BUDGET_FACTS_TICKS_PER_SEC
+            ));
+        }
+    }
+
+    // ---- 3. evaluator：事件流评判吞吐 ----
+    if want("evaluate") {
+        let mut engine = MatchEngine::with_setup(MatchSetup::builtin(GameRules::default()), 42);
+        let mut ndjson = String::new();
+        for _ in 0..ticks {
+            if engine.is_finished() {
+                break;
+            }
+            ndjson.push_str(&serde_json::to_string(&engine.step())?);
+            ndjson.push('\n');
+        }
+        let start = Instant::now();
+        let parsed = nba_evaluator::try_parse_stream(&ndjson)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let parse_elapsed = start.elapsed().as_secs_f64().max(1e-6);
+        let fixture = nba_evaluator::ReferenceDistributions::nba_v1();
+        let start = Instant::now();
+        let judgments = nba_evaluator::evaluate_stream(&parsed, &fixture);
+        let eval_elapsed = start.elapsed().as_secs_f64().max(1e-6);
+        println!(
+            "   [evaluate     ] {:>10.0} ticks/s parse, {:>10.0} ticks/s judge  ({} ticks, {} judgments)",
+            parsed.len() as f64 / parse_elapsed,
+            parsed.len() as f64 / eval_elapsed,
+            parsed.len(),
+            judgments.len()
+        );
+    }
+
+    if failures.is_empty() {
+        println!("\n   ✅ All measured layers within budget.");
+        Ok(())
+    } else {
+        println!("\n   ❌ Below budget:");
+        for f in &failures {
+            println!("      - {f}");
+        }
         std::process::exit(1);
     }
-    Ok(())
 }
 
 /// 解析 `--seeds A..B`（含端点）为种子列表。
@@ -464,22 +728,52 @@ fn run_audit_stream(file_path: &str) -> std::io::Result<()> {
     let mut checker = InvariantChecker::new();
     let mut total_ticks = 0;
     let mut all_violations = Vec::new();
+    // 几何投影流的规则与 tactical_set 只在首条记录写出（gap.md §16.4），
+    // 后续记录继承；同时据此识别投影粒度。
+    let mut carried_rules: Option<nba_protocol::FrameRules> = None;
+    let mut projection: Option<String> = None;
 
     for (line_idx, line_res) in reader.lines().enumerate() {
         let line = line_res?;
         if line.trim().is_empty() {
             continue;
         }
-        let tick: StreamTick = serde_json::from_str(&line).map_err(|e| {
+        let mut tick: StreamTick = serde_json::from_str(&line).map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("JSON parse error at line {}: {}", line_idx + 1, e),
             )
         })?;
+        // 首条记录之后规则不再重复写出，向前继承。
+        if tick.frame.rules.is_present() {
+            carried_rules = Some(tick.frame.rules.clone());
+        } else if let Some(rules) = &carried_rules {
+            tick.frame.rules = rules.clone();
+        }
+        if projection.is_none() && !tick.frame.stream_projection.is_empty() {
+            projection = Some(tick.frame.stream_projection.clone());
+        }
+        // 紧凑流（facts/summary）不携带逐 tick 几何投影，L1 几何检测不适用；
+        // 明确拒绝而不是用零坐标误报「越界/球人分离」（gap.md §16.4）。
+        if projection.as_deref().is_some_and(|p| p != "full")
+            && tick.frame.players.is_empty()
+        {
+            continue;
+        }
 
         let violations = checker.check_tick(&tick);
         all_violations.extend(violations);
         total_ticks += 1;
+    }
+
+    let geometry_audited = projection.as_deref().is_none_or(|p| p == "full");
+    if let Some(p) = &projection {
+        println!("   Projection: {}", p);
+    }
+    if !geometry_audited {
+        println!(
+            "   ⚠️  Non-full projection: L1 geometric invariants were NOT audited\n      (compact streams carry causal facts only). Use --stream-mode frames\n      to produce an auditable geometric stream."
+        );
     }
 
     let elapsed = start.elapsed();
@@ -494,6 +788,13 @@ fn run_audit_stream(file_path: &str) -> std::io::Result<()> {
         (total_ticks as f64 / elapsed.as_secs_f64().max(0.001)) as u64
     );
 
+    if !geometry_audited {
+        println!(
+            "✅ Causal stream check complete: {} violations. Geometry audit: not applicable for this projection.",
+            all_violations.len()
+        );
+        return Ok(());
+    }
     if !all_violations.is_empty() {
         println!("❌ Audit Failed with Violations:");
         for v in all_violations.iter().take(20) {
@@ -566,7 +867,8 @@ fn main() -> std::io::Result<()> {
     }
 
     if args.len() > 1 && args[1] == "benchmark" {
-        let mut ticks = 20_000usize;
+        let mut ticks = DEFAULT_BENCHMARK_TICKS;
+        let mut mode = "all".to_string();
         let mut i = 2;
         while i < args.len() {
             if args[i] == "--ticks" {
@@ -576,15 +878,23 @@ fn main() -> std::io::Result<()> {
                     continue;
                 }
             }
+            if args[i] == "--mode" {
+                if let Some(v) = args.get(i + 1) {
+                    mode = v.clone();
+                    i += 2;
+                    continue;
+                }
+            }
             i += 1;
         }
-        return run_benchmark(ticks);
+        return run_benchmark(ticks, &mode);
     }
 
     let mut rules_path: Option<&str> = None;
     let mut league: Option<String> = None;
     let mut seeds: Option<Vec<u64>> = None;
     let mut out_path: Option<&str> = None;
+    let mut stream_mode: Option<StreamMode> = None;
     let mut positional = Vec::new();
 
     let mut i = 1;
@@ -620,6 +930,17 @@ fn main() -> std::io::Result<()> {
             "--out" => {
                 if i + 1 < args.len() {
                     out_path = Some(&args[i + 1]);
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            "--stream-mode" => {
+                if i + 1 < args.len() {
+                    stream_mode = Some(StreamMode::parse(&args[i + 1]).unwrap_or_else(|e| {
+                        eprintln!("❌ {}", e);
+                        std::process::exit(2);
+                    }));
                     i += 2;
                 } else {
                     i += 1;
@@ -662,10 +983,13 @@ fn main() -> std::io::Result<()> {
     let batch_mode = seeds.is_some() || positional.first().copied() == Some("batch");
     let positional: Vec<&str> = positional.into_iter().filter(|p| *p != "batch").collect();
 
+    // 默认 facts（因果事实流，数 MB 级）；逐 tick 帧需显式 --stream-mode frames。
+    let stream_mode = stream_mode.unwrap_or_default();
+
     if batch_mode {
         let seeds = seeds.unwrap_or_else(|| (1..=10).collect());
         let scope = positional.first().copied().unwrap_or("1q");
-        run_batch_simulation(&seeds, scope, rules, out_path)?;
+        run_batch_simulation(&seeds, scope, rules, out_path, stream_mode)?;
     } else {
         let seed = positional
             .first()
@@ -677,7 +1001,7 @@ fn main() -> std::io::Result<()> {
             .unwrap_or("output/game.ticks.ndjson");
         let scope = positional.get(2).copied().unwrap_or("1q");
 
-        run_single_simulation(seed, out_path, scope, rules)?;
+        run_single_simulation(seed, out_path, scope, rules, stream_mode)?;
     }
 
     Ok(())

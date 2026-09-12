@@ -132,10 +132,21 @@ impl OffensiveSystem {
 pub struct TacticalSlotSpec {
     pub role: String,
     pub name_zh: String,
+    /// 距**进攻底线**的距离（ft）。home 攻右篮时 x = width - base_offset_x。
     pub base_offset_x: f32,
+    /// 绝对 y（0 = 一侧边线，height = 另一侧）。
     pub base_offset_y: f32,
     #[serde(default)]
     pub target_lane: u8,
+    /// 该槽位是否为掩护人（决定 roll/screen 行为）。
+    #[serde(default)]
+    pub is_screener: bool,
+    /// 该槽位是否为底角拉开者。
+    #[serde(default)]
+    pub is_corner_spacer: bool,
+    /// 该槽位是否为翼位纵向 relocate 者。
+    #[serde(default)]
+    pub is_wing_relocate: bool,
 }
 
 /// 兼容老接口的阵型规格（TacticalSetSpec）

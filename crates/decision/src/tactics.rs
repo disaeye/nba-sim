@@ -229,6 +229,154 @@ impl TacticalPlanner {
             live_off_positions,
         )
     }
+    /// D5.1b：以战术档案（slot 元数据）为准生成进攻目标。
+    ///
+    /// 这是取代「全局 ratio 推所有槽位」的正式路径：档案里声明的
+    /// `base_offset_x/y` 决定每个槽位的真实距离，因此底角（8–10 ft）、
+    /// 内线（18 ft）、弧顶（28–29 ft）会同时存在，而不是全队挤在弧顶。
+    ///
+    /// `carrier_slot_index` 由调用方通过能力适配的 slot fill 给出
+    /// （见 [`Self::select_carrier_slot`]）；此处不做球员选择。
+    #[allow(clippy::too_many_arguments)]
+    pub fn plan_offense_from_spec(
+        spec: &nba_domain::TacticalSetSpec,
+        sub_phase: SubPhase,
+        possession: Possession,
+        carrier_slot_index: usize,
+        progress_sec: f32,
+        rules: &GameRules,
+    ) -> Vec<TargetAssignment> {
+        let court = rules.court;
+        let policy = &rules.tactics;
+        let is_home = possession == Possession::Home;
+        let hoop = court.hoop_pos(is_home);
+        let dir = if is_home { -1.0 } else { 1.0 };
+        let action_t = (progress_sec / policy.action_duration_seconds).clamp(0.0, 1.0);
+        Self::spec_offense_targets(
+            spec,
+            is_home,
+            court,
+            policy,
+            carrier_slot_index,
+            sub_phase,
+            action_t,
+            hoop,
+            dir,
+            rules,
+        )
+    }
+
+    /// D5.1b：能力适配的 slot fill（tactics.md §3 契约）。
+    ///
+    /// 输入：档案槽位 + 在场球员的能力画像；输出：`slots[i] -> player_id` 的
+    /// 确定性匹配，或 `FitError`（无人可满足最低要求）。
+    ///
+    /// 算法（确定性、可复现）：
+    /// 1. 计算每个 (槽位, 球员) 的适配分：按槽位语义加权相关能力；
+    /// 2. 按**稀缺性**降序处理槽位（候选人少者优先），避免被通用球员抢占；
+    /// 3. 每个槽位取当前剩余球员中最高分者；分数相同时按 player_id 排序决胜。
+    ///
+    /// 评分只使用与槽位职责相关的能力（不引入全局 IQ 乘数）。
+    pub fn fill_slots(
+        spec: &nba_domain::TacticalSetSpec,
+        players: &[nba_domain::data::PlayerSlotFitness],
+        rules: &GameRules,
+    ) -> Result<Vec<Option<String>>, String> {
+        if players.is_empty() {
+            return Err("slot fill requires at least one available player".to_string());
+        }
+        if spec.slots.is_empty() {
+            return Err("tactical spec declares no slots".to_string());
+        }
+        let policy = &rules.tactics;
+        let score = |slot: &nba_domain::TacticalSlotSpec, p: &nba_domain::data::PlayerSlotFitness| -> f32 {
+            let role = slot.role.to_ascii_lowercase();
+            if role.contains("playmaker") || role.contains("handler") {
+                p.ball_handling * policy.slot_handler_ball_handling_weight
+                    + p.decision_iq * policy.slot_handler_decision_iq_weight
+            } else if slot.is_screener {
+                p.strength * policy.slot_screener_strength_weight
+                    + p.finishing * policy.slot_screener_finishing_weight
+            } else if slot.is_corner_spacer {
+                p.shooting_three * policy.slot_corner_three_weight
+                    + p.off_ball_sense * policy.slot_corner_off_ball_weight
+            } else if slot.is_wing_relocate {
+                p.shooting_mid * policy.slot_wing_mid_weight
+                    + p.off_ball_sense * policy.slot_wing_off_ball_weight
+            } else {
+                p.decision_iq * policy.slot_generic_decision_weight
+                    + p.off_ball_sense * policy.slot_generic_off_ball_weight
+            }
+        };
+
+        // 稀缺性：候选人数（分数显著高于 0 的球员数）升序 → 先处理难填的槽位。
+        let mut order: Vec<usize> = (0..spec.slots.len()).collect();
+        let candidate_count = |i: usize| -> usize {
+            players
+                .iter()
+                .filter(|p| score(&spec.slots[i], p) > 0.01)
+                .count()
+        };
+        order.sort_by(|&a, &b| {
+            candidate_count(a)
+                .cmp(&candidate_count(b))
+                .then(a.cmp(&b))
+        });
+
+        let mut taken = vec![false; players.len()];
+        let mut assignment: Vec<Option<String>> = vec![None; spec.slots.len()];
+        for &slot_idx in &order {
+            let slot = &spec.slots[slot_idx];
+            let mut best: Option<(f32, usize)> = None;
+            for (pi, p) in players.iter().enumerate() {
+                if taken[pi] {
+                    continue;
+                }
+                let s = score(slot, p);
+                match best {
+                    Some((bs, _)) if s <= bs => {}
+                    _ => best = Some((s, pi)),
+                }
+            }
+            match best {
+                Some((_, pi)) => {
+                    taken[pi] = true;
+                    assignment[slot_idx] = Some(players[pi].player_id.clone());
+                }
+                None => {
+                    return Err(format!(
+                        "no available player fits slot `{}`",
+                        slot.role
+                    ));
+                }
+            }
+        }
+        Ok(assignment)
+    }
+
+    /// D5.1b：返回与槽位顺序一致的球员 id 列表（供 bind_targets 使用）。
+    ///
+    /// 失败时回退到 roster 顺序，保证引擎不会因档案/人员不匹配而死锁；
+    /// 回退是显式的，调用方可据 `Ok/Err` 记录缺口。
+    pub fn fill_slots_or_roster_order(
+        spec: &nba_domain::TacticalSetSpec,
+        players: &[nba_domain::data::PlayerSlotFitness],
+        roster_order: &[String],
+        rules: &GameRules,
+    ) -> (Vec<String>, Option<String>) {
+        match Self::fill_slots(spec, players, rules) {
+            Ok(assignment) => {
+                let ids: Vec<String> = assignment.into_iter().flatten().collect();
+                if ids.len() == spec.slots.len() {
+                    (ids, None)
+                } else {
+                    (roster_order.to_vec(), Some("partial slot assignment".to_string()))
+                }
+            }
+            Err(e) => (roster_order.to_vec(), Some(e)),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn plan_possession_targets_with_geometry(
         tactical_set: TacticalSet,
@@ -645,6 +793,119 @@ impl TacticalPlanner {
         } else {
             (def_targets, off_targets)
         }
+    }
+
+    /// D5.1b：把战术档案声明的槽位转换为场上世界坐标（gap.md §10.3）。
+    ///
+    /// 坐标语义（与 `data/tactics/*.json` 一致）：
+    /// - `base_offset_x`：距**进攻底线**的距离（home 攻右篮，故 x = width - offset）；
+    /// - `base_offset_y`：绝对 y（0 = 一侧边线，height = 另一侧）。
+    ///
+    /// 关键修复动机：此前所有槽位都由全局 ratio 推得，导致**全队都在弧顶
+    /// 三分线外**（实测进攻方 90% 球员距篮筐 > 23.75 ft），中距离出手根本
+    /// 没有机会产生（2PA 均值 14.5，真实 ~55）。档案里已声明了正确且多样化
+    /// 的距离（底角 8–10 ft、内线 18 ft、弧顶 28–29 ft），但从未被消费。
+    pub fn spec_slot_world_pos(
+        slot: &nba_domain::TacticalSlotSpec,
+        is_home: bool,
+        court: nba_domain::court::CourtGeometry,
+        rules: &GameRules,
+    ) -> Vec2 {
+        let x = if is_home {
+            court.width_ft - slot.base_offset_x
+        } else {
+            slot.base_offset_x
+        };
+        // 第一性原理：槽位目标必须是**球员能真实站立**的位置。
+        //
+        // 若目标落在球员半径之外（例如 y=2.5 而可站立下限是 1.8，
+        // 或 y=0 直接压在边线上），物理层会每 tick 把球员夹回边界——
+        // 球员被**永久钉在边界**，且反复产生 `BoundaryCross` 边界事实，
+        // 对持球人即被判成出界失误（实测每场 42 次虚假
+        // `TURNOVER:OUT_OF_BOUNDS`）。
+        //
+        // 这里把目标 clamp 到「含球员半径的可站立区域」，使目标可达。
+        let margin = rules.player_radius_ft;
+        let x = x.clamp(margin, court.width_ft - margin);
+        let y = slot
+            .base_offset_y
+            .clamp(margin, court.height_ft - margin);
+        Vec2::new(x, y)
+    }
+
+    /// 按档案槽位生成进攻目标（顺序 = 档案声明顺序）。
+    ///
+    /// 每个槽位必须恰好得到一个球员；调用方负责把返回的 targets 绑定到
+    /// 经能力适配的球员（D5.1b 的 slot fill）。
+    #[allow(clippy::too_many_arguments)]
+    fn spec_offense_targets(
+        spec: &nba_domain::TacticalSetSpec,
+        is_home: bool,
+        court: nba_domain::court::CourtGeometry,
+        policy: &nba_domain::rules::TacticalRules,
+        carrier_slot_index: usize,
+        sub_phase: SubPhase,
+        action_t: f32,
+        hoop: Vec2,
+        dir: f32,
+        rules: &GameRules,
+    ) -> Vec<TargetAssignment> {
+        let speed = |ratio: f32| rules.max_player_speed_ftps * ratio;
+        spec.slots
+            .iter()
+            .enumerate()
+            .map(|(i, slot)| {
+                let base = Self::spec_slot_world_pos(slot, is_home, court, rules);
+                let is_carrier = i == carrier_slot_index;
+                // 持球人在执行阶段向篮筐压迫；其余槽位保持在档案声明的位置，
+                // 以保证中距离/底角/内线距离真实存在。
+                let (target_pos, speed_ratio, action) = if is_carrier {
+                    let pressed = match sub_phase {
+                        SubPhase::Initiation => base,
+                        _ => base + (hoop - base) * (action_t * policy.drive_distance_ratio),
+                    };
+                    (
+                        pressed,
+                        policy.carrier_speed_ratio,
+                        if sub_phase == SubPhase::Initiation {
+                            "DRIBBLE_TOP"
+                        } else {
+                            "DRIVE_OFF_SCREEN"
+                        },
+                    )
+                } else if slot.is_screener {
+                    let rolled = match sub_phase {
+                        SubPhase::Initiation => base,
+                        _ => base + (hoop - base) * action_t * 0.5,
+                    };
+                    (
+                        rolled,
+                        policy.screener_speed_ratio,
+                        if sub_phase == SubPhase::Initiation {
+                            "SET_HIGH_SCREEN"
+                        } else {
+                            "ROLL_TO_RIM"
+                        },
+                    )
+                } else if slot.is_corner_spacer {
+                    (base, policy.support_speed_ratio, "SPOT_UP_3PT")
+                } else if slot.is_wing_relocate {
+                    // 翼位球员在弧顶与内线之间做纵向 relocate，制造切入时机。
+                    let drift = Vec2::new(0.0, dir * action_t * 6.0);
+                    (base + drift, policy.support_speed_ratio, "PERIMETER_CUT")
+                } else {
+                    (base, policy.support_speed_ratio, "SPOT_UP_3PT")
+                };
+                TargetAssignment {
+                    player_id: None,
+                    target_pos: court.clamp_playable(target_pos, rules.player_radius_ft),
+                    speed: speed(speed_ratio),
+                    action: action.to_string(),
+                    slot: slot.role.clone(),
+                    morale: "Normal".to_string(),
+                }
+            })
+            .collect()
     }
 
     /// Assign generated targets to the ordered roster supplied by the caller.

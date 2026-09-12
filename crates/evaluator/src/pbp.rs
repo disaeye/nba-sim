@@ -148,5 +148,8 @@ pub fn convert_pbp_events_to_fixture(
         heavy_contest_threshold: base_template.heavy_contest_threshold,
         phase_dwell_max_seconds: base_template.phase_dwell_max_seconds,
         phase_transitions: base_template.phase_transitions,
+        // PBP 转换产物当前不携带构成带标定（provenance: pbp 的构成带
+        // 标定是 dev 方案 §5.2 的后续项），缺省即判 NotApplicable。
+        composition_bands: None,
     }
 }

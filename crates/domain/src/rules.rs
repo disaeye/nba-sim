@@ -21,6 +21,11 @@ pub struct GameRules {
     pub period_break_seconds: f32,
     pub tactical_initiation_seconds: f32,
     pub decision_interval_seconds: f32,
+    /// 发球阶段的决策间隔（秒）。发球受 5 秒规则约束，若沿用阵地进攻的
+    /// `decision_interval_seconds`（2.4s），首次决策若被 Dwell 消耗，第二次
+    /// 要等到 4.8s，加帧对齐即越过 5.0s 阈值——实测 37% 的发球因此被判
+    /// 五秒违例。发球是「尽快把球发进场」的程序，不该套用阵地节奏。
+    pub inbound_decision_interval_seconds: f32,
     pub free_throw_interval_seconds: f32,
     pub pass_speed_ftps: f32,
     pub inbound_pass_speed_ftps: f32,
@@ -115,6 +120,32 @@ pub struct GameRules {
     pub invariant_speed_tolerance_ftps: f32,
     /// 球高度上限（L1 BALL_HEIGHT_BOUNDS）。
     pub ball_z_max_ft: f32,
+    /// 「实质性越界」的最小超出距离（ft）。
+    ///
+    /// 球员目标点贴边时，物理 clamp 会每 tick 产生零点几英尺的差值；
+    /// 把这种亚英尺级钳制当成越界事实，会让被顶在边线的持球人反复
+    /// 被判出界（实测每场 42–52 次虚假失误）。只有超出该阈值的位移
+    /// 才产生 `BoundaryCross`。
+    pub boundary_epsilon_ft: f32,
+    /// 事实/总结流的最大写入字节数（gap.md §16.4 资源治理）。
+    /// 实测一场 full scope 的 facts 流约 7–16 MiB，故预算取 64 MiB
+    /// 留出余量；仍是有界值，而不是无限增长。
+    pub stream_max_bytes: u64,
+    /// 逐 tick 帧流的最大写入字节数。帧模式是显式选择（回放/展示），
+    /// 默认只够一节/片段；整场帧流请显式上调（或改用 facts 模式）。
+    pub stream_frames_max_bytes: u64,
+    /// 单次模拟的最大 tick 数（生命周期防护，非篮球规则）。
+    pub stream_max_ticks: usize,
+    /// 投篮弧线峰值反解的二分迭代次数（仅影响数值精度，不影响行为）。
+    pub shot_arc_solve_iterations: u32,
+    /// 交接落点相对 leash 的安全比例：接球人未能走到冻结点时，球落在
+    /// 「冻结点 → 接球人」方向上距接球人 `leash × 该比例` 处，保证
+    /// `BALL_WITH_HOLDER` 成立且不悬置。
+    pub transfer_landing_leash_ratio: f32,
+    /// 分离投影中非豁免球员承担修正量的比例（gap.md §4.3）。
+    /// 两名球员都参与时为 0.5；一方是显式 placement 角色时由另一方
+    /// 承担全部修正量（即 1.0 - 该比例）。
+    pub separation_correction_share: f32,
     /// Player stamina model parameters, expressed in normalized stamina units.
     pub stamina_sprint_speed_ftps: f32,
     pub stamina_recovery_speed_ftps: f32,
@@ -159,6 +190,20 @@ pub struct GameRules {
 #[serde(default)]
 pub struct DecisionRules {
     pub shoot_base: f32,
+    /// 早出手的机会成本（DecisionRules 通道）。
+    ///
+    /// 进攻时间充足时出手意味着放弃可能更好的后续机会；此前效用只随
+    /// shot clock 递减，没有时间价值项，导致 46% 出手发生在 8 秒内
+    /// （真实约 15%），每回合传球仅 1.3 次（真实 ~3.5）。
+    pub early_shot_penalty: f32,
+    /// `Advance`（后场推进）在 8 秒规则下的效用放大倍数。
+    ///
+    /// 紧迫度 = backcourt_elapsed / backcourt_seconds，效用 =
+    /// `dwell_base × (1 + urgency × 该倍数)`，使推进能压过原地动作。
+    pub advance_urgency_boost: f32,
+    /// `Advance` 目标越过中线的余量比例（× 场地长度）。
+    /// 越过少许可避免卡在中线上反复触发后场计时。
+    pub advance_overshoot_ratio: f32,
     pub pass_base: f32,
     pub dwell_base: f32,
     /// Strength of stamina's influence on action utility.
@@ -213,9 +258,11 @@ impl Default for DecisionRules {
     fn default() -> Self {
         Self {
             shoot_base: 0.60,
+            early_shot_penalty: 0.35,
+            advance_urgency_boost: 3.0,
+            advance_overshoot_ratio: 0.075,
             pass_base: 0.82,
-            dwell_base: 0.82,
-            stamina_sensitivity: 0.5,
+            dwell_base: 0.82,            stamina_sensitivity: 0.5,
             temperature: 0.30,
             pass_lead_time_seconds: 0.65,
             risk_aversion: 0.8,
@@ -223,12 +270,16 @@ impl Default for DecisionRules {
             team_style_weight: 0.25,
             three_point_utility_multiplier: 0.68,
             drive_base: 0.85,
-            dwell_decay_max: 0.38,
+            dwell_decay_max: 0.85,
             contested_patience_floor: 0.25,
-            urgency_shoot_boost: 0.25,
-            urgency_drive_boost: 0.10,
-            urgency_pass_penalty: 0.10,
-            urgency_dwell_penalty: 0.20,
+            // D3.4 校准：紧逼加成原值（shoot 0.25 / drive 0.10 / dwell -0.20）
+            // 量级远小于 pass_base=0.82，无法在倒计时阶段真正压低组织/传球、
+            // 抬高出手。实测提升后单场违例从 53 降至 ~70/3 场均值，TO% 由
+            // 60% 降至 46%。三个系数仍全部走 GameRules 通道。
+            urgency_shoot_boost: 1.20,
+            urgency_drive_boost: 0.60,
+            urgency_pass_penalty: 0.30,
+            urgency_dwell_penalty: 0.80,
             pass_distance_free_ft: 20.0,
             pass_distance_decay_reference_ft: 55.0,
             pass_distance_max_decay: 0.75,
@@ -249,6 +300,9 @@ impl DecisionRules {
     pub fn validate(&self) -> Result<(), String> {
         let values = [
             self.shoot_base,
+            self.early_shot_penalty,
+            self.advance_urgency_boost,
+            self.advance_overshoot_ratio,
             self.pass_base,
             self.dwell_base,
             self.stamina_sensitivity,
@@ -450,10 +504,14 @@ impl Default for SemanticRules {
             contact_positional_speed_ratio: 0.50,
             contact_foul_candidate_speed_ratio: 0.58,
             screen_stationary_speed_ratio: 0.20,
-            spacing_corner_weight: 0.30,
-            spacing_weak_side_weight: 0.30,
-            spacing_lane_weight: 0.40,
-            spacing_paint_penalty: 0.50,
+            // D3.1 校准（dev 方案 §6.2）：spacing_bonus 三项权重原和为 1.0，
+            // 空位时直接叠加近 +1.0 命中率（3P 64% 主因）。下调至和 0.16，
+            // 使 spacing 成为小幅调制而非主导项。8 seed full 证据：3P 64→35.4%、
+            // 2P 73→63.8%，无交叉准则退化，扰动测试 9/9 绿。
+            spacing_corner_weight: 0.05,
+            spacing_weak_side_weight: 0.05,
+            spacing_lane_weight: 0.06,
+            spacing_paint_penalty: 0.12,
             opponent_density_capacity: 3.0,
             pass_base_probability: 0.50,
             pass_openness_weight: 0.40,
@@ -532,6 +590,26 @@ pub struct TacticalRules {
     pub screen_roll_separation_ft: f32,
     /// 沉退防守中锋纵深距筐距离（ft）
     pub drop_coverage_depth_ft: f32,
+    /// slot fill 能力权重（tactics.md §3 契约）：持球槽位的 ball_handling 权重。
+    pub slot_handler_ball_handling_weight: f32,
+    /// slot fill 能力权重：持球槽位的 decision_iq 权重。
+    pub slot_handler_decision_iq_weight: f32,
+    /// slot fill 能力权重：掩护槽位的 strength 权重。
+    pub slot_screener_strength_weight: f32,
+    /// slot fill 能力权重：掩护槽位的 finishing 权重。
+    pub slot_screener_finishing_weight: f32,
+    /// slot fill 能力权重：底角槽位的 shooting_three 权重。
+    pub slot_corner_three_weight: f32,
+    /// slot fill 能力权重：底角槽位的 off_ball_sense 权重。
+    pub slot_corner_off_ball_weight: f32,
+    /// slot fill 能力权重：翼位槽位的 shooting_mid 权重。
+    pub slot_wing_mid_weight: f32,
+    /// slot fill 能力权重：翼位槽位的 off_ball_sense 权重。
+    pub slot_wing_off_ball_weight: f32,
+    /// slot fill 能力权重：通用槽位的 decision_iq 权重。
+    pub slot_generic_decision_weight: f32,
+    /// slot fill 能力权重：通用槽位的 off_ball_sense 权重。
+    pub slot_generic_off_ball_weight: f32,
 }
 impl Default for TacticalRules {
     fn default() -> Self {
@@ -571,6 +649,16 @@ impl Default for TacticalRules {
             screen_hold_separation_ft: 6.0,
             screen_roll_separation_ft: 8.0,
             drop_coverage_depth_ft: 14.0,
+            slot_handler_ball_handling_weight: 1.0,
+            slot_handler_decision_iq_weight: 0.8,
+            slot_screener_strength_weight: 0.8,
+            slot_screener_finishing_weight: 0.6,
+            slot_corner_three_weight: 1.0,
+            slot_corner_off_ball_weight: 0.3,
+            slot_wing_mid_weight: 0.6,
+            slot_wing_off_ball_weight: 0.8,
+            slot_generic_decision_weight: 0.5,
+            slot_generic_off_ball_weight: 0.5,
         }
     }
 }
@@ -591,6 +679,7 @@ impl Default for GameRules {
             period_break_seconds: 15.0,
             tactical_initiation_seconds: 6.5,
             decision_interval_seconds: 2.4,
+            inbound_decision_interval_seconds: 0.4,
             free_throw_interval_seconds: 2.2,
             pass_speed_ftps: 32.0,
             inbound_pass_speed_ftps: 30.0,
@@ -615,8 +704,16 @@ impl Default for GameRules {
             rebound_flight_base_seconds: 0.8,
             rebound_flight_distance_factor: 0.4,
             rebound_distance_scale_ft: 15.0,
-            shot_clock_urgency_seconds: 5.0,
-            shot_contest_sensitivity: 0.22,
+            // D3.4 校准（dev 方案 §6.2）：紧逼窗口从最后 5s 扩到 12s。
+            // 实测：5s 窗口下进攻方长期 Dwell 到 24s 违例（单场 53 次
+            // SHOT_CLOCK_VIOLATION，真实 NBA ≈ 0–2 次），回合以违例而非
+            // 出手告终。真实进攻在 24→14s 区间就已开始组织。
+            shot_clock_urgency_seconds: 12.0,
+            // D3.1 校准：防守干扰惩罚从 0.22 提至 0.32，使空位/重压出手的
+            // 命中率分化接近真实。0.42 实测 2P 63.8% 超带且诱发贴边几何死锁
+            // （seed11 streak 714>200）；0.32 为 8 seed full 实测双入带点：
+            // 3P 39.7% ∈ [30,40]、2P 58.1% ∈ [48,58]，streak 121<200。
+            shot_contest_sensitivity: 0.32,
             semantics: SemanticRules::default(),
             resolve: crate::resolve::ResolveConfig::default(),
             rim_shot_distance_ft: 8.0,
@@ -660,6 +757,13 @@ impl Default for GameRules {
             invariant_holder_leash_ft: 3.0,
             invariant_speed_tolerance_ftps: 1.5,
             ball_z_max_ft: 35.0,
+            boundary_epsilon_ft: 1.0,
+            stream_max_bytes: 64 * 1024 * 1024,
+            stream_frames_max_bytes: 512 * 1024 * 1024,
+            stream_max_ticks: 250_000,
+            shot_arc_solve_iterations: 48,
+            transfer_landing_leash_ratio: 0.5,
+            separation_correction_share: 0.5,
             stamina_sprint_speed_ftps: 15.0,
             stamina_recovery_speed_ftps: 6.0,
             stamina_drain_per_second: 0.015,
@@ -992,6 +1096,25 @@ impl GameRules {
             || self.league.three_point_distance_ft <= self.rim_shot_distance_ft
         {
             return Err("shot percentage and distance bounds are invalid".to_string());
+        }
+        if self.stream_max_bytes == 0
+            || self.stream_frames_max_bytes == 0
+            || self.stream_max_ticks == 0
+        {
+            return Err("stream byte/tick budgets must be positive".to_string());
+        }
+        if !(0.0..=1.0).contains(&self.separation_correction_share)
+            || self.separation_correction_share == 0.0
+        {
+            return Err("separation correction share must be in (0, 1]".to_string());
+        }
+        if self.shot_arc_solve_iterations == 0 {
+            return Err("shot arc solve iterations must be positive".to_string());
+        }
+        if !(0.0..=1.0).contains(&self.transfer_landing_leash_ratio)
+            || self.transfer_landing_leash_ratio == 0.0
+        {
+            return Err("transfer landing leash ratio must be in (0, 1]".to_string());
         }
         if !(0.0..=1.0).contains(&self.tactics.initiation_distance_ratio)
             || self.tactics.action_duration_seconds <= 0.0

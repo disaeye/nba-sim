@@ -240,7 +240,7 @@ impl MatchService {
             .engine
             .as_ref()
             .expect("configured engine checked above")
-            .possession_id;
+            .possession_id();
         self.state = SessionState::Running;
         let mut steps = 0usize;
         loop {
@@ -253,7 +253,7 @@ impl MatchService {
             let changed = self
                 .engine
                 .as_ref()
-                .map(|current| current.possession_id != initial_possession_id)
+                .map(|current| current.possession_id() != initial_possession_id)
                 .unwrap_or(true);
             if changed || steps >= MAX_SERVICE_STEPS_PER_CALL {
                 break;

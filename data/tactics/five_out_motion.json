@@ -33,8 +33,8 @@
     {
       "role": "CornerSpacer",
       "name_zh": "左底角射手",
-      "base_offset_x": 8.0,
-      "base_offset_y": 4.0,
+      "base_offset_x": 4.0,
+      "base_offset_y": 2.5,
       "is_screener": false,
       "is_corner_spacer": true,
       "is_wing_relocate": false
@@ -42,8 +42,8 @@
     {
       "role": "CornerSpacer",
       "name_zh": "右底角射手",
-      "base_offset_x": 8.0,
-      "base_offset_y": 46.0,
+      "base_offset_x": 4.0,
+      "base_offset_y": 47.5,
       "is_screener": false,
       "is_corner_spacer": true,
       "is_wing_relocate": false

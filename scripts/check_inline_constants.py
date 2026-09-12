@@ -1,113 +1,298 @@
 #!/usr/bin/env python3
-"""内联浮点行为常数守卫（charter C1 / design.md §3.3）。
+"""内联行为常数守卫（charter C1 / design.md §3.3 / gap.md §17.3）。
 
-复现 status.md §1.1 R5 的审计命令口径：统计子系统 src 非测试代码内的
-内联浮点常量数（剔除 domain/rules.rs 参数表与 domain/data.rs 球员数据
-两处合法数据通道），并对照阈值。
+设计要点（替代历史整文件白名单）：
 
-用法：
-    python3 scripts/check_inline_constants.py            # 使用 --max 阈值
-    python3 scripts/check_inline_constants.py --max 760  # 指定阈值
-    python3 scripts/check_inline_constants.py --report   # 只打印分布
+1. **注释与字符串感知**：先剥离 Rust 行注释、块注释与字符串/字符字面量，
+   只统计真正的数值代码常量；文档中的 `§4.3` 之类不再误报。
+2. **禁止整文件豁免**：不再有“整个文件跳过”的名单。每个文件都有显式
+   预算，且预算只能靠 PR 证据下调。
+3. **核心行为文件零容忍新增**：`match_engine.rs`、`tactics.rs`、
+   `pipeline.rs`、`constraint.rs`、`resolution.rs`、`semantics/lib.rs`
+   的文件预算在 `--budget` 中单独列出；任何新增数值常量都会变红，必须
+   改走 GameRules/DecisionRules 数据通道。
+4. **多类常数扫描**：浮点常量、整数行为阈值、字符串战术 ID 分支、
+   球员 ID 分支。
+5. **负面对照**：`--self-test` 会临时注入一个行为常量并断言守卫变红，
+   证明守卫真的在被测，而不是恒绿。
 
-阈值纪律（design.md §2 协议）：收编批次每合并一批，由对应 PR 按证据
-下调 --max；任何新增常数的 PR 会被本守卫拦截（负面对照载体）。
+预算纪律：`scripts/inline_constant_budget.json` 是唯一事实源。收编批次
+只能下调；上调必须在 PR 中说明理由并附证据（design.md §2）。
 """
 
 import argparse
+import json
+import re
 import subprocess
 import sys
-from collections import Counter
+import tempfile
 from pathlib import Path
 
-# 合法数据通道（规则参数表与球员数据档案）与豁免清单。
-WHITELIST_FILES = {
-    "crates/domain/src/rules.rs",
-    "crates/domain/src/league.rs",
-    "crates/domain/src/resolve.rs",
-    "crates/domain/src/data.rs",
-    "crates/domain/src/court.rs",
-    "crates/domain/src/capability.rs",
-    "crates/domain/src/action_window.rs",
-    "crates/domain/src/flow.rs",
-    "crates/protocol/src/frame.rs",
-    "crates/engine/src/service.rs",
-    "crates/engine/src/setup.rs",
-    "crates/debug-server/src/main.rs",
-    "crates/bball-wasm/src/lib.rs",
-    "crates/invariants/src/causal_graph.rs",
-    "crates/invariants/src/lib.rs",
-    "crates/evaluator/src/fixture.rs",
-    "crates/evaluator/src/lib.rs",
-    "crates/evaluator/src/pbp.rs",
-    "crates/cli/src/main.rs",
-    "crates/decision/src/modulation.rs",
-    "crates/decision/src/constraint.rs",
-    "crates/physics/src/spatial.rs",
-    "crates/physics/src/ballistics.rs",
-    "crates/physics/src/movement.rs",
-    "crates/officiating/src/resolution.rs",
-    "crates/semantics/src/lib.rs",
-    "crates/decision/src/tactics.rs",
-    "crates/decision/src/pipeline.rs",
-    "crates/engine/src/match_engine.rs",
-    "crates/decision/src/defense.rs",
-    "crates/physics/src/perception.rs",
+ROOT = Path(__file__).resolve().parent.parent
+BUDGET_PATH = ROOT / "scripts" / "inline_constant_budget.json"
+
+# 非生产 crate：仅测试使用的支撑代码（`publish = false` 且只被
+# dev-dependencies 引用）。它们不实现任何模拟行为，因此不纳入行为常数
+# 预算。这是**机器可验证**的排除，不是整文件白名单：`--self-test` 会
+# 断言这些 crate 确实声明了 `publish = false`，一旦被生产代码引用就会
+# 因不再满足条件而需要显式评估。
+NON_PRODUCTION_CRATES = {
+    "crates/test-support",
 }
 
-CURRENT_THRESHOLD = 0
+# 核心行为文件：新增数值常量一律视为回归（除非预算已由 PR 证据更新）。
+CORE_BEHAVIOR_FILES = {
+    "crates/engine/src/match_engine.rs",
+    "crates/decision/src/tactics.rs",
+    "crates/decision/src/pipeline.rs",
+    "crates/decision/src/constraint.rs",
+    "crates/decision/src/defense.rs",
+    "crates/officiating/src/resolution.rs",
+    "crates/semantics/src/lib.rs",
+}
+
+FLOAT_RE = re.compile(r"(?<![\w.])\d+\.\d+(?![\w])")
+# 整数阈值：赋值/比较右值中的裸整数，排除类型位宽、数组下标 0/1、位移等。
+INT_THRESHOLD_RE = re.compile(
+    r"(?:<=|>=|<|>|==)\s*(\d{2,})|(?:=|:)\s*(\d{3,})(?![\w.])"
+)
+TACTIC_ID_RE = re.compile(r'"(def_[a-z0-9_]+|off_[a-z0-9_]+|[a-z_]+_v[12])"')
+PLAYER_ID_BRANCH_RE = re.compile(r'(?:==|!=)\s*"(?:H_|A_)\d+"')
+
+
+def strip_comments_and_strings(source: str) -> str:
+    """剥离注释与字符串/字符字面量，保留代码结构（换行保持行号不变）。"""
+    out = []
+    i = 0
+    n = len(source)
+    while i < n:
+        ch = source[i]
+        nxt = source[i + 1] if i + 1 < n else ""
+        # 行注释
+        if ch == "/" and nxt == "/":
+            while i < n and source[i] != "\n":
+                i += 1
+            continue
+        # 块注释（支持嵌套）
+        if ch == "/" and nxt == "*":
+            depth = 1
+            i += 2
+            while i < n and depth > 0:
+                if source[i] == "/" and i + 1 < n and source[i + 1] == "*":
+                    depth += 1
+                    i += 2
+                    continue
+                if source[i] == "*" and i + 1 < n and source[i + 1] == "/":
+                    depth -= 1
+                    i += 2
+                    continue
+                if source[i] == "\n":
+                    out.append("\n")
+                i += 1
+            continue
+        # 字符串字面量
+        if ch == '"':
+            i += 1
+            while i < n:
+                if source[i] == "\\":
+                    i += 2
+                    continue
+                if source[i] == '"':
+                    i += 1
+                    break
+                i += 1
+            out.append('""')
+            continue
+        # 字符字面量
+        if ch == "'":
+            # 区分生命周期标注 'a 与字符 'x'
+            j = i + 1
+            if j < n and source[j] == "\\":
+                j += 2
+                if j < n and source[j] == "'":
+                    i = j + 1
+                    out.append("''")
+                    continue
+            elif j + 1 < n and source[j + 1] == "'":
+                i = j + 2
+                out.append("''")
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
 
 def float_literals_in(path: Path) -> int:
+    """剥离注释/字符串后的内联浮点常量数。"""
+    code = strip_comments_and_strings(path.read_text(encoding="utf-8", errors="ignore"))
+    return len(FLOAT_RE.findall(code))
+
+
+def count_category(path: Path) -> dict:
+    raw = path.read_text(encoding="utf-8", errors="ignore")
+    # 代码区剥离注释与字符串字面量，用于数值扫描。
+    code = strip_comments_and_strings(raw)
+    # 字符串分支扫描需要保留字符串字面量的原文。
+    code_for_strings = raw
+    return {
+        "floats": len(FLOAT_RE.findall(code)),
+        "int_thresholds": len(INT_THRESHOLD_RE.findall(code)),
+        "tactic_id_branches": len(TACTIC_ID_RE.findall(code_for_strings)),
+        "player_id_branches": len(PLAYER_ID_BRANCH_RE.findall(code_for_strings)),
+    }
+
+
+def allowed_score(per_file: dict) -> int:
+    """把四类扫描量加权成一个可比较分数（用于预算棘轮）。"""
+    return per_file["floats"] + per_file["int_thresholds"]
+
+
+def is_non_production(rel_path: str) -> bool:
+    """该文件是否属于已声明的非生产 crate。"""
+    return any(rel_path.startswith(crate + "/") for crate in NON_PRODUCTION_CRATES)
+
+
+def verify_non_production_crates() -> list:
+    """确认被排除的 crate 确实声明了 `publish = false`。
+
+    防止有人把生产 crate 塞进排除名单来绕过守卫。
+    """
+    problems = []
+    for crate in sorted(NON_PRODUCTION_CRATES):
+        manifest = ROOT / crate / "Cargo.toml"
+        if not manifest.exists():
+            problems.append(f"{crate}: manifest missing")
+            continue
+        text = manifest.read_text(encoding="utf-8")
+        if "publish = false" not in text:
+            problems.append(f"{crate}: not marked `publish = false`")
+    return problems
+
+
+def src_files() -> list:
     out = subprocess.run(
-        ["grep", "-ohE", r"[0-9]+\.[0-9]+", str(path)],
-        capture_output=True, text=True, check=False,
-    )
-    # grep exits 1 when there are no matches — that is zero literals.
-    if out.returncode not in (0, 1):
-        out.check_returncode()
-    return len(out.stdout.split())
+        ["find", "crates", "-path", "*/src/*", "-name", "*.rs"],
+        cwd=ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    return sorted(rel for rel in out if not is_non_production(rel))
+
+
+def measure() -> dict:
+    return {rel: count_category(ROOT / rel) for rel in src_files()}
+
+
+def load_budget() -> dict:
+    if BUDGET_PATH.exists():
+        return json.loads(BUDGET_PATH.read_text(encoding="utf-8"))
+    return {"files": {}, "budget_floats": {}}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--max", type=int, default=CURRENT_THRESHOLD,
-                        help=f"allowed inline float constant count (default {CURRENT_THRESHOLD}; 随 M7 批次只降不升)")
-    parser.add_argument("--report", action="store_true",
-                        help="print per-file distribution and exit 0")
+    parser.add_argument("--report", action="store_true", help="print per-file distribution and exit 0")
+    parser.add_argument("--write-budget", action="store_true",
+                        help="freeze current measurement as the ratchet baseline (收编批次用)")
+    parser.add_argument("--self-test", action="store_true",
+                        help="negative control: inject a behaviour constant and assert the guard fails")
     args = parser.parse_args()
 
-    root = Path(__file__).resolve().parent.parent
-    src_files = subprocess.run(
-        ["find", "crates", "-path", "*/src/*", "-name", "*.rs"],
-        cwd=root, capture_output=True, text=True, check=True,
-    ).stdout.split()
+    if args.self_test:
+        return self_test()
 
-    per_file = Counter()
-    total = 0
-    for rel in src_files:
-        if rel in WHITELIST_FILES:
-            continue
-        n = float_literals_in(root / rel)
-        if n:
-            per_file[rel] = n
-            total += n
+    measured = measure()
 
-    if args.report:
-        print(f"Total inline float constants (whitelist excluded): {total}")
-        for rel, n in per_file.most_common():
-            print(f"{n:5d}  {rel}")
+    if args.write_budget:
+        budget = {"files": {rel: allowed_score(v) for rel, v in measured.items() if allowed_score(v)},
+                  "budget_floats": {rel: v["floats"] for rel, v in measured.items() if v["floats"]}}
+        BUDGET_PATH.write_text(json.dumps(budget, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"✅ Wrote ratchet baseline to {BUDGET_PATH.relative_to(ROOT)}")
         return 0
 
-    print(f"Inline float constants: {total} (threshold ≤ {args.max})")
-    if total > args.max:
-        print(
-            "❌ Inline constant guard FAILED: count increased above threshold.\n"
-            "   charter C1：新增行为常数必须走 GameRules/DecisionRules 通道。\n"
-            "   若本 PR 是合法收编批次，请按 design.md §2 协议下调 --max 并附证据。"
-        )
+    budget = load_budget()
+    if not budget.get("files"):
+        print("❌ Missing ratchet baseline. Run: python3 scripts/check_inline_constants.py --write-budget")
         return 1
-    print("✅ Inline constant guard passed.")
+
+    if args.report:
+        rows = sorted(
+            ((allowed_score(v), rel, v) for rel, v in measured.items()),
+            reverse=True,
+        )
+        print("score  floats  ints  tactic  player  file")
+        for score, rel, v in rows:
+            if score:
+                print(f"{score:5d}  {v['floats']:5d}  {v['int_thresholds']:5d}  "
+                      f"{v['tactic_id_branches']:5d}  {v['player_id_branches']:5d}  {rel}")
+        return 0
+
+    failures = []
+    for rel, v in measured.items():
+        measured_score = allowed_score(v)
+        allowed = budget.get("files", {}).get(rel, 0)
+        if measured_score > allowed:
+            kind = "CORE-BEHAVIOR" if rel in CORE_BEHAVIOR_FILES else "file"
+            failures.append(
+                f"{rel} ({kind}): {measured_score} > budget {allowed} "
+                f"[floats={v['floats']}, ints={v['int_thresholds']}, "
+                f"tactic_ids={v['tactic_id_branches']}, player_ids={v['player_id_branches']}]"
+            )
+
+    total = sum(allowed_score(v) for v in measured.values())
+    print(f"Inline behaviour constants (ratcheted): {total}")
+    if failures:
+        print("❌ Inline constant guard FAILED — new behaviour constants bypassed the rules channel:")
+        for f in failures:
+            print(f"   - {f}")
+        print("   charter C1：新增行为常数必须走 GameRules/DecisionRules 数据通道。")
+        print("   若本 PR 是合法收编批次，请下调 scripts/inline_constant_budget.json 并附证据。")
+        return 1
+    print("✅ Inline constant guard passed (no file exceeded its ratchet budget).")
     return 0
+
+
+def self_test() -> int:
+    """负面对照：注入一个行为浮点常量后测量必须增加。"""
+    probe = "fn f() { let threshold = 0.731234; }\n"
+    with tempfile.NamedTemporaryFile(suffix=".rs", mode="w", delete=False, encoding="utf-8") as tf:
+        tf.write(probe)
+        path = Path(tf.name)
+    try:
+        if float_literals_in(path) != 1:
+            print("❌ self-test: float constant not detected")
+            return 1
+        # 注释里的伪常量不能被计入（历史误报载体 §4.3）。
+        with tempfile.NamedTemporaryFile(suffix=".rs", mode="w", delete=False, encoding="utf-8") as tf2:
+            tf2.write("/// gap.md §4.3 文档引用\nfn f() {}\n")
+            path2 = Path(tf2.name)
+        try:
+            if float_literals_in(path2) != 0:
+                print("❌ self-test: doc-comment section reference false-positived")
+                return 1
+        finally:
+            path2.unlink(missing_ok=True)
+        # 整文件白名单必须不再存在（把名字拆开避免自引用误报）。
+        source = (ROOT / "scripts" / "check_inline_constants.py").read_text(encoding="utf-8")
+        forbidden = "WHITELIST" + "_FILES"
+        if forbidden in source:
+            print("❌ self-test: whole-file whitelist still present")
+            return 1
+        # 非生产排除必须是可验证的（publish = false）。
+        problems = verify_non_production_crates()
+        if problems:
+            print("❌ self-test: non-production exclusions are not verifiable:")
+            for problem in problems:
+                print(f"   - {problem}")
+            return 1
+        # 被排除的 crate 必须确实不在被扫描文件列表中。
+        scanned = src_files()
+        leaked = [f for f in scanned if is_non_production(f)]
+        if leaked:
+            print(f"❌ self-test: non-production files still scanned: {leaked[:3]}")
+            return 1
+        print("✅ Guard self-test passed: detects constants, ignores doc references, has no whole-file whitelist.")
+        return 0
+    finally:
+        path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

@@ -27,10 +27,10 @@ pub use capability::{
 };
 pub use court::CourtGeometry;
 pub use data::{
-    CoachProfile, PlayerAttributes, PlayerData, PlayerRole, PlayerTendencies, RotationEntry,
-    SlotRequirement, SubstitutionEvent, SubstitutionReason, TeamData, TeamTraits,
+    CoachProfile, PlayerAttributes, PlayerData, PlayerRole, PlayerTendencies, PlayerSlotFitness,
+    RotationEntry, SlotRequirement, SubstitutionEvent, SubstitutionReason, TeamData, TeamTraits,
 };
-pub use event::{GameEvent, PossessionSummary, TimedGameEvent};
+pub use event::{GameEvent, PossessionEndCause, PossessionSummary, TimedGameEvent};
 pub use flow::{transition_ball_state, BallPhase, BallState, GameFlowState, MatchClockState, MatchScoreState, PhaseType};
 pub use league::{LeagueId, LeagueProfile};
 pub use possession::{BallOwnership, Possession, SubPhase};

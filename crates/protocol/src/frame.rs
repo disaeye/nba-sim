@@ -35,7 +35,7 @@ pub struct RenderPlayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub facing_y: Option<f32>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RenderBall {
     pub x: f32,
     pub y: f32,
@@ -45,7 +45,7 @@ pub struct RenderBall {
     pub holder_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RenderScore {
     pub home: u32,
     pub away: u32,
@@ -99,7 +99,7 @@ pub struct DebugFlag {
 pub struct RenderFrame {
     pub t: f32,
     pub t_game: f32,
-    #[serde(rename = "shotClock")]
+    #[serde(rename = "shotClock", default)]
     pub shot_clock: f32,
     pub period: u32,
     pub phase: String,
@@ -111,7 +111,12 @@ pub struct RenderFrame {
     #[serde(default)]
     pub away_team: RenderTeam,
     pub score: RenderScore,
+    /// Per-tick player projections. Omitted in bounded output mode: the engine
+    /// self-audits L1 every tick, so the stream only needs to carry causal and
+    /// presentation data (gap.md §16.4 resource governance).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub players: Vec<RenderPlayer>,
+    #[serde(default)]
     pub ball: RenderBall,
     #[serde(rename = "eventType")]
     pub event_type: Option<String>,
@@ -150,7 +155,22 @@ pub struct RenderFrame {
     /// Geometry and fixed-step policy used to produce this frame.
     /// 必填字段（quality.md §1.1 单一事实源）：不变量限值一律取自帧内
     /// FrameRules，禁止消费方自带限值副本或兜底常数。
+    /// 紧凑流只在首条记录携带该字段；后续记录由消费者向前继承
+    /// （gap.md §16.4）。`default` 使缺失时可解析，值由继承补齐。
+    #[serde(default)]
     pub rules: FrameRules,
+    /// 流投影粒度（gap.md §16.4）：
+    /// - `full`：携带逐 tick 球员/球几何投影，可做 L1 几何不变量审计；
+    /// - `facts` / `summary`：只携带因果事实，几何不变量不适用。
+    ///
+    /// 审计器据此区分「几何未采集」与「几何缺失/损坏」，
+    /// 避免把有界流误判成 L1 违规。
+    #[serde(default = "default_stream_projection")]
+    pub stream_projection: String,
+}
+
+fn default_stream_projection() -> String {
+    "full".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +181,15 @@ pub struct FrameEvent {
     /// Domain event payload retained for replay, analytics, and debugging.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
+    /// D4.1 稳定事件 ID（dev 方案 §7.1 / gap.md §7.1）：全场单调递增，
+    /// 与 `sequence`（逐 tick 内的本地序号）不同——`event_id` 跨 tick 唯一，
+    /// 供评判器/账本按 ID 重建因果链。`default` 保证旧流可解析。
+    #[serde(default)]
+    pub event_id: u64,
+    /// D4.1 因果父事件 ID：本事件由哪个事件直接导致（如
+    /// `SHOT_RELEASE → SCORE`、`FOUL → FREE_THROW`）。无父事件时为 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_event_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,6 +235,16 @@ fn default_ball_z_max() -> f32 {
     35.0
 }
 
+impl FrameRules {
+    /// 该记录是否显式携带规则（紧凑流只在首条记录写出）。
+    ///
+    /// 用 `tick_seconds` 作为存在性判据：它必须为正才有物理意义，
+    /// 因此零值只能表示「字段缺失、需向前继承」。
+    pub fn is_present(&self) -> bool {
+        self.tick_seconds > f32::MIN_POSITIVE
+    }
+}
+
 impl Default for FrameRules {
     fn default() -> Self {
         Self {
@@ -234,9 +273,9 @@ impl Default for FrameRules {
 pub struct StreamTick {
     #[serde(flatten)]
     pub frame: RenderFrame,
-    #[serde(rename = "tactical_set")]
+    #[serde(rename = "tactical_set", default)]
     pub tactical_set: String,
-    #[serde(rename = "gameClock")]
+    #[serde(rename = "gameClock", default)]
     pub game_clock: f32,
     #[serde(rename = "keyframeIndex")]
     pub keyframe_index: Option<u64>,

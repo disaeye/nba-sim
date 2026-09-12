@@ -174,6 +174,8 @@ impl InvariantChecker {
         // --------------------------------------------------------------
         // 2. 球员位置：在场球员必须在球场界内，替补球员必须位于替补席区。
         // 阶段豁免：发球阶段持球发球者允许站界外（quality.md §1.1）。
+        // 离散 placement 事实（gap.md §4.3）在 placement tick 豁免越界/瞬移判定。
+        let placement_tick = frame.events.iter().any(|e| e == "PLACEMENT_APPLIED");
         for p in &frame.players {
             if !p.on_court {
                 continue;
@@ -182,6 +184,9 @@ impl InvariantChecker {
                 || p.action == "INBOUND_SETUP"
                 || p.action == "InboundPositioning";
             if is_inbounding_player {
+                continue;
+            }
+            if placement_tick {
                 continue;
             }
             if !(0.0..=1.0).contains(&p.x) || !(0.0..=1.0).contains(&p.y) {
@@ -209,6 +214,11 @@ impl InvariantChecker {
             // 入场首 tick（换人/死球重置）豁免速度判定：站位重置是规则允许
             // 的瞬移（quality.md §1.1 阶段语义），下一 tick 恢复监测。
             if entering {
+                self.prev_positions.insert(p.id.clone(), (p.x, p.y));
+                continue;
+            }
+            // placement tick 是显式离散重置，不是连续运动。
+            if placement_tick {
                 self.prev_positions.insert(p.id.clone(), (p.x, p.y));
                 continue;
             }

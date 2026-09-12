@@ -13,11 +13,11 @@ fn axiom_fuzzing_multi_seed_long_run() {
         for tick_idx in 0..2500 {
             let _tick = engine.step();
             assert!(
-                engine.last_tick_violations.is_empty(),
+                engine.last_tick_violations().is_empty(),
                 "Seed {} at tick {} violated axioms: {:?}",
                 seed,
                 tick_idx,
-                engine.last_tick_violations
+                engine.last_tick_violations()
             );
             if engine.is_finished() {
                 break;

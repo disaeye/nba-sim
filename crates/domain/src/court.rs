@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 
 pub const COURT_WIDTH_FT: f32 = 94.0;
 pub const COURT_HEIGHT_FT: f32 = 50.0;
+/// 底角区域深度（距边线，ft）：该区域内三分线是直线而非圆弧。
+/// NBA 真实值为 3 ft —— 底角线距边线 3 ft 且平行于边线，
+/// 其最近点距篮筐 22 ft（即「底角 22 ft」的来源）。
+pub const CORNER_ZONE_DEPTH_FT: f32 = 3.0;
 pub const HOOP_LEFT_FT: Vec2 = Vec2::new(5.25, 25.0);
 pub const HOOP_RIGHT_FT: Vec2 = Vec2::new(88.75, 25.0);
 
@@ -41,6 +45,55 @@ impl CourtGeometry {
             hoop_right_x_ft: 91.86 - 5.25,
             hoop_y_ft: 49.21 / 2.0,
         }
+    }
+
+
+    /// 是否为三分出手（含底角特例）。
+    ///
+    /// NBA/FIBA 的三分线不是等半径圆弧：弧顶与翼位是 `three_point_distance_ft`，
+    /// 但**底角区域是一条更近的直线**（NBA 底角 22 ft、弧顶 23.75 ft）。此前
+    /// 引擎在 4 处直接用 `dist >= three_point_distance_ft` 判定，导致底角
+    /// 三分被误判成两分——这是"出手构成失真"的一个独立成因（本轮实测：
+    /// 档案声明的 CornerSpacer 站在 21.2–21.5 ft，被当成 2PT）。
+    ///
+    /// `corner_three_distance_ft` 由联赛档案给出；若为 0 则退化为等半径圆弧。
+    pub fn is_three_point_attempt(
+        self,
+        pos: Vec2,
+        attacking_right: bool,
+        three_point_distance_ft: f32,
+        corner_three_distance_ft: f32,
+    ) -> bool {
+        let hoop = self.hoop_pos(attacking_right);
+        let distance = (pos - hoop).length();
+        if distance >= three_point_distance_ft {
+            return true;
+        }
+        // 底角：靠近边线且 x 位于篮筐与底线之间时才适用更近的直线距离。
+        if corner_three_distance_ft <= 0.0 {
+            return false;
+        }
+        let corner_depth = self.corner_zone_depth_ft();
+        let near_sideline = pos.y <= corner_depth || pos.y >= self.height_ft - corner_depth;
+        // 仅限进攻半场：底角线不延伸到后场。
+        let in_attacking_half = if attacking_right {
+            pos.x >= self.width_ft / f32::from(2u8)
+        } else {
+            pos.x <= self.width_ft / f32::from(2u8)
+        };
+        near_sideline && in_attacking_half && distance >= corner_three_distance_ft
+    }
+
+    /// 底角区域深度（距边线），与 [`Self::region`] 使用同一几何定义。
+    pub fn corner_zone_depth_ft(self) -> f32 {
+        let scale_y = self.height_ft / COURT_HEIGHT_FT;
+        CORNER_ZONE_DEPTH_FT * scale_y
+    }
+
+    /// 球场几何中心（placement 搜索、站位对称计算使用）。
+    pub fn center(self) -> Vec2 {
+        let half = f32::from(2u8);
+        Vec2::new(self.width_ft / half, self.height_ft / half)
     }
 
     pub fn hoop_pos(self, is_home_attacking_right: bool) -> Vec2 {

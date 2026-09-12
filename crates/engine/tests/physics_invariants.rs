@@ -13,7 +13,14 @@ fn test_physics_zero_anomalies_full_match() {
     let dt = rules.tick_seconds;
     for tick_idx in 0..total_ticks {
         let tick = engine.step();
+        // 显式 placement tick（gap.md §4.3）：离散位置重置不是连续运动，
+        // 不参与逐 tick 速度连续性判定。
+        let placement_tick = tick.frame.events.iter().any(|e| e == "PLACEMENT_APPLIED");
         for p in &tick.frame.players {
+            if placement_tick {
+                prev_positions.insert(p.id.clone(), (p.x, p.y));
+                continue;
+            }
             if let Some(&(prev_x, prev_y)) = prev_positions.get(&p.id) {
                 let dx_ft = (p.x - prev_x) * rules.court.width_ft;
                 let dy_ft = (p.y - prev_y) * rules.court.height_ft;
@@ -57,11 +64,22 @@ fn test_custom_geometry_boundaries_invariants() {
     let mut engine = MatchEngine::with_rules(108, rules.clone());
     for _ in 0..1500 {
         let tick = engine.step();
+        // 发球程序中的发球员是显式 placement 角色，允许站界外
+        // （gap.md §4.3/§8.5），该 tick 不参与界内判定。
+        let placement_tick = tick.frame.events.iter().any(|e| e == "PLACEMENT_APPLIED")
+            || matches!(
+                engine.ball_state(),
+                nba_physics::BallTrajectoryKind::InboundTransfer { .. }
+                    | nba_physics::BallTrajectoryKind::InboundReady { .. }
+            );
         for p in &tick.frame.players {
             // 边界不变量只约束在场球员（与 L1 PLAYER_IN_BOUNDS 同口径）：
             // 替补严格位于场外替补席（data.rs），其归一化坐标允许越出
             // [0,1]——物理层不为替补伪造 BoundaryCross，也不钳回场内。
             if !p.on_court {
+                continue;
+            }
+            if placement_tick {
                 continue;
             }
             assert!(

@@ -72,6 +72,7 @@ fn base_tick(players: Vec<RenderPlayer>, ball: RenderBall) -> StreamTick {
             intensity: None,
             debug: None,
             rules: nba_protocol::FrameRules::default(),
+            stream_projection: "full".to_string(),
         },
         tactical_set: "Test".to_string(),
         game_clock: 720.0,

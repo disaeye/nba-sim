@@ -1,0 +1,129 @@
+{
+  "version": "nba.v2",
+  "league": "NBA",
+  "court_width_ft": 94.0,
+  "court_height_ft": 50.0,
+  "pass_corridor_radius_ft": 4.0,
+  "duration_bands": {
+    "score": {
+      "min": 2.0,
+      "max": 26.0
+    },
+    "rebound": {
+      "min": 2.0,
+      "max": 56.0
+    },
+    "turnover": {
+      "min": 0.5,
+      "max": 29.0
+    }
+  },
+  "passes_bands": {
+    "score": {
+      "min": 0.0,
+      "max": 9.0
+    },
+    "rebound": {
+      "min": 0.0,
+      "max": 10.0
+    },
+    "turnover": {
+      "min": 0.0,
+      "max": 10.0
+    }
+  },
+  "turnover_rate_band": {
+    "min": 0.05,
+    "max": 0.35
+  },
+  "three_attempt_rate_band": {
+    "min": 0.15,
+    "max": 0.65
+  },
+  "heavy_contest_threshold": 0.75,
+  "phase_dwell_max_seconds": {
+    "Initiation": 6.5,
+    "ActionExecution": 20.0,
+    "ShotAttempt": 2.5,
+    "FlightAndRebound": 3.5,
+    "DeadBallReset": 6.0,
+    "FreeThrow": 15.0,
+    "Rebound": 3.5
+  },
+  "phase_transitions": {
+    "Initiation": [
+      "ActionExecution",
+      "DeadBallReset",
+      "ShotAttempt"
+    ],
+    "ActionExecution": [
+      "Initiation",
+      "ShotAttempt",
+      "FlightAndRebound",
+      "DeadBallReset"
+    ],
+    "ShotAttempt": [
+      "FlightAndRebound",
+      "Initiation",
+      "DeadBallReset"
+    ],
+    "FlightAndRebound": [
+      "Initiation",
+      "ActionExecution",
+      "DeadBallReset",
+      "ShotAttempt"
+    ],
+    "DeadBallReset": [
+      "Initiation",
+      "ActionExecution",
+      "FreeThrow",
+      "FlightAndRebound",
+      "ShotAttempt"
+    ],
+    "FreeThrow": [
+      "DeadBallReset",
+      "Initiation",
+      "FlightAndRebound"
+    ]
+  },
+  "composition_bands": {
+    "provenance": "prior",
+    "note": "先验带宽（公开赛季统计口径），未经 PBP 标定；禁止以模拟输出反标定。",
+    "three_attempt_rate": {
+      "min": 0.3,
+      "max": 0.45
+    },
+    "two_attempt_rate": {
+      "min": 0.55,
+      "max": 0.7
+    },
+    "mid_range_share_of_fga": {
+      "min": 0.08,
+      "max": 0.3
+    },
+    "rim_share_of_fga": {
+      "min": 0.25,
+      "max": 0.5
+    },
+    "free_throw_rate": {
+      "min": 0.2,
+      "max": 0.35
+    },
+    "pace_possessions_per_48min": {
+      "min": 185.0,
+      "max": 220.0
+    },
+    "three_make_pct": {
+      "min": 0.3,
+      "max": 0.4
+    },
+    "two_make_pct": {
+      "min": 0.48,
+      "max": 0.58
+    },
+    "assist_rate": {
+      "min": 0.55,
+      "max": 0.75
+    }
+  }
+}

@@ -149,6 +149,66 @@ pub enum GameEvent {
         player_a_id: String,
         player_b_id: String,
     },
+    /// 离散位置重置（gap.md 第四节第三小节）：发球人从界外 placement 到场内合法位置。
+    /// 这是显式生命周期事实，不属于普通运动，检查器据此豁免瞬移判定。
+    PlacementApplied {
+        player_id: String,
+        from: (f32, f32),
+        to: (f32, f32),
+        reason: String,
+        phase: String,
+    },
+}
+
+/// 回合终结的显式归因（dev 方案 §3.2 D0.1）。
+///
+/// 每个回合结束必须携带一个终结原因；**没有兜底变体**——历史
+/// `UNATTRIBUTED_END` 被物理删除，任何到达回合边界却拿不出原因的
+/// 路径在编译期就写不出这条总结。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PossessionEndCause {
+    /// 得分（投篮命中或罚球终结）。
+    Score,
+    /// 防守篮板终结回合（含篮板后的控制转移）。
+    DefensiveRebound,
+    /// 传球/运球被直接抢断。
+    TurnoverSteal,
+    /// 传球被点掉后由对方控制松球。
+    TurnoverPassTipped,
+    /// 传球掉球（未被点掉）后由对方控制。
+    TurnoverPassDropped,
+    /// 松球易主（其他无法细分到上述三类的松球转换）。
+    TurnoverLooseBall,
+    /// 违例（24 秒/8 秒/回场/出界等）。
+    TurnoverViolation,
+    /// 节末/终场导致的回合终结。
+    PeriodEnd,
+}
+
+impl PossessionEndCause {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PossessionEndCause::Score => "SCORE",
+            PossessionEndCause::DefensiveRebound => "DEFENSIVE_REBOUND",
+            PossessionEndCause::TurnoverSteal => "TURNOVER_STEAL",
+            PossessionEndCause::TurnoverPassTipped => "TURNOVER_PASS_TIPPED",
+            PossessionEndCause::TurnoverPassDropped => "TURNOVER_PASS_DROPPED",
+            PossessionEndCause::TurnoverLooseBall => "TURNOVER_LOOSE_BALL",
+            PossessionEndCause::TurnoverViolation => "TURNOVER_VIOLATION",
+            PossessionEndCause::PeriodEnd => "PERIOD_END",
+        }
+    }
+
+    pub fn is_turnover(&self) -> bool {
+        self.as_str().starts_with("TURNOVER")
+    }
+}
+
+impl std::fmt::Display for PossessionEndCause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// 回合完整因果语义总结。
@@ -160,7 +220,10 @@ pub struct PossessionSummary {
     pub end_clock: f32,
     pub duration_seconds: f32,
     pub passes_count: u32,
-    pub terminal_event: String,
+    /// 终结原因（向后兼容：旧流中的字符串经 serde 映射到本枚举；
+    /// 历史 `UNATTRIBUTED_END` 不再是合法值，解析旧流遇到它将报错——
+    /// 严格解析是设计特性，见 dev 方案 §4 D1.3）。
+    pub terminal_event: PossessionEndCause,
     #[serde(default)]
     pub shooter_id: Option<String>,
     #[serde(default)]
@@ -223,6 +286,7 @@ impl GameEvent {
             GameEvent::PossessionSummary(_) => "POSSESSION_SUMMARY",
             GameEvent::Substitution { .. } => "SUBSTITUTION",
             GameEvent::JumpBallTriggered { .. } => "JUMP_BALL_TRIGGERED",
+            GameEvent::PlacementApplied { .. } => "PLACEMENT_APPLIED",
         }
     }
 }

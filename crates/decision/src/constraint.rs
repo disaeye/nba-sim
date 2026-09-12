@@ -135,6 +135,17 @@ pub enum CandidateAction {
     Dwell {
         player_id: String,
     },
+    /// 持球推进过半场（第一性原理新增）。
+    ///
+    /// 篮球规则要求进攻方在 8 秒内把球推进过中线；若决策集里没有
+    /// 「推进」这个动作，持球人就只能在原地 Dwell/试探，直到被吹 8 秒
+    /// 违例——实测占全部违例的 12 次/场，球 x 在 8 秒内只从 8.4 移到
+    /// 9.5 ft（需要越过 47 ft）。
+    Advance {
+        player_id: String,
+        from_pos: Vec2,
+        target_pos: Vec2,
+    },
 }
 
 impl CandidateAction {
@@ -145,6 +156,7 @@ impl CandidateAction {
             Self::PostUp { player_id, .. } => player_id,
             Self::Pass { passer_id, .. } | Self::InboundPass { passer_id, .. } => passer_id,
             Self::Dwell { player_id } | Self::TripleThreatJab { player_id, .. } => player_id,
+            Self::Advance { player_id, .. } => player_id,
         }
     }
 
@@ -157,6 +169,7 @@ impl CandidateAction {
             Self::InboundPass { .. } => "INBOUND_PASS",
             Self::TripleThreatJab { .. } => "TRIPLE_THREAT_JAB",
             Self::Dwell { .. } => "DWELL",
+            Self::Advance { .. } => "ADVANCE",
         }
     }
 
@@ -168,6 +181,7 @@ impl CandidateAction {
                 | Self::PostUp { .. }
                 | Self::Pass { .. }
                 | Self::InboundPass { .. }
+                | Self::Advance { .. }
                 | Self::TripleThreatJab { .. }
         )
     }
@@ -352,7 +366,9 @@ fn eval_out_of_bounds_action(
 ) -> ConstraintResult {
     let in_bounds = match action {
         CandidateAction::Shoot { from_pos, .. } => ctx.rules.court.contains(*from_pos, 0.0),
-        CandidateAction::Drive { target_pos, .. } | CandidateAction::PostUp { target_pos, .. } => {
+        CandidateAction::Drive { target_pos, .. }
+        | CandidateAction::PostUp { target_pos, .. }
+        | CandidateAction::Advance { target_pos, .. } => {
             ctx.rules.court.contains(*target_pos, 0.0)
         }
         CandidateAction::Pass { to_pos, .. } => ctx.rules.court.contains(*to_pos, 0.0),
@@ -398,7 +414,23 @@ fn eval_out_of_bounds_event(ctx: &ConstraintContext, event: &GameEvent) -> Const
     let (is_ball_carrier, is_inbounding) = match event {
         GameEvent::BoundaryCross { player_id, pos, .. } => {
             let player = ctx.physics.get_player(player_id);
-            let has_ball = player.map(|p| p.has_ball).unwrap_or(false);
+            // 第一性原理：判定「球员越过边界是否构成出界」必须依据
+            // **球的权威归属**，而不是 physics 逐球员缓存 `has_ball`。
+            //
+            // `has_ball` 由 `sync_ball_holder` 在球态变更后同步；而
+            // `BoundaryCross` 是 physics 在球态变更**之前**产生的物理事实，
+            // 于是该 tick 上的 `has_ball` 可能仍是上一 tick 的旧值——实测
+            // 因此把「已进入发球程序、球已离手」的球员误判为持球出界，
+            // 每场产生 42 次虚假 `TURNOVER:OUT_OF_BOUNDS`。
+            //
+            // 权威来源是 `ctx.ball_phase`（由领域层 `BallState` 派生）：
+            // 只有球处于「有明确持球人」的相位时，该球员才可能是出界的
+            // 持球人。飞行/松球/发球/死球相位下，球员越界不构成球权违例。
+            let ball_held = matches!(
+                ctx.ball_phase,
+                nba_domain::BallPhase::Held | nba_domain::BallPhase::Drive
+            );
+            let has_ball = player.map(|p| p.has_ball).unwrap_or(false) && ball_held;
             let is_inbound_action = player
                 .map(|p| p.action == "INBOUND_SETUP" || p.action == "InboundPositioning")
                 .unwrap_or(false);
@@ -641,7 +673,9 @@ fn eval_shot_clock_urgency(ctx: &ConstraintContext, action: &CandidateAction) ->
             ctx.rules.decision.urgency_shoot_boost * urgency,
             0.0,
         ),
-        CandidateAction::Drive { .. } | CandidateAction::PostUp { .. } => {
+        CandidateAction::Drive { .. }
+        | CandidateAction::PostUp { .. }
+        | CandidateAction::Advance { .. } => {
             ConstraintResult::flagged(
                 "CLOCK_URGENCY_DRIVE",
                 ctx.rules.decision.urgency_drive_boost * urgency,

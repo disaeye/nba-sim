@@ -613,3 +613,36 @@ fn player_height_cm(index: usize) -> u16 {
 fn player_weight_kg(index: usize) -> u16 {
     [90, 88, 98, 104, 116, 86, 102, 122][index]
 }
+
+/// D5.1b：slot fill 的能力画像（tactics.md §3 契约）。
+///
+/// 只暴露与槽位职责相关的能力子集，避免 slot fill 退化成"全局 IQ 排序"。
+/// 由引擎从 `PlayerData.attributes` 投影而来，不承担任何可变状态。
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerSlotFitness {
+    pub player_id: String,
+    pub ball_handling: f32,
+    pub decision_iq: f32,
+    pub strength: f32,
+    pub finishing: f32,
+    pub shooting_three: f32,
+    pub shooting_mid: f32,
+    pub off_ball_sense: f32,
+}
+
+impl PlayerSlotFitness {
+    /// 从球员档案投影（纯函数）。
+    pub fn from_player(player: &PlayerData) -> Self {
+        let a = &player.attributes;
+        Self {
+            player_id: player.id.clone(),
+            ball_handling: a.ball_handling,
+            decision_iq: a.decision_iq,
+            strength: a.strength,
+            finishing: a.finishing,
+            shooting_three: a.shooting_three,
+            shooting_mid: a.shooting_mid,
+            off_ball_sense: a.off_ball_sense,
+        }
+    }
+}

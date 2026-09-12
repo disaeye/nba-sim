@@ -74,6 +74,13 @@ pub struct PlayerPhysicsState {
     pub facing_dir: Vec2,
     pub turn_decel_timer: f32,
     pub is_locked_kinematics: bool,
+    /// 显式 placement 豁免（gap.md §4.3）：发球程序中的发球员允许被
+    /// 放置到界外发球点，且不产生伪造的边界/violation 事实。
+    /// 这是结构化状态，不是按 action 字符串匹配。
+    pub out_of_bounds_placement: bool,
+    /// BoundaryCross 的边沿锁存：记录上一 tick 是否处于越界（被 clamp）
+    /// 状态，使边界事实只在上升沿发射而非逐 tick 重复（电平→边沿）。
+    pub boundary_cross_latched: bool,
     pub attributes: nba_domain::PlayerAttributes,
     pub roles: Vec<nba_domain::PlayerRole>,
     pub tendencies: nba_domain::PlayerTendencies,
@@ -234,6 +241,30 @@ impl PhysicsWorld {
         slot: &str,
         morale: &str,
     ) {
+        // 几何自洽（dev 方案 D3.1 暴露的缺陷）：任何移动目标点必须是
+        // "可站立"的界内坐标。实测站位生成器会给出恰好落在 clamp 边界
+        // 线上的目标（如 y = height - player_radius），球员被钉在该点后
+        // 每 tick 都满足 `raw_pos != clamped`，边界事实刷屏且发球程序
+        // 被长期阻塞（seed 21 单球员连续 675 tick）。
+        //
+        // 豁免：显式 placement 的球员（发球程序中的发球员）允许在界外。
+        // 这里统一约束目标点，使位置与目标口径一致，而不是只在物理步进
+        // 时反复把位置 clamp 回来。
+        let target_pos_ft = {
+            let clamped = self.backend.rules().court.clamp_playable(
+                target_pos_ft,
+                self.backend.rules().player_radius_ft,
+            );
+            let is_placement_exempt = self
+                .backend
+                .get_player(id)
+                .is_some_and(|p| p.out_of_bounds_placement);
+            if is_placement_exempt {
+                target_pos_ft
+            } else {
+                clamped
+            }
+        };
         self.backend
             .set_player_target(id, target_pos_ft, speed_ftps, action, slot, morale);
     }
@@ -500,7 +531,6 @@ impl RapierSpatialPhysics {
                 .rules
                 .player_radius_ft
                 .min(self.rules.court.width_ft.min(self.rules.court.height_ft) / 2.0);
-            let clamped = self.rules.court.clamp_playable(raw_pos, margin);
             if let Some(player) = self.players.get_mut(&id) {
                 // 替补席在场地边界之外，且不参与比赛物理：既不回写坐标，
                 // 也不产生边界事实（每 tick 6 条伪造 OUT_OF_BOUNDS 会污染
@@ -508,18 +538,24 @@ impl RapierSpatialPhysics {
                 if !player.on_court {
                     continue;
                 }
-                player.pos_ft = clamped;
-                // Kinematic velocity is owned by the custom movement solver.
-                // Rapier's `linvel` is an integration artifact here: the body
-                // target is applied across sub-steps, so exposing it would make
-                // acceleration depend on the adapter's internal sub-step count.
-                if raw_pos != clamped {
-                    self.pending_facts.push(PhysicsFact::BoundaryCross {
-                        entity_id: player.id.clone(),
-                        attempted_pos: raw_pos,
-                        boundary_name: "COURT".to_string(),
-                    });
+                if player.out_of_bounds_placement {
+                    player.pos_ft = raw_pos;
+                    continue;
                 }
+                // 仅在刚体坐标比运动学结果更"靠内"时采纳，避免用刚体积分
+                // 产物覆盖 `apply_motion_proposals` 已 clamp 的权威位置——
+                // 否则每 tick 都会重新把位置推到边界外，下一 tick 又产生
+                // 新的上升沿（死循环刷屏）。
+                let body_inside = self.rules.court.clamp_playable(raw_pos, margin);
+                if (body_inside - raw_pos).length() <= f32::EPSILON {
+                    player.pos_ft = raw_pos;
+                }
+                // 边界事实的唯一发射点是 `apply_motion_proposals`（运动学权威，
+                // 在本函数之前运行并已回写 `player.pos_ft`）。本函数只从 Rapier
+                // 刚体同步坐标，不再发 BoundaryCross：
+                // 双发射点 + 单锁存会让两个源交替产生上升沿，实测导致
+                // 单球员连续 675–755 tick 刷屏（dev 方案 D3.1 诊断）。
+                // 保留位置 clamp 作为兜底，但不发事实。
             }
         }
         collect_contact_facts(
@@ -1276,9 +1312,34 @@ fn apply_motion_proposals(
             continue;
         }
         let raw_pos = proposal.next_pos;
-        let next_pos = rules.court.clamp_playable(raw_pos, margin);
+        let next_pos = if player.out_of_bounds_placement {
+            raw_pos
+        } else {
+            rules.court.clamp_playable(raw_pos, margin)
+        };
         player.pos_ft = next_pos;
-        if raw_pos != next_pos {
+        // 边界事实（唯一发射点）+ 边沿锁存：只有当球员从"可站立区域"真正
+        // 越出时才发事实。目标点恰在 clamp 边界线时 `raw_pos != next_pos`
+        // 会因浮点误差恒为真，故以几何容差判定，并且只在上升沿发射
+        // （dev 方案 D3.1：实测单球员连续 675–755 tick 刷屏）。
+        // 第一性原理：`BoundaryCross` 表达的是「球员**实质性**越出边界」，
+        // 而不是「目标点比 clamp 边界多出零点几英尺」。
+        //
+        // 战术槽位/防守目标若贴着边线（例如底角 y=2.5 而可站立下限 1.8），
+        // 球员会被**永久顶在边界**上，raw 与 clamped 每 tick 相差 0.06–0.17 ft。
+        // 若把这种亚英尺级钳制也算作越界事实，持球人就会被反复判成出界失误
+        // （实测每场 42–52 次虚假 `TURNOVER:OUT_OF_BOUNDS`）。
+        //
+        // 用规则化的 `boundary_epsilon_ft` 作为"实质性越界"的门槛：
+        // 只有真正把身体推出边界（例如强制位移、碰撞挤出）才算事实。
+        let epsilon = rules
+            .boundary_epsilon_ft
+            .max(rules.semantics.minimum_entity_distance_ft)
+            .max(f32::EPSILON);
+        let out_of_bounds = (raw_pos - next_pos).length() > epsilon;
+        let was_out_of_bounds = player.boundary_cross_latched;
+        player.boundary_cross_latched = out_of_bounds;
+        if out_of_bounds && !was_out_of_bounds {
             pending_facts.push(PhysicsFact::BoundaryCross {
                 entity_id: player.id.clone(),
                 attempted_pos: raw_pos,
@@ -1309,13 +1370,23 @@ fn apply_motion_proposals(
                     continue;
                 }
                 let normal = (right.pos_ft - left.pos_ft).normalize_or_zero();
-                let correction = (minimum - distance) * 0.5;
+                let correction = (minimum - distance) * rules.separation_correction_share;
+                // 显式 placement 球员（发球程序中的发球员）不参与分离投影：
+                // 否则投影会把它推回场内并卡在边界，`inbounder_arrived`
+                // 永不成立，造成第二个 DeadBall 活锁（本轮 seed 6/9/11 实测）。
+                // 其他球员承担全部修正量，发球员保持在合法发球点。
+                let left_exempt = left.out_of_bounds_placement;
+                let right_exempt = right.out_of_bounds_placement;
+                if left_exempt && right_exempt {
+                    continue;
+                }
+                let (left_correction, right_correction) = (correction, correction);
                 let left_pos = rules
                     .court
-                    .clamp_playable(left.pos_ft - normal * correction, margin);
+                    .clamp_playable(left.pos_ft - normal * left_correction, margin);
                 let right_pos = rules
                     .court
-                    .clamp_playable(right.pos_ft + normal * correction, margin);
+                    .clamp_playable(right.pos_ft + normal * right_correction, margin);
                 if let Some(left) = players.get_mut(left_id) {
                     left.pos_ft = left_pos;
                 }

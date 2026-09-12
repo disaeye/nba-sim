@@ -8,6 +8,11 @@ output/
 *.ndjson
 *.ndjson.gz
 *.log
+# 评判与违规工件（与流同目录生成）
+*.judgments.ndjson
+*.attribution_report.json
+# 测试临时产物（test-support 会在退出时清理，这里兜底）
+nba_*
 
 # System / Cache
 .DS_Store

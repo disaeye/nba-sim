@@ -1,0 +1,8 @@
+[package]
+name = "nba-test-support"
+version.workspace = true
+edition.workspace = true
+# 仅供测试使用；不对外发布。
+publish = false
+
+[dependencies]

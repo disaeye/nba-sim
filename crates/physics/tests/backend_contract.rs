@@ -28,6 +28,8 @@ fn player(id: &str, team: &str, pos: Vec2) -> PlayerPhysicsState {
         facing_dir: Vec2::X,
         turn_decel_timer: 0.0,
         is_locked_kinematics: false,
+        out_of_bounds_placement: false,
+        boundary_cross_latched: false,
         attributes: Default::default(),
         roles: Vec::new(),
         tendencies: Default::default(),

@@ -4,10 +4,11 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+nba-domain.workspace = true
 nba-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+nba-test-support.workspace = true
 nba-engine.workspace = true
-nba-domain.workspace = true

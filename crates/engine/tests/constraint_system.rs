@@ -39,6 +39,8 @@ fn make_player(id: &str, team: &str, x: f32, y: f32) -> PlayerPhysicsState {
         facing_dir: Vec2::X,
         turn_decel_timer: 0.0,
         is_locked_kinematics: false,
+        out_of_bounds_placement: false,
+        boundary_cross_latched: false,
         attributes: Default::default(),
         roles: Vec::new(),
         tendencies: Default::default(),
@@ -144,13 +146,13 @@ fn test_seed4_diagnostic() {
     engine.set_scope("full").expect("full scope is valid");
     for i in 0..12085 {
         let tick = engine.step();
-        if i >= 12065 && i <= 12082 {
+        if (12065..=12082).contains(&i) {
             eprintln!(
                 "TICK {}: flow={:?} sub={:?} ball={:?} holder={:?} events={:?} event_log={:?}",
                 i,
-                engine.game_flow,
-                engine.sub_phase,
-                engine.ball_state,
+                engine.game_flow(),
+                engine.sub_phase(),
+                engine.ball_state(),
                 tick.frame.ball.holder_id,
                 tick.frame.events,
                 tick.frame.event_log
@@ -168,10 +170,10 @@ fn test_custom_rules_drive_engine_tick_and_clock() {
         ..nba_domain::GameRules::default()
     };
     let mut engine = MatchEngine::with_rules(3, rules);
-    let before = engine.game_clock;
+    let before = engine.game_clock();
     engine.step();
-    assert!((engine.current_time - 0.1).abs() < f32::EPSILON);
-    assert!(engine.game_clock < before);
+    assert!((engine.current_time() - 0.1).abs() < f32::EPSILON);
+    assert!(engine.game_clock() < before);
 }
 
 #[test]
@@ -278,7 +280,7 @@ fn test_shot_clock_violation_triggers_turnover_in_sim() {
     let mut rules = nba_domain::GameRules::default();
     rules.tip_off_duration_seconds = 0.0;
     let mut engine = MatchEngine::with_rules(42, rules);
-    engine.shot_clock = engine.rules.tick_seconds;
+    engine.set_shot_clock_for_test(engine.rules.tick_seconds);
     let previous_possession = engine.possession();
 
     let tick = engine.step();
@@ -286,7 +288,7 @@ fn test_shot_clock_violation_triggers_turnover_in_sim() {
     assert!(tick.frame.events.iter().any(|event| event == "VIOLATION"));
     assert_ne!(engine.possession(), previous_possession);
     assert!(matches!(
-        engine.ball_state,
+        engine.ball_state(),
         nba_physics::BallTrajectoryKind::InboundTransfer { .. }
     ));
 }
@@ -319,10 +321,10 @@ fn test_post_boundary_fact_is_evaluated_by_active_constraint() {
 #[test]
 fn test_engine_clock_advances_only_in_live_flow() {
     let mut engine = MatchEngine::new(11);
-    let initial = engine.game_clock;
-    engine.game_flow = nba_domain::GameFlowState::Timeout;
+    let initial = engine.game_clock();
+    engine.set_game_flow_for_test(nba_domain::GameFlowState::Timeout);
     engine.step();
-    assert_eq!(engine.game_clock, initial);
+    assert_eq!(engine.game_clock(), initial);
 }
 
 #[test]
@@ -330,7 +332,9 @@ fn test_phase_transition_and_pass_events_are_observable() {
     let mut engine = MatchEngine::new(7);
     let mut saw_phase_transition = false;
     let mut saw_pass = false;
-    for _ in 0..800 {
+    // 预算 1500 tick：发球员现在必须真实走到界外发球点（F1.3 placement 修正），
+    // 首次入界传球比历史硬编码预算更晚，但仍是单节内的正常时序。
+    for _ in 0..1500 {
         let tick = engine.step();
         saw_phase_transition |= tick
             .frame
@@ -357,11 +361,11 @@ fn test_offensive_rebound_does_not_switch_possession() {
         last_touch_team: engine.possession(),
         hoop_pos: engine.rules.court.hoop_pos(true),
         target_landing: glam::Vec2::new(70.0, 25.0),
-        start_time: engine.current_time,
+        start_time: engine.current_time(),
         duration: 10.0,
         peak_z: engine.rules.rebound_peak_ft,
     };
-    engine.ball_state = rebound;
+    engine.set_ball_state_for_test(rebound);
     assert_eq!(engine.possession(), before);
     assert_eq!(engine.possession(), nba_domain::Possession::Home);
 }
@@ -421,7 +425,7 @@ fn test_contact_fact_is_adjudicated_into_foul_fact() {
 #[test]
 fn test_contact_adjudication_emits_foul_fact_when_policy_calls_it() {
     let mut engine = MatchEngine::new(7);
-    engine.pending_events.push(nba_domain::GameEvent::Contact {
+    engine.push_event_for_test(nba_domain::GameEvent::Contact {
         player_a: "H_1".to_string(),
         player_b: "A_1".to_string(),
         impact_speed: 20.0,
@@ -459,7 +463,7 @@ fn test_shooting_foul_enters_free_throw_state_and_scores_free_throws() {
     rules.free_throw_interval_seconds = 0.1;
     let mut engine = MatchEngine::with_rules(101, rules);
     engine.force_possession_for_test(nba_domain::Possession::Home);
-    engine.pending_events.push(nba_domain::GameEvent::Foul {
+    engine.push_event_for_test(nba_domain::GameEvent::Foul {
         fouled_player_id: "H_1".to_string(),
         fouler_id: "A_1".to_string(),
         is_shooting: true,
@@ -469,17 +473,17 @@ fn test_shooting_foul_enters_free_throw_state_and_scores_free_throws() {
         first.frame.events.iter().any(|event| event == "FOUL")
             || first.frame.event_type.as_deref() == Some("FOUL")
     );
-    assert_eq!(engine.game_flow, nba_domain::GameFlowState::FreeThrow);
-    assert_eq!(engine.free_throws_remaining, 2);
-    let score_before = engine.home_score;
+    assert_eq!(engine.game_flow(), nba_domain::GameFlowState::FreeThrow);
+    assert_eq!(engine.free_throws_remaining(), 2);
+    let score_before = engine.home_score();
     for _ in 0..20 {
         engine.step();
-        if engine.free_throws_remaining == 0 {
+        if engine.free_throws_remaining() == 0 {
             break;
         }
     }
-    assert_eq!(engine.free_throws_remaining, 0);
-    assert!(engine.home_score >= score_before);
+    assert_eq!(engine.free_throws_remaining(), 0);
+    assert!(engine.home_score() >= score_before);
 }
 #[test]
 fn test_period_expiration_reaches_break_then_next_period() {
@@ -491,23 +495,23 @@ fn test_period_expiration_reaches_break_then_next_period() {
     rules.tactical_initiation_seconds = 0.1;
     rules.league.regulation_periods = 2;
     let mut engine = MatchEngine::with_rules(202, rules);
-    let period_before = engine.period;
-    engine.game_clock = 0.0;
-    engine.ball_state = nba_physics::BallTrajectoryKind::Held {
+    let period_before = engine.period();
+    engine.set_game_clock_for_test(0.0);
+    engine.set_ball_state_for_test(nba_physics::BallTrajectoryKind::Held {
         carrier_id: engine.new_possession_pg_for_test(),
-    };
-    engine.game_flow = nba_domain::GameFlowState::LiveBall;
+    });
+    engine.set_game_flow_for_test(nba_domain::GameFlowState::LiveBall);
     let end_tick = engine.step();
-    assert_eq!(engine.game_flow, nba_domain::GameFlowState::Halftime);
+    assert_eq!(engine.game_flow(), nba_domain::GameFlowState::Halftime);
     assert!(end_tick
         .frame
         .events
         .iter()
         .any(|event| event == "PHASE_TRANSITION"));
-    assert_eq!(engine.period, period_before);
-    engine.period_break_elapsed = engine.rules.period_break_seconds + 1.0;
+    assert_eq!(engine.period(), period_before);
+    engine.set_period_break_elapsed_for_test(engine.rules.period_break_seconds + 1.0);
     engine.step();
-    assert_eq!(engine.period, period_before + 1);
+    assert_eq!(engine.period(), period_before + 1);
 }
 #[test]
 fn test_free_throw_phase_is_visible_in_stream_contract() {
@@ -515,7 +519,7 @@ fn test_free_throw_phase_is_visible_in_stream_contract() {
     rules.tick_seconds = 0.1;
     rules.decision_interval_seconds = 0.1;
     let mut engine = MatchEngine::with_rules(404, rules);
-    engine.pending_events.push(nba_domain::GameEvent::Foul {
+    engine.push_event_for_test(nba_domain::GameEvent::Foul {
         fouled_player_id: "H_1".to_string(),
         fouler_id: "A_1".to_string(),
         is_shooting: true,
@@ -539,23 +543,23 @@ fn test_game_end_is_sticky_after_regulation_winner() {
     rules.period_break_seconds = 0.1;
     rules.league.regulation_periods = 1;
     let mut engine = MatchEngine::with_rules(505, rules);
-    engine.home_score = 1;
-    engine.away_score = 0;
+    engine.set_scores_for_test(1, 0);
+    
     for _ in 0..10 {
         engine.step();
-        if engine.game_flow == nba_domain::GameFlowState::GameEnd {
+        if engine.game_flow() == nba_domain::GameFlowState::GameEnd {
             break;
         }
     }
-    assert_eq!(engine.game_flow, nba_domain::GameFlowState::GameEnd);
+    assert_eq!(engine.game_flow(), nba_domain::GameFlowState::GameEnd);
     assert_eq!(engine.step().frame.game_flow, "GameEnd");
 }
 
 #[test]
 fn test_inbound_baseline_is_recorded_inside_boundary_domain() {
     let engine = MatchEngine::new(303);
-    assert!(engine.inbound_baseline.x >= -0.01 && engine.inbound_baseline.x <= 94.01);
-    assert!(engine.inbound_baseline.y >= 0.0 && engine.inbound_baseline.y <= 50.0);
+    assert!(engine.inbound_baseline().x >= -0.01 && engine.inbound_baseline().x <= 94.01);
+    assert!(engine.inbound_baseline().y >= 0.0 && engine.inbound_baseline().y <= 50.0);
 }
 
 #[test]
@@ -568,13 +572,13 @@ fn test_lifecycle_stream_preserves_event_order_and_clock_invariants() {
     rules.decision_interval_seconds = 0.1;
     rules.league.regulation_periods = 1;
     let mut engine = MatchEngine::with_rules(606, rules);
-    engine.home_score = 1;
-    engine.game_clock = 0.0;
-    engine.ball_state = nba_physics::BallTrajectoryKind::Held {
+    engine.set_scores_for_test(1, 0);
+    engine.set_game_clock_for_test(0.0);
+    engine.set_ball_state_for_test(nba_physics::BallTrajectoryKind::Held {
         carrier_id: "H_1".to_string(),
-    };
+    });
     let mut saw_game_end = false;
-    let mut previous_game_clock = engine.game_clock;
+    let mut previous_game_clock = engine.game_clock();
     for _ in 0..20 {
         let tick = engine.step();
         assert!(
@@ -596,15 +600,15 @@ fn test_bonus_foul_uses_configured_threshold() {
     let mut rules = nba_domain::GameRules::default();
     rules.league.bonus_fouls_per_period = 1;
     let mut engine = MatchEngine::with_rules(707, rules);
-    engine.pending_events.push(nba_domain::GameEvent::Foul {
+    engine.push_event_for_test(nba_domain::GameEvent::Foul {
         fouled_player_id: "H_1".to_string(),
         fouler_id: "A_1".to_string(),
         is_shooting: false,
     });
     engine.step();
-    assert_eq!(engine.team_fouls_away, 1);
-    assert_eq!(engine.free_throws_remaining, 2);
-    assert_eq!(engine.game_flow, nba_domain::GameFlowState::FreeThrow);
+    assert_eq!(engine.team_fouls_away(), 1);
+    assert_eq!(engine.free_throws_remaining(), 2);
+    assert_eq!(engine.game_flow(), nba_domain::GameFlowState::FreeThrow);
     assert_eq!(
         engine.physics.get_player("A_1").expect("fouler").foul_count,
         1
@@ -617,9 +621,7 @@ fn test_inbound_pass_arrival_releases_dead_ball() {
     rules.tick_seconds = 0.1;
     rules.decision_interval_seconds = 0.1;
     let mut engine = MatchEngine::with_rules(808, rules);
-    engine
-        .pending_events
-        .push(nba_domain::GameEvent::RuleViolation {
+    engine.push_event_for_test(nba_domain::GameEvent::RuleViolation {
             constraint_id: "test".to_string(),
             reason: "test".to_string(),
         });
@@ -642,15 +644,15 @@ fn test_shooting_foul_awards_free_throws_to_fouled_team_not_possession_flip() {
     let mut engine = MatchEngine::with_rules(901, rules);
     engine.force_possession_for_test(nba_domain::Possession::Home);
     let possession_before = engine.possession();
-    engine.pending_events.push(nba_domain::GameEvent::Foul {
+    engine.push_event_for_test(nba_domain::GameEvent::Foul {
         fouled_player_id: "H_3".to_string(),
         fouler_id: "A_2".to_string(),
         is_shooting: true,
     });
     engine.step();
-    assert_eq!(engine.free_throws_remaining, 2);
+    assert_eq!(engine.free_throws_remaining(), 2);
     assert_eq!(engine.possession(), possession_before);
-    assert_eq!(engine.free_throw_shooter.as_deref(), Some("H_3"));
+    assert_eq!(engine.free_throw_shooter(), Some("H_3"));
 }
 
 #[test]
@@ -660,7 +662,7 @@ fn test_made_final_free_throw_gives_ball_to_opponent_inbound() {
     rules.decision_interval_seconds = 0.1;
     let mut engine = MatchEngine::with_rules(902, rules);
     engine.force_possession_for_test(nba_domain::Possession::Home);
-    engine.pending_events.push(nba_domain::GameEvent::Foul {
+    engine.push_event_for_test(nba_domain::GameEvent::Foul {
         fouled_player_id: "H_1".to_string(),
         fouler_id: "A_1".to_string(),
         is_shooting: true,
@@ -669,8 +671,8 @@ fn test_made_final_free_throw_gives_ball_to_opponent_inbound() {
     let mut saw_inbound_setup = false;
     for _ in 0..30 {
         engine.resolve_forced_free_throw(true);
-        if engine.game_flow == nba_domain::GameFlowState::DeadBall
-            && engine.free_throws_remaining == 0
+        if engine.game_flow() == nba_domain::GameFlowState::DeadBall
+            && engine.free_throws_remaining() == 0
             && engine.possession() == nba_domain::Possession::Away
         {
             saw_inbound_setup = true;
@@ -687,7 +689,7 @@ fn test_missed_final_free_throw_starts_rebound_from_last_ball_position() {
     rules.decision_interval_seconds = 0.1;
     let mut engine = MatchEngine::with_rules(904, rules);
     engine.force_possession_for_test(nba_domain::Possession::Home);
-    engine.pending_events.push(nba_domain::GameEvent::Foul {
+    engine.push_event_for_test(nba_domain::GameEvent::Foul {
         fouled_player_id: "H_1".to_string(),
         fouler_id: "A_1".to_string(),
         is_shooting: true,
@@ -696,12 +698,12 @@ fn test_missed_final_free_throw_starts_rebound_from_last_ball_position() {
     engine.resolve_forced_free_throw(false);
     engine.resolve_forced_free_throw(false);
     assert!(matches!(
-        engine.ball_state,
+        engine.ball_state(),
         nba_physics::BallTrajectoryKind::RimRebound { from_pos, from_z, .. }
-            if from_pos == engine.ball_pos_3d.0 && from_z == engine.ball_pos_3d.1
+            if *from_pos == engine.ball_pos_3d().0 && *from_z == engine.ball_pos_3d().1
     ));
-    assert_eq!(engine.game_flow, nba_domain::GameFlowState::LiveBall);
-    assert_eq!(engine.sub_phase, nba_domain::SubPhase::FlightAndRebound);
+    assert_eq!(engine.game_flow(), nba_domain::GameFlowState::LiveBall);
+    assert_eq!(engine.sub_phase(), nba_domain::SubPhase::FlightAndRebound);
 }
 
 #[test]
@@ -728,25 +730,25 @@ fn test_shot_clock_violation_starts_continuous_inbound_transfer() {
     rules.decision_interval_seconds = 0.1;
     let mut engine = MatchEngine::with_rules(903, rules);
     engine.force_possession_for_test(nba_domain::Possession::Home);
-    engine.game_flow = nba_domain::GameFlowState::LiveBall;
-    engine.shot_clock = 0.0;
-    engine.ball_state = nba_physics::BallTrajectoryKind::Held {
+    engine.set_game_flow_for_test(nba_domain::GameFlowState::LiveBall);
+    engine.set_shot_clock_for_test(0.0);
+    engine.set_ball_state_for_test(nba_physics::BallTrajectoryKind::Held {
         carrier_id: "H_1".to_string(),
-    };
-    let source = engine.ball_pos_3d.0;
+    });
+    let source = engine.ball_pos_3d().0;
     let _tick = engine.step();
     assert_eq!(engine.possession(), nba_domain::Possession::Away);
     assert!(matches!(
-        engine.ball_state,
+        engine.ball_state(),
         nba_physics::BallTrajectoryKind::InboundTransfer { .. }
     ));
-    assert_eq!(engine.ball_pos_3d.0, source);
+    assert_eq!(engine.ball_pos_3d().0, source);
     let mut saw_ready = false;
     for _ in 0..50 {
         let tick = engine.step();
         if tick.frame.ball.status == "INBOUND_READY" {
             saw_ready = true;
-            assert!((engine.ball_pos_3d.0 - engine.inbound_baseline).length() <= 4.5);
+            assert!((engine.ball_pos_3d().0 - engine.inbound_baseline()).length() <= 4.5);
             break;
         }
     }
@@ -760,24 +762,24 @@ fn test_period_end_waits_for_shot_in_flight() {
     rules.league.period_duration_seconds = 0.2;
     rules.league.regulation_periods = 1;
     let mut engine = MatchEngine::with_rules(904, rules);
-    engine.game_clock = 0.0;
-    engine.game_flow = nba_domain::GameFlowState::LiveBall;
-    engine.ball_state = nba_physics::BallTrajectoryKind::Shot {
+    engine.set_game_clock_for_test(0.0);
+    engine.set_game_flow_for_test(nba_domain::GameFlowState::LiveBall);
+    engine.set_ball_state_for_test(nba_physics::BallTrajectoryKind::Shot {
         shooter_id: "H_1".to_string(),
         from_pos: glam::Vec2::new(80.0, 25.0),
         hoop_pos: glam::Vec2::new(88.75, 25.0),
-        start_time: engine.current_time,
+        start_time: engine.current_time(),
         duration: 10.0,
         is_made: true,
         is_three: false,
         peak_z: 15.0,
-    };
-    let home_before = engine.home_score;
+    });
+    let home_before = engine.home_score();
     engine.step();
-    assert_eq!(engine.game_flow, nba_domain::GameFlowState::LiveBall);
+    assert_eq!(engine.game_flow(), nba_domain::GameFlowState::LiveBall);
     engine.step();
-    assert_ne!(engine.game_flow, nba_domain::GameFlowState::GameEnd);
-    assert!(engine.home_score >= home_before);
+    assert_ne!(engine.game_flow(), nba_domain::GameFlowState::GameEnd);
+    assert!(engine.home_score() >= home_before);
 }
 
 #[test]
@@ -790,7 +792,7 @@ fn test_event_types_are_scoped_to_one_tick() {
     let second = engine.step();
     assert!(first.frame.events.len() <= 10);
     assert!(second.frame.events.len() <= 10);
-    assert!(engine.pending_events.is_empty());
+    assert!(engine.pending_events().is_empty());
 }
 
 #[test]
@@ -963,7 +965,7 @@ fn physics_contact_is_promoted_to_semantic_event_stream() {
         "raw contact was not surfaced as a semantic contact event: {:?}",
         tick.frame.events
     );
-    assert!(engine.pending_events.is_empty());
+    assert!(engine.pending_events().is_empty());
 }
 
 #[test]
@@ -1110,16 +1112,23 @@ fn event_log_retains_replayable_domain_payloads() {
 #[test]
 fn possession_summary_uses_elapsed_time_and_turnover_actor() {
     let mut engine = MatchEngine::new(918);
-    engine.current_possession_start_clock = 100.0;
-    engine.game_clock = 97.5;
-    engine.current_possession_start_time = 10.0;
-    engine.current_time = 12.5;
-    engine.current_possession_turnover_player = Some("H_1".to_string());
+    engine.set_possession_context_for_test(
+        Some("H_1".to_string()),
+        100.0,
+        10.0,
+    );
+    engine.set_game_clock_for_test(97.5);
+    engine.set_current_time_for_test(12.5);
 
-    engine.emit_possession_summary("TURNOVER_VIOLATION", None, Some("H_1".to_string()), None);
+    engine.emit_possession_summary(
+        nba_domain::PossessionEndCause::TurnoverViolation,
+        None,
+        Some("H_1".to_string()),
+        None,
+    );
 
     let summary = engine
-        .pending_events
+        .pending_events()
         .iter()
         .find_map(|event| match event {
             nba_domain::GameEvent::PossessionSummary(summary) => Some(summary),
@@ -1154,7 +1163,7 @@ fn pass_arrival_replays_release_outcome_and_emits_matching_fact() {
     setup.rules.resolve.pass.receiver_control_weight = 0.0;
     setup.rules.resolve.pass.catch_equilibrium_weight = 0.0;
     let mut engine = MatchEngine::with_setup(setup, 1201);
-    engine.ball_state = nba_physics::BallTrajectoryKind::Pass {
+    engine.set_ball_state_for_test(nba_physics::BallTrajectoryKind::Pass {
         from_pos: glam::Vec2::new(40.0, 25.0),
         to_pos: glam::Vec2::new(50.0, 25.0),
         target_id: "H_2".to_string(),
@@ -1163,18 +1172,19 @@ fn pass_arrival_replays_release_outcome_and_emits_matching_fact() {
         peak_z: engine.rules.pass_peak_ft,
         inbound: false,
         receive_success: true,
-    };
-    engine.last_passer_id = Some("H_1".to_string());
-    engine.game_flow = nba_domain::GameFlowState::LiveBall;
-    engine.sub_phase = nba_domain::SubPhase::ActionExecution;
-    engine.current_time = 1.0;
+        intercept: None,
+    });
+    engine.set_last_passer_for_test(Some("H_1".to_string()));
+    engine.set_game_flow_for_test(nba_domain::GameFlowState::LiveBall);
+    engine.set_sub_phase_for_test(nba_domain::SubPhase::ActionExecution);
+    engine.set_current_time_for_test(1.0);
     engine.physics.get_player_mut("H_1").expect("passer").pos_ft = glam::Vec2::new(40.0, 25.0);
     engine
         .physics
         .get_player_mut("H_2")
         .expect("receiver")
         .pos_ft = glam::Vec2::new(50.0, 25.0);
-    engine.pending_events.clear();
+    engine.clear_pending_events_for_test();
     let mut saw_receive = false;
     for _ in 0..30 {
         let tick = engine.step();
@@ -1189,7 +1199,7 @@ fn pass_arrival_replays_release_outcome_and_emits_matching_fact() {
     }
     assert!(saw_receive, "pass arrival did not emit PASS_RECEIVED");
     assert!(matches!(
-        engine.ball_state,
+        engine.ball_state(),
         nba_physics::BallTrajectoryKind::Held { ref carrier_id } if carrier_id == "H_2"
     ));
 }
@@ -1208,7 +1218,7 @@ fn pass_release_policy_can_emit_drop_without_redeciding_at_arrival() {
     setup.rules.resolve.pass.receiver_control_weight = 0.0;
     setup.rules.resolve.pass.catch_equilibrium_weight = 0.0;
     let mut engine = MatchEngine::with_setup(setup, 1202);
-    engine.ball_state = nba_physics::BallTrajectoryKind::Pass {
+    engine.set_ball_state_for_test(nba_physics::BallTrajectoryKind::Pass {
         from_pos: glam::Vec2::new(40.0, 25.0),
         to_pos: glam::Vec2::new(50.0, 25.0),
         target_id: "H_2".to_string(),
@@ -1217,11 +1227,12 @@ fn pass_release_policy_can_emit_drop_without_redeciding_at_arrival() {
         peak_z: engine.rules.pass_peak_ft,
         inbound: false,
         receive_success: false,
-    };
-    engine.last_passer_id = Some("H_1".to_string());
-    engine.current_time = 0.0;
-    engine.game_flow = nba_domain::GameFlowState::LiveBall;
-    engine.sub_phase = nba_domain::SubPhase::ActionExecution;
+        intercept: None,
+    });
+    engine.set_last_passer_for_test(Some("H_1".to_string()));
+    engine.set_current_time_for_test(0.0);
+    engine.set_game_flow_for_test(nba_domain::GameFlowState::LiveBall);
+    engine.set_sub_phase_for_test(nba_domain::SubPhase::ActionExecution);
     let tick = engine.step();
     assert!(tick
         .frame
@@ -1229,7 +1240,7 @@ fn pass_release_policy_can_emit_drop_without_redeciding_at_arrival() {
         .iter()
         .any(|event| event == "PASS_DROPPED"));
     assert!(matches!(
-        engine.ball_state,
+        engine.ball_state(),
         nba_physics::BallTrajectoryKind::LooseBall { .. }
     ));
 }
@@ -1242,7 +1253,7 @@ fn shot_release_uses_configured_skill_and_spacing_inputs() {
     rules.shot_pct_ceiling = 1.0;
     let mut engine = MatchEngine::with_rules(1211, rules);
     engine.force_possession_for_test(nba_domain::Possession::Home);
-    engine.ball_pos_3d.0 = glam::Vec2::new(40.0, 25.0);
+    engine.ball_pos_3d().0 = glam::Vec2::new(40.0, 25.0);
     engine
         .physics
         .get_player_mut("H_1")
@@ -1256,7 +1267,7 @@ fn shot_release_uses_configured_skill_and_spacing_inputs() {
         .pos_ft = glam::Vec2::new(40.0, 25.0);
     engine.execute_shot_for_test("H_1", glam::Vec2::new(40.0, 25.0), false);
     assert!(matches!(
-        engine.ball_state,
+        engine.ball_state(),
         nba_physics::BallTrajectoryKind::Shot { is_made: true, .. }
     ));
 }
@@ -1277,7 +1288,7 @@ fn test_configured_tip_off_duration_produces_physical_tipoff_phase() {
     rules.tip_off_duration_seconds = 1.0;
     let setup = nba_engine::MatchSetup::builtin(rules);
     let mut engine = MatchEngine::with_setup(setup, 42);
-    assert_eq!(engine.game_flow, nba_domain::GameFlowState::TipOff);
+    assert_eq!(engine.game_flow(), nba_domain::GameFlowState::TipOff);
 
     let mut saw_tipoff = false;
     let mut saw_tipoff_secured = false;
@@ -1300,5 +1311,587 @@ fn test_configured_tip_off_duration_produces_physical_tipoff_phase() {
         saw_tipoff_secured,
         "should emit TIPOFF_SECURED after duration completes"
     );
-    assert_eq!(engine.game_flow, nba_domain::GameFlowState::LiveBall);
+    assert_eq!(engine.game_flow(), nba_domain::GameFlowState::LiveBall);
+}
+
+/// F1.1 红测试：罚球全程不得输出 holderId（伪持球）。
+/// 根因：罚球期间权威球态仍是 Held{carrier_id}，而 ball_pos_3d 被放到
+/// 篮筐/罚球点，导致 BALL_WITH_HOLDER Hard（seed=1 full tick=58954，26.51ft）。
+#[test]
+fn test_free_throw_never_reports_ball_holder() {
+    let mut rules = nba_domain::GameRules::default();
+    rules.tip_off_duration_seconds = 0.0;
+    rules.free_throw_interval_seconds = 0.1;
+    let mut engine = MatchEngine::with_rules(101, rules);
+    engine.force_possession_for_test(nba_domain::Possession::Home);
+    engine.push_event_for_test(nba_domain::GameEvent::Foul {
+        fouled_player_id: "H_1".to_string(),
+        fouler_id: "A_1".to_string(),
+        is_shooting: true,
+    });
+
+    // 第一 tick 触发犯规，随后每个 tick 检查罚球期间的球权投影。
+    let mut saw_free_throw = false;
+    for _ in 0..40 {
+        let tick = engine.step();
+        if tick.frame.game_flow == "FreeThrow" || engine.game_flow() == nba_domain::GameFlowState::FreeThrow
+        {
+            saw_free_throw = true;
+            assert!(
+                tick.frame.ball.holder_id.is_none(),
+                "during FreeThrow the ball must not advertise a holder (tick {}, holder={:?}, status={})",
+                engine.tick_index,
+                tick.frame.ball.holder_id,
+                tick.frame.ball.status
+            );
+        }
+        if engine.free_throws_remaining() == 0 {
+            break;
+        }
+    }
+    assert!(saw_free_throw, "free-throw flow must be observed");
+}
+
+/// F1.1 红测试：罚球期间球与任何球员的距离必须在 leash 内，否则球态必须是 Dead。
+/// 这是 BALL_WITH_HOLDER 不变量语义的正面表述。
+#[test]
+fn test_free_throw_ball_is_dead_or_attached()  {
+    let mut rules = nba_domain::GameRules::default();
+    rules.tip_off_duration_seconds = 0.0;
+    rules.free_throw_interval_seconds = 0.1;
+    let mut engine = MatchEngine::with_rules(102, rules);
+    engine.force_possession_for_test(nba_domain::Possession::Home);
+    engine.push_event_for_test(nba_domain::GameEvent::Foul {
+        fouled_player_id: "H_1".to_string(),
+        fouler_id: "A_1".to_string(),
+        is_shooting: true,
+    });
+    for _ in 0..40 {
+        let tick = engine.step();
+        if engine.game_flow() != nba_domain::GameFlowState::FreeThrow {
+            if engine.free_throws_remaining() == 0 {
+                break;
+            }
+            continue;
+        }
+        if let Some(holder) = tick.frame.ball.holder_id.as_deref() {
+            let rules = &tick.frame.rules;
+            let bft = (
+                tick.frame.ball.x * rules.court_width_ft,
+                tick.frame.ball.y * rules.court_height_ft,
+            );
+            if let Some(p) = engine.physics.get_player(holder) {
+                let d = ((bft.0 - p.pos_ft.x).powi(2) + (bft.1 - p.pos_ft.y).powi(2)).sqrt();
+                assert!(
+                    d <= rules.holder_leash_ft,
+                    "advertised holder {} is {:.2} ft from ball during free throw (tick {})",
+                    holder,
+                    d,
+                    engine.tick_index
+                );
+            }
+        }
+        if engine.free_throws_remaining() == 0 {
+            break;
+        }
+    }
+}
+
+/// F1.2 红测试：进攻方越过中线进入前场后，后场计时必须重置。
+/// 根因：backcourt_elapsed 仅在进入 Initiation 阶段清零，跨场后继续累加，
+/// 8 秒后无条件判 EIGHT_SECOND_BACKCOURT（seed 0 单节 26 次违例主因）。
+#[test]
+fn test_backcourt_clock_resets_on_halfcourt_cross() {
+    let mut rules = nba_domain::GameRules::default();
+    rules.tip_off_duration_seconds = 0.0;
+    rules.tick_seconds = 0.1;
+    rules.backcourt_seconds = 3.0;
+    let mut engine = MatchEngine::with_rules(701, rules);
+    engine.force_possession_for_test(nba_domain::Possession::Home);
+    engine.set_game_flow(nba_domain::GameFlowState::LiveBall);
+    engine.set_ball_state_for_test(nba_physics::BallTrajectoryKind::Held {
+        carrier_id: "H_1".to_string(),
+    });
+    // 把球与持球人放到前场（Home 攻击右侧，x >= 47 为前场）。
+    let frontcourt = glam::Vec2::new(70.0, 25.0);
+    engine.set_ball_pos_for_test(frontcourt, 4.0);
+    if let Some(p) = engine.physics.get_player_mut("H_1") {
+        p.pos_ft = frontcourt;
+        p.target_pos_ft = frontcourt;
+    }
+    // 人为把后场计时推过阈值，若引擎不按位置重置就会立刻误判违例。
+    engine.set_backcourt_elapsed_for_test(99.0);
+    let tick = engine.step();
+    assert!(
+        !tick
+            .frame
+            .events
+            .iter()
+            .any(|e| e == "RULE_VIOLATION"),
+        "frontcourt possession must not trigger an 8-second violation, events={:?}",
+        tick.frame.events
+    );
+    assert!(
+        engine.backcourt_elapsed() < 1.0,
+        "backcourt clock must reset after crossing halfcourt, got {}",
+        engine.backcourt_elapsed()
+    );
+}
+
+/// F1.2 负面对照：若球队仍滞留后场，计时必须继续累加并最终判违例。
+#[test]
+fn test_eight_second_violation_requires_continuous_backcourt() {
+    let mut rules = nba_domain::GameRules::default();
+    rules.tip_off_duration_seconds = 0.0;
+    rules.tick_seconds = 0.1;
+    rules.backcourt_seconds = 0.5;
+    rules.decision_interval_seconds = 100.0;
+    let mut engine = MatchEngine::with_rules(702, rules);
+    engine.force_possession_for_test(nba_domain::Possession::Home);
+    engine.set_game_flow(nba_domain::GameFlowState::LiveBall);
+    engine.set_ball_state_for_test(nba_physics::BallTrajectoryKind::Held {
+        carrier_id: "H_1".to_string(),
+    });
+    let backcourt = glam::Vec2::new(20.0, 25.0);
+    engine.set_ball_pos_for_test(backcourt, 4.0);
+    if let Some(p) = engine.physics.get_player_mut("H_1") {
+        p.pos_ft = backcourt;
+        p.target_pos_ft = backcourt;
+        p.target_speed_ftps = 0.0;
+        p.vel_ft = glam::Vec2::ZERO;
+    }
+    let mut saw_violation = false;
+    for _ in 0..40 {
+        let tick = engine.step();
+        if tick
+            .frame
+            .events
+            .iter()
+            .any(|e| e == "VIOLATION" || e == "RULE_VIOLATION")
+        {
+            saw_violation = true;
+            break;
+        }
+        // 保持球员停留在后场，排除运动学把它们带过中线。
+        if let Some(p) = engine.physics.get_player_mut("H_1") {
+            p.pos_ft = backcourt;
+            p.target_pos_ft = backcourt;
+            p.vel_ft = glam::Vec2::ZERO;
+        }
+        engine.set_ball_pos_for_test(backcourt, 4.0);
+    }
+    assert!(
+        saw_violation,
+        "continuous backcourt possession must eventually trigger the 8-second violation"
+    );
+}
+
+/// F1.3 红测试：full scope 必须在真实生命周期内进入 GameEnd，不能卡死在
+/// DeadBall。根因：发球员的界外发球点被 physics 的场地 clamp 推回场内，
+/// `inbounder_arrived` 永不成立，`InboundTransfer` 无法推进（gap.md §6.3）。
+#[test]
+fn test_full_scope_reaches_game_end_without_deadball_livelock() {
+    // 三个独立活锁根因分别由不同 seed 触发：555/999（发球点被 clamp）、
+    // 6/9/11（分离投影推回发球员）、3/15/26（发球员被指派到替补）。
+    for seed in [999u64, 555, 6, 9, 11, 3, 15, 26] {
+        let mut engine = MatchEngine::new(seed);
+        engine.set_scope("full").unwrap();
+        let mut ticks = 0usize;
+        while !engine.is_finished() && ticks < 200_000 {
+            engine.step();
+            ticks += 1;
+        }
+        assert!(
+            engine.is_finished(),
+            "seed {} livelocked before GameEnd (ticks={}, flow={:?}, clock={:.1})",
+            seed,
+            ticks,
+            engine.game_flow(),
+            engine.game_clock()
+        );
+    }
+}
+
+/// F1.3c 红测试：被钉在边线的防守者不得阻塞发球程序。
+/// 根因：发球员必须步行到界外发球点，而防守者被场地 clamp 钉在同一路径上，
+/// 形成几何死锁（本轮 seed 6/9/11 实测约 19 万 tick 的 OUT_OF_BOUNDS 活锁）。
+/// 修复：发球赴界外改为显式离散 placement（gap.md §4.3）。
+///
+/// D3.1 口径修正：计数从"任意球员 OOB 的连续 tick"改为"**同一球员**连续
+/// OOB 的 tick 数"。前者把多名球员接力越界累加成一个长 streak，与
+/// gap.md §4.3 的死锁定义（单球员被永久钉在边界）不符，会产生假阳性。
+/// 物理层同时改为边沿触发（boundary_cross_latched），贴边不再逐 tick 刷屏。
+#[test]
+fn test_wall_pinned_defender_does_not_block_inbound() {
+    for seed in [6u64, 9, 11, 16, 21] {
+        let mut engine = MatchEngine::new(seed);
+        engine.set_scope("full").unwrap();
+        let mut ticks = 0usize;
+        // 每个球员各自的连续越界计数。
+        let mut streaks: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        let mut max_oob_streak = 0usize;
+        while !engine.is_finished() && ticks < 250_000 {
+            let tick = engine.step();
+            let mut crossed: Vec<String> = Vec::new();
+            for e in &tick.frame.event_log {
+                if e.kind != "OUT_OF_BOUNDS" {
+                    continue;
+                }
+                if let Some(pid) = e
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.get("BoundaryCross"))
+                    .and_then(|b| b.get("player_id"))
+                    .and_then(|v| v.as_str())
+                {
+                    crossed.push(pid.to_string());
+                }
+            }
+            for pid in &crossed {
+                let s = streaks.entry(pid.clone()).or_insert(0);
+                *s += 1;
+                max_oob_streak = max_oob_streak.max(*s);
+            }
+            // 本 tick 未越界的球员计数归零。
+            for (pid, s) in streaks.iter_mut() {
+                if !crossed.contains(pid) {
+                    *s = 0;
+                }
+            }
+            ticks += 1;
+        }
+        assert!(engine.is_finished(), "seed {} livelocked", seed);
+        // 单个球员连续越界 = 被永久钉在边界（死锁）。
+        assert!(
+            max_oob_streak < 200,
+            "seed {} had a player pinned out of bounds for {} consecutive ticks",
+            seed,
+            max_oob_streak
+        );
+        assert!(
+            engine.last_tick_violations().is_empty(),
+            "seed {} ended with violations: {:?}",
+            seed,
+            engine.last_tick_violations()
+        );
+    }
+}
+
+/// F1.3 红测试：发球员被换下/犯满离场后，发球程序必须自动改派在场球员
+/// 并最终完成，不能永久停留在「发球员不在场」的状态。
+/// 根因：`new_possession_pg` 曾按 roster 顺序取发球员，可能返回替补；
+/// 替补不参与物理步进，`inbounder_arrived` 永不成立。
+#[test]
+fn test_inbounder_reassigned_when_leaving_court() {
+    for seed in [3u64, 15, 26] {
+        let mut engine = MatchEngine::new(seed);
+        engine.set_scope("full").unwrap();
+        let mut ticks = 0usize;
+        let mut stalled_ticks = 0usize;
+        let mut max_stalled = 0usize;
+        while !engine.is_finished() && ticks < 250_000 {
+            engine.step();
+            let inbounder_off_court = match &engine.ball_state() {
+                nba_physics::BallTrajectoryKind::InboundTransfer { inbounder_id, .. }
+                | nba_physics::BallTrajectoryKind::InboundReady { inbounder_id, .. } => engine
+                    .physics
+                    .get_player(inbounder_id)
+                    .map(|p| !p.on_court)
+                    .unwrap_or(true),
+                _ => false,
+            };
+            if inbounder_off_court {
+                stalled_ticks += 1;
+                max_stalled = max_stalled.max(stalled_ticks);
+            } else {
+                stalled_ticks = 0;
+            }
+            ticks += 1;
+        }
+        assert!(engine.is_finished(), "seed {} livelocked", seed);
+        // 恢复应在极短窗口内完成，而不是无限期停留。
+        assert!(
+            max_stalled < 60,
+            "seed {} stayed with an off-court inbounder for {} ticks",
+            seed,
+            max_stalled
+        );
+    }
+}
+
+/// F1.3：发球员站界外不得被判违例（不产生 VIOLATION / 回合终止），
+/// 且发球程序必须能够真实完成推进到 InboundReady。
+/// 非持球人的 BOUNDARY_CROSSING 是咨询性信号（flagged），不属于本节范围。
+#[test]
+fn test_inbounder_out_of_bounds_does_not_emit_boundary_turnover() {
+    let mut rules = nba_domain::GameRules::default();
+    rules.tip_off_duration_seconds = 0.0;
+    rules.tick_seconds = 0.1;
+    let mut engine = MatchEngine::with_rules(703, rules);
+    engine.force_possession_for_test(nba_domain::Possession::Home);
+    engine.start_inbound_transition_for_test();
+    let mut inbounder_violation = false;
+    let mut reached_ready = false;
+    for _ in 0..200 {
+        let tick = engine.step();
+        if matches!(
+            engine.ball_state(),
+            nba_physics::BallTrajectoryKind::InboundReady { .. }
+        ) {
+            reached_ready = true;
+        }
+        for e in &tick.frame.event_log {
+            if e.kind == "VIOLATION" {
+                let d = e.data.as_ref().and_then(|v| v.as_object());
+                let mentions_inbounder = d
+                    .map(|o| {
+                        let text = serde_json::to_string(o).unwrap_or_default();
+                        text.contains("INBOUND_SETUP") || text.contains("INBOUND")
+                    })
+                    .unwrap_or(false);
+                if mentions_inbounder {
+                    inbounder_violation = true;
+                }
+            }
+        }
+        if reached_ready {
+            break;
+        }
+    }
+    assert!(
+        !inbounder_violation,
+        "inbounder standing out of bounds must not be judged as a violation"
+    );
+    assert!(
+        reached_ready,
+        "inbound program must reach InboundReady instead of livelocking"
+    );
+}
+
+/// F6.2 红测试：默认（facts）流必须远小于逐 tick 帧流，且仍然可评判。
+/// 根因：此前默认逐 tick 全量帧，单场 full scope 达数百 MB
+/// （gap.md §16.4 / problem.md §14.4）。
+#[test]
+fn test_bounded_stream_modes_are_much_smaller() {
+    use nba_engine::StreamMode;
+
+    let run = |mode: StreamMode, label: &str| -> u64 {
+        let mut engine = MatchEngine::new(42);
+        // RAII：panic 展开也会删除临时流（test-support）。
+        let artifact = nba_test_support::TempArtifact::new(&format!("stream_mode_{label}"));
+        let result = engine.simulate_scope_and_export_with_mode(
+            "1q",
+            &artifact.path_str(),
+            mode,
+        );
+        assert!(result.is_ok(), "mode {:?} failed: {:?}", mode, result.err());
+        artifact.assert_within_limit()
+    };
+
+    let frames = run(StreamMode::Frames, "frames");
+    let facts = run(StreamMode::Facts, "facts");
+    let summary = run(StreamMode::Summary, "summary");
+
+    assert!(frames > 0 && facts > 0 && summary > 0);
+    // facts 模式必须比帧模式小一个数量级以上。
+    assert!(
+        facts * 10 < frames,
+        "facts stream ({facts} B) must be at least 10x smaller than frames ({frames} B)"
+    );
+    assert!(
+        summary < facts,
+        "summary ({summary} B) must be smaller than facts ({facts} B)"
+    );
+    // 一场 full scope 的 facts 流必须落在 MB 级（< 64 MiB）。
+    let mut engine = MatchEngine::new(42);
+    let artifact = nba_test_support::TempArtifact::with_limit("full_facts", 64 * 1024 * 1024);
+    engine
+        .simulate_scope_and_export_with_mode("full", &artifact.path_str(), StreamMode::Facts)
+        .expect("full facts export");
+    let full_facts = artifact.assert_within_limit();
+    assert!(
+        full_facts < 64 * 1024 * 1024,
+        "full-scope facts stream must stay in the MB range, got {} bytes",
+        full_facts
+    );
+}
+
+/// F6.2：超过字节预算必须报错，而不是静默写满磁盘。
+#[test]
+fn test_stream_byte_budget_fails_closed() {
+    use nba_engine::StreamMode;
+    let mut rules = nba_domain::GameRules::default();
+    rules.stream_max_bytes = 1024; // 1 KiB：必然超限
+    let mut engine = MatchEngine::with_rules(42, rules);
+    let artifact = nba_test_support::TempArtifact::new("budget");
+    let result =
+        engine.simulate_scope_and_export_with_mode("1q", &artifact.path_str(), StreamMode::Facts);
+    assert!(result.is_err(), "exceeding the byte budget must fail closed");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("budget"),
+        "error should mention the budget, got: {err}"
+    );
+}
+
+/// D5.1 红测试：交接（ControlTransfer）不得永久悬置。
+/// 根因：接球人被动作窗口锁定（`lock_kinematics`）时无法走到冻结点，
+/// `receiver_ready` 永不成立 —— seed 6 full 实测 69,466 帧（约 2,780 秒）
+/// 活锁，全场仅 11 个回合、10 分。
+#[test]
+fn test_control_transfer_never_hangs_forever() {
+    use nba_domain::GameRules;
+    for seed in [6u64, 21, 42] {
+        let mut engine = MatchEngine::with_rules(seed, GameRules::default());
+        engine.set_scope("full").unwrap();
+        let mut max_ct_streak = 0usize;
+        let mut streak = 0usize;
+        let mut ticks = 0usize;
+        while !engine.is_finished() && ticks < 250_000 {
+            engine.step();
+            ticks += 1;
+            if matches!(
+                engine.ball_state(),
+                nba_physics::BallTrajectoryKind::ControlTransfer { .. }
+            ) {
+                streak += 1;
+                max_ct_streak = max_ct_streak.max(streak);
+            } else {
+                streak = 0;
+            }
+        }
+        assert!(engine.is_finished(), "seed {seed} did not reach GameEnd");
+        // 交接是一次短飞行（约 0.5s = 13 tick）；超过数秒即为悬置。
+        assert!(
+            max_ct_streak < 500,
+            "seed {seed}: ControlTransfer hung for {max_ct_streak} consecutive ticks"
+        );
+        assert!(
+            engine.completed_possessions() > 150,
+            "seed {seed}: only {} possessions completed (expected a full game)",
+            engine.completed_possessions()
+        );
+    }
+}
+
+/// D5.1：投篮弧线峰值必须服从规则高度上限（BALL_HEIGHT_BOUNDS）。
+/// 根因：`arc = A·p·(1-p)` 的真实极值点在 p>0.5，线性缩放的 A 使实际
+/// 峰值高于请求值（请求 35.0 ft → 采样 35.08 ft）。
+#[test]
+fn test_shot_arc_respects_height_ceiling() {
+    use nba_domain::GameRules;
+    let rules = GameRules::default();
+    let ceiling = rules.ball_z_max_ft;
+    for seed in [6u64, 21, 42] {
+        let mut engine = MatchEngine::with_rules(seed, rules.clone());
+        engine.set_scope("full").unwrap();
+        let mut worst = 0.0f32;
+        let mut ticks = 0usize;
+        while !engine.is_finished() && ticks < 250_000 {
+            let tick = engine.step();
+            ticks += 1;
+            worst = worst.max(tick.frame.ball.z);
+        }
+        assert!(
+            worst <= ceiling,
+            "seed {seed}: ball reached {worst:.4} ft, above the {ceiling} ft ceiling"
+        );
+    }
+}
+
+/// D5.1b 红测试：战术档案的槽位必须真正决定进攻站位。
+/// 根因：`data/tactics/*.json` 的 `base_offset_x/y` 从未被消费，全队挤在
+/// 弧顶三分线外（实测进攻方 90% 球员距篮筐 > 23.75 ft），中距离出手
+/// 没有机会产生（2PA 均值 10.8，真实 ~55）。
+#[test]
+fn test_tactical_spec_slots_drive_offensive_spacing() {
+    use nba_domain::GameRules;
+    let rules = GameRules::default();
+    let three = rules.league.three_point_distance_ft;
+    let mut inside = 0usize;
+    let mut total = 0usize;
+    for seed in [0u64, 42] {
+        let mut engine = MatchEngine::with_rules(seed, rules.clone());
+        engine.set_scope("1q").unwrap();
+        let mut ticks = 0usize;
+        while !engine.is_finished() && ticks < 60_000 {
+            let tick = engine.step();
+            ticks += 1;
+            for p in &tick.frame.players {
+                if !p.on_court {
+                    continue;
+                }
+                // 只统计进攻方（possession_team）
+                if p.team != tick.frame.possession_team {
+                    continue;
+                }
+                let x = p.x * rules.court.width_ft;
+                let y = p.y * rules.court.height_ft;
+                let hoop = rules.court.hoop_pos(tick.frame.possession_team == "home");
+                total += 1;
+                if (glam::Vec2::new(x, y) - hoop).length() < three {
+                    inside += 1;
+                }
+            }
+        }
+    }
+    assert!(total > 0, "no offensive player samples collected");
+    let ratio = inside as f64 / total as f64;
+    // 修复前该比例约 9.9%；档案槽位生效后应显著提升（底角/内线槽位在三分线内）。
+    assert!(
+        ratio > 0.25,
+        "offensive players inside the arc: {:.1}% (expected > 25%; \
+         tactical spec slots are not driving spacing)",
+        ratio * 100.0
+    );
+}
+
+/// D5.1b：底角三分必须按「更近的底角线」判定，而不是弧顶半径。
+/// NBA 底角线距边线 3 ft，最近点距篮筐 22 ft；弧顶是 23.75 ft。
+#[test]
+fn test_corner_three_geometry() {
+    use nba_domain::GameRules;
+    let rules = GameRules::default();
+    let court = rules.court;
+    let arc = rules.league.three_point_distance_ft;
+    let corner = rules.league.corner_three_distance_ft;
+    assert!(corner > 0.0 && corner < arc, "NBA must declare corner < arc");
+
+    // 底角带内、距篮筐 22.4 ft → 三分
+    let corner_spot = glam::Vec2::new(court.hoop_right_x_ft - 6.0, 2.5);
+    let d = (corner_spot - court.hoop_pos(true)).length();
+    assert!(d >= corner && d < arc, "probe must sit between corner and arc");
+    assert!(
+        court.is_three_point_attempt(corner_spot, true, arc, corner),
+        "corner spot at {d:.2} ft must count as a three"
+    );
+
+    // 同一距离但在弧顶区域（y 居中）→ 两分
+    let top_spot = glam::Vec2::new(court.hoop_right_x_ft - 6.0, court.hoop_y_ft);
+    assert!(
+        (top_spot - court.hoop_pos(true)).length() < arc,
+        "probe must be inside the arc"
+    );
+    assert!(
+        !court.is_three_point_attempt(top_spot, true, arc, corner),
+        "top-of-key spot inside the arc must not count as a three"
+    );
+
+    // 底角特例只"放宽"近处的判定，不得"收紧"远处的判定：
+    // 后场远投（距篮筐 > 弧顶半径）本就该是三分。
+    let backcourt = glam::Vec2::new(court.width_ft * 0.2, 2.5);
+    let bd = (backcourt - court.hoop_pos(true)).length();
+    assert!(bd > arc, "probe must be beyond the arc ({bd:.1} ft)");
+    assert!(
+        court.is_three_point_attempt(backcourt, true, arc, corner),
+        "a shot beyond the arc is a three regardless of court zone"
+    );
+
+    // 底角特例不适用于【弧顶区域】内、比底角线更近的点。
+    let near_top = glam::Vec2::new(court.hoop_right_x_ft - 6.0, court.hoop_y_ft);
+    assert!(
+        !court.is_three_point_attempt(near_top, true, arc, corner),
+        "corner exception must not apply away from the sideline"
+    );
 }

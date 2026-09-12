@@ -32,7 +32,7 @@ fn fiba_quarter_runs_with_zero_hard_violations() {
         }
         let tick = engine.step();
         let hard: Vec<_> = engine
-            .last_tick_violations
+            .last_tick_violations()
             .iter()
             .filter(|v| matches!(v.severity, nba_invariants::ViolationSeverity::Hard))
             .collect();
@@ -56,7 +56,7 @@ fn fiba_full_game_runs_and_evaluates_with_fiba_fixture() {
     for tick_idx in 0..8000 {
         let _tick = engine.step();
         let hard: Vec<_> = engine
-            .last_tick_violations
+            .last_tick_violations()
             .iter()
             .filter(|v| matches!(v.severity, nba_invariants::ViolationSeverity::Hard))
             .collect();
@@ -70,7 +70,7 @@ fn fiba_full_game_runs_and_evaluates_with_fiba_fixture() {
     }
 
     assert_eq!(ticks.len(), 8000);
-    assert!(engine.completed_possessions > 10, "FIBA 8000 ticks must simulate active possessions");
+    assert!(engine.completed_possessions() > 10, "FIBA 8000 ticks must simulate active possessions");
     assert_eq!(rules.league.name, "FIBA");
 }
 
@@ -110,7 +110,7 @@ fn forced_substitution_preserves_five_on_five() {
     );
 
     let events: Vec<String> = engine
-        .pending_events
+        .pending_events()
         .iter()
         .map(|e| e.event_type_str().to_string())
         .collect();
@@ -122,10 +122,10 @@ fn forced_substitution_preserves_five_on_five() {
 
     for tick in 0..500 {
         engine.step();
-        if !engine.last_tick_violations.is_empty() {
+        if !engine.last_tick_violations().is_empty() {
             panic!(
                 "tick {} violations: {:?}",
-                tick, engine.last_tick_violations
+                tick, engine.last_tick_violations()
             );
         }
     }

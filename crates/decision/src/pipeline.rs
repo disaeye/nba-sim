@@ -85,15 +85,29 @@ impl DecisionSystem {
 
         let hoop = ctx.rules.court.hoop_pos(offense_team == "home");
         let dist_to_hoop = (carrier_pos - hoop).length();
-        let is_three = dist_to_hoop >= ctx.rules.league.three_point_distance_ft;
+        // 底角三分是更近的直线（NBA 22ft vs 弧顶 23.75ft），
+        // 必须用几何判定而非单一半径（D5.1b）。
+        let is_three = ctx.rules.court.is_three_point_attempt(
+            carrier_pos,
+            offense_team == "home",
+            ctx.rules.league.three_point_distance_ft,
+            ctx.rules.league.corner_three_distance_ft,
+        );
 
         // Stamina is normalized against the player's own capacity before it reaches the decision model.
         let stamina_factor = stamina.clamp(0.0, 1.0);
         let stamina_mult = stamina_factor * self.weights.stamina_sensitivity
             + (1.0 - self.weights.stamina_sensitivity);
 
+        // 是否处于后场（决定是否必须提供「推进」候选）。
+        let midcourt = ctx.rules.court.width_ft / f32::from(2u8);
+        let in_backcourt = if offense_team == "home" {
+            carrier_pos.x < midcourt
+        } else {
+            carrier_pos.x > midcourt
+        };
         // Candidate actions are derived from the authoritative spatial view.
-        let mut candidates: Vec<CandidateAction> = Vec::with_capacity(7);
+        let mut candidates: Vec<CandidateAction> = Vec::with_capacity(8);
         if ctx.game_flow == nba_domain::GameFlowState::DeadBall
             && ctx.phase == nba_domain::PhaseType::Inbound
         {
@@ -200,6 +214,23 @@ impl DecisionSystem {
                 });
             }
         }
+        // 第一性原理：把球推进过半场是进攻方的强制义务（8 秒规则）。
+        // 若候选集里没有「推进」，持球人只能在原地 Dwell/试探，直到被判
+        // 8 秒违例——实测球 x 在 8 秒内只从 8.4 移到 9.5 ft（需越过 47）。
+        if in_backcourt {
+            let advance_target = Self::advance_target(
+                ctx.rules,
+                offense_team == "home",
+                carrier_pos,
+            );
+            if advance_target.distance(carrier_pos) > ctx.rules.player_radius_ft {
+                candidates.push(CandidateAction::Advance {
+                    player_id: carrier_id.to_string(),
+                    from_pos: carrier_pos,
+                    target_pos: advance_target,
+                });
+            }
+        }
         candidates.push(CandidateAction::Dwell {
             player_id: carrier_id.to_string(),
         });
@@ -223,6 +254,7 @@ impl DecisionSystem {
                     format!("{}→{}", c.kind_str(), receiver_id)
                 }
                 CandidateAction::Dwell { player_id } => format!("DWELL({})", player_id),
+                CandidateAction::Advance { player_id, .. } => format!("ADVANCE({})", player_id),
                 _ => "OTHER".to_string(),
             }
         };
@@ -259,6 +291,12 @@ impl DecisionSystem {
         }
 
         // --- softmax 个性化采样（文档 §6.7）---
+        //
+        // 曾尝试改为「分层 softmax」（先族后目标），假设是"传球族被队友数量
+        // 稀释"。**该假设被实测否证**：分层后传球数反而从 1.61 降到 1.12，
+        // 且实测 PASS 族效用均值 0.389 < DWELL 0.496 —— 传球不是被稀释，
+        // 而是效用本身就低（见 `utility` 里 `(0.5 + openness)` 乘子的说明）。
+        // 因此保留扁平 softmax，把修复放在效用结构上。
         let max_u = scored
             .iter()
             .map(|(_, u)| *u)
@@ -322,6 +360,15 @@ impl DecisionSystem {
         let style = team_traits.cloned().unwrap_or_default();
         let centered = |value: f32| value.clamp(0.0, 1.0) - 0.5;
         let base = match &s.action {
+            CandidateAction::Advance { .. } => {
+                // 推进的紧迫性：后场停留越久越必须推进（8 秒规则）。
+                let one = f32::from(1u8);
+                let zero = f32::from(0u8);
+                let urgency = (ctx.backcourt_elapsed / ctx.rules.backcourt_seconds.max(one))
+                    .clamp(zero, one);
+                self.weights.dwell_base
+                    * (one + urgency * self.weights.advance_urgency_boost)
+            }
             CandidateAction::Shoot {
                 shooter_id,
                 is_three,
@@ -336,7 +383,7 @@ impl DecisionSystem {
                     .map(|a| {
                         if dist_to_hoop < ctx.rules.rim_shot_distance_ft {
                             a.finishing
-                        } else if dist_to_hoop >= ctx.rules.league.three_point_distance_ft {
+                        } else if *is_three {
                             a.shooting_three
                         } else {
                             a.shooting_mid
@@ -356,12 +403,32 @@ impl DecisionSystem {
                 } else {
                     1.0
                 };
+                // 第一性原理：早出手有**机会成本**——放弃一次可能更好的
+                // 后续出手。此前效用只随 shot clock 递减（紧迫加成），没有
+                // 「时间价值」项，导致 46% 出手发生在 8 秒内（真实约 15%），
+                // 进而使每回合传球仅 1.3 次（真实 ~3.5）。
+                //
+                // 用 `shot_clock_urgency_seconds` 作为「进入紧迫期」的分界：
+                // 在此之前出手按剩余时间打折；进入紧迫期后折扣消失。
+                let zero = f32::from(0u8);
+                let one = f32::from(1u8);
+                let clock_remaining = ctx.shot_clock.max(zero);
+                let early_shot_cost = if clock_remaining > ctx.rules.shot_clock_urgency_seconds {
+                    let slack = (clock_remaining - ctx.rules.shot_clock_urgency_seconds)
+                        / (ctx.rules.league.shot_clock_seconds
+                            - ctx.rules.shot_clock_urgency_seconds)
+                            .max(f32::EPSILON);
+                    self.weights.early_shot_penalty * slack.clamp(zero, one)
+                } else {
+                    zero
+                };
                 self.weights.shoot_base
                     * three_mult
                     * (0.45 + distance_factor * 0.7 + open_bonus)
                     * (1.0 + (shooting_skill - 0.5) * self.weights.tendency_weight)
                     + (shoot_preference - 0.5) * self.weights.tendency_weight
                     + range_bias * self.weights.team_style_weight
+                    - early_shot_cost
             }
             CandidateAction::Drive {
                 driver_id,
@@ -425,6 +492,29 @@ impl DecisionSystem {
     }
 
     /// 根据防守人分布采样中路与两侧突破走廊，避免无脑直冲篮下中心
+    /// 后场推进的目标点：朝中线方向前进（第一性原理：8 秒内必须过中线）。
+    ///
+    /// 目标点取「当前 x 与中线之间、再向进攻方向留一点余量」的位置，
+    /// 使持球人按最大速度的一小部分推进即可在规则时限内越线。
+    fn advance_target(
+        rules: &nba_domain::GameRules,
+        offense_home: bool,
+        carrier_pos: Vec2,
+    ) -> Vec2 {
+        let midcourt = rules.court.width_ft / 2.0;
+        // 越过中线后进入前场少许，避免卡在中线上反复触发后场计时。
+        let overshoot = rules.court.width_ft * rules.decision.advance_overshoot_ratio;
+        let target_x = if offense_home {
+            (midcourt + overshoot).min(rules.court.width_ft)
+        } else {
+            (midcourt - overshoot).max(0.0)
+        };
+        Vec2::new(target_x, carrier_pos.y.clamp(
+            rules.player_radius_ft,
+            rules.court.height_ft - rules.player_radius_ft,
+        ))
+    }
+
     fn select_drive_lane(
         players: &std::collections::HashMap<String, nba_physics::movement::PlayerPhysicsState>,
         rules: &nba_domain::GameRules,

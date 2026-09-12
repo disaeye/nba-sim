@@ -269,6 +269,7 @@ dependencies = [
  "nba-physics",
  "nba-protocol",
  "nba-semantics",
+ "nba-test-support",
  "rand",
  "rand_chacha",
  "serde",
@@ -282,6 +283,7 @@ dependencies = [
  "nba-domain",
  "nba-engine",
  "nba-protocol",
+ "nba-test-support",
  "serde",
  "serde_json",
 ]
@@ -347,6 +349,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "nba-test-support"
+version = "0.1.0"
 
 [[package]]
 name = "nba-wasm"

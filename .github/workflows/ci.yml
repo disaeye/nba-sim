@@ -5,6 +5,14 @@ on:
     branches: [main]
   pull_request:
 
+# 资源治理（gap.md §16.4 / problem.md §14.4）：
+# - 关闭增量编译：CI 依赖 rust-cache，target/debug/incremental 是纯浪费
+#   （本地实测可达 1.1 GiB）。
+# - 限制 cargo 并行度与测试线程，避免峰值内存/临时文件过高。
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -12,10 +20,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # 缓存上限：超过即不再增长，避免 CI 缓存无限膨胀。
+          cache-all-crates: false
+      - name: Disk budget check (pre-build)
+        run: python3 scripts/check_disk_budget.py --report
       - name: Build (debug)
         run: cargo build --workspace
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Disk budget check (post-build)
+        run: python3 scripts/check_disk_budget.py
 
   test:
     runs-on: ubuntu-latest
@@ -23,9 +38,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: false
+      - name: Disk budget check (pre-test)
+        run: python3 scripts/check_disk_budget.py --clean
       # 黄金哈希在测试套件内：任何逐 tick 分歧立即变红（quality.md §5）。
       - name: Test (含黄金哈希 / 不变量 / 评判)
         run: cargo test --workspace --release
+      # 测试产物泄漏守卫：测试必须使用 panic-safe 的 TempArtifact，
+      # 任何遗留的 nba_* 临时文件都会让本步变红。
+      - name: Temp artifact leak check (post-test)
+        if: always()
+        run: python3 scripts/check_disk_budget.py
+      - name: Cleanup on failure
+        if: failure()
+        run: python3 scripts/check_disk_budget.py --clean
 
   stage-gate:
     runs-on: ubuntu-latest
@@ -37,8 +64,21 @@ jobs:
         run: cargo build --release -p nba-sim-cli
       # 缩减种子集的统计 sanity net（quality.md §2.5；统计基线测试
       # stats_baseline.rs 亦在 test job 内运行）。
+      # 输出写入 runner 临时目录，并在结束后清理（gap.md §16.4）。
       - name: Batch statistics (sanity net)
-        run: cargo run --release -p nba-sim-cli -- --seeds 0..7 batch full --out /tmp/stats.jsonl
+        run: |
+          cargo run --release -p nba-sim-cli -- --seeds 0..7 batch full --out "$RUNNER_TEMP/stats.jsonl"
+      # 分层性能预算（gap.md §18.5）：与输出模式绑定，纯引擎吞吐不把
+      # 序列化成本算进去。预算取自实测下沿留余量。
+      - name: Layered performance benchmark
+        run: |
+          cargo run --release -p nba-sim-cli -- benchmark --ticks 60000 --mode all
+      - name: Disk budget check (post-batch)
+        if: always()
+        run: python3 scripts/check_disk_budget.py
+      - name: Cleanup outputs
+        if: always()
+        run: rm -rf "$RUNNER_TEMP"/stats.jsonl "$RUNNER_TEMP"/stats.jsonl.judgments.ndjson "$RUNNER_TEMP"/stats.jsonl.attribution_report.json"
 
   guards:
     runs-on: ubuntu-latest
@@ -49,8 +89,37 @@ jobs:
           python-version: "3.12"
       - name: Inline constant guard (charter C1)
         run: python3 scripts/check_inline_constants.py
+      - name: Inline constant guard negative control (gap.md §17.3)
+        # 负面对照：守卫自身的扫描器必须能发现注入的行为常数，
+        # 且不得保留整文件白名单。
+        run: |
+          python3 scripts/check_inline_constants.py --self-test
+          cp crates/engine/src/match_engine.rs /tmp/me_guard_backup.rs
+          python3 - <<'PY'
+          p = 'crates/engine/src/match_engine.rs'
+          s = open(p).read()
+          s = s.replace('    pub fn step(&mut self) -> StreamTick {',
+                        '    pub fn step(&mut self) -> StreamTick {\n        let _guard_probe = 0.424242;', 1)
+          open(p, 'w').write(s)
+          PY
+          if python3 scripts/check_inline_constants.py; then
+            echo "::error::constant guard failed to detect an injected behaviour constant"
+            cp /tmp/me_guard_backup.rs crates/engine/src/match_engine.rs
+            exit 1
+          fi
+          cp /tmp/me_guard_backup.rs crates/engine/src/match_engine.rs
       - name: Doc cross-reference guard
         run: python3 scripts/check_doc_refs.py
+      - name: Test resource guard (disk / target / temp leftovers)
+        run: python3 scripts/check_disk_budget.py
+      - name: Test resource guard negative control
+        # 负面对照：守卫必须能发现人为制造的泄漏。
+        run: python3 scripts/check_disk_budget.py --self-test
+      - name: World-privacy guard (dev 方案 D4.2)
+        # 比赛真相字段不得在 MatchEngine 上公开可变；含负面对照。
+        run: |
+          python3 scripts/check_world_privacy.py
+          python3 scripts/check_world_privacy.py --self-test
       - name: Build debug-server and run full UI card alignment check
         run: |
           cargo build --release -p nba-debug-server

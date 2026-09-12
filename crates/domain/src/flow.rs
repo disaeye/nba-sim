@@ -276,6 +276,11 @@ pub enum BallState {
         inbound: bool,
         /// 出手时刻裁定、到达时刻回放。
         receive_success: bool,
+        /// 拦截事实：释放时刻**一次性**裁定，飞行期间只回放。
+        ///
+        /// `None` = 无人拦截；`Some((defender_id, is_steal))` =
+        /// 该次传球被此防守者抢断（true）或点掉（false）。
+        intercept: Option<(String, bool)>,
     },
     /// 投篮飞行。
     Shot {
@@ -341,7 +346,7 @@ impl BallState {
                 driver_id: carrier_id,
                 ..
             } => Some(carrier_id.as_str()),
-            BallState::ControlTransfer { .. } | _ => None,
+            _ => None,
         }
     }
 

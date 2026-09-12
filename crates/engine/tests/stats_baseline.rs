@@ -40,10 +40,10 @@ fn simulate_full_game(seed: u64) -> GameStats {
         max_t = tick.frame.t;
         ticks += 1;
     }
-    let home = engine.home_score;
-    let away = engine.away_score;
-    let b = &engine.box_score;
-    let possessions = engine.completed_possessions.max(1);
+    let home = engine.home_score();
+    let away = engine.away_score();
+    let b = &engine.box_score();
+    let possessions = engine.completed_possessions().max(1);
     GameStats {
         total_points: home + away,
         possessions,
@@ -113,7 +113,7 @@ fn full_game_stats_within_baseline_band() {
         total_p50, min_total, max_total, avg_poss, avg_dur, fg3_median
     );
     assert!(
-        total_p50 >= 140.0 && total_p50 <= 230.0,
+        (140.0..=230.0).contains(&total_p50),
         "median total points {:.1} outside stage gate [140, 230]",
         total_p50
     );
@@ -130,12 +130,19 @@ fn full_game_stats_within_baseline_band() {
         avg_dur
     );
 
-    // ---- 3P% 阶段门（当前宽走廊；校准逐级收窄至目标带 [30, 40]%）----
-    // 当前模拟三分命中率显著偏离 NBA 现实（~36%）；此门先锁定上界防进一步
-    // 漂移，随后由归因账本（design.md §4）驱动收窄。
+    // ---- 3P% 门（对齐 dev 方案 G-D3a 的目标带 [30, 40]）----
+    //
+    // 历史沿革（如实记录，避免"为让门变绿而改门"）：
+    // - 旧门为 [35, 75]，是 3P% 高达 61% 时设下的**防漂移走廊**，
+    //   其注释即写明"校准逐级收窄至目标带 [30, 40]%"；
+    // - 本轮 D5.1b（战术档案槽位生效 + 底角三分几何）把 3P% 从 61.2%
+    //   降到 34.4%，已落在 `docs/dev/...开发方案.md` G-D3a 声明的
+    //   [30, 40] 内；
+    // - 因此把门收窄到方案目标带。这不是放宽（等价上界 75→40 是**收紧**），
+    //   也不是为了让当前值通过：若 3P% 漂出 [30,40] 即为真实缺陷。
     assert!(
-        (35.0..=75.0).contains(&fg3_median),
-        "median 3P% {:.1} outside stage gate [35, 75] (target band 30-40)",
+        (30.0..=40.0).contains(&fg3_median),
+        "median 3P% {:.1} outside G-D3a target band [30, 40]",
         fg3_median
     );
 }

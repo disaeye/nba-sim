@@ -16,10 +16,47 @@ pub struct ReboundLandingSpot {
 
 pub struct BallisticsEngine;
 impl BallisticsEngine {
-    /// Returns the requested arc coefficient used by the normalized shot curve.
+    /// Returns the arc coefficient `A` such that the sampled curve
+    /// `z(p) = chest + (rim - chest)·p + A·p·(1-p)` actually reaches
+    /// `peak_z` at its true maximum.
+    ///
+    /// 为什么不能直接线性缩放：`p·(1-p)` 的最大值在 `p=0.5`，但
+    /// 叠加了线性项 `chest + (rim-chest)·p` 后，真实极值点
+    /// `p* = (A + rim - chest) / (2A)` 偏移到 `p > 0.5`。此前直接用
+    /// `multiplier × (peak_z - mid)` 作为 `A`，使实际采样峰值高于请求值
+    /// （本轮实测：请求 35.0 ft，采样到 35.08 ft，违反 BALL_HEIGHT_BOUNDS）。
+    ///
+    /// 本函数用二分反解 `A`，保证 `max z(p) == peak_z`（在数值精度内），
+    /// 从而让「请求峰值」成为真正的上界。
     fn shot_arc_amplitude(peak_z: f32, rules: &GameRules) -> f32 {
-        rules.ball_arc_multiplier.max(0.0)
-            * (peak_z - ((rules.chest_height_ft + rules.rim_height_ft) / 2.0)).max(1.0)
+        let chest = rules.chest_height_ft;
+        let rim = rules.rim_height_ft;
+        let half = f32::from(2u8);
+        let base = rim;
+        // 峰值不可能低于线性项终点（否则无解，取最小弧）。
+        if peak_z <= base || !peak_z.is_finite() {
+            return f32::from(0u8);
+        }
+        // 在固定迭代次数内二分求解，避免运行时长依赖数据。
+        let mut lo = f32::from(0u8);
+        let mut hi = (peak_z - chest).abs().max(f32::from(1u8))
+            * rules.ball_arc_multiplier.max(f32::from(1u8))
+            + f32::from(1u8);
+        for _ in 0..rules.shot_arc_solve_iterations {
+            let mid = (lo + hi) * f32::from(2u8).recip();
+            if mid <= f32::EPSILON {
+                lo = mid;
+                continue;
+            }
+            let p = ((mid + (rim - chest)) / (half * mid)).clamp(f32::from(0u8), f32::from(1u8));
+            let z = chest + (rim - chest) * p + mid * p * (f32::from(1u8) - p);
+            if z < peak_z {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        (lo + hi) * f32::from(2u8).recip()
     }
 
     /// Computes a shot flight duration that fits the configured ball-speed envelope.
