@@ -16,15 +16,25 @@
 
 ## 1.1 最近验证边界
 
-**基线提交与全量套件（2026-09-15）**：工作区已固定为 5 个提交（`8b34ff8`、`1c86c49`、`487293c`、`de15932`、`dd910ec`），工作树 clean。`./scripts/run-tests.sh` 结果：**22 个测试二进制中 21 绿 / 1 红，148 条断言通过 / 1 条失败**；唯一失败为 `stats_baseline::full_game_stats_within_baseline_band`。
+**统计门已关闭（2026-09-15）**：`./scripts/run-tests.sh` 得 **45 个测试套件全绿、0 失败**，含此前唯一红色的 `stats_baseline::full_game_stats_within_baseline_band`。全程**未修改任何门限或分母**。
 
-**回归判定**：同一测试在提交前后各跑一次，聚合输出**逐字节相同**（`total_p50=237.0`、`avg_poss=234.5`、`avg_dur=14.42s`、`3P%_median=34.8`）。因此该红门是**既存缺陷**，非提交引入的回归。六项守卫全部通过（含 4 项 `--self-test` 负面对照），且**逐提交**均通过 `check_threshold_integrity.py`（基准与被测源分离）。
+累计效果（8 seed full，对照仓库自己的 `nba.v2.json` composition_bands）：
 
-**红门定性**：这是**回归而非从未达标**——`status_history.md` §39 记录过该门通过（得分中位 197、回合 232、`cargo test --workspace` 41 套件全绿，黄金哈希 `v48`；当前 `v60`）。机制定位见 `docs/dev/evidence/problem.md` §21：
+| 指标 | 起点 | 现在 | 门/带 |
+| --- | --- | --- | --- |
+| `total_p50` | 237.0 ✗ | **213.5** | [140, 230] ✓ |
+| `two_make_pct` | 0.621 ✗ | **0.536** | [0.48, 0.58] ✓ |
+| `three_make_pct` | 0.348 | 0.337 | [0.30, 0.40] ✓ |
+| `three_attempt_rate` | 0.329 | 0.334 | [0.30, 0.45] ✓ |
+| ORB% | 0.070 ✗ | **0.244–0.330** | ~0.245 ✓ |
+| `pace` | 234.5 ✗ | 218.4 | [185, 220] ✓ |
+| `free_throw_rate` | 0.122 ✗ | 0.118 | [0.20, 0.35] **✗ 未闭合** |
 
-- **两个结构性缺口**：`two_make_pct` 0.621 越带 [0.48, 0.58]（`match_engine.rs:4112-4120` 让中距离与篮下共用 `shot_make_2pt = 0.565`，仓库无分区命中率模型）；`pace` 234.5 越带 [185, 220]；`free_throw_rate` 0.122 越带 [0.20, 0.35]。
-- **漂移来源**：`v59`（round-18 攻框体系）与 `v60`（round-19 护框让位）把出手推向篮下，触发了上述结构性缺口。这两轮修的是真实缺陷（篮下出手占比过低），方向正确。
-- **门可达性**：把三个越界量收到各自带中点后投影总分为 203.1，落在门 `[140, 230]` 内——**不需放宽门**即可通过。
+三项修复均为**结构性缺陷**而非调参：分区命中率（中距离误用篮下基准）、篮板冲抢指派（无人抢篮板）、箱体失误/犯规零写入。机制定位与 A/B 证据见 `docs/dev/evidence/problem.md` §21–§23。
+
+**唯一剩余越界项**：`free_throw_rate`。根因已定位为**非投篮犯规路径完全缺失**（真实每场约 16 次：无球/进攻/卡位犯规），而非法定基准偏小；不调大 `foul_on_shot_rate` 凑带（见 §23.11.1）。
+
+**回归判定方法**：新增结构体字段等跨 workspace 改动，必须用 `cargo check --workspace --all-targets` 验证。本会话曾因只验证单个 crate 而提交了破坏测试 target 的改动（已在 `cde5084` 修复并记录）。
 
 ## 2. 门矩阵
 
@@ -49,7 +59,7 @@
 | LeagueProfile | partial | `LeagueProfile` 类型、NBA/FIBA fixture 与 league 测试存在 | 不能以单场或类型存在宣称全部 NBA/FIBA 程序情景通过；NCAA 仍是路线项 | `crates/domain/src/league.rs`、`crates/engine/tests/league_profile.rs`、`crates/evaluator/fixtures/` |
 | 确定性与黄金哈希 | verified（现有测试范围） | golden hash 测试和事件 ID 单调测试存在 | 行为改动仍需按 protocol 重新冻结；黄金哈希不能证明真实性 | `crates/engine/tests/golden_hash.rs`、`docs/protocol.md` §3 |
 | 文档与阈值守卫 | verified（脚本范围） | `check_docs.py`、`no_index_identity`、`threshold_integrity`、阈值自测、常数自测、World privacy 自测均可运行；前四项含 `--self-test` 负面对照 | `check_threshold_integrity.py` 与 `check_no_index_identity.py` **尚未接线到任何 CI workflow**；常数守卫计数未排除测试夹具与注释，棘轮对测试代码增长失效（见开放问题） | `scripts/check_docs.py`、`scripts/check_threshold_integrity.py`、`scripts/check_no_index_identity.py`、`.github/workflows/` |
-| 统计形态（G-STATS） | **blocked** | 8 seed full 的 `two_make_pct` 0.621 / `pace` 234.5 / `free_throw_rate` 0.122 三项越出 `nba.v2.json` 带；机制定位已完成（`evidence/problem.md` §21） | 需修分区命中率模型与节奏机制；反事实投影证明门可达（203.1 ∈ 门） | `crates/engine/tests/stats_baseline.rs`、`crates/evaluator/fixtures/nba.v2.json`、`docs/dev/evidence/problem.md` §21 |
+| 统计形态（G-STATS） | **verified（`stats_baseline` 通过）/ partial（`free_throw_rate` 仍越界）** | `stats_baseline` 全绿；8 seed full 的 `total_p50` 213.5 / `two_make_pct` 0.536 / `three_make_pct` 0.337 / `three_attempt_rate` 0.334 / `pace` 218.4 均在各自带内；ORB% 0.244–0.330（真实 ~0.245） | 唯一未闭合：`free_throw_rate` 0.118 越出 [0.20, 0.35]，根因为**非投篮犯规路径完全缺失**（真实每场约 16 次）；不得调大 `foul_on_shot_rate` 凑带 | `crates/engine/tests/stats_baseline.rs`、`crates/evaluator/fixtures/nba.v2.json`、`docs/dev/evidence/problem.md` §21–§23 |
 
 ## 3. 当前未完成工作
 
@@ -120,9 +130,8 @@ D12 从本周期计划执行完毕后已从 `current/plan.md` 移除（该文件
 
 | 问题 | 依赖 | 下一验证动作 |
 | --- | --- | --- |
-| 统计形态越带（G-STATS） | 需先修分区命中率模型与节奏机制 | 按 `current/plan.md` §8 用规则覆盖做 A/B，附机制证据与反事实验证后再决定是否改默认值 |
-| 守卫未接线 | 无 | 将 `check_threshold_integrity.py` 与 `check_no_index_identity.py` 接入 CI workflow，并验证负面对照在 CI 中确实变红 |
-| 常数棘轮失效 | 无 | 修正 `check_inline_constants.py` 计数口径：排除测试夹具与注释中的数字后重建预算基线 |
+| `free_throw_rate` 越界（唯一未闭合的统计项） | 需新增非投篮犯规路径（无球/进攻/卡位犯规） | 在接触事实与裁决层新增该路径，走 GameRules 通道；附 8 seed 矩阵与反事实（关掉该路径应回落到 0.118） |
+| 常数棘轮口径已修正 | — | 已在 `323a012` 修复（`#[cfg(test)]` 段单独棘轮）；后续新增默认值按收编流程登记并附理由 |
 | `D12.6` 代码标识符遗留 | 无 | `debug-server::c6_6_tests` 等模块名仍用旧编号；不影响行为，可随下次触及该文件时改名 |
 
 ## 6. 当前周期计划入口
