@@ -1316,3 +1316,76 @@ box_score.turnovers（同一场）                   = 12
 破坏投篮犯规的真实结构（真实每场仅约 14 次跳投犯规）。
 
 该路径登记为后续任务，本提交不做数字试凑。
+
+### 23.12 `free_throw_rate` 的更深一层根因：接触裁定链存在但转化率过低
+
+§23.11.1 已确定差距在**犯规总数**（17.6 vs 真实约 40），并推断「非投篮犯规
+路径不存在」。进一步核对发现更准确的表述：**裁定链是齐备的，但几乎没有
+产出**。逐环节实测（seed42 full）：
+
+```text
+CONTACT 类事件            2475 次
+  ├ semantic_severity: FoulCandidate   84 次   ← 已达到犯规候选阈值
+  ├ Positional                         78
+  ├ Minor                            1342
+  └ None                              971
+
+实际 FOUL 事件            18 次
+```
+
+即 **84 个「犯规候选」只转化成约 12 次投篮类犯规**（另约 5 次来自跳投路径）。
+裁定链本身存在且被调用（`publish_events` → `resolve_semantic_contact`，
+`match_engine.rs:3711`），瓶颈在**概率**：
+
+```text
+probability = policy.foul_rate(0.12)
+            × (0.5 + impact_factor × 0.5)
+            × semantic_multiplier
+            × (1 + (0.5 − fouler_skill) × 0.35)
+```
+
+`semantic_multiplier` 由 `contact.context.legal_position` 决定：
+`legal_position_foul_multiplier = 0.15`（合法防守位置几乎不吹），
+`illegal_position_foul_multiplier = 1.0`。
+
+实测 84 个 FoulCandidate 的位置分布：
+
+| `legal_position` | 次数 |
+| --- | --- |
+| `false`（非法位置，multiplier 1.0） | **83** |
+| `true`（合法位置，multiplier 0.15） | 1 |
+
+按 `p ≈ 0.12 × 0.75 × 1.0 × 1.0 ≈ 0.09` 估算，83 个非法位置候选
+应产出约 **7.5 次**犯规——与实际观察到的非跳投犯规量级一致。
+所以瓶颈**不是** multiplier 被合法位置压制（实测几乎全是非法位置），
+而是**候选数量本身太少**：2475 次接触中只有 84 次（3.4%）达到
+`FoulCandidate` 阈值（相对速度 > 12.76 ft/s），而实测接触的
+`impact_speed` 中位数只有 **6.18 ft/s**、均值 6.08（最大 21.87）。
+
+也就是：**引擎里的接触强度分布整体偏低**，绝大多数身体接触达不到
+「可吹罚」的速度门槛。真实 NBA 每场约 40 次犯规来自大量中低强度接触
+（推、拉、hand-check、卡位、掩护），这些在真实规则下**不以高速碰撞
+为前提**，而引擎把犯规阈值绑在了速度上。
+
+按 (kind, legal_position) 细分这 84 次：
+
+| kind | 次数 |
+| --- | --- |
+| `Incidental` | 67 |
+| `ReboundContact` | 13 |
+| `BlockingCandidate` | 3 |
+| `ChargingCandidate` | 1 |
+
+即绝大多数是 `Incidental`（附带接触）却达到犯规速度阈值，而
+`BlockingCandidate`/`ChargingCandidate`（真正的防守/进攻犯规语义）只有 4 次。
+说明**语义分类与强度判定的组合还不足以表达真实犯规结构**。
+
+**结论**：`free_throw_rate` 的修复不是「加一个大常数」也不只是「新增一条
+路径」，而需要重建「哪些接触构成犯规」的判定口径——至少包括：
+无球/卡位/掩护类接触的犯规判定不依赖高速碰撞；`Incidental` 不应仅凭速度
+进入犯规候选。这是一项涉及 semantics 分类与 officiating 概率模型的改动，
+须单独设计并附完整证据包（8 seed 矩阵 + 反事实），不在本轮数字内完成。
+
+**状态：已定位到环节与量级，未修。** 明确不采用「调大 `foul_on_shot_rate`
+或 `ContactPolicy.foul_rate`」的路线：那会把犯规数凑到 40，同时让
+高速碰撞的吹罚率远超真实，用错误机制换正确数字。
