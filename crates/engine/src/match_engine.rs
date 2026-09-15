@@ -4209,9 +4209,9 @@ impl MatchEngine {
         // 跳投不会被犯规），基准经 GameRules 通道（charter C1）。
         // 犯规与命中相互独立，因此不能从 `is_made` 反推——
         // and-one（犯规且命中）与投篮犯规（犯规且不中）都要能表达。
-        let foul_probability =
-            (self.rules.resolve.base_rates.foul_on_shot_rate * openness.contest_intensity)
-                .clamp(f32::EPSILON, f32::from(1u8));
+        let foul_probability = (self.rules.resolve.base_rates.foul_on_shot_rate
+            * openness.contest_intensity)
+            .clamp(f32::EPSILON, f32::from(1u8));
         let fouled = self.rng.gen_bool(foul_probability as f64);
         let fouler_id = if fouled {
             openness.closest_defender_id.clone()

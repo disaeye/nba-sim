@@ -789,6 +789,10 @@ fn test_period_end_waits_for_shot_in_flight() {
         is_made: true,
         is_three: false,
         peak_z: 15.0,
+        // 该场景测试的是节末时钟行为，不涉及投篮犯规
+        // （`BallState::Shot` 自 v62 起携带犯规事实）。
+        fouled: false,
+        fouler_id: None,
     });
     let home_before = engine.home_score();
     engine.step();

@@ -49,6 +49,8 @@ fn legal_edges_are_accepted() {
                 is_made: true,
                 is_three: false,
                 peak_z: 14.0,
+                fouled: false,
+                fouler_id: None,
             },
         ),
         (
@@ -127,6 +129,8 @@ fn legal_edges_are_accepted() {
                 is_made: false,
                 is_three: false,
                 peak_z: 14.0,
+                fouled: false,
+                fouler_id: None,
             },
             BallState::RimRebound {
                 from_pos: Vec2::ZERO,
@@ -275,6 +279,8 @@ fn illegal_edges_are_rejected() {
         is_made: false,
         is_three: false,
         peak_z: 14.0,
+        fouled: false,
+        fouler_id: None,
     };
     assert!(transition_ball_state(&shot, held()).is_err());
     assert!(transition_ball_state(&shot, held()).is_err());
@@ -310,7 +316,9 @@ fn illegal_edges_are_rejected() {
             duration: 1.0,
             is_made: true,
             is_three: false,
-            peak_z: 10.0
+            peak_z: 10.0,
+            fouled: false,
+            fouler_id: None,
         }
     )
     .is_err());
@@ -335,7 +343,9 @@ fn illegal_edges_are_rejected() {
             duration: 1.0,
             is_made: false,
             is_three: false,
-            peak_z: 10.0
+            peak_z: 10.0,
+            fouled: false,
+            fouler_id: None,
         }
     )
     .is_err());
@@ -361,7 +371,9 @@ fn illegal_edges_are_rejected() {
             duration: 1.0,
             is_made: false,
             is_three: false,
-            peak_z: 10.0
+            peak_z: 10.0,
+            fouled: false,
+            fouler_id: None,
         }
     )
     .is_err());
