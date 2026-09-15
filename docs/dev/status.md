@@ -52,14 +52,14 @@
 | World 封装 | verified（字段可见性）/ partial（snapshot 投影） | `MatchEngine` 的 16 个 `pub` 字段已全部私有（`da453cf`），只保留只读访问器与显式 `*_for_test` 钩子；守卫判据已由「字段清单」升级为「零 `pub` 字段」（`0bc7496`），两类负面对照均能变红 | CLI/回放/评判尚未统一到单一只读 `snapshot()` 投影；`step_inner` 的阶段拆分属 D8 | `scripts/check_world_privacy.py`、`crates/engine/src/match_engine.rs`、`docs/dev/evidence/problem.md` §24 |
 | 球态单一写入口 | partial | domain 转换表、engine `transition_ball_state`、BallState 领域测试存在 | engine 内部仍使用 `BallTrajectoryKind` 别名和多个运行态派生字段；目标 `BallControl × BallMotion` 尚未完成 | `crates/domain/src/flow.rs`、`crates/engine/src/match_engine.rs`、`docs/dev/gap.md` §5 |
 | 主循环阶段化 | partial | 生命周期与子阶段类型存在，事件/不变量在主循环中接入 | `step_inner` 仍是大型编排函数，尚未兑现窄签名静态 Phase 序列 | `crates/engine/src/match_engine.rs`、`docs/architecture.md` §4 |
-| 能力扰动 | partial | 领域 capability 映射、属性扰动测试和 roster 资产存在 | 不是每个能力/倾向维度都已在 CI 中有独立、单调、反事实响应链 | `crates/domain/src/capability.rs`、`crates/engine/tests/attribute_perturbation.rs`、`docs/attributes.md` §2 |
+| 能力扰动 | partial | `evidence/problem.md` §29 已交付**逐维消费链清单**（29 维：19 有消费点、6 已实证零消费、3 名义有消费点但未接线）；领域 capability 映射、属性扰动测试与 roster 资产存在 | 29 维中**仅 7 维有扰动测试**（`free_throw` 独占 6 处用例）；零消费维度待接线或移除 | `crates/domain/src/capability.rs`、`crates/engine/tests/attribute_perturbation.rs`、`docs/attributes.md` §2、`docs/dev/evidence/problem.md` §29 |
 | 进攻战术资产化 | partial | 两个内置 JSON 档案、slot fill、能力适配和目标绑定已进入当前路径；**旧 `TacticalSet` 的 6 个硬编码几何分支已删除**（`db31fe7`，330 行死计算，8 seed 逐字段比对差异 0） | `TacticalSet` 仍作为**兼容/解析枚举**存在（`from_id`/`id`/`name_zh` 与 `tactical_set` 字段）；更多档案未纳入统一库；slot fill 回退路径仍按 roster 顺序 | `data/tactics/`、`crates/domain/src/tactics.rs`、`crates/decision/src/tactics.rs`、`crates/engine/src/match_engine.rs`、`docs/dev/evidence/problem.md` §26 |
-| 防守因果链 | partial | `DefenseRules` 从 `data/defense/schemes.json` 进入目标几何；防守效果测试要求方案差异 | 完整动作候选、责任图、动态换防和结果解释尚未统一接入 `decision/src/defense.rs` | `data/defense/schemes.json`、`crates/domain/src/rules.rs`、`crates/decision/src/defense.rs`、`crates/engine/tests/defense_effect.rs` |
+| 防守因果链 | partial | `DefenseRules` 从 `data/defense/schemes.json` 进入目标几何（`sag_multiplier` / `on_ball_gap_multiplier` / `help_priority` 已接线且有方向性断言）；`switch_aggressiveness` 经实测为零消费 | 三层声明**均未接线**（evidence §28）：`DefensiveSystem` 含四个子配置消费点全为 0；`decision/src/defense.rs` 两个评估函数全仓零调用；档案数据缺对位/换防/协防规则字段 | `data/defense/schemes.json`、`crates/domain/src/rules.rs`、`crates/domain/src/tactics.rs`、`crates/decision/src/defense.rs`、`crates/engine/tests/defense_effect.rs`、`docs/dev/evidence/problem.md` §28 |
 | 名册身份独立 | verified（守卫与回归范围） | roster JSON 数据资产、`check_no_index_identity.py`、顺序中性测试均存在；`PlayerRole` 与 `PlayerData.roles` 已物理删除（提交 `487293c`） | 仍需清理通用工具中以 index 访问的非身份用途，避免守卫只覆盖已知模式 | `data/roster/`、`scripts/check_no_index_identity.py`、`crates/engine/tests/roster_order_neutrality.rs` |
-| LeagueProfile | partial | `LeagueProfile` 类型、NBA/FIBA fixture 与 league 测试存在 | 不能以单场或类型存在宣称全部 NBA/FIBA 程序情景通过；NCAA 仍是路线项 | `crates/domain/src/league.rs`、`crates/engine/tests/league_profile.rs`、`crates/evaluator/fixtures/` |
+| LeagueProfile | partial | `LeagueProfile` 类型、NBA/FIBA fixture 与 league 测试存在；`e63d320` 新增 **6 个程序级情景用例**（节时长/ORB 时钟/三分几何/犯规上限/bonus 门槛/节末终场），其中三分几何用例带负面对照 | **交替拥有与罚球程序仍未覆盖**；评判 fixture 带来源/版本的契约未完成；固定种子矩阵未运行；NCAA 仍是路线项 | `crates/domain/src/league.rs`、`crates/engine/tests/league_profile.rs`、`crates/evaluator/fixtures/` |
 | 确定性与黄金哈希 | verified（现有测试范围） | golden hash 测试和事件 ID 单调测试存在 | 行为改动仍需按 protocol 重新冻结；黄金哈希不能证明真实性 | `crates/engine/tests/golden_hash.rs`、`docs/protocol.md` §3 |
 | 文档与阈值守卫 | verified（脚本范围） | `check_docs.py`、`no_index_identity`、`threshold_integrity`、阈值自测、常数自测、World privacy 自测均可运行；前四项含 `--self-test` 负面对照 | `check_threshold_integrity.py` 与 `check_no_index_identity.py` **尚未接线到任何 CI workflow**；常数守卫计数未排除测试夹具与注释，棘轮对测试代码增长失效（见开放问题） | `scripts/check_docs.py`、`scripts/check_threshold_integrity.py`、`scripts/check_no_index_identity.py`、`.github/workflows/` |
-| 统计形态（G-STATS） | **verified（`stats_baseline` 通过）/ partial（`free_throw_rate` 仍越界）** | `stats_baseline` 全绿；8 seed full 的 `total_p50` 213.5 / `two_make_pct` 0.536 / `three_make_pct` 0.337 / `three_attempt_rate` 0.334 / `pace` 218.4 均在各自带内；ORB% 0.244–0.330（真实 ~0.245） | 唯一未闭合：`free_throw_rate` 0.118 越出 [0.20, 0.35]，根因为**非投篮犯规路径完全缺失**（真实每场约 16 次）；不得调大 `foul_on_shot_rate` 凑带 | `crates/engine/tests/stats_baseline.rs`、`crates/evaluator/fixtures/nba.v2.json`、`docs/dev/evidence/problem.md` §21–§23 |
+| 统计形态（G-STATS） | **verified（`stats_baseline` 通过）/ partial（`free_throw_rate` 仍越界）** | `stats_baseline` 全绿；8 seed full 的 `total_p50` 213.5 / `two_make_pct` 0.536 / `three_make_pct` 0.337 / `three_attempt_rate` 0.334 / `pace` 218.4 均在各自带内；ORB% 0.244–0.330（真实 ~0.245） | 唯一未闭合：`free_throw_rate` 0.118 越出 [0.20, 0.35]。根因**已收窄到量级**：实测接触 `impact_speed` 中位数 6.18 ft/s vs 犯规候选门槛 12.76 ft/s——真实犯规多数不以高速碰撞为前提（§23.12）。不得调大 `foul_on_shot_rate` 凑带 | `crates/engine/tests/stats_baseline.rs`、`crates/evaluator/fixtures/nba.v2.json`、`docs/dev/evidence/problem.md` §21–§23 |
 
 ## 3. 当前未完成工作
 
@@ -137,12 +137,36 @@ D12 从本周期计划执行完毕后已从 `current/plan.md` 移除（该文件
 
 > 编号说明：`D12` 是本周期状态快照对已关闭任务的登记号；项内 `c6_6_tests` 等标识符是代码中的模块名，保留不改。
 
+### 4.2 本周期后续收敛（统计门关闭与结构欠账）
+
+在本周期内完成、已验证、且不再作为待办的项：
+
+| 项 | 结论 | 证据/提交 |
+| --- | --- | --- |
+| **G-STATS 统计门关闭** | 8 seed full：`total_p50` 237.0→**213.5**、`two_make_pct` 0.621→**0.536**、ORB% 0.070→**0.244–0.330**、`pace` 234.5→**218.4**；`stats_baseline` 转绿。**未改任何门限或分母** | `7e331fc`、`10f2a53`、`ef4bd39`；机制见 evidence §21–§23 |
+| 分区命中率模型（D8.4） | 修结构性缺陷：旧三分支只产生两种基准，使中距离按廊下基准（0.565）结算 | `7e331fc` |
+| 篮板冲抢指派（D8.5） | 修行为缺失：球在空中时守方靠近速率是攻方约 42 倍而两者近零 | `10f2a53` |
+| 失误计数单一入口（D8.6） | 修零写入字段：5 种失误终结只有 2 个自增点（实测 52 vs 12） | `ef4bd39` |
+| 抛投犯规路径（D8.7，部分） | 新增 `foul_on_shot_rate` 与 `box_score.fouls` 计数；`free_throw_rate` 仅升至 0.118（未闭合） | `9bef004`、`b47e88f` |
+| `BaseRates` 死参数清理（D9.4） | 删四个零消费字段，并区分「重复声明」与「未实现功能」两类 | `320bcaf`、`22bb764` |
+| 旧 `TacticalSet` 几何退役（D9.1） | 删 330 行死计算；三组对照实验 + 8 seed 逐字段比对差异 0 | `3e9011b`、`db31fe7` |
+| 球态边穷举矩阵（D8.3） | 10×10=100 种组合全覆盖（49 合法 / 51 非法），替代样例式测试 | `72661d5` |
+| NBA/FIBA 程序级 fixture（D11.1，部分） | 6 个程序级情景用例 + 负面对照 | `e63d320` |
+| 能力消费链清单（D10.1） | 29 维逐维清单，6 个零消费维度经实证确认 | `8410f75` |
+| 黄金哈希窗口缺口 | 窗口内无 2 分出手而不报错，现改为断言覆盖 | `041cdfe` |
+| 守卫失效面修复 | 常数棘轮不再把测试夹具计入生产预算；两项守卫接入 CI；文档守卫新增编号命名空间校验 | `323a012`、`0bc7496` |
+
+验证范围：`./scripts/run-tests.sh` **45 个套件全绿、0 失败**（含 `stats_baseline`）；6 项守卫 + 负面对照全通过。
+
 ## 5. 开放问题
 
 | 问题 | 依赖 | 下一验证动作 |
 | --- | --- | --- |
-| `free_throw_rate` 越界（唯一未闭合的统计项） | 需新增非投篮犯规路径（无球/进攻/卡位犯规） | 在接触事实与裁决层新增该路径，走 GameRules 通道；附 8 seed 矩阵与反事实（关掉该路径应回落到 0.118） |
-| 常数棘轮口径已修正 | — | 已在 `323a012` 修复（`#[cfg(test)]` 段单独棘轮）；后续新增默认值按收编流程登记并附理由 |
+| `free_throw_rate` 越界（唯一未闭合统计项） | 需重建犯规判定口径 | 实测接触 `impact_speed` 中位数 6.18 ft/s vs 犯规门槛 12.76 ft/s；真实犯规多数不以高速碰撞为前提（evidence §23.12）。应在 semantics 分类 + officiating 概率两层重建，附 8 seed 矩阵与反事实；**禁止**调大 `foul_on_shot_rate` 凑数 |
+| `carrier_idx` 删除阻塞 | 需先定「无关联球员的球态下谁算 ball handler」 | evidence §25 实证非等价重构（8 seed 213.5→212.0）；旧/新语义含义不同，属 gap.md §5.2 状态边责任问题 |
+| `GameRules` 零消费字段 | 分属四个未接线子系统 | 12 个已实证零消费（§27）；`def_*` 三字段随 D9.2 接线，`transition_*`/`clutch_*` 属 plan §10 范围外，需先决定是否本周期补齐 |
+| 能力维度零消费 | 分属四个未实现的战术行为 | 6 个已实证零消费（§29）：`agility`/`shooting_close`/`cut_frequency`/`screen_frequency`/`offensive_rebound_frequency`/`transition_sprint`；接线或标为未批准提案 |
+| 防守责任链三层未接线 | 需先补全档案数据 | `data/defense/schemes.json` 只有 4 个几何倍率，缺对位/换防/协防规则字段（§28） |
 | `D12.6` 代码标识符遗留 | 无 | `debug-server::c6_6_tests` 等模块名仍用旧编号；不影响行为，可随下次触及该文件时改名 |
 
 ## 6. 当前周期计划入口
