@@ -376,8 +376,8 @@ impl TacticalPlanner {
 
     #[allow(clippy::too_many_arguments)]
     fn plan_possession_targets_with_geometry(
-        tactical_set: TacticalSet,
-        sub_phase: SubPhase,
+        _tactical_set: TacticalSet,
+        _sub_phase: SubPhase,
         possession: Possession,
         _ball_pos: Vec2,
         carrier_idx: usize,
@@ -393,344 +393,46 @@ impl TacticalPlanner {
         let base_x = hoop.x;
         let dir = if is_home { -1.0 } else { 1.0 };
         let mid_y = court.hoop_y_ft;
-        let side_margin = court.height_ft * rules.court_side_margin_ratio;
-        let baseline_offset = court.width_ft * policy.initiation_distance_ratio;
-        let screen_offset = court.width_ft * policy.screen_distance_ratio;
+        let _side_margin = court.height_ft * rules.court_side_margin_ratio;
+        let _baseline_offset = court.width_ft * policy.initiation_distance_ratio;
+        let _screen_offset = court.width_ft * policy.screen_distance_ratio;
         let drive_offset = court.width_ft * policy.drive_distance_ratio;
-        let action_t = (progress_sec / policy.action_duration_seconds).clamp(0.0, 1.0);
+        let _action_t = (progress_sec / policy.action_duration_seconds).clamp(0.0, 1.0);
         let speed = |ratio: f32| rules.max_player_speed_ftps * ratio;
 
         let mut off_targets = Vec::with_capacity(5);
         let mut def_targets = Vec::with_capacity(5);
-        match tactical_set {
-            TacticalSet::HighPickAndRoll => {
-                let pg_spot = match sub_phase {
-                    SubPhase::Initiation => Vec2::new(base_x + dir * baseline_offset, mid_y),
-                    SubPhase::ActionExecution => Vec2::new(
-                        base_x + dir * (baseline_offset - action_t * drive_offset),
-                        mid_y + action_t * side_margin,
-                    ),
-                    _ => Vec2::new(base_x + dir * drive_offset, mid_y + side_margin * 0.6),
-                };
-
-                let c_spot = match sub_phase {
-                    SubPhase::Initiation => {
-                        Vec2::new(base_x + dir * screen_offset, mid_y + side_margin * 0.3)
-                    }
-                    _ => Vec2::new(base_x + dir * drive_offset * 0.5, mid_y),
-                };
-                let off_carrier_pos = live_off_positions
-                    .and_then(|p| p.get(carrier_idx).copied())
-                    .unwrap_or(pg_spot);
-                let drive_penetration = ((off_carrier_pos.x - hoop.x).abs() < 24.0) as u32 as f32;
-                let corner_lift = dir * drive_penetration * 4.0;
-                let sg_spot = Vec2::new(
-                    base_x + dir * screen_offset * 0.86 + corner_lift,
-                    side_margin,
-                );
-                let sf_spot = Vec2::new(
-                    base_x + dir * screen_offset * 0.86 + corner_lift,
-                    court.height_ft - side_margin,
-                );
-                let pf_spot = Vec2::new(base_x + dir * screen_offset, side_margin * 1.5);
-                let spots = [pg_spot, sg_spot, sf_spot, pf_spot, c_spot];
-                let slots = [
-                    "BallHandler",
-                    "CornerSpacer",
-                    "CornerSpacer",
-                    "WingSpacer",
-                    "ScreenAndRoll",
-                ];
-
-                for (i, (&spot, &slot)) in spots.iter().zip(slots.iter()).enumerate() {
-                    let is_carrier = i == carrier_idx;
-                    let action = if is_carrier {
-                        if sub_phase == SubPhase::ActionExecution {
-                            "DRIVE_OFF_SCREEN"
-                        } else {
-                            "DRIBBLE_TOP"
-                        }
-                    } else if i == 4 {
-                        if sub_phase == SubPhase::Initiation {
-                            "SET_HIGH_SCREEN"
-                        } else {
-                            "ROLL_TO_RIM"
-                        }
-                    } else {
-                        "SPOT_UP_3PT"
-                    };
-
-                    off_targets.push(TargetAssignment {
-                        player_id: None,
-                        target_pos: court.clamp_playable(spot, rules.player_radius_ft),
-                        speed: if is_carrier {
-                            speed(policy.carrier_speed_ratio)
-                        } else if i == 4 {
-                            speed(policy.screener_speed_ratio)
-                        } else {
-                            speed(policy.support_speed_ratio)
-                        },
-                        action: action.to_string(),
-                        slot: slot.to_string(),
-                        morale: if is_carrier {
-                            "HotHand".to_string()
-                        } else {
-                            "Normal".to_string()
-                        },
-                    });
-                }
-            }
-
-            TacticalSet::FiveOutMotion => {
-                // 5-Out perimeter motion with continuous cut & replace
-                let phase_shift = progress_sec * 0.8;
-                let spots = [
-                    Vec2::new(
-                        base_x + dir * baseline_offset,
-                        mid_y + phase_shift.sin() * side_margin * 0.5,
-                    ),
-                    Vec2::new(base_x + dir * screen_offset * 0.86, side_margin * 1.25),
-                    Vec2::new(
-                        base_x + dir * screen_offset * 0.86,
-                        court.height_ft - side_margin * 1.25,
-                    ),
-                    Vec2::new(base_x + dir * screen_offset, side_margin),
-                    Vec2::new(base_x + dir * screen_offset, court.height_ft - side_margin),
-                ];
-                let slots = [
-                    "Playmaker",
-                    "WingCutter",
-                    "WingCutter",
-                    "CornerSpacer",
-                    "CornerSpacer",
-                ];
-
-                for (i, (&spot, &slot)) in spots.iter().zip(slots.iter()).enumerate() {
-                    let is_carrier = i == carrier_idx;
-                    let action = if is_carrier {
-                        "BALL_MOVEMENT"
-                    } else {
-                        "PERIMETER_CUT"
-                    };
-                    off_targets.push(TargetAssignment {
-                        player_id: None,
-                        target_pos: court.clamp_playable(spot, rules.player_radius_ft),
-                        speed: speed(if is_carrier {
-                            policy.carrier_speed_ratio
-                        } else {
-                            policy.support_speed_ratio
-                        }),
-                        action: action.to_string(),
-                        slot: slot.to_string(),
-                        morale: "Normal".to_string(),
-                    });
-                }
-            }
-
-            TacticalSet::IsolationDrive => {
-                let iso_spot = match sub_phase {
-                    SubPhase::Initiation => {
-                        Vec2::new(base_x + dir * baseline_offset * 0.83, side_margin * 2.0)
-                    }
-                    SubPhase::ActionExecution => Vec2::new(
-                        base_x + dir * (baseline_offset * 0.83 - action_t * drive_offset),
-                        side_margin * 2.0 + action_t * side_margin * 0.9,
-                    ),
-                    _ => Vec2::new(base_x + dir * drive_offset * 0.6, mid_y),
-                };
-                let spots = [
-                    iso_spot,
-                    Vec2::new(base_x + dir * screen_offset, court.height_ft - side_margin),
-                    Vec2::new(
-                        base_x + dir * screen_offset * 0.8,
-                        court.height_ft - side_margin * 0.55,
-                    ),
-                    Vec2::new(
-                        base_x + dir * screen_offset * 0.95,
-                        mid_y + side_margin * 0.4,
-                    ),
-                    Vec2::new(
-                        base_x + dir * drive_offset * 0.6,
-                        court.height_ft - side_margin * 0.75,
-                    ),
-                ];
-                let slots = [
-                    "IsoStar",
-                    "WeaksideWing",
-                    "WeaksideCorner",
-                    "TopSpacer",
-                    "ShortCorner",
-                ];
-
-                for (i, (&spot, &slot)) in spots.iter().zip(slots.iter()).enumerate() {
-                    let is_carrier = i == carrier_idx;
-                    let action = if is_carrier {
-                        "ISOLATION_DRIVE"
-                    } else {
-                        "SPACING_CLEAROUT"
-                    };
-                    off_targets.push(TargetAssignment {
-                        player_id: None,
-                        target_pos: court.clamp_playable(spot, rules.player_radius_ft),
-                        speed: speed(if is_carrier {
-                            policy.carrier_speed_ratio
-                        } else {
-                            policy.support_speed_ratio
-                        }),
-                        action: action.to_string(),
-                        slot: slot.to_string(),
-                        morale: if is_carrier {
-                            "HotHand".to_string()
-                        } else {
-                            "Normal".to_string()
-                        },
-                    });
-                }
-            }
-
-            TacticalSet::DriveAndKick => {
-                let drive_spot = match sub_phase {
-                    SubPhase::Initiation => Vec2::new(base_x + dir * baseline_offset * 0.96, mid_y),
-                    _ => Vec2::new(base_x + dir * drive_offset * 0.53, mid_y),
-                };
-                let spots = [
-                    drive_spot,
-                    Vec2::new(base_x + dir * screen_offset * 0.8, side_margin * 0.9),
-                    Vec2::new(
-                        base_x + dir * screen_offset,
-                        court.height_ft - side_margin * 0.9,
-                    ),
-                    Vec2::new(
-                        base_x + dir * screen_offset * 0.95,
-                        mid_y - side_margin * 1.1,
-                    ),
-                    Vec2::new(
-                        base_x + dir * drive_offset * 0.6,
-                        court.height_ft - side_margin,
-                    ),
-                ];
-                let slots = [
-                    "Penetrator",
-                    "CornerSniper",
-                    "WingSniper",
-                    "TopReset",
-                    "DunkerSpot",
-                ];
-
-                for (i, (&spot, &slot)) in spots.iter().zip(slots.iter()).enumerate() {
-                    let is_carrier = i == carrier_idx;
-                    let action = if is_carrier {
-                        "COLLAPSE_PAINT"
-                    } else if i == 1 {
-                        "OPEN_CATCH_SHOOT"
-                    } else {
-                        "PERIMETER_STATION"
-                    };
-                    off_targets.push(TargetAssignment {
-                        player_id: None,
-                        target_pos: court.clamp_playable(spot, rules.player_radius_ft),
-                        speed: speed(if is_carrier {
-                            policy.carrier_speed_ratio
-                        } else {
-                            policy.support_speed_ratio
-                        }),
-                        action: action.to_string(),
-                        slot: slot.to_string(),
-                        morale: if i == 1 {
-                            "HotHand".to_string()
-                        } else {
-                            "Normal".to_string()
-                        },
-                    });
-                }
-            }
-
-            TacticalSet::PostUp => {
-                let c_post = Vec2::new(base_x + dir * drive_offset * 0.6, side_margin * 1.8);
-                let spots = [
-                    Vec2::new(base_x + dir * baseline_offset * 0.86, side_margin),
-                    Vec2::new(base_x + dir * screen_offset, court.height_ft - side_margin),
-                    Vec2::new(
-                        base_x + dir * screen_offset * 0.95,
-                        mid_y + side_margin * 0.6,
-                    ),
-                    Vec2::new(
-                        base_x + dir * screen_offset * 0.8,
-                        court.height_ft - side_margin * 0.6,
-                    ),
-                    c_post,
-                ];
-                let slots = [
-                    "EntryPasser",
-                    "WeaksideWing",
-                    "TopRelief",
-                    "CornerSpacer",
-                    "PostMaster",
-                ];
-                for (i, (&spot, &slot)) in spots.iter().zip(slots.iter()).enumerate() {
-                    let is_carrier = i == carrier_idx;
-                    let action = if i == 4 {
-                        "POST_UP_MOVE"
-                    } else if is_carrier {
-                        "FEED_THE_POST"
-                    } else {
-                        "SPACE_WEAKSIDE"
-                    };
-                    off_targets.push(TargetAssignment {
-                        player_id: None,
-                        target_pos: court.clamp_playable(spot, rules.player_radius_ft),
-                        speed: speed(if i == 4 {
-                            policy.screener_speed_ratio
-                        } else {
-                            policy.support_speed_ratio
-                        }),
-                        action: action.to_string(),
-                        slot: slot.to_string(),
-                        morale: if i == 4 {
-                            "HotHand".to_string()
-                        } else {
-                            "Normal".to_string()
-                        },
-                    });
-                }
-            }
-
-            TacticalSet::FastBreakTransition => {
-                let spots = [
-                    Vec2::new(base_x + dir * drive_offset * 0.53, mid_y),
-                    Vec2::new(base_x + dir * screen_offset * 0.65, side_margin),
-                    Vec2::new(
-                        base_x + dir * screen_offset * 0.65,
-                        court.height_ft - side_margin,
-                    ),
-                    Vec2::new(base_x + dir * baseline_offset * 0.83, mid_y),
-                    Vec2::new(base_x + dir * drive_offset * 0.8, mid_y - side_margin * 0.3),
-                ];
-                let slots = [
-                    "RimRunner",
-                    "LeftLaneSprinter",
-                    "RightLaneSprinter",
-                    "Trailer",
-                    "LobThreat",
-                ];
-
-                for (i, (&spot, &slot)) in spots.iter().zip(slots.iter()).enumerate() {
-                    let is_carrier = i == carrier_idx;
-                    off_targets.push(TargetAssignment {
-                        player_id: None,
-                        target_pos: court.clamp_playable(spot, rules.player_radius_ft),
-                        speed: speed(policy.transition_speed_ratio),
-                        action: if is_carrier {
-                            "FASTBREAK_LAYUP"
-                        } else {
-                            "TRANSITION_SPRINT"
-                        }
-                        .to_string(),
-                        slot: slot.to_string(),
-                        morale: "HotHand".to_string(),
-                    });
-                }
-            }
+        // 旧 `TacticalSet` 几何分支已退役（evidence/problem.md §26）。
+        //
+        // 那 6 个分支为每种旧战术枚举硬编码一套槽位几何，但引擎随后用
+        // **档案路径**（`plan_offense_from_spec`，见 `match_engine.rs`）
+        // 覆盖进攻侧，使这些位置成为每 tick 计算、每 tick 丢弃的死计算。
+        //
+        // 三组对照实验（8 seed full）证明删除是行为中性的：清空进攻输出、
+        // 或把全部进攻位置中性化后，逐 seed 全字段比对差异均为 0。
+        // 防守目标由 `live_off_positions`（实时位置）驱动；进攻槽位位置仅在
+        // 调用方传 `None` 时兜底，而引擎路径总是传 `Some`。
+        //
+        // 这里只保留防守循环所需的槽位**数量**与占位点；真正的进攻几何
+        // 由版本化战术档案负责（`docs/tactics.md` §2）。
+        for slot in [
+            "BallHandler",
+            "CornerSpacer",
+            "WingSpacer",
+            "ScreenAndRoll",
+            "Spacer",
+        ] {
+            off_targets.push(TargetAssignment {
+                player_id: None,
+                target_pos: court.clamp_playable(
+                    Vec2::new(base_x + dir * drive_offset, mid_y),
+                    rules.player_radius_ft,
+                ),
+                speed: speed(policy.carrier_speed_ratio),
+                action: "Spot".to_string(),
+                slot: slot.to_string(),
+                morale: "Normal".to_string(),
+            });
         }
         let carrier_pos = live_off_positions
             .and_then(|positions| positions.get(carrier_idx).copied())
