@@ -2318,10 +2318,80 @@ let severity = if relative_speed > max_speed × 0.58 { FoulCandidate } // L266
    卡位），且**每次犯规的分值后果与回合后果不同**——投篮犯规给 2/3 罚，
    非投篮犯规在 bonus 前**不给罚球也不终结回合**。
 
-第 3 点是关键：本引擎的犯规**一律终结回合并产生罚球**（见 §23.9 的路径
-设计），因此"犯规数"同时是"罚球数"和"回合数"的乘数。要解耦，需要
-先区分投篮犯规与非投篮犯规（后者在 bonus 前不罚球、不换回合），
-而不是调一个速度门槛。
+第 3 点是关键（但需精确表述）：本引擎的犯规在**后果上已经分化**——
+`match_engine.rs` 的犯规处理里：
+
+```rust
+if *is_shooting || team_fouls >= bonus_fouls_per_period { 给罚球 }
+```
+
+即**非投篮犯规且未到 bonus 时不给罚球**（这一点代码已正确）。
+
+真正缺少的是两点：
+
+1. **犯规分类本身不完整**：`is_shooting` 只来自突破/跳投路径，
+   卡位、无球、掩护类犯规没有产生路径（§28.2 已记录该层未接线）；
+2. **未到 bonus 的非投篮犯规是否终结回合**需单独核实——真实篮球里
+   进攻方继续进攻，而若引擎把它当成回合终结，则“犯规数”仍会
+   同时乘到“回合数”上。
 
 **该结论已登记为后续修复的前置条件**：`free_throw_rate` 的闭合依赖
 「犯规分类 + 后果分化」这一结构性改动，而非参数调优。
+
+### 32.9 更正与进一步定位：不是"缺少犯规分类"，而是**后果映射错误**
+
+§32.8 原写「本引擎的犯规一律终结回合并产生罚球」。核对代码后该表述**过强**，
+已在原处更正。实际事实分两层：
+
+**(a) 后果分化已存在（代码正确）**
+
+`match_engine.rs` 的犯规处理：
+
+```rust
+if *is_shooting || team_fouls >= bonus_fouls_per_period { 给罚球 }
+```
+
+即非投篮犯规在 bonus 前**不给罚球**。实测 seed42：17 次犯规中 12 次
+`is_shooting=true`、5 次 `false`；其中 3 次非投篮犯规确实"终结回合但无罚球"。
+
+**(b) 真正的缺陷：`is_shooting` 的映射把非投篮犯规标成了投篮犯规**
+
+`officiating/src/resolution.rs:358`：
+
+```rust
+is_shooting: matches!(
+    contact.kind,
+    ContactKind::BlockingCandidate
+        | ContactKind::ChargingCandidate
+        | ContactKind::ShootingContactCandidate
+)
+```
+
+按真实规则：
+
+| 接触语义 | 真实后果 | 代码后果 |
+| --- | --- | --- |
+| `ChargingCandidate`（带球撞人） | **进攻犯规**：无罚球，球权交**防守方** | `is_shooting=true` → 2 罚 |
+| `BlockingCandidate`（阻挡） | 防守犯规；若进攻方**非投篮动作**则非投篮犯规（bonus 前不罚球） | `is_shooting=true` → 2 罚 |
+| `ShootingContactCandidate`（投篮接触） | 投篮犯规 → 2/3 罚 | `is_shooting=true` → 2 罚 ✓ |
+
+即**两类非投篮犯规被无条件当成投篮犯规**，每次都产生 2 次罚球。
+这正是 §32.7 观察到的"犯规数 ≈ 罚球数"耦合的代码来源。
+
+### 32.10 这改变了修复方向（可修，且是具体缺陷）
+
+§32.8 的结论「需要结构性的犯规分类 + 后果分化」**需修正**：
+分类**已经存在**（`ContactKind` 三态 + `IllegalScreenCandidate`），
+后果分化**也已存在**（`is_shooting || bonus`）；缺的是**两者之间的正确映射**：
+
+1. `ChargingCandidate` 应映射为**进攻犯规**（球权转换、无罚球），而非投篮犯规；
+2. `BlockingCandidate` 应只在进攻方**处于投篮动作**时才是投篮犯规，
+   否则按非投篮犯规处理（受 bonus 条件约束）；
+3. `IllegalScreenCandidate` 同理（非投篮犯规）。
+
+这是一个**有限、可验证**的改动（不涉及新建分类层），但会显著改变
+犯规/罚球/球权结构，须附 8 seed 矩阵与反事实。
+
+**未在本轮实现**：§32.7 已证明该系统的 FT/total/pace 三者耦合，
+改动方向明确但需要按 `current/plan.md` §1 的纪律"先 A/B 再改默认值"，
+且要同时观察三个门。已登记为下一步。
