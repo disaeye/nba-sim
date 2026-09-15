@@ -1905,3 +1905,122 @@ acceleration ×2  defense_perimeter ×1  defense_interior ×1
 并配扰动测试。
 
 **已登记为 D10.2/D10.3 的输入。**
+
+---
+
+## 30. 固定种子矩阵运行结果（D11.2）
+
+> 目标（`current/plan.md` §7 D11.2）：运行固定种子矩阵，**分别记录** L1、
+> 因果账本、评判证据覆盖和构成准则，不能只保留综合指数（`gap.md` §18.4）。
+
+### 30.1 运行配置
+
+```text
+命令: nba-sim --seeds 0..15 batch full --out /dev/shm/nba16.ndjson
+范围: 16 场 full scope，NBA profile，fixture nba.v2
+工件: batch jsonl（每场一行）+ judgments.ndjson + attribution_report.json
+耗时: 121.5s（约 7.6s/场）
+```
+
+（工件写 `/dev/shm` 以遵守磁盘预算；单场 full 工件约 5.5 MiB，
+16 场约 0.09 GiB。）
+
+### 30.2 四类结果分期记录（不压成单一指数）
+
+**[1] L1 物理/状态不变量**
+
+```text
+violations 合计 = 0   （16 场逐场均为 0）
+```
+
+**[2] 因果账本**
+
+```text
+ledger_violations.ndjson 未生成
+```
+
+**这是一个真实缺口，不是数据为空的正常结果**：`check_ledger()` 只在
+**单场模式**（`run_single_simulation`，`crates/cli/src/main.rs:290`）
+被调用；**批量模式**（`run_batch_simulation`）全函数内
+`grep -c check_ledger` = **0**，且 batch jsonl 的字段里也没有任何
+ledger 相关项。
+
+即 CI 的 `stage-gate` job（跑 batch）**从未执行过账本对平**。
+`plan.md` §7.2 的出口门要求「账本和事件工件完整」，此条**不满足**。
+已登记为独立缺陷（见 §30.4）。
+
+**[3] 评判证据覆盖**
+
+```text
+total_judgments      = 32894
+evidence_coverage    = 0.995
+opportunities        = 32894
+passes               = 32575
+defects              = 140       (hard=0, soft=140)
+not_applicable       = 163
+insufficient_evidence= 16
+hard_gate_failed     = False
+```
+
+**缺陷按准则分布（带责任子系统，可直接定位）**：
+
+| 准则 | 责任 | 总数 | Hard | Soft |
+| --- | --- | --- | --- | --- |
+| `PHASE_DWELL_TIME` | engine | 48 | 0 | 48 |
+| `RHYTHM_DURATION` | decision | 35 | 0 | 35 |
+| `SHOT_PROFILE_ZONE_MIX` | decision | 16 | 0 | 16 |
+| `FT_RATE` | officiating | 15 | 0 | 15 |
+| `SHOT_MAKE_PROFILE` | decision | 10 | 0 | 10 |
+| `PACE_POSSESSIONS` | decision | 7 | 0 | 7 |
+| `SHOT_PROFILE_3PA_RATE` | decision | 5 | 0 | 5 |
+| `SHOT_QUALITY_CONTEST` | decision | 4 | 0 | 4 |
+
+全部 140 条均为 **Soft**（Hard = 0），且 `evidence_coverage` 0.995、
+`insufficient_evidence` 仅 16（占比 0.05%）——即评判结论建立在
+**近乎完整的证据**上，不是靠证据缺失换来的通过。
+
+**[4] 构成准则（逐项对照 `nba.v2.json` 的带）**
+
+| 准则 | 16 seed 实测 | 带 | 结果 |
+| --- | --- | --- | --- |
+| `two_make_pct` | 0.534 | [0.48, 0.58] | ✓ |
+| `three_make_pct` | 0.338 | [0.30, 0.40] | ✓ |
+| `three_attempt_rate` | 0.326 | [0.30, 0.45] | ✓ |
+| `two_attempt_rate` | 0.674 | [0.55, 0.70] | ✓ |
+| **`free_throw_rate`** | **0.119** | [0.20, 0.35] | **✗** |
+| `pace` | 217.6 | [185, 220] | ✓ |
+| `total_p50` | 219.0 | [140, 230] | ✓ |
+
+即 16 seed 矩阵下，**除 `free_throw_rate` 外全部入带**；
+`free_throw_rate` 与 8-seed 结论一致（0.119 vs 0.118），
+说明该缺口是系统性的、不随种子范围扩大而收敛。
+
+### 30.3 与 8-seed 结论的一致性
+
+| 指标 | 8 seed（§23） | 16 seed（本节） |
+| --- | --- | --- |
+| `total_p50` | 213.5 | 219.0 |
+| `two_make_pct` | 0.536 | 0.534 |
+| `three_make_pct` | 0.337 | 0.338 |
+| `pace` | 218.4 | 217.6 |
+| `free_throw_rate` | 0.118 | 0.119 |
+
+扩大种子范围后各项稳定，无新暴露的越界项——即 8 seed 的结论不是小样本巧合。
+
+### 30.4 本次运行暴露的新缺陷：批量模式不做账本对平
+
+**事实**：`check_ledger()` 仅在单场模式调用；`run_batch_simulation`
+全函数无任何账本检查，batch jsonl 也无 ledger 字段。
+
+**影响**：
+
+1. CI 的 `stage-gate` job 跑的是 batch，因此**四式（现五式）账本
+   从未在 CI 中对平过**；
+2. `plan.md` §7.2 出口门「账本和事件工件完整」不满足；
+3. 与 §23.10 的 `box_score.turnovers` 漏计同类：**账本对平只在
+   局部路径存在**，而批量路径——即被 CI 与计划反复引用的那条——
+   完全没有。
+
+**未修**：属 CLI 工件通道改动（需在 batch 里逐场跑 `check_ledger`
+并把结果纳入聚合与退出码），应与 `plan.md` §7.2 的出口门一起处理，
+避免"顺手补一行"绕过验收设计。已登记。
