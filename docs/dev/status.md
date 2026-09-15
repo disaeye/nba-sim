@@ -16,7 +16,15 @@
 
 ## 1.1 最近验证边界
 
-文档与守卫检查已通过；定向引擎回归中，归因、 防守几何、黄金哈希、有限信息传球和名册顺序中性测试通过。`stats_baseline` 仍未通过：8 个 full-game seed 的总分中位数为 237.0，超过现有阶段门 `[140, 230]`；同期平均回合数 234.5、平均回合时长 14.42 秒、三分命中率中位数 34.8%。该失败是当前行为校准门未闭合，不通过放宽测试范围或修改阈值处理。完整 workspace 测试尚未据此宣称通过。
+**基线提交与全量套件（2026-09-15）**：工作区已固定为 5 个提交（`8b34ff8`、`1c86c49`、`487293c`、`de15932`、`dd910ec`），工作树 clean。`./scripts/run-tests.sh` 结果：**22 个测试二进制中 21 绿 / 1 红，148 条断言通过 / 1 条失败**；唯一失败为 `stats_baseline::full_game_stats_within_baseline_band`。
+
+**回归判定**：同一测试在提交前后各跑一次，聚合输出**逐字节相同**（`total_p50=237.0`、`avg_poss=234.5`、`avg_dur=14.42s`、`3P%_median=34.8`）。因此该红门是**既存缺陷**，非提交引入的回归。六项守卫全部通过（含 4 项 `--self-test` 负面对照），且**逐提交**均通过 `check_threshold_integrity.py`（基准与被测源分离）。
+
+**红门定性**：这是**回归而非从未达标**——`status_history.md` §39 记录过该门通过（得分中位 197、回合 232、`cargo test --workspace` 41 套件全绿，黄金哈希 `v48`；当前 `v60`）。机制定位见 `docs/dev/evidence/problem.md` §21：
+
+- **两个结构性缺口**：`two_make_pct` 0.621 越带 [0.48, 0.58]（`match_engine.rs:4112-4120` 让中距离与篮下共用 `shot_make_2pt = 0.565`，仓库无分区命中率模型）；`pace` 234.5 越带 [185, 220]；`free_throw_rate` 0.122 越带 [0.20, 0.35]。
+- **漂移来源**：`v59`（round-18 攻框体系）与 `v60`（round-19 护框让位）把出手推向篮下，触发了上述结构性缺口。这两轮修的是真实缺陷（篮下出手占比过低），方向正确。
+- **门可达性**：把三个越界量收到各自带中点后投影总分为 203.1，落在门 `[140, 230]` 内——**不需放宽门**即可通过。
 
 ## 2. 门矩阵
 
@@ -37,10 +45,11 @@
 | 能力扰动 | partial | 领域 capability 映射、属性扰动测试和 roster 资产存在 | 不是每个能力/倾向维度都已在 CI 中有独立、单调、反事实响应链 | `crates/domain/src/capability.rs`、`crates/engine/tests/attribute_perturbation.rs`、`docs/attributes.md` §2 |
 | 进攻战术资产化 | partial | 两个内置 JSON 档案、slot fill、能力适配和目标绑定已进入当前路径 | `TacticalSet` 兼容枚举仍是主编排输入之一；更多档案未纳入统一库，回退路径仍按 roster 顺序 | `data/tactics/`、`crates/domain/src/tactics.rs`、`crates/decision/src/tactics.rs`、`crates/engine/src/match_engine.rs` |
 | 防守因果链 | partial | `DefenseRules` 从 `data/defense/schemes.json` 进入目标几何；防守效果测试要求方案差异 | 完整动作候选、责任图、动态换防和结果解释尚未统一接入 `decision/src/defense.rs` | `data/defense/schemes.json`、`crates/domain/src/rules.rs`、`crates/decision/src/defense.rs`、`crates/engine/tests/defense_effect.rs` |
-| 名册身份独立 | verified（守卫与回归范围） | roster JSON、starter 标记、`check_no_index_identity.py` 和顺序中性测试存在 | 仍需清理通用工具中以 index 访问的非身份用途，避免守卫只覆盖已知模式 | `data/roster/`、`scripts/check_no_index_identity.py`、`crates/engine/tests/roster_order_neutrality.rs` |
+| 名册身份独立 | verified（守卫与回归范围） | roster JSON 数据资产、`check_no_index_identity.py`、顺序中性测试均存在；`PlayerRole` 与 `PlayerData.roles` 已物理删除（提交 `487293c`） | 仍需清理通用工具中以 index 访问的非身份用途，避免守卫只覆盖已知模式 | `data/roster/`、`scripts/check_no_index_identity.py`、`crates/engine/tests/roster_order_neutrality.rs` |
 | LeagueProfile | partial | `LeagueProfile` 类型、NBA/FIBA fixture 与 league 测试存在 | 不能以单场或类型存在宣称全部 NBA/FIBA 程序情景通过；NCAA 仍是路线项 | `crates/domain/src/league.rs`、`crates/engine/tests/league_profile.rs`、`crates/evaluator/fixtures/` |
 | 确定性与黄金哈希 | verified（现有测试范围） | golden hash 测试和事件 ID 单调测试存在 | 行为改动仍需按 protocol 重新冻结；黄金哈希不能证明真实性 | `crates/engine/tests/golden_hash.rs`、`docs/protocol.md` §3 |
-| 文档与阈值守卫 | verified（脚本范围） | `check_docs.py`、阈值自测、常数自测、World privacy 自测可运行 | 文档语义引用和实现状态仍需持续人工审查；CI 已切换到当前文档守卫 | `scripts/check_docs.py`、`scripts/check_threshold_integrity.py`、`.github/workflows/` |
+| 文档与阈值守卫 | verified（脚本范围） | `check_docs.py`、`no_index_identity`、`threshold_integrity`、阈值自测、常数自测、World privacy 自测均可运行；前四项含 `--self-test` 负面对照 | `check_threshold_integrity.py` 与 `check_no_index_identity.py` **尚未接线到任何 CI workflow**；常数守卫计数未排除测试夹具与注释，棘轮对测试代码增长失效（见开放问题） | `scripts/check_docs.py`、`scripts/check_threshold_integrity.py`、`scripts/check_no_index_identity.py`、`.github/workflows/` |
+| 统计形态（G-STATS） | **blocked** | 8 seed full 的 `two_make_pct` 0.621 / `pace` 234.5 / `free_throw_rate` 0.122 三项越出 `nba.v2.json` 带；机制定位已完成（`evidence/problem.md` §21） | 需修分区命中率模型与节奏机制；反事实投影证明门可达（203.1 ∈ 门） | `crates/engine/tests/stats_baseline.rs`、`crates/evaluator/fixtures/nba.v2.json`、`docs/dev/evidence/problem.md` §21 |
 
 ## 3. 当前未完成工作
 
@@ -107,11 +116,20 @@ D12 从本周期计划执行完毕后已从 `current/plan.md` 移除（该文件
 
 > 编号说明：`D12` 是本周期状态快照对已关闭任务的登记号；项内 `c6_6_tests` 等标识符是代码中的模块名，保留不改。
 
-## 5. 当前周期计划入口
+## 5. 开放问题
+
+| 问题 | 依赖 | 下一验证动作 |
+| --- | --- | --- |
+| 统计形态越带（G-STATS） | 需先修分区命中率模型与节奏机制 | 按 `current/plan.md` §8 用规则覆盖做 A/B，附机制证据与反事实验证后再决定是否改默认值 |
+| 守卫未接线 | 无 | 将 `check_threshold_integrity.py` 与 `check_no_index_identity.py` 接入 CI workflow，并验证负面对照在 CI 中确实变红 |
+| 常数棘轮失效 | 无 | 修正 `check_inline_constants.py` 计数口径：排除测试夹具与注释中的数字后重建预算基线 |
+| `D12.6` 代码标识符遗留 | 无 | `debug-server::c6_6_tests` 等模块名仍用旧编号；不影响行为，可随下次触及该文件时改名 |
+
+## 6. 当前周期计划入口
 
 详见 [`current/plan.md`](current/plan.md)。计划只描述上述未完成工作的依赖和验收，不复制已经完成的 Round-6–17 执行记录。
 
-## 6. 证据索引
+## 7. 证据索引
 
 - 历史问题复现与逐 seed 结果：[`evidence/problem.md`](evidence/problem.md)；
 - 历史伤害排序：[`evidence/impact_assessment.md`](evidence/impact_assessment.md)；
