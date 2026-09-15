@@ -39,6 +39,12 @@ impl LedgerViolation {
 }
 
 /// 从事件流独立重建四本账并检查平衡。
+/// 账本对平的方程数（供调用方报告用，避免硬编码数量在加式后漂移）。
+///
+/// 新增一条守恒式时必须同步此值：`crates/evaluator/src/ledger.rs`
+/// 的 `check_ledger()` 是唯一权威，本常量只是它的声明式投影。
+pub const LEDGER_EQUATION_COUNT: usize = 5;
+
 pub fn check_ledger(ticks: &[StreamTick]) -> Vec<LedgerViolation> {
     let mut violations = Vec::new();
     if ticks.is_empty() {

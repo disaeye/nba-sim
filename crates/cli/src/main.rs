@@ -385,6 +385,13 @@ fn run_batch_simulation(
     let mut fg3_pct_list = Vec::with_capacity(seeds.len());
     let mut total_violations = 0;
     let mut all_judgments: Vec<nba_evaluator::Judgment> = Vec::new();
+    // 账本对平（plan §7.2 出口门「账本和事件工件完整」）。
+    //
+    // 此前 `check_ledger()` 只在单场模式被调用，批量模式（即 CI 的
+    // `stage-gate` job 跑的那条路径）**从未做过账本对平**，batch jsonl
+    // 也没有任何 ledger 字段。实测见 evidence/problem.md §30.4。
+    let mut total_ledger_violations = 0usize;
+    let mut ledger_report: Vec<serde_json::Value> = Vec::new();
 
     let stats_writer = out_path.map(|path| {
         let file = File::create(path)?;
@@ -480,6 +487,22 @@ fn run_batch_simulation(
                         j
                     }),
             );
+            // 账本对平：与单场模式同一函数，避免第二套口径。
+            let ledger_violations = nba_evaluator::check_ledger(&ticks);
+            total_ledger_violations += ledger_violations.len();
+            ledger_report.push(serde_json::json!({
+                "seed": seed,
+                "ledger_violations": ledger_violations.len(),
+                "equations_checked": nba_evaluator::LEDGER_EQUATION_COUNT,
+            }));
+            if !ledger_violations.is_empty() {
+                for v in ledger_violations.iter().take(5) {
+                    eprintln!(
+                        "   ⚠️ seed {} ledger violation: {} — {}",
+                        seed, v.equation, v.detail
+                    );
+                }
+            }
         }
         // 临时流由 `guard` 在作用域结束时删除（RAII，异常安全）。
         drop(guard);
@@ -516,6 +539,15 @@ fn run_batch_simulation(
             format!("{}.attribution_report.json", base),
             serde_json::to_string_pretty(&report).map_err(std::io::Error::other)?,
         )?;
+        // 逐场账本结果落盘：与单场模式的 ledger_violations.ndjson 同源同义。
+        fs::write(
+            format!("{}.ledger_report.json", base),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "games": ledger_report,
+                "total_ledger_violations": total_ledger_violations,
+            }))
+            .map_err(std::io::Error::other)?,
+        )?;
     }
 
     total_points_list.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -542,6 +574,12 @@ fn run_batch_simulation(
     println!("   Median Poss Duration: {:.2}s", median_dur);
     println!("   Median 3P Accuracy: {:.1}%", median_3p);
     println!("   Total Axiom Violations: {}", total_violations);
+    // 账本对平结果必须与违规数并列可见：轴门与账本是两类不同的失败，
+    // 不能只看其中一个（plan §7.2）。
+    println!(
+        "   Total Ledger Violations: {} (5 equations per game)",
+        total_ledger_violations
+    );
     println!(
         "   Realism Index: {:.3} ({} judgments, {} defects) — fixture {}",
         report.realism_index, report.total_judgments, report.defect_count, report.fixture_version
@@ -552,6 +590,16 @@ fn run_batch_simulation(
     );
 
     if total_violations > 0 {
+        std::process::exit(1);
+    }
+    // 账本不平衡 = Hard（与单场模式同一判据）：金额式不对平意味着
+    // 事实流不能独立重建比赛，比任何分布偏差都更严重。
+    if total_ledger_violations > 0 {
+        eprintln!(
+            "⛔ batch LEDGER gate FAILED: {} violation(s) across {} games",
+            total_ledger_violations,
+            seeds.len()
+        );
         std::process::exit(1);
     }
     // gap.md \u00a718.6\uff1abatch \u6b64\u524d\u53ea\u628a Hard \u95e8\u6253\u5370\u6210\u4e00\u884c\uff0c\u5373\u4fbf

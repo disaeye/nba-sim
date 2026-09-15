@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 pub mod fixture;
 pub use fixture::ReferenceDistributions;
 pub mod ledger;
-pub use ledger::{check_ledger, LedgerViolation};
+pub use ledger::{check_ledger, LedgerViolation, LEDGER_EQUATION_COUNT};
 pub mod pbp;
 pub use pbp::{convert_pbp_events_to_fixture, PbpEvent};
 
