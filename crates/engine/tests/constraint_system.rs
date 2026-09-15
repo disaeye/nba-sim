@@ -979,8 +979,16 @@ fn physics_contact_is_promoted_to_semantic_event_stream() {
     rules.tip_off_duration_seconds = 0.0;
     rules.contact_margin_ft = 0.2;
     let mut engine = MatchEngine::with_rules(808, rules);
-    engine.physics_mut_for_test().get_player_mut("H_01").unwrap().pos_ft = Vec2::new(30.0, 25.0);
-    engine.physics_mut_for_test().get_player_mut("A_01").unwrap().pos_ft = Vec2::new(33.0, 25.0);
+    engine
+        .physics_mut_for_test()
+        .get_player_mut("H_01")
+        .unwrap()
+        .pos_ft = Vec2::new(30.0, 25.0);
+    engine
+        .physics_mut_for_test()
+        .get_player_mut("A_01")
+        .unwrap()
+        .pos_ft = Vec2::new(33.0, 25.0);
     let tick = engine.step();
     assert!(
         tick.frame
@@ -1000,9 +1008,21 @@ fn screen_contact_classification_uses_tactical_action_context() {
     rules.tip_off_duration_seconds = 0.0;
     rules.contact_margin_ft = 0.2;
     let mut engine = MatchEngine::with_rules(909, rules);
-    engine.physics_mut_for_test().get_player_mut("H_01").unwrap().pos_ft = Vec2::new(30.0, 25.0);
-    engine.physics_mut_for_test().get_player_mut("H_01").unwrap().action = "SET_HIGH_SCREEN".to_string();
-    engine.physics_mut_for_test().get_player_mut("A_01").unwrap().pos_ft = Vec2::new(33.0, 25.0);
+    engine
+        .physics_mut_for_test()
+        .get_player_mut("H_01")
+        .unwrap()
+        .pos_ft = Vec2::new(30.0, 25.0);
+    engine
+        .physics_mut_for_test()
+        .get_player_mut("H_01")
+        .unwrap()
+        .action = "SET_HIGH_SCREEN".to_string();
+    engine
+        .physics_mut_for_test()
+        .get_player_mut("A_01")
+        .unwrap()
+        .pos_ft = Vec2::new(33.0, 25.0);
     let tick = engine.step();
     assert!(
         tick.frame
