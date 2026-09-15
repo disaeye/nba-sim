@@ -389,27 +389,144 @@ fn perturbation_off_ball_sense_raises_offensive_board_rate() {
 }
 
 // ---------------------------------------------------------------------------
-// 负面对照（M9 验收：断路一条链，测试必须红）
+// D10.3 · 断路负面对照
+//
+// 要求（current/plan.md §6.2）：「断路后测试必红，恢复后必绿」。
+//
+// 关键区别：**不是**手写一个常数函数再断言它不响应（那只证明了常数是常数）。
+// 而是把单调性判定抽成**可复用的 harness**，然后用同一份 harness 同时验证：
+//   - 接线链路 → harness 通过（正向）；
+//   - 断开链路 → **harness 报错**（负向）。
+// 这才证明 harness 本身有区分力，而非"恰好通过"。
 // ---------------------------------------------------------------------------
 
-/// 模拟"常数短路"的评分函数：无视属性、恒定返回。
-fn decoupled_free_throw_probability(_rules: &GameRules, _attributes: &PlayerAttributes) -> f32 {
-    0.77
+/// 单调性判定的通用 harness。
+///
+/// 给定「单维属性值 → 观测量」的评分函数，检查在 `[low_in, high_in]`
+/// 区间内响应方向是否与 `expect_increase` 一致。返回 `Err` 表示该链路
+/// **无响应或方向错误** —— 即 charter C1 意义的「死链」。
+///
+/// 之所以让 harness 返回 `Result` 而不是直接 `assert!`：负面对照需要断言
+/// 「harness 确实会拒绝一条断链」，这要求判定结果可被检查。
+fn check_monotonic_response(
+    label: &str,
+    score: impl Fn(f32) -> f32,
+    low_in: f32,
+    high_in: f32,
+    expect_increase: bool,
+    min_magnitude: f32,
+) -> Result<f32, String> {
+    let low = score(low_in);
+    let high = score(high_in);
+    let delta = high - low;
+
+    if !low.is_finite() || !high.is_finite() {
+        return Err(format!("{label}: non-finite response ({low}, {high})"));
+    }
+    // 幅度门：防止"响应极小但符号正确"被当作有效链路。
+    // 实测三条链路的响应幅度为 0.48 / 0.24 / 2.00，故 0.01 的门是宽松的。
+    if delta.abs() < min_magnitude {
+        return Err(format!(
+            "{label}: no usable response (delta {delta:.5} < {min_magnitude}); \
+             the link is decoupled or constant-short-circuited"
+        ));
+    }
+    if expect_increase && delta <= 0.0 {
+        return Err(format!(
+            "{label}: expected increase, got delta {delta:.5} (low={low}, high={high})"
+        ));
+    }
+    if !expect_increase && delta >= 0.0 {
+        return Err(format!(
+            "{label}: expected decrease, got delta {delta:.5} (low={low}, high={high})"
+        ));
+    }
+    Ok(delta)
 }
 
+/// 负面对照①：harness 必须**拒绝**一条常数短路（死链）。
 #[test]
-fn negative_control_dead_link_is_detected_by_the_harness() {
-    // 故意断路：用无视属性的常数评分。harness 的单调性判定必须发现它
-    // 不再响应 —— 即"扰动后行为不动"会被本 harness 判红。
-    let rules = GameRules::default();
-    let low = decoupled_free_throw_probability(&rules, &attrs_with(|a| a.free_throw = 0.1));
-    let high = decoupled_free_throw_probability(&rules, &attrs_with(|a| a.free_throw = 0.9));
-    assert_eq!(
-        low, high,
-        "a decoupled (dead) link shows no response; the harness flags this as C1 violation"
+fn negative_control_harness_rejects_a_constant_short_circuit() {
+    // 无视输入、恒定返回 —— 典型的"规则曲线被短路成常数"。
+    let dead = |_x: f32| 0.77_f32;
+    let verdict = check_monotonic_response("dead", dead, 0.1, 0.9, true, 0.01);
+    assert!(
+        verdict.is_err(),
+        "harness must reject a decoupled constant link, got {verdict:?}"
     );
-    // 对照：接线后的真实链路同断言不成立。
-    let wired_low = free_throw_probability(&rules, &attrs_with(|a| a.free_throw = 0.1));
-    let wired_high = free_throw_probability(&rules, &attrs_with(|a| a.free_throw = 0.9));
-    assert_ne!(wired_low, wired_high, "wired link must respond");
+}
+
+/// 负面对照②：harness 必须拒绝**方向相反**的链路。
+///
+/// 这防止 harness 退化成"只看有没有变化"。
+#[test]
+fn negative_control_harness_rejects_wrong_direction() {
+    // 真实 free_throw 链路是递增的；此处故意声明"期望递减"。
+    let rules = GameRules::default();
+    let verdict = check_monotonic_response(
+        "free_throw (wrong expectation)",
+        |x| free_throw_probability(&rules, &attrs_with(|a| a.free_throw = x)),
+        0.1,
+        0.9,
+        /* expect_increase = */ false,
+        0.01,
+    );
+    assert!(
+        verdict.is_err(),
+        "harness must reject a link whose direction contradicts the expectation"
+    );
+}
+
+/// 负面对照③：harness 必须拒绝**幅度过小**的响应。
+#[test]
+fn negative_control_harness_rejects_negligible_magnitude() {
+    let tiny = |x: f32| 0.5 + x * 1e-6;
+    let verdict = check_monotonic_response("tiny", tiny, 0.1, 0.9, true, 0.01);
+    assert!(
+        verdict.is_err(),
+        "harness must reject a response below the magnitude gate (virtual dead link)"
+    );
+}
+
+/// 正面对照：三条真实链路必须**通过**同一个 harness。
+///
+/// 与上面三个负面对照共用同一函数，因此"通过"具有区分力：
+/// 若 harness 退化为恒真，这三个用例仍会通过而负面对照会失败；
+/// 若 harness 退化为恒假，负面对照会通过而这里会失败。
+#[test]
+fn positive_controls_pass_the_same_harness() {
+    let rules = GameRules::default();
+
+    // (1) 接球半径：ball_handling 递增。
+    let d = check_monotonic_response(
+        "catch_radius",
+        |x| effective_catch_radius(&rules, &attrs_with(|a| a.ball_handling = x)),
+        0.1,
+        0.9,
+        true,
+        0.01,
+    );
+    assert!(d.is_ok(), "wired catch radius must pass: {d:?}");
+
+    // (2) 预估噪声：off_ball_sense 递减（反向链路）。
+    let d = check_monotonic_response(
+        "estimate_noise",
+        |x| receive_estimate_noise(&rules, &attrs_with(|a| a.off_ball_sense = x)),
+        0.1,
+        0.9,
+        false,
+        0.01,
+    );
+    assert!(d.is_ok(), "wired estimate noise must pass: {d:?}");
+
+    // (3) 罚球概率：free_throw 递增。
+    let d = check_monotonic_response(
+        "free_throw",
+        |x| free_throw_probability(&rules, &attrs_with(|a| a.free_throw = x)),
+        0.1,
+        0.9,
+        true,
+        0.01,
+    );
+    assert!(d.is_ok(), "wired free throw must pass: {d:?}");
 }
