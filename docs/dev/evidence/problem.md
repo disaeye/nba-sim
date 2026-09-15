@@ -1732,3 +1732,75 @@ pub fn pass_duration(&self, distance_ft: f32, inbound: bool) -> f32 {
 **登记为 D9.3 的输入**：`D9.2 防守责任链` 应消费 `def_*` 三字段；
 `transition_*` 与 `clutch_*` 属 `plan.md` §11「暂不纳入本周期」范围内的
 候选（需先决定是否本周期补齐）。
+
+---
+
+## 28. 防守责任链的接线缺口盘点（D9.2 前置）
+
+> 目标（`current/plan.md` §5 D9.2）：slot fill、对位、协防、换防、恢复和
+> 轮换都输出**结构化责任**，而不是只输出目标坐标；让档案字段进入决策
+> 候选、执行重校验和结果解释。
+
+### 28.1 已接线（真实生效）
+
+| 机制 | 位置 | 证据 |
+| --- | --- | --- |
+| 领防人间隔倍率 | `tactics.rs` `defensive_gap_ft * on_ball_gap_multiplier` | `defense_effect.rs` 方向性断言 |
+| 协防深度倍率 | `tactics.rs` `help_sag_ratio * sag_multiplier` | 同上（zone/drop 比 man 更收缩） |
+| 协防方向倾斜 | `help_priority` → `help_hoop_weight_base` + `tilt_gain` | `help_priority == 0.5` 逐位复原历史公式 |
+
+### 28.2 未接线（声明存在、零消费）
+
+**(a) `switch_aggressiveness`（换防激进程度）**
+
+`DefenseRules` 字段，注释即写明「用于**后续** switch 执行链」。实测：
+把 `data/defense/schemes.json` 中 6 个方案的该值**全部改为 1.0**，
+seed42 黄金哈希逐位不变（`0xa25e5c57…`）→ **零消费**。
+
+**(b) `DefensiveSystem` 整个档案层**
+
+`crates/domain/src/tactics.rs:85` 声明了 `DefensiveSystem`，含四个子配置：
+
+| 子结构 | 消费点 |
+| --- | --- |
+| `OnBallDefenseConfig` | **0** |
+| `HelpDefenseConfig` | **0** |
+| `ScreenDefenseConfig` | **0** |
+| `MatchupRule` | **0** |
+
+`DefensiveSystem` 自身也仅被 `domain/src/lib.rs` 重导出，无任何读取。
+
+**(c) `decision/src/defense.rs` 的两个评估函数**
+
+`evaluate_gamble_interception()`（防守赌博式抢断）与
+`evaluate_rim_help_vs_shooter()`（护框协防 vs 对位出手）——
+**全仓零调用点**（`grep` 仅命中定义）。其 `DefensiveCandidateAction`
+枚举同样零使用。
+
+### 28.3 现状的真实结构
+
+即当前防守行为**只由一条路径产生**：`tactics.rs` 的几何公式
+（领防人间隔 + 协防深度/方向），输入是 `DefenseRules` 的 4 个几何倍率。
+
+而「防守**责任**」的三层声明——**档案层**（`DefensiveSystem`）、
+**候选层**（`DefensiveCandidateAction`）、**评估层**
+（`evaluate_*`）——都已存在但**从未接线**。
+
+这与 `gap.md` §10.4「防守责任图」和 `architecture.md` §5
+「机会—意图—执行」的差距一致：现状是「几何目标」，不是「责任分配」。
+
+### 28.4 处置与依赖
+
+本轮**不改代码**，理由是这属于**新增行为链**而非重构：
+
+1. 接线 `DefensiveCandidateAction`（switch/drop/hedge/recover）会让
+   决策层首次出现防守动作候选，改变行为，必须按 `plan.md` §1 附
+   8 seed 矩阵 + 反事实证据；
+2. `DefensiveSystem` 的档案格式（`on_ball`/`help`/`screen_defense`/
+   `matchup_rules`）需先与 `data/defense/schemes.json` 的实际字段对齐
+   ——后者目前只有 4 个几何倍率 + help 混合参数，**没有**档案层所需的
+   对位/换防/协防规则字段；
+3. 即「档案层接线」的前提是「档案数据先补全」，属 D9.2 的完整工作量。
+
+**已登记为 D9.2 的输入**：本轮只交付接线缺口的准确清单与证据，
+不交付半接线的行为改动。
