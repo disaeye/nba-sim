@@ -70,10 +70,14 @@ fn check_score_conservation(ticks: &[StreamTick], out: &mut Vec<LedgerViolation>
         for event in &tick.frame.event_log {
             match event.kind.as_str() {
                 "SCORE" => {
-                    let Some(arrival) = event.data.as_ref().and_then(|d| d.get("HoopArrival")) else {
+                    let Some(arrival) = event.data.as_ref().and_then(|d| d.get("HoopArrival"))
+                    else {
                         let mut v = LedgerViolation::new(
                             "SCORE_CONSERVATION",
-                            format!("tick {} SCORE fact without HoopArrival payload", tick.frame.t),
+                            format!(
+                                "tick {} SCORE fact without HoopArrival payload",
+                                tick.frame.t
+                            ),
                         );
                         v.tick = Some(tick.frame.event_sequence);
                         out.push(v);
@@ -105,33 +109,33 @@ fn check_score_conservation(ticks: &[StreamTick], out: &mut Vec<LedgerViolation>
                         other => {
                             out.push(LedgerViolation::new(
                                 "SCORE_CONSERVATION",
-                                format!("tick {} score with unknown shooter team prefix '{other}'", tick.frame.t),
+                                format!(
+                                    "tick {} score with unknown shooter team prefix '{other}'",
+                                    tick.frame.t
+                                ),
                             ));
                         }
                     }
                 }
                 "FREE_THROW" => {
-                    let Some(ft) = event.data.as_ref().and_then(|d| d.get("FreeThrowAttempt")) else {
+                    let Some(ft) = event.data.as_ref().and_then(|d| d.get("FreeThrowAttempt"))
+                    else {
                         continue;
                     };
-                    let made = ft
-                        .get("made")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
+                    let made = ft.get("made").and_then(|v| v.as_bool()).unwrap_or(false);
                     if !made {
                         continue;
                     }
-                    match ft
-                        .get("shooter_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                    {
+                    match ft.get("shooter_id").and_then(|v| v.as_str()).unwrap_or("") {
                         s if s.starts_with("H_") => home_from_events += 1,
                         s if s.starts_with("A_") => away_from_events += 1,
                         other => {
                             out.push(LedgerViolation::new(
                                 "SCORE_CONSERVATION",
-                                format!("tick {} made free throw with unknown shooter '{other}'", tick.frame.t),
+                                format!(
+                                    "tick {} made free throw with unknown shooter '{other}'",
+                                    tick.frame.t
+                                ),
                             ));
                         }
                     }
@@ -446,9 +450,7 @@ mod tests {
         )];
         let violations = check_ledger(&ticks);
         assert!(
-            violations
-                .iter()
-                .any(|v| v.equation == "TIME_CONSERVATION"),
+            violations.iter().any(|v| v.equation == "TIME_CONSERVATION"),
             "zero-duration possession must be caught: {violations:?}"
         );
     }

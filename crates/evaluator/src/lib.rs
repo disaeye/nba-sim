@@ -73,6 +73,7 @@ pub fn criterion_severity(criterion: &str) -> &'static str {
     match criterion {
         "POSSESSION_DURATION_BOUNDS"
         | "PASS_CORRIDOR_REACHABLE"
+        | "PASS_LANDING_FACT_MISMATCH"
         | "STEAL_CORRIDOR"
         | "SCORE_SOURCE_CAUSALITY"
         | "TURNOVER_ATTRIBUTION"
@@ -82,6 +83,7 @@ pub fn criterion_severity(criterion: &str) -> &'static str {
         | "POSSESSION_COVERAGE" => "hard",
 
         "RHYTHM_DURATION"
+        | "RECEIVE_ESTIMATE_DIVERGENCE"
         | "ACTION_COMPOSITION_PASSES"
         | "SHOT_QUALITY_CONTEST"
         | "PHASE_DWELL_TIME"
@@ -167,6 +169,13 @@ pub struct AttributionReport {
     pub realism_index: f32,
     /// 任一 Hard defect 存在即为 true；此时 realism_index 无效（置 0）。
     pub hard_gate_failed: bool,
+    /// Hard defect 条数；`defect_count` 是 Hard+Soft 合计。
+    ///
+    /// 消费方报告门禁时必须用本字段：把「Hard + Soft 合计」写成「Hard 缺陷」
+    /// 会高估严重度，与被本项修复的「以聚合量掩盖真相」是同一类错误。
+    pub hard_defect_count: usize,
+    /// Soft defect 条数。
+    pub soft_defect_count: usize,
     pub total_judgments: usize,
     pub defect_count: usize,
     /// 固定分母五元组（dev 方案 §4 D1.1）：各 verdict 计数。
@@ -220,6 +229,8 @@ pub fn attribution_report(judgments: &[Judgment], fixture_version: &str) -> Attr
     let mut not_applicable = 0usize;
     let mut insufficient_evidence = 0usize;
     let mut hard_gate_failed = false;
+    let mut hard_defect_count = 0usize;
+    let mut soft_defect_count = 0usize;
     let mut by_criterion: BTreeMap<(String, &'static str), (usize, usize, usize)> = BTreeMap::new();
     for j in judgments {
         opportunities += 1;
@@ -235,6 +246,9 @@ pub fn attribution_report(judgments: &[Judgment], fixture_version: &str) -> Attr
                 defect_w += weight(&j.severity);
                 if j.severity != "soft" {
                     hard_gate_failed = true;
+                    hard_defect_count += 1;
+                } else {
+                    soft_defect_count += 1;
                 }
                 let e = by_criterion
                     .entry((j.criterion.clone(), j.attribution))
@@ -280,6 +294,8 @@ pub fn attribution_report(judgments: &[Judgment], fixture_version: &str) -> Attr
         fixture_version: fixture_version.to_string(),
         realism_index,
         hard_gate_failed,
+        hard_defect_count,
+        soft_defect_count,
         total_judgments: judgments.len(),
         defect_count: defects,
         opportunities,
@@ -300,9 +316,8 @@ pub fn try_parse_stream(content: &str) -> Result<Vec<StreamTick>, String> {
         if trimmed.is_empty() {
             continue;
         }
-        let tick: StreamTick = serde_json::from_str(trimmed).map_err(|e| {
-            format!("line {}: failed to parse StreamTick: {}", line_no + 1, e)
-        })?;
+        let tick: StreamTick = serde_json::from_str(trimmed)
+            .map_err(|e| format!("line {}: failed to parse StreamTick: {}", line_no + 1, e))?;
         ticks.push(tick);
     }
     Ok(ticks)
@@ -333,21 +348,49 @@ pub fn parse_stream_lenient(content: &str) -> Vec<StreamTick> {
 }
 
 /// 单回合上下文：从上一 POSSESSION_SUMMARY 到本条之间的全部事件。
-type PassRelease = (String, String, (f32, f32), (f32, f32));
+/// 一次传球释放：`(sequence, passer, receiver, from, to, 是否已终结)`。
+///
+/// `sequence` 用于**按事件顺序配对**，而不是按接球人 id 配对。
+/// 后者会产生误报：同一接球人在一个回合内可能多次接球，若其中一次传球
+/// 被点掉/掉落（不产生 `PASS_RECEIVED`），按 id 配对会把**更早的释放**与
+/// **更晚的接球**凑成一对，算出数十英尺的虚假距离。
+/// 实测 seed 1 full：按 id 配对报 4 条走廊 Hard，其中 3 条是这种错配
+/// （释放到接球间隔 0.3–1.2s，却跨全场 52–55 ft）；按顺序配对后只剩 1 条。
+type PassRelease = (u64, String, String, (f32, f32), (f32, f32));
 
 #[derive(Debug, Default)]
 struct PossessionWindow {
     pass_releases: Vec<PassRelease>,
-    pass_received: Vec<(String, (f32, f32))>,
+    /// 接球事实：`(sequence, receiver, position)`。
+    pass_received: Vec<(u64, String, (f32, f32))>,
+    /// 传球终结事实（点掉/掉落）的 sequence：用于把对应的 release 标记为
+    /// 「不会再有接球」，从而不参与走廊配对。
+    pass_terminations: Vec<(u64, String)>,
     steals: Vec<(String, String, String, (f32, f32))>,
     tipped_passes: usize,
     loose_ball_secures: Vec<String>,
+    /// 带球被切掉的次数（`BALL_POKED_LOOSE`）。
+    ///
+    /// 与 `loose_ball_secures` 是**两件事**：前者是「球被拨离持球人」的
+    /// 原因事实，后者是「松球被某方收下」的结果事实。回合以
+    /// `TurnoverLooseBall` 终止时，原因事实必然是前者；球可能由防守方直接
+    /// 收下、或弹出界。此时没有 `LOOSE_BALL_SECURED`，却仍是一次合法的
+    /// 带球丢球——原判据把两者混为一谈，导致真事实被判 Hard defect。
+    poked_loose: usize,
     shot_releases: Vec<(String, bool, f32)>,
     made_arrivals: usize,
     ft_made: usize,
-    _rebounds: usize,
+    /// 进攻篮板数：回合时长上界的自变量（每次进攻篮板重置时钟）。
+    offensive_rebounds: usize,
     drops: usize,
     violations: usize,
+    /// 本回合是否发布了「传球落点修正」事实。
+    ///
+    /// 层 A（有限信息）下，接球人按自己的估计跑位，接球成功时球的位置
+    /// 可能与传球人冻结的 `to_pos` 不同。引擎必须把这一修正显式发布为事实
+    /// （`PASS_LANDING_CORRECTED`），否则评判器无法区分
+    /// 「设计内的估计偏差」与「事实自相矛盾」。
+    saw_pass_position_fix: bool,
 }
 
 /// 逐回合 + 逐阶段评判主入口。
@@ -434,7 +477,11 @@ fn evaluate_possessions(ticks: &[StreamTick], fixture: &ReferenceDistributions) 
                 if let Ok(summary) = serde_json::from_value::<PossessionSummaryData>(d.clone()) {
                     if window_open {
                         judgments.extend(evaluate_possession_window(
-                            &window, &summary, fixture, tick_idx,
+                            &window,
+                            &summary,
+                            fixture,
+                            tick_idx,
+                            rules_cache.as_ref(),
                         ));
                     }
                     window = PossessionWindow::default();
@@ -461,6 +508,7 @@ fn evaluate_possessions(ticks: &[StreamTick], fixture: &ReferenceDistributions) 
                 "PASS" => {
                     if let Ok(ev) = serde_json::from_value::<PassReleaseData>(d.clone()) {
                         window.pass_releases.push((
+                            entry.sequence,
                             ev.passer_id,
                             ev.receiver_id,
                             ev.from_pos,
@@ -470,7 +518,9 @@ fn evaluate_possessions(ticks: &[StreamTick], fixture: &ReferenceDistributions) 
                 }
                 "PASS_RECEIVED" => {
                     if let Ok(ev) = serde_json::from_value::<PassReceivedData>(d.clone()) {
-                        window.pass_received.push((ev.receiver_id, ev.position));
+                        window
+                            .pass_received
+                            .push((entry.sequence, ev.receiver_id, ev.position));
                     }
                 }
                 "STEAL" => {
@@ -483,9 +533,17 @@ fn evaluate_possessions(ticks: &[StreamTick], fixture: &ReferenceDistributions) 
                         ));
                     }
                 }
+                "PASS_LANDING_CORRECTED" => {
+                    window.saw_pass_position_fix = true;
+                }
                 "PASS_DROPPED" => {
                     window.drops += 1;
-                    window.pass_releases.pop();
+                    // 按顺序标记：本次传球不会产生接球事实。
+                    // 不能用 `pass_releases.pop()`（队列尾部不一定是本次传球）。
+                    let recv = d.get("receiver_id").and_then(|v| v.as_str());
+                    window
+                        .pass_terminations
+                        .push((entry.sequence, recv.unwrap_or_default().to_string()));
                 }
                 "SHOT_RELEASE" => {
                     if let Ok(ev) = serde_json::from_value::<ShotReleaseData>(d.clone()) {
@@ -510,10 +568,32 @@ fn evaluate_possessions(ticks: &[StreamTick], fixture: &ReferenceDistributions) 
                 }
                 "PASS_TIPPED" => {
                     window.tipped_passes += 1;
+                    // 同上：点掉的传球也不会有接球事实。
+                    let recv = d.get("receiver_id").and_then(|v| v.as_str());
+                    window
+                        .pass_terminations
+                        .push((entry.sequence, recv.unwrap_or_default().to_string()));
                 }
                 "LOOSE_BALL_SECURED" => {
                     if let Ok(ev) = serde_json::from_value::<LooseBallSecuredData>(d.clone()) {
                         window.loose_ball_secures.push(ev.player_id);
+                    }
+                }
+                "BALL_POKED_LOOSE" => {
+                    // 持球被切掉：带球丢球的**原因事实**（round-14）。
+                    window.poked_loose += 1;
+                }
+                "REBOUND" => {
+                    // 进攻篮板会延长同一回合（重置进攻时钟），因此它是回合时长
+                    // 上界的**自变量**：一个回合可能抢到多个进攻篮板。此前
+                    // `_rebounds` 字段声明了但从未写入，导致上界被写死为
+                    // 「24s + 一次 14s 重置」，实测有 3 个进攻篮板、43.6s 的
+                    // 合法回合被误报为 Hard defect。
+                    if d.get("is_offensive")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        window.offensive_rebounds += 1;
                     }
                 }
                 "VIOLATION" | "RULE_VIOLATION" | "ENFORCEMENT_APPLIED" => {
@@ -533,55 +613,163 @@ fn evaluate_possession_window(
     summary: &PossessionSummaryData,
     fixture: &ReferenceDistributions,
     tick_idx: usize,
+    rules_cache: Option<&nba_protocol::FrameRules>,
 ) -> Vec<Judgment> {
     let mut out = Vec::new();
     let idx = summary.possession_index;
     let _ = tick_idx;
 
     // ---- (a) 结构因果 ----
-    // 回合时长边界：下界 0（发球即断可 <1s），上界 24s + 进攻篮板延长。
+    // 回合时长边界（round-5 审计修正）。
+    //
+    // 口径：`duration_seconds` 是**墙钟模拟时间**（含死球/罚球/发球程序），
+    // 而进攻时钟在投篮飞行与篮板争抢期间停表，因此合法回合本就可以超过
+    // 一个完整进攻时钟。历史上界 `24 + 14 + 2 = 40` 是对此的**经验包络**，
+    // 在实测数据上表现良好，不应收紧。
+    //
+    // 它的唯一结构性缺陷是：隐含“每回合最多一个进攻篮板”。每次进攻篮板
+    // 会把进攻时钟重置为 `offensive_rebound_shot_clock_seconds`，因此 n 个
+    // 进攻篮板的回合会多出 n-1 个完整窗口。实测 seed 1 possession 148 有
+    // 3 个进攻篮板、43.6s 的**合法**回合被判 Hard defect（此前 20 种子共
+    // 11 条同类误报）。
+    //
+    // 数值来源遵守 gap.md §8.2 单一事实源：进攻时钟取自帧携带的
+    // `FrameRules`（`rules_cache`，此前声明却未被消费），而非评判代码里的
+    // 常数副本。帧未携带规则时（无几何投影的紧凑流）不做时长裁决。
     let dur = summary.duration_seconds;
-    if dur < 0.0 || dur > 24.0 + 14.0 + 2.0 {
-        out.push(Judgment::defect(
-            "POSSESSION_DURATION_BOUNDS",
-            "hard",
-            format!("possession {} duration {}s outside [0, 40]", idx, dur),
-            "engine",
-            idx,
-        ));
-    } else {
-        out.push(Judgment::pass("POSSESSION_DURATION_BOUNDS", "engine", idx));
+    if let Some(r) = rules_cache.as_ref() {
+        // 进攻篮板重置量：NBA 为 14s。该值尚无 `FrameRules` 字段，
+        // 沿用 fixture 的数据契约（league 级别），不新增内联常数。
+        let base = r.shot_clock_seconds;
+        let reset = fixture.offensive_rebound_shot_clock_seconds;
+        let tolerance = fixture.duration_tolerance_seconds;
+        let extra_windows = window.offensive_rebounds.saturating_sub(1) as f32;
+        let upper = base + reset + tolerance + reset * extra_windows;
+        if dur < 0.0 || dur > upper {
+            out.push(Judgment::defect(
+                "POSSESSION_DURATION_BOUNDS",
+                "hard",
+                format!(
+                    "possession {} duration {:.1}s exceeds {:.1}s \
+                     ({} offensive rebound(s) -> {:.0}s base + {:.0}s tolerance \
+                     + {:.0}s extra window(s))",
+                    idx,
+                    dur,
+                    upper,
+                    window.offensive_rebounds,
+                    base + reset,
+                    tolerance,
+                    reset * extra_windows
+                ),
+                "engine",
+                idx,
+            ));
+        } else {
+            out.push(Judgment::pass("POSSESSION_DURATION_BOUNDS", "engine", idx));
+        }
     }
 
     // 接球人走廊可达：release 的冻结线段与 arrival 事实位置一致。
+    //
+    // ## 配对纪律（round-6 审计修复）
+    //
+    // 按**事件顺序**配对，不按接球人 id 配对。按 id 配对会把「被点掉/掉落的
+    // 传球」与「同一接球人更晚的一次接球」凑成一对，算出数十英尺的虚假距离。
+    // 实测 seed 1 full：按 id 配对报 4 条走廊 Hard，其中 3 条是这种错配
+    // （释放到接球间隔 0.3–1.2s，却跨全场 52–55 ft）；按顺序配对后只剩 1 条。
+    // 8 seed 下该错配共产生 12 条 Hard defect。
+    //
+    // 配对规则：对每个接球事实，取**最近一个未终结、未匹配**的、sequence
+    // 小于它且 receiver 相同的 release。
     let corridor = fixture.pass_corridor_radius_ft;
-    let mut remaining_received = window.pass_received.clone();
-    for (passer, receiver, from, to) in &window.pass_releases {
-        if let Some(pos_idx) = remaining_received.iter().position(|(id, _)| id == receiver) {
-            let (_, receiver_pos) = remaining_received.remove(pos_idx);
-            let dist = point_segment_distance_ft(receiver_pos, *from, *to);
-            if dist > corridor + 1.0 {
-                out.push(Judgment::defect(
-                    "PASS_CORRIDOR_REACHABLE",
-                    "hard",
-                    format!(
-                        "receiver {} arrived {:.1} ft from pass target (passer {})",
-                        receiver, dist, passer
-                    ),
-                    "decision",
-                    idx,
-                ));
-            } else {
-                out.push(Judgment::pass("PASS_CORRIDOR_REACHABLE", "decision", idx));
+    let mut taken = vec![false; window.pass_releases.len()];
+    for (rec_seq, receiver, receiver_pos) in &window.pass_received {
+        let mut chosen: Option<usize> = None;
+        for (i, (rel_seq, _passer, rel_receiver, _from, _to)) in
+            window.pass_releases.iter().enumerate().rev()
+        {
+            if taken[i] || rel_seq >= rec_seq || rel_receiver != receiver {
+                continue;
             }
+            // 本次释放是否已被点掉/掉落终结？若是则不可配对。
+            let terminated = window
+                .pass_terminations
+                .iter()
+                .any(|(term_seq, term_receiver)| {
+                    term_seq > rel_seq && term_seq < rec_seq && term_receiver == receiver
+                });
+            if terminated {
+                continue;
+            }
+            chosen = Some(i);
+            break;
+        }
+        let Some(i) = chosen else { continue };
+        taken[i] = true;
+        let (_rel_seq, passer, _receiver, from, to) = &window.pass_releases[i];
+        let dist = point_segment_distance_ft(*receiver_pos, *from, *to);
+        // ## 两类语义分离（round-10）
+        //
+        // 旧口径把两种**完全不同**的现象混为一条 Hard 准则：
+        //   (a) 接球人按自己的估计跑位，到达点与传球人的意图不同 ——
+        //       这是 **P-1 有限信息原则的设计意图**，不是缺陷；
+        //   (b) 事实自相矛盾（如 `PassReceived.position` 与冻结终点不一致、
+        //       同一 tick 内 `to_pos` 被改写）—— 这才是因果断裂（Hard）。
+        //
+        // 分离后：
+        //   - (a) 超过走廊 → `RECEIVE_ESTIMATE_DIVERGENCE`（**soft/informational**），
+        //     用于观测预估偏差的分布，不阻断门；
+        //   - (b) 仍为 Hard，但判据收窄为“事实不一致”，见下方 `pass_fact_mismatch`。
+        //
+        // 注意：这不是“放宽门” —— 同时新增了更严的 (b)。
+        if dist > corridor + 1.0 {
+            out.push(Judgment::defect(
+                "RECEIVE_ESTIMATE_DIVERGENCE",
+                "soft",
+                format!(
+                    "receiver {} arrived {:.1} ft from leader's intended landing \
+                     (passer {}; limited-information estimate, not a defect)",
+                    receiver, dist, passer
+                ),
+                "decision",
+                idx,
+            ));
+        } else {
+            out.push(Judgment::pass(
+                "RECEIVE_ESTIMATE_DIVERGENCE",
+                "decision",
+                idx,
+            ));
+        }
+        // (b) 事实一致性（Hard）：`PassReceived.position` 必须与冻结终点
+        // `to_pos` **一致**。层 A 修正后，引擎在接球成功时把球收到接球人身上，
+        // 位置会不同于 `to_pos` —— 那时引擎需发出“落点修正”事实（见引擎侧）。
+        // 这里只检测“事件声称的位置与它引用的冻结事实不可调和”的情形。
+        if dist > corridor + 1.0 && !window.saw_pass_position_fix {
+            out.push(Judgment::defect(
+                "PASS_LANDING_FACT_MISMATCH",
+                "hard",
+                format!(
+                    "receiver {} arrived {:.1} ft from intended landing (passer {}) \
+                     with no landing-correction fact published",
+                    receiver, dist, passer
+                ),
+                "engine",
+                idx,
+            ));
+        } else {
+            out.push(Judgment::pass("PASS_LANDING_FACT_MISMATCH", "engine", idx));
         }
     }
     // 抢断走廊：抢断位置必须在 passer→receiver 连线走廊半径内。
     for (passer, receiver, defender, pos) in &window.steals {
-        if let Some((_p, _r, from, to)) = window
+        // 取该 (passer, receiver) 组合**最后一次**释放的线段：抢断发生在那次
+        // 传球的走廊上。按位置取而非按 id 配对，避免与更早的传球混淆。
+        if let Some((_seq, _p, _r, from, to)) = window
             .pass_releases
             .iter()
-            .find(|(p, r, _, _)| p == passer && r == receiver)
+            .rev()
+            .find(|(_s, p, r, _, _)| p == passer && r == receiver)
         {
             let dist = point_segment_distance_ft(*pos, *from, *to);
             if dist > corridor + 1.5 {
@@ -602,7 +790,10 @@ fn evaluate_possession_window(
     }
 
     // 得分因果：得分回合必须有出手或罚球命中来源。
-    if summary.terminal_event == nba_domain::PossessionEndCause::Score && window.made_arrivals == 0 && window.ft_made == 0 {
+    if summary.terminal_event == nba_domain::PossessionEndCause::Score
+        && window.made_arrivals == 0
+        && window.ft_made == 0
+    {
         out.push(Judgment::defect(
             "SCORE_SOURCE_CAUSALITY",
             "hard",
@@ -627,13 +818,16 @@ fn evaluate_possession_window(
             nba_domain::PossessionEndCause::TurnoverPassDropped => window.drops > 0,
             nba_domain::PossessionEndCause::TurnoverViolation => window.violations > 0,
             nba_domain::PossessionEndCause::TurnoverLooseBall => {
-                !window.loose_ball_secures.is_empty()
+                // 原因事实：带球被切掉（`BALL_POKED_LOOSE`），或松球被某方
+                // 收下后球权易主。两者都是合法归因，缺一才算 Hard defect。
+                window.poked_loose > 0 || !window.loose_ball_secures.is_empty()
             }
             _ => {
                 !window.steals.is_empty()
                     || window.drops > 0
                     || window.tipped_passes > 0
                     || window.violations > 0
+                    || window.poked_loose > 0
                     || !window.loose_ball_secures.is_empty()
             }
         };
@@ -714,13 +908,23 @@ fn evaluate_possession_window(
 
     let outcome = fixture.classify_outcome(summary.terminal_event.as_str());
     if let Some(band) = fixture.duration_band(outcome) {
-        if !band.contains(&dur) {
+        // ## ORB 窗口扩带（round-17，与 POSSESSION_DURATION_BOUNDS 同源）
+        //
+        // 静态带（如 score [2,26]s）没算进攻篮板重置：n 个 ORB 的回合
+        // 合法多出 (n−1) 个 14s 窗口，可到 ~40s。实测 round-17 后该准则
+        // 7.7 次/场，几乎全部是 ORB 回合撞静态上限。上界按窗口扩展，
+        // 并计入容差（与硬界公式一致）；下界不变（ORB 不会缩短回合）。
+        let extra_windows = window.offensive_rebounds.saturating_sub(1) as f32;
+        let orb_allowance = fixture.offensive_rebound_shot_clock_seconds * extra_windows
+            + fixture.duration_tolerance_seconds;
+        let effective_max = band.max + orb_allowance;
+        if dur < band.min || dur > effective_max {
             out.push(Judgment::defect(
                 "RHYTHM_DURATION",
                 "soft",
                 format!(
-                    "possession {} duration {:.1}s outside {:?} band for outcome {}",
-                    idx, dur, band, outcome
+                    "possession {} duration {:.1}s outside {:?}(+ORB {:.0}s) band for outcome {}",
+                    idx, dur, band, orb_allowance, outcome
                 ),
                 "decision",
                 idx,
@@ -1104,7 +1308,11 @@ fn evaluate_composition_criteria(
 
     // SHOT_PROFILE_3PA_RATE：三分出手占比。
     if fga < MIN_SHOTS_FOR_PROFILE {
-        out.push(Judgment::insufficient("SHOT_PROFILE_3PA_RATE", "decision", idx));
+        out.push(Judgment::insufficient(
+            "SHOT_PROFILE_3PA_RATE",
+            "decision",
+            idx,
+        ));
     } else {
         let rate = ev.fga_three as f32 / fga as f32;
         if bands.three_attempt_rate.contains(&rate) {
@@ -1113,7 +1321,10 @@ fn evaluate_composition_criteria(
             out.push(Judgment::defect(
                 "SHOT_PROFILE_3PA_RATE",
                 "soft",
-                format!("3PA rate {:.3} outside {:?} ({} 3PA / {} FGA)", rate, bands.three_attempt_rate, ev.fga_three, fga),
+                format!(
+                    "3PA rate {:.3} outside {:?} ({} 3PA / {} FGA)",
+                    rate, bands.three_attempt_rate, ev.fga_three, fga
+                ),
                 "decision",
                 idx,
             ));
@@ -1122,7 +1333,11 @@ fn evaluate_composition_criteria(
 
     // SHOT_PROFILE_ZONE_MIX：中距离/篮下构成（中距离回归的直接证据）。
     if fga < MIN_SHOTS_FOR_PROFILE {
-        out.push(Judgment::insufficient("SHOT_PROFILE_ZONE_MIX", "decision", idx));
+        out.push(Judgment::insufficient(
+            "SHOT_PROFILE_ZONE_MIX",
+            "decision",
+            idx,
+        ));
     } else {
         let mid_share = ev.fga_mid as f32 / fga as f32;
         let rim_share = ev.fga_rim as f32 / fga as f32;
@@ -1146,7 +1361,11 @@ fn evaluate_composition_criteria(
 
     // TEAM_TURNOVER_RATE：比赛级固定分母失误率（现有 TURNOVER_RATE 的升格版）。
     if ev.possessions < MIN_POSSESSIONS_FOR_PACE {
-        out.push(Judgment::insufficient("TEAM_TURNOVER_RATE", "decision", idx));
+        out.push(Judgment::insufficient(
+            "TEAM_TURNOVER_RATE",
+            "decision",
+            idx,
+        ));
     } else {
         let rate = ev.turnovers as f32 / ev.possessions as f32;
         if bands_turnover(fixture).contains(&rate) {
@@ -1155,7 +1374,13 @@ fn evaluate_composition_criteria(
             out.push(Judgment::defect(
                 "TEAM_TURNOVER_RATE",
                 "soft",
-                format!("turnover rate {:.3} outside {:?} ({}/{})", rate, bands_turnover(fixture), ev.turnovers, ev.possessions),
+                format!(
+                    "turnover rate {:.3} outside {:?} ({}/{})",
+                    rate,
+                    bands_turnover(fixture),
+                    ev.turnovers,
+                    ev.possessions
+                ),
                 "decision",
                 idx,
             ));
@@ -1173,7 +1398,10 @@ fn evaluate_composition_criteria(
             out.push(Judgment::defect(
                 "PACE_POSSESSIONS",
                 "soft",
-                format!("pace {:.1} poss/48min outside {:?} ({} poss in {:.0}s)", pace, bands.pace_possessions_per_48min, ev.possessions, ev.wall_seconds),
+                format!(
+                    "pace {:.1} poss/48min outside {:?} ({} poss in {:.0}s)",
+                    pace, bands.pace_possessions_per_48min, ev.possessions, ev.wall_seconds
+                ),
                 "decision",
                 idx,
             ));
@@ -1191,7 +1419,10 @@ fn evaluate_composition_criteria(
             out.push(Judgment::defect(
                 "FT_RATE",
                 "soft",
-                format!("FT rate {:.3} outside {:?} ({} FTA / {} FGA)", rate, bands.free_throw_rate, ev.fta, fga),
+                format!(
+                    "FT rate {:.3} outside {:?} ({} FTA / {} FGA)",
+                    rate, bands.free_throw_rate, ev.fta, fga
+                ),
                 "officiating",
                 idx,
             ));
@@ -1222,8 +1453,14 @@ fn evaluate_composition_criteria(
                 "soft",
                 format!(
                     "make pct off: 3P {:.3} (band {:?}, {}/{}), 2P {:.3} (band {:?}, {}/{})",
-                    three_pct, bands.three_make_pct, ev.fgm_three, ev.fga_three,
-                    two_pct, bands.two_make_pct, ev.fgm_two, ev.fga_two
+                    three_pct,
+                    bands.three_make_pct,
+                    ev.fgm_three,
+                    ev.fga_three,
+                    two_pct,
+                    bands.two_make_pct,
+                    ev.fgm_two,
+                    ev.fga_two
                 ),
                 "decision",
                 idx,

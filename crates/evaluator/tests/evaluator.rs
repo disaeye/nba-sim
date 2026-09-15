@@ -1,8 +1,8 @@
 //! M8 评判器测试：准则行为 + 端到端工件完整性。
 
 use nba_evaluator::{
-    attribution_report, evaluate_stream, observed_possession_indices, parse_stream,
-    Judgment, ReferenceDistributions, Verdict,
+    attribution_report, evaluate_stream, observed_possession_indices, parse_stream, Judgment,
+    ReferenceDistributions, Verdict,
 };
 
 #[test]
@@ -35,7 +35,9 @@ fn empty_stream_yields_insufficient_not_empty() {
     let f = ReferenceDistributions::nba_v1();
     let judgments = evaluate_stream(&[], &f);
     assert!(
-        judgments.iter().all(|j| j.verdict == Verdict::InsufficientEvidence),
+        judgments
+            .iter()
+            .all(|j| j.verdict == Verdict::InsufficientEvidence),
         "empty stream must yield only InsufficientEvidence, got {:?}",
         judgments
     );
@@ -52,14 +54,14 @@ fn possession_coverage_flags_missing_indices() {
             "t": 0.0, "t_game": 720.0, "shotClock": 24.0, "period": 1,
             "phase": "Initiation", "possession_id": 1, "possession_team": "home",
             "score": {"home": 0, "away": 0}, "players": [],
-            "ball": {"x": 0.5, "y": 0.5, "z": 4.0, "status": "HELD", "holderId": "H_1"},
+            "ball": {"x": 0.5, "y": 0.5, "z": 4.0, "status": "HELD", "holderId": "H_01"},
             "event_log": [{
                 "sequence": 1, "time": 0.0, "kind": "POSSESSION_SUMMARY",
                 "data": {"PossessionSummary": {
                     "possession_index": idx, "offense_team": "home",
                     "start_clock": 720.0, "end_clock": 700.0,
                     "duration_seconds": 20.0, "passes_count": 2,
-                    "terminal_event": "SCORE", "shooter_id": "H_1",
+                    "terminal_event": "SCORE", "shooter_id": "H_01",
                     "shot_contest_intensity": 0.3
                 }}
             }],
@@ -166,12 +168,12 @@ fn shot_quality_contest_pass_judgment_is_emitted() {
         "t": 0.0, "t_game": 720.0, "shotClock": 24.0, "period": 1,
         "phase": "Initiation", "possession_id": 1, "possession_team": "home",
         "score": {"home": 0, "away": 0}, "players": [],
-        "ball": {"x": 0.5, "y": 0.5, "z": 4.0, "status": "HELD", "holderId": "H_1"},
+        "ball": {"x": 0.5, "y": 0.5, "z": 4.0, "status": "HELD", "holderId": "H_01"},
         "event_log": [
             {
                 "sequence": 1, "time": 0.0, "kind": "SHOT_RELEASE",
                 "data": {"ShotRelease": {
-                    "shooter_id": "H_1", "is_three": false, "contest_level": 0.2
+                    "shooter_id": "H_01", "is_three": false, "contest_level": 0.2
                 }}
             },
             {
@@ -180,7 +182,7 @@ fn shot_quality_contest_pass_judgment_is_emitted() {
                     "possession_index": 1, "offense_team": "home",
                     "start_clock": 720.0, "end_clock": 705.0,
                     "duration_seconds": 15.0, "passes_count": 2,
-                    "terminal_event": "SCORE", "shooter_id": "H_1",
+                    "terminal_event": "SCORE", "shooter_id": "H_01",
                     "shot_contest_intensity": 0.2
                 }}
             }
@@ -218,7 +220,7 @@ fn tipped_pass_is_a_valid_turnover_attribution() {
         "events": ["PASS_TIPPED"],
         "event_log": [
             {"sequence": 1, "time": 1.0, "kind": "PASS_TIPPED", "data": {"PassTipped": {
-                "passer_id": "H_1", "receiver_id": "H_2", "defender_id": "A_1", "position": [47.0, 25.0]
+                "passer_id": "H_01", "receiver_id": "H_02", "defender_id": "A_01", "position": [47.0, 25.0]
             }}},
             {"sequence": 2, "time": 1.0, "kind": "POSSESSION_SUMMARY", "data": {"PossessionSummary": {
                 "possession_index": 0, "offense_team": "home", "start_clock": 720.0,
@@ -260,7 +262,7 @@ fn frame_event_fallback_does_not_leak_across_possession_boundary() {
             "possession_index": index, "offense_team": "home",
             "start_clock": 720.0 - index as f32, "end_clock": 719.0 - index as f32,
             "duration_seconds": 1.0, "passes_count": 0,
-            "terminal_event": terminal, "turnover_player_id": "H_1"
+            "terminal_event": terminal, "turnover_player_id": "H_01"
         })
     };
     let first = serde_json::json!({
@@ -271,7 +273,7 @@ fn frame_event_fallback_does_not_leak_across_possession_boundary() {
         "events": ["PASS_DROPPED"],
         "event_log": [
             {"sequence": 1, "time": 1.0, "kind": "PASS_DROPPED", "data": {"PassDropped": {
-                "passer_id": "H_1", "receiver_id": "H_2", "position": [47.0, 25.0]
+                "passer_id": "H_01", "receiver_id": "H_02", "position": [47.0, 25.0]
             }}},
             {"sequence": 2, "time": 1.0, "kind": "POSSESSION_SUMMARY", "data": {"PossessionSummary": summary(0, "TURNOVER_PASS_DROPPED")}}
         ],
@@ -281,7 +283,7 @@ fn frame_event_fallback_does_not_leak_across_possession_boundary() {
         "t": 2.0, "t_game": 718.0, "shotClock": 22.0, "period": 1,
         "phase": "ActionExecution", "possession_id": 2, "possession_team": "home",
         "score": {"home": 0, "away": 0}, "players": [],
-        "ball": {"x": 0.5, "y": 0.5, "z": 2.0, "status": "HELD", "holderId": "H_1"},
+        "ball": {"x": 0.5, "y": 0.5, "z": 2.0, "status": "HELD", "holderId": "H_01"},
         "events": [],
         "event_log": [{"sequence": 3, "time": 2.0, "kind": "POSSESSION_SUMMARY", "data": {"PossessionSummary": summary(1, "TURNOVER_PASS_DROPPED")}}],
         "rules": rules, "tactical_set": "T", "gameClock": 718.0, "keyframeIndex": null
@@ -308,7 +310,7 @@ fn turnover_actor_consistency_is_judged_from_summary() {
             "data": {"PossessionSummary": {
                 "possession_index": 0, "offense_team": "home", "start_clock": 720.0,
                 "end_clock": 719.0, "duration_seconds": 1.0, "passes_count": 0,
-                "terminal_event": "TURNOVER_PASS_DROPPED", "turnover_player_id": "H_1"
+                "terminal_event": "TURNOVER_PASS_DROPPED", "turnover_player_id": "H_01"
             }}
         }],
         "rules": {"tick_seconds": 0.04, "court_width_ft": 94.0, "court_height_ft": 50.0,
@@ -413,7 +415,7 @@ fn score_fact_in_window_makes_source_causality_pass() {
             "t": 0.0, "t_game": 720.0, "shotClock": 24.0, "period": 1,
             "phase": "Initiation", "possession_id": 1, "possession_team": "home",
             "score": {"home": 2, "away": 0}, "players": [],
-            "ball": {"x": 0.5, "y": 0.5, "z": 4.0, "status": "HELD", "holderId": "H_1"},
+            "ball": {"x": 0.5, "y": 0.5, "z": 4.0, "status": "HELD", "holderId": "H_01"},
             "event_log": [
                 {"sequence": seq, "time": 0.0, "kind": kind, "data": data},
                 {"sequence": seq + 1, "time": 0.0, "kind": "POSSESSION_SUMMARY",
@@ -421,7 +423,7 @@ fn score_fact_in_window_makes_source_causality_pass() {
                     "possession_index": 1, "offense_team": "home",
                     "start_clock": 720.0, "end_clock": 705.0,
                     "duration_seconds": 15.0, "passes_count": 2,
-                    "terminal_event": "SCORE", "shooter_id": "H_1",
+                    "terminal_event": "SCORE", "shooter_id": "H_01",
                     "shot_contest_intensity": 0.2
                  }}}
             ],
@@ -444,7 +446,7 @@ fn score_fact_in_window_makes_source_causality_pass() {
         "SCORE",
         1,
         serde_json::json!({"HoopArrival": {
-            "shooter_id": "H_1", "shot_origin": [10.0, 25.0],
+            "shooter_id": "H_01", "shot_origin": [10.0, 25.0],
             "is_made": true, "is_three": false, "contest_intensity": 0.2
         }}),
     );
@@ -461,10 +463,14 @@ fn score_fact_in_window_makes_source_causality_pass() {
     );
 
     // 负面对照：窗口内没有得分来源事实，必须报 defect。
-    let no_source = make_tick("SHOT_MISS", 1, serde_json::json!({"HoopArrival": {
-        "shooter_id": "H_1", "shot_origin": [10.0, 25.0],
-        "is_made": false, "is_three": false, "contest_intensity": 0.2
-    }}));
+    let no_source = make_tick(
+        "SHOT_MISS",
+        1,
+        serde_json::json!({"HoopArrival": {
+            "shooter_id": "H_01", "shot_origin": [10.0, 25.0],
+            "is_made": false, "is_three": false, "contest_intensity": 0.2
+        }}),
+    );
     let judgments = evaluate_stream(&parse_stream(&no_source).expect("parse"), &fixture);
     assert!(
         judgments
@@ -486,13 +492,13 @@ fn free_throw_score_is_not_applicable_for_contest_consistency() {
         "ball": {"x": 0.5, "y": 0.5, "z": 4.0, "status": "DEAD", "holderId": null},
         "event_log": [
             {"sequence": 1, "time": 0.0, "kind": "FREE_THROW",
-             "data": {"FreeThrowAttempt": {"shooter_id": "H_1", "attempt": 1, "made": true}}},
+             "data": {"FreeThrowAttempt": {"shooter_id": "H_01", "attempt": 1, "made": true}}},
             {"sequence": 2, "time": 0.0, "kind": "POSSESSION_SUMMARY",
              "data": {"PossessionSummary": {
                 "possession_index": 1, "offense_team": "home",
                 "start_clock": 720.0, "end_clock": 718.0,
                 "duration_seconds": 2.0, "passes_count": 0,
-                "terminal_event": "SCORE", "shooter_id": "H_1"
+                "terminal_event": "SCORE", "shooter_id": "H_01"
              }}}
         ],
         "rules": {
@@ -546,7 +552,10 @@ fn compact_facts_stream_is_fully_judged() {
 
     // 回合覆盖与得分因果必须在 facts 流上完整成立。
     let seen = observed_possession_indices(&ticks);
-    assert!(!seen.is_empty(), "facts stream must carry possession summaries");
+    assert!(
+        !seen.is_empty(),
+        "facts stream must carry possession summaries"
+    );
     let scoring: std::collections::HashSet<u64> = judgments
         .iter()
         .filter(|j| j.criterion == "SCORE_SOURCE_CAUSALITY")
@@ -573,7 +582,10 @@ fn compact_facts_stream_is_fully_judged() {
 #[test]
 fn empty_stream_scores_zero_not_full() {
     let report = attribution_report(&[], "nba.v1");
-    assert_eq!(report.realism_index, 0.0, "empty stream must not score full marks");
+    assert_eq!(
+        report.realism_index, 0.0,
+        "empty stream must not score full marks"
+    );
     assert_eq!(report.opportunities, 0);
     assert_eq!(report.passes, 0);
     assert_eq!(report.defects, 0);
@@ -666,7 +678,7 @@ fn strict_parse_rejects_corrupt_stream_wholesale() {
 /// D1.3：罚球得分回合对 CONTEST_CONSISTENCY 产出显式 NotApplicable 裁决。
 #[test]
 fn free_throw_score_marks_contest_not_applicable() {
-    let tick = r#"{"t":10.0,"t_game":700.0,"period":1,"phase":"FreeThrow","possession_id":0,"score":{"home":1,"away":0},"event_log":[{"sequence":1,"time":10.0,"kind":"FREE_THROW","data":{"FreeThrowAttempt":{"shooter_id":"H_1","attempt":1,"made":true}}},{"sequence":2,"time":10.0,"kind":"POSSESSION_SUMMARY","data":{"PossessionSummary":{"possession_index":0,"offense_team":"home","start_clock":720.0,"end_clock":700.0,"duration_seconds":20.0,"passes_count":0,"terminal_event":"SCORE","shooter_id":"H_1"}}}]}"#;
+    let tick = r#"{"t":10.0,"t_game":700.0,"period":1,"phase":"FreeThrow","possession_id":0,"score":{"home":1,"away":0},"event_log":[{"sequence":1,"time":10.0,"kind":"FREE_THROW","data":{"FreeThrowAttempt":{"shooter_id":"H_01","attempt":1,"made":true}}},{"sequence":2,"time":10.0,"kind":"POSSESSION_SUMMARY","data":{"PossessionSummary":{"possession_index":0,"offense_team":"home","start_clock":720.0,"end_clock":700.0,"duration_seconds":20.0,"passes_count":0,"terminal_event":"SCORE","shooter_id":"H_01"}}}]}"#;
     let ticks = parse_stream(tick).expect("parse");
     let fixture = ReferenceDistributions::nba_v1();
     let judgments = evaluate_stream(&ticks, &fixture);
@@ -674,7 +686,11 @@ fn free_throw_score_marks_contest_not_applicable() {
         .iter()
         .filter(|j| j.criterion == "CONTEST_CONSISTENCY")
         .collect();
-    assert_eq!(contest.len(), 1, "FT score must yield exactly one contest judgment");
+    assert_eq!(
+        contest.len(),
+        1,
+        "FT score must yield exactly one contest judgment"
+    );
     assert_eq!(
         contest[0].verdict,
         Verdict::NotApplicable,
@@ -714,12 +730,12 @@ fn composition_synthetic_stream(
             // 命中事件
         }
         events.push_str(&format!(
-            r#"{{"sequence":{},"time":10.0,"kind":"POSSESSION_SUMMARY","data":{{"PossessionSummary":{{"possession_index":{},"offense_team":"home","start_clock":720.0,"end_clock":700.0,"duration_seconds":{:.1},"passes_count":1,"terminal_event":"{}","shooter_id":"H_1","turnover_player_id":{}}}}}}}"#,
+            r#"{{"sequence":{},"time":10.0,"kind":"POSSESSION_SUMMARY","data":{{"PossessionSummary":{{"possession_index":{},"offense_team":"home","start_clock":720.0,"end_clock":700.0,"duration_seconds":{:.1},"passes_count":1,"terminal_event":"{}","shooter_id":"H_01","turnover_player_id":{}}}}}}}"#,
             seq,
             idx,
             dur,
             summary_terminal,
-            if summary_terminal.starts_with("TURNOVER") { r#""H_1""#.to_string() } else { "null".to_string() },
+            if summary_terminal.starts_with("TURNOVER") { r#""H_01""#.to_string() } else { "null".to_string() },
         ));
         seq += 1;
         ticks.push_str(&format!(
@@ -734,10 +750,12 @@ fn composition_synthetic_stream(
     let mut idx = 0usize;
     for _ in 0..three_attempts {
         let made = made3 > 0;
-        if made { made3 -= 1; }
+        if made {
+            made3 -= 1;
+        }
         emit(
             "SHOT_RELEASE",
-            r#"{"ShotRelease":{"shooter_id":"H_1","pos":[70.0,25.0],"is_three":true,"contest_level":0.0,"make_probability":0.37}}"#.to_string(),
+            r#"{"ShotRelease":{"shooter_id":"H_01","pos":[70.0,25.0],"is_three":true,"contest_level":0.0,"make_probability":0.37}}"#.to_string(),
             if made { "SCORE" } else { "DEFENSIVE_REBOUND" },
             idx,
         );
@@ -748,10 +766,12 @@ fn composition_synthetic_stream(
     }
     for _ in 0..two_attempts {
         let made = made2 > 0;
-        if made { made2 -= 1; }
+        if made {
+            made2 -= 1;
+        }
         emit(
             "SHOT_RELEASE",
-            r#"{"ShotRelease":{"shooter_id":"H_1","pos":[80.0,25.0],"is_three":false,"contest_level":0.0,"make_probability":0.5}}"#.to_string(),
+            r#"{"ShotRelease":{"shooter_id":"H_01","pos":[80.0,25.0],"is_three":false,"contest_level":0.0,"make_probability":0.5}}"#.to_string(),
             if made { "SCORE" } else { "DEFENSIVE_REBOUND" },
             idx,
         );
@@ -781,7 +801,9 @@ fn composition_synthetic_a_three_heavy_is_flagged() {
     // 80 次三分 + 20 次两分（全在篮下），0 失误。
     let stream = composition_synthetic_stream(80, 20, 30, 10, 0, 100, 1200.0);
     let judgments = composition_judgments(&stream);
-    let rate = judgments.iter().find(|j| j.criterion == "SHOT_PROFILE_3PA_RATE");
+    let rate = judgments
+        .iter()
+        .find(|j| j.criterion == "SHOT_PROFILE_3PA_RATE");
     assert!(
         matches!(rate, Some(j) if j.verdict == Verdict::Defect),
         "3PA rate 0.8 must be flagged: {:?}",
@@ -811,7 +833,11 @@ fn composition_synthetic_c_in_band_passes() {
     // 需把 tick 间隔拉大到 ~15s 使 pace ≈ 197 入带 [185,220]。
     let stream = composition_synthetic_stream(35, 65, 13, 32, 15, 100, 14.5);
     let judgments = composition_judgments(&stream);
-    for criterion in ["SHOT_PROFILE_3PA_RATE", "PACE_POSSESSIONS", "TEAM_TURNOVER_RATE"] {
+    for criterion in [
+        "SHOT_PROFILE_3PA_RATE",
+        "PACE_POSSESSIONS",
+        "TEAM_TURNOVER_RATE",
+    ] {
         let j = judgments.iter().find(|j| j.criterion == criterion);
         assert!(
             matches!(j, Some(j) if j.verdict == Verdict::Pass),
@@ -829,7 +855,9 @@ fn composition_criteria_not_applicable_on_v1_fixture() {
     let ticks = parse_stream(&stream).expect("parse");
     let fixture = ReferenceDistributions::nba_v1();
     let judgments = evaluate_stream(&ticks, &fixture);
-    let rate = judgments.iter().find(|j| j.criterion == "SHOT_PROFILE_3PA_RATE");
+    let rate = judgments
+        .iter()
+        .find(|j| j.criterion == "SHOT_PROFILE_3PA_RATE");
     assert!(
         matches!(rate, Some(j) if j.verdict == Verdict::NotApplicable),
         "v1 fixture must mark composition criteria NotApplicable: {:?}",

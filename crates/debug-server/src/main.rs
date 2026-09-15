@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use nba_domain::{FixedDt, GameRules};
 use nba_engine::{MatchEngine, MatchService};
+use nba_invariants::Violation;
 use serde_json::Value;
 
 mod static_page;
@@ -467,8 +468,14 @@ fn run_simulation(seed: u64, scope: &str, rules: GameRules) -> Result<Vec<u8>, S
     engine.set_scope(scope)?;
     let mut body = Vec::with_capacity(1024 * 1024);
     let mut ticks = 0usize;
+    // C6.6：官方违规随响应下发（gap.md §16.3 调试视图是投影）。
+    // 此前引擎不变量判定只存在于进程内，前端只能用 detectAnomalies
+    // 自行重算（第二套口径，容差与引擎不一致）。现在违规作为流末的
+    // run_summary 记录下发，前端退役本地检查、只做渲染。
+    let mut violations: Vec<Violation> = Vec::new();
     while !engine.is_finished() {
         let tick = engine.step();
+        violations.extend(engine.last_tick_violations().iter().cloned());
         serde_json::to_writer(&mut body, &tick).map_err(|e| e.to_string())?;
         body.push(b'\n');
         ticks += 1;
@@ -479,6 +486,13 @@ fn run_simulation(seed: u64, scope: &str, rules: GameRules) -> Result<Vec<u8>, S
             ));
         }
     }
+    let summary = serde_json::json!({
+        "run_summary": 1,
+        "violation_count": violations.len(),
+        "violations": violations,
+    });
+    serde_json::to_writer(&mut body, &summary).map_err(|e| e.to_string())?;
+    body.push(b'\n');
     Ok(body)
 }
 
@@ -612,5 +626,61 @@ mod tests {
             &session,
         );
         assert_eq!(status, "409 Conflict");
+    }
+}
+
+#[cfg(test)]
+mod c6_6_tests {
+    use super::*;
+
+    /// C6.6 契约：`/api/simulate` 的响应是「tick 帧 + 流末 run_summary 记录」，
+    /// run_summary 必须携带引擎官方 violations 数组（gap.md §16.3：调试视图
+    /// 是事件与快照的投影，前端不得自行重算不变量）。
+    ///
+    /// 此前引擎不变量判定只存在于进程内，前端只能以第二套口径
+    /// （`detectAnomalies`）重算，两侧容差已经分叉。
+    #[test]
+    fn simulate_response_ends_with_run_summary_carrying_engine_violations() {
+        let (status, content_type, body) = api_simulate(&Request {
+            method: "GET".to_string(),
+            path: "/api/simulate".to_string(),
+            query: "seed=1&scope=2p".to_string(),
+            body: Vec::new(),
+        });
+        assert_eq!(status, "200 OK", "simulate must succeed");
+        assert_eq!(content_type, "application/x-ndjson; charset=utf-8");
+
+        let text = String::from_utf8(body).expect("stream must be UTF-8");
+        let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert!(lines.len() > 2, "expected ticks plus a summary record");
+
+        let summary: Value =
+            serde_json::from_str(lines[lines.len() - 1]).expect("last line must be JSON");
+        assert_eq!(
+            summary["run_summary"], 1,
+            "last record must be the run summary"
+        );
+        assert!(
+            summary["violations"].is_array(),
+            "run summary must carry the engine violations array"
+        );
+        assert_eq!(
+            summary["violation_count"].as_u64().unwrap_or(u64::MAX),
+            summary["violations"]
+                .as_array()
+                .map(|v| v.len() as u64)
+                .unwrap_or(u64::MAX),
+            "violation_count must match the array length"
+        );
+
+        // 其余每一行都必须是可解析的 tick 帧（不得混入其他记录类型）。
+        for line in &lines[..lines.len() - 1] {
+            let tick: Value = serde_json::from_str(line).expect("tick line must be JSON");
+            assert!(
+                tick["run_summary"].is_null(),
+                "ticks must not be summary records"
+            );
+            assert!(tick["t"].as_f64().is_some(), "tick line must carry time");
+        }
     }
 }

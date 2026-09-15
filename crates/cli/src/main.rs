@@ -1,11 +1,26 @@
+use flate2::read::GzDecoder;
 use nba_domain::GameRules;
 use nba_engine::{MatchEngine, MatchSetup, StreamMode};
 use nba_invariants::{InvariantChecker, Violation, ViolationTaxonomy};
 use nba_protocol::StreamTick;
 use std::env;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::time::Instant;
+
+fn read_stream_text(path: &str) -> std::io::Result<String> {
+    // 评判工件通常已经是内存字符串；这里保持同一语义，并按 gzip magic
+    // 自动解压，避免要求调用方记住 frames-gzip 的特殊后缀。
+    let bytes = fs::read(path)?;
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        let mut content = String::new();
+        GzDecoder::new(bytes.as_slice()).read_to_string(&mut content)?;
+        Ok(content)
+    } else {
+        String::from_utf8(bytes)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+    }
+}
 
 fn load_rules(path_opt: Option<&str>) -> std::io::Result<GameRules> {
     if let Some(path) = path_opt {
@@ -45,6 +60,44 @@ fn write_violation_ledger(path: &str, violations: &[Violation]) -> std::io::Resu
 }
 
 /// 评判工件落盘（M8：judgments.ndjson + attribution_report.json）。
+/// 门禁判定：把「评判 Hard 门失败」变成进程退出码（gap.md §18.6 第 7 条）。
+///
+/// ## 为什么需要这个函数
+///
+/// `AttributionReport.hard_gate_failed` 自 D1.2 起就已正确计算，但**没有任何
+/// 调用点消费它**：单场、batch、evaluate 三条路径都只打印 `⛔ HARD gate
+/// FAILED` 然后正常返回。实测 `--seeds 0..1 batch full` 在
+/// `hard_gate_failed=true` 且 61 条 defect 的情况下**退出码仍为 0**，
+/// 因此 CI 的 `stage-gate` job 是一条永远为绿的假门。
+///
+/// 打印而不断言，等于把门降级成日志。
+///
+/// 返回 `true` 表示调用方应当以失败退出。
+fn enforce_hard_gate(report: &nba_evaluator::AttributionReport, context: &str) -> bool {
+    if !report.hard_gate_failed {
+        return false;
+    }
+    eprintln!(
+        "\u{26d4} HARD gate FAILED [{context}]: {} Hard + {} Soft defects ({} judgments), \
+         coverage {:.0}%, fixture {}",
+        report.hard_defect_count,
+        report.soft_defect_count,
+        report.total_judgments,
+        pct(report.evidence_coverage),
+        report.fixture_version,
+    );
+    for row in report.defects_by_criterion.iter().take(8) {
+        eprintln!(
+            "   [{:>4}x] {} ({}; hard={}, soft={})",
+            row.count, row.criterion, row.attribution, row.hard, row.soft
+        );
+    }
+    eprintln!(
+        "   gap.md §18.6: Hard gate failure must not be offset by the realism index; every turnover/score/rebound must have a causal source."
+    );
+    true
+}
+
 fn write_judgment_artifacts(
     stream_path: &str,
     judgments: &[nba_evaluator::Judgment],
@@ -58,7 +111,11 @@ fn write_judgment_artifacts(
         let mut w = std::io::BufWriter::new(jf);
         use std::io::Write;
         for j in judgments {
-            writeln!(w, "{}", serde_json::to_string(j).map_err(std::io::Error::other)?)?;
+            writeln!(
+                w,
+                "{}",
+                serde_json::to_string(j).map_err(std::io::Error::other)?
+            )?;
         }
         w.flush()?;
     }
@@ -100,7 +157,9 @@ fn run_single_simulation(
     println!("\n📊 Box Score & Advanced Statistics:");
     println!(
         "   Score: Home {} - {} Away (Total: {})",
-        engine.home_score(), engine.away_score(), total_points
+        engine.home_score(),
+        engine.away_score(),
+        total_points
     );
     println!(
         "   Possessions: {} | Avg Duration: {:.2}s",
@@ -110,19 +169,19 @@ fn run_single_simulation(
         "   2PT FG: {}/{} ({:.1}%)",
         summary.box_score.fg2_made,
         summary.box_score.fg2_attempts,
-        summary.box_score.fg2_pct() * 100.0
+        pct(summary.box_score.fg2_pct())
     );
     println!(
         "   3PT FG: {}/{} ({:.1}%)",
         summary.box_score.fg3_made,
         summary.box_score.fg3_attempts,
-        summary.box_score.fg3_pct() * 100.0
+        pct(summary.box_score.fg3_pct())
     );
     println!(
         "   FT:     {}/{} ({:.1}%)",
         summary.box_score.ft_made,
         summary.box_score.ft_attempts,
-        summary.box_score.ft_pct() * 100.0
+        pct(summary.box_score.ft_pct())
     );
     println!(
         "   Turnovers: {} | Fouls: {}",
@@ -172,12 +231,15 @@ fn run_single_simulation(
     }
 
     // M8 评判工件：judgments.ndjson + attribution_report.json 与流同落盘。
-    if let Ok(stream) = fs::read_to_string(out_path) {
+    if let Ok(stream) = read_stream_text(out_path) {
         // D1.3 严格解析：坏行 = 流不可信，跳过评判并告警（不产出假工件）。
         let ticks = match nba_evaluator::parse_stream(&stream) {
             Ok(t) => t,
             Err(e) => {
-                eprintln!("⚠️ stream parse failed (strict): {} — skipping judgment artifacts", e);
+                eprintln!(
+                    "⚠️ stream parse failed (strict): {} — skipping judgment artifacts",
+                    e
+                );
                 return Ok(());
             }
         };
@@ -189,14 +251,16 @@ fn run_single_simulation(
                 j
             })
             .collect::<Vec<_>>();
+        let mut judgments_report: Option<nba_evaluator::AttributionReport> = None;
         match write_judgment_artifacts(out_path, &judgments, &fixture) {
             Ok(report) => {
                 // D1.2：Hard 门失败时指数无效，先报门再报指数。
                 if report.hard_gate_failed {
                     println!(
-                        "⛔ HARD gate FAILED ({} defects, coverage {:.0}%) → {}.judgments.ndjson",
-                        report.defect_count,
-                        report.evidence_coverage * 100.0,
+                        "⛔ HARD gate FAILED ({} Hard + {} Soft defects, coverage {:.0}%) → {}.judgments.ndjson",
+                        report.hard_defect_count,
+                        report.soft_defect_count,
+                        pct(report.evidence_coverage),
                         out_path
                     );
                 } else {
@@ -205,12 +269,19 @@ fn run_single_simulation(
                         report.realism_index,
                         report.total_judgments,
                         report.defect_count,
-                        report.evidence_coverage * 100.0,
+                        pct(report.evidence_coverage),
                         out_path
                     );
                 }
+                judgments_report = Some(report);
             }
             Err(e) => eprintln!("⚠️ judgment artifacts failed: {}", e),
+        }
+        // gap.md §18.6：Hard 门失败必须以失败退出，不得只打印。
+        if let Some(report) = judgments_report.as_ref() {
+            if enforce_hard_gate(report, "single") {
+                std::process::exit(1);
+            }
         }
 
         // D0.2 四式账本平衡检查：ledger_violations.ndjson 同落盘；
@@ -226,7 +297,9 @@ fn run_single_simulation(
                     if let Err(e) = writeln!(
                         w,
                         "{}",
-                        serde_json::to_string(v).map_err(std::io::Error::other).unwrap_or_default()
+                        serde_json::to_string(v)
+                            .map_err(std::io::Error::other)
+                            .unwrap_or_default()
                     ) {
                         write_err = Some(e);
                         break;
@@ -250,7 +323,6 @@ fn run_single_simulation(
 
     Ok(())
 }
-
 
 /// CLI 自己的临时目录根（与 test-support 的约定一致）。
 ///
@@ -333,8 +405,7 @@ fn run_batch_simulation(
             seed
         )));
         let out_path = guard.path_str();
-        let summary =
-            engine.simulate_scope_and_export_with_mode(scope, &out_path, stream_mode)?;
+        let summary = engine.simulate_scope_and_export_with_mode(scope, &out_path, stream_mode)?;
 
         let pts = engine.home_score() + engine.away_score();
         let poss = engine.completed_possessions();
@@ -378,19 +449,22 @@ fn run_batch_simulation(
             "   [Game {:02}/{:02}] Seed={:<3} Total={:<3} Poss={:<3} Dur={:.2}s 3P={:.1}% Violations={}",
             i + 1,
             seeds.len(),
-            seed, pts, poss, dur, summary.box_score.fg3_pct() * 100.0, game_violations
+            seed, pts, poss, dur, pct(summary.box_score.fg3_pct()), game_violations
         );
 
         total_points_list.push(pts as f32);
         avg_dur_list.push(dur);
-        fg3_pct_list.push(summary.box_score.fg3_pct() * 100.0);
+        fg3_pct_list.push(pct(summary.box_score.fg3_pct()));
 
         // M8 评判：逐场评判并聚合（batch 与 violations 同落盘）。
-        if let Ok(stream) = fs::read_to_string(&out_path) {
+        if let Ok(stream) = read_stream_text(&out_path) {
             let ticks = match nba_evaluator::parse_stream(&stream) {
                 Ok(t) => t,
                 Err(e) => {
-                    eprintln!("⚠️ batch stream parse failed (strict): {} — skipping game", e);
+                    eprintln!(
+                        "⚠️ batch stream parse failed (strict): {} — skipping game",
+                        e
+                    );
                     continue;
                 }
             };
@@ -418,10 +492,7 @@ fn run_batch_simulation(
     if !all_judgments.is_empty() {
         // 未指定 --out 时使用进程隔离的临时聚合路径，避免多次运行互相
         // 覆盖或在固定路径累积（gap.md §16.4）。
-        let fallback = cli_temp_root().join(format!(
-            "nba_batch_aggregate_{}",
-            std::process::id()
-        ));
+        let fallback = cli_temp_root().join(format!("nba_batch_aggregate_{}", std::process::id()));
         let fallback_str = fallback.to_string_lossy().to_string();
         let base = out_path.unwrap_or(fallback_str.as_str());
         let judgments_path = format!("{}.judgments.ndjson", base);
@@ -430,7 +501,11 @@ fn run_batch_simulation(
             let jf = File::create(&judgments_path)?;
             let mut w = std::io::BufWriter::new(jf);
             for j in &all_judgments {
-                writeln!(w, "{}", serde_json::to_string(j).map_err(std::io::Error::other)?)?;
+                writeln!(
+                    w,
+                    "{}",
+                    serde_json::to_string(j).map_err(std::io::Error::other)?
+                )?;
             }
             w.flush()?;
         }
@@ -476,12 +551,17 @@ fn run_batch_simulation(
     if total_violations > 0 {
         std::process::exit(1);
     }
+    // gap.md \u00a718.6\uff1abatch \u6b64\u524d\u53ea\u628a Hard \u95e8\u6253\u5370\u6210\u4e00\u884c\uff0c\u5373\u4fbf
+    // hard_gate_failed \u4e14\u4e0a\u767e\u6761 Hard defect \u4e5f\u4ee5 0 \u9000\u51fa\u3002
+    if enforce_hard_gate(&report, "batch") {
+        std::process::exit(1);
+    }
     Ok(())
 }
 
 /// 离线评判（quality 评判规范）：对既有 ndjson 流产出评判工件。
 fn run_evaluate(stream_path: &str) -> std::io::Result<()> {
-    let stream = fs::read_to_string(stream_path)?;
+    let stream = read_stream_text(stream_path)?;
     let ticks = nba_evaluator::parse_stream(&stream)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let fixture = nba_evaluator::ReferenceDistributions::nba_v1();
@@ -500,6 +580,10 @@ fn run_evaluate(stream_path: &str) -> std::io::Result<()> {
         );
     }
     println!("   Realism index: {:.3}", report.realism_index);
+    // gap.md \u00a718.6\uff1aevaluate \u5b50\u547d\u4ee4\u540c\u6837\u5fc5\u987b\u53cd\u6620 Hard \u95e8\u3002
+    if enforce_hard_gate(&report, "evaluate") {
+        std::process::exit(1);
+    }
     Ok(())
 }
 
@@ -560,8 +644,10 @@ const DEFAULT_BENCHMARK_TICKS: usize = 20_000;
 const BYTES_PER_MEBIBYTE: f64 = 1_048_576.0;
 
 fn run_benchmark(ticks: usize, mode: &str) -> std::io::Result<()> {
-    println!("⏱️  Layered benchmark: {ticks} ticks, mode={mode}, release
-");
+    println!(
+        "⏱️  Layered benchmark: {ticks} ticks, mode={mode}, release
+"
+    );
     let mut failures: Vec<String> = Vec::new();
     let want = |layer: &str| mode == "all" || mode == layer;
 
@@ -593,10 +679,9 @@ fn run_benchmark(ticks: usize, mode: &str) -> std::io::Result<()> {
 
     // ---- 2. engine + facts：事实流序列化 ----
     if want("facts") {
-        let artifact = TempStreamGuard::new(cli_temp_root().join(format!(
-            "nba_bench_facts_{}.ndjson",
-            std::process::id()
-        )));
+        let artifact = TempStreamGuard::new(
+            cli_temp_root().join(format!("nba_bench_facts_{}.ndjson", std::process::id())),
+        );
         let start = Instant::now();
         let mut engine = MatchEngine::with_setup(MatchSetup::builtin(GameRules::default()), 42);
         let mut completed = 0usize;
@@ -640,10 +725,7 @@ fn run_benchmark(ticks: usize, mode: &str) -> std::io::Result<()> {
         let mbps = mib / elapsed;
         println!(
             "   [engine+facts ] {:>10.0} ticks/s  ({} ticks, {:.1} MiB, {:.1} MiB/s)",
-            tps,
-            completed,
-            mib,
-            mbps
+            tps, completed, mib, mbps
         );
         if tps < BUDGET_FACTS_TICKS_PER_SEC {
             failures.push(format!(
@@ -755,9 +837,7 @@ fn run_audit_stream(file_path: &str) -> std::io::Result<()> {
         }
         // 紧凑流（facts/summary）不携带逐 tick 几何投影，L1 几何检测不适用；
         // 明确拒绝而不是用零坐标误报「越界/球人分离」（gap.md §16.4）。
-        if projection.as_deref().is_some_and(|p| p != "full")
-            && tick.frame.players.is_empty()
-        {
+        if projection.as_deref().is_some_and(|p| p != "full") && tick.frame.players.is_empty() {
             continue;
         }
 
@@ -809,6 +889,15 @@ fn run_audit_stream(file_path: &str) -> std::io::Result<()> {
     }
 
     Ok(())
+}
+
+/// 比例 → 百分比的唯一换算点（展示层）。
+///
+/// 调用方不得各自写 `* 100.0`：那会让同一个换算字面量以「行为常数」的身份
+/// 散落 8 处（charter C1 / docs/protocol.md §2.1 M7 的收编对象）。收编为单点后，
+/// 该字面量只出现一次，且位置明确属于展示层。
+fn pct(ratio: f32) -> f32 {
+    ratio * 100.0
 }
 
 fn main() -> std::io::Result<()> {
@@ -946,7 +1035,7 @@ fn main() -> std::io::Result<()> {
                     i += 1;
                 }
             }
-            // 兼容旧形态：--batch N = 种子 1..=N（design.md §2 前置口径）。
+            // 兼容旧形态：--batch N = 种子 1..=N（docs/quality.md §3.1 的批处理口径）。
             "--batch" => {
                 if i + 1 < args.len() {
                     let n: usize = args[i + 1].parse().unwrap_or(10);

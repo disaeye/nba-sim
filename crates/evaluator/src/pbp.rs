@@ -1,10 +1,9 @@
-//! 外部 Play-by-Play 数据转换器（M8 扩展位：quality.md §2.4 / status.md §8.4）。
+//! 外部 Play-by-Play 数据转换器（M8 扩展位：`docs/quality.md` §2.4 / 历史缺口登记见 `docs/dev/cycles/20260901_historical/status_snapshot.md` §8.4）。
 //!
 //! 将真实或外部比赛 Play-by-Play (PBP) 事件流聚合统计，生成版本化的 ReferenceDistributions fixture。
 
 use crate::fixture::{Band, OutcomeBands, ReferenceDistributions};
 use serde::{Deserialize, Serialize};
-
 
 /// 单条外部 PBP 事件。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,7 +43,10 @@ impl OutcomeStats {
 
 fn compute_percentile_band(values: &[f32], default_min: f32, default_max: f32) -> Band {
     if values.len() < 3 {
-        return Band { min: default_min, max: default_max };
+        return Band {
+            min: default_min,
+            max: default_max,
+        };
     }
     let mut sorted = values.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -97,7 +99,11 @@ pub fn convert_pbp_events_to_fixture(
     }
 
     let is_fiba = league.eq_ignore_ascii_case("FIBA");
-    let (court_w, court_h) = if is_fiba { (91.86, 49.21) } else { (94.0, 50.0) };
+    let (court_w, court_h) = if is_fiba {
+        (91.86, 49.21)
+    } else {
+        (94.0, 50.0)
+    };
 
     let turnover_rate = if total_possessions > 0 {
         total_turnovers as f32 / total_possessions as f32
@@ -135,6 +141,9 @@ pub fn convert_pbp_events_to_fixture(
         court_width_ft: court_w,
         court_height_ft: court_h,
         pass_corridor_radius_ft: base_template.pass_corridor_radius_ft,
+        // 时钟政策与联赛模板一致；PBP 事件不携带时钟规则。
+        offensive_rebound_shot_clock_seconds: base_template.offensive_rebound_shot_clock_seconds,
+        duration_tolerance_seconds: base_template.duration_tolerance_seconds,
         duration_bands,
         passes_bands,
         turnover_rate_band: Band {
