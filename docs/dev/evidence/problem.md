@@ -1513,3 +1513,76 @@ home_defensive_tactic, away_defensive_tactic
   未统一到单一只读快照（`current/plan.md` D7 的后续项）；
 - `check_world_privacy.py` 目前仍以「字段名清单」为判据；守卫升级为
   「API 形态」判据（禁止任何 `pub` 字段，而非列出清单）是 D7 的下一项。
+
+---
+
+## 25. `carrier_idx` 的调查（D8.1 前置，结论：不是等价重构）
+
+> 目标（`current/plan.md` §4 D8.1）：分离 `BallControl` × `BallMotion`，
+> 删除 `carrier_idx`、`ball_pos_3d` 等旁路字段作为权威来源的路径。
+
+### 25.1 现状
+
+`carrier_idx` 全仓仅 7 处引用（1 处声明、3 处写入、2 处读取、1 处初始化），
+看似是可直接删除的旁路字段。读取点：
+
+- `carrier_id()` 的 `_ =>` 回退分支：`roster[self.possession][carrier_idx]`；
+- `plan_possession_targets_with_rules` 的 `carrier_idx` 实参。
+
+写入点：传球执行（接球人）、`start_loose_ball_transition`（控球人）、
+`start_inbound_transition`（= 0）。
+
+### 25.2 实验一：回退分支是否影响行为
+
+`carrier_id()` 只对 `Held` / `InboundReady` / `InboundTransfer` 显式处理，
+**其余 7 种球态（Drive/ControlTransfer/Pass/Shot/LooseBall/RimRebound/Dead）
+全部落入 roster 下标回退**。把该回退改为
+`BallState::associated_player()` 后：
+
+```text
+GOLDEN seed42 x2000:  0xa25e5c57a026def0 -> 0x2d3a14c60062eb9f（变化）
+```
+
+即它是**活的行为**，不是死代码。
+
+### 25.3 实验二：8 seed 对照，逐处隔离
+
+| 变体 | 8 seed full `total_p50` |
+| --- | --- |
+| 基线（HEAD） | 213.5 |
+| 只改 `carrier_id()` 回退 → `associated_player()` | **212.0** |
+| 只把 planner 实参换成 `player_index_for_id(carrier_id())` | 哈希未变（2000 tick 窗口内） |
+
+行为差异来自 `carrier_id()` 的**回退分支**本身，而非 planner 传参。
+
+### 25.4 探针：回退是否会取到「另一支球队」的球员
+
+给回退分支加探针，跑 seed42 `1q`：
+
+```text
+回退命中 4315 次，cross_team=false 全部为假
+```
+
+即 `roster[self.possession][carrier_idx]` **从不跨队**。原因：`carrier_idx`
+由 `player_index_for_id(pid)` 写入，而读取用当前球权队的名单；球权翻转的
+路径（抢断、防守篮板 outlet）随后都会把球态置为 `Held{新持球人}`，
+而 `Held` 走显式分支，不经回退。
+
+### 25.5 结论：两个语义都不是「显然正确」的那一个
+
+| 方案 | 回退语义 |
+| --- | --- |
+| 旧（roster 下标） | 当前球权队名单中，**同一位置序号**的球员 |
+| 新（`associated_player()`） | 球态关联球员；Loose/RimRebound/ControlTransfer 为 `None` |
+
+两者都能通过 `roster_order_neutrality`（顺序中性），但含义不同：旧版是
+「上一次控制权的序号在同一名单上的投影」，新版是「当前球态的关联人」。
+`ControlTransfer`（防守篮板 outlet）与 `LooseBall` 期间两者尤其不同：旧版
+返回某个**同队**球员，新版返回**空**。
+
+**因此这不能作为行为中性重构提交，也不能直接判定哪个更正确。** 正确做法
+是先明确「无关联球员的球态下，谁算 ball handler」这一语义（属 `gap.md` §5.2
+的状态边责任问题），再据以重构；期间需要 8 seed 矩阵与反事实验证。
+
+**当前处置：不改代码。** 已回退全部实验改动，工作树保持 HEAD 状态
+（`git status` 干净）。`carrier_idx` 的删除顺延，等待上述语义决定。
