@@ -1804,3 +1804,104 @@ seed42 黄金哈希逐位不变（`0xa25e5c57…`）→ **零消费**。
 
 **已登记为 D9.2 的输入**：本轮只交付接线缺口的准确清单与证据，
 不交付半接线的行为改动。
+
+---
+
+## 29. 能力与倾向的消费链清单（D10.1 交付物）
+
+> 目标（`current/plan.md` §6 D10.1）：生成「维度 → 消费点 → 观测量 → 测试」的清单。
+> 契约依据：`docs/attributes.md` §2（21 能力维 + 8 倾向维）、T5（逐维登记消费链）。
+
+### 29.1 方法与一次判据修正
+
+第一版扫描只统计「字段名在其它文件出现」，结果把
+`agility`/`shooting_close` 等报为零消费；但 §27.1 的教训表明该判据有
+假阳性（经方法封装的消费会漏）。本次对**全部 6 个疑似零消费维度**做了
+**决定性实证**：把它们设为 0.99（每名球员），跑 3000 tick 并比较行为哈希。
+
+```
+agility=0.99              哈希未变 -> 零消费
+shooting_close=0.99       哈希未变 -> 零消费
+cut_frequency=0.99        哈希未变 -> 零消费
+screen_frequency=0.99     哈希未变 -> 零消费
+offensive_rebound_frequency=0.99  哈希未变 -> 零消费
+transition_sprint=0.99    哈希未变 -> 零消费
+```
+
+即下列结论均经实证，不是扫描推断。
+
+### 29.2 能力维度（21 维）
+
+| 维度 | 生产消费点数 | 首个消费位置 |
+| --- | --- | --- |
+| `speed` | 7 | `decision/src/defense.rs:116` |
+| `acceleration` | 1 | `domain/src/capability.rs:18` |
+| **`agility`** | **0** | **★ 无生产消费（已实证）** |
+| `strength` | 1 | `decision/src/tactics.rs:299` |
+| `vertical` | 2 | `engine/src/match_engine.rs:5896` |
+| `stamina` | 16 | `officiating/src/resolution.rs:438` |
+| `ball_handling` | 12 | `officiating/src/resolution.rs:166` |
+| `passing` | 4 | `officiating/src/resolution.rs:165` |
+| **`shooting_close`** | **0** | **★ 无生产消费（已实证）** |
+| `shooting_mid` | 3 | `decision/src/tactics.rs:305` |
+| `shooting_three` | 3 | `decision/src/tactics.rs:302` |
+| `free_throw` | 1 | `domain/src/capability.rs:26` |
+| `finishing` | 11 | `decision/src/tactics.rs:300` |
+| `defense_perimeter` | 5 | `officiating/src/resolution.rs:336` |
+| `defense_interior` | 4 | `officiating/src/resolution.rs:396` |
+| `steal` | 4 | `officiating/src/resolution.rs:120` |
+| `block` | 1 | `decision/src/defense.rs:169` |
+| `offensive_rebound` | 2 | `officiating/src/resolution.rs:192` |
+| `defensive_rebound` | 2 | `officiating/src/resolution.rs:192` |
+| `decision_iq` | 10 | `decision/src/tactics.rs:297` |
+| `off_ball_sense` | 13 | `officiating/src/resolution.rs:195` |
+
+注：`block` 的唯一消费点在 `decision/src/defense.rs:169`，而该文件的函数
+**全仓零调用**（见 §28.2c）——即 `block` 名义上有消费点，实际未接线。
+另 `free_throw` 的唯一消费点在 `capability.rs` 的 `free_throw_probability()`，
+需确认该函数的调用链（§29.4 列为待办）。
+
+### 29.3 倾向维度（8 维）
+
+| 维度 | 生产消费点数 | 结论 |
+| --- | --- | --- |
+| `shoot_frequency` | 1 | `decision/src/pipeline.rs:399` |
+| `drive_frequency` | 1 | `decision/src/pipeline.rs:447` |
+| `pass_frequency` | 1 | `decision/src/pipeline.rs:473` |
+| **`cut_frequency`** | **0** | **★ 无生产消费（已实证）** |
+| **`screen_frequency`** | **0** | **★ 无生产消费（已实证）** |
+| **`offensive_rebound_frequency`** | **0** | **★ 无生产消费（已实证）** |
+| `risk_tolerance` | 2 | `decision/src/defense.rs:134`（同 `block`，该文件零调用） |
+| **`transition_sprint`** | **0** | **★ 无生产消费（已实证）** |
+
+### 29.4 现有扰动测试的覆盖（8/29 维）
+
+`crates/engine/tests/attribute_perturbation.rs` 实际扰动的维度：
+
+```text
+free_throw ×6   stamina ×2   speed ×2   finishing ×2
+acceleration ×2  defense_perimeter ×1  defense_interior ×1
+```
+
+即 **29 个维度中只有 7 个有扰动测试**，且其中 `free_throw` 占了 6 处用例
+（罚球是唯一被系统性验证的链路）。
+
+### 29.5 结论与处置
+
+1. **6 个维度经实证零消费**（`agility`、`shooting_close`、`cut_frequency`、
+   `screen_frequency`、`offensive_rebound_frequency`、`transition_sprint`）。
+   它们**同时存在于运行 schema 与名册数据中**——即「声明了但引擎不看」，
+   属 `gap.md` §20.3 与 `attributes.md` T5 的明确违反。
+2. **3 个维度名义有消费点但实际未接线**（`block`、`risk_tolerance` 的消费
+   点在零调用文件；`free_throw` 需确认调用链）。
+3. **19 个维度有真实消费点**，但**只有 7 个有扰动测试**；
+   `plan.md` §6 D10.2/D10.3 要求的「每个保留维度至少一条单调响应 +
+   断路负面对照」目前远未覆盖。
+
+**本轮不改代码**，理由与 §27.4 一致：这 6 个零消费维度分属
+**四个未实现的战术行为**（敏捷性影响变向、近距投篮分区、无球切入、
+掩护、冲抢倾向、转换冲刺），删除会抹掉设计意图，接线则是各自独立的行为
+改动。正确顺序是先落清单（本文件），再按 `plan.md` §6 的 D10.2 逐条接线
+并配扰动测试。
+
+**已登记为 D10.2/D10.3 的输入。**
