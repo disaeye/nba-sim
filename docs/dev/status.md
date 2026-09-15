@@ -49,7 +49,7 @@
 | 评判证据模型 | verified（单测范围） | 四态 `Verdict`、固定分母字段、空证据不计通过、Hard gate 使指数失效 | 当前评判准则仍有盲区；`ASSIST_PROFILE` 等明确标记为证据不足 | `crates/evaluator/src/lib.rs`、`crates/evaluator/tests/evaluator.rs` |
 | 构成评判 | partial | 3PA、区域、节奏、失误率等比赛级准则和 fixture 字段存在 | 参考带来源/联合分布/跨 profile 标定仍不完整；不能把进带当作机制真实 | `crates/evaluator/src/fixture.rs`、`crates/evaluator/fixtures/`、`docs/dev/gap.md` §15 |
 | 事件因果链 | verified（协议字段与回归范围） | `FrameEvent` 有全场 `event_id` 和可选 `parent_event_id`，语义父链有测试 | 仍需把所有事件族纳入稳定 schema，并让 ledger 直接消费而非解析字符串载荷 | `crates/protocol/src/frame.rs`、`crates/engine/tests/possession_attribution.rs` |
-| World 封装 | partial | Python 守卫已要求关键真相字段私有，当前守卫通过 | `MatchEngine` 仍公开 `physics`、`tick_index`、`rng`、`rules`、团队/战术依赖等字段；完整 snapshot/service 边界未完成 | `scripts/check_world_privacy.py`、`crates/engine/src/match_engine.rs` |
+| World 封装 | verified（字段可见性）/ partial（snapshot 投影） | `MatchEngine` 的 16 个 `pub` 字段已全部私有（`da453cf`），只保留只读访问器与显式 `*_for_test` 钩子；守卫判据已由「字段清单」升级为「零 `pub` 字段」（`0bc7496`），两类负面对照均能变红 | CLI/回放/评判尚未统一到单一只读 `snapshot()` 投影；`step_inner` 的阶段拆分属 D8 | `scripts/check_world_privacy.py`、`crates/engine/src/match_engine.rs`、`docs/dev/evidence/problem.md` §24 |
 | 球态单一写入口 | partial | domain 转换表、engine `transition_ball_state`、BallState 领域测试存在 | engine 内部仍使用 `BallTrajectoryKind` 别名和多个运行态派生字段；目标 `BallControl × BallMotion` 尚未完成 | `crates/domain/src/flow.rs`、`crates/engine/src/match_engine.rs`、`docs/dev/gap.md` §5 |
 | 主循环阶段化 | partial | 生命周期与子阶段类型存在，事件/不变量在主循环中接入 | `step_inner` 仍是大型编排函数，尚未兑现窄签名静态 Phase 序列 | `crates/engine/src/match_engine.rs`、`docs/architecture.md` §4 |
 | 能力扰动 | partial | 领域 capability 映射、属性扰动测试和 roster 资产存在 | 不是每个能力/倾向维度都已在 CI 中有独立、单调、反事实响应链 | `crates/domain/src/capability.rs`、`crates/engine/tests/attribute_perturbation.rs`、`docs/attributes.md` §2 |
@@ -65,11 +65,22 @@
 
 当前只保留仍然需要动作的事项；已完成的 Round 记录不在这里复制。
 
-### 3.1 收敛公共边界
+### 3.1 收敛公共边界（字段可见性已完成，快照投影待做）
 
-- 将 `MatchEngine` 的公共字段收敛为不可变配置句柄和只读快照；至少先处理 `physics`、`rng`、`rules`、`decision`、团队和战术字段；
-- 让测试后门集中在明确命名的 `*_for_test` 接口，不把可变真相暴露给库调用方；
-- 更新 `check_world_privacy.py` 的判据，使它覆盖目标 API，而不是只检查一组字段名。
+已完成（`da453cf` / `0bc7496`）：
+
+- 16 个 `pub` 字段全部私有，只保留只读访问器（`tick_index`/`rules`/
+  `physics`/`home_roster_order`/`away_roster_order`）；
+- 测试后门集中为显式命名的 `physics_mut_for_test` / `rules_mut_for_test` /
+  `modulation_for_test`；
+- `check_world_privacy.py` 判据由「字段清单」升级为「零 `pub` 字段」，
+  两类负面对照（真相字段 / 配置字段）均能变红。
+
+仍需动作：
+
+- 让 CLI、回放、评判与测试统一经**最小只读 `snapshot()`** 观察，
+  不再各自选访问器；
+- 事件流与黄金哈希在此过程中的变更需可解释（本步尚未触及）。
 
 出口：外部调用只能通过 `step`、`snapshot`、只读访问器和显式命令观察/推进比赛；守卫与编译测试同时通过。
 

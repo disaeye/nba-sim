@@ -38,22 +38,31 @@ D7 + D8 + D9 ─► D11 NBA/FIBA 情景矩阵 ───┘
 已关闭：D12 调试链缺陷与验证通道（结论见 `docs/dev/status.md` §4，不在本文件保留条目）
 ```
 
-## 3. D7 · 收敛 `MatchEngine` 公共边界
+## 3. D7 · 收敛 `MatchEngine` 公共边界（字段可见性已完成）
 
-### 3.1 工作项
+### 3.1 已完成（`da453cf` / `0bc7496`）
 
-- 把 `physics`、`rng`、`rules`、`decision`、团队/战术配置等公开字段改为内部字段或不可变句柄；
-- 设计最小只读 `snapshot`，让 CLI、回放、评判和测试不再依赖内部布局；
-- 将强制场景与测试后门集中为命名明确的 `*_for_test` API；
-- 扩展 `check_world_privacy.py`，检查 API 形态和禁止的公共真相字段，而不只是固定字段名；
+- 16 个 `pub` 字段全部私有，只保留只读访问器；
+- 测试后门集中为 `physics_mut_for_test` / `rules_mut_for_test` /
+  `modulation_for_test`；
+- `check_world_privacy.py` 判据由「字段清单」升级为「零 `pub` 字段」，
+  两类负面对照均能变红（真相字段 + 配置字段）；
+- `cargo check --workspace --all-targets` 与 `clippy -D warnings` 均退出码 0，
+  黄金哈希未变（行为中性），`./scripts/run-tests.sh` 45 套件全绿。
+
+### 3.2 剩余工作项
+
+- 设计最小只读 `snapshot`，让 CLI、回放、评判和测试不再各自选访问器；
 - 保持事件流和黄金哈希的变更可解释，若输出契约改变则同步 protocol/schema 测试。
 
-### 3.2 出口门
+### 3.3 出口门
 
-- 正常外部 crate 无法写入比赛真相字段；
-- privacy guard 正常与负面对照都通过；
-- engine、CLI、debug-server、WASM 和测试改用 snapshot/访问器；
-- 至少一场固定输入回放与改造前具有等价的事件语义，或记录有意行为变化。
+- 正常外部 crate 无法写入比赛真相字段（**已达成**：无 `pub` 字段）；
+- privacy guard 正常与负面对照都通过（**已达成**）；
+- engine、CLI、debug-server、WASM 和测试改用 snapshot/访问器（**部分**：
+  已改用访问器，snapshot 投影待做）；
+- 至少一场固定输入回放与改造前具有等价的事件语义，或记录有意行为变化
+  （**已达成**：黄金哈希未变）。
 
 ## 4. D8 · 球态和阶段边界
 
