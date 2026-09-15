@@ -225,7 +225,6 @@ impl Default for PassPolicy {
 #[serde(default)]
 pub struct BaseRates {
     pub pass_success: f32,
-    pub handoff_success: f32,
     pub drive_success: f32,
     /// 篮下（`dist_to_hoop < GameRules.rim_shot_distance_ft`）投篮命中基准。
     pub shot_make_2pt: f32,
@@ -238,7 +237,6 @@ pub struct BaseRates {
     pub shot_make_mid: f32,
     pub shot_make_3pt: f32,
     pub ft_make: f32,
-    pub steal_attempt_success: f32,
     pub foul_on_drive_rate: f32,
     /// 跳投（含三分）被干扰时造成投篮犯规的概率。
     ///
@@ -247,9 +245,10 @@ pub struct BaseRates {
     /// 跳投在被干扰时没有任何造犯规可能。实测 seed42 全场仅 12 次犯规
     /// （真实 NBA 约 40），`free_throw_rate` 因此只有 0.110（带 [0.20,0.35]）。
     /// 这是缺失的程序路径，不是参数偏差，所以新建字段而非调已有值。
+    ///
+    /// 已知未闭合：该路径使罚球率只到 0.118，仍越带；瓶颈在接触强度
+    /// 分布而非本参数（evidence/problem.md §23.12），不得调大凑数。
     pub foul_on_shot_rate: f32,
-    pub offensive_rebound_rate: f32,
-    pub block_rate: f32,
     /// Pass interception adjudication shape.
     pub intercept_steal_slope: f32,
     pub intercept_tip_slope: f32,
@@ -264,7 +263,6 @@ impl Default for BaseRates {
     fn default() -> Self {
         Self {
             pass_success: 0.94,
-            handoff_success: 0.97,
             drive_success: 0.78,
             shot_make_2pt: 0.565,
             // 中距离基准：公开赛季口径约 0.42。此前与廊下共用 0.565，
@@ -272,14 +270,11 @@ impl Default for BaseRates {
             shot_make_mid: 0.42,
             shot_make_3pt: 0.34,
             ft_make: 0.77,
-            steal_attempt_success: 0.005,
             foul_on_drive_rate: 0.10,
             // 跳投犯规基准：真实 NBA 每场约 40 次犯规，其中相当部分来自
             // 跳投犯规（三分犯规 / 中距离投篮犯规 / and-one）。
             // 干扰强度在上层作为自变量乘入，此处为“受到实质干扰时”的基准。
             foul_on_shot_rate: 0.06,
-            offensive_rebound_rate: 0.26,
-            block_rate: 0.05,
             // round-16 调整（A/B 证据 §17.6）：传球选择修复（距离衰减）后，
             // 拦截斜率减半：失败率 10.7%→7.5%、e 0.231→0.178、n 2.47。
             // 选择层已不再系统性喂长传，裁决层的惩罚强度相应回调。
@@ -360,15 +355,13 @@ impl ResolveConfig {
     pub fn validate(&self) -> Result<(), String> {
         let probabilities = [
             self.base_rates.pass_success,
-            self.base_rates.handoff_success,
             self.base_rates.drive_success,
             self.base_rates.shot_make_2pt,
             self.base_rates.shot_make_3pt,
+            self.base_rates.shot_make_mid,
             self.base_rates.ft_make,
-            self.base_rates.steal_attempt_success,
             self.base_rates.foul_on_drive_rate,
-            self.base_rates.offensive_rebound_rate,
-            self.base_rates.block_rate,
+            self.base_rates.foul_on_shot_rate,
             self.base_rates.intercept_steal_floor,
             self.base_rates.intercept_steal_ceiling,
             self.base_rates.intercept_tip_floor,

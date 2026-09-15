@@ -1407,3 +1407,29 @@ probability = policy.foul_rate(0.12)
 **状态：已定位到环节与量级，未修。** 明确不采用「调大 `foul_on_shot_rate`
 或 `ContactPolicy.foul_rate`」的路线：那会把犯规数凑到 40，同时让
 高速碰撞的吹罚率远超真实，用错误机制换正确数字。
+
+### 22.6 处置：四个死参数已删除，并区分两类不同性质
+
+`BaseRates` 的四个零消费字段已删除，但它们**不是同一类问题**：
+
+| 字段 | 性质 | 处置 |
+| --- | --- | --- |
+| `steal_attempt_success` | **重复声明**：抢断实际由 `InterceptPolicy.intercept_steal_slope/floor/ceiling` 决定（`officiating/src/resolution.rs:124`，真实生效） | 删除（已被取代） |
+| `offensive_rebound_rate` | **重复声明**：篮板实际由 `ReboundPolicy.base_offensive_rate` 决定（同值 0.26，`resolution.rs:196`） | 删除（重复） |
+| `handoff_success` | **功能未实现**：手递手（handoff）机制本身在引擎中不存在 | 删除参数，**同时登记功能缺口** |
+| `block_rate` | **功能未实现**：盖帽仅存在于突破终结（`shot_type_block_bias.drive_finish`）；跳投**没有盖帽路径**（`resolve_shot_arrival` 只有命中/不中两个分支，`BLOCK` 事件类型不存在） | 删除参数，**同时登记功能缺口** |
+
+区分这两类的理由：删除一个"重复声明"只是清理，而删除一个"未实现功能的
+参数"有被误读为"该功能已支持"的风险。因此后两者的缺口在此显式登记：
+
+**缺口 G-A（跳投盖帽）**：`resolve_shot_arrival()` 只接受
+`is_made` 并返回 `Score` / `Miss`，没有第三方结果（被盖）。真实 NBA 每场
+约 5 次盖帽，其中多数来自跳投。当前引擎的盖帽只影响突破终结的成功率，
+**不产生独立的盖帽事实**。若要支持，需在 `GameEvent` 增加盖帽事实、
+在裁决层增加阻塞结果，并让被盖后的球进入松球/篮板路径。
+
+**缺口 G-B（手递手）**：引擎没有 handoff 动作类型，传球只有
+`Pass` / `PassReceived` 等路径。手递手在真实进攻中是独立的动作族
+（含掩护、交接球、随即出手），需要决策层候选与执行链两层支持。
+
+两项均**不在本周期范围**，登记为后续周期候选，避免"参数删了 = 功能有了"。
