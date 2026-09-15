@@ -9,7 +9,7 @@
 当前工作区已经具备一条可运行、可复现、带事件和评判工件的模拟链，但**不能宣称已经满足全部设计契约**。最重要的判断如下：
 
 - **可宣称**：领域层提供 `BallState` 与受约束的状态转换；事件帧带稳定 `event_id` / `parent_event_id`；评判器有 `NotApplicable` / `InsufficientEvidence` 与 Hard gate；账本检查器和多种负面对照测试已存在；名册数据不再以数组顺序定义身份；防守方案已经通过规则参数影响目标几何；默认事实流有资源上限。
-- **只能部分宣称**：防守方案对几何和部分结果有因果影响，但完整 switch/drop/hedge/recover 责任链、动态对位与反事实覆盖仍未形成完整证据包；战术档案已接入当前目标生成路径，但旧 `TacticalSet` 兼容路径和 `carrier_idx` 仍存在。
+- **只能部分宣称**：防守方案对几何和部分结果有因果影响，但完整 switch/drop/hedge/recover 责任链、动态对位与反事实覆盖仍未形成完整证据包；战术档案已接入当前目标生成路径，旧 `TacticalSet` 的**几何分支**已删除但仍作为兼容枚举存在，`carrier_idx` 经调查确认非等价可删（见 `evidence/problem.md` §25）。
 - **不能宣称**：所有 `MatchEngine` 真相字段已经封装；完整阶段管线已经按 `architecture.md` 的窄签名落地；所有战术都已成为可扩展 JSON 资产；NBA/FIBA 全部情景门已通过；真实度和统计目标带已在全矩阵连续校准中达标。
 
 因此当前唯一合法的整体标签是：**实现进行中，核心证据链已明显增强，结构和行为契约仍有未闭合门**。
@@ -53,7 +53,7 @@
 | 球态单一写入口 | partial | domain 转换表、engine `transition_ball_state`、BallState 领域测试存在 | engine 内部仍使用 `BallTrajectoryKind` 别名和多个运行态派生字段；目标 `BallControl × BallMotion` 尚未完成 | `crates/domain/src/flow.rs`、`crates/engine/src/match_engine.rs`、`docs/dev/gap.md` §5 |
 | 主循环阶段化 | partial | 生命周期与子阶段类型存在，事件/不变量在主循环中接入 | `step_inner` 仍是大型编排函数，尚未兑现窄签名静态 Phase 序列 | `crates/engine/src/match_engine.rs`、`docs/architecture.md` §4 |
 | 能力扰动 | partial | 领域 capability 映射、属性扰动测试和 roster 资产存在 | 不是每个能力/倾向维度都已在 CI 中有独立、单调、反事实响应链 | `crates/domain/src/capability.rs`、`crates/engine/tests/attribute_perturbation.rs`、`docs/attributes.md` §2 |
-| 进攻战术资产化 | partial | 两个内置 JSON 档案、slot fill、能力适配和目标绑定已进入当前路径 | `TacticalSet` 兼容枚举仍是主编排输入之一；更多档案未纳入统一库，回退路径仍按 roster 顺序 | `data/tactics/`、`crates/domain/src/tactics.rs`、`crates/decision/src/tactics.rs`、`crates/engine/src/match_engine.rs` |
+| 进攻战术资产化 | partial | 两个内置 JSON 档案、slot fill、能力适配和目标绑定已进入当前路径；**旧 `TacticalSet` 的 6 个硬编码几何分支已删除**（`db31fe7`，330 行死计算，8 seed 逐字段比对差异 0） | `TacticalSet` 仍作为**兼容/解析枚举**存在（`from_id`/`id`/`name_zh` 与 `tactical_set` 字段）；更多档案未纳入统一库；slot fill 回退路径仍按 roster 顺序 | `data/tactics/`、`crates/domain/src/tactics.rs`、`crates/decision/src/tactics.rs`、`crates/engine/src/match_engine.rs`、`docs/dev/evidence/problem.md` §26 |
 | 防守因果链 | partial | `DefenseRules` 从 `data/defense/schemes.json` 进入目标几何；防守效果测试要求方案差异 | 完整动作候选、责任图、动态换防和结果解释尚未统一接入 `decision/src/defense.rs` | `data/defense/schemes.json`、`crates/domain/src/rules.rs`、`crates/decision/src/defense.rs`、`crates/engine/tests/defense_effect.rs` |
 | 名册身份独立 | verified（守卫与回归范围） | roster JSON 数据资产、`check_no_index_identity.py`、顺序中性测试均存在；`PlayerRole` 与 `PlayerData.roles` 已物理删除（提交 `487293c`） | 仍需清理通用工具中以 index 访问的非身份用途，避免守卫只覆盖已知模式 | `data/roster/`、`scripts/check_no_index_identity.py`、`crates/engine/tests/roster_order_neutrality.rs` |
 | LeagueProfile | partial | `LeagueProfile` 类型、NBA/FIBA fixture 与 league 测试存在 | 不能以单场或类型存在宣称全部 NBA/FIBA 程序情景通过；NCAA 仍是路线项 | `crates/domain/src/league.rs`、`crates/engine/tests/league_profile.rs`、`crates/evaluator/fixtures/` |
