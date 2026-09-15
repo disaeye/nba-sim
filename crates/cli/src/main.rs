@@ -284,8 +284,9 @@ fn run_single_simulation(
             }
         }
 
-        // D0.2 四式账本平衡检查：ledger_violations.ndjson 同落盘；
-        // 账本不平衡 = Hard，违反条数计入输出供批处理门禁消费。
+        // D0.2 账本平衡检查（含 §23.10 新增的失误归因式）：
+        // ledger_violations.ndjson 同落盘；账本不平衡 = Hard，
+        // 违反条数计入输出供批处理门禁消费。
         let ledger_violations = nba_evaluator::check_ledger(&ticks);
         let ledger_path = format!("{}.ledger_violations.ndjson", out_path);
         match File::create(&ledger_path) {
@@ -308,7 +309,9 @@ fn run_single_simulation(
                 if let Some(e) = write_err.or_else(|| w.flush().err()) {
                     eprintln!("⚠️ ledger violations artifact write failed: {}", e);
                 } else if ledger_violations.is_empty() {
-                    println!("📒 Ledger: 4 equations balanced (score/possession/time/foul).");
+                    println!(
+                        "📒 Ledger: 5 equations balanced (score/possession/time/foul/turnover)."
+                    );
                 } else {
                     println!(
                         "📒 Ledger: {} HARD violations → {}",

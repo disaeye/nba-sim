@@ -727,6 +727,29 @@ impl MatchEngine {
             shot_contest_intensity: self.current_possession_contest,
             rebound_distance_ft,
         };
+        // ## 失误计数单一入口（evidence/problem.md §23.10）
+        //
+        // 此前 `box_score.turnovers` 只有两个自增点
+        // （`start_violation_turnover` / `start_steal_transition`），
+        // 而 `PossessionEndCause` 有五种 Turnover* 终结：
+        // PassTipped / PassDropped / LooseBall 三条路径只发总结、不计箱体，
+        // 实测 seed42 事件流 52 次失误终结 vs 箱体 12 次（低估约 4 倍）。
+        //
+        // 账本后果：守恒式 `possessions ≈ FGA + TO + 0.44·FTA − OREB` 的
+        // TO 项失真，回合残差由 +4 撑到 +44。
+        //
+        // 修正方式：把计数收敛到**唯一入口**（本函数是所有权终结的漏斗），
+        // 而不是在五条路径上各自补一次——后者迟早会再次漏掉新增的终结类型。
+        if matches!(
+            terminal_event,
+            nba_domain::PossessionEndCause::TurnoverViolation
+                | nba_domain::PossessionEndCause::TurnoverSteal
+                | nba_domain::PossessionEndCause::TurnoverPassTipped
+                | nba_domain::PossessionEndCause::TurnoverPassDropped
+                | nba_domain::PossessionEndCause::TurnoverLooseBall
+        ) {
+            self.box_score.turnovers += 1;
+        }
         self.last_possession_summary_index = Some(summary.possession_index);
         self.pending_events
             .push(nba_domain::GameEvent::PossessionSummary(summary));
@@ -5211,7 +5234,8 @@ impl MatchEngine {
     }
 
     fn start_violation_turnover(&mut self, _kind: ViolationKind) {
-        self.box_score.turnovers += 1;
+        // 失误计数已收敛到 `emit_possession_summary` 单一入口
+        // （evidence/problem.md §23.10）：此处不再自增，避免重复计数。
         self.emit_possession_summary(
             nba_domain::PossessionEndCause::TurnoverViolation,
             None,
@@ -5232,7 +5256,7 @@ impl MatchEngine {
     }
 
     fn start_steal_transition(&mut self, stealer_id: String, intercept_pos: Vec2) {
-        self.box_score.turnovers += 1;
+        // 失误计数已收敛到 `emit_possession_summary` 单一入口（§23.10）。
         // The defender is the actor in the STEAL fact; the summary's
         // turnover_player_id is the offensive player who lost the pass.
         self.emit_possession_summary(

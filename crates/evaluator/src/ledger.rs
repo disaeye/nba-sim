@@ -48,7 +48,57 @@ pub fn check_ledger(ticks: &[StreamTick]) -> Vec<LedgerViolation> {
     check_possession_conservation(ticks, &mut violations);
     check_time_conservation(ticks, &mut violations);
     check_foul_conservation(ticks, &mut violations);
+    check_turnover_conservation(ticks, &mut violations);
     violations
+}
+
+/// 失误终结的责任可追溯性：每条 `TURNOVER*` 回合终结都必须携带
+/// 责任球员或可归因的抢断事实。
+///
+/// 为什么需要（evidence/problem.md §23.10 的同类缺陷）：
+/// `box_score.turnovers` 曾只有两个自增点而失误终结有五种，导致箱体
+/// 低估约 4 倍（seed42 实测 12 vs 52），并使守恒式
+/// `possessions ≈ FGA + TO + 0.44·FTA − OREB` 的 TO 项失真。
+/// 该缺陷长期存活的原因是：没有任何检查对平「汇总字段」与「事件事实」。
+///
+/// 本函数只做它**能看见**的那部分：事实流内部的一致性——失误终结不能
+/// 缺少责任归属（`turnover_player_id`），否则归因链断裂。
+/// 「箱体等于事件流」的跨天对比在内核对中不可行（`StreamTick` 不带
+/// 箱体快照），因此那一条由 `crates/engine/tests/` 的回归测试承担。
+fn check_turnover_conservation(ticks: &[StreamTick], out: &mut Vec<LedgerViolation>) {
+    for tick in ticks {
+        for event in &tick.frame.event_log {
+            if event.kind != "POSSESSION_SUMMARY" {
+                continue;
+            }
+            let Some(summary) = event.data.as_ref().and_then(|d| d.get("PossessionSummary")) else {
+                continue;
+            };
+            let terminal = summary
+                .get("terminal_event")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if !terminal.starts_with("TURNOVER") {
+                continue;
+            }
+            let has_player = summary
+                .get("turnover_player_id")
+                .map(|v| !v.is_null())
+                .unwrap_or(false);
+            if !has_player {
+                let idx = summary
+                    .get("possession_index")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(u64::MAX);
+                let mut v = LedgerViolation::new(
+                    "TURNOVER_CONSERVATION",
+                    format!("turnover terminal `{terminal}` at possession {idx} lacks responsible player"),
+                );
+                v.possession = Some(idx);
+                out.push(v);
+            }
+        }
+    }
 }
 
 /// 得分守恒：终场比分 = Σ 得分事件载荷。

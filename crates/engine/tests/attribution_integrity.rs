@@ -188,3 +188,66 @@ fn possession_windows_do_not_span_period_boundaries() {
          finish_period)"
     );
 }
+
+/// `box_score.turnovers` 必须等于事件流中的 `TURNOVER*` 回合终结数。
+///
+/// ## 为什么需要这条断言（evidence/problem.md §23.10）
+///
+/// `box_score.turnovers` 曾只有**两个**自增点（`start_violation_turnover`
+/// 与 `start_steal_transition`），而 `PossessionEndCause` 有**五种**
+/// `Turnover*` 终结：`PassTipped`、`PassDropped`、`LooseBall` 三条路径
+/// 只发布回合总结、不写箱体。实测 seed42 全场的对比是：
+///
+/// ```text
+/// 事件流 TURNOVER* 终结合计 = 52
+/// box_score.turnovers       = 12     ← 低估约 4 倍
+/// ```
+///
+/// 后果不止于报表：守恒式 `possessions ≈ FGA + TO + 0.44·FTA − OREB`
+/// 的 TO 项失真，回合残差由 +4 被撑到 +44，使 `pace` 校准失去可信输入。
+///
+/// 该缺陷能长期存活，是因为既有守卫分别只检查「数值字面量」（常数守卫）、
+/// 「字段可见性」（World privacy）与「文档引用」（文档守卫），
+/// **没有任何一项对平「汇总字段」与「事件事实」**。本测试补这一层。
+#[test]
+fn box_score_turnovers_match_turnover_terminals() {
+    // 失误计数与比赛长度无关；用 `1q` 保持测试时长可控（quality.md §2.5）。
+    for seed in [42u64, 1, 7, 100, 999, 31337] {
+        let mut engine = MatchEngine::new(seed);
+        engine.set_scope("1q").expect("1q scope is valid");
+
+        let mut terminals = 0u32;
+        let mut ticks = 0usize;
+        while !engine.is_finished() && ticks < 300_000 {
+            let tick = engine.step();
+            for ev in &tick.frame.event_log {
+                if ev.kind != "POSSESSION_SUMMARY" {
+                    continue;
+                }
+                let terminal = ev
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.get("PossessionSummary"))
+                    .and_then(|s| s.get("terminal_event"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("");
+                if terminal.starts_with("TURNOVER") {
+                    terminals += 1;
+                }
+            }
+            ticks += 1;
+        }
+        let box_score_turnovers = engine.box_score().turnovers;
+        assert_eq!(
+            box_score_turnovers, terminals,
+            "seed {seed}: box_score.turnovers ({box_score_turnovers}) must equal the number of \
+             TURNOVER* possession terminals in the event stream ({terminals}); a \
+             mismatch means some turnover path bypasses the box score \
+             (evidence/problem.md §23.10)"
+        );
+        assert!(
+            terminals > 0,
+            "seed {seed}: a quarter of basketball must contain at least one turnover"
+        );
+    }
+}
