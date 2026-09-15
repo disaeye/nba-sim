@@ -2176,3 +2176,100 @@ seed 5 poss  95: 42.7s（ORB=1）超出 40.0s
 即该门对长回合仍敏感，只是不再把合法的停表开销算作违规。
 
 至此 `plan.md` §7.2 的「NBA/FIBA 情景测试分别通过」满足。
+
+---
+
+## 32. `free_throw_rate` 的真正机制：严重度门槛用错了指标
+
+> 上游：§23.9（跳投犯规路径）、§23.12（接触强度分布偏低）。
+> 本节进一步定位到**判据本身**，而不是"接触强度不够"这类描述性结论。
+
+### 32.1 用交叉表取代单变量统计
+
+seed42 full 的 2475 次接触事件，按
+`(semantic_kind, semantic_severity)` 交叉统计：
+
+| semantic_kind | severity | 次数 | 速度中位 |
+| --- | --- | --- | --- |
+| Incidental | Minor | 998 | 7.05 |
+| Incidental | None | 752 | 2.84 |
+| ReboundContact | Minor | 175 | 7.75 |
+| **ChargingCandidate** | **None** | **135** | **2.30** |
+| **BlockingCandidate** | **Minor** | **101** | 7.12 |
+| **ChargingCandidate** | **Minor** | **68** | 6.55 |
+| **Incidental** | **FoulCandidate** | **67** | **14.89** |
+| Incidental | Positional | 55 | 11.76 |
+| **BlockingCandidate** | **None** | **53** | 4.31 |
+| ReboundContact | FoulCandidate | 13 | 13.64 |
+| **BlockingCandidate** | **FoulCandidate** | **3** | 13.21 |
+| **ChargingCandidate** | **FoulCandidate** | **1** | 16.28 |
+
+### 32.2 两个方向相反的错配
+
+**错配 A：语义犯规被挡下（362 次）**
+
+语义分类器识别出 **366 次** `ChargingCandidate` / `BlockingCandidate`
+——即真正的带球撞人/阻挡犯规语义；但其中只有 **4 次**（3+1）同时达到
+`FoulCandidate` 严重度。
+
+其余 **362 次**因速度未达门槛而停留在 `None` / `Minor` / `Positional`。
+而 `resolve_semantic_contact` 开头即：
+
+```rust
+let is_foul_candidate = matches!(contact.severity, ContactSeverity::FoulCandidate);
+if !is_foul_candidate {
+    return ResolutionOutcome::NoChange;   // 直接返回，不考虑 kind
+}
+```
+
+即**这些语义犯规永远不会成为犯规**。
+
+**错配 B：附带接触被放行（67 次）**
+
+84 个 `FoulCandidate` 中有 **67 次是 `Incidental`**（附带碰撞，非犯规语义），
+其速度中位 14.89 ft/s —— 高于真正的语义犯规（`ChargingCandidate` 中位
+2.30–6.55 ft/s）。
+
+### 32.3 机制：严重度与语义分类是**独立**计算的
+
+`crates/semantics/src/lib.rs`：
+
+```rust
+let contact_kind = if screen { … } else { /* 按参与者角色判定 */ };   // L238
+let severity = if relative_speed > max_speed × 0.58 { FoulCandidate } // L266
+               else if relative_speed > max_speed × 0.50 { Positional }
+               else if relative_speed > max_speed × 0.25 { Minor }
+               else { None };
+```
+
+`severity` 只看 `relative_speed`，**完全不看 `contact_kind`**。
+于是"是不是犯规"由速度决定，而速度与"是不是犯规语义"在真实篮球里
+并不相关：带球撞人与阻挡通常发生在**低速**（进攻方减速、防守方站定），
+而高速碰撞多是 incidental（追防、掩护、篮板卡位）。
+
+**这就是"门槛放行 incidental、挡下语义犯规"的根因。**
+
+### 32.4 与 §23.12 的关系（修正描述）
+
+§23.12 曾把根因描述为「接触强度分布整体偏低」。本节表明更准确的表述是：
+**判据选错了**——不是接触不够强，而是用速度作为犯规的唯一门控指标，
+与犯规的真实判定依据（合法性、圆柱体、垂直原则、谁先占位）不匹配。
+
+同样地，`foul_on_shot_rate` 与 `ContactPolicy.foul_rate` **都不是**
+可修复点：把它们调大只会让 67 次 incidental 高速碰撞更多成为犯规，
+进一步偏离真实的犯规结构（真实犯规以低速的身体接触为主）。
+
+### 32.5 处置
+
+**本节不改代码。** 修复要求重建 `contact_kind → severity → foul` 的
+判定关系，属**语义层模型改动**：
+
+1. `severity` 不应只由速度决定。至少应把 `contact_kind` 纳入：
+   `ChargingCandidate` / `BlockingCandidate` / `IllegalScreenCandidate`
+   在低速下也应可判 `FoulCandidate`；`Incidental` 在高速下也不应自动升级。
+2. 需区分**合法与非法接触**的判据（圆柱体、垂直起跳、先占位），
+   而不是只用一个标量速度。
+3. 改动会显著改变犯规/罚球结构，须附 8 seed 矩阵 + 反事实
+   （§22.3 已证明该系统的耦合性，不能按单参数试凑）。
+
+**已登记为独立任务**；`free_throw_rate` 的闭合依赖于它。
