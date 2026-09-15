@@ -116,6 +116,46 @@ fn golden_baseline_seed42() {
     assert_eq!(h, GOLDEN_SEED42_2000, "golden hash drifted for seed 42");
 }
 
+/// `golden_baseline_seed42` 的窗口必须真的覆盖各类得分行为。
+///
+/// ## 为何需要这条断言（evidence/problem.md §23.4）
+///
+/// 该守卫曾出现「测试全绿但实际未覆盖」的静默失效：实测 seed42 × 2000
+/// tick 窗口内 `fg2_att = 0`——首次 2 分出手在 tick 2020，恰在窗口之外。
+/// 因此任何只影响 2 分结算的改动都不会改变 `GOLDEN_SEED42_2000`，
+/// 哈希保持绿色，而 CI 看不出它没在守卫。
+///
+/// 这类缺陷的危险在于**失败方向是绿而不是红**：覆盖丢失不会报警。
+/// 所以修法不是把窗口调到「刚好覆盖」，而是让覆盖本身成为可断言属性：
+/// 一旦窗口内缺少某类得分行为，本测试直接失败，提示需要扩大窗口。
+#[test]
+fn golden_window_covers_scoring_behaviour() {
+    let mut engine = MatchEngine::new(42);
+    let ticks = 2000usize;
+    for _ in 0..ticks {
+        engine.step();
+    }
+    let b = engine.box_score();
+    // 2 分是本次实际漏掉的那一类（§23.4），必须有覆盖：
+    // 若把窗口改小或行为漂移导致首次 2 分出手推后，这里会变红。
+    assert!(
+        b.fg2_attempts > 0,
+        "golden window ({ticks} ticks, seed 42) contains no two-point attempt \
+         (fg2_attempts=0); the golden hash cannot guard two-point behaviour. \
+         Enlarge the window or re-freeze with a window that covers it \
+         (evidence/problem.md §23.4)"
+    );
+    // 三分与得分总数同样属于「必须被守卫的行为」：
+    assert!(
+        b.fg3_attempts > 0,
+        "golden window ({ticks} ticks, seed 42) contains no three-point attempt"
+    );
+    assert!(
+        b.fg2_made + b.fg3_made > 0,
+        "golden window ({ticks} ticks, seed 42) contains no made field goal"
+    );
+}
+
 // 基线常量冻结记录（校准协议 docs/protocol.md §3）：
 //   v1 0x76e41f2a83f74b38 — 重构前锚点（BallState 写入口收敛，行为保持）
 //   v2 0xef68d18205abaa12 — 2026-08-31 回合节奏校准
