@@ -19,7 +19,7 @@ pub mod tactics;
 pub use capability::{
     drive_finishing_delta, effective_catch_radius, effective_decision_risk_tolerance,
     effective_defense_factor, effective_max_accel, effective_max_speed, free_throw_probability,
-    receive_estimate_noise,
+    poke_check_success, receive_estimate_noise,
 };
 pub use court::CourtGeometry;
 pub use data::{
