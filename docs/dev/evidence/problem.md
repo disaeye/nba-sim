@@ -1586,3 +1586,62 @@ GOLDEN seed42 x2000:  0xa25e5c57a026def0 -> 0x2d3a14c60062eb9f（变化）
 
 **当前处置：不改代码。** 已回退全部实验改动，工作树保持 HEAD 状态
 （`git status` 干净）。`carrier_idx` 的删除顺延，等待上述语义决定。
+
+---
+
+## 26. `TacticalSet` 旧几何分支是「死计算」（D9.1 前置，含对照实验）
+
+> 目标（`current/plan.md` §5 D9.1）：统一从版本化战术档案生成机会；
+> 旧 `TacticalSet` 只能作为解析/兼容层，不能继续承担主路径几何分支。
+
+### 26.1 现状
+
+`TacticalPlanner::plan_possession_targets_with_geometry`
+（`crates/decision/src/tactics.rs:378`）是一个 6 分支的 `match tactical_set`
+（405–734 行），为 6 种旧战术枚举各写一套硬编码槽位几何，产出
+`off_targets`（进攻）与 `def_targets`（防守）。引擎每 tick 调用它
+（`match_engine.rs:3411`）。
+
+但引擎随后**用档案路径的结果覆盖进攻侧**：
+
+```rust
+if self.possession == Possession::Home {
+    home_targets = off_targets;        // <- 来自 plan_offense_from_spec（档案）
+    TacticalPlanner::bind_targets(&mut away_targets, &away_roster);
+}
+```
+
+即旧几何算出的进攻目标**从不被使用**。
+
+### 26.2 对照实验（三组，8 seed full，逐字段比对）
+
+| 实验 | 改动 | 8 seed `total_p50` |
+| --- | --- | --- |
+| 基线 | 无 | 213.5 |
+| A | 清空 `off_targets`（旧几何的进攻输出） | **213.5（不变）** |
+| B | 清空 `def_targets`（防守输出） | **251.5（大变）** |
+| C | 保留数量/槽名，把全部进攻目标**位置**中性化 | **213.5（不变）** |
+
+实验 C 做了**逐 seed 全字段比对**：8 个 seed × 全部 batch 字段，
+差异数 **0**（完全相同）。
+
+### 26.3 结论
+
+1. 旧 `TacticalSet` 几何的**进攻位置输出是死计算**——每 tick 计算、
+   每 tick 丢弃。既浪费，又是「看起来权威实则无效」的风险面：
+   6 个分支的硬编码几何会误导读者以为它决定跑位。
+2. 防守输出**是活的**（实验 B 证明），但它实际消费的是
+   `live_off_positions`（实时位置），`off_targets` 的位置仅作
+   `live_off_positions == None` 时的兜底——引擎路径**总是**传
+   `Some(...)`，故兜底不生效。
+3. 防守循环真正需要的是：进攻方**人数**（5）、`carrier_idx`、实时位置。
+   不需要 `tactical_set` 的几何。
+
+### 26.4 对 D9.1 的意义
+
+删除旧几何分支是**行为中性**的（有上述实验证明），但因涉及
+「防守循环改由什么驱动」的接口调整，仍需单独提交并附 8 seed 对照。
+本轮先落证据，不落代码——避免把「删除死代码」与「防守驱动改造」
+混在一个提交里，那样会失去逐项归因能力。
+
+**状态：已证明可安全删除，未执行。**
