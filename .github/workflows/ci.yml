@@ -83,7 +83,11 @@ jobs:
   guards:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 —— 阈值守卫需要比较 PR base 与 HEAD，
+      # 默认的浅克隆（depth=1）会让基准提交不存在，导致 PR 上静默跳过检查。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -120,6 +124,32 @@ jobs:
         run: |
           python3 scripts/check_world_privacy.py
           python3 scripts/check_world_privacy.py --self-test
+      - name: Roster identity guard (ADR-005)
+        # 名册身份不得来自数组下标或 `roles` 字段；含负面对照。
+        run: |
+          python3 scripts/check_no_index_identity.py
+          python3 scripts/check_no_index_identity.py --self-test
+      - name: Threshold integrity guard (ruler independence)
+        # 同一个提交不得同时修改「判定基准」与「被测源码」。
+        #
+        # 为何显式传 --range：守卫默认比较 HEAD~1..HEAD，但在 PR 上
+        # 那不是本次改动的范围（checkout 的 HEAD 是合并提交），会漏检或误判。
+        # 这里按事件类型取真实范围：PR 用 base...HEAD，push 用前后两个提交。
+        # fetch-depth: 0 保证基准提交在本地存在。
+        run: |
+          python3 scripts/check_threshold_integrity.py --self-test
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RANGE="${{ github.event.pull_request.base.sha }}...HEAD"
+          else
+            RANGE="HEAD~1..HEAD"
+            git rev-parse -q --verify HEAD~1 >/dev/null || RANGE=""
+          fi
+          if [ -n "$RANGE" ]; then
+            echo "threshold-integrity range: $RANGE"
+            python3 scripts/check_threshold_integrity.py --range "$RANGE"
+          else
+            echo "single-commit history; skipping coupled-ruler check"
+          fi
       - name: Build debug-server and run full UI card alignment check
         run: |
           cargo build --release -p nba-debug-server

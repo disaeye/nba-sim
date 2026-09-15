@@ -122,8 +122,26 @@ def strip_comments_and_strings(source: str) -> str:
     return "".join(out)
 
 
+def split_test_section(source: str) -> tuple[str, str]:
+    """把源码切成 (生产代码, 测试代码) 两段。
+
+    为什么需要：`#[cfg(test)] mod tests` 里的数字是测试夹具（构造球员、
+    断言区间、合成流），不是行为参数。它们不应占用生产预算——否则预算
+    被测试代码占用后，生产侧就留下“免费新增行为常数”的空间。实测该空间
+    曾达 191 个常量（capability.rs 53 / resolution.rs 55 / ballistics.rs 42 …），
+    使 charter C1 的棘轮对这些文件形同虚设。
+
+    切分规则：以第一个 `#[cfg(test)]` 为界。Rust 的测试模块约定放在文件
+    末尾，因此该规则与惯例一致；不使用括号配平以避免误判字符串/注释。
+    """
+    idx = source.find("#[cfg(test)]")
+    if idx < 0:
+        return source, ""
+    return source[:idx], source[idx:]
+
+
 def float_literals_in(path: Path) -> int:
-    """剥离注释/字符串后的内联浮点常量数。"""
+    """剥离注释/字符串后的内联浮点常量数（含测试段，供旧调用方使用）。"""
     code = strip_comments_and_strings(path.read_text(encoding="utf-8", errors="ignore"))
     return len(FLOAT_RE.findall(code))
 
@@ -139,6 +157,37 @@ def count_category(path: Path) -> dict:
         "int_thresholds": len(INT_THRESHOLD_RE.findall(code)),
         "tactic_id_branches": len(TACTIC_ID_RE.findall(code_for_strings)),
         "player_id_branches": len(PLAYER_ID_BRANCH_RE.findall(code_for_strings)),
+    }
+
+
+def count_production(path: Path) -> dict:
+    """只统计**生产代码**（排除 `#[cfg(test)]` 段）的四类扫描量。
+
+    这是棘轮应当计量的口径：测试夹具不改变比赛行为。
+    """
+    raw = path.read_text(encoding="utf-8", errors="ignore")
+    prod_raw, _test_raw = split_test_section(raw)
+    code = strip_comments_and_strings(prod_raw)
+    return {
+        "floats": len(FLOAT_RE.findall(code)),
+        "int_thresholds": len(INT_THRESHOLD_RE.findall(code)),
+        "tactic_id_branches": len(TACTIC_ID_RE.findall(prod_raw)),
+        "player_id_branches": len(PLAYER_ID_BRANCH_RE.findall(prod_raw)),
+    }
+
+
+def count_test(path: Path) -> dict:
+    """只统计 `#[cfg(test)]` 段，用于防止测试代码无界膨胀。"""
+    raw = path.read_text(encoding="utf-8", errors="ignore")
+    _prod_raw, test_raw = split_test_section(raw)
+    if not test_raw:
+        return {"floats": 0, "int_thresholds": 0, "tactic_id_branches": 0, "player_id_branches": 0}
+    code = strip_comments_and_strings(test_raw)
+    return {
+        "floats": len(FLOAT_RE.findall(code)),
+        "int_thresholds": len(INT_THRESHOLD_RE.findall(code)),
+        "tactic_id_branches": len(TACTIC_ID_RE.findall(test_raw)),
+        "player_id_branches": len(PLAYER_ID_BRANCH_RE.findall(test_raw)),
     }
 
 
@@ -178,7 +227,11 @@ def src_files() -> list:
 
 
 def measure() -> dict:
-    return {rel: count_category(ROOT / rel) for rel in src_files()}
+    return {rel: count_production(ROOT / rel) for rel in src_files()}
+
+
+def measure_tests() -> dict:
+    return {rel: count_test(ROOT / rel) for rel in src_files()}
 
 
 def load_budget() -> dict:
@@ -204,12 +257,23 @@ def main() -> int:
         return self_test()
 
     measured = measure()
+    measured_tests = measure_tests()
 
     if args.write_budget:
-        budget = {"files": {rel: allowed_score(v) for rel, v in measured.items() if allowed_score(v)},
-                  "budget_floats": {rel: v["floats"] for rel, v in measured.items() if v["floats"]}}
+        budget = {
+            "files": {rel: allowed_score(v) for rel, v in measured.items() if allowed_score(v)},
+            "budget_floats": {rel: v["floats"] for rel, v in measured.items() if v["floats"]},
+            "test_files": {
+                rel: allowed_score(v) for rel, v in measured_tests.items() if allowed_score(v)
+            },
+            "test_floats": {
+                rel: v["floats"] for rel, v in measured_tests.items() if v["floats"]
+            },
+        }
         BUDGET_PATH.write_text(json.dumps(budget, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"✅ Wrote ratchet baseline to {BUDGET_PATH.relative_to(ROOT)}")
+        print("   files/budget_floats         = 生产代码（排除 #[cfg(test)]）")
+        print("   test_files/test_floats     = #[cfg(test)] 段，单独棘轮")
         return 0
 
     budget = load_budget()
@@ -222,8 +286,18 @@ def main() -> int:
             ((allowed_score(v), rel, v) for rel, v in measured.items()),
             reverse=True,
         )
-        print("score  floats  ints  tactic  player  file")
+        print("score  floats  ints  tactic  player  file (生产代码，排除 #[cfg(test)])")
         for score, rel, v in rows:
+            if score:
+                print(f"{score:5d}  {v['floats']:5d}  {v['int_thresholds']:5d}  "
+                      f"{v['tactic_id_branches']:5d}  {v['player_id_branches']:5d}  {rel}")
+        print()
+        trows = sorted(
+            ((allowed_score(v), rel, v) for rel, v in measured_tests.items()),
+            reverse=True,
+        )
+        print("score  floats  ints  tactic  player  file (#[cfg(test)] 段)")
+        for score, rel, v in trows[:15]:
             if score:
                 print(f"{score:5d}  {v['floats']:5d}  {v['int_thresholds']:5d}  "
                       f"{v['tactic_id_branches']:5d}  {v['player_id_branches']:5d}  {rel}")
@@ -241,8 +315,21 @@ def main() -> int:
                 f"tactic_ids={v['tactic_id_branches']}, player_ids={v['player_id_branches']}]"
             )
 
+    # 测试段单独棘轮：防止“把行为参数藏进 #[cfg(test)] 段”绕过生产预算。
+    test_budget = budget.get("test_files", {})
+    for rel, v in measured_tests.items():
+        measured_score = allowed_score(v)
+        allowed = test_budget.get(rel, 0)
+        if measured_score > allowed:
+            failures.append(
+                f"{rel} (TEST-SECTION): {measured_score} > test budget {allowed} "
+                f"[floats={v['floats']}, ints={v['int_thresholds']}]"
+            )
+
     total = sum(allowed_score(v) for v in measured.values())
-    print(f"Inline behaviour constants (ratcheted): {total}")
+    total_tests = sum(allowed_score(v) for v in measured_tests.values())
+    print(f"Inline behaviour constants (production, ratcheted): {total}")
+    print(f"Inline constants in #[cfg(test)] sections (separately ratcheted): {total_tests}")
     if failures:
         print("❌ Inline constant guard FAILED — new behaviour constants bypassed the rules channel:")
         for f in failures:
@@ -280,6 +367,36 @@ def self_test() -> int:
         if forbidden in source:
             print("❌ self-test: whole-file whitelist still present")
             return 1
+        # 测试段必须不计入生产预算（charter C1 棘轮的真实性）。
+        #
+        # 历史缺陷：旧口径把 `#[cfg(test)]` 段的浮动常量计入同一个文件预算，
+        # 导致「测试段减 N 个夹具常量 + 生产段加 N 个行为常量」净变化为 0，
+        # 守卫完全看不见行为常数注入。实测该缺陷留下 191 个常量的免费空间
+        # （capability.rs 53 / resolution.rs 55 / ballistics.rs 42 …）。
+        mix = (
+            "fn prod() { let a = 0.11; let b = 0.22; }\n"
+            "#[cfg(test)]\nmod tests { fn t() { let x = 0.33; let y = 0.44; } }\n"
+        )
+        with tempfile.NamedTemporaryFile(suffix=".rs", mode="w", delete=False, encoding="utf-8") as tf3:
+            tf3.write(mix)
+            path3 = Path(tf3.name)
+        try:
+            prod_count = len(FLOAT_RE.findall(strip_comments_and_strings(split_test_section(mix)[0])))
+            test_count = len(FLOAT_RE.findall(strip_comments_and_strings(split_test_section(mix)[1])))
+            if prod_count != 2 or test_count != 2:
+                print(
+                    f"❌ self-test: test-section split wrong "
+                    f"(prod={prod_count} expected 2, test={test_count} expected 2)"
+                )
+                return 1
+            # 关键：测试段改动不得影响生产计数。
+            mut = mix.replace("0.33", "0", 1)
+            prod_after = len(FLOAT_RE.findall(strip_comments_and_strings(split_test_section(mut)[0])))
+            if prod_after != prod_count:
+                print("❌ self-test: test-section change leaked into production count")
+                return 1
+        finally:
+            path3.unlink(missing_ok=True)
         # 非生产排除必须是可验证的（publish = false）。
         problems = verify_non_production_crates()
         if problems:
@@ -293,7 +410,8 @@ def self_test() -> int:
         if leaked:
             print(f"❌ self-test: non-production files still scanned: {leaked[:3]}")
             return 1
-        print("✅ Guard self-test passed: detects constants, ignores doc references, has no whole-file whitelist.")
+        print("✅ Guard self-test passed: detects constants, ignores doc references, "
+              "separates #[cfg(test)] from production, has no whole-file whitelist.")
         return 0
     finally:
         path.unlink(missing_ok=True)

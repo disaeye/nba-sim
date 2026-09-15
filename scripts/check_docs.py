@@ -130,6 +130,75 @@ def check_dev_structure(dev_files: list[Path]) -> list[str]:
     return violations
 
 
+# 编号命名空间：同一编号前缀不得被两个不同层级的文档共享。
+#
+# 历史事故：`current/plan.md` 曾用 `C1–C6` 命名周期任务，而 `charter.md` §4
+# 的宪章红线就是 `C1–C4`；全仓有 49 处 “charter C1” / “宪章 C1” 引用，
+# 两者撞名后读者无法判断 `C1` 指哪一条。旧守卫只校验文件路径与章节号，
+# 不校验编号命名空间，因此无法发现。
+#
+# 规则：每个文档“拥有”它用 ###/#### 标题声明的编号前缀。同一前缀若被
+# 两个文档同时拥有，则报错。`docs/dev/README.md` §4 是编号归属的权威，
+# 新增编号前必须先在该表登记。
+# 什么算“声明一个编号”。
+#
+# 标题里的编号可能有两种角色：
+#   - **声明**：`### C1 · 无隐藏硬编码`、`## 3. D7 · 收敛 …`、`### G0 · 证据基线`
+#     —— 编号是该节的**主身份**，后面紧跟分隔符（· / ：/ :）。
+#   - **引用**：`## 19. 2026-09-11 D0 执行：…`、`### 33.1 D3.1 命中模型…`
+#     —— 编号只是标题叙述的一部分（带日期、或前面已有内容），不属于本节身份。
+#
+# 旧守卫完全不做这个区分，因此无法发现 C1–C6 与 charter 红线 C1–C4 的
+# 撞名（全仓 49 处 “charter C1” 引用）。只把“声明”纳入归属统计。
+NUMBERED_DECLARATION = re.compile(
+    r"^#{2,6}\s+"
+    r"(?:[0-9]+(?:\.[0-9]+)*\.?\s+)?"   # 可选章节号（plan.md 风格 `## 3. D7`）
+    r"([A-Z]{1,3})[0-9]+(?:\.[0-9]+)*"    # 编号标签
+    r"\s*(?:·|：|:)"                        # 必须是声明：后跟分隔符
+)
+
+# 这些前缀已被 `docs/dev/README.md` §4 登记为跨文档共享的**同一套阶梯**：
+# - `M`：roadmap.md 与 protocol.md 都定义里程碑验收
+# - `G`：gap.md 的差距程序编号
+# - `L`：quality.md 定义 L1–L3 检测网，gap.md §8 与 protocol.md 引用同一阶梯
+SHARED_PREFIXES = {"M", "G", "L", "P", "R", "T", "TA", "F", "OQ", "PA", "E"}
+
+# 周期归档是同一编号空间的历史区段（如 `D0–D6` 在 cycles、`D7–D13` 在当前
+# 计划），不参与“当前文档拥有该前缀”的判定；否则归档与当前计划会被误判为冲突。
+ARCHIVE_PREFIX = "docs/dev/cycles/"
+
+
+def check_numbering_namespaces(files: list[Path]) -> list[str]:
+    """校验编号前缀未被两个**当前**文档分别拥有（防止 C1 类碰撞）。
+
+    历史事故：`current/plan.md` 曾用 `C1–C6` 命名周期任务，而 charter.md §4
+    的宪章红线就是 `C1–C4`；两者都在当前工作面，读者无法判断 `C1` 指哪一条。
+    """
+    owners: dict[str, set[str]] = {}
+    for path in files:
+        rel = path.relative_to(ROOT).as_posix()
+        if rel.startswith(ARCHIVE_PREFIX):
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            match = NUMBERED_DECLARATION.match(line)
+            if not match:
+                continue
+            prefix = match.group(1)
+            owners.setdefault(prefix, set()).add(rel)
+
+    violations: list[str] = []
+    for prefix, paths in sorted(owners.items()):
+        if prefix in SHARED_PREFIXES or len(paths) < 2:
+            continue
+        listed = ", ".join(sorted(paths))
+        violations.append(
+            f"编号前缀 `{prefix}` 被多个文档同时用作条目标题：{listed} — "
+            f"同一编号只能有一个归属（见 docs/dev/README.md §4）；"
+            f"若确需共享，请在该表登记后加入 SHARED_PREFIXES"
+        )
+    return violations
+
+
 def main() -> int:
     docs_dir = DOCS
     if len(sys.argv) == 3 and sys.argv[1] == "--docs":
@@ -140,7 +209,12 @@ def main() -> int:
 
     print(f"扫描 {len(contract_files)} 份契约文档 + {len(dev_files)} 份工作文档")
     ref_errors, total = check_refs(files)
-    errors = ref_errors + check_contract_discipline(contract_files) + check_dev_structure(dev_files)
+    errors = (
+        ref_errors
+        + check_contract_discipline(contract_files)
+        + check_dev_structure(dev_files)
+        + check_numbering_namespaces(files)
+    )
     if errors:
         print(f"\n❌ 文档守卫发现 {len(errors)} 处违规（共扫描 {total} 处引用）：")
         for error in errors:
