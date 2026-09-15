@@ -142,12 +142,14 @@
 仍需动作：
 
 - 交替拥有与罚球程序的专题情景仍未覆盖；
-- **FIBA 侧 8 seed full 矩阵已跑**（`5504281`，evidence §31）：L1=0、
-  Ledger=0，但评判报 **2 Hard**（`POSSESSION_DURATION_BOUNDS`），
-  HARD gate 按设计以非零码退出。根因已定位为**我方容差标定不足**
-  （`duration_tolerance_seconds` 为 `1c86c49` 新加字段，fiba.v1/nba.v1=2.0、
-  nba.v2=6.0，互不一致且未经测量；实测停表开销 2.7–4.9s、均值 3.69s）。
-  该门解除依赖 #26 的分 league 标定；
+- **FIBA 侧 8 seed full 矩阵已跑并通过**（`5504281` 定位、`f8425f1` 修复）：
+  初次运行报 **2 Hard**（`POSSESSION_DURATION_BOUNDS`），根因定位为
+  **容差标定不足**而非引擎缺陷——`duration_tolerance_seconds` 是 `1c86c49`
+  新加字段，值 `fiba.v1/nba.v1=2.0`、`nba.v2=6.0`，互不一致且未经测量。
+  按 **2843 个回合**的停表开销实测分布（FIBA p95=6.32/p99=8.59/max=12.89；
+  NBA p95=6.45/p99=8.47/max=12.89）统一标定为 **15.0s**，两 league 的
+  HARD gate 现均通过（FIBA Hard 2→0、NBA 判定不变）；
+  门的区分力经负面对照验证（tol=−40 时报 439 Hard）；
 - 评判 fixture 带来源/版本的契约未完成（`protocol.md` §1）。
 
 出口：每个 profile 的情景门、回放一致性和评判工件完整；未覆盖的 NCAA 继续标记为路线项。
