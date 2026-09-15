@@ -114,13 +114,24 @@ def struct_body(source: str) -> str:
 
 
 def find_violations(source: str) -> list[str]:
+    """返回 `MatchEngine` 上所有 `pub` 字段（判据已升级）。
+
+    ## 为何从「清单」改为「零容忍」（D7 后续项）
+
+    旧判据只拦 `TRUTH_FIELDS` 名单内的字段，因此 16 个「配置/外部依赖」
+    类字段（`physics`/`rules`/`rng`/`coach`/…）长期为 `pub`。
+    实测全仓外部使用面是**纯只读**的（无任何外部赋值或可变借用），
+    所以这 16 个字段的可变性无任何合法用途，却允许调用方绕过阶段化
+    推进与不变量检查（例如 `engine.rules.tick_seconds = f32::MAX`）。
+
+    现改为：「`MatchEngine` 不得有任何 `pub` 字段」，即只允许经
+    `step()` / `snapshot()` / 只读访问器 / 显式 `*_for_test` 钩子交互。
+    这只使守卫更严（旧清单是它的子集），不会放过原有任何违规。
+    """
     body = struct_body(source)
-    bad: list[str] = []
-    for match in re.finditer(r"^\s*pub ([a-z_][a-z_0-9]*)\s*:", body, re.M):
-        field = match.group(1)
-        if field in TRUTH_FIELDS:
-            bad.append(field)
-    return sorted(set(bad))
+    return sorted(
+        set(re.findall(r"^\s*pub ([a-z_][a-z_0-9]*)\s*:", body, re.M))
+    )
 
 
 def self_test() -> int:
@@ -159,17 +170,18 @@ def main() -> int:
     source = ENGINE_SRC.read_text()
     violations = find_violations(source)
     if violations:
-        print("❌ World-privacy guard FAILED — match truth fields are publicly mutable:")
+        print("❌ World-privacy guard FAILED — MatchEngine must expose no public fields:")
         for field in violations:
             print(f"   - MatchEngine.{field}")
         print(
-            "   dev 方案 §7.1 D4.2：真相字段必须私有，"
-            "外部经只读访问器或 snapshot()/step() 观测。"
+            "   D7 / gap.md §20.1：外部只能经 step()、snapshot()、只读访问器或"
+            "显式 `*_for_test` 钩子交互；直接公开字段即可绕过阶段化推进与不变量检查。"
         )
         return 1
     print(
         f"✅ World-privacy guard passed "
-        f"({len(TRUTH_FIELDS)} truth fields all private in MatchEngine)."
+        f"(all MatchEngine state fields private; "
+        f"{len(TRUTH_FIELDS)} truth fields + config/dependency fields covered)."
     )
     return 0
 
