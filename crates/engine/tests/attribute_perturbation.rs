@@ -12,6 +12,7 @@ use nba_domain::{
     receive_estimate_noise, GameRules, LeagueProfile, PlayerAttributes,
 };
 use nba_engine::MatchEngine;
+use nba_physics::movement::PlayerPhysicsState;
 
 fn attrs_with(mutate: impl FnOnce(&mut PlayerAttributes)) -> PlayerAttributes {
     let mut a = PlayerAttributes::default();
@@ -256,6 +257,134 @@ fn perturbation_poke_check_responds_to_both_sides() {
     assert!(
         reckless > cautious,
         "higher risk_tolerance must expose the ball more (cautious={cautious}, reckless={reckless})"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// D10.2 续：篮板轴的端到端响应（此前完全无扰动测试）
+//
+// §29 清单显示 `offensive_rebound` / `defensive_rebound` 的消费点是
+// `officiating::ResolutionLayer::resolve_rebound`，但没有任何扰动测试。
+// 该函数是**概率裁决**，因此用给定种子做重复采样估计概率，再做单调断言
+// ——而不是断言单次掷骰结果（那会引入随机性）。
+// ---------------------------------------------------------------------------
+
+/// 构造一个最小球员视图（只填 `resolve_rebound` 会读的字段）。
+fn rebound_player(
+    id: &str,
+    off_reb: f32,
+    def_reb: f32,
+    sense: f32,
+    stamina: f32,
+) -> PlayerPhysicsState {
+    PlayerPhysicsState {
+        id: id.to_string(),
+        jersey: id.to_string(),
+        team: "home".to_string(),
+        pos_ft: glam::Vec2::ZERO,
+        vel_ft: glam::Vec2::ZERO,
+        accel_ft: glam::Vec2::ZERO,
+        target_pos_ft: glam::Vec2::ZERO,
+        max_speed_ftps: 22.0,
+        max_accel_ftps2: 35.0,
+        target_speed_ftps: 0.0,
+        has_ball: false,
+        on_court: true,
+        action: "Idle".to_string(),
+        slot: "PF".to_string(),
+        morale: "Normal".to_string(),
+        stamina,
+        max_stamina: 100.0,
+        foul_count: 0,
+        locomotion: nba_physics::movement::LocomotionState::Idle,
+        facing_dir: glam::Vec2::X,
+        turn_decel_timer: 0.0,
+        is_locked_kinematics: false,
+        out_of_bounds_placement: false,
+        is_receiving_pass: false,
+        is_driving_to_rim: false,
+        boundary_cross_latched: false,
+        attributes: PlayerAttributes {
+            offensive_rebound: off_reb,
+            defensive_rebound: def_reb,
+            off_ball_sense: sense,
+            ..PlayerAttributes::default()
+        },
+        tendencies: nba_domain::PlayerTendencies::default(),
+    }
+}
+
+/// 用固定种子重复采样，估计「攻方赢得篮板」的概率。
+fn estimate_offensive_rebound_rate(
+    offense: &PlayerPhysicsState,
+    defense: &PlayerPhysicsState,
+) -> f32 {
+    use rand::SeedableRng;
+    let rules = GameRules::default();
+    let policy = &rules.resolve.rebound;
+    let samples = 4000;
+    let mut wins = 0usize;
+    // 逐样本用不同但确定的种子，避免同一个 rng 状态影响可复现性。
+    for i in 0..samples {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0x5eed_0000 + i as u64);
+        if let nba_officiating::ResolutionOutcome::ReboundSecured { is_offensive, .. } =
+            nba_officiating::ResolutionLayer::resolve_rebound(
+                offense, defense, 5.0, 5.0, policy, &mut rng,
+            )
+        {
+            if is_offensive {
+                wins += 1;
+            }
+        }
+    }
+    wins as f32 / samples as f32
+}
+
+/// 攻方 `offensive_rebound` 越高 → 抢到进攻篮板的概率越高。
+#[test]
+fn perturbation_offensive_rebound_raises_offensive_board_rate() {
+    let defense = rebound_player("D_1", 0.3, 0.5, 0.5, 100.0);
+    let weak = rebound_player("O_weak", 0.1, 0.5, 0.5, 100.0);
+    let strong = rebound_player("O_strong", 0.9, 0.5, 0.5, 100.0);
+
+    let weak_rate = estimate_offensive_rebound_rate(&weak, &defense);
+    let strong_rate = estimate_offensive_rebound_rate(&strong, &defense);
+    assert!(
+        strong_rate > weak_rate,
+        "offensive_rebound must raise the offensive board rate \
+         (weak={weak_rate:.3}, strong={strong_rate:.3})"
+    );
+}
+
+/// 守方 `defensive_rebound` 越高 → 攻方抢到的概率越低（反向单调）。
+#[test]
+fn perturbation_defensive_rebound_lowers_offensive_board_rate() {
+    let offense = rebound_player("O_1", 0.5, 0.5, 0.5, 100.0);
+    let weak_d = rebound_player("D_weak", 0.3, 0.1, 0.5, 100.0);
+    let strong_d = rebound_player("D_strong", 0.3, 0.9, 0.5, 100.0);
+
+    let weak_rate = estimate_offensive_rebound_rate(&offense, &weak_d);
+    let strong_rate = estimate_offensive_rebound_rate(&offense, &strong_d);
+    assert!(
+        strong_rate < weak_rate,
+        "defensive_rebound must lower the offensive board rate \
+         (weak_d={weak_rate:.3}, strong_d={strong_rate:.3})"
+    );
+}
+
+/// `off_ball_sense` 作为**站位预判**参与篮板争夺（正向）。
+#[test]
+fn perturbation_off_ball_sense_raises_offensive_board_rate() {
+    let defense = rebound_player("D_1", 0.3, 0.5, 0.5, 100.0);
+    let poor = rebound_player("O_poor", 0.5, 0.5, 0.1, 100.0);
+    let sharp = rebound_player("O_sharp", 0.5, 0.5, 0.9, 100.0);
+
+    let poor_rate = estimate_offensive_rebound_rate(&poor, &defense);
+    let sharp_rate = estimate_offensive_rebound_rate(&sharp, &defense);
+    assert!(
+        sharp_rate > poor_rate,
+        "off_ball_sense must raise the offensive board rate \
+         (poor={poor_rate:.3}, sharp={sharp_rate:.3})"
     );
 }
 
