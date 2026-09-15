@@ -1110,3 +1110,47 @@ seed42 full: FGA=174, SCORE+DREB = 87+88 = 175  ->  差 +1
 **状态：根因已定位到数量级，但未修。** 修复必须在
 `ReboundPolicy` 通道内进行并附 8 seed 矩阵 + 反事实证据，
 不得直接调 `base_offensive_rate` 试凑（见 §22.3 关于单参数拟合的结论）。
+
+### 23.8 探针实测：进攻篮板劣势不在基准值，而在"没有人去抢"
+
+用临时探针（`crates/engine/tests/zz_probe.rs`，已删除）直接测量机制，
+而不是继续推测：
+
+**探针 1：投篮瞬间双方距篮筐的最近距离**（seed42，130 次出手）
+
+```text
+off_mean=50.7ft  def_mean=50.8ft  off_closer=109  def_closer=21
+```
+
+攻方在 109/130 次中离篮筐**更近**，距离不构成劣势。因此
+`resolve_rebound` 里的 `distance_advantage` 项并**不是** ORB 偏低的原因。
+
+**探针 2：球在空中时双方"是否朝球靠近"**（seed42，10867 个采样 tick）
+
+```text
+offense_close_rate = 0.0001     (每 tick 平均净靠近 0.0001 ft)
+defense_close_rate = 0.0042     (每 tick 平均净靠近 0.0042 ft)
+```
+
+守方朝球移动的速率是攻方的 **约 42 倍**。两者绝对值都很小（说明
+球在空中时**双方都没有实质性的抢篮板行为**），但守方至少有一点，
+攻方几乎为零。
+
+**结论**：ORB% 只有 0.07–0.13（真实 0.245）不是因为判定公式里的
+`base_offensive_rate` 偏小（它是 0.26，与真实相符），而是因为
+**抢篮板的球员运动目标缺失**——投篮后没有"攻方冲抢 / 守方卡位"的
+指派，攻方尤其完全没有。
+
+这同时解释了 §23.7 的另一个现象：12–19 次投失没有篮板事实，
+以及 `pace` 偏高——没有冲抢就没有二次进攻，每次不中直接换手。
+
+**修复方向**（属 decision/physics 接线，不是调参）：
+
+1. `SubPhase::FlightAndRebound` 期间为双方指派篮板目标点
+   （落点 `target_landing` 的邻域），守方优先、攻方按
+   `offensive_rebound` 属性加权；
+2. 让该指派进入 APF/steering 通道（`physics::movement` 已有
+   `set_player_target`，且已有 `is_driving_to_rim` 这类豁免先例）；
+3. 用本节的同一探针复测：`offense_close_rate` 应升至与
+   `defense_close_rate` 同量级，ORB% 应进入 0.20–0.28；
+4. 验收需 8 seed 矩阵 + 反事实（关掉指派应使 ORB% 回落到当前水平）。
