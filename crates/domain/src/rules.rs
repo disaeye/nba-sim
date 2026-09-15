@@ -187,6 +187,16 @@ pub struct GameRules {
     pub rebound_prep_seconds: f32,
     pub rebound_exec_seconds: f32,
     pub rebound_follow_seconds: f32,
+    /// 进攻方冲抢篮板的人数（charter C1：行为参数走数据通道，不内联在引擎里）。
+    ///
+    /// 真实篮球里不是全队都冲抢：全员扑向落点会立即触发
+    /// `min_player_separation_ft` 碰撞消解，反而把所有人推离落点。
+    /// evidence/problem.md §23.8 记录了指派前攻方几乎无人向球移动
+    /// （0.0001 ft/tick，而守方 0.0042）。
+    pub rebound_crash_offense_count: u32,
+    /// 防守方卡位／收篮板的人数。守方多一人，与真实的
+    /// 「守方收下约 75.5% 投失」一致（evidence/problem.md §23.7）。
+    pub rebound_boxout_defense_count: u32,
     pub layup_prep_seconds: f32,
     pub layup_exec_seconds: f32,
     pub layup_follow_seconds: f32,
@@ -993,6 +1003,8 @@ impl Default for GameRules {
             rebound_prep_seconds: 0.20,
             rebound_exec_seconds: 0.30,
             rebound_follow_seconds: 0.30,
+            rebound_crash_offense_count: 2,
+            rebound_boxout_defense_count: 3,
             rebound_peak_ft: 11.5,
             layup_prep_seconds: 0.20,
             layup_exec_seconds: 0.25,
@@ -1402,6 +1414,8 @@ impl GameRules {
             || self.rebound_prep_seconds < 0.0
             || self.rebound_exec_seconds < 0.0
             || self.rebound_follow_seconds < 0.0
+            || self.rebound_crash_offense_count == 0
+            || self.rebound_boxout_defense_count == 0
             || self.rebound_peak_ft < self.chest_height_ft
         {
             return Err(

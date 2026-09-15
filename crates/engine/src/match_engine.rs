@@ -3004,6 +3004,18 @@ impl MatchEngine {
                                 peak_z: self.rules.rebound_peak_ft,
                                 last_touch_team: self.possession,
                             });
+                            // ## 篮板冲抢指派（evidence/problem.md §23.8）
+                            //
+                            // 实测：球在空中时守方朝球靠近的速率是攻方的**约 42 倍**
+                            // （0.0042 vs 0.0001 ft/tick），且两者绝对值都极小——
+                            // 即双方都几乎没有抢篮板行为，攻方几乎为零。后果是
+                            // ORB% 仅 0.07–0.13（真实 0.245），每次不中直接换手，
+                            // 回合被压成「一次性进攻」并与 pace 偏高同向。
+                            //
+                            // 此处显式指派：双方球员向落点邻域移动（守方优先，
+                            // 攻方按 offensive_rebound 属性加权），使篮板真的被争抢，
+                            // 而不是靠判定公式凭空产生归属。
+                            self.assign_rebound_pursuit(landing_spot.landing_pos, current_t);
                         }
                         _ => {}
                     }
@@ -4849,6 +4861,116 @@ impl MatchEngine {
                     .map(|player| (id, (player.pos_ft - landing).length()))
             })
             .collect()
+    }
+
+    /// 篮板冲抢的目标指派（evidence/problem.md §23.8）。
+    ///
+    /// 为什么需要：实测球在空中时守方朝球靠近的速率是攻方的约 42 倍
+    /// （0.0042 vs 0.0001 ft/tick），且两者绝对值都极小——即双方都没有
+    /// 实质性的抢篮板行为，攻方几乎为零。结果是 ORB% 仅 0.07–0.13
+    /// （真实 0.245），每次不中直接换手。
+    ///
+    /// 设计（用已有规则字段，不新增内联常数）：
+    /// - 每队取距落点最近的若干名在场上球员作为争抢者；
+    /// - 指派目标点 = 落点，但按 `min_player_separation_ft` 绕开同队
+    ///   已派球员，避免互相碰撞（分离约束在物理层仍会生效）；
+    /// - 攻方按 `offensive_rebound` 属性加权决定谁去冲抢（属能力通道）；
+    /// - 守方速度用其 `max_speed_ftps`，攻方用同一上限（不人为区分快慢，
+    ///   因为“谁抢到”由 `resolve_rebound` 的概率决定，几何只负责让双方
+    ///   真的到达落点附近）。
+    ///
+    /// 该函数只指派运动目标，不裁定归属——归属仍由 `resolve_rebound`
+    /// 在落地时刻裁定（概率在事件时刻裁定、事实随后回放）。
+    fn assign_rebound_pursuit(&mut self, landing: Vec2, current_t: f32) {
+        let offensive_team = match self.possession {
+            Possession::Home => "home",
+            Possession::Away => "away",
+        };
+        let defensive_team = match self.possession {
+            Possession::Home => "away",
+            Possession::Away => "home",
+        };
+        // 落点可站立化（与其它目标点同口径，避免边界 clamp 刷屏）。
+        let landing = self
+            .rules
+            .court
+            .clamp_playable(landing, self.rules.player_radius_ft);
+
+        for team in [offensive_team, defensive_team] {
+            let is_offense = team == offensive_team;
+            // 候选：在场上球员，按（攻方：篮板属性降序 / 守方：距落点升序）
+            // 排序后取前若干名。攻方用属性是为了让 `offensive_rebound` 真正
+            // 决定“谁去冲抢”（能力→行为链），而非全员无差别跑动。
+            let mut squad: Vec<(String, Vec2, f32, String, String, f32)> = self
+                .physics
+                .get_players()
+                .values()
+                .filter(|p| p.on_court && p.team == team)
+                .map(|p| {
+                    (
+                        p.id.clone(),
+                        p.pos_ft,
+                        p.max_speed_ftps,
+                        p.slot.clone(),
+                        p.morale.clone(),
+                        p.attributes.offensive_rebound,
+                    )
+                })
+                .collect();
+            if squad.is_empty() {
+                continue;
+            }
+            if is_offense {
+                squad.sort_by(|a, b| {
+                    b.5.partial_cmp(&a.5)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| a.0.cmp(&b.0))
+                });
+            } else {
+                squad.sort_by(|a, b| {
+                    (a.1 - landing)
+                        .length_squared()
+                        .partial_cmp(&(b.1 - landing).length_squared())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| a.0.cmp(&b.0))
+                });
+            }
+            // 派若干名争抢：真实篮球里不是全队都冲抢，且全员挤向落点
+            // 会立刻触发 `min_player_separation_ft` 碰撞消解（把所有人推离）。
+            // 人数经 GameRules 通道（charter C1），不内联在引擎里。
+            let quota = if is_offense {
+                self.rules.rebound_crash_offense_count as usize
+            } else {
+                self.rules.rebound_boxout_defense_count as usize
+            };
+            let spread = self.rules.min_player_separation_ft;
+            for (idx, (id, pos, speed, slot, morale, _attr)) in
+                squad.into_iter().take(quota).enumerate()
+            {
+                // 同队错开：以落点为圆心，按序号横向排开一个分离距离，
+                // 避免两名同队球员被派到同一点后互推。
+                let dir = (pos - landing).normalize_or_zero();
+                let perp = if dir.length_squared().abs() > f32::EPSILON {
+                    Vec2::new(-dir.y, dir.x)
+                } else {
+                    Vec2::X
+                };
+                let offset =
+                    (idx as f32 - (quota as f32 - f32::from(1u8)) / f32::from(2u8)) * spread;
+                let target = self
+                    .rules
+                    .court
+                    .clamp_playable(landing + perp * offset, self.rules.player_radius_ft);
+                let action = if is_offense { "CrashBoards" } else { "BoxOut" };
+                self.physics
+                    .set_player_target(&id, target, speed, action, &slot, &morale);
+                // 动作窗口：篮板起跳准备（复用既有规则字段）。
+                self.active_windows.insert(
+                    id.clone(),
+                    ActionTimeWindow::new_rebound_jump(&id, current_t, &self.rules),
+                );
+            }
+        }
     }
 
     fn update_scope_completion(&mut self) {

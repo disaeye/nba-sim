@@ -1154,3 +1154,85 @@ defense_close_rate = 0.0042     (每 tick 平均净靠近 0.0042 ft)
 3. 用本节的同一探针复测：`offense_close_rate` 应升至与
    `defense_close_rate` 同量级，ORB% 应进入 0.20–0.28；
 4. 验收需 8 seed 矩阵 + 反事实（关掉指派应使 ORB% 回落到当前水平）。
+
+### 23.9 `free_throw_rate` 越界的根因：跳投永远不可能造犯规
+
+`free_throw_rate` 实测 0.110（带 [0.20, 0.35]，真实 NBA 约 0.22–0.26）。
+定位到一条**缺失的程序路径**，不是参数偏差：
+
+`execute_shot()`（`crates/engine/src/match_engine.rs:4081`）全程**没有任何
+犯规判定**。全仓的 `shooting_foul` 只有一个产生点——`DriveResolution::resolve`
+（`crates/officiating/src/resolution.rs:46`），即**只有突破能被犯规**。
+跳投（含三分）在被干扰时没有任何造犯规的可能。
+
+seed42 full 的事件计数印证：
+
+```text
+SHOT_RELEASE     186      FOUL        12
+DRIVE_INITIATED  132      FREE_THROW  20
+DRIVE_SCORE       22
+```
+
+全场仅 12 次犯规，且全部来自 132 次突破。真实 NBA 每场约 40 次犯规，
+其中相当一部分来自跳投犯规（三分犯规、中距离投篮犯规、and-one），
+这是罚球率的主要来源之一。
+
+**这解释了罚球率的量级差**（0.110 vs 真实 0.22–0.26），且与
+`gap.md` §9（决策：机会—意图—执行）和 `architecture.md` §5 的
+「裁决层」职责一致：犯规是裁决层事实，不应只有突框一条路径。
+
+修复方向（属新增裁决路径，不是调参）：
+
+1. 在 `execute_shot` 的结算处增加投篮犯规判定，概率经 GameRules 通道
+   （复用或新增 `foul_on_shot_rate`，勿内联常数）；
+2. 与 `DRIVE` 侧同构：先裁定 `shooting_foul`，命中则按
+   `league.shooting_foul_free_throws` 进入罚球程序，未命中则按投篮犯规
+   给 2/3 罚（三分犯规 3 罚）；
+3. and-one 语义：犯规且命中时保留得分并追加 1 罚；
+4. 验收：`free_throw_rate` 进入 [0.20, 0.35]；8 seed 矩阵；反事实
+   （关掉跳投犯规应回落到当前 0.110）；同时复核 `total_p50` 不被推出
+   [140, 230]（罚球增加会抬分，需与 pace 一并看）。
+
+**状态：根因已定位，未修。**
+
+### 23.10 `box_score.turnovers` 漏计 3/5 的失误类型（账本不对平）
+
+修复篮板冲抢后追查 `pace` 残差（+34/场）时发现口径破缺：
+
+**事实**：`box_score.turnovers` 全仓只有 **2 个**自增点——
+`start_violation_turnover()`（§5213）与 `start_steal_transition()`（§5234）。
+但 `PossessionEndCause::Turnover*` 有 **5 种**终结方式：
+
+| 终结原因 | 产生点 | 是否计入 `box_score.turnovers` |
+| --- | --- | --- |
+| `TurnoverViolation` | `start_violation_turnover` §5215 | 是 |
+| `TurnoverSteal` | `start_steal_transition` §5238 | 是 |
+| `TurnoverPassTipped` | `step_inner` §2483 | **否** |
+| `TurnoverPassDropped` | `step_inner` §2615 | **否** |
+| `TurnoverLooseBall` | `start_loose_ball_transition` §5420 | **否** |
+
+**实测差异**（seed42 full）：
+
+```text
+事件流 POSSESSION_SUMMARY 的 Turnover* 终结合计 = 52
+  (LOOSE_BALL 25 + STEAL 8 + PASS_TIPPED 8 + PASS_DROPPED 7 + VIOLATION 4)
+box_score.turnovers（同一场）                   = 12
+```
+
+即箱体统计把失误**低估了约 4 倍**（52 → 12）。
+
+**影响**：
+
+1. 任何消费 `box_score.turnovers` 的准则与报表（含 `turnover_rate_band`
+   相关判定、CLI 摘要、批量 jsonl）都在用错误的分母；
+2. 回合守恒式 `possessions ≈ FGA + TO + 0.44·FTA − OREB` 的 TO 项失真，
+   这正是 §23.6 里 pace 残差 +34 的主要来源之一；
+3. 与 §22.4 的四个死参数同属一类：**声明的字段与真实事实脱钩**，
+   而现有守卫（常数守卫、世界私有化、文档守卫）都不检查
+   「字段是否被完整写入」。
+
+**状态：已定位，未修。** 修复方向：把失误计数收敛到**唯一入口**
+（例如在 `emit_possession_summary` 内按 `end_cause` 分类计数，
+或让三个缺口路径同样经过带计数的公共函数），并在账本检查器
+（`crates/evaluator/src/ledger.rs`）中增加
+「`box_score.turnovers` 必须等于事件流 Turnover* 终结数」的对平式。
