@@ -116,7 +116,7 @@ fn golden_baseline_seed42() {
     assert_eq!(h, GOLDEN_SEED42_2000, "golden hash drifted for seed 42");
 }
 
-// 基线常量冻结记录（校准协议 design.md §11.3）：
+// 基线常量冻结记录（校准协议 docs/protocol.md §3）：
 //   v1 0x76e41f2a83f74b38 — 重构前锚点（BallState 写入口收敛，行为保持）
 //   v2 0xef68d18205abaa12 — 2026-08-31 回合节奏校准
 //   v3 0x84a62217d990685b — 2026-08-31 常识公理修复：替补席界外物理隔离
@@ -159,7 +159,8 @@ fn golden_baseline_seed42() {
 //       3P 64.0%→39.7% ∈ [30,40]、2P 72.9%→58.1% ∈ [48,58]（SHOT_MAKE_PROFILE 入带）。
 //   (b) BoundaryCross 由电平触发改为上升沿触发 + 几何容差，且 sync_positions 不再用
 //       刚体积分产物覆盖运动学权威位置（双发射点/单锁存导致单球员连续 675–755 tick
-//       伪造越界刷屏，阻塞发球程序）。属设计内行为修复，见 status.md §33。
+//       伪造越界刷屏，阻塞发球程序）。属设计内行为修复，见历史执行记录
+//       `docs/dev/cycles/20260911_first-principles/status_history.md` §33.3。
 // v43 0xa89062d9c5141724 - 2026-09-11 dev 方案 D3.4 进攻时钟紧逼校准：
 //   shot_clock_urgency_seconds 5.0→12.0（真实进攻在 24→14s 已开始组织）；
 //   dwell_decay_max 0.38→0.85（原来衰减上限过低使 Dwell 在 24s 仍保有 62% 效用，
@@ -203,7 +204,223 @@ fn golden_baseline_seed42() {
 // v46 0x0e610303a063503e - 2026-09-11 D5.1b 修复：进攻目标不得再经 bind_targets
 //   按 roster 顺序重绑（那会抹掉 slot fill 结果并把替补拉进场内，实测 116 条
 //   PLAYER_SEPARATION，替补 A_7 与在场球员重叠 1.19ft）。
-const GOLDEN_SEED42_2000: u64 = 0x97c7de28a95cb3d5;
+// v49 0xd28c579e08299d3c - 2026-09-13 round-6 防守方案因果化（D5.2 最小闭环）：
+//   (a) 缺陷：`DefensiveTactic` 对比赛结果**零影响**。全仓库仅 6 处引用 = 2 处
+//       字段声明 + 2 处赋值 + 2 处 `name_zh()`（生成展示字符串）。实测 6 种方案
+//       各跑一场全场模拟，逐字节相同（ticks=84029、score=96081、行为哈希全为
+//       `0x3ba37e7fa9e5ec7d`），包括 2-3 联防。违反 gap.md §21 第 2 条标准
+//       （「它会打篮球，而不是播放战术动画」）。
+//   (b) 修复：新增 `DefenseRules`（sag_multiplier / on_ball_gap_multiplier /
+//       help_priority / switch_aggressiveness），按方案 id 在
+//       `DefenseRules::for_scheme` 实例化，经 GameRules 通道进入防守目标点生成
+//       （charter C1/C3：数据通道，非代码分支）。同时接线此前声明未消费的
+//       `drop_coverage_depth_ft` 同族参数语义。
+//   (c) **中性性证明**（本冻结的授权依据）：默认值 sag=1.0 / gap=1.0 /
+//       help_priority=0.5 时**逐位复原**历史行为——把双方防守方案都置为
+//       `def_man_conservative`（中性档案）后 seed42×2000 的哈希为
+//       `0x97c7de28a95cb3d5`，与 v48 完全相同。因此本次漂移**不是**
+//       RNG 错位或未授权行为变化，而是「默认阵容使用的 drop_coverage /
+//       man_conservative 方案开始真实生效」。
+//   (d) 证据：seed=0..7 full 的 L1 violations 仍为 0；`defense_effect.rs`
+//       两条新门通过（防守几何 spread > 0.25ft；zone/drop 比 man 更收缩；
+//       press 与 zone 的失误总数不同：126 vs 113）。
+// v50 0xc164745fadeb0c69 - 2026-09-13 round-6 接球减速模型（gap.md §12.1/§9.5）：
+//   (a) 缺陷：接球人被硬编码为 20 ft/s 全速冲向 `frozen_to_pos`，**无减速模型**。
+//       传球飞行时长受 `max_pass_duration_seconds`（1.4s）封顶，但 40–60 ft 的
+//       跨场 outlet 实际只需 0.5–0.7s，接球人在被拉长的飞行期内持续全速前进，
+//       实测**越过**冻结点 5–12.5 ft（越位方向几乎垂直于传球线）。
+//       后果：`PASS_CORRIDOR_REACHABLE` 在 8 seed 下报 8–17 条 Hard defect。
+//       这违反 gap.md §12.1「加速、制动、变向受属性与规则上限约束」。
+//   (b) 修复：新增 `receive_approach()`，按制动距离反解允许速度
+//       `v = sqrt(2·a·max(d - margin, 0))`（受 `receive_approach_speed_ratio`
+//       封顶），并把瞄准点提前 `receive_stop_margin_ft`。参数经 GameRules 通道。
+//   (c) 效果：`PASS_CORRIDOR_REACHABLE` 8 seed 17 → 10；L1 violations 仍 0。
+//   (d) 授权依据：
+//       - 防守侧变更的中性性已在 v49 证明（中性方案逐位复原 0x97c7de28a95cb3d5）；
+//       - 本轮为**独立**的物理约束补齐：修复前该路径恒为常数 20.0 ft/s，
+//         不存在「把常数改成参数」之外的等价回退;若把
+//         `receive_approach_speed_ratio` 设为 1.0 且 `receive_stop_margin_ft`
+//         设为 0，即为不减速的旧行为退化形式（速度改为受制动距离约束）。
+//       - 新增门：`defense_effect.rs` 2 条；`attribution_integrity.rs` 2 条。
+// v51 0x15cad99d0fdea90b - 2026-09-13 round-7 领传与拦传时序：
+//   (a) outlet 一传（`start_rebound_outlet`）此前把 `to_pos` 冻结为接球人
+//       **释放时刻**的位置，而接球人在飞行期间继续跑动，永远不能恰好停在
+//       冻结点（实测越位 5–12 ft，全部出现在 `(±97, 25)` 基准发球点）。
+//       改为与决策侧一致的领传（`lead_receiver_position`）。
+//   (b) `execute_pass` **不得**再叠加一次领传：决策层给出的 `to_pos` 已含提前量，
+//       重复叠加使判定从 9 条恶化到 28 条（接球人因减速模型无法到达过远落点）。
+//       已在代码注释中记录该实验结论，防止后续重犯。
+//   (c) 新增 `pass_lead_gain` / `pass_lead_max_ft` 规则参数（数据通道）。
+//   (d) 净效果：`PASS_CORRIDOR_REACHABLE` 8 seed 由 8 → 9（持平），
+//       `RHYTHM_DURATION` 70 → 62（改善）；L1 violations 仍 0。
+//       本轮的价值主要是**排除了两个错误假设**并文档化，而非指标改善。
+// v52 0x9af1ff1c8d3a5710 - 2026-09-13 round-8 接球制动距离自洽：
+//   (a) 缺陷：`receive_stop_margin_ft` 是**固定**裕量（2.5 ft），但所需制动
+//       距离是 `v²/(2a)`，随接近速度增大。实测 19.8 ft/s 需 5.60 ft、
+//       12.0 ft/s 需 2.06 ft。当裕量小于所需制动距离时，「已到位则停下」
+//       的分支**永远不可达**：接球人一边被 `sqrt(2as)` 减速，一边因
+//       `d > margin` 继续被推着走。
+//       实测（seed 1, rel seq=3484）：45.3 ft 传球飞行 35 tick，接球人在第
+//       18 tick 已到冻结点（距离 0.43 ft），之后又跑 19 tick × 0.35 ft = 6.7 ft
+//       越过，最终报 5.65 ft 越位。
+//   (b) 修复：用物理所需制动距离 `v²/(2a)` 取代固定裕量（取两者较大值），
+//       使 `d <= stop_margin` 分支真正可达；进入后速度为 0（站住等球）。
+//   (c) 净效果：Hard 15 → **12**；`PASS_CORRIDOR_REACHABLE` 10 → 9；
+//       `POSSESSION_DURATION_BOUNDS` 1 → **0**；L1 violations 仍 0。
+//   (d) 本轮同时否证两个假设并文档化（见 docs/dev/cycles/20260911_first-principles/closure_plan.md §11）：
+//       - `execute_pass` 叠加领传 → 判定 9 → 28（恶化），已回退；
+//       - 「飞行时长要求超过 ball_max_speed」经算术验证不成立
+//         （50 ft 传球的等效速度仅 35.7 ft/s < 85 上限）。
+// v53 0x2cf17a83dcb9571e - 2026-09-14 round-10 Step3b 传球落点真实飞行时长：
+//   (a) 缺陷：`DecisionRules.pass_lead_time_seconds` 是**固定** 0.65s，而真实飞行
+//       时长随距离变化（8 ft→0.45s、50 ft→1.40s）。短传领过头、长传领不足，
+//       双向都错 —— 用一个常数近似一个函数的必然结果。
+//   (b) 修复：新增 `BallisticsEngine::solve_pass_landing(passer, receiver, rules)`，
+//       求不动点 `T = pass_duration(|L−p|)`、`L = x + v̂·brake_reach(v0,T)`。
+//       `brake_reach` 与 `engine::receive_approach` **同源**（否则两处对
+//       “能否到达”判断不一致）。返回 `(落点, 时长)` 成对冻结，满足
+//       gap.md §9.5 的“release 时同时冻结 frozen_to_pos 与 flight_duration”。
+//   (c) 验收：4 条纯函数单测（不动点残差 <1e-3、领传 ≤ 制动可达、静止不领、
+//       飞行时长随距离单调且跨度 >0.3s）全绿，不跑模拟。
+//   (d) 效果（seed 0 full）：传球失败率 36.6% → **29.7%**；回合 287 → 261。
+//       8 seed full：Hard 0，L1 violations 0。
+// v54 0xa155d1c3b21552de - 2026-09-14 round-10 Step4a 名册去索引化（P-2）：
+//   (a) 缺陷：名册由 `builtin_attributes(index)` / `builtin_roles(index)` /
+//       `builtin_tendencies(index)` 按**数组下标**分派，且 `id` 编码下标
+//       （`id = "{prefix}_{index+1}"`）；`default_lineup` 直接取**数组前 5 个**
+//       作为首发。即「顺序即身份」——轮转名册数组就能改变首发阵容。
+//   (b) 修复：球员改为 `data/roster/{home,away}.json` 数据资产（顺序不携带语义）；
+//       删除 `PlayerData.roles` 与 `PlayerRole`（attributes.md §2.7/§2.9/T1 要求）；
+//       展示槽位改为 `project_display_role(attributes, tendencies)` 纯函数投影；
+//       首发由档案 `starter` 标记声明；`validate_team` 的
+//       `ids.len() <= 5`（HashSet 插入计数，语义错误）改为读 `player.starter`。
+//       删除 227 行 index 分派生成器。
+//   (c) 本版漂移的**主要来源**是球员 id 改名（`H_1` → `H_01`，补零以去掉
+//       「序号即身份」的暗示），哈希输入包含 id，故必然变化；行为指标保持
+//       （8 seed full：Hard 1、L1 violations 0、回合/场 236.9）。
+//   (d) 决定性验收（新增 rsoster_order_neutrality 测试）：
+//       **打乱名册数组顺序 → 逐 tick 行为哈希完全不变**（3 种轮转 × 3 个种子）。
+//       修复前该测试必然红。
+// v55 0x025c5ced668159d3 - 2026-09-15 round-14 带球丢球事实路径：
+//   (a) 缺陷：真实 NBA 失误构成中「带球丢球」占 53.6%（82games 2024-25 IND），
+//       是占比最大的一类，而引擎**只有传球失败一条失误路径**，
+//       `TURNOVER_LOOSE_BALL` 在 718 回合中只出现 1 次（0.4%）。
+//       根因是架构级的：`decision/src/defense.rs` 整个模块零调用者，
+//       `BallState` 状态机也**没有 `Held -> LooseBall` 边**。
+//   (b) 修复（四处，全走既有架构通道，无硬编码）：
+//       ① `ResolveConfig.ball_security: BallSecurityPolicy`（11 参数 + validate）；
+//       ② `capability::poke_check_success()` 由 `steal` / `ball_handling` /
+//          `risk_tolerance` 派生（能力与倾向分离）；
+//       ③ `flow.rs` 新增 `Held -> LooseBall` 边（真正的阻塞点）；
+//       ④ `resolve_on_ball_poke()` + `apply_on_ball_poke()` + `GameEvent::BallPokedLoose`。
+//       概率按 `rate × dt` 做时间积分 `1 − (1−p)^trials`，与
+//       `resolve_pass_interception` 同形，不产生逐 tick 概率累积。
+//   (c) 本版漂移是**预期的**：新增了一条失误事实路径，行为必然变化。
+//       实测 8 seed full：**Hard 0**、BALL_SPEED 0、丢球占比 0.4% → 4.8%。
+//   (d) 修复过程中发现并解决的两个真实缺陷：
+//       · `BALL_SPEED` Hard 违规（seed 31337 tick 3755，96.72 ft/s > 85）：
+//         根因是松球起点误用 `carrier_pos` 而非球的实际坐标（持球时球有
+//         `ball_holder_offset_ft` 偏移与弹跳相位），单帧跳变 3.87 ft。
+//       · `TURNOVER_ATTRIBUTION` Hard defect：评判器把
+//         `TurnoverLooseBall` 的原因事实误判为「必须有 `LOOSE_BALL_SECURED`」，
+//         但球被切掉后可能直接出界（防守方收下），此时无收下事实。
+//         已为 `BALL_POKED_LOOSE` 增加独立的原因事实通道。
+//   (e) 保持：`roster_order_neutrality` 2/2 通过（P-2 中立性未受影响）；
+//       `possession_invariants_hold_across_seeds` 通过。
+// v56 0xcaa7befc5149f0e3 - 2026-09-15 round-15 接球语义修复（两项）：
+//   (a) Fix-1「首次触球」：接球裁决的触发条件从「飞行结束」放宽为
+//       「飞行结束 **或** 接球人已进入接球半径」。此前接球人的估计模型
+//       以自身为参照系（initial = ball + dir×|ball−我|），他朝来球走则
+//       估计点随之后退（追赶曲线），于是「朝来球移动」这一正确行为反而
+//       必然导致终点 miss——实测层 A 失败 22 例：估计误差 p50=3.37 ft、
+//       接球人正确到达自己的估计（1.34 ft）、球距 3.64 ft。
+//       传球全程胸高平飞（pass_peak_ft == chest_height_ft），无空中接球问题；
+//       拦截优先级不变（同 tick 拦截事实先行）。
+//   (b) Fix-2 拆除 Layer B 的走廊双重计费：`resolve_pass_arrival` 删除
+//       lane_risk 项（连带删除 PassPolicy.lane_risk_weight）。走廊风险是否
+//       化为事实由 resolve_pass_interception 独立裁决；球干净到达接球人身旁
+//       （实测层 B 失败 37 例球距 p50=0.94 ft）不应再因出发时走廊拥挤被
+//       降低接球概率。
+//   (c) 效果（3 seed full）：传球失败 28.3% → 16.9%；掉球 17.0% → 5.0%；
+//       失误/回合 0.353 → 0.287；0 Axiom Violations。
+//       P-1 验证测试（receiver_must_estimate_not_know_the_frozen_landing /
+//       receiver_landing_estimate_diverges_from_passer_intent）保持通过。
+//   (d) 同轮修复 attribution_integrity 测试盲区：WindowKinds 补统计
+//       BALL_POKED_LOOSE（TURNOVER_LOOSE_BALL 的原因事实）。
+// v57 0xfdb47231f042e55d - 2026-09-15 round-16 进攻组织与失误构成修复（五项）：
+//   (a) Fix-3 传球效用距离衰减接线：DecisionRules 的 pass_distance_free_ft /
+//       decay_reference / max_decay 声明多轮但从未消费。此前效用只有「接球人
+//       空不空」，传球人系统性选最长传（中位 28.3ft、48% >30ft），而拦截率
+//       随距离单调上升（0-12ft 4.2% → 40ft+ 21.5%）。接线后中位 20ft。
+//       同时删除 2 个与 constraint 通道重复的死参数（pass_lane_defender_penalty /
+//       pass_lane_blocked_multiplier，charter C1 单一事实源）。
+//   (b) Fix-4 驱动停滞双重缺陷：(i) 预掷 finish_made=true 的「进球」被空间门
+//       （>16ft）静默丢弃——6 场 397 次 DRIVE_SCORE 中 80%（场均 52.7 次）未
+//       变成出手，事件流与记分簿矛盾；现按真实分支申报。(ii) 停滞转回
+//       Initiation 强制重等 tactical_initiation_seconds=6.5s——停滞是进攻延续
+//       不是新回合；该机制是 24s 违例（12.8 次/场，真实 ~0.5）的主要时间吞噬器。
+//       修复后 24s 违例 12.8 → 2.3 次/场。
+//   (c) Fix-5 发球 5 秒压力：距离衰减接入后发球员宁愿 Dwell（0.82）也不发
+//       长球（衰减后 0.47），FIVE_SECOND 违例 0→22 次/场。修复：Dwell 在发球
+//       阶段按 inbound_elapsed/5s 线性加压（发球传球保持距离优选）。
+//   (d) 标定（A/B 证据 §17.5-17.7）：pass_base 0.82→1.15（n 1.45→2.47）；
+//       intercept_steal/tip_slope 0.12/0.20→0.06/0.10（失败率 10.7%→7.5%）；
+//       poke_attempt_rate 0.55→2.2（丢球占比 8%→36%，真实 53.6%）。
+//   (e) 效果（3 seed full）：失误/回合 0.353→0.247（真实 0.1447）；构成
+//       传球/丢球/违例 = 50/36/13%（真实 33.6/53.6/12.1）；得分率 43%（~45%）。
+// v58 0x1ce391e109621bbf - 2026-09-15 round-17 活锁与归因修复（三项，全 seed Hard 归零）：
+//   (a) 地板球追逐去距离限制：原 `cur_dist <= 25.0` 硬半径在球停于空档区时
+//       失效——实测 seed 6 罚球后松球停在 (85.6,29.0)，最近球员 59.1 ft，
+//       无人满足 25 ft → 全场站桩 247 秒直到节末（回合 258.4s > 40s 上限，
+//       POSSESSION_DURATION_BOUNDS Hard）。第一性原理：活球是全场唯一
+//       完全可观测的对象，地板上躺着一颗活球时「去抢球」压倒一切战术
+//       站位。RimRebound 的落点预判追逐保留 25 ft；LooseBall 无条件追逐。
+//   (b) 篮板源地板球归因：投/罚不中弹出的地板球被防守方收下时，原实现
+//       默认记 TURNOVER_LOOSE_BALL——虚增失误且不存在「失误球员」
+//       （TURNOVER_ACTOR_CONSISTENCY Hard，seed 2 possession 83：
+//       FT 不中→地板球→防守收下→turnover_player_id=null）。修复：
+//       RimRebound→LooseBall 时登记 DefensiveRebound 源，防守方收下
+//       按防守篮板归因到收球人；进攻方收下则继续回合（前场篮板）。
+//   (c) 回合时长容差 2.0→6.0（fixture nba.v2 数据契约）：合法回合 =
+//       发球准备(~2.6s 死球) + 24s + 出手飞行 + 篮板 + ORB 14s + 终结飞行
+//       ≈ 43.6s；原容差 2.0 只覆盖飞行、不覆盖回合开始的死球准备，
+//       把 seed 7 的合法回合（5 传 2 突破 ORB 后得分，42.4s）误判为 Hard。
+//   验收：9 seeds（42,1,2,3,6,7,100,999,31337）全部 0 Hard；
+//   n（传球/回合）1.45→2.27；传球失败率 15.0%→10.4%。
+// v59 0x9db5032576bb6093 - 2026-09-15 round-18 攻框体系修复（五项）：
+//   (a) 冲框价值折扣（drive_rim_attack_bias 1.2）：走廊选择原本只比拥堵
+//       成本，篮筐（防守最密处）几乎永不入选——88% 突破停在离筐 14-18 ft，
+//       篮下出手 3%（真实 25-50%）。按持球人 finishing 折扣冲框走廊。
+//   (b) 攻框 APF 豁免（is_driving_to_rim）：转向力墙挡不住攻框，对抗由
+//       终结裁决处理（硬碰撞分离仍生效）。
+//   (c) 突破时长加加速坡（dist/speed + speed/accel；max 2.2→3.2s）：
+//       原公式假设瞬时极速，tau=1 时人差 5-10 ft，只能 7-16 ft 抛投。
+//   (d) 过人两段式几何：successful 预掷=过掉对位防守人——被过者让位
+//       （目标=侧向清空点，极速），0.35s 后持球人重定向攻框。
+//       初版瞬移被 PLAYER_TELEPORT 正确拦截（70-94 Hard，已废弃）。
+//   (e) 分球 on_court 过滤 + 换人守卫扩展：突破分球曾把球传给板凳上的
+//       队友（seed 31337：H_08 在 y=-4 板凳区「接球」，BALL_HOLDER_ON_COURT
+//       190 次）；换人守卫补 pending_pass_receiver/Pass.target_id。
+//   效果（3 seed）：突破停滞 88%→67%，得分 5%→20%；FT/场 12.7→21.3；
+//   失误/回合 0.248→0.213；得分率 43.6→45.4%（真实 ~45%）。
+//   11 seeds 全 0 Hard。
+// v60 0x308de474dc203661 - 2026-09-15 round-19 护框让位 + P-1 纯度（三项）：
+//   (a) 通道全员让位 + 恢复窗口（drive_beaten_recovery_seconds 0.6）：
+//       让位目标此前被战术层每 tick 重派覆盖，防守人立刻被派回护框位，
+//       让位形同虚设。窗口内战术层不得重派被过者（与
+//       GambleInterception 的 failure_recovery 语义同源）。
+//       效果：篮下≤7ft 出手 11.9%→14.7%，停滞 67%→64%。
+//   (b) P-1 修复①（全知泄漏）：ball_velocity_estimate 原直读球态的
+//       to_pos/from_pos/duration（传球人冻结意图），其文档注释声称
+//       "用上一 tick 与本 tick 的球位置差"——注释与实现不一致。
+//       改为真实观测差分（prev_observed_ball_pos，感知延迟一步），
+//       信息量等价（球匀速直线飞行）但来源合法。
+//   (c) P-1 修复②（噪声双重应用）：residual = noise_cap×(1−sense) 而
+//       noise_cap 已含 (1−sense)，实际 = noise_ft×(1−sense)²——低观察力
+//       球员的噪声被意外压缩。恢复线性设计意图。
+//   效果（3 seed）：传球失败 10.4%→8.5%；失误/回合 0.213→0.208；
+//   9 seeds 全 0 Hard；P-1 验证测试保持通过。
+const GOLDEN_SEED42_2000: u64 = 0x308de474dc203661;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

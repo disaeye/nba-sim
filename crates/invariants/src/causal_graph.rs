@@ -5,8 +5,8 @@
 //! 2. 比分增加 (ScoreDelta) 严格必须由前置的合法进球或罚球事件引起（杜绝幽灵得分）；
 //! 3. 篮板争抢 (Rebound) 严格必须由前置的投篮不中 (HoopArrival { is_made: false }) 触发。
 
-use nba_protocol::StreamTick;
 use crate::Violation;
+use nba_protocol::StreamTick;
 
 #[derive(Debug, Clone)]
 pub struct ActiveShotTracking {
@@ -40,7 +40,8 @@ impl CausalEventGraph {
         if cur_score != self.last_score {
             let delta_home = cur_score.0.saturating_sub(self.last_score.0);
             let delta_away = cur_score.1.saturating_sub(self.last_score.1);
-            let is_valid_delta = (delta_home <= 3 && delta_away == 0) || (delta_away <= 3 && delta_home == 0);
+            let is_valid_delta =
+                (delta_home <= 3 && delta_away == 0) || (delta_away <= 3 && delta_home == 0);
             if !is_valid_delta {
                 violations.push(Violation {
                     tick_index,
@@ -76,7 +77,12 @@ impl CausalEventGraph {
         // 2. 投篮与到筐事件因果链
         for event in &frame.events {
             if event == "SHOT_RELEASE" || event == "SHOT" {
-                let shooter = frame.players.iter().find(|p| p.has_ball).map(|p| p.id.clone()).unwrap_or_default();
+                let shooter = frame
+                    .players
+                    .iter()
+                    .find(|p| p.has_ball)
+                    .map(|p| p.id.clone())
+                    .unwrap_or_default();
                 self.active_shot = Some(ActiveShotTracking {
                     shooter_id: shooter,
                     release_tick: tick_index,
@@ -87,7 +93,10 @@ impl CausalEventGraph {
                 self.active_shot = None;
             } else if event == "REBOUND" {
                 // 篮板事件因果性：争抢篮板必须在前置投篮不中后发生
-                if self.last_made_shot_tick.is_some_and(|t| tick_index <= t + 2) {
+                if self
+                    .last_made_shot_tick
+                    .is_some_and(|t| tick_index <= t + 2)
+                {
                     violations.push(Violation {
                         tick_index,
                         rule: "REBOUND_AFTER_MADE_SHOT",
@@ -99,12 +108,19 @@ impl CausalEventGraph {
                 // 发球因果：发球人必须站在底线/边线界外附近
                 if let Some(holder) = frame.players.iter().find(|p| p.has_ball) {
                     let margin = 0.05;
-                    if holder.x > margin && holder.x < (1.0 - margin) && holder.y > margin && holder.y < (1.0 - margin) {
+                    if holder.x > margin
+                        && holder.x < (1.0 - margin)
+                        && holder.y > margin
+                        && holder.y < (1.0 - margin)
+                    {
                         violations.push(Violation {
                             tick_index,
                             rule: "INBOUNDER_DEEP_IN_COURT",
                             severity: crate::ViolationSeverity::Hard,
-                            detail: format!("inbounder {} is deep inside the court at ({:.2}, {:.2})", holder.id, holder.x, holder.y),
+                            detail: format!(
+                                "inbounder {} is deep inside the court at ({:.2}, {:.2})",
+                                holder.id, holder.x, holder.y
+                            ),
                         });
                     }
                 }
@@ -126,8 +142,9 @@ impl CausalEventGraph {
         // 上一帧必须有合法持球人，或者球的起始位置必须在某个在场球员的接触范围内（<= 4.5 ft）
         let cur_ball_pos = (frame.ball.x, frame.ball.y, frame.ball.z);
         let cur_status = &frame.ball.status;
-        let is_new_flight = (cur_status == "PASS" || cur_status == "SHOT" || cur_status == "INBOUND_TRANSFER")
-            && self.prev_ball_status.as_deref() != Some(cur_status);
+        let is_new_flight =
+            (cur_status == "PASS" || cur_status == "SHOT" || cur_status == "INBOUND_TRANSFER")
+                && self.prev_ball_status.as_deref() != Some(cur_status);
 
         if is_new_flight {
             let had_prior_holder = self.prev_ball_holder.is_some()
@@ -140,10 +157,20 @@ impl CausalEventGraph {
                 let dy = (p.y - frame.ball.y) * 50.0;
                 (dx * dx + dy * dy).sqrt() < 6.0
             });
-            let is_rim_origin = (cur_ball_pos.0 - 0.05).abs() < 0.08 || (cur_ball_pos.0 - 0.95).abs() < 0.08;
+            let is_rim_origin =
+                (cur_ball_pos.0 - 0.05).abs() < 0.08 || (cur_ball_pos.0 - 0.95).abs() < 0.08;
             let is_inbound = cur_status == "INBOUND_TRANSFER"
-                || (cur_status == "PASS" && (frame.phase == "Inbound" || frame.phase == "ActionExecution" && (self.prev_ball_status.as_deref() == Some("INBOUND_READY") || self.prev_ball_status.as_deref() == Some("INBOUND_TRANSFER"))));
-            if !had_prior_holder && !near_any_player && !is_rim_origin && !is_inbound && tick_index > 0 {
+                || (cur_status == "PASS"
+                    && (frame.phase == "Inbound"
+                        || frame.phase == "ActionExecution"
+                            && (self.prev_ball_status.as_deref() == Some("INBOUND_READY")
+                                || self.prev_ball_status.as_deref() == Some("INBOUND_TRANSFER"))));
+            if !had_prior_holder
+                && !near_any_player
+                && !is_rim_origin
+                && !is_inbound
+                && tick_index > 0
+            {
                 violations.push(Violation {
                     tick_index,
                     rule: "BALL_IMPULSE_WITHOUT_SOURCE",
@@ -229,7 +256,9 @@ impl PreconditionEvaluator {
                 // 罚球必须有明确指定罚球人持球就位
                 let has_shooter = frame.players.iter().any(|p| p.has_ball);
                 if !has_shooter {
-                    return Err("PRECONDITION_FAILED: free throw shooter must hold the ball at line");
+                    return Err(
+                        "PRECONDITION_FAILED: free throw shooter must hold the ball at line",
+                    );
                 }
                 Ok(())
             }

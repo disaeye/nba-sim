@@ -47,7 +47,6 @@ impl CourtGeometry {
         }
     }
 
-
     /// 是否为三分出手（含底角特例）。
     ///
     /// NBA/FIBA 的三分线不是等半径圆弧：弧顶与翼位是 `three_point_distance_ft`，

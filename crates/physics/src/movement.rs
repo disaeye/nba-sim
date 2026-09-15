@@ -78,11 +78,21 @@ pub struct PlayerPhysicsState {
     /// 放置到界外发球点，且不产生伪造的边界/violation 事实。
     /// 这是结构化状态，不是按 action 字符串匹配。
     pub out_of_bounds_placement: bool,
+    /// 正在执行接球跑位（round-10）：接球人向球收敛期间豁免 APF 排斥，
+    /// 否则「保持间距」会把他推离球，造成层 A 误判（实测被推 3.2 ft）。
+    pub is_receiving_pass: bool,
+    /// 持球攻框中（Drive 状态且目标为篮筐方向）：豁免 APF 排斥。
+    ///
+    /// 真实篮球里攻框者**顶着对抗完成终结**——对抗的代价由终结裁决
+    /// （命中率/犯规掷骰）处理，而不是被一个转向力场挡在 7-16 ft 外
+    /// （round-18 前实测：88% 突破停滞、篮下出手仅 3%）。
+    /// 硬性碰撞分离（min_player_separation）仍然生效——豁免的只是
+    /// 转向，不是穿人。
+    pub is_driving_to_rim: bool,
     /// BoundaryCross 的边沿锁存：记录上一 tick 是否处于越界（被 clamp）
     /// 状态，使边界事实只在上升沿发射而非逐 tick 重复（电平→边沿）。
     pub boundary_cross_latched: bool,
     pub attributes: nba_domain::PlayerAttributes,
-    pub roles: Vec<nba_domain::PlayerRole>,
     pub tendencies: nba_domain::PlayerTendencies,
 }
 
@@ -251,10 +261,11 @@ impl PhysicsWorld {
         // 这里统一约束目标点，使位置与目标口径一致，而不是只在物理步进
         // 时反复把位置 clamp 回来。
         let target_pos_ft = {
-            let clamped = self.backend.rules().court.clamp_playable(
-                target_pos_ft,
-                self.backend.rules().player_radius_ft,
-            );
+            let clamped = self
+                .backend
+                .rules()
+                .court
+                .clamp_playable(target_pos_ft, self.backend.rules().player_radius_ft);
             let is_placement_exempt = self
                 .backend
                 .get_player(id)
@@ -311,7 +322,6 @@ impl PhysicsWorld {
     pub fn teleport_player(&mut self, id: &str, pos: Vec2) {
         self.backend.teleport_player(id, pos);
     }
-
 
     pub fn query_nearby(&self, center: Vec2, radius: f32, filter: &EntityFilter) -> Vec<String> {
         self.backend.query_nearby(center, radius, filter)
@@ -991,22 +1001,57 @@ fn make_motion_proposals(
             }
             player.turn_decel_timer = (player.turn_decel_timer - dt).max(0.0);
 
+            // 朝目标的期望速度（单一表达式，避免在分支间重复常数）。
+            let seek_target = |distance: f32| -> Vec2 {
+                if distance > rules.arrival_epsilon_ft && player.target_speed_ftps > 0.0 {
+                    let target_speed = (player.target_speed_ftps
+                        * (distance / (max_speed * rules.arrival_speed_scale + 1.0))
+                            .clamp(rules.arrival_speed_floor, 1.0))
+                    .min(max_speed);
+                    to_target.normalize_or_zero() * target_speed
+                } else {
+                    Vec2::ZERO
+                }
+            };
+
             let mut next_vel = if player.is_locked_kinematics {
                 current_vel * (1.0 - rules.player_linear_damping * dt).max(0.0)
+            } else if player.is_receiving_pass {
+                // ## 接球人不受转身减速影响（round-10）
+                //
+                // 接球人的速度由 `engine::receive_approach` 按制动距离给出，
+                // 后者已经保证「到位即停」。而 `turn_decel_timer` 分支会把它
+                // 覆盖为 `current_vel * 0.4`，使接球人带着上一 tick 的战术跑位
+                // 速度滑离落点。
+                //
+                // 实测（seed 1201）：H_2 初速 43.2 ft/s → 保留 40% = 17.26 ft/s，
+                // 一 tick 滑 1.73 ft > catch_radius 2.6 ft，层 A 误判「接不到」。
+                //
+                // 因此接球人**无条件**向目标收敛，跳过转身减速分支。
+                seek_target(distance)
             } else if player.turn_decel_timer > 0.0 {
-                current_vel * 0.4
-            } else if distance > 0.15 && player.target_speed_ftps > 0.0 {
-                let target_speed = (player.target_speed_ftps
-                    * (distance / (max_speed * 0.25 + 1.0)).clamp(0.15, 1.0))
-                .min(max_speed);
-                to_target.normalize_or_zero() * target_speed
+                current_vel * rules.turn_decel_retention
             } else {
-                Vec2::ZERO
+                seek_target(distance)
             };
             // 人造势能场（APF）：计算周围球员对当前球员的平滑排斥加速度
+            //
+            // ## 接球人豁免（round-10）
+            //
+            // 接球人向球收敛时不得被 APF 推开：实测 H_2 初始恰在冻结落点
+            // (d=0, 目标速度 0)，仍被 12 ft 半径的队友排斥场以 ~16 ft/s 推离，
+            // 2 tick 后距球 3.2 ft > catch_radius 2.6 → 层 A 误判「接不到」。
+            //
+            // `is_receiving` 标志由引擎在设置接球目标时置位（见
+            // `MatchEngine::sync_team_tactics` 的 `pass_receiver_override` 分支），
+            // 此处据此豁免 APF —— 接球是比「保持间距」更强的意图。
             let mut apf_repulsion_accel = Vec2::ZERO;
             let rep_radius = rules.tactics.apf_repulsion_radius_ft;
-            if !player.is_locked_kinematics && rep_radius > f32::EPSILON {
+            if !player.is_locked_kinematics
+                && rep_radius > f32::EPSILON
+                && !player.is_receiving_pass
+                && !player.is_driving_to_rim
+            {
                 for (other_id, other_team, other_pos, other_has_ball) in &on_court_snapshots {
                     if other_id == &player.id {
                         continue;

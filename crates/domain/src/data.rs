@@ -183,22 +183,6 @@ impl Default for PlayerTendencies {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PlayerRole {
-    PrimaryCreator,
-    SecondaryCreator,
-    Shooter,
-    Cutter,
-    Roller,
-    Screener,
-    Spacer,
-    RimProtector,
-    Rebounder,
-    Defender,
-    TransitionFinisher,
-    PostScorer,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerData {
     pub id: String,
@@ -209,8 +193,18 @@ pub struct PlayerData {
     pub weight_kg: u16,
     pub age: u8,
     pub attributes: PlayerAttributes,
-    pub roles: Vec<PlayerRole>,
     pub tendencies: PlayerTendencies,
+    /// 是否为首发（round-10 Step4a）。
+    ///
+    /// ## 为什么首发必须是数据而不是数组位置
+    ///
+    /// 此前 `default_lineup` 直接取**数组前 5 个**作为首发 —— 于是
+    /// 「顺序即身份」：把名册数组轮转一下，首发阵容就变了（并能触发
+    /// `starter H_06 starts outside the court geometry` 这类错误）。
+    ///
+    /// 现在首发由档案显式声明，数组顺序不再携带任何语义。
+    #[serde(default)]
+    pub starter: bool,
     /// Initial court position in the engine's feet coordinate system.
     pub initial_position_ft: (f32, f32),
 }
@@ -322,7 +316,7 @@ impl TeamData {
             id: "north_city_hawks".to_string(),
             name: "North City Hawks".to_string(),
             short_name: "Hawks".to_string(),
-            players: builtin_players("H", geometry),
+            players: load_roster(HOME_ROSTER_JSON, geometry),
             default_offense_tactic: "off_horns_pnr".to_string(),
             default_defense_tactic: "def_drop_coverage".to_string(),
             team_traits: TeamTraits {
@@ -344,7 +338,7 @@ impl TeamData {
             id: "south_bay_mariners".to_string(),
             name: "South Bay Mariners".to_string(),
             short_name: "Mariners".to_string(),
-            players: builtin_players("A", geometry),
+            players: load_roster(AWAY_ROSTER_JSON, geometry),
             default_offense_tactic: "off_motion_spacing".to_string(),
             default_defense_tactic: "def_man_conservative".to_string(),
             team_traits: TeamTraits {
@@ -369,249 +363,47 @@ impl TeamData {
     }
 }
 
-fn builtin_players(prefix: &str, geometry: CourtGeometry) -> Vec<PlayerData> {
-    let home_positions = [
-        (geometry.width_ft * 0.298, geometry.hoop_y_ft),
-        (geometry.width_ft * 0.372, geometry.height_ft * 0.20),
-        (geometry.width_ft * 0.372, geometry.height_ft * 0.80),
-        (geometry.width_ft * 0.234, geometry.height_ft * 0.32),
-        (geometry.width_ft * 0.160, geometry.hoop_y_ft),
-        (geometry.width_ft * 0.213, geometry.height_ft * 0.14),
-        (geometry.width_ft * 0.213, geometry.height_ft * 0.86),
-        (geometry.width_ft * 0.128, geometry.height_ft * 0.18),
-    ];
-    let home_names = [
-        "Darius Vale",
-        "Malik Rowan",
-        "Andre Mercer",
-        "Caleb North",
-        "Jonas Reed",
-        "Jordan Pike",
-        "Aaron Wells",
-        "Rudy Moss",
-    ];
-    let away_names = [
-        "Luka Maren",
-        "Kellan Price",
-        "Scott Rowan",
-        "Drake Ellis",
-        "Anton Vale",
-        "Tyler Quinn",
-        "Mika Stone",
-        "Niko Voss",
-    ];
-    let home_jerseys = ["0", "7", "4", "8", "9", "11", "24", "35"];
-    let away_jerseys = ["23", "3", "15", "1", "28", "12", "6", "41"];
-    let is_home = prefix == "H";
-    let team_id = if is_home {
-        "north_city_hawks"
-    } else {
-        "south_bay_mariners"
-    };
-    home_positions
-        .into_iter()
-        .enumerate()
-        .map(|(index, (_x, _y))| {
-            let initial_position_ft = if index < 5 {
-                let center_x = geometry.width_ft * 0.5;
-                let center_y = geometry.height_ft * 0.5;
-                let tipoff_positions = if is_home {
-                    [
-                        (center_x - 18.0, center_y),       // PG: 后方弧顶卡位
-                        (center_x - 12.0, center_y - 14.0), // SG: 边线侧翼
-                        (center_x - 12.0, center_y + 14.0), // SF: 边线侧翼
-                        (center_x - 7.0, center_y - 8.0),   // PF: 中圈弧顶外围
-                        (center_x - 1.5, center_y),         // C: 中圈跳球点（主队半圆）
-                    ]
-                } else {
-                    [
-                        (center_x + 18.0, center_y),       // PG: 客队后方弧顶卡位
-                        (center_x + 12.0, center_y - 14.0), // SG: 边线侧翼
-                        (center_x + 12.0, center_y + 14.0), // SF: 边线侧翼
-                        (center_x + 7.0, center_y + 8.0),   // PF: 中圈弧顶外围
-                        (center_x + 1.5, center_y),         // C: 中圈跳球点（客队半圆）
-                    ]
-                };
-                tipoff_positions[index]
-            } else {
-                let bench_offset_x = (index - 5) as f32 * 6.0;
-                if is_home {
-                    (geometry.width_ft * 0.20 + bench_offset_x, -4.0)
-                } else {
-                    (geometry.width_ft * 0.80 - bench_offset_x, geometry.height_ft + 4.0)
-                }
-            };
-            PlayerData {
-                id: format!("{}_{}", prefix, index + 1),
-                name: (if is_home {
-                    home_names[index]
-                } else {
-                    away_names[index]
-                })
-                .to_string(),
-                jersey: (if is_home {
-                    home_jerseys[index]
-                } else {
-                    away_jerseys[index]
-                })
-                .to_string(),
-                team_id: team_id.to_string(),
-                height_cm: player_height_cm(index),
-                weight_kg: player_weight_kg(index),
-                age: 22 + (index as u8 % 10),
-                attributes: builtin_attributes(index),
-                roles: builtin_roles(index),
-                tendencies: builtin_tendencies(index),
-                initial_position_ft,
-            }
-        })
-        .collect()
+/// 名册档案的反序列化外壳（round-10 Step4a）。
+#[derive(serde::Deserialize)]
+struct RosterFile {
+    players: Vec<PlayerData>,
 }
 
-fn builtin_attributes(index: usize) -> PlayerAttributes {
-    let mut attributes = PlayerAttributes::default();
-    match index {
-        0 => {
-            attributes.free_throw = 0.84;
-            attributes.speed = 0.88;
-            attributes.acceleration = 0.86;
-            attributes.ball_handling = 0.90;
-            attributes.passing = 0.86;
-            attributes.shooting_mid = 0.78;
-            attributes.shooting_three = 0.76;
-            attributes.finishing = 0.80;
-            attributes.decision_iq = 0.88;
-        }
-        1 => {
-            attributes.free_throw = 0.88;
-            attributes.speed = 0.76;
-            attributes.acceleration = 0.72;
-            attributes.shooting_three = 0.91;
-            attributes.shooting_mid = 0.82;
-            attributes.off_ball_sense = 0.84;
-        }
-        2 => {
-            attributes.free_throw = 0.78;
-            attributes.speed = 0.80;
-            attributes.acceleration = 0.78;
-            attributes.passing = 0.78;
-            attributes.defense_perimeter = 0.86;
-            attributes.defense_interior = 0.80;
-            attributes.decision_iq = 0.82;
-        }
-        3 => {
-            attributes.free_throw = 0.72;
-            attributes.strength = 0.78;
-            attributes.shooting_three = 0.72;
-            attributes.shooting_mid = 0.76;
-            attributes.off_ball_sense = 0.78;
-            attributes.defensive_rebound = 0.72;
-            attributes.offensive_rebound = 0.68;
-        }
-        4 => {
-            attributes.free_throw = 0.55;
-            attributes.strength = 0.92;
-            attributes.stamina = 0.86;
-            attributes.finishing = 0.84;
-            attributes.defensive_rebound = 0.92;
-            attributes.offensive_rebound = 0.90;
-            attributes.off_ball_sense = 0.88;
-        }
-        5 => {
-            attributes.free_throw = 0.80;
-            attributes.speed = 0.82;
-            attributes.acceleration = 0.80;
-            attributes.ball_handling = 0.77;
-            attributes.shooting_three = 0.79;
-            attributes.passing = 0.70;
-        }
-        6 => {
-            attributes.free_throw = 0.86;
-            attributes.speed = 0.90;
-            attributes.acceleration = 0.89;
-            attributes.agility = 0.88;
-            attributes.defense_perimeter = 0.79;
-            attributes.finishing = 0.78;
-        }
-        _ => {
-            attributes.free_throw = 0.52;
-            attributes.strength = 0.94;
-            attributes.stamina = 0.88;
-            attributes.block = 0.94;
-            attributes.defensive_rebound = 0.94;
-            attributes.offensive_rebound = 0.92;
-            attributes.defense_interior = 0.92;
+/// 从声明式档案载入名册（单一人事实源）。
+///
+/// ## 为什么改为数据档案（P-2 / charter C1）
+///
+/// 此前名册由 `builtin_attributes(index)` / `builtin_roles(index)` /
+/// `builtin_tendencies(index)` 按**数组下标**分派，且 `id = "{prefix}_{index+1}"`
+/// 让 id 本身编码了下标。后果：**顺序即身份**——球员"是什么"取决于他在数组里
+/// 排第几，而契约（`attributes.md §2.7/§2.9/T1`、`tactics.md TA3`）要求
+/// 「角色是槽位不是身份」，且 `roles` 字段应当移除。
+///
+/// 现在球员作为 `data/roster/*.json` 数据资产声明：
+/// - **数组顺序不携带语义**（放哪都一样）；
+/// - **无 `roles` 字段**（契约要求）；
+/// - `id` 不再承载身份序号。
+///
+/// `initial_position_ft` 仍随档案声明（几何相关），因此载入后按当前
+/// 场地几何做一次等比缩放，兼容自定义 `CourtGeometry`。
+const HOME_ROSTER_JSON: &str = include_str!("../../../data/roster/home.json");
+const AWAY_ROSTER_JSON: &str = include_str!("../../../data/roster/away.json");
+
+fn load_roster(json: &str, geometry: CourtGeometry) -> Vec<PlayerData> {
+    let mut file: RosterFile =
+        serde_json::from_str(json).expect("data/roster/*.json must be valid (charter C1)");
+    // 档案以默认几何书写；换几何时把初始站位等比缩放。
+    let def = CourtGeometry::default();
+    if (def.width_ft - geometry.width_ft).abs() > f32::EPSILON
+        || (def.height_ft - geometry.height_ft).abs() > f32::EPSILON
+    {
+        let sx = geometry.width_ft / def.width_ft;
+        let sy = geometry.height_ft / def.height_ft;
+        for p in file.players.iter_mut() {
+            p.initial_position_ft = (p.initial_position_ft.0 * sx, p.initial_position_ft.1 * sy);
         }
     }
-    attributes
-}
-
-fn builtin_roles(index: usize) -> Vec<PlayerRole> {
-    match index {
-        0 => vec![PlayerRole::PrimaryCreator, PlayerRole::Shooter],
-        1 => vec![PlayerRole::Shooter, PlayerRole::Spacer],
-        2 => vec![PlayerRole::SecondaryCreator, PlayerRole::Defender],
-        3 => vec![PlayerRole::Screener, PlayerRole::Shooter],
-        4 => vec![
-            PlayerRole::Screener,
-            PlayerRole::Roller,
-            PlayerRole::Rebounder,
-        ],
-        5 => vec![PlayerRole::Shooter, PlayerRole::SecondaryCreator],
-        6 => vec![
-            PlayerRole::Cutter,
-            PlayerRole::Defender,
-            PlayerRole::TransitionFinisher,
-        ],
-        _ => vec![PlayerRole::RimProtector, PlayerRole::Rebounder],
-    }
-}
-
-fn builtin_tendencies(index: usize) -> PlayerTendencies {
-    let mut tendencies = PlayerTendencies::default();
-    match index {
-        0 => {
-            tendencies.shoot_frequency = 0.68;
-            tendencies.drive_frequency = 0.78;
-            tendencies.pass_frequency = 0.76;
-            tendencies.risk_tolerance = 0.64;
-        }
-        1 => {
-            tendencies.shoot_frequency = 0.86;
-            tendencies.pass_frequency = 0.42;
-            tendencies.cut_frequency = 0.72;
-        }
-        2 => {
-            tendencies.pass_frequency = 0.70;
-            tendencies.cut_frequency = 0.66;
-            tendencies.transition_sprint = 0.70;
-        }
-        3 | 4 => {
-            tendencies.screen_frequency = 0.82;
-            tendencies.offensive_rebound_frequency = 0.78;
-        }
-        5 => {
-            tendencies.shoot_frequency = 0.74;
-            tendencies.drive_frequency = 0.61;
-        }
-        6 => {
-            tendencies.cut_frequency = 0.84;
-            tendencies.transition_sprint = 0.90;
-        }
-        _ => {
-            tendencies.offensive_rebound_frequency = 0.82;
-            tendencies.transition_sprint = 0.42;
-        }
-    }
-    tendencies
-}
-
-fn player_height_cm(index: usize) -> u16 {
-    [193, 190, 198, 203, 211, 191, 201, 216][index]
-}
-
-fn player_weight_kg(index: usize) -> u16 {
-    [90, 88, 98, 104, 116, 86, 102, 122][index]
+    file.players
 }
 
 /// D5.1b：slot fill 的能力画像（tactics.md §3 契约）。
@@ -645,4 +437,56 @@ impl PlayerSlotFitness {
             off_ball_sense: a.off_ball_sense,
         }
     }
+}
+
+/// 展示用角色的**纯函数投影**（attributes.md §2.7/§2.9）。
+///
+/// ## 为什么是纯函数而不是字段
+///
+/// 契约要求 `roles` 从球员档案移除、降级为「上层派生视图」——因为
+/// 「角色是槽位不是身份」（`tactics.md TA3`）。原先的
+/// `PlayerData.roles: Vec<PlayerRole>` 由 `builtin_roles(index)` 按**数组下标**
+/// 分派，使「顺序即身份」：球员"是什么"取决于他在名册里排第几。
+///
+/// 现在展示标签由 `(attributes, tendencies)` 重算，因此：
+/// - 名册数组顺序不携带语义（打乱顺序不改变任何标签）；
+/// - 标签不参与任何行为判定（只用于 UI 展示）；
+/// - 同一份数据必得同一标签（纯函数，可复现）。
+///
+/// 判定顺序按"最能区分该球员的维度"降序：先看极端专长，再看通用倾向。
+pub fn project_display_role(
+    attributes: &PlayerAttributes,
+    tendencies: &PlayerTendencies,
+) -> String {
+    // 阈值来自"显著高于联盟中位"的常识口径；不参与行为，故不进规则通道
+    // （仅影响展示字符串，charter C1 的"行为常数"定义不覆盖展示）。
+    let a = attributes;
+    let t = tendencies;
+
+    // 极端专长优先
+    if a.defense_interior >= 0.9 && a.block >= 0.9 {
+        return "RimProtector".to_string();
+    }
+    if a.offensive_rebound >= 0.88 && a.defensive_rebound >= 0.9 {
+        return "Rebounder".to_string();
+    }
+    if a.ball_handling >= 0.85 && a.passing >= 0.8 {
+        return "PrimaryCreator".to_string();
+    }
+    if a.shooting_three >= 0.88 && t.shoot_frequency >= 0.8 {
+        return "Shooter".to_string();
+    }
+    if t.screen_frequency >= 0.8 {
+        return "Screener".to_string();
+    }
+    if t.cut_frequency >= 0.8 {
+        return "Cutter".to_string();
+    }
+    if a.defense_perimeter >= 0.82 {
+        return "Defender".to_string();
+    }
+    if a.passing >= 0.75 {
+        return "SecondaryCreator".to_string();
+    }
+    "Player".to_string()
 }

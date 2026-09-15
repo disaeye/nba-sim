@@ -46,8 +46,7 @@ fn no_unattributed_end_across_seed_matrix_1q() {
 fn no_unattributed_end_full_scope() {
     for seed in [0u64, 3, 6, 42, 555, 999] {
         let mut engine = MatchEngine::new(seed);
-        let guard =
-            nba_test_support::TempArtifact::new(&format!("possession_attr_full_{seed}"));
+        let guard = nba_test_support::TempArtifact::new(&format!("possession_attr_full_{seed}"));
         engine
             .simulate_scope_and_export_with_mode("full", &guard.path_str(), StreamMode::Facts)
             .expect("run full");
@@ -85,7 +84,9 @@ fn violation_turnover_summary_carries_player_id() {
                 else {
                     continue;
                 };
-                if summary.get("terminal_event").and_then(|v| v.as_str()) != Some("TURNOVER_VIOLATION") {
+                if summary.get("terminal_event").and_then(|v| v.as_str())
+                    != Some("TURNOVER_VIOLATION")
+                {
                     continue;
                 }
                 checked += 1;
@@ -132,7 +133,10 @@ fn event_ids_and_semantic_causal_links_hold() {
         for e in events {
             let eid = e.get("event_id").and_then(|v| v.as_u64()).unwrap_or(0);
             let kind = e.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-            assert!(eid > last_id, "event_id must increase monotonically ({eid} after {last_id})");
+            assert!(
+                eid > last_id,
+                "event_id must increase monotonically ({eid} after {last_id})"
+            );
             last_id = eid;
             kind_of.insert(eid, kind.to_string());
             if let Some(pid) = e.get("parent_event_id").and_then(|v| v.as_u64()) {
@@ -156,7 +160,10 @@ fn event_ids_and_semantic_causal_links_hold() {
             }
         }
     }
-    assert!(linked > 0, "matrix must exercise causal links (no links found)");
+    assert!(
+        linked > 0,
+        "matrix must exercise causal links (no links found)"
+    );
     // 不伪造因果：接触类事实不得携带父（它们之间无因果关系）。
     for (eid, kind) in &kind_of {
         if kind == "CONTACT_BUMP" {

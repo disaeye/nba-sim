@@ -1,7 +1,7 @@
 //! 裁决参数档案（ResolveConfig - M7 并轨产物）。
 //!
 //! 原 officiating/config.rs 的第二 config 体系已并入 GameRules
-//! 嵌套组（architecture.md 7.2 / design.md 3.1 M7 验收）：裁决的
+//! 嵌套组（architecture.md §6 / protocol.md §2.1 M7 验收）：裁决的
 //! 全部概率与权重只经 GameRules.resolve 一条规则通道注入。
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,72 @@ pub struct ResolveConfig {
     pub rebound: ReboundPolicy,
     /// Physical lane and player capability policy used for passes.
     pub pass: PassPolicy,
+    /// On-ball ball-security policy: pressure, containment, and poke-check shape.
+    pub ball_security: BallSecurityPolicy,
+}
+
+/// 持球安全（on-ball security）裁决策略。
+///
+/// ## 为什么需要它（round-13 结构发现）
+///
+/// 真实 NBA 的失误构成（82games 2024-25 IND）为：带球丢球 **53.6%**、
+/// 传球失误 33.6%、进攻犯规/违例 12.1%。此前引擎只有「传球失败」一条
+/// 失误路径（`TurnoverPassDropped` / `TurnoverPassTipped` / `TurnoverSteal`），
+/// `TurnoverLooseBall` 在 718 回合中只出现 1 次 —— 即**占比最大的失误
+/// 类型在模型里不存在**。
+///
+/// 本策略为「持球人被贴身施压后丢球」提供事实路径：几何可达 → 概率 →
+/// 抽样，形状与 `BaseRates` 的 `intercept_*` 一致（释放时裁定、逐 tick
+/// 回放），因此不引入逐 tick 概率累积的错误语义。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BallSecurityPolicy {
+    /// 防守者可发起切球的接触半径（ft）：防守人与此半径内才算贴身。
+    pub poke_pressure_radius_ft: f32,
+    /// 单位时间切球尝试的基础速率（每秒尝试次数）。
+    pub poke_attempt_rate_per_sec: f32,
+    /// 单次切球尝试的成功概率上限（技能调制前）。
+    pub poke_success_ceiling: f32,
+    /// 单次切球尝试的成功概率下限。
+    pub poke_success_floor: f32,
+    /// 防守人 `steal` 能力对成功概率的权重。
+    pub poke_defender_skill_weight: f32,
+    /// 持球人 `ball_handling` 能力对成功概率的抑制权重。
+    pub poke_handler_skill_weight: f32,
+    /// 持球人护球倾向对成功概率的抑制权重。
+    pub poke_handler_tendency_weight: f32,
+    /// 切球成功时球的弹出方向相对防守人→球方向的随机偏转上限（弧度）。
+    pub poke_deflection_spread_rad: f32,
+    /// 切球弹出速度上限（ft/s）。
+    ///
+    /// 切球是**小幅拨离**，不是全速发射：球原本在持球人手里（近乎静止），
+    /// 被拨一下只能获得有限初速。硬用 `ball_max_speed_ftps` 会让球“瞬移”，
+    /// 并使 3D 速度（水平 + 重力下落的竖直分量）越过 `BALL_SPEED` 不变量
+    /// （实测 seed 31337 tick 3755：水平 83.5 + 竖直 16.0 = 85.0 > 上限）。
+    pub poke_ball_speed_ftps: f32,
+    /// 切球弹出速度占 `本次球速上限` 的比例（保底用，使不同规则档案下
+    /// 仍不越过不变量）。
+    pub poke_ball_speed_ratio: f32,
+}
+
+impl Default for BallSecurityPolicy {
+    fn default() -> Self {
+        Self {
+            poke_pressure_radius_ft: 4.5,
+            // round-16 标定（A/B 证据 §17.7）：0.55 → 2.2。
+            // 失误构成对齐真实：丢球占比 24%(r1.5)/40%(r3.0) 的插值点，
+            // 丢球率 0.078/回合 ≈ 真实 0.0776（82games 53.6% × 0.145）。
+            poke_attempt_rate_per_sec: 2.2,
+            poke_success_ceiling: 0.16,
+            poke_success_floor: 0.008,
+            poke_defender_skill_weight: 0.55,
+            poke_handler_skill_weight: 0.70,
+            poke_handler_tendency_weight: 0.25,
+            poke_deflection_spread_rad: 0.9,
+            poke_ball_speed_ftps: 14.0,
+            poke_ball_speed_ratio: 0.18,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,7 +204,6 @@ impl Default for ReboundPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PassPolicy {
-    pub lane_risk_weight: f32,
     pub openness_weight: f32,
     pub passer_skill_weight: f32,
     pub receiver_control_weight: f32,
@@ -148,7 +213,6 @@ pub struct PassPolicy {
 impl Default for PassPolicy {
     fn default() -> Self {
         Self {
-            lane_risk_weight: 0.35,
             openness_weight: 0.10,
             passer_skill_weight: 0.12,
             receiver_control_weight: 0.08,
@@ -158,6 +222,7 @@ impl Default for PassPolicy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BaseRates {
     pub pass_success: f32,
     pub handoff_success: f32,
@@ -179,7 +244,35 @@ pub struct BaseRates {
     pub intercept_tip_ceiling: f32,
 }
 
+impl Default for BaseRates {
+    fn default() -> Self {
+        Self {
+            pass_success: 0.94,
+            handoff_success: 0.97,
+            drive_success: 0.78,
+            shot_make_2pt: 0.565,
+            shot_make_3pt: 0.34,
+            ft_make: 0.77,
+            steal_attempt_success: 0.005,
+            foul_on_drive_rate: 0.10,
+            offensive_rebound_rate: 0.26,
+            block_rate: 0.05,
+            // round-16 调整（A/B 证据 §17.6）：传球选择修复（距离衰减）后，
+            // 拦截斜率减半：失败率 10.7%→7.5%、e 0.231→0.178、n 2.47。
+            // 选择层已不再系统性喂长传，裁决层的惩罚强度相应回调。
+            intercept_steal_slope: 0.06,
+            intercept_tip_slope: 0.10,
+            intercept_clearance_scale_ft: 2.5,
+            intercept_steal_floor: 0.01,
+            intercept_steal_ceiling: 0.25,
+            intercept_tip_floor: 0.02,
+            intercept_tip_ceiling: 0.40,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ShotTypeRates {
     pub catch_shoot_2pt: f32,
     pub catch_shoot_3pt: f32,
@@ -188,6 +281,20 @@ pub struct ShotTypeRates {
     pub post_2pt: f32,
     pub drive_finish_2pt: f32,
     pub other_2pt: f32,
+}
+
+impl Default for ShotTypeRates {
+    fn default() -> Self {
+        Self {
+            catch_shoot_2pt: 0.46,
+            catch_shoot_3pt: 0.33,
+            pull_up_2pt: 0.40,
+            pull_up_3pt: 0.27,
+            post_2pt: 0.45,
+            drive_finish_2pt: 0.60,
+            other_2pt: 0.42,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,34 +313,8 @@ impl Default for ResolveConfig {
             ft_probability_floor: 0.40,
             ft_probability_ceiling: 0.96,
             model: "homogeneous_v0_1".to_string(),
-            base_rates: BaseRates {
-                pass_success: 0.94,
-                handoff_success: 0.97,
-                drive_success: 0.78,
-                shot_make_2pt: 0.565,
-                shot_make_3pt: 0.34,
-                ft_make: 0.77,
-                steal_attempt_success: 0.005,
-                foul_on_drive_rate: 0.10,
-                offensive_rebound_rate: 0.26,
-                block_rate: 0.05,
-                intercept_steal_slope: 0.12,
-                intercept_tip_slope: 0.20,
-                intercept_clearance_scale_ft: 2.5,
-                intercept_steal_floor: 0.01,
-                intercept_steal_ceiling: 0.25,
-                intercept_tip_floor: 0.02,
-                intercept_tip_ceiling: 0.40,
-            },
-            shot_type_rates: ShotTypeRates {
-                catch_shoot_2pt: 0.46,
-                catch_shoot_3pt: 0.33,
-                pull_up_2pt: 0.40,
-                pull_up_3pt: 0.27,
-                post_2pt: 0.45,
-                drive_finish_2pt: 0.60,
-                other_2pt: 0.42,
-            },
+            base_rates: BaseRates::default(),
+            shot_type_rates: ShotTypeRates::default(),
             shot_type_block_bias: ShotTypeBlockBias {
                 drive_finish: 1.4,
                 post: 1.2,
@@ -246,6 +327,7 @@ impl Default for ResolveConfig {
             drive: DrivePolicy::default(),
             rebound: ReboundPolicy::default(),
             pass: PassPolicy::default(),
+            ball_security: BallSecurityPolicy::default(),
         }
     }
 }
@@ -277,6 +359,8 @@ impl ResolveConfig {
             self.shot_type_rates.other_2pt,
             self.contact.foul_rate,
             self.rebound.base_offensive_rate,
+            self.ball_security.poke_success_floor,
+            self.ball_security.poke_success_ceiling,
         ];
         if probabilities
             .iter()
@@ -290,6 +374,13 @@ impl ResolveConfig {
             || !self.base_rates.intercept_clearance_scale_ft.is_finite()
         {
             return Err("interception policy bounds are invalid".to_string());
+        }
+        if self.ball_security.poke_success_floor > self.ball_security.poke_success_ceiling
+            || self.ball_security.poke_pressure_radius_ft <= 0.0
+            || !self.ball_security.poke_pressure_radius_ft.is_finite()
+            || !(0.0..=1.0).contains(&self.ball_security.poke_ball_speed_ratio)
+        {
+            return Err("ball-security policy bounds are invalid".to_string());
         }
         if [
             self.player_skill.shooting_weight,
@@ -305,12 +396,18 @@ impl ResolveConfig {
             self.rebound.attribute_weight,
             self.rebound.stamina_weight,
             self.rebound.positioning_weight,
-            self.pass.lane_risk_weight,
             self.pass.openness_weight,
             self.pass.passer_skill_weight,
             self.pass.receiver_control_weight,
             self.pass.catch_equilibrium_weight,
             self.contact.defender_skill_foul_scale,
+            self.ball_security.poke_attempt_rate_per_sec,
+            self.ball_security.poke_defender_skill_weight,
+            self.ball_security.poke_handler_skill_weight,
+            self.ball_security.poke_handler_tendency_weight,
+            self.ball_security.poke_deflection_spread_rad,
+            self.ball_security.poke_ball_speed_ftps,
+            self.ball_security.poke_ball_speed_ratio,
         ]
         .iter()
         .any(|value| !value.is_finite() || *value < 0.0)

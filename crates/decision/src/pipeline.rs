@@ -124,21 +124,29 @@ impl DecisionSystem {
                     passer_id: carrier_id.to_string(),
                     receiver_id: p.id.clone(),
                     from_pos: carrier_pos,
-                    to_pos: nba_physics::ballistics::BallisticsEngine::extrapolate_receiver_pos(
+                    // 落点与飞行时长一起求解（不动点），不再用固定领传时长。
+                    to_pos: nba_physics::ballistics::BallisticsEngine::solve_pass_landing(
+                        carrier_pos,
                         p,
-                        self.weights.pass_lead_time_seconds,
                         ctx.rules,
-                    ),
+                    )
+                    .0,
                 });
             }
         } else if ctx.ball_available_for_action() {
             // 3. 突破通道选择：评估中路、左侧与右侧走廊，避开主防人正面阻挡，寻找进攻切入角度
+            let driver_finishing = ctx
+                .physics
+                .get_player(carrier_id)
+                .map(|p| p.attributes.finishing)
+                .unwrap_or(0.5);
             let drive_target = Self::select_drive_lane(
                 ctx.physics.get_players(),
                 ctx.rules,
                 carrier_pos,
                 hoop,
                 &offense_team,
+                driver_finishing,
             );
             let carrier_skill = carrier.attributes.ball_handling;
             let closest_def_dist = ctx
@@ -201,11 +209,13 @@ impl DecisionSystem {
                 .collect();
             ordered_teammates.sort_by(|left, right| left.id.cmp(&right.id));
             for p in ordered_teammates {
-                let to_pos = nba_physics::ballistics::BallisticsEngine::extrapolate_receiver_pos(
+                // 落点与飞行时长一起求解（不动点），不再用固定领传时长。
+                let to_pos = nba_physics::ballistics::BallisticsEngine::solve_pass_landing(
+                    carrier_pos,
                     p,
-                    self.weights.pass_lead_time_seconds,
                     ctx.rules,
-                );
+                )
+                .0;
                 candidates.push(CandidateAction::Pass {
                     passer_id: carrier_id.to_string(),
                     receiver_id: p.id.clone(),
@@ -218,11 +228,8 @@ impl DecisionSystem {
         // 若候选集里没有「推进」，持球人只能在原地 Dwell/试探，直到被判
         // 8 秒违例——实测球 x 在 8 秒内只从 8.4 移到 9.5 ft（需越过 47）。
         if in_backcourt {
-            let advance_target = Self::advance_target(
-                ctx.rules,
-                offense_team == "home",
-                carrier_pos,
-            );
+            let advance_target =
+                Self::advance_target(ctx.rules, offense_team == "home", carrier_pos);
             if advance_target.distance(carrier_pos) > ctx.rules.player_radius_ft {
                 candidates.push(CandidateAction::Advance {
                     player_id: carrier_id.to_string(),
@@ -364,10 +371,9 @@ impl DecisionSystem {
                 // 推进的紧迫性：后场停留越久越必须推进（8 秒规则）。
                 let one = f32::from(1u8);
                 let zero = f32::from(0u8);
-                let urgency = (ctx.backcourt_elapsed / ctx.rules.backcourt_seconds.max(one))
-                    .clamp(zero, one);
-                self.weights.dwell_base
-                    * (one + urgency * self.weights.advance_urgency_boost)
+                let urgency =
+                    (ctx.backcourt_elapsed / ctx.rules.backcourt_seconds.max(one)).clamp(zero, one);
+                self.weights.dwell_base * (one + urgency * self.weights.advance_urgency_boost)
             }
             CandidateAction::Shoot {
                 shooter_id,
@@ -450,13 +456,48 @@ impl DecisionSystem {
                     + drive_distance.min(ctx.rules.court.width_ft) * 0.001
                     - (1.0 - openness.contest_free_score()) * self.weights.team_style_weight * 0.5
             }
-            CandidateAction::Pass { receiver_id, .. }
-            | CandidateAction::InboundPass { receiver_id, .. } => {
+            CandidateAction::Pass {
+                receiver_id,
+                from_pos,
+                to_pos,
+                ..
+            }
+            | CandidateAction::InboundPass {
+                receiver_id,
+                from_pos,
+                to_pos,
+                ..
+            } => {
                 let openness = ctx.physics.openness(receiver_id);
                 let passing_skill = attributes.map(|a| a.passing).unwrap_or(0.5);
                 let pass_preference = tendency.map(|t| t.pass_frequency).unwrap_or(0.5);
+                // ## 距离衰减（round-15 接线，此前声明但从未消费）
+                //
+                // 实测（6 场）：传球距离中位 28.3 ft、48% 超过 30 ft，
+                // 而拦截率随距离单调上升（0-12ft 4.2% → 40ft+ 21.5%），
+                // 短传失败率（6.4%）已与真实(~5%)一致。根因是效用只有
+                // 「接球人空不空」一个空间项——最空的人往往最远，于是传球
+                // 人系统性选择长传。三项参数（free/参考/上限）正是为此
+                // 声明的规则通道，本次接线：
+                //   factor = 1 − clamp((d − free)/(ref − free), 0, 1) × max_decay
+                // 走廊风险**不**在这里重复计入——它已由约束层的
+                // PASS_LANE_CONTESTED/NARROW 通道惩罚（单一事实源，charter C1）。
+                let pass_distance = (*to_pos - *from_pos).length();
+                let free = ctx.rules.decision.pass_distance_free_ft;
+                let reference =
+                    (ctx.rules.decision.pass_distance_decay_reference_ft - free).max(f32::EPSILON);
+                let over = ((pass_distance - free) / reference).clamp(0.0, 1.0);
+                // ## 发球传球的义务性压力（round-16）
+                //
+                // 发球传球受 5 秒规则约束：不发的后果是 FIVE_SECOND 失误。
+                // 此前用「豁免距离衰减」修复 5 秒违例（0→22 次/场的回归），
+                // 但那丢失了接球人的距离优选（发球后失败率回升）。
+                // 正确的做法：保留距离衰减（优选接球人），把「必须出球」的
+                // 压力加在替代动作（Dwell/Jab）上——见下方的 inbound_pressure。
+                let distance_factor = 1.0 - over * ctx.rules.decision.pass_distance_max_decay;
                 self.weights.pass_base
                     * (0.5 + openness.contest_free_score())
+                    * distance_factor
                     * (1.0 + (passing_skill - 0.5) * self.weights.tendency_weight)
                     + (pass_preference - 0.5) * self.weights.tendency_weight
                     + centered(style.pace) * self.weights.team_style_weight
@@ -469,7 +510,19 @@ impl DecisionSystem {
                 let decay = 1.0
                     - (time_used / ctx.rules.league.shot_clock_seconds.max(1.0))
                         .clamp(0.0, self.weights.dwell_decay_max);
-                self.weights.dwell_base * decay / coach.pace_factor.max(0.1)
+                // ## 发球 5 秒压力（round-16）
+                //
+                // 发球阶段「继续持球」是非法选项的邻近地带：5 秒规则使
+                // 不发球成为失误。压力随发球已用时间线性上升（0s 可自由
+                // 观察，近 5s 必须出球），使持球观察的效用让位于发球传球
+                // ——即使接球人较远（距离衰减后的效用仍高于受压的 Dwell）。
+                // 修复前：豁免发球距离衰减 → 5 秒违例归零但长发球失败回升。
+                let inbound_pressure = if ctx.rules.inbound_seconds > f32::EPSILON {
+                    1.0 - (ctx.inbound_elapsed / ctx.rules.inbound_seconds).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                self.weights.dwell_base * decay * inbound_pressure / coach.pace_factor.max(0.1)
             }
             CandidateAction::TripleThreatJab { .. } => {
                 let time_used = (ctx.rules.league.shot_clock_seconds - ctx.shot_clock)
@@ -509,10 +562,13 @@ impl DecisionSystem {
         } else {
             (midcourt - overshoot).max(0.0)
         };
-        Vec2::new(target_x, carrier_pos.y.clamp(
-            rules.player_radius_ft,
-            rules.court.height_ft - rules.player_radius_ft,
-        ))
+        Vec2::new(
+            target_x,
+            carrier_pos.y.clamp(
+                rules.player_radius_ft,
+                rules.court.height_ft - rules.player_radius_ft,
+            ),
+        )
     }
 
     fn select_drive_lane(
@@ -521,6 +577,7 @@ impl DecisionSystem {
         carrier_pos: Vec2,
         hoop: Vec2,
         offense_team: &str,
+        driver_finishing: f32,
     ) -> Vec2 {
         let to_hoop = hoop - carrier_pos;
         let dist = to_hoop.length();
@@ -578,8 +635,23 @@ impl DecisionSystem {
                 }
             }
 
-            if congestion < min_congestion {
-                min_congestion = congestion;
+            // ## 冲框价值折扣（round-18）
+            //
+            // 拥堵是成本，但冲框有更高的期望收益（篮下 ~1.3 PPP vs 中距
+            // ~0.8）。原实现只比成本，篮筐（防守最密处）几乎永不入选——
+            // 实测 88% 突破停在离筐 14-18 ft，篮下出手仅 3%（真实 25-50%）。
+            // 按持球人终结能力给冲框走廊折扣：终结强者应顶着防守攻框。
+            let is_rim_attack =
+                (clamped_target - hoop).length() <= rules.tactics.drive_early_finish_dist_ft;
+            let effective = if is_rim_attack {
+                (congestion
+                    - rules.tactics.drive_rim_attack_bias * driver_finishing.clamp(0.0, 1.0))
+                .max(0.0)
+            } else {
+                congestion
+            };
+            if effective < min_congestion {
+                min_congestion = effective;
                 best_target = clamped_target;
             }
         }

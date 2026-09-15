@@ -147,14 +147,20 @@ impl ResolutionLayer {
     pub fn resolve_pass_arrival(
         passer: &PlayerPhysicsState,
         receiver: &PlayerPhysicsState,
-        lane_risk: f32,
         target_openness: f32,
         catch_equilibrium: f32,
         policy: &nba_domain::resolve::PassPolicy,
         base_success: f32,
         rng: &mut impl Rng,
     ) -> ResolutionOutcome {
-        let probability = (base_success - lane_risk.clamp(0.0, 1.0) * policy.lane_risk_weight
+        // Fix（round-15）：删除 lane_risk 项 —— 走廊风险的**双重计费**。
+        //
+        // 走廊拥堵是否化为事实，由 `resolve_pass_interception` 在飞行中
+        // 独立裁决（拦截/点掉）；球既然干净到达接球人身旁（实测层 B 失败
+        // 的 37 例中球距 p50=0.94 ft），就不应再因「出发时走廊拥挤」被
+        // 降低接球概率。该项删除后，接球概率由接球当下的因素决定：
+        // 空位程度、传球/控球技术、接球稳定性调制。
+        let probability = (base_success
             + target_openness.clamp(0.0, 1.0) * policy.openness_weight
             + passer.attributes.passing * policy.passer_skill_weight
             + receiver.attributes.ball_handling * policy.receiver_control_weight
@@ -483,9 +489,10 @@ mod tests {
             turn_decel_timer: 0.0,
             is_locked_kinematics: false,
             out_of_bounds_placement: false,
+            is_receiving_pass: false,
+            is_driving_to_rim: false,
             boundary_cross_latched: false,
             attributes,
-            roles: Vec::new(),
             tendencies: Default::default(),
         }
     }
@@ -495,7 +502,6 @@ mod tests {
         let passer = player("passer", 1.0, 0.5, 0.5);
         let receiver = player("receiver", 0.5, 1.0, 0.5);
         let policy = PassPolicy {
-            lane_risk_weight: 0.0,
             openness_weight: 0.0,
             passer_skill_weight: 0.0,
             receiver_control_weight: 0.0,
@@ -503,7 +509,7 @@ mod tests {
         };
         let mut rng = StdRng::seed_from_u64(7);
         let received = ResolutionLayer::resolve_pass_arrival(
-            &passer, &receiver, 1.0, 0.0, 0.0, &policy, 1.0, &mut rng,
+            &passer, &receiver, 0.0, 0.0, &policy, 1.0, &mut rng,
         );
         assert!(matches!(
             received,
@@ -512,7 +518,7 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(7);
         let dropped = ResolutionLayer::resolve_pass_arrival(
-            &passer, &receiver, 0.0, 0.0, 0.0, &policy, 0.0, &mut rng,
+            &passer, &receiver, 0.0, 0.0, &policy, 0.0, &mut rng,
         );
         assert!(matches!(dropped, ResolutionOutcome::NoChange));
     }

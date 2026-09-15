@@ -37,10 +37,18 @@ fn test_physics_zero_anomalies_full_match() {
             }
             prev_positions.insert(p.id.clone(), (p.x, p.y));
         }
+        // 间距不变量只对**在场球员**成立（与 L1 `PLAYER_SEPARATION` 同口径）。
+        //
+        // 替补席球员按设计集中在场外替补席区域（彼此本就相邻），把他们
+        // 计入会得到虚假违反。实测：H_01（在场，发球员站位）与 H_08（替补）
+        // 相距 1.45 ft，被误判 66 次。
         for i in 0..tick.frame.players.len() {
             for j in (i + 1)..tick.frame.players.len() {
                 let p1 = &tick.frame.players[i];
                 let p2 = &tick.frame.players[j];
+                if !p1.on_court || !p2.on_court {
+                    continue;
+                }
                 let dx_ft = (p1.x - p2.x) * rules.court.width_ft;
                 let dy_ft = (p1.y - p2.y) * rules.court.height_ft;
                 if (dx_ft * dx_ft + dy_ft * dy_ft).sqrt() < rules.player_radius_ft * 0.9 {

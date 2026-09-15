@@ -74,6 +74,14 @@ pub enum GameEvent {
         defender_id: String,
         position: (f32, f32),
     },
+    /// A defender poked the ball loose from the on-ball handler (on-ball strip).
+    ///
+    /// 这是「带球丢球」（real NBA 失误占比最大的一类，53.6%）的事实源。
+    BallPokedLoose {
+        handler_id: String,
+        defender_id: String,
+        position: (f32, f32),
+    },
     /// A defender secured the ball during a pass flight.
     PassIntercepted {
         passer_id: String,
@@ -130,6 +138,38 @@ pub enum GameEvent {
     RuleViolation {
         constraint_id: String,
         reason: String,
+    },
+    /// 球离开场地（第一性原理：出界是**球的位置事实**，不是球员违例）。
+    ///
+    /// 与 `BoundaryCross` 严格区分：后者语义是「**球员**越过边界」，由约束层
+    /// 判定球员违例；本事件只陈述球已出界，并携带最后触球方与责任球员，
+    /// 供因果账本把「出界导致的失误」与「违例导致的失误」区分开。
+    BallOutOfBounds {
+        position: [f32; 2],
+        last_touch_team: String,
+        responsible_player_id: Option<String>,
+    },
+    /// 传球落点修正事实（层 A，P-1 有限信息）。
+    ///
+    /// ## 为什么需要这个事实
+    ///
+    /// 传球人在 release 时冻结 `to_pos`（他的**意图**）。但接球人只能按
+    /// **自己的估计**跑位（P-1），因此接球成功时球的到达位置可能与 `to_pos`
+    /// 不同。这一差异是**设计内的**（大个策应传提前量，小个可能预估不同），
+    /// 不是缺陷。
+    ///
+    /// 但事实账本必须自洽：`PassReceived.position` 携带了与冻结点不同的位置，
+    /// 消费方（评判器）会看到"事件声明的位置与它引用的冻结事实不可调和"。
+    /// 因此引擎必须**显式发布修正**，把"意图"与"实际"的差异登记为事实，
+    /// 而不是让下游去猜（gap.md §9.5：禁止三处各自解释同一传球）。
+    PassLandingCorrected {
+        receiver_id: String,
+        /// 传球人冻结的意图落点。
+        intended: (f32, f32),
+        /// 接球人的实际到达位置。
+        actual: (f32, f32),
+        /// 两者距离（ft）——即本回合的预估偏差量。
+        divergence_ft: f32,
     },
     /// A normalized enforcement intent has been applied by the application layer.
     EnforcementApplied {
@@ -258,8 +298,10 @@ impl GameEvent {
             GameEvent::WindowTransition { .. } => "ACTION_WINDOW_SHIFT",
             GameEvent::PassRelease { .. } => "PASS",
             GameEvent::PassReceived { .. } => "PASS_RECEIVED",
+            GameEvent::PassLandingCorrected { .. } => "PASS_LANDING_CORRECTED",
             GameEvent::PassDropped { .. } => "PASS_DROPPED",
             GameEvent::PassTipped { .. } => "PASS_TIPPED",
+            GameEvent::BallPokedLoose { .. } => "BALL_POKED_LOOSE",
             GameEvent::PassIntercepted { .. } => "STEAL",
             GameEvent::DriveInitiated { .. } => "DRIVE_INITIATED",
             GameEvent::DriveOutcome {
@@ -282,6 +324,7 @@ impl GameEvent {
             GameEvent::PhaseTransition { .. } => "PHASE_TRANSITION",
             GameEvent::Foul { .. } => "FOUL",
             GameEvent::RuleViolation { .. } => "VIOLATION",
+            GameEvent::BallOutOfBounds { .. } => "OUT_OF_BOUNDS",
             GameEvent::EnforcementApplied { .. } => "ENFORCEMENT_APPLIED",
             GameEvent::PossessionSummary(_) => "POSSESSION_SUMMARY",
             GameEvent::Substitution { .. } => "SUBSTITUTION",

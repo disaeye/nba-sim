@@ -289,25 +289,26 @@ impl TacticalPlanner {
             return Err("tactical spec declares no slots".to_string());
         }
         let policy = &rules.tactics;
-        let score = |slot: &nba_domain::TacticalSlotSpec, p: &nba_domain::data::PlayerSlotFitness| -> f32 {
-            let role = slot.role.to_ascii_lowercase();
-            if role.contains("playmaker") || role.contains("handler") {
-                p.ball_handling * policy.slot_handler_ball_handling_weight
-                    + p.decision_iq * policy.slot_handler_decision_iq_weight
-            } else if slot.is_screener {
-                p.strength * policy.slot_screener_strength_weight
-                    + p.finishing * policy.slot_screener_finishing_weight
-            } else if slot.is_corner_spacer {
-                p.shooting_three * policy.slot_corner_three_weight
-                    + p.off_ball_sense * policy.slot_corner_off_ball_weight
-            } else if slot.is_wing_relocate {
-                p.shooting_mid * policy.slot_wing_mid_weight
-                    + p.off_ball_sense * policy.slot_wing_off_ball_weight
-            } else {
-                p.decision_iq * policy.slot_generic_decision_weight
-                    + p.off_ball_sense * policy.slot_generic_off_ball_weight
-            }
-        };
+        let score =
+            |slot: &nba_domain::TacticalSlotSpec, p: &nba_domain::data::PlayerSlotFitness| -> f32 {
+                let role = slot.role.to_ascii_lowercase();
+                if role.contains("playmaker") || role.contains("handler") {
+                    p.ball_handling * policy.slot_handler_ball_handling_weight
+                        + p.decision_iq * policy.slot_handler_decision_iq_weight
+                } else if slot.is_screener {
+                    p.strength * policy.slot_screener_strength_weight
+                        + p.finishing * policy.slot_screener_finishing_weight
+                } else if slot.is_corner_spacer {
+                    p.shooting_three * policy.slot_corner_three_weight
+                        + p.off_ball_sense * policy.slot_corner_off_ball_weight
+                } else if slot.is_wing_relocate {
+                    p.shooting_mid * policy.slot_wing_mid_weight
+                        + p.off_ball_sense * policy.slot_wing_off_ball_weight
+                } else {
+                    p.decision_iq * policy.slot_generic_decision_weight
+                        + p.off_ball_sense * policy.slot_generic_off_ball_weight
+                }
+            };
 
         // 稀缺性：候选人数（分数显著高于 0 的球员数）升序 → 先处理难填的槽位。
         let mut order: Vec<usize> = (0..spec.slots.len()).collect();
@@ -317,11 +318,7 @@ impl TacticalPlanner {
                 .filter(|p| score(&spec.slots[i], p) > 0.01)
                 .count()
         };
-        order.sort_by(|&a, &b| {
-            candidate_count(a)
-                .cmp(&candidate_count(b))
-                .then(a.cmp(&b))
-        });
+        order.sort_by(|&a, &b| candidate_count(a).cmp(&candidate_count(b)).then(a.cmp(&b)));
 
         let mut taken = vec![false; players.len()];
         let mut assignment: Vec<Option<String>> = vec![None; spec.slots.len()];
@@ -344,10 +341,7 @@ impl TacticalPlanner {
                     assignment[slot_idx] = Some(players[pi].player_id.clone());
                 }
                 None => {
-                    return Err(format!(
-                        "no available player fits slot `{}`",
-                        slot.role
-                    ));
+                    return Err(format!("no available player fits slot `{}`", slot.role));
                 }
             }
         }
@@ -370,7 +364,10 @@ impl TacticalPlanner {
                 if ids.len() == spec.slots.len() {
                     (ids, None)
                 } else {
-                    (roster_order.to_vec(), Some("partial slot assignment".to_string()))
+                    (
+                        roster_order.to_vec(),
+                        Some("partial slot assignment".to_string()),
+                    )
                 }
             }
             Err(e) => (roster_order.to_vec(), Some(e)),
@@ -752,8 +749,11 @@ impl TacticalPlanner {
                 Vec2::X
             };
             let (def_pos, action, slot) = if is_guarding_carrier {
-                // 领防人：建立紧逼与滑步阻截线 (Pursuit Contest)
-                let gap = policy.defensive_gap_ft.min(dist_to_hoop * 0.4).max(2.5);
+                // 领防人：建立紧逼与滑步阻截线 (Pursuit Contest)。
+                // round-6：间隔经防守方案倍率调制（迫使贴防或退到纵深）。
+                let gap = (policy.defensive_gap_ft * policy.defense.on_ball_gap_multiplier)
+                    .min(dist_to_hoop * 0.4)
+                    .max(2.5);
                 (
                     off_pos + to_hoop_dir * gap,
                     "ON_BALL_CONTEST",
@@ -768,13 +768,28 @@ impl TacticalPlanner {
                 } else {
                     Vec2::ZERO
                 };
-                // 综合人-筐方向与人-球方向，保持在传球拦截视野与回防扑防（Closeout）边界
-                let bisector_dir = (to_hoop_dir * 0.7 + to_carrier_dir * 0.3).normalize_or_zero();
-                let effective_sag = (dist_to_hoop * policy.help_sag_ratio)
-                    .min(policy.defensive_gap_ft * 2.0)
-                    .max(rules.player_radius_ft * 2.0);
+                // 综合人-筐方向与人-球方向，保持在传球拦截视野与回防扑防（Closeout）边界。
+                // （round-6 起该合成由下方按防守方案加权，不再用固定 0.7/0.3。）
+                // round-6：协防深度与优先级经防守方案调制。
+                // - `sag_multiplier` 直接缩放协防深度（联防/沉退更收缩）；
+                // - `help_priority` 按**偏离中性值 0.5 的量**倾斜人-筐 / 人-球向权重。
+                //
+                // 关键：`help_priority == 0.5` 时必须**逐位复原**历史公式
+                // `to_hoop * 0.7 + to_carrier * 0.3`，否则默认方案的行为也会漂移，
+                // 「默认不变」的声明就不成立。
+                let tilt = policy.defense.help_priority - 0.5;
+                let d = &policy.defense;
+                let hoop_weight = (d.help_hoop_weight_base + tilt * d.help_priority_tilt_gain)
+                    .clamp(d.help_hoop_weight_min, d.help_hoop_weight_max);
+                let carrier_weight = 1.0 - hoop_weight;
+                let blended_dir = (to_hoop_dir * hoop_weight + to_carrier_dir * carrier_weight)
+                    .normalize_or_zero();
+                let effective_sag =
+                    (dist_to_hoop * policy.help_sag_ratio * policy.defense.sag_multiplier)
+                        .min(policy.defensive_gap_ft * 2.0 * policy.defense.sag_multiplier)
+                        .max(rules.player_radius_ft * 2.0);
                 (
-                    off_pos + bisector_dir * effective_sag,
+                    off_pos + blended_dir * effective_sag,
                     "HELP_SIDE_SHELL",
                     "HelpAnchor",
                 )
@@ -827,9 +842,7 @@ impl TacticalPlanner {
         // 这里把目标 clamp 到「含球员半径的可站立区域」，使目标可达。
         let margin = rules.player_radius_ft;
         let x = x.clamp(margin, court.width_ft - margin);
-        let y = slot
-            .base_offset_y
-            .clamp(margin, court.height_ft - margin);
+        let y = slot.base_offset_y.clamp(margin, court.height_ft - margin);
         Vec2::new(x, y)
     }
 

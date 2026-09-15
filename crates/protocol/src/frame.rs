@@ -254,9 +254,13 @@ impl Default for FrameRules {
             hoop_left_x_ft: 5.25,
             hoop_right_x_ft: 88.75,
             hoop_y_ft: 25.0,
-            player_radius_ft: 1.0,
+            // C6.4：与 GameRules::default().player_radius_ft (1.8) 对齐。
+            // 原值 1.0 是手抄漂移；全字段一致性测试在 engine/tests 守卫。
+            player_radius_ft: 1.8,
             min_player_separation_ft: 3.6,
-            separation_safety_margin_ft: 0.0,
+            // C6.4：与 GameRules::default() (0.05) 对齐——第二个手抄漂移点，
+            // 由 engine/tests 的全字段一致性测试抓出。
+            separation_safety_margin_ft: 0.05,
             max_player_speed_ftps: 22.0,
             max_player_accel_ftps2: 35.0,
             ball_max_speed_ftps: 85.0,

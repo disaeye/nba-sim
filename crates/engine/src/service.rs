@@ -282,16 +282,26 @@ impl MatchService {
             .map_err(|error| format!("snapshot serialization failed: {error}"))
     }
 
-    pub fn events_since(&self, sequence: u64) -> Vec<FrameEvent> {
+    /// ## C6.1 修复：游标必须是跨 tick 唯一的 `event_id`
+    ///
+    /// 原实现按 `sequence` 过滤，而 `sequence` 是 tick 内局部序号（每 tick 从
+    /// 0 重新计数，见 protocol frame.rs `FrameEvent.sequence` 注释）。两个后果：
+    ///
+    /// - 调用方以 "sequence > N" 做增量游标时，后续 tick 中 sequence ≤ N 的
+    ///   事件全部漏取；
+    /// - `step_once` 按 `sequence` 去重时，不同 tick 的同号事件被误判为重复。
+    ///
+    /// `event_id` 全场单调递增（D4.1），是协议声明的因果链锚点，改用它。
+    pub fn events_since(&self, event_id_cursor: u64) -> Vec<FrameEvent> {
         self.event_history
             .iter()
-            .filter(|event| event.sequence > sequence)
+            .filter(|event| event.event_id > event_id_cursor)
             .cloned()
             .collect()
     }
 
-    pub fn events_since_json(&self, sequence: u64) -> Result<String, String> {
-        serde_json::to_string(&self.events_since(sequence))
+    pub fn events_since_json(&self, event_id_cursor: u64) -> Result<String, String> {
+        serde_json::to_string(&self.events_since(event_id_cursor))
             .map_err(|error| format!("event serialization failed: {error}"))
     }
 
@@ -307,9 +317,10 @@ impl MatchService {
             .expect("service step requires a configured engine")
             .step();
         for event in &tick.frame.event_log {
+            // C6.1：按 event_id 去重（跨 tick 唯一），见 events_since 注释。
             if let Err(position) = self
                 .event_history
-                .binary_search_by_key(&event.sequence, |known| known.sequence)
+                .binary_search_by_key(&event.event_id, |known| known.event_id)
             {
                 self.event_history.insert(position, event.clone());
             }

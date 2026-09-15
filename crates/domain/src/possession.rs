@@ -32,7 +32,7 @@ pub enum SubPhase {
     DeadBallReset,
 }
 
-/// 领域权威球权归属状态机（docs/design 球权模型）。
+/// 领域权威球权归属状态机（docs/architecture.md §3 球权模型）。
 ///
 /// 严格区分"球权归属"（谁控制球/谁是进攻方）与物理层"弹道轨迹"（抛物线坐标插值）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

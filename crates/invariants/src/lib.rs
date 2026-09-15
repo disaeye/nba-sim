@@ -32,7 +32,11 @@ pub struct Violation {
 
 impl std::fmt::Display for Violation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[tick {}] {}: {}", self.tick_index, self.rule, self.detail)
+        write!(
+            f,
+            "[tick {}] {}: {}",
+            self.tick_index, self.rule, self.detail
+        )
     }
 }
 
@@ -91,8 +95,9 @@ impl InvariantChecker {
         let min_sep = rules.min_player_separation_ft;
         // 阶段语义：发球/死球重置阶段，持球者（发球人）可站界外。
         let phase_upper = frame.phase.to_ascii_uppercase();
-        let inbound_phase =
-            phase_upper == "INBOUND" || phase_upper == "DEAD_BALL_RESET" || (phase_upper == "INITIATION" && frame.game_flow == "DeadBall");
+        let inbound_phase = phase_upper == "INBOUND"
+            || phase_upper == "DEAD_BALL_RESET"
+            || (phase_upper == "INITIATION" && frame.game_flow == "DeadBall");
         let holder_id = frame.ball.holder_id.as_deref();
 
         // --------------------------------------------------------------
@@ -112,7 +117,10 @@ impl InvariantChecker {
                 tick_index: self.tick_index,
                 rule: "TEAM_ON_COURT_COUNT",
                 severity: ViolationSeverity::Hard,
-                detail: format!("home team has {} players on court, expected 5", home_on_court),
+                detail: format!(
+                    "home team has {} players on court, expected 5",
+                    home_on_court
+                ),
             });
         }
         if away_on_court != 5 {
@@ -120,7 +128,10 @@ impl InvariantChecker {
                 tick_index: self.tick_index,
                 rule: "TEAM_ON_COURT_COUNT",
                 severity: ViolationSeverity::Hard,
-                detail: format!("away team has {} players on court, expected 5", away_on_court),
+                detail: format!(
+                    "away team has {} players on court, expected 5",
+                    away_on_court
+                ),
             });
         }
 
@@ -194,7 +205,10 @@ impl InvariantChecker {
                     tick_index: self.tick_index,
                     rule: "PLAYER_IN_BOUNDS",
                     severity: ViolationSeverity::Hard,
-                    detail: format!("on-court player {} out of bounds at norm ({}, {})", p.id, p.x, p.y),
+                    detail: format!(
+                        "on-court player {} out of bounds at norm ({}, {})",
+                        p.id, p.x, p.y
+                    ),
                 });
             }
         }
@@ -203,8 +217,7 @@ impl InvariantChecker {
         // 3. 运动学边界：速度 / 加速度 / 间距（复用 audit 脚本的物理事实）。
         let dt_safe = dt.max(f32::EPSILON);
         for p in &frame.players {
-            let entering = p.on_court
-                && !self.prev_on_court.get(&p.id).copied().unwrap_or(false);
+            let entering = p.on_court && !self.prev_on_court.get(&p.id).copied().unwrap_or(false);
             if !p.on_court {
                 self.prev_positions.remove(&p.id);
                 self.prev_on_court.insert(p.id.clone(), false);
@@ -309,8 +322,14 @@ impl InvariantChecker {
                 }
             }
         } else if let Some(prev) = self.prev_ball {
-            let is_dead_ball = frame.ball.status == "DEAD" || frame.phase == "FreeThrow" || frame.phase == "DeadBallReset" || frame.game_flow == "DeadBall";
-            let was_rebound_start = frame.events.iter().any(|e| e == "FREE_THROW" || e == "REBOUND" || e == "TIPOFF_SECURED");
+            let is_dead_ball = frame.ball.status == "DEAD"
+                || frame.phase == "FreeThrow"
+                || frame.phase == "DeadBallReset"
+                || frame.game_flow == "DeadBall";
+            let was_rebound_start = frame
+                .events
+                .iter()
+                .any(|e| e == "FREE_THROW" || e == "REBOUND" || e == "TIPOFF_SECURED");
             if is_dead_ball || was_rebound_start {
                 // 死球、罚球准备、发球、篮板或跳球点拍争夺时不计算速度跳变
             } else {

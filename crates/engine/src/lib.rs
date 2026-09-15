@@ -12,4 +12,6 @@ pub use service::{MatchInfo, MatchService, SessionState};
 
 pub use setup::{LineupConfig, MatchSetup};
 
-pub use match_engine::{ExportSummary, MatchBoxScore, MatchEngine, Simulation, StreamMode};
+pub use match_engine::{
+    frame_rules_from_game_rules, ExportSummary, MatchBoxScore, MatchEngine, Simulation, StreamMode,
+};

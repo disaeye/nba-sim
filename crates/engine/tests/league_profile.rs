@@ -39,7 +39,8 @@ fn fiba_quarter_runs_with_zero_hard_violations() {
         assert!(
             hard.is_empty(),
             "FIBA seed 42 tick {} hard violations: {:?}",
-            tick_idx, hard
+            tick_idx,
+            hard
         );
         assert!((tick.frame.rules.three_point_distance_ft - 22.15).abs() < 0.01);
     }
@@ -70,14 +71,17 @@ fn fiba_full_game_runs_and_evaluates_with_fiba_fixture() {
     }
 
     assert_eq!(ticks.len(), 8000);
-    assert!(engine.completed_possessions() > 10, "FIBA 8000 ticks must simulate active possessions");
+    assert!(
+        engine.completed_possessions() > 10,
+        "FIBA 8000 ticks must simulate active possessions"
+    );
     assert_eq!(rules.league.name, "FIBA");
 }
 
 #[test]
 fn forced_substitution_preserves_five_on_five() {
     let mut engine = MatchEngine::new(42);
-    let out_id = "A_1".to_string();
+    let out_id = "A_01".to_string();
     engine
         .physics
         .get_player_mut(&out_id)
@@ -125,7 +129,8 @@ fn forced_substitution_preserves_five_on_five() {
         if !engine.last_tick_violations().is_empty() {
             panic!(
                 "tick {} violations: {:?}",
-                tick, engine.last_tick_violations()
+                tick,
+                engine.last_tick_violations()
             );
         }
     }

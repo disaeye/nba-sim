@@ -269,7 +269,7 @@ fn inbounder_out_of_bounds_is_exempt_during_inbound_phase() {
 
 #[test]
 fn violations_carry_severity() {
-    // design.md §3.1 M1：每条违反必须携带 severity。
+    // docs/protocol.md §2.1 M1：每条违反必须携带 severity。
     let mut checker = InvariantChecker::new();
     let mut tick = base_tick(valid_5v5_players(), ball(0.2, 0.5, Some("H1")));
     for p in tick.frame.players.iter_mut() {

@@ -168,9 +168,14 @@ impl SpatialGeometry {
         } else {
             1.0
         };
-        let facing_factor = if facing_dot < 0.0 { 0.25 } else { (0.5 + 0.5 * facing_dot).clamp(0.25, 1.0) };
+        let facing_factor = if facing_dot < 0.0 {
+            0.25
+        } else {
+            (0.5 + 0.5 * facing_dot).clamp(0.25, 1.0)
+        };
         let contest_intensity = ((dist_factor * rules.semantics.contest_dist_weight
-            + speed_factor * rules.semantics.contest_speed_weight) * facing_factor)
+            + speed_factor * rules.semantics.contest_speed_weight)
+            * facing_factor)
             .clamp(0.0, 1.0);
         OpennessMetric {
             closest_defender_id: Some(closest_id),

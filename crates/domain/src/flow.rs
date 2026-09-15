@@ -320,6 +320,20 @@ pub enum BallState {
         pos: Vec2,
         z: f32,
         last_touch_team: Possession,
+        /// 最后触球的**球员**（可空）。
+        ///
+        /// ## 为什么需要它（round-9 审计修复）
+        ///
+        /// `Dead` 此前只带 `last_touch_team`，因此死球回合的**责任球员**无法从
+        /// 球态本身派生，只能回退到引擎里另存的 `last_passer_id`。而该字段会在
+        /// 进入下一次进攻时被清空，于是当 8 秒违例等死球终结发生在清空之后，
+        /// 归因链断在 `None` 上——实测 `TURNOVER_ACTOR_CONSISTENCY` 8 seed 报
+        /// 3 条 Hard（`turnover_player_id` 为空）。
+        ///
+        /// 这是架构问题而非缺一个 fallback：按 P1「状态是唯一事实源」，
+        /// 责任球员应当能从**权威球态**读出，而不是依赖旁路字段的存活期。
+        /// 补上该载荷后，`BallState` 自身即可回答「谁最后触球」。
+        last_touch_player: Option<String>,
     },
 }
 
@@ -369,9 +383,11 @@ impl BallState {
             BallState::Shot { shooter_id, .. } => Some(shooter_id.as_str()),
             BallState::InboundTransfer { inbounder_id, .. }
             | BallState::InboundReady { inbounder_id, .. } => Some(inbounder_id.as_str()),
-            BallState::LooseBall { .. } | BallState::RimRebound { .. } | BallState::Dead { .. } => {
-                None
-            }
+            BallState::LooseBall { .. } | BallState::RimRebound { .. } => None,
+            // 死球：回放进入死球时快照的最后触球人（可空）。
+            BallState::Dead {
+                last_touch_player, ..
+            } => last_touch_player.as_deref(),
         }
     }
 
@@ -447,11 +463,16 @@ fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
         // 持球：可继续持球（重持）、突破、传球、投篮、交接、死球、
         // 或进入发球程序（持球违例，如 5 秒/8 秒/走步——死球化与发球
         // 转移合并为单步，见下注）。
+        //
+        // `Held -> LooseBall`（持球被切掉）是 round-13 新增：真实 NBA
+        // 失误中「带球丢球」占 53.6%（82games 2024-25 IND），是占比最大
+        // 的一类，而此前状态机里没有这条边，以致该事实无法表达。
         (B::Held { .. }, B::Held { .. })
             | (B::Held { .. }, B::Drive { .. })
             | (B::Held { .. }, B::Pass { .. })
             | (B::Held { .. }, B::Shot { .. })
             | (B::Held { .. }, B::ControlTransfer { .. })
+            | (B::Held { .. }, B::LooseBall { .. })
             | (B::Held { .. }, B::Dead { .. })
             | (B::Held { .. }, B::InboundTransfer { .. })
         // 罚球特殊路径：罚球出手为瞬时结算，不中直接进入罚球篮板

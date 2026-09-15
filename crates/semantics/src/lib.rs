@@ -177,7 +177,7 @@ impl SemanticEvaluator {
         }
     }
 
-    /// 传球时空走廊几何干涉分析（docs/design.md §7.1）：
+    /// 传球时空走廊几何干涉分析（docs/protocol.md §5）：
     /// 计算防守人坐标与传球起点到目标点线段的最短空间投影距离。
     pub fn pass_corridor_distance(from: Vec2, to: Vec2, interceptor_pos: Vec2) -> f32 {
         let segment = to - from;

@@ -29,9 +29,10 @@ fn player(id: &str, team: &str, pos: Vec2) -> PlayerPhysicsState {
         turn_decel_timer: 0.0,
         is_locked_kinematics: false,
         out_of_bounds_placement: false,
+        is_receiving_pass: false,
+        is_driving_to_rim: false,
         boundary_cross_latched: false,
         attributes: Default::default(),
-        roles: Vec::new(),
         tendencies: Default::default(),
     }
 }
@@ -41,9 +42,9 @@ fn spatial_backends_share_query_contract() {
     let rules = GameRules::default();
     for backend in [PhysicsBackend::Rapier, PhysicsBackend::SimpleCircle] {
         let mut world = PhysicsWorld::with_backend(&rules, backend);
-        world.register_player(player("H_1", "home", Vec2::new(20.0, 25.0)));
-        world.register_player(player("A_1", "away", Vec2::new(24.0, 25.0)));
-        world.register_player(player("A_2", "away", Vec2::new(40.0, 25.0)));
+        world.register_player(player("H_01", "home", Vec2::new(20.0, 25.0)));
+        world.register_player(player("A_01", "away", Vec2::new(24.0, 25.0)));
+        world.register_player(player("A_02", "away", Vec2::new(40.0, 25.0)));
 
         assert_eq!(world.backend(), backend);
         assert_eq!(
@@ -52,7 +53,7 @@ fn spatial_backends_share_query_contract() {
                 5.0,
                 &EntityFilter::OpposingTeam("home".to_string()),
             ),
-            vec!["A_1".to_string()]
+            vec!["A_01".to_string()]
         );
         let hit = world
             .cast_capsule(
@@ -62,7 +63,7 @@ fn spatial_backends_share_query_contract() {
                 &EntityFilter::OpposingTeam("home".to_string()),
             )
             .expect("capsule should hit A_1");
-        assert_eq!(hit.entity_id, "A_1");
+        assert_eq!(hit.entity_id, "A_01");
         let ray = world
             .raycast(
                 Vec2::new(15.0, 25.0),
@@ -71,7 +72,7 @@ fn spatial_backends_share_query_contract() {
                 &EntityFilter::Team("away".to_string()),
             )
             .expect("ray should hit A_1");
-        assert_eq!(ray.entity_id, "A_1");
+        assert_eq!(ray.entity_id, "A_01");
     }
 }
 
@@ -83,9 +84,9 @@ fn kinematic_step_never_exceeds_configured_speed() {
         ..GameRules::default()
     };
     let mut world = PhysicsWorld::with_backend(&rules, PhysicsBackend::SimpleCircle);
-    world.register_player(player("H_1", "home", Vec2::new(20.0, 25.0)));
+    world.register_player(player("H_01", "home", Vec2::new(20.0, 25.0)));
     world.set_player_target(
-        "H_1",
+        "H_01",
         Vec2::new(80.0, 25.0),
         100.0,
         "SPRINT",
@@ -93,9 +94,9 @@ fn kinematic_step_never_exceeds_configured_speed() {
         "Normal",
     );
     for _ in 0..100 {
-        let previous = world.get_player("H_1").unwrap().pos_ft;
+        let previous = world.get_player("H_01").unwrap().pos_ft;
         world.step(nba_domain::FixedDt(rules.tick_seconds));
-        let current = world.get_player("H_1").unwrap();
+        let current = world.get_player("H_01").unwrap();
         let speed = (current.pos_ft - previous).length() / rules.tick_seconds;
         assert!(
             speed <= rules.max_player_speed_ftps + 1e-4,
@@ -114,7 +115,7 @@ fn inbound_transfer_duration_uses_inbound_speed_policy() {
         from_pos: from,
         from_z: rules.rim_height_ft,
         baseline_pos: baseline,
-        inbounder_id: "A_1".to_string(),
+        inbounder_id: "A_01".to_string(),
         start_time: 0.0,
         duration: rules.pass_duration((baseline - from).length(), true),
     };
@@ -143,7 +144,7 @@ fn shot_samples_stay_within_configured_speed_envelope() {
     let duration =
         nba_physics::BallisticsEngine::shot_duration((hoop - from).length(), peak_z, &rules);
     let state = nba_physics::BallTrajectoryKind::Shot {
-        shooter_id: "H_1".to_string(),
+        shooter_id: "H_01".to_string(),
         from_pos: from,
         hoop_pos: hoop,
         start_time: 0.0,
@@ -210,10 +211,10 @@ fn collision_braking_respects_acceleration_envelope() {
         ..GameRules::default()
     };
     let mut world = PhysicsWorld::with_backend(&rules, PhysicsBackend::SimpleCircle);
-    world.register_player(player("H_1", "home", Vec2::new(30.0, 25.0)));
-    world.register_player(player("A_1", "away", Vec2::new(36.0, 25.0)));
+    world.register_player(player("H_01", "home", Vec2::new(30.0, 25.0)));
+    world.register_player(player("A_01", "away", Vec2::new(36.0, 25.0)));
     world.set_player_target(
-        "H_1",
+        "H_01",
         Vec2::new(40.0, 25.0),
         16.0,
         "DRIVE",
@@ -221,7 +222,7 @@ fn collision_braking_respects_acceleration_envelope() {
         "Normal",
     );
     world.set_player_target(
-        "A_1",
+        "A_01",
         Vec2::new(26.0, 25.0),
         16.0,
         "CLOSEOUT",
@@ -264,10 +265,10 @@ fn collision_solver_preserves_separation_when_players_approach() {
         ..GameRules::default()
     };
     let mut world = PhysicsWorld::with_backend(&rules, PhysicsBackend::SimpleCircle);
-    world.register_player(player("H_1", "home", Vec2::new(30.0, 25.0)));
-    world.register_player(player("A_1", "away", Vec2::new(36.0, 25.0)));
+    world.register_player(player("H_01", "home", Vec2::new(30.0, 25.0)));
+    world.register_player(player("A_01", "away", Vec2::new(36.0, 25.0)));
     world.set_player_target(
-        "H_1",
+        "H_01",
         Vec2::new(40.0, 25.0),
         16.0,
         "DRIVE",
@@ -275,7 +276,7 @@ fn collision_solver_preserves_separation_when_players_approach() {
         "Normal",
     );
     world.set_player_target(
-        "A_1",
+        "A_01",
         Vec2::new(26.0, 25.0),
         16.0,
         "CLOSEOUT",
@@ -285,8 +286,8 @@ fn collision_solver_preserves_separation_when_players_approach() {
 
     for step in 0..80 {
         world.step(nba_domain::FixedDt(rules.tick_seconds));
-        let home = world.get_player("H_1").unwrap();
-        let away = world.get_player("A_1").unwrap();
+        let home = world.get_player("H_01").unwrap();
+        let away = world.get_player("A_01").unwrap();
         let distance = home.pos_ft.distance(away.pos_ft);
         assert!(
             distance + 1e-3 >= rules.min_player_separation_ft,
@@ -307,13 +308,13 @@ fn contact_facts_are_emitted_once_per_contact_episode() {
     };
     for backend in [PhysicsBackend::Rapier, PhysicsBackend::SimpleCircle] {
         let mut world = PhysicsWorld::with_backend(&rules, backend);
-        world.register_player(player("H_1", "home", Vec2::new(30.0, 25.0)));
-        world.register_player(player("A_1", "away", Vec2::new(33.0, 25.0)));
+        world.register_player(player("H_01", "home", Vec2::new(30.0, 25.0)));
+        world.register_player(player("A_01", "away", Vec2::new(33.0, 25.0)));
         world.step(nba_domain::FixedDt(rules.tick_seconds));
         let first = world.drain_contacts();
         assert_eq!(first.len(), 1, "{backend:?} should report the new contact");
-        assert_eq!(first[0].entity_a, "A_1");
-        assert_eq!(first[0].entity_b, "H_1");
+        assert_eq!(first[0].entity_a, "A_01");
+        assert_eq!(first[0].entity_b, "H_01");
         assert_eq!(first[0].entity_a_action.as_deref(), Some("Idle"));
         assert_eq!(first[0].entity_b_action.as_deref(), Some("Idle"));
 
@@ -335,10 +336,10 @@ fn separation_contract_survives_turning_approach() {
         ..GameRules::default()
     };
     let mut world = PhysicsWorld::with_backend(&rules, PhysicsBackend::SimpleCircle);
-    world.register_player(player("H_1", "home", Vec2::new(30.0, 25.0)));
-    world.register_player(player("A_1", "away", Vec2::new(36.0, 25.0)));
+    world.register_player(player("H_01", "home", Vec2::new(30.0, 25.0)));
+    world.register_player(player("A_01", "away", Vec2::new(36.0, 25.0)));
     world.set_player_target(
-        "H_1",
+        "H_01",
         Vec2::new(38.0, 29.0),
         16.0,
         "DRIVE",
@@ -346,7 +347,7 @@ fn separation_contract_survives_turning_approach() {
         "Normal",
     );
     world.set_player_target(
-        "A_1",
+        "A_01",
         Vec2::new(28.0, 21.0),
         16.0,
         "CLOSEOUT",
@@ -355,8 +356,8 @@ fn separation_contract_survives_turning_approach() {
     );
     for _ in 0..120 {
         world.step(nba_domain::FixedDt(rules.tick_seconds));
-        let home = world.get_player("H_1").unwrap();
-        let away = world.get_player("A_1").unwrap();
+        let home = world.get_player("H_01").unwrap();
+        let away = world.get_player("A_01").unwrap();
         assert!(home.pos_ft.distance(away.pos_ft) + 1e-3 >= rules.min_player_separation_ft);
     }
 }
@@ -366,19 +367,19 @@ fn semantic_queries_use_selected_backend_contract() {
     let rules = GameRules::default();
     for backend in [PhysicsBackend::Rapier, PhysicsBackend::SimpleCircle] {
         let mut world = PhysicsWorld::with_backend(&rules, backend);
-        world.register_player(player("H_1", "home", Vec2::new(40.0, 25.0)));
-        world.register_player(player("H_2", "home", Vec2::new(52.0, 25.0)));
-        world.register_player(player("A_1", "away", Vec2::new(46.0, 25.0)));
+        world.register_player(player("H_01", "home", Vec2::new(40.0, 25.0)));
+        world.register_player(player("H_02", "home", Vec2::new(52.0, 25.0)));
+        world.register_player(player("A_01", "away", Vec2::new(46.0, 25.0)));
         let corridor = world.pass_corridor(
             Vec2::new(40.0, 25.0),
             Vec2::new(52.0, 25.0),
             rules.pass_corridor_radius_ft,
-            "H_1",
-            "H_2",
+            "H_01",
+            "H_02",
         );
         assert!(corridor.is_blocked);
-        assert_eq!(corridor.nearest_interceptor_id.as_deref(), Some("A_1"));
-        let openness = world.openness("H_1");
+        assert_eq!(corridor.nearest_interceptor_id.as_deref(), Some("A_01"));
+        let openness = world.openness("H_01");
         assert!(openness.contest_intensity > 0.0);
     }
 }

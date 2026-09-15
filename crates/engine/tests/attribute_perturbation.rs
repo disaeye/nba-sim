@@ -73,15 +73,27 @@ fn perturbation_defense_interior_vs_perimeter_differentiates() {
     });
     let factor_in = effective_defense_factor(&rules, &lockdown_interior, true);
     let factor_out = effective_defense_factor(&rules, &lockdown_interior, false);
-    assert!(factor_in > factor_out, "interior specialist must have stronger interior contest factor");
+    assert!(
+        factor_in > factor_out,
+        "interior specialist must have stronger interior contest factor"
+    );
 }
 
 #[test]
 fn perturbation_mental_iq_modulates_risk_tolerance() {
     let rules = GameRules::default();
-    let low = PlayerAttributes { decision_iq: 0.25, ..Default::default() };
-    let high = PlayerAttributes { decision_iq: 0.85, ..Default::default() };
-    assert!(effective_decision_risk_tolerance(&rules, &high) > effective_decision_risk_tolerance(&rules, &low));
+    let low = PlayerAttributes {
+        decision_iq: 0.25,
+        ..Default::default()
+    };
+    let high = PlayerAttributes {
+        decision_iq: 0.85,
+        ..Default::default()
+    };
+    assert!(
+        effective_decision_risk_tolerance(&rules, &high)
+            > effective_decision_risk_tolerance(&rules, &low)
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +105,7 @@ fn perturbation_mental_iq_modulates_risk_tolerance() {
 fn avg_displacement(seed: u64, speed_attr: f32, ticks: usize) -> f32 {
     let mut engine = MatchEngine::new(seed);
     // 直接把目标球员（主队 3 号，非持球人）的能力置为指定值并同步物理上限。
-    if let Some(p) = engine.physics.get_player_mut("H_3") {
+    if let Some(p) = engine.physics.get_player_mut("H_03") {
         p.attributes.speed = speed_attr;
         p.max_speed_ftps = engine.rules.max_player_speed_ftps * speed_attr.max(0.2);
     }
@@ -101,7 +113,7 @@ fn avg_displacement(seed: u64, speed_attr: f32, ticks: usize) -> f32 {
     let mut total = 0.0f32;
     for _ in 0..ticks {
         let tick = engine.step();
-        if let Some(p) = tick.frame.players.iter().find(|p| p.id == "H_3") {
+        if let Some(p) = tick.frame.players.iter().find(|p| p.id == "H_03") {
             if let Some((px, py)) = prev {
                 let dx = (p.x - px).abs() * 94.0;
                 let dy = (p.y - py).abs() * 50.0;
@@ -122,10 +134,10 @@ fn behavioral_speed_perturbation_raises_kinematic_cap() {
     let mut engine = MatchEngine::new(42);
     let _ = rules;
     for attr in [0.6f32, 0.95f32] {
-        if let Some(p) = engine.physics.get_player_mut("H_3") {
+        if let Some(p) = engine.physics.get_player_mut("H_03") {
             p.attributes.speed = attr;
         }
-        let attrs = &engine.physics.get_player("H_3").unwrap().attributes;
+        let attrs = &engine.physics.get_player("H_03").unwrap().attributes;
         let cap = nba_domain::effective_max_speed(&engine.rules, attrs);
         let expected = engine.rules.max_player_speed_ftps * attr;
         assert!(

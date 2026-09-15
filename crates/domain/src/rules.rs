@@ -85,6 +85,15 @@ pub struct GameRules {
     pub max_player_accel_ftps2: f32,
     pub turnaround_min_decel_seconds: f32,
     pub player_linear_damping: f32,
+    /// 「到达」判定阈值（ft）：目标距离小于该值即视为到位，速度归零。
+    /// 从 `physics::movement` 的内联常数收编而来（charter C1）。
+    pub arrival_epsilon_ft: f32,
+    /// 目标速度的距离缩放基准（无量纲）：`distance / (max_speed*scale + 1)`。
+    pub arrival_speed_scale: f32,
+    /// 目标速度缩放的下限比例（避免远距离时速度被压得过低）。
+    pub arrival_speed_floor: f32,
+    /// 转身减速期间保留的速度比例（round-10 从内联 0.4 收编）。
+    pub turn_decel_retention: f32,
     pub contact_margin_ft: f32,
     /// 最大转体角速度（弧度/秒，真实人体转向速率上限）
     pub max_player_turn_rate_rad_per_sec: f32,
@@ -95,6 +104,22 @@ pub struct GameRules {
     pub ball_velocity_retention: f32,
     pub defender_reach_ft: f32,
     pub pass_corridor_radius_ft: f32,
+    /// 接球半径基准（ft）：接球人"控制圈"在**无技能加成**时的半径。
+    ///
+    /// 用于判断球到达时接球人是否**在物理上可能接到**（层 A，P-1）。
+    /// 实际半径由 `capability::effective_catch_radius` 按
+    /// `ball_handling` / `off_ball_sense` / 体格调制——本值仅作曲线基准，
+    /// 不直接参与判定（charter C1：曲线形状参数走规则通道）。
+    pub catch_radius_base_ft: f32,
+    /// 接球技能对接球半径的调制幅度（ft）：`ball_handling` 从 0→1 的增量。
+    pub catch_radius_skill_gain_ft: f32,
+    /// 预估误差幅度（ft）：`off_ball_sense` 从 1→0 时接球人预估落点的
+    /// 额外偏差上限。0 表示完全精确（当前行为）；>0 即实现 P-1「预估可能错」。
+    pub receive_estimate_noise_ft: f32,
+    /// 确定性偏差向量的量化分母（用于把 16 位哈希切片映射到 [-1, 1]）。
+    /// 是**数值工具参数**（不是行为常数）：放在规则通道以便审计与调整，
+    /// 取值 32767.5 = (2^16 − 1) / 2，使 0..=65535 映射到 [-1, 1]。
+    pub estimate_offset_quantization: f32,
     /// Reference clearance used to normalize pass-lane risk scores.
     pub pass_lane_clearance_reference_ft: f32,
     /// 飞行中传球拦截判定半径（球心-防守人心距，含臂展与跨步）。
@@ -234,16 +259,13 @@ pub struct DecisionRules {
     pub urgency_pass_penalty: f32,
     /// 24 秒倒计时迫近时的持球组织惩罚。
     pub urgency_dwell_penalty: f32,
-    /// 传球效用距离衰减起点（ft）：低于此距离不施加衰减。
+    /// 传球效用距离衰减起点（ft）：低于此距离不施加衰减（round-15 已接线
+    /// 到 `pipeline.rs` 的 Pass 效用）。
     pub pass_distance_free_ft: f32,
     /// 传球效用距离衰减参考距离（ft）：超过 free 距离后线性衰减到此处的参考强度。
     pub pass_distance_decay_reference_ft: f32,
     /// 传球衰减最大比例（衰减因子下限 = 1 - 此值）。
     pub pass_distance_max_decay: f32,
-    /// 传球走廊内每名防守人对效用的乘数惩罚。
-    pub pass_lane_defender_penalty: f32,
-    /// 走廊被判定 blocked 时传球效用的乘数（近于硬禁）。
-    pub pass_lane_blocked_multiplier: f32,
     /// 防守自主体基础效用乘数（由规则层提供基准，严禁决策层硬编码）。
     pub def_steal_gamble_base: f32,
     pub def_steal_risk_penalty: f32,
@@ -261,8 +283,14 @@ impl Default for DecisionRules {
             early_shot_penalty: 0.35,
             advance_urgency_boost: 3.0,
             advance_overshoot_ratio: 0.075,
-            pass_base: 0.82,
-            dwell_base: 0.82,            stamina_sensitivity: 0.5,
+            // round-16 调整（A/B 证据 §17.5）：0.82 → 1.15。
+            // 0.82 == dwell_base 使传球与原地持球打平，n（传球/回合）
+            // 卡在 1.45（真实 3.0）；1.15 使 n=2.46、失败率 15.0%→10.7%。
+            // 代价 e 0.180→0.231，需配合拦截率标定（intercept_* 斜率）
+            // 联合收敛到 e≈0.145。
+            pass_base: 1.15,
+            dwell_base: 0.82,
+            stamina_sensitivity: 0.5,
             temperature: 0.30,
             pass_lead_time_seconds: 0.65,
             risk_aversion: 0.8,
@@ -283,8 +311,6 @@ impl Default for DecisionRules {
             pass_distance_free_ft: 20.0,
             pass_distance_decay_reference_ft: 55.0,
             pass_distance_max_decay: 0.75,
-            pass_lane_defender_penalty: 0.45,
-            pass_lane_blocked_multiplier: 0.10,
             def_steal_gamble_base: 0.70,
             def_steal_risk_penalty: 0.85,
             def_rim_help_base: 0.80,
@@ -322,8 +348,6 @@ impl DecisionRules {
             self.pass_distance_free_ft,
             self.pass_distance_decay_reference_ft,
             self.pass_distance_max_decay,
-            self.pass_lane_defender_penalty,
-            self.pass_lane_blocked_multiplier,
             self.def_steal_gamble_base,
             self.def_steal_risk_penalty,
             self.def_rim_help_base,
@@ -345,8 +369,6 @@ impl DecisionRules {
             || self.pass_distance_free_ft < 0.0
             || self.pass_distance_decay_reference_ft <= self.pass_distance_free_ft
             || !(0.0..=1.0).contains(&self.pass_distance_max_decay)
-            || !(0.0..=1.0).contains(&self.pass_lane_defender_penalty)
-            || !(0.0..=1.0).contains(&self.pass_lane_blocked_multiplier)
             || self.def_steal_gamble_base < 0.0
             || self.def_steal_risk_penalty < 0.0
             || self.def_rim_help_base < 0.0
@@ -557,6 +579,21 @@ pub struct TacticalRules {
     pub drive_mid_range_pullup_dist_ft: f32,
     pub drive_kickout_pass_dist_ft: f32,
     pub drive_lane_offset_ft: f32,
+    /// 冲框（直接攻击篮筐）相对肘区路线的拥堵折扣（round-18）。
+    ///
+    /// 走廊选择原本只算拥堵成本：篮筐永远是防守最密处，于是肘区几乎
+    /// 总被选中——实测 88% 的突破终点离筐 14-18 ft（>16 ft 停滞门槛），
+    /// 篮下出手仅 3%（真实 25-50%）。真实篮球里冲框值得冒险：篮下
+    /// ~1.3 PPP vs 中距 ~0.8。折扣按持球人 `finishing` 能力缩放
+    /// （终结强的球员更应冲击篮筐），从冲框走廊的拥堵中扣除。
+    pub drive_rim_attack_bias: f32,
+    /// 被过防守人的恢复窗口（秒，round-19）。
+    ///
+    /// 让位目标若被战术层每 tick 重新指派，防守人会立刻被派回护框位，
+    /// 让位形同虚设。窗口内战术层不得重派被过者——他处于「失去身位、
+    /// 扑向回追位」的状态（与 GambleInterception 的 failure_recovery
+    /// 语义同源）。
+    pub drive_beaten_recovery_seconds: f32,
     pub drive_finish_range_ft: f32,
     pub drive_dunk_max_dist_ft: f32,
     pub drive_floater_min_dist_ft: f32,
@@ -574,6 +611,33 @@ pub struct TacticalRules {
     pub screener_speed_ratio: f32,
     pub support_speed_ratio: f32,
     pub defender_speed_ratio: f32,
+    /// 接球人向冻结点收敛的速度上限倍率（round-6 审计修复）。
+    ///
+    /// ## 为什么需要它
+    ///
+    /// 此前接球人被硬编码为 20 ft/s 全速冲向冻结点，而**没有任何减速模型**。
+    /// 传球飞行时长受 `max_pass_duration_seconds` 限制（默认 1.4s），但长传
+    /// （40–60 ft 的跨场 outlet）在 1.4s 内实际只需 0.5–0.7s 即可到达，接球人
+    /// 于是在整个（被拉长的）飞行期内持续全速前进。实测：接球人**越过**冻结点
+    /// 5–12.5 ft，且越位方向几乎垂直于传球线。
+    ///
+    /// 后果：`PASS_CORRIDOR_REACHABLE` 在 8 seed 下报 8–17 条 Hard defect，
+    /// 而 gap.md §9.5 要求接球人「向 frozen_to_pos 收敛」。
+    ///
+    /// 修复：按**剩余距离与制动能力**反解接近速度（减速模型），使接球人在
+    /// 冻结点附近自然减速，而不是全速冲过头。
+    pub receive_approach_speed_ratio: f32,
+    /// 接球制动安全裕量（ft）：减速目标点提前于冻结点该距离，
+    /// 替球员的身体半径与单 tick 离散误差留余量。
+    pub receive_stop_margin_ft: f32,
+    /// 接球逼近速度下限倍率：进入安全裕量内仍保留的逼近速度，
+    /// 避免因 `v=sqrt(2as)→0` 而停在冻结点之外。
+    pub receive_min_approach_speed_ratio: f32,
+    /// 领传提前量增益（round-7）：`lead = receiver_velocity × flight × gain`。
+    /// 1.0 = 完全按接球人当前速度外推；<1 表示他会在飞行中减速。
+    pub pass_lead_gain: f32,
+    /// 领传提前量上限（ft）：防止高速接球人被外推到不可达或贴边位置。
+    pub pass_lead_max_ft: f32,
     /// APF 动态排斥场有效感应距离（呎）
     pub apf_repulsion_radius_ft: f32,
     /// APF 队友间空间拉开斥力系数（ft/s^2）
@@ -590,10 +654,32 @@ pub struct TacticalRules {
     pub screen_roll_separation_ft: f32,
     /// 沉退防守中锋纵深距筐距离（ft）
     pub drop_coverage_depth_ft: f32,
+    /// 防守方案对比赛的影响系数（round-6 审计修复）。
+    ///
+    /// ## 为什么需要这一组参数
+    ///
+    /// `DefensiveTactic` 此前对比赛结果**零影响**：它只被用于生成展示字符串，
+    /// 物理层与决策管线从不消费。实测 6 种方案各跑一场全场模拟，逐字节相同
+    /// （ticks=84029、score=96081、行为哈希全为 `0x3ba37e7fa9e5ec7d`）。
+    ///
+    /// 修复方式是让方案通过**规则通道**（而非代码分支，charter C1/C3）
+    /// 影响防守人的目标点生成：
+    /// - `sag_multiplier`：无球防守人的协防深度倍率（联防收缩、紧逼外扩）；
+    /// - `on_ball_gap_multiplier`：领防人距对位人的间隔倍率；
+    /// - `help_priority`：弱侧协防权重（越大越倾向于放空外线收缩护框）。
+    ///
+    /// 三个方案各自实例见 `DefensiveSchemeSpec`。
+    pub defense: DefenseRules,
     /// slot fill 能力权重（tactics.md §3 契约）：持球槽位的 ball_handling 权重。
     pub slot_handler_ball_handling_weight: f32,
     /// slot fill 能力权重：持球槽位的 decision_iq 权重。
     pub slot_handler_decision_iq_weight: f32,
+    /// slot fill / 处理球人选择：传球能力权重（round-11 Step4b）。
+    ///
+    /// 处理球人身份由能力派生（`tactics.md TA3`），而不是名册数组位置。
+    /// 与 `slot_handler_ball_handling_weight` / `slot_handler_decision_iq_weight`
+    /// 同源，保证「填槽」与「选处理球人」用同一套能力口径。
+    pub slot_handler_passing_weight: f32,
     /// slot fill 能力权重：掩护槽位的 strength 权重。
     pub slot_screener_strength_weight: f32,
     /// slot fill 能力权重：掩护槽位的 finishing 权重。
@@ -611,6 +697,115 @@ pub struct TacticalRules {
     /// slot fill 能力权重：通用槽位的 off_ball_sense 权重。
     pub slot_generic_off_ball_weight: f32,
 }
+
+/// 防守体系参数（round-6 审计修复）：把「防守方案」从展示字符串变成因果输入。
+///
+/// 每个防守方案实例化一份，经 `GameRules` 通道进入防守目标点生成。
+/// 三个倍率都围绕**已有**的基准量调整（`help_sag_ratio`、`defensive_gap_ft`），
+/// 因此默认值 `1.0/1.0/1.0` 完全等价于历史行为——保证修复前的黄金哈希
+/// 在不指定防守方案时不受影响。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DefenseRules {
+    /// 无球防守人协防深度倍率：>1 收缩（联防/沉退），<1 外扩（紧逼）。
+    pub sag_multiplier: f32,
+    /// 领防人距对位人的间隔倍率：<1 贴得更近（紧逼），>1 放得更远（沉退）。
+    pub on_ball_gap_multiplier: f32,
+    /// 弱侧协防优先级：越大越愿意放空外线收缩护框。
+    pub help_priority: f32,
+    /// 换防激进程度：0 = 不换防，1 = 逢掩护必换（用于后续 switch 执行链）。
+    pub switch_aggressiveness: f32,
+    /// 弱侧协防方向的人-筐基准权重（`help_priority == 0.5` 时生效）。
+    ///
+    /// 历史公式为 `to_hoop * 0.7 + to_carrier * 0.3`；把两个权重参数化，
+    /// 使 `help_priority` 只需在基准上倾斜，且默认值逐位复原历史行为。
+    pub help_hoop_weight_base: f32,
+    /// `help_priority` 偏离 0.5 时对人-筐权重的倾斜系数。
+    pub help_priority_tilt_gain: f32,
+    /// 人-筐权重下限（防止协防完全脱离篮筐方向）。
+    pub help_hoop_weight_min: f32,
+    /// 人-筐权重上限（防止协防退化为纯护框而放弃外线）。
+    pub help_hoop_weight_max: f32,
+}
+
+impl Default for DefenseRules {
+    /// 中性档案 = `data/defense/schemes.json` 的 `def_man_conservative`
+    /// （sag=1.0 / gap=1.0 / help=0.5 / switch=0.0）。
+    ///
+    /// 从**同一数据源**派生而非在代码里重写四个字面量：既消除重复定义
+    /// （单一事实源），也避免默认值随档案调整而静默失配。
+    fn default() -> Self {
+        Self::for_scheme("def_man_conservative")
+            .expect("schemes.json must define the neutral scheme")
+    }
+}
+
+impl DefenseRules {
+    /// 按防守方案 id 返回参数档案（tactics.md §2.2 防守覆盖模型）。
+    ///
+    /// ## 数据来源（charter C1）
+    ///
+    /// 六个方案的参数写在 `data/defense/schemes.json`，经 `include_str!` 编译期内联。
+    /// 这样做的理由与 `data/tactics/*.json` 相同：行为参数属数据资产，
+    /// **不写在代码里**——写在代码里会以「内联行为常数」的形式绕过规则通道，
+    /// 而这正是 charter C1 与 docs/protocol.md §2.1 M7 要消灭的东西。
+    ///
+    /// 未知 id 返回 `None`，由调用方决定降级或报错——不得静默回退，
+    /// 否则又是一个「声明了但无效」的隐形参数。
+    pub fn for_scheme(id: &str) -> Option<Self> {
+        Self::all()
+            .into_iter()
+            .find(|(scheme_id, _)| *scheme_id == id)
+            .map(|(_, rules)| rules)
+    }
+
+    /// 全部方案档案（顺序与 `schemes.json` 一致）。
+    pub fn all() -> Vec<(&'static str, Self)> {
+        #[derive(serde::Deserialize)]
+        struct File {
+            help_blend: HelpBlend,
+            schemes: Vec<Entry>,
+        }
+        #[derive(serde::Deserialize)]
+        struct HelpBlend {
+            hoop_weight_base: f32,
+            priority_tilt_gain: f32,
+            hoop_weight_min: f32,
+            hoop_weight_max: f32,
+        }
+        #[derive(serde::Deserialize)]
+        struct Entry {
+            id: String,
+            sag_multiplier: f32,
+            on_ball_gap_multiplier: f32,
+            help_priority: f32,
+            switch_aggressiveness: f32,
+        }
+        const RAW: &str = include_str!("../../../data/defense/schemes.json");
+        let parsed: File = serde_json::from_str(RAW)
+            .expect("data/defense/schemes.json must be valid (charter C1 data channel)");
+        parsed
+            .schemes
+            .into_iter()
+            .map(|e| {
+                (
+                    // 泄漏为 'static：档案在编译期内联，生命周期与程序一致。
+                    Box::leak(e.id.into_boxed_str()) as &'static str,
+                    Self {
+                        sag_multiplier: e.sag_multiplier,
+                        on_ball_gap_multiplier: e.on_ball_gap_multiplier,
+                        help_priority: e.help_priority,
+                        switch_aggressiveness: e.switch_aggressiveness,
+                        help_hoop_weight_base: parsed.help_blend.hoop_weight_base,
+                        help_priority_tilt_gain: parsed.help_blend.priority_tilt_gain,
+                        help_hoop_weight_min: parsed.help_blend.hoop_weight_min,
+                        help_hoop_weight_max: parsed.help_blend.hoop_weight_max,
+                    },
+                )
+            })
+            .collect()
+    }
+}
 impl Default for TacticalRules {
     fn default() -> Self {
         Self {
@@ -618,12 +813,16 @@ impl Default for TacticalRules {
             action_duration_seconds: 9.5,
             drive_distance_ratio: 0.15,
             drive_min_duration_seconds: 0.8,
-            drive_max_duration_seconds: 2.2,
+            // round-18：2.2 → 3.2。时长公式加入加速坡（v/a ≈ 0.7s）后，
+            // 长.distance 突破需要更长时间才能真实到达（A/B 见 §19.3）。
+            drive_max_duration_seconds: 3.2,
             drive_speed_ratio: 1.15,
             drive_early_finish_dist_ft: 4.5,
             drive_mid_range_pullup_dist_ft: 14.0,
             drive_kickout_pass_dist_ft: 22.0,
             drive_lane_offset_ft: 4.0,
+            drive_rim_attack_bias: 1.2,
+            drive_beaten_recovery_seconds: 0.6,
             drive_finish_range_ft: 16.0,
             drive_dunk_max_dist_ft: 4.0,
             drive_floater_min_dist_ft: 7.0,
@@ -641,6 +840,11 @@ impl Default for TacticalRules {
             screener_speed_ratio: 0.64,
             support_speed_ratio: 0.45,
             defender_speed_ratio: 0.73,
+            receive_approach_speed_ratio: 0.9,
+            receive_stop_margin_ft: 2.5,
+            receive_min_approach_speed_ratio: 0.25,
+            pass_lead_gain: 0.75,
+            pass_lead_max_ft: 12.0,
             apf_repulsion_radius_ft: 12.0,
             apf_teammate_repulsion_accel: 15.0,
             apf_opponent_repulsion_accel: 10.0,
@@ -649,8 +853,10 @@ impl Default for TacticalRules {
             screen_hold_separation_ft: 6.0,
             screen_roll_separation_ft: 8.0,
             drop_coverage_depth_ft: 14.0,
+            defense: DefenseRules::default(),
             slot_handler_ball_handling_weight: 1.0,
             slot_handler_decision_iq_weight: 0.8,
+            slot_handler_passing_weight: 0.6,
             slot_screener_strength_weight: 0.8,
             slot_screener_finishing_weight: 0.6,
             slot_corner_three_weight: 1.0,
@@ -734,6 +940,10 @@ impl Default for GameRules {
             max_player_accel_ftps2: 35.0,
             turnaround_min_decel_seconds: 0.12,
             player_linear_damping: 4.0,
+            arrival_epsilon_ft: 0.15,
+            arrival_speed_scale: 0.25,
+            arrival_speed_floor: 0.15,
+            turn_decel_retention: 0.4,
             contact_margin_ft: 0.6,
             max_player_turn_rate_rad_per_sec: 18.0,
             pivot_foot_tolerance_ft: 0.35,
@@ -741,6 +951,10 @@ impl Default for GameRules {
             ball_velocity_retention: 0.85,
             defender_reach_ft: 4.0,
             pass_corridor_radius_ft: 3.5,
+            catch_radius_base_ft: 2.0,
+            catch_radius_skill_gain_ft: 1.2,
+            receive_estimate_noise_ft: 2.5,
+            estimate_offset_quantization: 32767.5,
             pass_lane_clearance_reference_ft: 8.0,
             flight_intercept_radius_ft: 3.8,
             intercept_lane_radius_ft: 6.0,
@@ -1037,6 +1251,9 @@ impl GameRules {
             || !(0.0..=1.0).contains(&self.ball_velocity_retention)
             || self.defender_reach_ft < 0.0
             || self.pass_corridor_radius_ft < 0.0
+            || self.catch_radius_base_ft <= 0.0
+            || self.catch_radius_skill_gain_ft < 0.0
+            || self.receive_estimate_noise_ft < 0.0
             || self.pass_lane_clearance_reference_ft <= 0.0
             || self.flight_intercept_radius_ft <= 0.0
             || self.intercept_lane_radius_ft < self.flight_intercept_radius_ft
@@ -1126,6 +1343,8 @@ impl GameRules {
             || self.tactics.drive_mid_range_pullup_dist_ft
                 <= self.tactics.drive_early_finish_dist_ft
             || self.tactics.drive_lane_offset_ft < 0.0
+            || self.tactics.drive_rim_attack_bias < 0.0
+            || self.tactics.drive_beaten_recovery_seconds < 0.0
             || self.tactics.drive_finish_range_ft <= 0.0
             || self.tactics.drive_dunk_max_dist_ft <= 0.0
             || self.tactics.drive_floater_min_dist_ft <= self.tactics.drive_dunk_max_dist_ft

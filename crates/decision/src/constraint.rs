@@ -368,9 +368,7 @@ fn eval_out_of_bounds_action(
         CandidateAction::Shoot { from_pos, .. } => ctx.rules.court.contains(*from_pos, 0.0),
         CandidateAction::Drive { target_pos, .. }
         | CandidateAction::PostUp { target_pos, .. }
-        | CandidateAction::Advance { target_pos, .. } => {
-            ctx.rules.court.contains(*target_pos, 0.0)
-        }
+        | CandidateAction::Advance { target_pos, .. } => ctx.rules.court.contains(*target_pos, 0.0),
         CandidateAction::Pass { to_pos, .. } => ctx.rules.court.contains(*to_pos, 0.0),
         CandidateAction::InboundPass {
             passer_id, to_pos, ..
@@ -675,13 +673,11 @@ fn eval_shot_clock_urgency(ctx: &ConstraintContext, action: &CandidateAction) ->
         ),
         CandidateAction::Drive { .. }
         | CandidateAction::PostUp { .. }
-        | CandidateAction::Advance { .. } => {
-            ConstraintResult::flagged(
-                "CLOCK_URGENCY_DRIVE",
-                ctx.rules.decision.urgency_drive_boost * urgency,
-                0.0,
-            )
-        }
+        | CandidateAction::Advance { .. } => ConstraintResult::flagged(
+            "CLOCK_URGENCY_DRIVE",
+            ctx.rules.decision.urgency_drive_boost * urgency,
+            0.0,
+        ),
         CandidateAction::InboundPass { .. } => ConstraintResult::flagged(
             "CLOCK_URGENCY_INBOUND_PASS",
             ctx.rules.decision.urgency_pass_penalty * urgency,

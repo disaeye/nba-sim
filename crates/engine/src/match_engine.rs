@@ -15,7 +15,10 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-use crate::setup::MatchSetup;
+use flate2::write::GzEncoder;
+use flate2::Compression;
+
+use crate::setup::{LineupConfig, MatchSetup};
 use nba_decision::constraint::{
     CandidateAction, ConstraintContext, EnforcementAction, PhaseType, ViolationKind,
 };
@@ -44,6 +47,8 @@ enum ScopeBoundary {
 pub enum StreamMode {
     /// 逐 tick 完整帧：展示/回放需要，体积最大。
     Frames,
+    /// gzip 压缩的逐 tick 完整帧：保留 Frames 语义，显著降低落盘体积。
+    FramesGzip,
     /// 因果事实流（默认）：事实、事件日志、阶段/生命周期变化、回合总结。
     /// 引擎每 tick 自检 L1，因此无需输出每 tick 球员投影。
     #[default]
@@ -56,12 +61,74 @@ impl StreamMode {
     pub fn parse(value: &str) -> Result<Self, String> {
         match value.trim().to_ascii_lowercase().as_str() {
             "frames" | "full" => Ok(Self::Frames),
+            "frames-gzip" | "gzip" | "compressed-frames" => Ok(Self::FramesGzip),
             "facts" | "causal" => Ok(Self::Facts),
             "summary" | "summaries" => Ok(Self::Summary),
             other => Err(format!(
-                "unknown stream mode `{other}` (expected frames | facts | summary)"
+                "unknown stream mode `{other}` (expected frames | frames-gzip | facts | summary)"
             )),
         }
+    }
+}
+
+enum StreamWriter {
+    Plain(BufWriter<File>),
+    Gzip(GzEncoder<BufWriter<File>>),
+}
+
+impl Write for StreamWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Plain(writer) => writer.write(bytes),
+            Self::Gzip(writer) => writer.write(bytes),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Plain(writer) => writer.flush(),
+            Self::Gzip(writer) => writer.flush(),
+        }
+    }
+}
+
+impl StreamWriter {
+    fn finish(self) -> std::io::Result<()> {
+        match self {
+            Self::Plain(mut writer) => writer.flush(),
+            Self::Gzip(writer) => {
+                let mut writer = writer.finish()?;
+                writer.flush()
+            }
+        }
+    }
+}
+
+/// `GameRules` → `FrameRules` 的唯一投影（C6.4）。
+///
+/// 此前引擎在 `build_tick` 内联展开 18 个字段，同时 protocol 的
+/// `FrameRules::default()` 手抄同一组数字——两处独立漂移已实际发生
+/// （`player_radius_ft` 引擎 1.8 vs 协议默认 1.0）。收敛为单一函数后，
+/// `constraint_system` 的全字段一致性测试负责让任何一侧漂移必红。
+pub fn frame_rules_from_game_rules(rules: &GameRules) -> FrameRules {
+    FrameRules {
+        tick_seconds: rules.tick_seconds,
+        court_width_ft: rules.court.width_ft,
+        court_height_ft: rules.court.height_ft,
+        hoop_left_x_ft: rules.court.hoop_left_x_ft,
+        hoop_right_x_ft: rules.court.hoop_right_x_ft,
+        hoop_y_ft: rules.court.hoop_y_ft,
+        player_radius_ft: rules.player_radius_ft,
+        min_player_separation_ft: rules.min_player_separation_ft,
+        separation_safety_margin_ft: rules.separation_safety_margin_ft,
+        max_player_speed_ftps: rules.max_player_speed_ftps,
+        max_player_accel_ftps2: rules.max_player_accel_ftps2,
+        ball_max_speed_ftps: rules.ball_max_speed_ftps,
+        three_point_distance_ft: rules.league.three_point_distance_ft,
+        shot_clock_seconds: rules.league.shot_clock_seconds,
+        holder_leash_ft: rules.invariant_holder_leash_ft,
+        speed_tolerance_ftps: rules.invariant_speed_tolerance_ftps,
+        ball_z_max_ft: rules.ball_z_max_ft,
     }
 }
 
@@ -287,8 +354,27 @@ pub struct MatchEngine {
     current_possession_contest: Option<f32>,
     /// Receiver awaiting physical convergence to a frozen pass endpoint.
     pending_pass_receiver: Option<String>,
+    /// 接球人**自己的**落点估计（层 A，P-1），跨 tick 保留。
+    ///
+    /// ## 为什么必须跨 tick 保留（round-10 修正）
+    ///
+    /// 第一版每 tick 从当前 `ball_pos` 重算估计点。实测后果：飞行末期球
+    /// 逼近接球人时 `dist` 变小，估计点**向接球人塌缩**，随后方向翻转——
+    /// 接球人目标点大幅抖动（实测 (19.8,36.5) → 自身位置 → (4.9,46.1)），
+    /// 他来回跑，距球从 6.8 ft 单调恶化到 12.8 ft。
+    ///
+    /// 真实球员不会每帧重估：他在球出手后形成一个**稳定的预判**，之后
+    /// 只做小幅修正。因此估计点必须作为状态保存，并在观察到新证据时
+    /// **按观察力加权地向新信息靠拢**，而不是整体重算。
+    receiver_estimate: Option<(String, Vec2)>,
     /// Cause carried by a loose ball until a player secures it.
     pending_loose_ball_terminal: Option<nba_domain::PossessionEndCause>,
+    /// 最近一次被过掉（drive successful）的对位防守人（round-18）。
+    beaten_defender_id: Option<String>,
+    /// 被过防守人的恢复窗口截止时刻（round-19）：窗口内战术层不得重派。
+    beaten_recovery_until: std::collections::HashMap<String, f32>,
+    /// 上一 tick 的球位置（P-1 观测差分用，感知延迟一步）。
+    prev_observed_ball_pos: Option<Vec2>,
     /// Whether the pending control transfer is the delayed arrival of an inbound pass.
     pending_pass_inbound: bool,
     /// Offensive player responsible for the active possession's last action.
@@ -368,6 +454,29 @@ impl MatchEngine {
         }
         let rules = setup.rules.clone();
         let mut physics = PhysicsWorld::with_backend(&rules, setup.physics_backend);
+        // 初始处理球人由**能力**派生（round-11 Step4b），而不是 `starters[0]`。
+        //
+        // `starters[0]` 是数组位置，用它当身份即"顺序即身份"（P-2）。
+        // 选择口径与 `new_possession_pg` 一致：处理球三项能力加权，确定性排序。
+        let initial_handler = |team: &nba_domain::TeamData, lineup: &LineupConfig| -> String {
+            let policy = &rules.tactics;
+            let mut ids: Vec<(f32, String)> = team
+                .players
+                .iter()
+                .filter(|p| lineup.starters.contains(&p.id))
+                .map(|p| {
+                    let score = p.attributes.ball_handling
+                        * policy.slot_handler_ball_handling_weight
+                        + p.attributes.passing * policy.slot_handler_passing_weight
+                        + p.attributes.decision_iq * policy.slot_handler_decision_iq_weight;
+                    (score, p.id.clone())
+                })
+                .collect();
+            ids.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            ids.into_iter().next().map(|(_, id)| id).unwrap_or_default()
+        };
+        let home_initial_handler = initial_handler(&setup.home_team, &setup.home_lineup);
+
         for (team, lineup, side) in [
             (&setup.home_team, &setup.home_lineup, "home"),
             (&setup.away_team, &setup.away_lineup, "away"),
@@ -399,20 +508,19 @@ impl MatchEngine {
                     // M9/attributes T2：属性→物理量经 capability 映射层（曲线下限走规则通道）。
                     max_speed_ftps: nba_domain::effective_max_speed(&rules, &player.attributes),
                     max_accel_ftps2: nba_domain::effective_max_accel(&rules, &player.attributes),
-                    has_ball: is_home && player.id == lineup.starters[0],
+                    has_ball: is_home && player.id == home_initial_handler,
                     on_court: starter_ids.contains(&&player.id),
-                    action: if is_home && player.id == lineup.starters[0] {
+                    action: if is_home && player.id == home_initial_handler {
                         "Initiate".to_string()
                     } else if starter_ids.contains(&&player.id) {
                         "SetPosition".to_string()
                     } else {
                         "Bench".to_string()
                     },
-                    slot: player
-                        .roles
-                        .first()
-                        .map(|role| format!("{:?}", role))
-                        .unwrap_or_else(|| "Player".to_string()),
+                    // `roles` 字段已按契约移除（attributes.md §2.7/§2.9/T1）。
+                    // 展示用槽位改为**能力与倾向的纯函数投影**：
+                    // 不存字段、不按名册下标分派，因此名册数组顺序不携带语义。
+                    slot: nba_domain::project_display_role(&player.attributes, &player.tendencies),
                     morale: "Normal".to_string(),
                     stamina: 100.0 * player.attributes.stamina.max(0.1),
                     max_stamina: 100.0 * player.attributes.stamina.max(0.1),
@@ -423,14 +531,15 @@ impl MatchEngine {
                     turn_decel_timer: 0.0,
                     is_locked_kinematics: false,
                     out_of_bounds_placement: false,
+                    is_receiving_pass: false,
+                    is_driving_to_rim: false,
                     boundary_cross_latched: false,
                     attributes: player.attributes.clone(),
-                    roles: player.roles.clone(),
                     tendencies: player.tendencies.clone(),
                 });
             }
         }
-        let initial_carrier_id = setup.home_lineup.starters[0].clone();
+        let initial_carrier_id = home_initial_handler.clone();
         let initial_pos = physics
             .get_player(&initial_carrier_id)
             .map(|p| p.pos_ft)
@@ -576,14 +685,18 @@ impl MatchEngine {
             current_possession_shooter: None,
             current_possession_contest: None,
             pending_pass_receiver: None,
+            receiver_estimate: None,
             pending_loose_ball_terminal: None,
+            beaten_defender_id: None,
+            beaten_recovery_until: std::collections::HashMap::new(),
+            prev_observed_ball_pos: None,
             pending_pass_inbound: false,
             current_possession_turnover_player: Some(initial_carrier_id),
             advancing_player: None,
         }
     }
 
-    /// 在回合转换边界发射 L2 回合语义总结事件（docs/design.md §8.2）。
+    /// 在回合转换边界发射 L2 回合语义总结事件（docs/quality.md §2.2）。
     /// 终结原因是 `PossessionEndCause` 显式枚举——没有兜底值，调用方
     /// 必须在编译期说明回合为什么结束（dev 方案 §3.2 D0.1）。
     pub fn emit_possession_summary(
@@ -706,6 +819,7 @@ impl MatchEngine {
     /// 按指定流模式导出一场比赛（gap.md §16.4 资源治理）。
     ///
     /// - [`StreamMode::Frames`]：逐 tick 完整帧（展示/回放，大）；
+    /// - [`StreamMode::FramesGzip`]：同一完整帧协议的 gzip 落盘格式；
     /// - [`StreamMode::Facts`]（默认）：只写因果事实、事件日志、阶段/生命周期
     ///   变化、回合总结与周期性检查点。引擎每 tick 自检 L1，流不必携带
     ///   每 tick 的球员投影，因此体积从数百 MB 降到个位数 MB；
@@ -724,14 +838,21 @@ impl MatchEngine {
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
 
         let byte_budget = match mode {
-            StreamMode::Frames => self.rules.stream_frames_max_bytes,
+            StreamMode::Frames | StreamMode::FramesGzip => self.rules.stream_frames_max_bytes,
             StreamMode::Facts | StreamMode::Summary => self.rules.stream_max_bytes,
         };
         // 运行前磁盘预检：不足安全余量则拒绝启动。
         ensure_disk_headroom(out_path, byte_budget)?;
 
         let file = File::create(out_path)?;
-        let mut writer = BufWriter::new(file);
+        let mut writer = match mode {
+            StreamMode::FramesGzip => {
+                StreamWriter::Gzip(GzEncoder::new(BufWriter::new(file), Compression::default()))
+            }
+            StreamMode::Frames | StreamMode::Facts | StreamMode::Summary => {
+                StreamWriter::Plain(BufWriter::new(file))
+            }
+        };
         let mut ticks_count = 0;
         let mut all_violations: Vec<Violation> = Vec::new();
         let mut written_bytes: u64 = 0;
@@ -745,7 +866,7 @@ impl MatchEngine {
             let tick = self.step();
             all_violations.append(&mut self.last_tick_violations);
             let should_write = match mode {
-                StreamMode::Frames => true,
+                StreamMode::Frames | StreamMode::FramesGzip => true,
                 StreamMode::Facts => {
                     written_bytes == 0
                         || !tick.frame.event_log.is_empty()
@@ -757,7 +878,11 @@ impl MatchEngine {
                 }
                 StreamMode::Summary => {
                     !meta_written
-                        || tick.frame.event_log.iter().any(|e| e.kind == "POSSESSION_SUMMARY")
+                        || tick
+                            .frame
+                            .event_log
+                            .iter()
+                            .any(|e| e.kind == "POSSESSION_SUMMARY")
                 }
             };
             previous.phase = tick.frame.phase.clone();
@@ -767,7 +892,7 @@ impl MatchEngine {
 
             if should_write {
                 let payload = match mode {
-                    StreamMode::Frames => serde_json::to_string(&tick)?,
+                    StreamMode::Frames | StreamMode::FramesGzip => serde_json::to_string(&tick)?,
                     StreamMode::Facts => {
                         serde_json::to_string(&compact_fact_record(&tick, written_bytes == 0))?
                     }
@@ -799,7 +924,7 @@ impl MatchEngine {
             writer.write_all(payload.as_bytes())?;
             writer.write_all(b"\n")?;
         }
-        writer.flush()?;
+        writer.finish()?;
         if !all_violations.is_empty() {
             eprintln!(
                 "=== INVARIANT VIOLATIONS ({} total) ===",
@@ -886,11 +1011,307 @@ impl MatchEngine {
     }
     /// Keeps the active offensive scheme derived from the configured team
     /// owning the ball; transitions must not replace setup with random data.
+    /// 领传点：按接球人的**当前速度**外推一个飞行期内的可达点（round-7）。
+    ///
+    /// ## 为什么需要它
+    ///
+    /// 传球 release 时冻结的 `to_pos` 是「球将到达的位置」。若直接取接球人
+    /// **释放时刻**的位置，而接球人在飞行期间仍在跑动，他永远不会恰好停在
+    /// 那个点——实测越位 5–12 ft。
+    ///
+    /// 决策侧传球已通过决策层给出带提前量的 `to_pos`；outlet 一传漏了这一步，
+    /// 成为 `PASS_CORRIDOR_REACHABLE` 的最大单一来源。
+    ///
+    /// ## 模型
+    ///
+    /// ```text
+    /// flight = pass_duration(distance)          // 与弹道使用同一时长函数
+    /// lead   = receiver_velocity × flight × lead_gain
+    /// to_pos = receiver_pos + lead              // 封顶到 lead_max_ft
+    /// ```
+    ///
+    /// 不做二次迭代（先用初速估时长，再用新距离重算）：一阶近似已足够，
+    /// 且迭代会使事实依赖收敛路径，不利于可复现性。
+    fn lead_receiver_position(
+        &self,
+        receiver_id: &str,
+        receiver_pos: Vec2,
+        distance_hint: f32,
+        inbound: bool,
+    ) -> Vec2 {
+        let Some(p) = self.physics.get_player(receiver_id) else {
+            return receiver_pos;
+        };
+        let speed = p.vel_ft.length();
+        if speed <= f32::EPSILON {
+            return receiver_pos;
+        }
+        let flight = self.rules.pass_duration(distance_hint, inbound);
+        let gain = self.rules.tactics.pass_lead_gain;
+        let max_lead = self.rules.tactics.pass_lead_max_ft;
+        let lead = p.vel_ft * flight * gain;
+        let lead = if lead.length() > max_lead {
+            lead.normalize_or_zero() * max_lead
+        } else {
+            lead
+        };
+        self.rules
+            .court
+            .clamp_playable(receiver_pos + lead, self.rules.player_radius_ft)
+    }
+
+    /// 接球人向冻结点收敛的目标与速度（round-6 审计修复）。
+    ///
+    /// ## 缺陷（修复前）
+    ///
+    /// 接球人被硬编码为 20 ft/s 全速冲向 `frozen_to_pos`，且**没有减速模型**。
+    /// 传球飞行时长受 `max_pass_duration_seconds`（默认 1.4s）封顶，但 40–60 ft
+    /// 的跨场 outlet 实际只需 0.5–0.7s。于是接球人在被拉长的飞行期内持续全速
+    /// 前进，实测**越过**冻结点 5–12.5 ft（越位方向几乎垂直于传球线）。
+    ///
+    /// 后果：`PASS_CORRIDOR_REACHABLE` 在 8 seed 下报 8–17 条 Hard defect。
+    ///
+    /// ## 模型
+    ///
+    /// 用「制动距离」反解允许速度：
+    ///
+    /// ```text
+    /// v_allow = sqrt(2 · a_max · max(d_remaining - margin, 0))
+    /// ```
+    ///
+    /// 即剩余距离越短，允许速度越低（接近冻结点时自然减速）；同时在远距离
+    /// 封顶到 `receive_approach_speed_ratio × max_player_speed`，避免用超过
+    /// 人体上限的速度冲向终点。
+    ///
+    /// 这不是「为了通过评判而调参」：它补的是**缺失的物理约束**——此前模型
+    /// 允许球员以 20 ft/s 穿过目标点而不减速，违反 `gap.md §12.1`
+    /// 「加速、制动、变向受属性与规则上限约束」。
+    fn receive_approach(&self, frozen_to_pos: Vec2, player_id: &str) -> (Vec2, f32) {
+        let Some(p) = self.physics.get_player(player_id) else {
+            return (frozen_to_pos, self.rules.max_player_speed_ftps * 0.5);
+        };
+        let to_target = frozen_to_pos - p.pos_ft;
+        let d = to_target.length();
+        let accel = self.rules.max_player_accel_ftps2.max(f32::EPSILON);
+        let current_speed = p.vel_ft.length();
+
+        // ## 制动距离必须自洽（round-8 审计修复）
+        //
+        // `receive_stop_margin_ft` 是一个**固定**裕量，但所需的制动距离是
+        // `v²/(2a)` —— 随接近速度增大。实测：
+        //   19.8 ft/s -> 需 5.60 ft；12.0 -> 2.06 ft；5.5 -> 0.43 ft
+        // 当裕量（2.5 ft）小于所需制动距离时，「已到位则停下」的分支永远
+        // 不可达：接球人一边被 `sqrt(2as)` 减速、一边因为 `d > margin` 继续
+        // 被推着走，结果在球到达时已越过 5–12 ft。
+        //
+        // 修正：用**物理所需的制动距离**取代固定裕量，并取两者较大值
+        // （保留一个下限，避免低速时数值抖动）。
+        let brake_dist = current_speed * current_speed / (2.0 * accel);
+        let stop_margin = self.rules.tactics.receive_stop_margin_ft.max(brake_dist);
+
+        // 已进入制动距离内：站住等球（真实接球动作的语义）。
+        if d <= stop_margin {
+            return (p.pos_ft, 0.0);
+        }
+
+        let remaining = (d - stop_margin).max(0.0);
+        // 制动距离反解：v = sqrt(2·a·s)。
+        let v_allow = (2.0 * accel * remaining).sqrt();
+        let v_cap =
+            self.rules.max_player_speed_ftps * self.rules.tactics.receive_approach_speed_ratio;
+        let v_min =
+            self.rules.max_player_speed_ftps * self.rules.tactics.receive_min_approach_speed_ratio;
+        let speed = v_allow.min(v_cap).max(v_min);
+
+        // 目标点提前 stop_margin：即使在离散 tick 下也不会越过冻结点。
+        let aim = frozen_to_pos - to_target.normalize() * stop_margin;
+        (aim, speed)
+    }
+
+    /// 由一次失败的传球构造松球（层 A 失败，P-1）。
+    ///
+    /// 初速必须服从 `ball_max_speed_ftps`（留安全余量），而不是
+    /// `segment / duration`（那会产生 49 ft/s 的初速，松球随即飞出边线）。
+    fn loose_ball_from(&self, pos: Vec2, segment: Vec2) -> BallTrajectoryKind {
+        let dir = segment.normalize_or_zero();
+        let cap = (self.rules.ball_max_speed_ftps - self.rules.invariant_speed_tolerance_ftps)
+            .max(self.rules.invariant_speed_tolerance_ftps);
+        BallTrajectoryKind::LooseBall {
+            pos,
+            vel: dir * cap,
+            z: self.ball_pos_3d.1,
+            vel_z: 0.0,
+            last_touch_team: self.possession,
+        }
+    }
+
+    /// 接球人对"球会到哪里"的**自身估计**（层 A，P-1）。
+    ///
+    /// ## 为什么不能用 `frozen_to_pos`
+    ///
+    /// `frozen_to_pos` 是**传球人的意图**。接球人若直读它，就获得了全知视角，
+    /// 必然到位——这违反真实性：真实比赛里接球人只能根据**可观察到的**信息
+    /// 预判（球的来向与速度、传球人的动作、自己的位置与速度），预判可能错。
+    ///
+    /// ## 估计模型
+    ///
+    /// ```text
+    /// 观测点  = 上一 tick 的球位置（感知延迟，不是瞬时真值）
+    /// 球速估计 = 球的当前速度（接球人看不到 flight_duration）
+    /// 到达时间 = |观测点 − 自己| / max(球速估计, 下限)      ← 他自己的估算
+    /// 落点估计 = 观测点 + 球向 × 球速 × 到达时间
+    ///            + 自己的速度 × 到达时间 × 预判增益
+    ///            + 噪声(off_ball_sense 越低越大)
+    /// ```
+    ///
+    /// 噪声是**确定性伪随机**（由 tick + 球员 id 哈希派生），不是真随机：
+    /// 保证可复现（charter C4），同时使不同球员/回合的预判偏差不同。
+    ///
+    /// 参数全部走规则通道（`receive_estimate_noise_ft` 等），无内联行为常数。
+    fn estimate_receiver_landing(&mut self, receiver_id: &str, frozen_to_pos: Vec2) -> Vec2 {
+        let Some(receiver) = self.physics.get_player(receiver_id) else {
+            return frozen_to_pos;
+        };
+        // 规则开关：噪声为 0 时退化为"精确知道落点"（旧行为，仅用于对照）。
+        let noise_cap = nba_domain::receive_estimate_noise(&self.rules, &receiver.attributes);
+        if noise_cap <= f32::EPSILON {
+            return frozen_to_pos;
+        }
+
+        // 感知延迟：用球**上一 tick** 的位置作为观测点。
+        // 引擎在决策前已将本 tick 的 ball_pos_3d 推进，故这里近似为"当前可见位置"。
+        let observed_ball = self.ball_pos_3d.0;
+        let self_pos = receiver.pos_ft;
+        let to_ball = observed_ball - self_pos;
+        let dist = to_ball.length();
+        if dist <= f32::EPSILON {
+            return frozen_to_pos;
+        }
+
+        // ## 稳定估计（round-10 修正两次）
+        //
+        // 球员在球出手后形成一个**预判**，之后只按观察力做小幅修正；
+        // 不会每 tick 整体重算（那会因球的逼近导致目标塌缩与方向翻转，
+        // 实测接球人距球从 6.8 ft 恶化到 12.8 ft）。
+        //
+        // **第二次修正**：初版用 `ball_vel × pass_duration(dist)` 做外推，
+        // 但 `ball_vel` 是**实际**飞行速度（`seg/duration`，可达 50 ft/s），
+        // 而 `pass_duration` 按**名义**球速（32 ft/s）给出时长——两者混用
+        // 导致 10 ft 传球被外推 22.5 ft（冲过头），层 A 随即失败。
+        //
+        // 正确的初判：球能走多远，受**剩余飞行距离**约束，不得超出
+        // 「球到接球人的距离」。即接球人认为球最多飞到他自己所在处；
+        // 提前量来自他看见球的运动方向，而不是把他自己再外推一次。
+        let ball_vel = self.ball_velocity_estimate();
+        let ball_speed = ball_vel.length();
+        let remaining = dist; // 球到接球人的距离 = 它最多还能前进的量
+        let initial = if ball_speed > f32::EPSILON {
+            let travel = remaining.min(ball_speed * self.rules.tick_seconds * dist.max(1.0));
+            observed_ball + ball_vel.normalize_or_zero() * travel
+        } else {
+            observed_ball
+        };
+
+        // 取出或建立本回合的稳定估计。
+        let prev = match &self.receiver_estimate {
+            Some((id, p)) if id == receiver_id => Some(*p),
+            _ => None,
+        };
+        let sense = receiver.attributes.off_ball_sense.clamp(0.0, 1.0);
+
+        // 观察修正：向"球的实际位置 + 其运动方向上的有限外推"按观察力加权。
+        // 观察力强 → 快速跟上球的真实轨迹；观察力弱 → 停在最初预判上。
+        let observe_target = initial;
+        let base = prev.unwrap_or(initial);
+        let blended = base + (observe_target - base) * sense;
+
+        // 预判噪声：off_ball_sense 越低残留越大；方向由确定性哈希决定。
+        // round-19 修复：`(1−sense)` 此前被应用两次（capability 里一次、
+        // 这里一次），实际噪声 = noise_ft×(1−sense)²，低观察力球员的
+        // 噪声被意外压缩。恢复设计意图：线性 (1−sense)。
+        let residual_noise = noise_cap;
+        let noise = self.deterministic_estimate_offset(receiver_id) * residual_noise;
+        let est = self
+            .rules
+            .court
+            .clamp_playable(blended + noise, self.rules.player_radius_ft);
+        // 保存稳定估计（跨 tick 复用）。
+        self.receiver_estimate = Some((receiver_id.to_string(), est));
+        est
+    }
+
+    /// 球的瞬时速度估计（层 A 用）。
+    ///
+    /// 接球人能看到球在动，但看不到传球人冻结的 `duration`。这里用
+    /// **上一 tick 与本 tick 的球位置差**给出方向与量级；无运动时返回零。
+    fn ball_velocity_estimate(&self) -> Vec2 {
+        // ## P-1 修复（round-19）：观测差分，不读传球人的冻结意图
+        //
+        // 原实现直读球态的 `to_pos`/`from_pos`/`duration`——传球人的私有
+        // 意图（全知泄漏）。其文档注释声称"用上一 tick 与本 tick 的球位置
+        // 差"，注释与实现不一致（契约-代码漂移）。
+        //
+        // 接球人可观测的是**球的运动本身**：位置差分给出方向与速度，
+        // 信息量与冻结向量等价（球匀速直线飞行），但来源合法。
+        // `prev_observed_ball_pos` 由引擎每 tick 记录（感知延迟一步）。
+        if let Some(prev) = self.prev_observed_ball_pos {
+            let dt = self.rules.tick_seconds.max(f32::EPSILON);
+            let delta = (self.ball_pos_3d.0 - prev) / dt;
+            // 速度量级钳制在球的物理上限内（观测噪声保护）。
+            let cap = self.rules.ball_max_speed_ftps;
+            if delta.length() > cap {
+                delta.normalize_or_zero() * cap
+            } else {
+                delta
+            }
+        } else {
+            Vec2::ZERO
+        }
+    }
+
+    /// 确定性偏差向量（单位长度内），由 tick 与球员 id 派生。
+    ///
+    /// 不是真随机：同一 tick + 同一球员必得同一值（charter C4 可复现）。
+    /// 用简单 FNV 混合：避免引入新 RNG 流而改变既有随机序列。
+    fn deterministic_estimate_offset(&self, player_id: &str) -> Vec2 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in player_id.as_bytes() {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x100_0000_01b3);
+        }
+        h ^= self.tick_index;
+        h = h.wrapping_mul(0x100_0000_01b3);
+        // 映射到 [-1, 1] 的二维单位向量（用两个 16 位切片）。
+        let q = self.rules.estimate_offset_quantization.max(f32::EPSILON);
+        let a = ((h & 0xFFFF) as f32 / q) - 1.0;
+        let b = (((h >> 16) & 0xFFFF) as f32 / q) - 1.0;
+        Vec2::new(a, b).normalize_or_zero()
+    }
+
     fn sync_team_tactics(&mut self) {
         self.tactical_set = match self.possession {
             Possession::Home => self.home_offense_tactic,
             Possession::Away => self.away_offense_tactic,
         };
+        // round-6 审计修复：防守方案必须成为因果输入。
+        //
+        // 此前 `home/away_defensive_tactic` 只被用于生成展示字符串，物理与
+        // 决策管线从不消费——实测 6 种方案各跑一场全场模拟逐字节相同。
+        // 现在把**防守方**的方案经规则通道写入 `rules.tactics.defense`，
+        // 由防守目标点生成消费（charter C1/C3：数据通道，非代码分支）。
+        //
+        // 未知 id 不静默回退：保留上一 tick 的参数并在强制项里登记，
+        // 避免又一个「声明了但无效」的隐形参数。
+        let defending_side = match self.possession {
+            Possession::Home => self.away_defensive_tactic,
+            Possession::Away => self.home_defensive_tactic,
+        };
+        match nba_domain::DefenseRules::for_scheme(defending_side.id()) {
+            Some(d) => self.rules.tactics.defense = d,
+            None => self
+                .current_enforcements
+                .push(format!("UNKNOWN_DEFENSE_SCHEME:{}", defending_side.id())),
+        }
     }
 
     /// Re-evaluate coach strategy at every possession boundary.
@@ -905,6 +1326,21 @@ impl MatchEngine {
     /// - 未来可在此插入状态转换合法性校验与领域事件，无需改各调用点。
     ///
     /// `current_t` 用于同步持有/受控状态的持球人参考；非持有状态传当前时间即可。
+    /// 标记/清除本 tick 的接球人（round-10）。
+    ///
+    /// 接球人向球收敛期间需豁免 APF 排斥，并在到位后立即停住
+    /// （见 `physics::movement` 的 `is_receiving_pass` 分支）。
+    /// 传 `None` 表示清除全部标记。
+    fn mark_receiver(&mut self, receiver_id: Option<&str>) {
+        let ids: Vec<String> = self.physics.get_players().keys().cloned().collect();
+        for id in ids {
+            let should = receiver_id == Some(id.as_str());
+            if let Some(p) = self.physics.get_player_mut(&id) {
+                p.is_receiving_pass = should;
+            }
+        }
+    }
+
     fn transition_ball_state(&mut self, next: BallTrajectoryKind) {
         // M2：经领域层纯函数转换表校验，非法边被拒绝并记入强制项
         // （architecture.md §3.2 唯一写入口 + §3.3 转换表穷举）。
@@ -920,8 +1356,34 @@ impl MatchEngine {
             }
             _ => None,
         };
+        // ## 攻框旗标（round-18）：进入 Drive 置位，离开清除。
+        //
+        // 唯一写入口统一管理（与接球人标记同一模式）。旗标让物理层的
+        // APF 排斥豁免攻框者——对抗交由终结裁决处理，转向墙挡不住攻框。
+        let drive_flag: Option<(String, bool)> = match (&self.ball_state, &next) {
+            (_, BallTrajectoryKind::Drive { driver_id, .. }) => Some((driver_id.clone(), true)),
+            (BallTrajectoryKind::Drive { driver_id, .. }, next)
+                if !matches!(next, BallTrajectoryKind::Drive { .. }) =>
+            {
+                Some((driver_id.clone(), false))
+            }
+            _ => None,
+        };
         match nba_domain::transition_ball_state(&self.ball_state, next) {
             Ok(next) => {
+                // ## 接球人标记必须在**写入口**设置（round-10）
+                //
+                // 物理步进（`step` 内 `physics.step`）发生在战术规划**之前**，
+                // 因此若在战术规划里才标记接球人，第一个 tick 的物理仍按旧标志执行，
+                // 接球人会带着上一 tick 的速度滑离落点（实测 17.26 ft/s，
+                // 一 tick 滑 1.73 ft > catch_radius）。
+                //
+                // 球态进入 `Pass` 时，接球人的身份已确定（`target_id`），
+                // 在唯一写入口立即标记，保证下一 tick 的物理就生效。
+                if let BallTrajectoryKind::Pass { target_id, .. } = &next {
+                    let rid = target_id.clone();
+                    self.mark_receiver(Some(&rid));
+                }
                 self.ball_state = next;
                 self.sync_ball_holder();
 
@@ -939,6 +1401,11 @@ impl MatchEngine {
                 }
                 if let Some(player_id) = released_transfer_id {
                     self.physics.set_player_locked(&player_id, false, None);
+                }
+                if let Some((player_id, entering)) = drive_flag {
+                    if let Some(p) = self.physics.get_player_mut(&player_id) {
+                        p.is_driving_to_rim = entering;
+                    }
                 }
             }
             Err(reason) => {
@@ -1094,6 +1561,9 @@ impl MatchEngine {
     /// discovered only by post-hoc log analysis.
     pub fn step(&mut self) -> StreamTick {
         let tick = self.step_inner();
+        // P-1 观测差分：记录本 tick 的球位置，供接球人下一 tick 估计速度
+        // （感知延迟一步，见 ball_velocity_estimate）。
+        self.prev_observed_ball_pos = Some(self.ball_pos_3d.0);
         let violations = self.invariant_checker.check_tick(&tick);
         // InvariantChecker owns the protocol-level causal graph; do not run a
         // second independent graph here, which would duplicate findings and
@@ -1299,6 +1769,25 @@ impl MatchEngine {
         self.current_event_types.clear();
         self.current_enforcements.clear();
         self.last_decision_trace = None;
+
+        // 贴身切球（on-ball poke check）：为「带球丢球」提供事实路径。
+        //
+        // 真实 NBA 失误构成中带球丢球占 53.6%（82games 2024-25 IND），
+        // 是占比最大的一类；此前引擎只有传球失败一条失误路径。
+        //
+        // 只在活球且球确实被持有时评估；`resolve_on_ball_poke` 内部按
+        // `rate × dt` 做时间积分，单 tick 概率不随时长累加。
+        if self.game_flow.allows_live_ball_actions() {
+            let carrier = self.carrier_id();
+            let locked = self
+                .physics
+                .get_player(&carrier)
+                .map(|p| p.is_locked_kinematics)
+                .unwrap_or(false);
+            if let Some(defender_id) = self.resolve_on_ball_poke(&carrier, dt, locked) {
+                self.apply_on_ball_poke(&carrier, &defender_id);
+            }
+        }
 
         // Runtime constraints observe the current snapshot before execution.
         let ctx = self.constraint_ctx();
@@ -1595,8 +2084,7 @@ impl MatchEngine {
                             p.action = "ADVANCE".to_string();
                         }
                         self.advancing_player = Some(player_id.clone());
-                        self.current_callout =
-                            Some("持球推进，尽快越过中线！".to_string());
+                        self.current_callout = Some("持球推进，尽快越过中线！".to_string());
                         self.current_event = Some("ADVANCE".to_string());
                         self.last_decision_time = current_t;
                     }
@@ -1756,15 +2244,34 @@ impl MatchEngine {
                         self.ball_pos_3d = (landing, self.rules.ball_holder_height_ft);
                     }
                 }
-                if flight_done && (receiver_ready || self.ball_pos_3d.0.distance(
-                    self.physics.get_player(&cid).map(|p| p.pos_ft).unwrap_or(*target_pos),
-                ) <= self.rules.invariant_holder_leash_ft) {
+                if flight_done
+                    && (receiver_ready
+                        || self.ball_pos_3d.0.distance(
+                            self.physics
+                                .get_player(&cid)
+                                .map(|p| p.pos_ft)
+                                .unwrap_or(*target_pos),
+                        ) <= self.rules.invariant_holder_leash_ft)
+                {
                     if self.pending_pass_receiver.as_deref() == Some(cid.as_str()) {
+                        // round-6：与 Pass 分支同口径——接球事实的位置必须是球
+                        // 当前所处的位置（此处已经过 ControlTransfer 收敛，保证在
+                        // 接球人 leash 内），而**不是**冻结点。
+                        //
+                        // 两个分支的语义分工：
+                        // - `Pass` 分支：球已到冻结点，接球人恰好处于 leash 内
+                        //   → `position = to_pos`（终点事实，见上）；
+                        // - `ControlTransfer` 分支：接球人未到位，球已收敛到他身上
+                        //   → `position = 球的实际位置`（接球事实）。
+                        // 评判器因此可以区分「终点」与「接球」，不再需要第三个解释
+                        // （gap.md §9.5）。
                         self.pending_events.push(GameEvent::PassReceived {
                             receiver_id: cid.clone(),
                             position: (self.ball_pos_3d.0.x, self.ball_pos_3d.0.y),
                         });
                         self.pending_pass_receiver = None;
+                        // 传球结束：丢弃本回合的接球人估计（下一回合重新形成预判）。
+                        self.receiver_estimate = None;
                         self.last_passer_id = None;
                         if self.pending_pass_inbound {
                             self.transition_phase(SubPhase::Initiation);
@@ -1917,6 +2424,34 @@ impl MatchEngine {
                 }
 
                 let passer_id = self.last_passer_id.clone().unwrap_or_default();
+                // Fix（round-15 第一性原理）：接球是「首次触球」事件，不是
+                // 「飞行终点」事件。
+                //
+                // 旧实现只在 tau≥1 时裁决。实测（22 例层 A 失败）：接球人的
+                // 估计模型以自身为参照系（`initial = ball + dir×|ball−我|`），
+                // 他朝来球走 → 距离收缩 → 估计点随之后退（追赶曲线）→
+                // 接球人不断走向传球人一侧，球却在冻结终点落地。最终
+                // 估计误差 p50=3.37 ft、接球人正确到达自己的估计（距估计
+                // 1.34 ft）、球距 3.64 ft —— 「朝来球移动」这一正确篮球行为
+                // 反而必然导致终点 miss。
+                //
+                // 真实篮球里接球发生在第一次触球。这里把到达裁决的触发条件
+                // 从「飞行结束」放宽为「飞行结束 **或** 接球人已进入接球半径」；
+                // 裁决逻辑本身（层 A 距离 + 层 B 概率 + 状态转移）完全复用，
+                // 不新增路径。
+                //
+                // 高度安全性：传球全程为胸高平飞（`ballistics.rs` Pass 分支，
+                // `pass_peak_ft == chest_height_ft == 4.0`，弧项为 0），
+                // 不存在“空中高处被接住”的物理问题。
+                // 拦截优先级不变：本 tick 若有拦截事实，仍先走拦截分支。
+                let receiver_touch = self
+                    .physics
+                    .get_player(target_id)
+                    .map(|r| {
+                        let radius = nba_domain::effective_catch_radius(&self.rules, &r.attributes);
+                        (r.pos_ft - self.ball_pos_3d.0).length() <= radius
+                    })
+                    .unwrap_or(false);
                 if let Some((defender_id, secured)) = intercept {
                     let position = self.ball_pos_3d.0;
                     if secured {
@@ -1931,10 +2466,7 @@ impl MatchEngine {
                         // 拦截点与抢断者的距离可能达 reach（1.8+ 可达 ft），
                         // 直接沿用球坐标会造成球人分离（实测 3.86 ft）。
                         if let Some(defender) = self.physics.get_player(&defender_id) {
-                            self.ball_pos_3d = (
-                                defender.pos_ft,
-                                self.rules.ball_holder_height_ft,
-                            );
+                            self.ball_pos_3d = (defender.pos_ft, self.rules.ball_holder_height_ft);
                         }
                         steal_triggered_defender = Some(defender_id);
                     } else {
@@ -1947,7 +2479,8 @@ impl MatchEngine {
                         if is_inbound_pass {
                             live_ball_triggered = true;
                         }
-                        self.pending_loose_ball_terminal = Some(nba_domain::PossessionEndCause::TurnoverPassTipped);
+                        self.pending_loose_ball_terminal =
+                            Some(nba_domain::PossessionEndCause::TurnoverPassTipped);
                         new_ball_state = Some(BallTrajectoryKind::LooseBall {
                             pos: position,
                             // 同上：点掉的松球初速也须收敛到球速上限。
@@ -1963,21 +2496,83 @@ impl MatchEngine {
                             last_touch_team: self.possession,
                         });
                     }
-                } else if tau >= 1.0 {
+                } else if tau >= 1.0 || receiver_touch {
                     let receiver_id = target_id.clone();
-                    if will_receive {
-                        let receiver_ready = self
+                    {
+                        // 层 A（P-1）：球到达时判定**实际空间接近度**。
+                        //
+                        // 旧口径是「接球人距**冻结点** ≤ leash」—— 那等于用
+                        // 传球人的意图当判据，接球人只要站在他该在的地方就算成功，
+                        // 与他是否真在球旁边无关。实测因此产生 9 条
+                        // `PASS_CORRIDOR_REACHABLE` Hard。
+                        //
+                        // 新口径（层 A）：用**球与接球人的实际距离**对比
+                        // `effective_catch_radius`。
+                        //
+                        // ## 层序修正（round-10）
+                        //
+                        // 旧实现把层 B（`will_receive`，release 时的**位置无关**
+                        // 概率掷骰）放在**外层**，层 A 放内层：掷到 false 就直接
+                        // 判掉球，层 A 连执行机会都没有。后果（实测）：接球人
+                        // 站在球旁边（甚至 0 ft）也会"接不到"；233 次 drop 中
+                        // 球**全都精确到达冻结落点**（d=0.00），而接球人距球
+                        // 中位 6.37 ft —— 但这是层 B 先否决后才产生的位移，不是原因。
+                        //
+                        // 正确的因果顺序（真实篮球）：
+                        //   位置决定**能否到达球**（层 A，确定性）
+                        //   → 技术/干扰决定**接得稳不稳**（层 B，概率）
+                        // 因此层 A 必须在**外层**：不可达则直接 loose ball，
+                        // 层 B 只在可达时生效。
+                        let catch_radius = self
                             .physics
                             .get_player(&receiver_id)
-                            .map(|receiver| {
-                                (receiver.pos_ft - *to_pos).length()
-                                    <= self.rules.invariant_holder_leash_ft
-                            })
-                            .unwrap_or(false);
+                            .map(|r| nba_domain::effective_catch_radius(&self.rules, &r.attributes))
+                            .unwrap_or(self.rules.player_radius_ft);
+                        let ball_to_receiver = self
+                            .physics
+                            .get_player(&receiver_id)
+                            .map(|r| (r.pos_ft - self.ball_pos_3d.0).length())
+                            .unwrap_or(f32::MAX);
+                        // 层 A：物理可达（确定性）；层 B：接稳（概率）。
+                        let receiver_ready = ball_to_receiver <= catch_radius && will_receive;
                         if receiver_ready {
+                            // 接球事实的位置必须是**冻结的传球终点**，而不是接球人
+                            // 当时的身体位置。
+                            // round-6：`PassReceived.position` 应携带**球的实际到达位置**，
+                            // 而不是冻结点 `to_pos`。
+                            //
+                            // round-10（层 A）更正：层 A 判定改用「球与接球人的**实际**
+                            // 距离 ≤ catch_radius」后，接球成功时球可能距冻结点数英尺
+                            // （因为接球人按自己的估计跑位）。若仍把球瞬移到 `to_pos`，
+                            // 会产生两个错误：
+                            //   (a) 球的飞行终点被暴改为一个它从未到达的位置（伪造事实）；
+                            //   (b) `Held` 要求 `BALL_WITH_HOLDER` ≤ leash，而接球人可能
+                            //       距 `to_pos` 超过 leash —— 实测 seed 5 tick 14338
+                            //       报 `BALL_WITH_HOLDER: ball 3.07 ft from holder`。
+                            //
+                            // 正确做法：接球成功时把球**收到接球人身上**（持球锚点），
+                            // 位置即接球人当前位置——这才是物理事实，也天然满足 leash。
+                            let catch_spot = self
+                                .physics
+                                .get_player(&receiver_id)
+                                .map(|r| r.pos_ft)
+                                .unwrap_or(*to_pos);
+                            self.ball_pos_3d = (catch_spot, self.rules.ball_holder_height_ft);
+                            // 发布落点修正事实（层 A，P-1）：当实际到达位置与
+                            // 传球人冻结的意图不同时，把差异登记为事实，使
+                            // 事实账本自洽（不允许下游各自解释同一传球）。
+                            let divergence = (catch_spot - *to_pos).length();
+                            if divergence > f32::EPSILON {
+                                self.pending_events.push(GameEvent::PassLandingCorrected {
+                                    receiver_id: receiver_id.clone(),
+                                    intended: (to_pos.x, to_pos.y),
+                                    actual: (catch_spot.x, catch_spot.y),
+                                    divergence_ft: divergence,
+                                });
+                            }
                             self.pending_events.push(GameEvent::PassReceived {
                                 receiver_id: receiver_id.clone(),
-                                position: (self.ball_pos_3d.0.x, self.ball_pos_3d.0.y),
+                                position: (catch_spot.x, catch_spot.y),
                             });
                             self.pending_pass_inbound = false;
                             if is_inbound_pass {
@@ -1994,74 +2589,38 @@ impl MatchEngine {
                             });
                             self.last_passer_id = None;
                         } else {
-                            // Keep the release outcome, then use a bounded
-                            // control transfer to the receiver's current body
-                            // position. This preserves the frozen pass fact
-                            // without teleporting either the ball or player.
-                            let receiver_pos = self
-                                .physics
-                                .get_player(&receiver_id)
-                                .map(|receiver| receiver.pos_ft)
-                                .unwrap_or(*to_pos);
-                            let speed_budget = (self.rules.ball_max_speed_ftps
-                                - self.rules.invariant_speed_tolerance_ftps)
-                                .max(self.rules.invariant_speed_tolerance_ftps);
-                            let transfer_duration = ((*to_pos - receiver_pos).length()
-                                / speed_budget)
-                                .max(self.rules.tick_seconds);
-                            self.pending_pass_receiver = Some(receiver_id.clone());
-                            self.pending_pass_inbound = is_inbound_pass;
-                            new_ball_state = Some(BallTrajectoryKind::ControlTransfer {
-                                from_pos: *to_pos,
-                                from_z: self.ball_pos_3d.1,
-                                target_pos: receiver_pos,
-                                target_z: self.rules.ball_holder_height_ft,
-                                carrier_id: receiver_id,
-                                start_time: current_t,
-                                duration: transfer_duration,
+                            // 层 A/层 B 不通过：球落到它**实际到达的位置**。
+                            // 层 A 不可达 → 球在人之外；层 B 未接稳 → 球在人身旁。
+                            // 两者都是 loose ball（用户批准的设计点 1）：
+                            // 「接不到就是接不到」，不是全知全能地送到手里。
+                            //
+                            // 发球传球失败时必须回到活球阶段，否则游戏卡在
+                            // DeadBall/ActionExecution（实测 120k tick 无进展）。
+                            let arrival = self.ball_pos_3d.0;
+                            if is_inbound_pass {
+                                self.transition_phase(SubPhase::Initiation);
+                                self.set_game_flow(GameFlowState::LiveBall);
+                                self.last_decision_time = -self.rules.decision_interval_seconds;
+                            }
+                            self.pending_pass_receiver = None;
+                            // 传球结束：丢弃本回合的接球人估计（下一回合重新形成预判）。
+                            self.receiver_estimate = None;
+                            self.pending_events.push(GameEvent::PassDropped {
+                                passer_id,
+                                receiver_id: receiver_id.clone(),
+                                position: (arrival.x, arrival.y),
                             });
+                            // 归因：传球失误（层 A 不可达 或 层 B 未接稳）。
+                            self.pending_loose_ball_terminal =
+                                Some(nba_domain::PossessionEndCause::TurnoverPassDropped);
+                            new_ball_state = Some(self.loose_ball_from(arrival, segment));
                         }
-                    } else {
-                        if is_inbound_pass {
-                            self.transition_phase(SubPhase::Initiation);
-                            self.set_game_flow(GameFlowState::LiveBall);
-                            self.last_decision_time = -self.rules.decision_interval_seconds;
-                        }
-                        self.pending_events.push(GameEvent::PassDropped {
-                            passer_id,
-                            receiver_id,
-                            position: (self.ball_pos_3d.0.x, self.ball_pos_3d.0.y),
-                        });
-                        self.pending_loose_ball_terminal =
-                            Some(nba_domain::PossessionEndCause::TurnoverPassDropped);
-                        new_ball_state = Some(BallTrajectoryKind::LooseBall {
-                            pos: self.ball_pos_3d.0,
-                            // 掉球的初速必须服从球的**速度上限**。
-                            //
-                            // 此前直接取 `segment / duration`（整条传球矢量除
-                            // 以时长）——一次 68ft 传球在 duration=1.4s 下得到
-                            // 49 ft/s 的初速，松球随即飞出边线。实测每场出现
-                            // **41 次出界**（真实 NBA 约 12–14 次）。
-                            //
-                            // 这里改为按规则通道的 `ball_max_speed_ftps`
-                            // 收敛（留安全余量），方向仍沿传球矢量。
-                            vel: {
-                                let dir = segment.normalize_or_zero();
-                                let cap = (self.rules.ball_max_speed_ftps
-                                    - self.rules.invariant_speed_tolerance_ftps)
-                                    .max(self.rules.invariant_speed_tolerance_ftps);
-                                dir * cap
-                            },
-                            z: self.ball_pos_3d.1,
-                            vel_z: 0.0,
-                            last_touch_team: self.possession,
-                        });
                     }
                 }
             }
             BallTrajectoryKind::Drive {
                 driver_id,
-                target_pos: _,
+                target_pos: ref target_pos_ref,
                 start_time,
                 duration,
                 successful,
@@ -2085,6 +2644,29 @@ impl MatchEngine {
                 let hoop_pos = self.rules.court.hoop_pos(is_home);
                 let dist_to_hoop = (driver_pos - hoop_pos).length();
 
+                // ## 过人后重定向（round-18 两段式几何的第二段）
+                //
+                // 起手目标是被过防守人身旁的空档（第一步过人）；越过他
+                // （沿突破方向投影领先）后，把目标切回**篮筐**，完成
+                // 「过人 → 攻框」的完整几何。
+                // 时间基重定向：被过防守人以极速让位，约一个加速窗口
+                // （0.35s）后通道即开，届时切回攻框目标。空间基判定
+                // （「越过防守人」）在碰撞边界处永不可达，实测卡死。
+                if self.beaten_defender_id.is_some() && current_t - start_time >= 0.35 {
+                    if let Some(dp) = self.physics.get_player(driver_id) {
+                        let drv_spd = dp.target_speed_ftps;
+                        let morale = dp.morale.clone();
+                        self.physics.set_player_target(
+                            driver_id,
+                            *target_pos_ref,
+                            drv_spd,
+                            "DriveToBasket",
+                            "BallHandler",
+                            &morale,
+                        );
+                        self.beaten_defender_id = None;
+                    }
+                }
                 // 1. 中途分流决策（Drive Branching: 突分 Kickout 或急停中投 Pull-up）
                 let elapsed = current_t - start_time;
                 let mut branched = false;
@@ -2111,7 +2693,16 @@ impl MatchEngine {
                             Possession::Away => "away",
                         };
                         for teammate in &all_players {
-                            if teammate.team == off_team_str && teammate.id != *driver_id {
+                            // ## on_court 过滤（round-18 修复）
+                            //
+                            // 此前漏掉：突破分球把球传给了**替补席上的队友**
+                            // （实测 seed 31337：分球给站在板凳区 y=-4 的
+                            // H_08，球被「已下场的人接住」，BALL_HOLDER_ON_COURT
+                            // Hard 190 次）。
+                            if teammate.on_court
+                                && teammate.team == off_team_str
+                                && teammate.id != *driver_id
+                            {
                                 let dist_to_team_hoop = (teammate.pos_ft - hoop_pos).length();
                                 if dist_to_team_hoop
                                     >= self.rules.tactics.drive_kickout_pass_dist_ft
@@ -2169,10 +2760,19 @@ impl MatchEngine {
                         .map(|player| player.pos_ft)
                         .unwrap_or(self.ball_pos_3d.0);
                     let holder_height = self.rules.ball_holder_height_ft;
+                    // ## 事实修正（round-16）：先判定空间门，再申报结果
+                    //
+                    // 原实现无条件把预掷的 `finish_made` 写进事件，但空间门
+                    // （距筐 >16ft）会把该「进球」静默丢弃——实测 6 场 397 次
+                    // DRIVE_SCORE 中 80%（场均 52.7 次）未变成出手，事件流与
+                    // 记分簿自相矛盾（事实账目违规）。
+                    let stall_hoop_pos = self.rules.court.hoop_pos(is_home);
+                    let stall_no_finish =
+                        successful && ((driver_pos - stall_hoop_pos).length() > 16.0_f32);
                     self.pending_events.push(GameEvent::DriveOutcome {
                         driver_id: driver_id.clone(),
-                        successful,
-                        finish_made,
+                        successful: successful && !stall_no_finish,
+                        finish_made: finish_made && !stall_no_finish,
                     });
 
                     if let Some(fouler_id) = fouler_id {
@@ -2182,11 +2782,7 @@ impl MatchEngine {
                             is_shooting: true,
                         });
                         self.ball_pos_3d = (driver_pos, holder_height);
-                        new_ball_state = Some(BallTrajectoryKind::Dead {
-                            pos: driver_pos,
-                            z: holder_height,
-                            last_touch_team: self.possession,
-                        });
+                        new_ball_state = Some(self.dead_state(driver_pos, holder_height));
                         self.transition_phase(SubPhase::DeadBallReset);
                         self.current_event = Some("DRIVE_FOUL".to_string());
                         self.current_callout =
@@ -2202,7 +2798,16 @@ impl MatchEngine {
                             new_ball_state = Some(BallTrajectoryKind::Held {
                                 carrier_id: driver_id.clone(),
                             });
-                            self.transition_phase(SubPhase::Initiation);
+                            // ## 停滞不重新发起战术（round-16）
+                            //
+                            // 原实现转回 Initiation，而 Initiation 在活球下要等
+                            // `tactical_initiation_seconds = 6.5s` 才回到可决策
+                            // 状态——停滞一次就白燃 6.5s 进攻时钟。突破受阻是
+                            // **进攻的延续**，不是新回合，直接回 ActionExecution
+                            // 下一决策间隔（2.4s）即可行动。
+                            // 实测该机制是 24s 违例（场均 12.8 次，真实 ~0.5）
+                            // 的主要时间吞噬器。
+                            self.transition_phase(SubPhase::ActionExecution);
                             self.current_event = Some("DRIVE_STOPPED".to_string());
                             self.current_callout =
                                 Some(format!("{} 突破被防守延误于外线，重新组织", driver_id));
@@ -2306,7 +2911,8 @@ impl MatchEngine {
                         new_ball_state = Some(BallTrajectoryKind::Held {
                             carrier_id: driver_id.clone(),
                         });
-                        self.transition_phase(SubPhase::Initiation);
+                        // 同上：突破未成是进攻延续，不重置为战术发起等待。
+                        self.transition_phase(SubPhase::ActionExecution);
                         self.current_event = Some("DRIVE_STOPPED".to_string());
                         self.current_callout =
                             Some(format!("{} 突破被防守延误，重新组织", driver_id));
@@ -2359,7 +2965,12 @@ impl MatchEngine {
                             let baseline =
                                 Court::nearest_boundary_with_geometry(h_pos, self.rules.court);
                             self.ball_pos_3d = (h_pos, self.rules.rim_height_ft);
-                            self.emit_possession_summary(nba_domain::PossessionEndCause::Score, None, None, None);
+                            self.emit_possession_summary(
+                                nba_domain::PossessionEndCause::Score,
+                                None,
+                                None,
+                                None,
+                            );
                             self.transition_phase(SubPhase::DeadBallReset);
                             self.start_inbound_transition(
                                 baseline,
@@ -2454,7 +3065,19 @@ impl MatchEngine {
                         }
                         self.start_rebound_outlet(reb_id, reb_pos, is_offensive);
                     } else {
-                        // 无人在有效范围内保护篮板，球弹落变地板球
+                        // 无人在有效范围内保护篮板，球弹落变地板球。
+                        //
+                        // ## 篮板源归因（round-17 修复）
+                        //
+                        // 投/罚不中弹出的地板球**不是失误**：防守方收下是
+                        // 防守篮板，进攻方收下是前场篮板。原实现默认
+                        // `TurnoverLooseBall`，把「防守方拿到罚球不中的球」
+                        // 记成失误——既虚增失误数，又因不存在「失误球员」
+                        // 触发 TURNOVER_ACTOR_CONSISTENCY Hard
+                        // （实测 seed 2 possession 83：FT 不中→地板球→
+                        // 防守收下→turnover_player_id=null）。
+                        self.pending_loose_ball_terminal =
+                            Some(nba_domain::PossessionEndCause::DefensiveRebound);
                         new_ball_state = Some(BallTrajectoryKind::LooseBall {
                             pos: reb_pos,
                             vel: Vec2::ZERO,
@@ -2746,8 +3369,9 @@ impl MatchEngine {
             away_targets = off_targets;
             TacticalPlanner::bind_targets(&mut home_targets, &home_roster);
         }
+        // 取为 owned String，避免与后续 `&mut self` 调用（接球人估计）冲突。
         let active_driver_id = match &self.ball_state {
-            BallTrajectoryKind::Drive { driver_id, .. } => Some(driver_id.as_str()),
+            BallTrajectoryKind::Drive { driver_id, .. } => Some(driver_id.clone()),
             _ => None,
         };
         let inbounder_override = match &self.ball_state {
@@ -2763,16 +3387,38 @@ impl MatchEngine {
             } => Some((inbounder_id.clone(), *baseline_pos)),
             _ => None,
         };
-        let pass_receiver_override = match &self.ball_state {
+        // 层 A（P-1 有限信息）：接球人**不得**直读传球人的冻结落点。
+        //
+        // 旧实现把 `BallState::Pass.to_pos`（传球人的私有意图）直接注入接球人的
+        // 运动目标，于是接球人必然到位——全知全能，违反真实性。实测：无论把
+        // 接球人的 `off_ball_sense`（预估能力）设为 0.95 还是 0.05，2/4 种子的
+        // 接球轨迹**逐位相同**（见 `tests/pass_information.rs`）。
+        //
+        // 现改为：接球人按**自己的感知**估算球会到哪里，并向该估计值收敛。
+        // 估计可能错 ⇒ 他可能接不到（真实：大个策应给小个传提前量，小个
+        // 可能启动方向不同而接不到）。
+        // 先从球态取出所需字段（避免与 `estimate_receiver_landing` 的
+        // `&mut self` 冲突），再计算接球人的**自身估计**。
+        let pass_fields = match &self.ball_state {
             BallTrajectoryKind::Pass {
                 target_id, to_pos, ..
             } => Some((target_id.clone(), *to_pos)),
-            BallTrajectoryKind::ControlTransfer {
-                carrier_id,
-                target_pos,
-                ..
-            } => Some((carrier_id.clone(), *target_pos)),
             _ => None,
+        };
+        let pass_receiver_override = if let Some((rid, frozen)) = pass_fields {
+            let est = self.estimate_receiver_landing(&rid, frozen);
+            // 接球人标记已在 `transition_ball_state`（唯一写入口）设置，
+            // 确保物理步进先于战术规划时也能生效。
+            Some((rid, est))
+        } else {
+            match &self.ball_state {
+                BallTrajectoryKind::ControlTransfer {
+                    carrier_id,
+                    target_pos,
+                    ..
+                } => Some((carrier_id.clone(), *target_pos)),
+                _ => None,
+            }
         };
         let rebound_chase_target = match &self.ball_state {
             BallTrajectoryKind::RimRebound { target_landing, .. } => Some(*target_landing),
@@ -2783,7 +3429,16 @@ impl MatchEngine {
         let away_jumper = self.select_jumper_id(Possession::Away);
         for target in home_targets.into_iter().chain(away_targets) {
             if let Some(player_id) = target.player_id {
-                if active_driver_id == Some(player_id.as_str()) {
+                if active_driver_id.as_deref() == Some(player_id.as_str()) {
+                    continue;
+                }
+                // 被过恢复窗口（round-19）：被过掉的防守人正扑向回追位，
+                // 战术层不得立即把他派回原位（否则让位形同虚设）。
+                if self
+                    .beaten_recovery_until
+                    .get(player_id.as_str())
+                    .is_some_and(|&until| current_t < until)
+                {
                     continue;
                 }
                 // If player is currently executing a locked action window (shot, layup, dunk, pass, screen),
@@ -2840,7 +3495,8 @@ impl MatchEngine {
                         (*inb_pos, 15.0, "INBOUND_SETUP".to_string())
                     } else if let Some((rx_id, rx_pos)) = &pass_receiver_override {
                         if rx_id == &player_id {
-                            (*rx_pos, 20.0, "RECEIVE_CUT".to_string())
+                            let (aim, spd) = self.receive_approach(*rx_pos, &player_id);
+                            (aim, spd, "RECEIVE_CUT".to_string())
                         } else {
                             (target.target_pos, target.speed, target.action)
                         }
@@ -2849,7 +3505,8 @@ impl MatchEngine {
                     }
                 } else if let Some((rx_id, rx_pos)) = &pass_receiver_override {
                     if rx_id == &player_id {
-                        (*rx_pos, 20.0, "RECEIVE_CUT".to_string())
+                        let (aim, spd) = self.receive_approach(*rx_pos, &player_id);
+                        (aim, spd, "RECEIVE_CUT".to_string())
                     } else {
                         (target.target_pos, target.speed, target.action)
                     }
@@ -2861,7 +3518,21 @@ impl MatchEngine {
                         .unwrap_or(99.0);
                     let is_tipoff_jumper = matches!(&self.ball_state, BallTrajectoryKind::LooseBall { z, .. } if *z > 0.5)
                         && (player_id == home_jumper || player_id == away_jumper);
-                    if cur_dist <= 25.0 && !is_tipoff_jumper {
+                    // ## 地板球追逐不受距离限制（round-17 活锁修复）
+                    //
+                    // 原实现的 `cur_dist <= 25.0` 硬半径在球停于空档区时失效：
+                    // 实测 seed 6，罚球后松球停在 (85.6, 29.0)，最近球员
+                    // 59.1 ft——无人满足 25 ft 条件 → 全场站桩 247 秒直到节末
+                    // （POSSESSION_DURATION_BOUNDS Hard: 258.4s > 40s）。
+                    //
+                    // 第一性原理：活球是场上**唯一完全可观测**的对象（不是
+                    // 任何人的私有信息），地板上躺着一颗活球时，「去抢球」
+                    // 压倒一切战术站位——真实篮球里所有近处球员都会扑向球。
+                    // 篮板追逐（RimRebound 的落点预判）保留 25 ft 半径；
+                    // 松球（LooseBall）无条件追逐。
+                    let is_live_loose_ball =
+                        matches!(self.ball_state, BallTrajectoryKind::LooseBall { .. });
+                    if (is_live_loose_ball || cur_dist <= 25.0) && !is_tipoff_jumper {
                         (reb_spot, 16.0, "REBOUND_CRASH".to_string())
                     } else {
                         (target.target_pos, target.speed, target.action)
@@ -3067,11 +3738,9 @@ impl MatchEngine {
                             .unwrap_or(self.possession == Possession::Home);
                         let ft_spot = Court::free_throw_pos(shooter_is_home, &self.rules);
                         self.ball_pos_3d = (ft_spot, self.rules.ball_holder_height_ft);
-                        self.transition_ball_state(BallTrajectoryKind::Dead {
-                            pos: ft_spot,
-                            z: self.rules.ball_holder_height_ft,
-                            last_touch_team: self.possession,
-                        });
+                        self.transition_ball_state(
+                            self.dead_state(ft_spot, self.rules.ball_holder_height_ft),
+                        );
                     }
                 }
             }
@@ -3110,8 +3779,8 @@ impl MatchEngine {
                 let event_id = self.event_id_counter;
                 let kind = event.event_type_str().to_string();
                 // D4.1：按语义槽位解析父事件，并登记本事件作为新的触发事件。
-                let parent_event_id = causal_parent_of(&kind)
-                    .and_then(|slot| self.causal_links.get(slot).copied());
+                let parent_event_id =
+                    causal_parent_of(&kind).and_then(|slot| self.causal_links.get(slot).copied());
                 if let Some(slot) = causal_trigger_slot(&kind) {
                     self.causal_links.insert(slot, event_id);
                 }
@@ -3227,7 +3896,15 @@ impl MatchEngine {
             .clamp_playable(target_pos, self.rules.player_radius_ft);
         let drive_dist = (target_pos - from_pos).length();
         let drive_speed = (driver.max_speed_ftps * self.rules.tactics.drive_speed_ratio).max(1.0);
-        let drive_duration = (drive_dist / drive_speed).clamp(
+        // ## 时长必须包含加速坡（round-18）
+        //
+        // 原公式 `dist/speed` 假设瞬时达到极速。实测从静止加速
+        // （max_player_accel 35 ft/s²）到 ~25 ft/s 需 ~0.7s、损失 ~9 ft
+        // 里程——tau=1 时持球人仍距目标 5-10 ft，只能在 7-16 ft 抛投
+        // （篮下≤4ft 出手占比 2.4%，真实 25-50%）。加入 `speed/accel`
+        // 的加速坡项，使时长覆盖真实到达时间。
+        let accel = self.rules.max_player_accel_ftps2.max(f32::EPSILON);
+        let drive_duration = (drive_dist / drive_speed + drive_speed / accel).clamp(
             self.rules.tactics.drive_min_duration_seconds,
             self.rules.tactics.drive_max_duration_seconds,
         );
@@ -3253,9 +3930,112 @@ impl MatchEngine {
             }
             _ => format!("{} 持球强突，冲击篮筐！", driver.jersey),
         };
+        // ## 被过掉的防守人必须真的被过掉（round-18）
+        //
+        // 根因链：突破预掷 `successful=true`，但物理层持球人直撞贴身防守人
+        // （最近防守人 3.7 ft ≈ min_player_separation），碰撞消解每 tick
+        // 清零速度——实测 0% 突破到达 ≤4.5ft，65% 停在离筐 18.6 ft。
+        //
+        // 语义对齐（与拦截锚定球到抢断者同一原则——概率在事件时刻裁定，
+        // 事实随后回放）：`successful` 意味着**过掉了对位防守人**。把该
+        // 防守人实际位移出突破走廊（侧向 + 分离余量），他随后由防守战术
+        // 重新追防——这正是真实篮球「被过掉后回追」的几何。
+        let mut target_pos_override: Option<Vec2> = None;
+        if resolution.successful {
+            // ## 过人变向（round-18 修订版：绕行而非瞬移）
+            //
+            // 初版把被过的防守人瞬移出通道——触发 PLAYER_TELEPORT 不变量
+            // （实测 70-94 Hard/seed）。不变量是对的：位置跳变是伪造事实。
+            //
+            // 物理一致的过人语义：**持球人变向绕过**防守人（真实的 crossover
+            // 几何）。突破目标点侧移一个分离余量，路径绕开贴身防守人；
+            // 防守人随后由战术层追防（真实「被过掉后回追」）。
+            let drive_dir = (target_pos - from_pos).normalize_or_zero();
+            let perp = Vec2::new(-drive_dir.y, drive_dir.x);
+            // ## 让位整条通道（round-19：从单人到全体）
+            //
+            // round-18 只让位**最近的一名**通道内防守人——过掉第一人对
+            // 后，护框者（第二道防线）仍在篮下挡住最后几米，实测篮下
+            // ≤4ft 出手仅 3.8%（真实 25-50%）。
+            //
+            // 语义：`successful` 预掷的是「这次突破**整体**打成了」——
+            // 包括过掉对位人与顶开/绕过护框。因此通道内**所有**防守人
+            // 都应让位（各自向远离突破方向的侧向清空点极速移动）；
+            // 对抗强度已由 successful 的掷骰（防守能力加权）承担，
+            // 几何层只负责让事实成立。
+            let clear = self.rules.min_player_separation_ft * 2.0 + self.rules.player_radius_ft;
+            let mut beaten_ids: Vec<String> = Vec::new();
+            let mut beat_spots: Vec<(String, Vec2, f32, String, String)> = Vec::new();
+            for q in self.physics.get_players().values() {
+                if !q.on_court || q.team == driver.team {
+                    continue;
+                }
+                let rel = q.pos_ft - from_pos;
+                let along = rel.dot(drive_dir);
+                let lateral = (rel - drive_dir * along).length();
+                if along > 0.0
+                    && along < drive_dist
+                    && lateral < self.rules.tactics.drive_lane_offset_ft.max(4.0)
+                {
+                    let side = if perp.dot(rel) >= 0.0 { -1.0 } else { 1.0 };
+                    let spot = self.rules.court.clamp_playable(
+                        q.pos_ft + perp * side * clear,
+                        self.rules.player_radius_ft,
+                    );
+                    beat_spots.push((
+                        q.id.clone(),
+                        spot,
+                        q.max_speed_ftps,
+                        q.slot.clone(),
+                        q.morale.clone(),
+                    ));
+                    beaten_ids.push(q.id.clone());
+                }
+            }
+            // 主对位人（离持球人最近者）驱动两段式过人几何；其余
+            // （护框者等）只让位，不参与重定向判定。
+            let primary = self
+                .physics
+                .get_players()
+                .values()
+                .filter(|q| beaten_ids.contains(&q.id))
+                .min_by(|a, b| {
+                    (a.pos_ft - from_pos)
+                        .length_squared()
+                        .partial_cmp(&(b.pos_ft - from_pos).length_squared())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|q| q.id.clone());
+            for (bid, spot, sp, slot, morale) in beat_spots {
+                self.physics
+                    .set_player_target(&bid, spot, sp, "BeatenRecovery", &slot, &morale);
+                self.beaten_recovery_until.insert(
+                    bid,
+                    self.current_time + self.rules.tactics.drive_beaten_recovery_seconds,
+                );
+            }
+            if let Some(pid) = primary {
+                if let Some(q) = self.physics.get_player(&pid) {
+                    let side = if perp.dot(q.pos_ft - from_pos) >= 0.0 {
+                        -1.0
+                    } else {
+                        1.0
+                    };
+                    let beat_spot = self.rules.court.clamp_playable(
+                        q.pos_ft + perp * side * clear,
+                        self.rules.player_radius_ft,
+                    );
+                    // 两段式过人几何（真实 crossover）：
+                    //   第一段：持球人目标 = 过人点；第二段：重定向攻框。
+                    target_pos_override = Some(beat_spot);
+                    self.beaten_defender_id = Some(pid);
+                }
+            }
+        }
+        let initial_target = target_pos_override.unwrap_or(target_pos);
         self.physics.set_player_target(
             driver_id,
-            target_pos,
+            initial_target,
             drive_speed,
             action_str,
             "BallHandler",
@@ -3449,11 +4229,7 @@ impl MatchEngine {
         // 的 Dead 状态，不得让 ball_pos_3d 指向篮筐而权威态仍为 Held。
         self.ball_pos_3d = (ft_pos, self.rules.ball_holder_height_ft);
         if !matches!(self.ball_state, BallTrajectoryKind::Dead { .. }) {
-            self.transition_ball_state(BallTrajectoryKind::Dead {
-                pos: ft_pos,
-                z: self.rules.ball_holder_height_ft,
-                last_touch_team: self.possession,
-            });
+            self.transition_ball_state(self.dead_state(ft_pos, self.rules.ball_holder_height_ft));
         } else if let BallTrajectoryKind::Dead { pos, z, .. } = &mut self.ball_state {
             *pos = ft_pos;
             *z = self.rules.ball_holder_height_ft;
@@ -3483,7 +4259,12 @@ impl MatchEngine {
                 // Emit the score summary before the inbound helper calls
                 // complete_possession(), so the boundary has a causal fact.
                 self.current_possession_shooter = Some(shooter_id.clone());
-                self.emit_possession_summary(nba_domain::PossessionEndCause::Score, None, None, None);
+                self.emit_possession_summary(
+                    nba_domain::PossessionEndCause::Score,
+                    None,
+                    None,
+                    None,
+                );
                 let hoop = self.rules.court.hoop_pos(shooter_is_home);
                 self.transition_phase(SubPhase::Initiation);
                 self.set_game_flow(GameFlowState::DeadBall);
@@ -3520,11 +4301,7 @@ impl MatchEngine {
                 | BallTrajectoryKind::InboundReady { .. }
                 | BallTrajectoryKind::LooseBall { .. }
         ) {
-            self.transition_ball_state(BallTrajectoryKind::Dead {
-                pos: rebound_from.0,
-                z: rebound_from.1,
-                last_touch_team: self.possession,
-            });
+            self.transition_ball_state(self.dead_state(rebound_from.0, rebound_from.1));
         }
         self.transition_ball_state(rebound);
     }
@@ -3564,7 +4341,12 @@ impl MatchEngine {
             self.free_throw_attempt = 0;
             if made {
                 self.current_possession_shooter = Some(shooter_id.clone());
-                self.emit_possession_summary(nba_domain::PossessionEndCause::Score, None, None, None);
+                self.emit_possession_summary(
+                    nba_domain::PossessionEndCause::Score,
+                    None,
+                    None,
+                    None,
+                );
                 self.transition_phase(SubPhase::Initiation);
                 self.set_game_flow(GameFlowState::DeadBall);
                 self.start_inbound_transition(Court::hoop_pos(shooter_is_home), self.ball_pos_3d);
@@ -3595,6 +4377,10 @@ impl MatchEngine {
             .get_player(receiver_id)
             .map(|p| (p.pos_ft - from_pos).length())
             .unwrap_or(20.0);
+        // 领传由**决策层**给出（`CandidateAction::Pass.to_pos` 已含提前量），
+        // 此处**不得**再叠加一次——实测叠加后 `PASS_CORRIDOR_REACHABLE`
+        // 由 9 条恶化到 28 条（接收人因减速模型无法到达过远的落点）。
+        // outlet 一传走 `start_rebound_outlet`，那条路径没有决策层，故单独领传。
         let target_lead_pos = to_pos;
         self.active_windows.insert(
             passer_id.to_string(),
@@ -3603,6 +4389,8 @@ impl MatchEngine {
         let pass_dist = (target_lead_pos - from_pos).length();
         let duration = self.rules.pass_duration(pass_dist, inbound);
         self.pending_pass_receiver = None;
+        // 传球结束：丢弃本回合的接球人估计（下一回合重新形成预判）。
+        self.receiver_estimate = None;
         self.pending_pass_inbound = inbound;
         let receive_success =
             self.resolve_pass_success(passer_id, receiver_id, from_pos, target_lead_pos);
@@ -3616,7 +4404,8 @@ impl MatchEngine {
         // 概率的语义是「这次传球是否被拦截」，不是「这个 tick 是否被拦截」，
         // 因此必须一次性裁定，并把结果作为事实随弹道携带（与
         // `receive_success` 同一模式）。
-        let intercept = self.resolve_pass_interception(passer_id, receiver_id, from_pos, target_lead_pos);
+        let intercept =
+            self.resolve_pass_interception(passer_id, receiver_id, from_pos, target_lead_pos);
         self.transition_ball_state(BallTrajectoryKind::Pass {
             from_pos,
             to_pos: target_lead_pos,
@@ -3675,11 +4464,7 @@ impl MatchEngine {
         from_pos: Vec2,
         to_pos: Vec2,
     ) -> Option<(String, bool)> {
-        let def_team = match self
-            .physics
-            .get_player(passer_id)
-            .map(|p| p.team.as_str())
-        {
+        let def_team = match self.physics.get_player(passer_id).map(|p| p.team.as_str()) {
             Some("home") => "away",
             Some("away") => "home",
             _ => return None,
@@ -3702,8 +4487,8 @@ impl MatchEngine {
             .values()
             .filter(|p| p.on_court && p.team == def_team && p.id != receiver_id)
             .filter_map(|p| {
-                let projection_t = ((p.pos_ft - from_pos).dot(segment) / segment_length_sq)
-                    .clamp(0.0, 1.0);
+                let projection_t =
+                    ((p.pos_ft - from_pos).dot(segment) / segment_length_sq).clamp(0.0, 1.0);
                 let closest = from_pos + segment * projection_t;
                 let clearance = (p.pos_ft - closest).length();
                 // 只有在球道可达范围内才算「有机会碰到球」。
@@ -3733,6 +4518,201 @@ impl MatchEngine {
             }
             if roll < steal_prob + tip_prob {
                 return Some((defender_id, false));
+            }
+        }
+        None
+    }
+
+    /// 贴身切球成立时的事实应用：球脱手 → loose ball → 失误归因。
+    ///
+    /// 与 `PassTipped` 的 loose ball 路径同构：球从持球人处弹出，
+    /// 双方争抢；`pending_loose_ball_terminal` 记录**若攻方未能夺回**时的
+    /// 回合终止原因（`TurnoverLooseBall` = 带球丢球）。
+    ///
+    /// 弹出方向：以防守人→持球人方向为基准（切球动作把球从护球位置拨走），
+    /// 叠加由 `poke_deflection_spread_rad` 限幅的确定性伪随机偏转。
+    fn apply_on_ball_poke(&mut self, carrier_id: &str, defender_id: &str) {
+        let Some(carrier_pos) = self.physics.get_player(carrier_id).map(|p| p.pos_ft) else {
+            return;
+        };
+        let Some(defender_pos) = self.physics.get_player(defender_id).map(|p| p.pos_ft) else {
+            return;
+        };
+        let spread = self.rules.resolve.ball_security.poke_deflection_spread_rad;
+        // 基准方向：防守人 → 持球人（球被从持球人身上拨离防守人方向）。
+        let base_dir = (carrier_pos - defender_pos).normalize_or_zero();
+        let base_dir = if base_dir.length_squared() <= f32::EPSILON {
+            // 完全重叠时退化：取持球人朝进攻篮筐方向，保持确定性。
+            let hoop = self
+                .rules
+                .court
+                .hoop_pos(self.possession == Possession::Home);
+            (hoop - carrier_pos).normalize_or_zero()
+        } else {
+            base_dir
+        };
+        let angle = (self.rng.gen::<f32>() * 2.0 - 1.0) * spread;
+        let (sin_a, cos_a) = angle.sin_cos();
+        let dir = Vec2::new(
+            base_dir.x * cos_a - base_dir.y * sin_a,
+            base_dir.x * sin_a + base_dir.y * cos_a,
+        );
+        // 球的位置取**球当前的实际坐标**，而不是持球人的身体坐标。
+        //
+        // 持球时球有 `ball_holder_offset_ft` 的前向/侧向偏移与弹跳相位
+        // （`ballistics.rs` 的 `Held` 分支），两者并不相等。若用
+        // `carrier_pos` 作为松球起点，球会在单帧内跳变该偏移量——实测
+        // 3.87 ft/tick，被 `BALL_SPEED` 不变量判为 96.72 ft/s（超上限 85）。
+        let ball_pos = self.ball_pos_3d.0;
+        // 切球是**小幅拨离**，不是全速发射：球原在持球人手里（近乎静止），
+        // 被拨一下只能获得有限初速。取「绝对上限」与「本次球速上限的比例」
+        // 的较小者，保证不同规则档案下都不越过 `BALL_SPEED` 不变量。
+        let policy = &self.rules.resolve.ball_security;
+        let cap = (self.rules.ball_max_speed_ftps - self.rules.invariant_speed_tolerance_ftps)
+            .max(self.rules.invariant_speed_tolerance_ftps);
+        let speed = policy
+            .poke_ball_speed_ftps
+            .min(cap * policy.poke_ball_speed_ratio)
+            .max(0.0);
+
+        self.pending_events.push(GameEvent::BallPokedLoose {
+            handler_id: carrier_id.to_string(),
+            defender_id: defender_id.to_string(),
+            position: (ball_pos.x, ball_pos.y),
+        });
+        // 归因：带球丢球（真实 NBA 占比最大的失误类型）。
+        self.pending_loose_ball_terminal = Some(nba_domain::PossessionEndCause::TurnoverLooseBall);
+        self.current_possession_turnover_player = Some(carrier_id.to_string());
+        // 传球链断：丢弃接球人估计与传球人记录。
+        self.receiver_estimate = None;
+        self.last_passer_id = None;
+        self.pending_pass_receiver = None;
+        self.transition_ball_state(BallTrajectoryKind::LooseBall {
+            pos: ball_pos,
+            vel: dir * speed,
+            // 沿用球**当前的** z，与 `loose_ball_from` 同源。
+            //
+            // 不可硬置 `ball_holder_height_ft`：那会在长下落中让重力把
+            // |v| 累积到超过 `ball_max_speed_ftps`，触发 `BALL_SPEED` Hard
+            // 违规（实测 seed 31337 tick 3755 → 96.72 ft/s > 85）。
+            // 球被切掉时的高度是**事实**，不应被重置。
+            z: self.ball_pos_3d.1,
+            vel_z: 0.0,
+            last_touch_team: self.possession,
+        });
+    }
+
+    /// 贴身切球（on-ball poke check）的一次性裁定。
+    ///
+    /// ## 语义
+    ///
+    /// 回答「**这次持球暴露**是否被防守者切掉」，而不是「这个 tick 是否被切」。
+    /// 与 `resolve_pass_interception` 同形：**在事件发生的那一刻裁定一次**，
+    /// 结果作为事实（loose ball）传播。因此不存在逐 tick 概率累积。
+    ///
+    /// ## 为什么需要它（round-13 结构发现）
+    ///
+    /// 真实 NBA 失误构成中「带球丢球」占 **53.6%**（82games 2024-25 IND），
+    /// 是占比最大的一类。此前引擎只有传球失败一条失误路径，
+    /// `TurnoverLooseBall` 在 718 回合中只出现 1 次。
+    ///
+    /// ## 判定依据（均为当前时刻的事实）
+    ///
+    /// - 防守者是否进入 `poke_pressure_radius_ft`（几何可达）；
+    /// - 持球人是否确实处于 `Held` 且未被动作窗口锁定
+    ///   （锁定 = 正在投篮/传球，球不在护球状态，由调用方保证）；
+    /// - 概率由 `capability::poke_check_success` 从**技能与倾向**派生；
+    /// - 逐 tick 按 `poke_attempt_rate_per_sec × dt` 折算尝试频率，
+    ///   使「贴身持续越久、被切风险越大」在**时间积分**意义上成立，
+    ///   而不是让单 tick 概率随时长累积成必然。
+    ///
+    /// 返回 `Some(defender_id)` 表示切球成立。
+    fn resolve_on_ball_poke(
+        &mut self,
+        carrier_id: &str,
+        dt: f32,
+        lock_kinematics: bool,
+    ) -> Option<String> {
+        // 动作窗口锁定（投篮/传球/上篮进行中）时球不在护球状态。
+        if lock_kinematics {
+            return None;
+        }
+        if !matches!(self.ball_state, BallTrajectoryKind::Held { .. }) {
+            return None;
+        }
+        let policy = self.rules.resolve.ball_security.clone();
+        let offense_team = self
+            .physics
+            .get_player(carrier_id)
+            .map(|p| p.team.clone())?;
+        let def_team = match offense_team.as_str() {
+            "home" => "away",
+            _ => "home",
+        };
+        let handler_attrs = self
+            .physics
+            .get_player(carrier_id)
+            .map(|p| p.attributes.clone())?;
+        let handler_risk = self
+            .physics
+            .get_player(carrier_id)
+            .map(|p| p.tendencies.risk_tolerance)
+            .unwrap_or(0.5);
+        let carrier_pos = self
+            .physics
+            .get_player(carrier_id)
+            .map(|p| p.pos_ft)
+            .unwrap_or(self.ball_pos_3d.0);
+
+        // 只有贴身到压力半径内的防守者才构成切球威胁。
+        let mut threats: Vec<(String, f32)> = self
+            .physics
+            .get_players()
+            .values()
+            .filter(|p| p.on_court && p.team == def_team)
+            .filter_map(|p| {
+                let distance = (p.pos_ft - carrier_pos).length();
+                if distance > policy.poke_pressure_radius_ft {
+                    return None;
+                }
+                Some((p.id.clone(), distance))
+            })
+            .collect();
+        // 确定性顺序：距离最近者优先（数值相同时按 id 排序）。
+        threats.sort_by(|a, b| {
+            a.1.partial_cmp(&b.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.0.cmp(&b.0))
+        });
+
+        // 时间积分：贴身持续 dt 秒相当于 rate × dt 次尝试机会。
+        // 单次尝试概率 p，至少成功一次的概率 = 1 − (1−p)^trials。
+        // 这样「贴得更久」以幂律逼近 1，但单 tick 概率不随时长累积。
+        let trials = (policy.poke_attempt_rate_per_sec * dt.max(0.0)).max(0.0);
+        if trials <= f32::EPSILON {
+            return None;
+        }
+        for (defender_id, distance) in threats {
+            let Some(defender_attrs) = self
+                .physics
+                .get_player(&defender_id)
+                .map(|p| p.attributes.clone())
+            else {
+                continue;
+            };
+            let per_try = nba_domain::capability::poke_check_success(
+                &self.rules,
+                &defender_attrs,
+                &handler_attrs,
+                handler_risk,
+            );
+            // 距离越远越难切到：压力半径边缘处线性衰减至 0。
+            let proximity = (1.0 - distance / policy.poke_pressure_radius_ft).clamp(0.0, 1.0);
+            let p = (per_try * proximity).clamp(0.0, 1.0);
+            let miss_all = (1.0 - p).powf(trials);
+            let hit_chance = 1.0 - miss_all;
+            if self.rng.gen::<f32>() < hit_chance {
+                return Some(defender_id);
             }
         }
         None
@@ -3770,7 +4750,6 @@ impl MatchEngine {
             ResolutionLayer::resolve_pass_arrival(
                 &passer,
                 &receiver,
-                evaluation.lane_risk,
                 evaluation.target_openness,
                 catch_equilibrium,
                 &self.rules.resolve.pass,
@@ -3915,10 +4894,26 @@ impl MatchEngine {
             None => return,
         };
         // 犯规方不可能持球；若命中持球者（异常调用），拒绝换人以保球权一致。
+        //
+        // ## holder 引用必须按球态投影判定（round-18 修复）
+        //
+        // 只查 `has_ball` 旗标不够：进攻犯规时球先进 `Dead` 态（旗标已清），
+        // 但 `Dead.last_touch_player` 仍指向犯规的持球人——把他换下场后，
+        // 帧投影的 holder 引用一个不在场的人，触发
+        // `BALL_HOLDER_ON_COURT` Hard（实测 seed 31337：190 次/场）。
+        // 改为：`has_ball` **或** 球态投影（`current_turnover_player_id`）
+        // 命中任一即拒绝。
         if self
             .physics
             .get_player(out_player_id)
             .is_some_and(|p| p.has_ball)
+            || self.current_turnover_player_id().as_deref() == Some(out_player_id)
+            // 飞行中的传球目标也不可换下：飞行 ~0.4s 内换人会让球到达时
+            // 「被已下场的人接住」（实测 seed 31337：t=3142 H_08 在飞行中
+            // 被罚下，到达帧起 Held{H_08} 引用下场者 190 tick）。
+            || self.pending_pass_receiver.as_deref() == Some(out_player_id)
+            || matches!(&self.ball_state,
+                BallTrajectoryKind::Pass { target_id, .. } if target_id == out_player_id)
         {
             return;
         }
@@ -3951,6 +4946,19 @@ impl MatchEngine {
             p.target_pos_ft = bench_spot;
             p.target_speed_ftps = 0.0;
             p.vel_ft = Vec2::ZERO;
+        }
+        // ## 清除对离场者的持球引用（round-18 修复）
+        //
+        // `last_passer_id` / `pending_pass_receiver` 可能仍指向离场者
+        // （如他在界外接球后球出界、引用未被回合边界清除——实测
+        // seed 31337：t=3142 H_08 在 y=-4 接球，43s 后被换下，之后
+        // 每次 Pass/Loose 飞行的 holder 投影都引用这个已下场的人，
+        // 触发 BALL_HOLDER_ON_COURT 190 次）。
+        if self.last_passer_id.as_deref() == Some(out_player_id) {
+            self.last_passer_id = None;
+        }
+        if self.pending_pass_receiver.as_deref() == Some(out_player_id) {
+            self.pending_pass_receiver = None;
         }
         if let Some(p) = self.physics.get_player_mut(&in_player_id) {
             p.on_court = true;
@@ -3995,23 +5003,23 @@ impl MatchEngine {
             return;
         }
         let (pos, z) = self.ball_pos_3d;
-        self.transition_ball_state(BallTrajectoryKind::Dead {
-            pos,
-            z,
-            last_touch_team: self.possession,
-        });
+        // 先取责任球员，再构造 Dead——`dead_state` 内部从权威球态派生，
+        // 因此**不得**在构造后清除 `last_passer_id`：那样会把刚写进载荷的
+        // 最后触球人也一并抹掉，使后续死球终结的归因链断在 None。
+        //
+        // 实测（round-9）：seed 0/2/7 的 8 秒违例在节末死球后触发，
+        // `Dead.last_touch_player` 恒为 None，正是此处顺序造成的。
+        // 载荷已是唯一事实源，不再需要旁路字段存续，故无需立即清空。
+        self.transition_ball_state(self.dead_state(pos, z));
         self.pending_pass_receiver = None;
+        // 传球结束：丢弃本回合的接球人估计（下一回合重新形成预判）。
+        self.receiver_estimate = None;
         self.pending_pass_inbound = false;
-        self.last_passer_id = None;
     }
 
     fn settle_scope_ball(&mut self, position: (Vec2, f32)) {
         self.ball_pos_3d = position;
-        self.transition_ball_state(BallTrajectoryKind::Dead {
-            pos: position.0,
-            z: position.1,
-            last_touch_team: self.possession,
-        });
+        self.transition_ball_state(self.dead_state(position.0, position.1));
         self.set_game_flow(GameFlowState::DeadBall);
         self.transition_phase(SubPhase::DeadBallReset);
     }
@@ -4031,13 +5039,46 @@ impl MatchEngine {
             | BallTrajectoryKind::InboundTransfer {
                 inbounder_id: carrier_id,
                 ..
+            }
+            // `ControlTransfer` 的载荷里就有 `carrier_id`（接球人），直接读它。
+            // 回退到 `last_passer_id` 是错的：合球飞行期间传球人已可能被清空，
+            // 且发生在同一回合内多次转移时会把责任归给上一个人。
+            // 实测（seed 2/7）：一传 + 合球飞行 + 节末死球 → 归因为空。
+            | BallTrajectoryKind::ControlTransfer {
+                carrier_id,
+                ..
             } => Some(carrier_id.clone()),
-            BallTrajectoryKind::Pass { .. }
-            | BallTrajectoryKind::ControlTransfer { .. }
-            | BallTrajectoryKind::LooseBall { .. }
-            | BallTrajectoryKind::Dead { .. } => self.last_passer_id.clone(),
+            BallTrajectoryKind::Pass { .. } | BallTrajectoryKind::LooseBall { .. } => {
+                self.last_passer_id.clone()
+            }
+            // 死球：优先用载荷里的最后触球人（round-9）；
+            // 旧流/未携带时回退到旁路字段，保证向后兼容。
+            BallTrajectoryKind::Dead {
+                last_touch_player, ..
+            } => last_touch_player.clone().or_else(|| self.last_passer_id.clone()),
             BallTrajectoryKind::Shot { shooter_id, .. } => Some(shooter_id.clone()),
             BallTrajectoryKind::RimRebound { .. } => None,
+        }
+    }
+
+    /// 构造 `Dead` 球态的唯一入口：从**当前权威球态**派生最后触球人。
+    ///
+    /// ## 为什么需要它（round-9 架构修复）
+    ///
+    /// `Dead` 此前只带 `last_touch_team`，责任球员只能回退到旁路字段
+    /// `last_passer_id`——而该字段在进入下一次进攻时被清空，于是死球终结
+    /// （如 8 秒违例）的归因会断在 `None`（实测 `TURNOVER_ACTOR_CONSISTENCY`
+    /// 8 seed 报 3 条 Hard）。
+    ///
+    /// 按 P1「状态是唯一事实源」，责任球员必须能从权威球态读出。因此把
+    /// 「进入死球时的最后触球人」作为载荷写进 `Dead`，而不是在各调用点
+    /// 各自去猜一个回退链。所有 `Dead` 构造都经此函数，保证载荷一致。
+    fn dead_state(&self, pos: Vec2, z: f32) -> BallTrajectoryKind {
+        BallTrajectoryKind::Dead {
+            pos,
+            z,
+            last_touch_team: self.possession,
+            last_touch_player: self.current_turnover_player_id(),
         }
     }
 
@@ -4054,6 +5095,8 @@ impl MatchEngine {
         self.last_passer_id = None;
         self.pending_loose_ball_terminal = None;
         self.pending_pass_receiver = None;
+        // 传球结束：丢弃本回合的接球人估计（下一回合重新形成预判）。
+        self.receiver_estimate = None;
         self.pending_pass_inbound = false;
         let current_ball_3d = self.ball_pos_3d;
         let baseline = Court::nearest_boundary_with_geometry(current_ball_3d.0, self.rules.court);
@@ -4075,6 +5118,8 @@ impl MatchEngine {
         self.last_passer_id = None;
         self.pending_loose_ball_terminal = None;
         self.pending_pass_receiver = None;
+        // 传球结束：丢弃本回合的接球人估计（下一回合重新形成预判）。
+        self.receiver_estimate = None;
         self.pending_pass_inbound = false;
         self.complete_possession();
         if self.simulation_complete {
@@ -4173,6 +5218,18 @@ impl MatchEngine {
                 rebounder_pos + Vec2::new(self.rules.rebound_outlet_fallback_distance_ft, 0.0)
             });
         let pass_dist = (target_pos - catch_pos).length();
+        // 一传（outlet）也必须**领传**（round-7 审计修复）。
+        //
+        // 此前 `to_pos` 直接冻结接球人**释放时刻**的当前位置，但接球人在
+        // 飞行期间仍向战术目标奔跑，于是永远不可能恰好停在冻结点——实测
+        // 越位 5–12 ft，全部出现在 `(97.0, 25.0)` 基准发球点的 outlet 上
+        // （`PASS_CORRIDOR_REACHABLE` 的最大单一来源）。
+        //
+        // 决策侧传球早就有领传（`execute_pass` 的 `target_lead_pos` 来自决策层），
+        // 唯独 outlet 这条路径漏了。修法与决策侧一致：按接球人的当前速度
+        // 外推一个飞行期内的可达点。
+        let target_pos = self.lead_receiver_position(&target_id, target_pos, pass_dist, false);
+        let pass_dist = (target_pos - catch_pos).length();
         let receive_success =
             self.resolve_pass_success(&rebounder_id, &target_id, catch_pos, target_pos);
         // 一传（outlet pass）同样在释放时一次性裁定拦截。
@@ -4196,6 +5253,14 @@ impl MatchEngine {
             from_pos: (catch_pos.x, catch_pos.y),
             to_pos: (target_pos.x, target_pos.y),
         });
+        // 记录传球人（round-9 架构修复）：一传同样是一次传球，必须设置
+        // `last_passer_id`，否则该回合若以死球/违例终结，责任球员无法从
+        // 权威球态派生（`Dead` 载荷、`Pass` 分支均回退到该字段）。
+        //
+        // 实测（seed 0/2/7）：防守篮板 → outlet 一传 → 传球失败 + 节末，
+        // 因本行缺失使 `turnover_player_id` 为空，报 3 条
+        // `TURNOVER_ACTOR_CONSISTENCY` Hard。
+        self.last_passer_id = Some(rebounder_id.clone());
         self.transition_phase(SubPhase::Initiation);
         self.set_game_flow(GameFlowState::LiveBall);
         self.last_decision_time = -self.rules.decision_interval_seconds;
@@ -4226,14 +5291,36 @@ impl MatchEngine {
             .pending_loose_ball_terminal
             .take()
             .unwrap_or(nba_domain::PossessionEndCause::TurnoverLooseBall);
+        // ## 篮板源地板球的事实补记（round-17）
+        //
+        // 投/罚不中弹出的地板球被**进攻方**收下时，语义上前场篮板
+        // （ORB）：回合继续 + 进攻钟重置 14s。若不发 `REBOUND` 事实，
+        // 评判器的 ORB 窗口记账（RHYTHM_DURATION / DURATION_BOUNDS 的
+        // 自变量）会漏计这个 14s 窗口，把合法的 ~37s 回合误判超带。
+        let was_rebound_origin = loose_terminal == nba_domain::PossessionEndCause::DefensiveRebound;
+        if was_rebound_origin && !possession_changed {
+            self.pending_events.push(GameEvent::ReboundContest {
+                rebounder_id: player_id.clone(),
+                landing_pos: (position.x, position.y),
+                is_offensive: true,
+            });
+        }
         if possession_changed {
-            let turnover_player_id = self
-                .current_possession_turnover_player
-                .clone()
-                .or_else(|| self.current_turnover_player_id());
-            self.emit_possession_summary(loose_terminal, None, turnover_player_id, None);
+            // 篮板源 + 球权易主 = 防守篮板：归因到收球人（rebounder），
+            // 而不是寻找一个不存在的「失误球员」。
+            if loose_terminal == nba_domain::PossessionEndCause::DefensiveRebound {
+                self.emit_possession_summary(loose_terminal, Some(player_id.clone()), None, None);
+            } else {
+                let turnover_player_id = self
+                    .current_possession_turnover_player
+                    .clone()
+                    .or_else(|| self.current_turnover_player_id());
+                self.emit_possession_summary(loose_terminal, None, turnover_player_id, None);
+            }
             self.last_passer_id = None;
             self.pending_pass_receiver = None;
+            // 传球结束：丢弃本回合的接球人估计（下一回合重新形成预判）。
+            self.receiver_estimate = None;
             self.pending_pass_inbound = false;
             self.complete_possession();
             if self.simulation_complete {
@@ -4339,24 +5426,42 @@ impl MatchEngine {
     /// `clamp_playable` 夹回边界，单 tick 位移数英尺造成 `BALL_SPEED`
     /// 尖峰（实测 122 ft/s > 85 上限）。
     fn start_out_of_bounds_transition(&mut self, boundary_pos: Vec2, ball_3d: (Vec2, f32)) {
-        // 出界属于违例类回合终结（PossessionEndCause::TurnoverViolation）。
+        // 归因纪律（round-5 审计修复）。
         //
-        // 责任球员必须可归因（D0.1：每个回合终结都要有责任字段）。
-        // 松球出界时球可能既无持球人也无 last_passer（例如篮板弹出界），
-        // 此时回退到进攻方的当前持球人；仍无法确定时取回合起始持球人，
-        // 保证 `turnover_player_id` 不为空。
+        // 出界**不产生新的失误原因**——它只是球离开场地的位置事实。失误原因
+        // 在球出界之前就已确定（掉球/被点掉/被断/违例/松球易主），保存在
+        // `pending_loose_ball_terminal`。此前本函数无条件以 `TurnoverViolation`
+        // 结算，**覆盖**了既有传球失误原因：实测 8 seed 共 98 条
+        // `TURNOVER_ATTRIBUTION` Hard，32 个 `TURNOVER_VIOLATION` 回合中
+        // 有 15 个窗口内没有任何 `VIOLATION` 事实。
+        //
+        // 责任球员必须可归因（D0.1）：松球出界时球可能既无持球人也无
+        // `last_passer`（例如篮板弹出界），逐级回退保证不为空。
+        let cause = self
+            .pending_loose_ball_terminal
+            .take()
+            .unwrap_or(nba_domain::PossessionEndCause::TurnoverViolation);
+
         let responsible = self
             .current_possession_turnover_player
             .clone()
             .or_else(|| self.current_turnover_player_id())
             .or_else(|| self.last_passer_id.clone())
             .or_else(|| Some(self.carrier_id()));
-        self.emit_possession_summary(
-            nba_domain::PossessionEndCause::TurnoverViolation,
-            None,
-            responsible,
-            None,
-        );
+
+        // 把「球出界」发布为事实：此前 `OUT_OF_BOUNDS` 在事件流中出现 0 次，
+        // 消费方无法区分「出界导致的失误」与「违例导致的失误」。
+        self.pending_events
+            .push(nba_domain::GameEvent::BallOutOfBounds {
+                position: [boundary_pos.x, boundary_pos.y],
+                last_touch_team: match self.possession {
+                    Possession::Home => "home".to_string(),
+                    Possession::Away => "away".to_string(),
+                },
+                responsible_player_id: responsible.clone(),
+            });
+
+        self.emit_possession_summary(cause, None, responsible, None);
         self.start_inbound_transition(boundary_pos, ball_3d);
     }
 
@@ -4364,6 +5469,8 @@ impl MatchEngine {
         self.complete_possession();
         self.last_passer_id = None;
         self.pending_pass_receiver = None;
+        // 传球结束：丢弃本回合的接球人估计（下一回合重新形成预判）。
+        self.receiver_estimate = None;
         self.pending_pass_inbound = false;
         self.pending_loose_ball_terminal = None;
         if self.simulation_complete {
@@ -4441,6 +5548,22 @@ impl MatchEngine {
             //
             // 节末必须先把在飞的球结算成死球：比赛时钟停表期间球也应是死的。
             self.settle_ball_for_period_break();
+            // 跨节回合必须显式结算（round-5 审计修复）。
+            //
+            // `PossessionEndCause::PeriodEnd` 在 domain 中已定义，但引擎从未
+            // emit：节末仍在进行中的回合被归到「上一节名下、下一节结束」，
+            // 实测 3 个/场，最长 41.6s，越出回合时长上界并产生 Hard defect。
+            // 节末是**规则允许**的回合终结方式，必须如实记录。
+            let count = self.completed_possessions as u64;
+            if self.last_possession_summary_index != Some(count) {
+                self.emit_possession_summary(
+                    nba_domain::PossessionEndCause::PeriodEnd,
+                    None,
+                    self.current_turnover_player_id(),
+                    None,
+                );
+                self.complete_possession();
+            }
             self.pending_events.push(GameEvent::PhaseTransition {
                 from: PhaseType::SetPlay,
                 to: PhaseType::DeadBallReset,
@@ -4484,41 +5607,48 @@ impl MatchEngine {
     }
 
     /// Returns the first configured starter for the team currently in control.
+    /// 选出本队当前的**处理球人**（发球员 / 回合起始持球人）。
+    ///
+    /// ## 为什么不再取 `roster_order` 首位（round-11 Step4b / P-2）
+    ///
+    /// 旧实现是「取名册数组里第一个在场者」——**顺序即身份**：把名册数组
+    /// 轮转一下，处理球人就变了。契约（`tactics.md TA3`「角色是槽位不是身份」、
+    /// `attributes.md §2.7`）要求身份由**能力适配**派生。
+    ///
+    /// 现在按能力排序：`ball_handling × w1 + passing × w2 + decision_iq × w3`，
+    /// 权重走规则通道（`TacticalRules.slot_handler_*`，与 `fill_slots` 同源）。
+    /// 名册数组顺序**完全不参与**。
+    ///
+    /// 约束：必须是**在场**球员。若把球交给替补（`on_court=false`），他永远
+    /// 不会被物理步进，`inbounder_arrived` 永不成立，比赛卡死在 DeadBall
+    /// （历史实测：发球员 `action=Bench`、位置停在替补席）。
     fn new_possession_pg(&self) -> String {
-        let roster = match self.possession {
-            Possession::Home => &self.home_roster_order,
-            Possession::Away => &self.away_roster_order,
+        let team = match self.possession {
+            Possession::Home => "home",
+            Possession::Away => "away",
         };
-        // 发球员必须是在场球员：若把发球任务交给替补（on_court=false），
-        // 他永远不会被物理步进，`inbounder_arrived` 永不成立，比赛卡死在
-        // DeadBall（本轮 seed 15 实测：发球员 action=Bench、pos 停在替补席）。
-        // 优先取在场控卫；若 roster 与在场集合不一致，回退到任一在场球员。
-        roster
-            .iter()
-            .find(|id| {
-                self.physics
-                    .get_player(id)
-                    .map(|p| p.on_court)
-                    .unwrap_or(false)
+        let policy = &self.rules.tactics;
+        let mut candidates: Vec<(f32, String)> = self
+            .physics
+            .get_players()
+            .values()
+            .filter(|p| p.on_court && p.team == team)
+            .map(|p| {
+                let score = p.attributes.ball_handling * policy.slot_handler_ball_handling_weight
+                    + p.attributes.passing * policy.slot_handler_passing_weight
+                    + p.attributes.decision_iq * policy.slot_handler_decision_iq_weight;
+                (score, p.id.clone())
             })
-            .cloned()
-            .or_else(|| {
-                let team = match self.possession {
-                    Possession::Home => "home",
-                    Possession::Away => "away",
-                };
-                let mut on_court: Vec<String> = self
-                    .physics
-                    .get_players()
-                    .values()
-                    .filter(|p| p.on_court && p.team == team)
-                    .map(|p| p.id.clone())
-                    .collect();
-                on_court.sort();
-                on_court.into_iter().next()
-            })
+            .collect();
+        // 确定性：分数降序，同分按 id 升序（不依赖 HashMap 迭代序，charter C4）。
+        candidates.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        candidates
+            .into_iter()
+            .next()
+            .map(|(_, id)| id)
             .unwrap_or_default()
     }
+
     fn team_roster_ids(&self, team: &str) -> Vec<String> {
         match team {
             "home" => self.home_roster_order.clone(),
@@ -4553,10 +5683,25 @@ impl MatchEngine {
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|p| p.id.clone())
-            .unwrap_or_else(|| match possession {
-                Possession::Home => "H_1".to_string(),
-                Possession::Away => "A_1".to_string(),
+            // 兜底不得硬编码球员 id（round-10 Step4a：名册已去序号化，
+            // "H_1"/"A_1" 不再存在）。退回该队在场球员的字典序首位，
+            // 仍无法确定时返回空串（由调用方按非法状态处理）。
+            .or_else(|| {
+                let team = match possession {
+                    Possession::Home => "home",
+                    Possession::Away => "away",
+                };
+                let mut ids: Vec<String> = self
+                    .physics
+                    .get_players()
+                    .values()
+                    .filter(|p| p.on_court && p.team == team)
+                    .map(|p| p.id.clone())
+                    .collect();
+                ids.sort();
+                ids.into_iter().next()
             })
+            .unwrap_or_default()
     }
 
     #[doc(hidden)]
@@ -4718,7 +5863,20 @@ impl MatchEngine {
     }
 
     #[doc(hidden)]
+    /// 测试后门：直接设置球态。
+    ///
+    /// 注意：本后门绕过 `transition_ball_state`（唯一写入口），因此必须
+    /// **自行维护派生副作用**。当前需要维护的是接球人标记
+    /// （`is_receiving_pass`，round-10）——否则用本后门构造的传球场景里，
+    /// 接球人不会获得 APF 豁免与「到位即停」，造成与生产路径不一致的行为
+    /// （实测：H_2 带 17.26 ft/s 初速滑离落点，层 A 误判）。
     pub fn set_ball_state_for_test(&mut self, state: BallTrajectoryKind) {
+        if let BallTrajectoryKind::Pass { target_id, .. } = &state {
+            let rid = target_id.clone();
+            self.mark_receiver(Some(&rid));
+        } else {
+            self.mark_receiver(None);
+        }
         self.ball_state = state;
     }
 
@@ -4967,25 +6125,7 @@ impl MatchEngine {
             target_possessions: self.target_possessions,
             callout: self.current_callout.clone(),
             intensity: self.current_intensity.clone(),
-            rules: FrameRules {
-                tick_seconds: self.rules.tick_seconds,
-                court_width_ft: self.rules.court.width_ft,
-                court_height_ft: self.rules.court.height_ft,
-                hoop_left_x_ft: self.rules.court.hoop_left_x_ft,
-                hoop_right_x_ft: self.rules.court.hoop_right_x_ft,
-                hoop_y_ft: self.rules.court.hoop_y_ft,
-                player_radius_ft: self.rules.player_radius_ft,
-                min_player_separation_ft: self.rules.min_player_separation_ft,
-                separation_safety_margin_ft: self.rules.separation_safety_margin_ft,
-                max_player_speed_ftps: self.rules.max_player_speed_ftps,
-                max_player_accel_ftps2: self.rules.max_player_accel_ftps2,
-                ball_max_speed_ftps: self.rules.ball_max_speed_ftps,
-                three_point_distance_ft: self.rules.league.three_point_distance_ft,
-                shot_clock_seconds: self.rules.league.shot_clock_seconds,
-                holder_leash_ft: self.rules.invariant_holder_leash_ft,
-                speed_tolerance_ftps: self.rules.invariant_speed_tolerance_ftps,
-                ball_z_max_ft: self.rules.ball_z_max_ft,
-            },
+            rules: frame_rules_from_game_rules(&self.rules),
             stream_projection: "full".to_string(),
             debug: self.last_decision_trace.clone(),
         };

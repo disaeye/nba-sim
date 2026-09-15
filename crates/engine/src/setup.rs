@@ -87,9 +87,30 @@ impl MatchSetup {
 }
 
 fn default_lineup(team: &TeamData) -> LineupConfig {
-    let mut ids = team.players.iter().map(|player| player.id.clone());
-    let starters = std::array::from_fn(|_| ids.next().unwrap_or_default());
-    let bench = ids.collect();
+    // 首发由档案的 `starter` 标记决定，**不取数组前 5 个**（round-10 Step4a）。
+    // 后者使「顺序即身份」：轮转名册数组就会改变首发阵容。
+    let mut starters: Vec<String> = team
+        .players
+        .iter()
+        .filter(|p| p.starter)
+        .map(|p| p.id.clone())
+        .collect();
+    // 兜底：档案未标记任何首发时，按 id 字典序取 5 人（确定性，
+    // 且不依赖数组顺序），而不是取前 5。
+    if starters.is_empty() {
+        let mut ids: Vec<String> = team.players.iter().map(|p| p.id.clone()).collect();
+        ids.sort();
+        starters = ids.into_iter().take(5).collect();
+    }
+    let starters: [String; 5] =
+        std::array::from_fn(|i| starters.get(i).cloned().unwrap_or_default());
+    let starter_set: std::collections::HashSet<&String> = starters.iter().collect();
+    let bench = team
+        .players
+        .iter()
+        .map(|p| p.id.clone())
+        .filter(|id| !starter_set.contains(id))
+        .collect();
     LineupConfig {
         starters,
         bench,
@@ -141,8 +162,15 @@ fn validate_team(team: &TeamData, geometry: nba_domain::CourtGeometry) -> Result
                 player.id
             ));
         }
-        // 首发 5 人必须在球场界内，替补球员允许位于界外替补席区域
-        let is_starter = ids.len() <= 5;
+        // 首发必须在球场界内，替补允许位于界外替补席区域。
+        //
+        // round-10 Step4a：改用档案的 `starter` 标记，而**不是**数组位置。
+        // 原实现 `ids.len() <= 5` 有两重问题：
+        //   (a) `ids` 是用于查重的 HashSet，其 len 是"已插入数量"而非索引，
+        //       语义上完全不是"前 5 个"；
+        //   (b) 即便改成索引，也仍是"顺序即身份"——轮转名册数组就会把
+        //       替补当成首发去校验场地边界。
+        let is_starter = player.starter;
         let tolerance = 0.0;
         if is_starter && !geometry.contains(Vec2::new(x, y), tolerance) {
             return Err(format!(
