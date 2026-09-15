@@ -399,7 +399,12 @@ fn illegal_edges_are_rejected() {
 /// 构造 10 个球态变体各一个代表实例（字段取合法占位值）。
 fn all_variants() -> Vec<(&'static str, BallState)> {
     vec![
-        ("Held", BallState::Held { carrier_id: "H_01".into() }),
+        (
+            "Held",
+            BallState::Held {
+                carrier_id: "H_01".into(),
+            },
+        ),
         (
             "Drive",
             BallState::Drive {
@@ -583,8 +588,7 @@ fn every_state_edge_matches_the_declared_table() {
         "expected 10 ball-state variants; update DECLARED_LEGAL when adding one"
     );
 
-    let legal: std::collections::HashSet<(&str, &str)> =
-        DECLARED_LEGAL.iter().copied().collect();
+    let legal: std::collections::HashSet<(&str, &str)> = DECLARED_LEGAL.iter().copied().collect();
     assert_eq!(
         legal.len(),
         DECLARED_LEGAL.len(),
