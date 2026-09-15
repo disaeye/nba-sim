@@ -227,7 +227,15 @@ pub struct BaseRates {
     pub pass_success: f32,
     pub handoff_success: f32,
     pub drive_success: f32,
+    /// 篮下（`dist_to_hoop < GameRules.rim_shot_distance_ft`）投篮命中基准。
     pub shot_make_2pt: f32,
+    /// 中距离（廊下之外、三分线内）投篮命中基准。
+    ///
+    /// 契约依据：`docs/attributes.md` §4 / `docs/quality.md` §2.1 要求命中率
+    /// 与出手区域匹配。真实篮球中距离命中（约 0.42）显著低于廊下（约 0.63）；
+    /// 二者共用一个基准会把中距离按廊下结算，形成结构性偏高。
+    /// 分区而非硬编码在引擎里，以遵守 `charter` C1（行为参数走数据通道）。
+    pub shot_make_mid: f32,
     pub shot_make_3pt: f32,
     pub ft_make: f32,
     pub steal_attempt_success: f32,
@@ -251,6 +259,9 @@ impl Default for BaseRates {
             handoff_success: 0.97,
             drive_success: 0.78,
             shot_make_2pt: 0.565,
+            // 中距离基准：公开赛季口径约 0.42。此前与廊下共用 0.565，
+            // 使 8ft–三分线的出手被按廊下结算（evidence/problem.md §21.3）。
+            shot_make_mid: 0.42,
             shot_make_3pt: 0.34,
             ft_make: 0.77,
             steal_attempt_success: 0.005,

@@ -4111,12 +4111,18 @@ impl MatchEngine {
             (skill - 0.5) * self.rules.resolve.player_skill.shooting_weight * 2.0;
         let stamina_adjustment = (stamina - 1.0) * self.rules.resolve.player_skill.shooting_weight;
         let contest_penalty = openness.contest_intensity * self.rules.shot_contest_sensitivity;
+        // 分区命中基准（charter C1：三种基准走 GameRules 数据通道）：
+        //   廊下      dist < rim_shot_distance_ft        -> shot_make_2pt
+        //   中距离    rim 以外、三分线以内             -> shot_make_mid
+        //   三分      is_three                          -> shot_make_3pt
+        // 此前中距离与廊下共用 shot_make_2pt，使 8ft–三分线的出手被按廊下
+        // 结算（真实 0.42 vs 0.63），形成结构性偏高：evidence/problem.md §21.3。
         let base_fg = if dist_to_hoop < self.rules.rim_shot_distance_ft {
             self.rules.resolve.base_rates.shot_make_2pt
         } else if is_three {
             self.rules.resolve.base_rates.shot_make_3pt
         } else {
-            self.rules.resolve.base_rates.shot_make_2pt
+            self.rules.resolve.base_rates.shot_make_mid
         };
         let final_fg_pct = (base_fg + skill_adjustment + stamina_adjustment + spacing_bonus
             - contest_penalty)
