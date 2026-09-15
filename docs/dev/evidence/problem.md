@@ -17,7 +17,7 @@
 - **事实**：`CONTROL_TRANSFER` 球速 `95.70 ft/s`，帧内允许上限（含 5% 过渡容差）`89.25 ft/s`；CLI 以退出码 1 结束。
 - **影响**：控制交接轨迹违反物理速度约束；与 `docs/quality.md §1.1` 的“物理不可能必须捕获”一致，但引擎基线未做到零 Hard 违反。
 - **定位**：`crates/engine/src/match_engine.rs` 的篮板/松球后 `ControlTransfer` 建立路径，以及 `crates/physics/src/ballistics.rs` 的交接采样共同决定该轨迹；需在规则通道内保证交接位移、持续时间和球速上限相容。
-- **设计符合性**：检测器行为符合设计；生成轨迹不符合 `docs/charter.md §4 C3` 物理约束和 `docs/design.md §3.1 M1` 标准种子零 Hard 违反验收。
+- **设计符合性**：检测器行为符合设计；生成轨迹不符合 `docs/charter.md §4 C3` 物理约束和 `docs/protocol.md §3.1 M1` 标准种子零 Hard 违反验收。
 
 ### P0 · seed=54 出现 Hard `BALL_WITH_HOLDER`
 
@@ -25,7 +25,7 @@
 - **事实**：球状态为 `DRIVE`，`ball.holderId=A_1`，球与持球人距离 `24.02 ft`，超过帧内 `holder_leash_ft=3.0 ft`；CLI 以退出码 1 结束。
 - **影响**：突破期间输出了球权持有人，但球的采样位置没有保持在持球人 leash 内，形成球人与球分离；违反 `docs/quality.md §1.1` 的球权/物理底线。
 - **定位**：`crates/physics/src/ballistics.rs` 的 `BallState::Drive` 采样将球放在运动方向偏移处，而 `crates/engine/src/match_engine.rs` 的突破目标/球员运动状态可能在该帧已经远离原突破者；需让 Drive 球位置始终相对 driver 合法，或在状态转换前清晰结束持球语义，不能输出自相矛盾的 holder。
-- **设计符合性**：不变量捕获符合设计；轨迹输出不符合 `docs/architecture.md §3.1–3.2` 的持球派生一致性与 `docs/design.md §3.1 M2` 的 `BALL_*` 零违反验收。
+- **设计符合性**：不变量捕获符合设计；轨迹输出不符合 `docs/architecture.md §3.1–3.2` 的持球派生一致性与 `docs/protocol.md §3.1 M2` 的 `BALL_*` 零违反验收。
 
 ### P1 · 回合级失误归因评判口径缺口（98/100 场，2,215 条 `TURNOVER_ATTRIBUTION` defect）
 
@@ -137,9 +137,9 @@
 
 ## 8. 文档与证据交付
 
-- 修复代码、针对性回归、运行矩阵和归因报告属于同一证据链；更新 `docs/status.md` 前必须有可复现命令和实际输出，禁止沿用历史“全里程碑完成”声明覆盖新失败结果。
+- 修复代码、针对性回归、运行矩阵和归因报告属于同一证据链；更新 `docs/dev/status.md` 前必须有可复现命令和实际输出，禁止沿用历史“全里程碑完成”声明覆盖新失败结果。
 - 本文档只保留实际观测结果；设计目标、验收门和未执行项必须明确标注，避免把计划写成通过结论。
-- 任何新默认参数按 `docs/design.md §2` 记录基线、JSON override、前后统计、归因变化及黄金哈希处理；如果行为有意变化，必须重新冻结哈希并说明原因。
+- 任何新默认参数按 `docs/protocol.md §2` 记录基线、JSON override、前后统计、归因变化及黄金哈希处理；如果行为有意变化，必须重新冻结哈希并说明原因。
 
 ## 9. 修复前续审记录（已由 §10 更新）
 
@@ -162,7 +162,7 @@
 
 - `cargo test -p nba-engine --test axiom_fuzzing`：8 个长时种子测试通过。
 - `cargo test -p nba-engine --test constraint_system test_missed_final_free_throw_starts_rebound_from_last_ball_position`：1 个通过；强制罚球路径现在与正常罚球一样清除旧持球并先写入 `Dead` 球状态，最后一次罚球不中后 `RimRebound.from_pos/from_z` 与 `ball_pos_3d` 一致。
-- `cargo test -p nba-engine --test constraint_system`：58 个通过；`cargo test -p nba-engine --test golden_hash`：4 个通过。由于本轮修复改变了确定性轨迹，黄金锚点按 `docs/design.md §2.3` 重新冻结为 `0x59b96ffa5ab114bb`，并在测试历史中记录原因。
+- `cargo test -p nba-engine --test constraint_system`：58 个通过；`cargo test -p nba-engine --test golden_hash`：4 个通过。由于本轮修复改变了确定性轨迹，黄金锚点按 `docs/protocol.md §2.3` 重新冻结为 `0x59b96ffa5ab114bb`，并在测试历史中记录原因。
 - `cargo test -p nba-domain --test ball_ownership`：2 个通过；`cargo test -p nba-physics --test backend_contract`：17 个通过；`cargo test -p nba-evaluator --test evaluator`：13 个通过；`cargo test -p nba-invariants --test checker`：3 个通过；决策战术单测：1 个通过。
 - release CLI 重放 `seed=0 1q`：24,543 ticks，77 summaries，0 Axiom Violations；逐帧复核的最大持球球距为 `1.4844 ft`，低于 `holder_leash_ft=3.0 ft`；`CONTROL_TRANSFER` 帧不再输出 `holderId`。
 - release CLI 重放历史失败种子 `seed=49 1q` 与 `seed=54 1q`：两场均退出码 0，分别生成 23,728 与 23,192 ticks，未生成 violations 工件；这只证明历史复现路径在 `1q` 范围内修复，不替代全矩阵证据。
@@ -179,7 +179,7 @@
 ### 10.4 清理状态
 
 - 每场 `matrix_seed_*.ndjson` 及其评判/违规工件均已在进入下一 seed 前删除；`/dev/shm/matrix.results` 与 `/dev/shm/matrix.log` 仅为本轮汇总证据，不属于仓库交付物。
-- 仓库中的 `docs/problem.md` 保留实际问题和本节证据；未新增批量事件流或临时统计文件。
+- 仓库中的 `docs/dev/evidence/problem.md` 保留实际问题和本节证据；未新增批量事件流或临时统计文件。
 
 ## 11. 续审后的回归发现（当前工作区）
 
@@ -286,13 +286,13 @@
 ## 15. 2026-09-10 GAP 修复轮（F1–F2 + 守卫）
 
 > 本节只记录本轮实际复现与修复后重新观测的结果；命令、范围与资源占用按 §14.4 记录。
-> 设计目标与验收门见 `docs/gap.md` 与 `docs/fix_plan.md`；本节的通过结论仅适用于所列 seed 与 scope。
+> 设计目标与验收门见 `docs/dev/gap.md` 与本周期历史计划；本节的通过结论仅适用于所列 seed 与 scope。
 
 ### 15.1 本轮新复现的 P0（修复前）
 
 - **P0 · full scope DeadBall 活锁，比赛永不终场**：发球员的界外发球点被 physics 场地 clamp 推回场内，`inbounder_arrived` 永不成立，`InboundTransfer` 无法推进。
   - 复现：`MatchEngine::new(999).set_scope("full")` 跑满 400,000 tick 仍未 `is_finished()`，卡在 period 3 `DeadBall`，`game_clock=645.8` 长期不变，每 tick 发射 2 条 `OUT_OF_BOUNDS`。
-  - 影响：违反 `docs/gap.md §6.3`「任何比赛必须进入 GameEnd 终态」与 `charter` 终场验收。
+  - 影响：违反 `docs/dev/gap.md §6.3`「任何比赛必须进入 GameEnd 终态」与 `charter` 终场验收。
   - 定位：`crates/physics/src/movement.rs` 的 `sync_positions` / `apply_motion_proposals` 对所有 on-court 球员执行 `clamp_playable`，而 `crates/engine/src/match_engine.rs::start_inbound_transition` 把发球员目标设为 `inbound_release_pos`（界外 3 ft）。
 - **P0 · 罚球期间伪持球（BALL_WITH_HOLDER）**：罚球时权威球态仍为 `Held{carrier_id}`，球被放到罚球点/篮筐。
   - 复现：seed=1 full tick=58954，holder=A_3，球 (5.2,25.0)，A_3 (27.1,40.0)，距离 26.51 ft，`game_flow=FreeThrow`。
@@ -361,7 +361,7 @@
 ### 16.3 修复后实测
 
 | 模式 | full scope 单场体积 | 用途 |
-|---|---:|---|
+| --- | ---: | --- |
 | `facts`（默认） | 平均 **8.9 MB**，最大 26 MB | 因果/审计/评判 |
 | `summary` | 约 **170 KB** | 批量统计 |
 | `frames`（显式） | 约 525 MB | 展示/回放 |
@@ -399,6 +399,7 @@
 - `bin/sim.sh` 默认输出改为带时间戳的临时路径。
 
 验证结果：
+
 - panic 清理：注入 panic 测试后临时目录**无残留文件**；
 - 历史残留回收：预置 `nba_test_999997/999998`（属主进程已退出）被自动回收；
 - 连续 3 轮 `./scripts/run-tests.sh`：可用空间 7678→7678→7677 MiB，`target/` 3401 MiB 不变，泄漏文件 0；
@@ -481,13 +482,14 @@
   两处均先用真实流复证再修，未凭假设改口径。
 - 验证：`run-tests.sh` 41 套件全绿；`check_inline_constants.py` 通过。
 
-## 19. 2026-09-11 D5.1 两个 Hard 级缺陷（本轮实测）
+## 20. 2026-09-11 D5.1 两个 Hard 级缺陷（本轮实测）
 
-### 19.1 `ControlTransfer` 永久悬置（活锁 · 最严重）
+### 20.1 `ControlTransfer` 永久悬置（活锁 · 最严重）
 
 **事实**：seed 6 full scope 下，模拟时间推进 2,915 秒，但全场**只有 11 个回合、10 分**；其中 **69,466 帧（约 2,780 秒）**球停在 `CONTROL_TRANSFER`，`holderId` 恒为 `null`。
 
 **根因链（逐层验证）**：
+
 1. `ControlTransfer` 退出条件 = 飞行时长届满 **且** `receiver_ready`（接球人在冻结点 3.0 ft 内）；
 2. 接球人 `action=RECEIVE_CUT`，`is_locked_kinematics=true`（被 `ActionTimeWindow` 锁定）；
 3. 锁定状态下每 tick 位移仅 **6e-6 ft**，接球人永久停在距冻结点 **3.99 ft** 处；
@@ -499,7 +501,7 @@
 
 **证据**：seed 6 由 10 分/11 回合 → 226 分/300 回合；新增回归 `test_control_transfer_never_hangs_forever`。
 
-### 19.2 投篮弧顶越界（BALL_HEIGHT_BOUNDS Hard）
+### 20.2 投篮弧顶越界（BALL_HEIGHT_BOUNDS Hard）
 
 **事实**：seed 6 full，4 条 `BALL_HEIGHT_BOUNDS`，球高 35.05–35.17 ft，规则上限 35.0 ft。
 
@@ -509,27 +511,27 @@
 
 **证据**：seed 6/21/42 full 最大球高 35.07 → 34.99 ft；新增回归 `test_shot_arc_respects_height_ceiling`。
 
-### 19.3 间距根因量化（拒绝单参数拟合）
+### 20.3 间距根因量化（拒绝单参数拟合）
 
 `is_three` 是二元阈值，故 `initiation_distance_ratio` 的单点变化造成构成量阶跃（8 seed full）：ratio 0.30→2PA 14.5；0.22→106.4；0.25→41.8。真实带 2PA ≈ 55、回合 ≈ 200。
 
 **没有任何单一 ratio 能让 2PA 与回合数同时入带**，因此本轮**不把任何调参值提升为默认**。正解是按槽位区分距离（消费 `data/tactics/*.json` 中已声明但从未生效的 `base_offset_x/y`），属 D5.1 范围。若强行取 ratio 0.22，会把 2PA 从 14.5 推到 106.4 并让回合数升到 307——用一个新的失真替换旧的。
 
-### 19.4 本轮验收
+### 20.4 本轮验收
 
 - `./scripts/run-tests.sh`：41 套件全绿（含 2 条新回归）。
 - 默认规则 8 seed full：Axiom Violations **0**（修复前 seed 6 有 4 条 Hard）。
 - 守卫四项全过；黄金哈希按协议重冻结 `v44 0xaa0948ab6cd348c1`。
 
-### 19.5 仍未修复
+### 20.5 仍未修复
 
 - **D3.2/D3.3**：2PA 默认仍 14.5（真实 ~55），阻塞于 D5.1 站位重构。
 - D5.2 防守执行器、D5.3 档案验收、D6 全矩阵未开始。
 - 教训：**L1 全绿不等于比赛有效**。本缺陷两项都在 L1 全绿的情况下静默产出无效结果（19.1）或偶发 Hard（19.2），说明还需"结果合理性"门（如回合数下界、得分为 0 的终场检测）。
 
-## 20. 2026-09-11 D5.1b：战术档案从未生效 + 底角三分几何缺失（本轮实测）
+## 21. 2026-09-11 D5.1b：战术档案从未生效 + 底角三分几何缺失（本轮实测）
 
-### 20.1 战术档案是死数据（决定性）
+### 21.1 战术档案是死数据（决定性）
 
 **事实**：`data/tactics/*.json` 声明的 `base_offset_x/y` **从未被任何代码消费**——
 档案只在 `setup.validate()` 里用于校验 id 合法性，进攻目标全部由全局 ratio 推得。
@@ -546,7 +548,7 @@
 `decision_iq`、掩护槽用 `strength`+`finishing`、底角槽用 `shooting_three`+`off_ball_sense`），
 按稀缺性排序、确定性匹配；引擎持球权由能力最强处理球者所占槽位决定。
 
-### 20.2 底角三分几何缺失（独立缺陷）
+### 21.2 底角三分几何缺失（独立缺陷）
 
 **事实**：三分判定在 4 处均为裸半径比较 `dist >= three_point_distance_ft`，
 **没有底角特例**。真实 NBA 底角线距边线 3 ft、最近点距篮筐 22 ft，而弧顶是 23.75 ft。
@@ -561,16 +563,16 @@
 但后场远投距篮筐 73 ft，本就是三分。底角特例的意义是**放宽近处判定**，
 不是**收紧远处判定**。测试断言已修正（这属于我的测试写错，不是代码错）。
 
-### 20.3 我引入并修复的回归（如实记录）
+### 21.3 我引入并修复的回归（如实记录）
 
 引入 slot fill 后出现 **116 条 `PLAYER_SEPARATION`**：替补 `A_7` 与在场球员重叠 1.19 ft。
 根因是我在引擎里对进攻目标**又调用了一次 `bind_targets`**，它按 roster 顺序重写
 `player_id`，抹掉 slot fill 的结果并把替补拉进场内。修复：进攻目标不再经 `bind_targets`。
 
-### 20.4 效果（8 seed full）
+### 21.4 效果（8 seed full）
 
 | 指标 | 修复前 | 修复后 | 真实带 |
-|---|---:|---:|---:|
+| --- | ---: | ---: | ---: |
 | 3P% | 61.2 | **33.2** ✅ | 30–40 |
 | 2P 出手 | 10.8 | **72.9** ✅ | ~55 |
 | 3P 出手 | 96.1 | 80.4 ❌ | ~40 |
@@ -578,7 +580,7 @@
 | 回合数 | 254 | 303 ❌ | ~200 |
 | 失误 | 91 | 100 ❌ | ~14 |
 
-### 20.5 未解决且已定位根因：发球 5 秒违例
+### 21.5 未解决且已定位根因：发球 5 秒违例
 
 `FIVE_SECOND_INBOUND` 占违例首位（19/68）。实测 41 次 `INBOUND_READY` 持续
 **4.84–5.05s**，其中 15 次（37%）恰越 5.0s 阈值。机制：`inbound_elapsed` 从
@@ -588,7 +590,7 @@
 **正解**：在发球程序内部优先决策（发球阶段豁免节流或使用更短间隔），
 而非全局降低决策间隔（那会连带改变阵地进攻节奏）。登记待修，**未做全局调参掩盖**。
 
-### 20.6 我自己的守卫缺陷（已修）
+### 21.6 我自己的守卫缺陷（已修）
 
 本轮两次写满磁盘（一度 100%），根因是**我上一轮写的守卫有漏洞**：
 `check_disk_budget.py` 的 `_owner_alive` 把「文件名不含 pid」的条目**一律视为存活**，
@@ -598,18 +600,18 @@
 CLI 临时路径改用项目专用根（不再落 `/tmp`）。
 验证：伪造 100 MiB 陈旧泄漏 → 守卫退出码 1；新建同名文件 → 不误报。
 
-## 21. 2026-09-11 第一性原理根因修复（本轮实测）
+## 22. 2026-09-11 第一性原理根因修复（本轮实测）
 
-### 21.1 方法：先用守恒式定位，再修根因
+### 22.1 方法：先用守恒式定位，再修根因
 
 用篮球回合守恒式对账：`possessions ≈ FGA + TO + 0.44·FTA − OREB`。
 实测每 100 回合：失误 49.7（真实 13，**3.82×**）、传球 116（真实 350，0.33×）、
 FGA 50（真实 88）。恒等式本身闭合，**偏差集中在失误与传球量** → 根因排序由此确定。
 
-### 21.2 六个根因（均为模型级，非参数级）
+### 22.2 六个根因（均为模型级，非参数级）
 
 | # | 根因 | 性质 | 修复 | 效果 |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 1 | 传球拦截写在**逐 tick** 循环内，每 tick 每防守者独立掷骰 → 概率随时长累积 | **概率语义错误** | 释放时裁定一次、飞行中回放 | 每次传球失败 35.8%→22.1% |
 | 2 | `CandidateAction` 里**没有"推进"**；且 `Initiation` 要等 `tactical_initiation_seconds=6.5s`，8 秒违例在 8.0s 触发（仅 1.5s 窗口） | **建模缺失** | 新增 `Advance` 全链路；后场不受战术发起延迟；推进期间不被战术槽位覆盖 | 8 秒违例 31→**0** |
 | 3 | 发球决策套用阵地节奏 `decision_interval=2.4s`，与 5 秒规则竞速 | **程序竞速** | 新增发球专用间隔 0.4s | 五秒违例 15→**1** |
@@ -617,13 +619,13 @@ FGA 50（真实 88）。恒等式本身闭合，**偏差集中在失误与传球
 | 5 | `step_inner` 在节间提前返回**不推进 `current_time`**，但在飞的球状态保留 → 时间恢复后球"瞬移" 3.85 ft/tick | **生命周期错误** | 节末把在飞球结算为死球 | seed 0..19 Hard 3→**0** |
 | 6 | 界外松球被 `clamp_playable` **硬夹回**边界，单 tick 跳 4.4 ft | **物理语义错误** | 新增出界状态转移 | BALL_SPEED 122 ft/s 消除 |
 
-### 21.3 结果
+### 22.3 结果
 
 `seed 0..19` full scope：**20/20 成功终场，Axiom Violations = 0**。
 8 seed full：3P% **61.2 → 35.3**（真实 ~36）、得分 210 → 186、失误 91 → 76.8。
 `cargo test --workspace`：**41 套件全绿**。
 
-### 21.4 仍未解决
+### 22.4 仍未解决
 
 **失误 76.8 vs 真实 ~14（5.5×）仍是最大失真**。已拆分为掉落 9.3% + 拦截 12.9%
 （真实合计 8–10%），需继续收缩。**每回合传球仅 1.3 次**（真实 ~3.5）是独立的结构性
@@ -631,15 +633,15 @@ FGA 50（真实 88）。恒等式本身闭合，**偏差集中在失误与传球
 
 **未做**：D5.2 防守执行器（`DefensiveTactic` 对比赛结果仍零影响）、D6 全矩阵、FIBA 矩阵。
 
-### 21.5 方法教训
+### 22.5 方法教训
 
 本轮六项修复**全部来自"守恒式对账 + 机制定位"**，没有一项是调参得到的；
 且前四项若靠调参，只会用一个新的失真替换旧的（实测：全局下调 `decision_interval`
 只把失误 100→92.6，却改变了阵地节奏）。
 
-## 22. 2026-09-11 边界事实语义过宽（§21 结论被本轮推翻）
+## 23. 2026-09-11 边界事实语义过宽（§21 结论被本轮推翻）
 
-### 22.1 事实
+### 23.1 事实
 
 `§21` 把"每场 42–52 次出界失误"记为「球频繁飞出边界」。**本轮实测推翻该因果**。
 
@@ -653,7 +655,7 @@ OOB_VIOLATE player=A_5 attempted=(39.53,1.76)  actual=(39.54,1.80)  ball_pos=(38
 球员**实际位置合法**（48.20 = 50 − 1.80 = clamp 上限），`attempted` 仅超出 0.06–0.17 ft，
 且 `has_ball=true`、`ball_phase=Held` —— 是持球人被**钉在边线**。
 
-### 22.2 根因
+### 23.2 根因
 
 1. `BoundaryCross` 判定为 `raw_pos != clamped`（任意差值即发射）；
 2. 战术槽位贴边（底角 `base_offset_y=2.5` vs 可站立下限 `1.8`），球员被永久顶在边界；
@@ -661,30 +663,30 @@ OOB_VIOLATE player=A_5 attempted=(39.53,1.76)  actual=(39.54,1.80)  ball_pos=(38
 
 即：**事实语义过宽** —— `BoundaryCross` 应表达"实质性越界"，而非"目标点超出 clamp 零点几英尺"。
 
-### 22.3 修复
+### 23.3 修复
 
 - 新增 `GameRules.boundary_epsilon_ft`（1.0 ft）：只有超出该阈值的位移才产生边界事实；
 - `spec_slot_world_pos` 把槽位目标 clamp 到含球员半径的可站立区域；
 - 修正 `data/tactics/*.json` 底角槽位（`offset_y=2.5`, `offset_x=4.0`）。
 
-### 22.4 效果
+### 23.4 效果
 
 出界失误 **52 → 0**；失误 **88.5 → 31.6**；回合 **264 → 232**；回合一 14.7s（真实 ~14s）；
 `seed 0..19` full **20/20 零违规**；`cargo test --workspace` **41 套件全绿**。
 
-### 22.5 仍未解决
+### 23.5 仍未解决
 
 失误 31.6 vs 真实 ~14（2.3×）；每回合传球 1.4 vs 3.5；总出手 157/100 回合 vs 88；2P% 59.6 vs 53。
 未做：D5.2 防守执行器、D6 全矩阵、FIBA 矩阵。
 
-### 22.6 教训
+### 23.6 教训
 
 `§21` 的写法是**在记录现象时顺带给出了因果结论**，而该结论未经插桩验证。
 纪律：现象与因果分开记录；因果必须由判定点插桩证据支撑，不能由"看起来像"推断。
 
-## 23. 2026-09-11 每回合传球数：测量口径错误 + 根因在机制层（本轮实测）
+## 24. 2026-09-11 每回合传球数：测量口径错误 + 根因在机制层（本轮实测）
 
-### 23.1 测量口径错误（真实缺陷，已修）
+### 24.1 测量口径错误（真实缺陷，已修）
 
 `PossessionSummary.passes_count` 只在 `PASS_RECEIVED` 时自增，
 **掉球/点掉/抢断的传球完全不计入**。实测 **17/60 回合**口径不一致
@@ -693,16 +695,16 @@ OOB_VIOLATE player=A_5 attempted=(39.53,1.76)  actual=(39.54,1.80)  ball_pos=(38
 修复：改为在 `PassRelease` 计数。结果：不一致 **17/60 → 0/219**；
 真实均值 **1.26 → 1.61**。
 
-### 23.2 两个被否证的假设（如实记录）
+### 24.2 两个被否证的假设（如实记录）
 
 | 假设 | 实验 | 结果 |
-|---|---|---|
+| --- | --- | --- |
 | 候选稀释（4–5 个 Pass 与 1 个 Dwell 同层 softmax） | 实现分层 softmax | **否证**：传球 1.61→**1.12**（更差）；实测 PASS 族效用 0.389 < DWELL 0.496 |
 | 传球效用被 `(0.5+openness)` 腰斩 | 新增 `pass_contest_floor` 0.5→0.95 | **否证**：传球 1.15→1.18（无变化）；`dwell_base` 0.82→0.2 也只到 1.66 |
 
 两次改动均已完整撤回，未留下无证据的行为变化。
 
-### 23.3 根因（数据支撑）
+### 24.3 根因（数据支撑）
 
 以出手终结的 163 回合，按已传球数：**0 次传球 78 回合（48%）**、
 1 次 58（36%）、2+ 次 27（17%）。真实 NBA 分别约 15% / 25% / 60%。
@@ -712,7 +714,7 @@ OOB_VIOLATE player=A_5 attempted=(39.53,1.76)  actual=(39.54,1.80)  ball_pos=(38
 后续出手命中率只由「出手者能力 + 当场空位」决定，与"本次进攻已传几次"无关；
 因此传球只增加 12.2% 的失误风险，不带来收益，理性持球人没有传球动机。
 
-### 23.4 修复方向（未实施，属机制层）
+### 24.4 修复方向（未实施，属机制层）
 
 1. 球转移后防守方必须重新分配责任（closeout/轮转），创造真实空位窗口
    —— 依赖 D5.2 防守执行器（当前 `DefensiveTactic` 对结果零影响）；

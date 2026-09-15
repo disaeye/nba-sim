@@ -108,8 +108,8 @@ jobs:
             exit 1
           fi
           cp /tmp/me_guard_backup.rs crates/engine/src/match_engine.rs
-      - name: Doc cross-reference guard
-        run: python3 scripts/check_doc_refs.py
+      - name: Documentation governance guard
+        run: python3 scripts/check_docs.py
       - name: Test resource guard (disk / target / temp leftovers)
         run: python3 scripts/check_disk_budget.py
       - name: Test resource guard negative control

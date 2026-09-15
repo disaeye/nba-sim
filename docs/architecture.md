@@ -1,11 +1,9 @@
 # NBA-Sim · 系统架构
 
-> 版本：v1.1（2026-09-01 对抗性审查修订：引用重建、效用代数复合律与 RoleFit 移除、时序不变式表述修正）
-> 定位：系统组织与模块交互的**架构契约**——分层、数据流、状态机、管线、决策、语义/裁决、多联赛
-> 上游文档：`docs/charter.md`（愿景与目标宪章；其 §4 宪章条款镜像为本文档 §1.3）
-> 关联文档：`docs/quality.md`（检测与评判体系）、`docs/attributes.md`（球员属性契约）、`docs/tactics.md`（阵容与战术契约）、`docs/status.md`（现状与差距）
-> 适用范围：`crates/*` 全部子系统
-> 修订纪律：本文档**零现状快照**——只写"应该是什么"，不写"现在是什么"；现状审计与差距矩阵一律去 `docs/status.md`
+> 定位：系统组织与模块交互的**架构契约**——分层、数据流、状态机、管线、决策、语义/裁决和多联赛。
+> 上游文档：`docs/charter.md`；关联契约：`docs/quality.md`、`docs/attributes.md`、`docs/tactics.md`、`docs/protocol.md`。
+> 实现状态、迁移差距和验证范围统一见 `docs/dev/status.md` 与 `docs/dev/gap.md`；跨模块取舍见 `docs/decisions.md`。
+> 修订纪律：本文档只定义目标架构和稳定边界，不记录当前实现快照、周期结果或执行命令。
 
 ---
 
@@ -26,7 +24,7 @@
 ### 1.1 设计原则
 
 | 原则 | 一句话表述 |
-|------|-----------|
+| ------ | ----------- |
 | **P1 单一事实源** | 球的归属只能从一个字段推导，其余全是派生只读视图 |
 | **P2 不变量即代码** | 每 tick 在引擎内校验物理/篮球底线，违反立即暴露（详见 quality.md） |
 | **P3 显式阶段管线** | 主循环是显式阶段序列的调度，顺序由调度器与窄签名保证而非注释 |
@@ -67,6 +65,7 @@
 ```
 
 **依赖规则（编译期强制）**：
+
 - 上层可依赖下层，下层**禁止**反向依赖；
 - `domain` 不依赖任何其他内部 crate；
 - `physics` 只依赖 `domain`；
@@ -81,10 +80,10 @@
 以下条款源自 `docs/charter.md` §4，是本文档与一切实现的**不可修订红线**：违反任一条的改动 = 打回，无论动机多好。完整论证见 `charter`；本节只列工程执行细则与机械守卫——红线没有守卫只是愿望。
 
 | 条款 | 内容 | 机械守卫 |
-|------|------|---------|
-| **C1 无硬编码** | 一切影响行为的数字必经规则/数据通道；一切行为是 `(能力, 规则, 状态)` 的纯函数，禁止剧本化战术与"让画面像"的经验常数 | 内联常数 grep 守卫（design.md §3.1 M7 阈值）+ 能力扰动测试（quality.md §6） |
-| **C2 评判落地** | 真实度判断逐回合、逐阶段产出裁决；禁止以"多场模拟原始结果统计"作为真实性评判；仅允许把"裁决结果"聚合为真实度指数 | 回合/阶段评判工件逐条落盘（quality.md §2.2–2.4） |
-| **C3 约束分轴** | 物理约束严格遵守且与联赛无关（可配置校准）；语义/规则约束按联赛档案 `LeagueProfile` 参数化（NBA/FIBA/NCAA），灵活可配 | LeagueProfile 切换验收（§6.3、design.md §3.1 M10） |
+| ------ | ------ | --------- |
+| **C1 无硬编码** | 一切影响行为的数字必经规则/数据通道；一切行为是 `(能力, 规则, 状态)` 的纯函数，禁止剧本化战术与"让画面像"的经验常数 | 内联常数 grep 守卫（protocol.md §2.1 M7 阈值）+ 能力扰动测试（quality.md §6） |
+| **C2 评判落地** | 真实度判断逐回合、逐阶段产出裁决；禁止以"多场模拟原始结果统计"作为真实性评判；仅允许把"裁决结果"聚合为真实度指数 | 回合/阶段评判工件逐条落盘（quality.md §2.1–2.3） |
+| **C3 约束分轴** | 物理约束严格遵守且与联赛无关（可配置校准）；语义/规则约束按联赛档案 `LeagueProfile` 参数化（NBA/FIBA/NCAA），灵活可配 | LeagueProfile 切换验收（§6.3、protocol.md §2.1 M10） |
 | **C4 确定性** | 相同种子 → 逐 tick 完全相同的世界；一切评判、归因、校准对比的前提 | 黄金哈希（quality.md §5）入库且必须常绿 |
 
 > 条款与原则的映射：P6 是 C1 的数值通道，P7 是 C1 的行为要求，P8 即 C2，C3 落地为 §6.3 的规则档案参数化，C4 是 P5 的宪章级强化。
@@ -181,22 +180,23 @@ BallTrajectoryKind (运动学采样参数 · crates/physics · 私有于执行)
 ### 3.2 派生视图（全部只读）
 
 | 派生 | 实现 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | `carrier() -> Option<&PlayerId>` | 从 `BallState::Held` 派生 | 取代 `carrier_idx` 的读取方 |
 | `has_ball(player) -> bool` | `carrier() == Some(player)` | 物理层不再持有独立标志 |
 | `possession_team()` | Held→持球人队；InFlight/Loose→最后触球队 | 取代 `Possession` 字段的读取方 |
 | `is_live() / is_dead()` | 从 BallState 变体派生 | 取代 `is_dead_ball` 布尔 |
 
 **写入纪律（字段私有化 + 唯一 mutator + grep 守卫）**：
+
 - `BallState` 只能被**一个函数** `MatchEngine::transition_ball_state(event) -> Vec<GameEvent>` 修改；
 - 该函数是纯函数风格：`(当前 BallState, 物理/裁决事实) -> (新 BallState, 产出事件)`；
 - 所有弹道到达、抢断、篮板、得分、出界都转化为对这个函数的调用；
-- **强制机制**：字段必须私有化，杜绝外部直接赋值。注意 quality.md §2.1 不变量校验的是**输出帧**，绕过写入口的直接赋值产出的帧可能仍然自洽、查不出来——因此不变量**不是**写入纪律的强制手段；落地靠字段私有化 + grep 守卫（design.md §3.1 M2 验收）+ code review。测试代码若需绕过该入口，grep 守卫需声明测试豁免或提供测试专用构造器。
+- **强制机制**：状态字段必须私有化，杜绝外部直接赋值；不变量检查输出，不能替代写入边界。写入纪律由类型封装、唯一 mutator、结构守卫和测试专用构造器共同保证。
 
 ### 3.3 状态转换表（节选）
 
-| 当前状态 | 触发事实 | 下一状态 | 副作用事件 |
-|---------|---------|---------|-----------|
+| 状态 | 触发事实 | 下一状态 | 副作用事件 |
+| --------- | --------- | --------- | ----------- |
 | Held(c) | 决策 Pass 执行 | InFlight{Pass} | PassReleased |
 | InFlight{Pass} | 到达接球人 | Held(receiver) | PassCompleted |
 | InFlight{Pass} | 防守者抢断 | Held(defender) + 球权翻转 | Steal + PossessionChange |
@@ -237,7 +237,7 @@ fn decision_phase(sys: &mut DecisionSystem, clock: &ClockState,
 // 调度器（step 主体）解构 World、按固定顺序调用，静态分发。
 ```
 
-> 阶段以对象列表组合且统一拿整个 `&mut World` 的签名无法兑现 §4.3 的借用隔离承诺（每个阶段都能改任何子结构）。故采用静态分发 + 窄签名；若未来退化为 trait 对象列表，必须重新评估写边界如何保证。
+> 阶段必须保持窄写权限：实现可以采用静态分发或其他等价机制，但不能把整个可变世界交给任意阶段。若改变阶段编排机制，必须在 `docs/decisions.md` 登记其借用隔离取舍。
 
 阶段序列（对应 §2 的 12 步；`FreeThrowPhase` 为死球罚球分支，条件激活，未出现在 §2 主数据流图中）：
 
@@ -320,11 +320,11 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 3. 若重校验失败：
    - 传球：接球人已不在走廊 → 降级为 `Dwell`（持球观察），意图标记作废；"重新决策"指**下一决策 tick**（DecisionPhase，§2 [4]）重新生成候选，不在执行阶段就地决策——保持阶段分离；
    - 投篮：防守者已封盖到位 → 按 `contest_intensity` 重新计算，而非用决策时刻的值；
-4. 重校验结果记入 `DecisionTrace`，供 quality.md §2.2 评判器分析"多少动作在落地时被迫改变"。
+4. 重校验结果记入 `DecisionTrace`，供 quality.md §2.1 评判器分析"多少动作在落地时被迫改变"。
 
 ### 5.3 决策可解释性
 
-`DecisionTrace` 必须包含候选效用、约束标记、概率分布。这是回合评判（quality.md §2.2）与校准闭环（design.md §2）的基础，**必须保证每个决策都有完整 trace**，禁止出现"决策了但没有 trace"的路径。
+`DecisionTrace` 必须包含候选效用、约束标记、概率分布。这是回合评判（quality.md §2.1）与校准闭环（protocol.md §1）的基础，**必须保证每个决策都有完整 trace**，禁止出现"决策了但没有 trace"的路径。
 
 ---
 
@@ -333,7 +333,7 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 ### 6.1 分层职责
 
 | 层 | 输入 | 输出 | 不含 |
-|----|------|------|------|
+| ---- | ------ | ------ | ------ |
 | physics | 刚体/速度/碰撞 | `RawContact`, `PhysicsFact`, 弹道到达 | 任何篮球概念 |
 | semantics | `RawContact` + 比赛上下文 | `ContactKind`(Screen/Block/Charge/...), `SpacingEvaluation`, `ShotEvaluation` | 犯规判定 |
 | officiating | `SemanticContact` + 规则 | `Foul` / `NoCall` / `Violation` / 罚则 | 物理计算 |
@@ -354,18 +354,16 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 
 **LeagueProfile 差异表（首批三联赛）**：
 
-| 档案字段 | NBA（当前基线） | FIBA | NCAA（男） |
-|---|---|---|---|
+| 档案字段 | NBA | FIBA | NCAA（男） |
+| --- | --- | --- | --- |
 | 计时结构 | 4×12 min | 4×10 min | 2×20 min |
 | 进攻时钟 | 24 s，前场板重置 14 s | 24 s，重置 14 s | 30 s |
 | 个人犯满 | 6 犯 | 5 犯 | 5 犯 |
-| 球队犯规罚则 | 单节 bonus（第 5 次犯规起） | 单节 bonus（第 4 次犯规起） | 半场 bonus / 双 bonus |
+| 球队犯规罚则 | 单节 bonus（第 5 次犯规起） | 单节 bonus（第 5 次犯规起） | 半场 bonus / 双 bonus |
 | 三分线 | ~23.75 ft（底角 22） | 6.75 m | 6.75 m |
 | 交替拥有 | 节间轮换 | 交替拥有箭头 | 交替拥有箭头 |
 
-**落地路径**：design.md §3.1 M7 先把散落的语义/裁决阈值收编进规则体系；M10 再抽出 `LeagueProfile` 独立类型，把现有 NBA 默认值变成它的一个实例，并补 FIBA 验收场次。
-
-**验收（design.md §3.1 M10）**：切换联赛 = 切换一份规则档案（数据），计时/几何/犯规政策/罚球程序全部随之生效，引擎代码路径零改动。在此之前，任何"看起来只影响 NBA"的规则逻辑也必须直接写成档案参数，禁止先写死后迁移。
+**验收原则**：切换联赛 = 切换一份规则档案（数据），计时、几何、犯规政策和罚球程序随之生效；引擎代码路径不因联赛而分叉。具体阶段顺序和证据要求见 `docs/protocol.md`。
 
 ---
 
@@ -378,12 +376,12 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 ### 7.2 核心类型
 
 | 类型 | 职责 | 关键约束 |
-|------|------|---------|
+| ------ | ------ | --------- |
 | `CourtGeometry` | 场地尺寸、篮筐位置、三分线、区域划分 | 构造时校验几何合法性（篮筐在界内等） |
 | `GameRules` | 全部可调参数（时钟、物理上限、权重、阈值） | `validate()` 在 setup 时强制执行 |
 | `DecisionRules` | 决策子系统参数（效用权重、约束阈值、采样个性化） | 独立 `validate()`，由 `decision` 消费；作为 `GameRules` 嵌套组注入 |
 | `PlayerData` 系（`data.rs`） | `PlayerAttributes` 能力向量 + `PlayerTendencies` + 球队级 `TeamTraits` | 能力是行为差异的唯一合法来源（P7）；被 decision/physics/officiating 消费；**本体契约（分类学/值语义/锚点/迁移路线）以 `docs/attributes.md` 为单一事实源**；涌现要求见 quality.md §6 |
-| `LeagueProfile`（M10） | 联赛规则档案：计时结构、进攻时钟与重置、犯规政策与 bonus、几何、语义阈值 | 收拢为档案（§6.3） |
+| `LeagueProfile` | 联赛规则档案：计时结构、进攻时钟与重置、犯规政策与 bonus、几何、语义阈值 | 由规则档案提供，不进入引擎联赛分支 |
 | `GameFlowState` | 宏观生命周期（TipOff/LiveBall/DeadBall/FreeThrow/QuarterEnd/Halftime/Overtime/GameEnd） | 转换由 `engine` 驱动，此处仅定义 |
 | `SubPhase` | 回合内子阶段（Initiation/ActionExecution/ShotAttempt/FlightAndRebound/DeadBallReset） | 与 GameFlowState 正交 |
 | `BallState`（见 §3） | 球的宏观归属状态 | **唯一事实源** |
@@ -393,7 +391,7 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 
 ### 7.3 设计要点
 
-- **规则参数集中（P6 的基石）**：所有影响行为的魔法数字（最大速度、最小间距、球速上限、效用权重、犯规阈值、节奏参数）必须收敛到 `GameRules`，禁止散落在子系统里写死。这是统计校准（design.md §2）的前提。
+- **规则参数集中（P6 的基石）**：所有影响行为的魔法数字（最大速度、最小间距、球速上限、效用权重、犯规阈值、节奏参数）必须收敛到 `GameRules`，禁止散落在子系统里写死。这是统计校准（protocol.md §1）的前提。
 - **事件即事实**：`GameEvent` 是引擎对外的**事实**而非"日志"。回放、审计、统计全部从事件流重建，不依赖引擎内部字段。
 
 ---
@@ -402,16 +400,16 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 
 ### 8.1 与其他文档的关系
 
-- `charter.md`（v1.0 立宪）是**目标宪章**：要做出什么、什么算好、红线与成功判据。本文档是**系统组织契约**：模块如何分层、状态如何流转。映射：`charter` §4 宪章条款 → 本文档 §1.3；C1 → P6/P7；C3 → §6.3；C4 → P5；
+- `charter.md` 是**目标宪章**：要做出什么、什么算好、红线与成功判据。本文档是**系统组织契约**：模块如何分层、状态如何流转。映射：`charter` §4 宪章条款 → 本文档 §1.3；C1 → P6/P7；C3 → §6.3；C4 → P5；
 - `quality.md` 是**检测与评判体系**：不变量、真实度评判、工具链、性能预算——本文档的架构如何被观测与验证；
 - `attributes.md` / `tactics.md` 是**数据契约**：球员/阵容/战术的分类学与值语义——本文档的领域层消费它们；
-- `design.md` 是**执行路线**：里程碑、校准协议、验收标准——本文档的架构按那个顺序落地；
-- `status.md` 是**现状与差距**：本文档的架构现状如何、差距在哪。
+- `protocol.md` 是**过程契约**：校准协议、验收标准和证据要求；
+- `docs/dev/status.md` 是**当前实现状态**；`docs/dev/gap.md` 是**迁移差距与依赖**。它们不改变本文档的目标架构。
 
 ### 8.2 术语表
 
 | 术语 | 定义 |
-|------|------|
+| ------ | ------ |
 | **事实源 (SoT)** | 某一信息的唯一权威存储，其余为派生 |
 | **意图 (Intent)** | 决策产出但尚未执行的动作，携带决策上下文 |
 | **执行重校验** | 意图落地时基于当前世界重新过约束 |

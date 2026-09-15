@@ -1,8 +1,11 @@
 # NBA-Sim · GAP 修复方案（gap.md 实施契约）
 
+> **状态：已废弃的历史计划**
+> 本文档属于已结束周期；F 编号仅保留作历史遗留项 ID。当前状态见 `docs/dev/status.md`，当前计划见 `docs/dev/current/plan.md`；执行顺序与验收门以当前计划为准。
+>
 > 文档类型：实施计划与验收契约
-> 上游契约：`docs/gap.md`
-> 证据来源：`docs/status.md`、`docs/problem.md`、本轮代码审计与实测复现
+> 上游契约：`docs/dev/gap.md`
+> 证据来源：`docs/dev/status.md`、`docs/dev/evidence/problem.md`、本轮代码审计与实测复现
 > 纪律：本文档写"如何修、按什么顺序修、用什么证据验收"；现状与结果写入 `status.md` / `problem.md`
 
 ---
@@ -12,7 +15,7 @@
 以下不是推断，而是本轮在工作区直接复现的结果：
 
 | 编号 | 事实 | 证据 |
-|---|---|---|
+| --- | --- | --- |
 | E1 | `BALL_WITH_HOLDER` Hard 违反可复现，根因是**罚球期间权威球态仍是 `Held{carrier_id}`**，而球被放到篮筐/罚球点 | seed=1 full tick=58954：holder=A_3，球(5.2,25.0)，A_3(27.1,40.0)，dist=26.51ft，`game_flow=FreeThrow`, `sub_phase=DeadBallReset`, event=`FREE_THROW` |
 | E2 | `backcourt_elapsed` 在跨半场后**永不重置**，只在 `transition_phase(Initiation)` 时清零 | 8 秒违例 `EIGHT_SECOND_BACKCOURT` 是 seed 0 单节最高频终端（26 次 `TURNOVER_VIOLATION`）的主要来源 |
 | E3 | 评测器 `made_arrivals` 字段**从未被赋值**，恒为 0 | `SCORE_SOURCE_CAUSALITY` Hard defect 在 seed 0/1/7/42 分别 18/15/25/16 条，全部为误报 |
@@ -49,12 +52,14 @@ P3   守卫与工具：E7 常数守卫重写、CI 负面对照
 现状：罚球期间 `ball_state` 保持 `Held{A_3}`，但 `ball_pos_3d` 被设为 `hoop_pos`/`rim_height`，导致 `BALL_WITH_HOLDER`。
 
 修复：
+
 - 罚球开始时经唯一写入口 `transition_ball_state` 转入 `Dead{pos: ft_spot, z: free_throw_z, last_touch_team}`；
 - 每次 `FreeThrowAttempt` 前球置于罚球点（`Court::free_throw_pos`），而非篮筐；
 - 命中后保持 `Dead` 直到发球程序；不中转入 `RimRebound`；
 - 禁止在罚球路径直接写 `ball_pos_3d` 而不改权威态。
 
 新增测试（先红后绿）：
+
 - `free_throw_never_reports_holder`：罚球全程 `frame.ball.holder_id == None`；
 - `free_throw_ball_within_leash_or_dead`：不变量检查 0 Hard；
 - `free_throw_chain_events`：`FREE_THROW`→（命中）`Dead`→inbound /（不中）`RimRebound`。
@@ -64,12 +69,14 @@ P3   守卫与工具：E7 常数守卫重写、CI 负面对照
 现状：`backcourt_elapsed` 仅在进入 `Initiation` 时清零；球过半场后继续累加，8 秒后无条件判违例。
 
 修复：
+
 - 在语义层（`step_inner` 的语义/裁决阶段）检测"进攻方持球越过中线"事实，重置 `backcourt_elapsed`；
 - 前场判定使用 `is_in_frontcourt()` 同一几何函数，禁止第二套中线常数；
 - 8 秒违例只在"仍处后场且连续时间 ≥ 阈值"时成立；
 - 死球、换边、发球开始必须重置。
 
 新增测试：
+
 - `backcourt_clock_resets_on_halfcourt_cross`；
 - `eight_second_violation_requires_continuous_backcourt`；
 - `eight_second_negative_control`：人为断路（不重置）时测试必须失败。
@@ -79,11 +86,13 @@ P3   守卫与工具：E7 常数守卫重写、CI 负面对照
 现状：`BALL_POSITION_DISCONTINUITY` 在 full scope 复现（57.7ft/tick）。
 
 修复：
+
 - 定位该 tick 的生命周期转换路径（预期在 `Dead`↔`InboundTransfer`/得分后重定位）；
 - 所有离散 placement 必须走显式 `PlacementStarted/PlacementApplied` 事实（gap.md §4.3），并让检查器在 placement 阶段豁免；
 - 禁止直接写 `ball_pos_3d` 造成跨帧跳变。
 
 新增测试：
+
 - `no_ball_teleport_outside_placement_phase`；
 - `placement_facts_present_for_discrete_moves`。
 
@@ -94,6 +103,7 @@ P3   守卫与工具：E7 常数守卫重写、CI 负面对照
 现状：`PossessionWindow.made_arrivals` 从未写入，`SCORE_SOURCE_CAUSALITY` 恒误报。
 
 修复：
+
 - `"SCORE"` 事件（`HoopArrival{is_made:true}`）递增 `made_arrivals`；
 - `"SHOT_MISS"` 单独计数；
 - 补充负面对照测试：构造"有 SCORE 无来源"的合成流，准则必须报 defect；构造"有来源"的流必须 pass。
@@ -118,6 +128,7 @@ P3   守卫与工具：E7 常数守卫重写、CI 负面对照
 现状：3P 占比与命中率严重偏高，回合数偏高。
 
 修复路径（全部走 JSON override，先 A/B 再改默认）：
+
 - 降低 `three_point_utility_multiplier` 或引入按距离的出手效用曲线；
 - 检查 `shot_make_3pt` 基线 + `spacing_bonus` + `shot_pct_ceiling=0.85` 是否叠加过头（`spacing_bonus` 目前直接加在命中率上）；
 - 每次改动附 ≥8 seed 的 `baseline_stats.json` vs `candidate_stats.json` 与归因 diff。
@@ -174,7 +185,7 @@ P3   守卫与工具：E7 常数守卫重写、CI 负面对照
 ## 3. 验收门（gap.md §18.6 目标）
 
 | 门 | 内容 | 当前 | 目标 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | G-BALL | `BALL_*` Hard = 0（全 seed、full scope） | 失败（E1/E5） | 0 |
 | G-CLOCK | 8 秒/回场违例仅真实发生 | 失败（E2） | 情景测试通过 |
 | G-EVAL | `SCORE_SOURCE_CAUSALITY` 无误报 | 失败（E3） | 0 误报 |

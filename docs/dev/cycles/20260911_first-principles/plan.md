@@ -1,9 +1,9 @@
 # NBA-Sim · 第一性原理开发方案
 
-> 版本：v1.1（2026-09-11；§0.2 修正：推翻"分布进带 = 真实"的隐含命题，验收改为机制/分布/反事实三层结构，D2 增盲区登记清单，D3 增机制层证据要求，D6 总门分层）
-> 定位：本目录（`docs/dev/`）的唯一权威**开发方案**。回答"**接下来做什么、按什么顺序做、每步用什么证据验收**"。
-> 与既有文档的分工：`charter.md` 等设计契约写"应该是什么"；`status.md`/`problem.md` 写"现在是什么"；**本文档写"怎么落地"**。里程碑级路线（M1–M10）归 `design.md`，本方案是当前执行周期（D0–D6）的作战计划。
-> 证据纪律：本文档所有"现状"断言均附 2026-09-11 当天可复现命令；验收门逐条可机械判定；禁止"完成度百分比"式主观结账（status.md §29 的两处账目错误即此教训）。
+> 文档类型：已结束周期的开发方案与实施记录。
+> 历史属性：非当前计划入口；当前状态见 `docs/dev/status.md`，当前计划见 `docs/dev/current/plan.md`。
+> 与其他文档的分工：契约面写应该是什么；证据面保存原始输出；本文件保留本周期 D0–D6 的方案、门和执行依据。
+> 记录纪律：历史命令和输出只回答当时观察到什么，不作为当前状态来源；禁止把完成度百分比当作验收。
 > 修订规则：每轮执行结束，把结果写入 `status.md`，并更新本文档 §8 的门状态；方案本身调整（增删阶段/改门）需升版本并注明依据。
 
 ---
@@ -13,7 +13,7 @@
 北极星（O1 真实）稳定、设计文档完整，但**实际产出与北极星的距离没有随工作量收缩**。2026-09-11 实测基线（命令见 §7.1）：
 
 | 量 | 实测 | 真实带 | 差距 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 3P 命中率中位数 | **65.8%** | 30–40% | +26pp |
 | 场均回合数 | **258.6** | ~200 | +29% |
 | 场均 2P 出手 | **~10 次**（2P=10/15） | ~55 次 | -82% |
@@ -25,7 +25,7 @@
 
 ### 0.1 结构性错误一：里程碑被"形式达成"掏空
 
-M1–M10 在 status.md §24 全部记为"~100%"，但同一文档的 §7、§26–§29 与 problem.md §13 证明：3P% 门、回合零遗漏、事件 ID、回合账本、World 私有化、战术 slot fill **从未通过其各自声明的验收标准**。"全里程碑绿"与"验收门未过"在同一份文档里长期共存。
+M1–M10 在 docs/dev/cycles/20260901_historical/status_snapshot.md §24 全部记为"~100%"，但同一文档的 §7 与本周期旧状态章节 §26–§29、problem.md §13 证明：3P% 门、回合零遗漏、事件 ID、回合账本、World 私有化、战术 slot fill **从未通过其各自声明的验收标准**。"全里程碑绿"与"验收门未过"在同一份文档里长期共存。
 
 **第一性原理**：验收只能是**验收标准本身**的逐条满足，不能是"做了相关工作"。凡不能以一条可机械执行的命令判红/绿的验收项，等价于没有验收。
 
@@ -66,6 +66,7 @@ git log 显示近期大量提交在 UI（战术路线绘制、运球动画、2K 
 
 **P1 · 一场比赛的唯一真相是一条满足守恒律的事件序列。**
 比分、球权、时间、犯规都是这条序列的**派生计数**。任何派生量与事件序列不一致 = 系统说谎。守恒式（gap.md §7.5）：
+
 - 得分守恒：每场总分 = Σ 得分事件载荷；
 - 球权守恒：回合数 = 跳球 + 得分后换发 + 篮板易主 + 失误 + 节末，每次球权转移有且只有一个因果事件；
 - 时间守恒：Σ 回合时长 + 死球时长 = 比赛时钟消耗；
@@ -109,6 +110,7 @@ D0 因果账本会合 ──► D1 证据模型 ──► D2 构成准则簇 ─
 ```
 
 依赖论证：
+
 - **D1 依赖 D0**：证据模型（NotApplicable/固定分母）以账本闭合为前提——账本破缺时"证据不足"与"真通过"无法区分；
 - **D2 依赖 D1**：新准则必须直接生在正确的证据模型上，避免二次迁移；
 - **D3 依赖 D2**：校准的选题与验收都来自构成准则，fix_plan.md 已确立"评判器错时校准会放大错误"；
@@ -119,9 +121,9 @@ D0 因果账本会合 ──► D1 证据模型 ──► D2 构成准则簇 ─
 ### 2.3 每阶段通用纪律（不再逐条重复）
 
 1. **先红后绿**：每个修复先写失败测试（含负面对照），再实现；
-2. **协议证据**：任何默认值改动走 design.md §2 校准协议（基线快照 → JSON override → ≥8 seed 对比 → 归因 diff → 黄金哈希重冻结 + 一行说明）；
+2. **协议证据**：任何默认值改动走 protocol.md §1 校准协议（基线快照 → JSON override → ≥8 seed 对比 → 归因 diff → 黄金哈希重冻结 + 一行说明）；
 3. **资源纪律**：遵循 problem.md §14.4——默认 `cargo check -p <crate>`，长测试用 `./scripts/run-tests.sh`，事件流写 `/dev/shm` 逐 seed 清理，构建前后记录 `df -h` 与 `du -sh target`；
-4. **逐条结账**：阶段完成与否按 todo 条目标号逐条对照本方案的门，禁止合并、禁止凭印象（status.md §29.3 教训）；
+4. **逐条结账**：阶段完成与否按 todo 条目标号逐条对照本方案的门，禁止合并、禁止凭印象（本周期旧状态章节 §29.3 教训）；
 5. **证据落盘**：每阶段结束把命令、输出、门状态写入 status.md 新一节，并更新本文档 §8。
 
 ---
@@ -139,11 +141,13 @@ D0 因果账本会合 ──► D1 证据模型 ──► D2 构成准则簇 ─
 ### 3.2 工作项
 
 **D0.1 回合终结归因穷举**
+
 - 在 `engine` 的 `emit_possession_summary` 路径上，把"回合结束"改为必须携带 `PossessionEndCause` 显式枚举（SCORE / DEFENSIVE_REBOUND / TURNOVER_STEAL / TURNOVER_PASS_TIPPED / TURNOVER_PASS_DROPPED / VIOLATION / PERIOD_END），**移除 `UNATTRIBUTED_END` 兜底**——编译期强制（枚举无该变体），而非运行时祈祷；
 - 每个终结原因必须同时填充责任字段（`turnover_player_id`/`rebounder_id`/`shooter_id`），缺失即编译错误或断言失败；
 - 红测试：构造当前能触发 `UNATTRIBUTED_END` 的种子（problem.md §13 矩阵中 62 场），修复后断言全矩阵为 0。
 
 **D0.2 四式账本平衡检查器（invariants 或 evaluator 侧离线工具）**
+
 - 得分守恒：终场比分 = Σ 得分事件载荷（含 FT 逐次 +1）；
 - 球权守恒：possession 序列满足"每次转移恰有一个因果事件"且队伍交替合法；
 - 时间守恒：Σ summary.duration + Σ 死球区间 = 时钟消耗（容差一个 tick）；
@@ -151,12 +155,13 @@ D0 因果账本会合 ──► D1 证据模型 ──► D2 构成准则簇 ─
 - 产出 `ledger_violations.ndjson`；任何一式不平衡 = Hard。
 
 **D0.3 回合时长真值化**
+
 - `duration_seconds` 改由单调 `current_time` 差值派生，**删除 `.max(0.1)` 填充**（problem.md §2 P1 明确禁止）；真实亚秒回合允许存在，但必须由实际 tick 数支撑。
 
 ### 3.3 验收门
 
 | 门 | 命令 | 通过条件 |
-|---|---|---|
+| --- | --- | --- |
 | G-D0a | `./scripts/run-tests.sh`（含新增回归） | 全绿 |
 | G-D0b | release CLI 串行 seed=0..19 `1q`，逐场评判 | `UNATTRIBUTED_END` = 0；四式账本平衡 violations = 0 |
 | G-D0c | `cargo test -p nba-engine --release` 黄金哈希 | 按协议重冻结并记录原因 |
@@ -170,22 +175,25 @@ D0 因果账本会合 ──► D1 证据模型 ──► D2 构成准则簇 ─
 ### 4.1 工作项
 
 **D1.1 Judgment 三态化（gap.md §15.1）**
+
 - `Judgment` 增加 `NotApplicable` 与 `InsufficientEvidence` 变体；
 - 每条准则输出 `{opportunities, passes, defects, not_applicable, insufficient}` 固定分母五元组；
 - 空流/窗口内无证据的准则输出 `InsufficientEvidence`，**不得计入 pass**（当前空证据按 pass 计是 0.994 的来源之一）。
 
 **D1.2 Hard 门与指数解耦（gap.md §15.3）**
+
 - `AttributionReport` 增加 `hard_gate_failed: bool`；存在任一 Hard defect 时 `realism_index` 标记 `invalid` 而不是输出一个仍接近 1 的数；
 - 报告必须同时列出：各准则缺陷率、证据覆盖率（passes+defects / opportunities）、insufficient 占比。
 
 **D1.3 严格解析默认化（gap.md §15.4）**
+
 - `parse_stream` 默认严格（坏行 = 错误退出），软解析仅在显式 `--lenient` 下可用；
 - 评判器对 facts 模式的 `stream_projection` 正确区分"未采集"与"损坏"（沿用 v1.41 口径，补测试）。
 
 ### 4.2 验收门
 
 | 门 | 命令 | 通过条件 |
-|---|---|---|
+| --- | --- | --- |
 | G-D1a | evaluator 单测（含合成流负面对照：空流、截断流、无源得分流） | 空流不得满分；无源得分流必须 Hard defect |
 | G-D1b | seed=0..7 `1q` 评判 | 报告含五元组分母与 `hard_gate_failed` 字段；存在 Hard 时指数 invalid |
 | G-D1c | `./scripts/run-tests.sh` | 全绿 |
@@ -202,7 +210,7 @@ D0 因果账本会合 ──► D1 证据模型 ──► D2 构成准则簇 ─
 参考分布进 `evaluator/fixtures/nba.v1.json`（带版本，按 gap.md §15.5 数据契约扩字段），准则在 evaluator 实现：
 
 | 准则 ID | 定义 | 责任子系统 | 参考带（NBA，待 fixture 标定） |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `SHOT_PROFILE_3PA_RATE` | 3PA / FGA ∈ 参考带 | decision | ~[0.30, 0.45] |
 | `SHOT_PROFILE_ZONE_MIX` | 出手构成（篮下/中距/三分/罚球占比）联合在带内 | decision | 标定见 §5.2 |
 | `TEAM_TURNOVER_RATE` | 已有 `TURNOVER_RATE`，升格为比赛级固定分母 | decision/officiating | [0.05, 0.35] |
@@ -240,10 +248,10 @@ D0 因果账本会合 ──► D1 证据模型 ──► D2 构成准则簇 ─
 ### 5.5 验收门
 
 | 门 | 命令 | 通过条件 |
-|---|---|---|
+| --- | --- | --- |
 | G-D2a | evaluator 合成流测试 | §5.3 三条负面对照全过 |
 | G-D2b | seed=0..7 `1q` 评判 | **当前真实模拟必然触发构成 defect**（这是对评判器"终于睁开眼睛"的正向验证；若全 pass 说明准则实现错误） |
-| G-D2c | fixture 升版本 + 盲区登记清单交付 + `check_inline_constants.py` / `check_doc_refs.py` | 全绿 |
+| G-D2c | fixture 升版本 + 盲区登记清单交付 + `check_inline_constants.py` / `check_docs.py` | 全绿 |
 
 ---
 
@@ -257,13 +265,13 @@ D0 因果账本会合 ──► D1 证据模型 ──► D2 构成准则簇 ─
 当前失真的机制链（问题不在于"参数没调好"，在于**效用结构系统性地偏向三分**）：
 
 1. **三分效用占优**：`three_point_utility_multiplier = 0.68`（rules.rs:190）与出手效用中三分项的期望收益（0.658 × 3 ≈ 1.97 分/次）远超两分（~0.5 × 2 = 1.0 分/次）——**理性球员在给定命中模型下必然全场投三分**。构成失真（3PA 率 ~0.85、2P 出手 10 次）是命中模型失真的下游结果；
-2. **命中模型叠加过高**：`shot_make_3pt` 基线 + `spacing_bonus` 直接加在命中率上 + `shot_pct_ceiling = 0.85` 几乎不构成上界约束（fix_plan.md §F3.1 已指明该叠加）；
+2. **命中模型叠加过高**：`shot_make_3pt` 基线 + `spacing_bonus` 直接加在命中率上 + `shot_pct_ceiling = 0.85` 几乎不构成上界约束（历史 fix_plan §F3.1 已指明该叠加）；
 3. **失误率 ~0.50**：传球走廊拦截/点掉概率与 `dwell_base` 共同决定失误产量，当前拦截链偏强；
 4. **回合数 ~259 > ~200**：回合时长偏短（avg 14.7s 且大量亚秒回合），进攻时间没有真实消耗——`dwell_base`、`action_duration_seconds` 与决策重选间隔共同决定。
 
 **关键洞察**：修命中率会联动修构成（命中回归真实后三分效用自然下降），但**不能只修命中率**——效用结构对距离的梯度必须真实（中距离必须有存在的局势），否则 2P 出手仍不会回来。
 
-### 6.2 校准顺序（严格按归因账本选题，design.md §4）
+### 6.2 校准顺序（严格按归因账本选题，protocol.md §3）
 
 每步都走完整校准协议（基线快照 → JSON override 实验 → ≥8 seed 对比 → 归因 diff → 过门后进默认值）：
 
@@ -285,7 +293,7 @@ D0 因果账本会合 ──► D1 证据模型 ──► D2 构成准则簇 ─
 ### 6.4 验收门
 
 | 门 | 命令 | 通过条件 |
-|---|---|---|
+| --- | --- | --- |
 | G-D3a | release `--seeds 0..7 batch full --out` | 3P% 中位数 ∈ [30,40]；`avg_poss` ∈ [185,220]；`SHOT_PROFILE_*`、`PACE`、`TURNOVER_RATE` 准则 defect 率 ≤ 12.5%（1/8 场） |
 | G-D3b | 归因账本 | top 缺陷准则相对 D3 前基线**单调收缩**（第一轮收缩证据；第二轮收缩在 D6 复验，满足 charter §8.2"连续两轮"） |
 | G-D3c | 机制层证据（§6.3 四条） | 扰动测试全绿；场景测试全绿；常数棘轮不升；无交叉准则退化 |
@@ -301,22 +309,25 @@ D0 因果账本会合 ──► D1 证据模型 ──► D2 构成准则簇 ─
 ### 7.1 工作项
 
 **D4.1 事件 ID 与因果链（F4.1）**
+
 - `GameEvent` 发布时分配单调 `event_id`；`FrameEvent` 增加 `event_id`/`parent_event_id`；
 - 动作生命周期（开始/执行/完成/取消）接入 parent 链（gap.md §7.2）；评判器与账本检查器改从 parent 链重建因果，替代当前的事件窗口猜测；
 - 兼容：旧流解析走版本字段，新流必须带 ID。
 
 **D4.2 World 私有化（F4.3）**
-- `MatchEngine` 真相字段改 `pub(crate)`（当前全 `pub`，含 `pub possession`/`ball_state`/`home_score`，fix_plan.md E10）；
+
+- `MatchEngine` 真相字段改 `pub(crate)`（当前全 `pub`，含 `pub possession`/`ball_state`/`home_score`，历史 fix_plan E10）；
 - 外部只经 `snapshot()`/`step()`/`apply_command()`；`has_ball` 仅由 `holder()` 派生；
-- grep 守卫进 CI：`match_engine.rs` 中 `pub ` 字段声明的白名单制。
+- grep 守卫进 CI：`match_engine.rs` 中 `pub` 字段声明的白名单制。
 
 **D4.3 `full` scope 语义统一**
+
 - problem.md §11.1：`full` 曾按 `estimated_possessions_per_period × 4` 的回合预算推进，把"估计"当"真实"。落地 `ScopeBoundary::Game` = 真实比赛时钟/终场状态结束；回合估计仅用于进度展示，不得参与终止条件。
 
 ### 7.2 验收门
 
 | 门 | 命令 | 通过条件 |
-|---|---|---|
+| --- | --- | --- |
 | G-D4a | grep 守卫 + `cargo check` | `MatchEngine` 无裸露 `pub` 真相字段；编译通过 |
 | G-D4b | 黄金哈希 | 与 D3 结束态**严格一致**（行为中性） |
 | G-D4c | seed=0..19 `full` 终场矩阵 | 40/40（含历史活锁种子 3/6/9/15/16/21/26/555/999）进入 `GameEnd`，L1 = 0，账本平衡 = 0 |
@@ -336,7 +347,7 @@ D0 因果账本会合 ──► D1 证据模型 ──► D2 构成准则簇 ─
 ### 8.2 验收门
 
 | 门 | 命令 | 通过条件 |
-|---|---|---|
+| --- | --- | --- |
 | G-D5a | 战术单测 + 能力扰动测试 | slot fill 按能力适配；扰动响应单调；负面对照（断路）红 |
 | G-D5b | seed=0..7 `1q` | L1 = 0；账本平衡 = 0；构成准则不退化（相对 D3 结束态） |
 
@@ -349,7 +360,7 @@ D0 因果账本会合 ──► D1 证据模型 ──► D2 构成准则簇 ─
 ### 9.1 矩阵
 
 | 维度 | 内容 |
-|---|---|
+| --- | --- |
 | NBA 1q | seed=0..99，逐场 L1/L2/账本/构成准则，串行清理（problem.md §7 协议） |
 | NBA full | seed=0..39 终场 + L1 + 账本 + 构成 + 性能（engine-only ≥ 11,000 ticks/s，v1.43 标定） |
 | FIBA full | seed=0..7，零 Hard + 评判工件完整（M10 验收的当前形态） |
@@ -360,7 +371,7 @@ D0 因果账本会合 ──► D1 证据模型 ──► D2 构成准则簇 ─
 按 §1 P4，总门分三层：**机制层**（#1–#4）、**分布层**（#5–#7）、**反事实层**（#8）。三层全部通过才验收；分布层单独通过只构成"未被抓到"。
 
 | # | 层 | 门 | 通过条件 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | 机制 | G-CAUSAL | 全矩阵 `UNATTRIBUTED_END` = 0；账本四式 violations = 0 |
 | 2 | 机制 | G-EMERGENCE | 能力扰动测试全绿（每能力维 ≥1 条单调响应链）；常数棘轮不升；无新增行为常数 |
 | 3 | 机制 | G-STRUCT | World 私有化守卫绿；`full` = 真实终场；事件 ID/parent 链覆盖 100% 新流 |
@@ -398,7 +409,7 @@ cargo test --release -p nba-engine --test stats_baseline -- --nocapture
 ```bash
 ./scripts/run-tests.sh                                  # 全量测试 + 资源门
 python3 scripts/check_inline_constants.py               # 常数守卫（含 --self-test）
-python3 scripts/check_doc_refs.py                       # 文档引用守卫
+python3 scripts/check_docs.py                         # 文档引用守卫
 python3 scripts/check_disk_budget.py --report           # 资源守卫
 cargo run --release -p nba-sim-cli -- benchmark --ticks 60000   # 分层性能
 # 矩阵取证：release CLI 逐 seed 串行，/dev/shm 落流，评判后即删（problem.md §7 协议）
@@ -409,7 +420,7 @@ cargo run --release -p nba-sim-cli -- benchmark --ticks 60000   # 分层性能
 ## 11. 风险与对策
 
 | 风险 | 对策 |
-|---|---|
+| --- | --- |
 | 校准陷入"摁下葫芦浮起瓢"（修命中率导致节奏/构成联动漂移） | D3 四子步每步独立协议证据；归因账本跨步对比；任何一步使其他构成准则退化即回滚该步 |
 | 纯曲线拟合蒙混过门（分布进带但机制残废，古德哈特） | §6.3 机制层证据四条为校准 PR 强制件；G-D6 #8 反事实场景门兜底——分布拟合伪造不了定性行为签名 |
 | 账本穷举暴露大量历史未归因路径，D0 范围膨胀 | `PossessionEndCause` 枚举先行（编译期暴露全部分支），逐个分支补归因；不允许新增兜底变体 |
@@ -433,14 +444,14 @@ cargo run --release -p nba-sim-cli -- benchmark --ticks 60000   # 分层性能
 ## 13. 附录：与既有文档的引用关系
 
 | 本方案章节 | 上游依据 |
-|---|---|
-| §0 根因分析 | status.md §7/§26–§29、problem.md §13–§18、fix_plan.md §1 |
+| --- | --- |
+| §0 根因分析 | docs/dev/cycles/20260901_historical/status_snapshot.md §7、旧状态章节 §26–§29、docs/dev/evidence/problem.md §13–§18、历史 fix_plan §1 |
 | §1 P1 账本 | gap.md §2 P2、§7.3/§7.5 |
-| §1 P2/P3 评判先行 | charter.md §6 C2、fix_plan.md §1（P0-B 先于 P1 纪律） |
+| §1 P2/P3 评判先行 | charter.md §6 C2、docs/dev/cycles/20260911_first-principles/fix_plan.md §1（P0-B 先于 P1 纪律） |
 | D0 | gap.md §7、problem.md §13.2 |
-| D1 | gap.md §15.1/§15.3/§15.4、fix_plan.md F2.2/F2.3 |
+| D1 | gap.md §15.1/§15.3/§15.4、历史 fix_plan F2.2/F2.3 |
 | D2 | quality.md §2（准则体系扩展）、gap.md §15.5（参考分布契约） |
-| D3 | fix_plan.md F3、design.md §2/§4（校准协议与闭环） |
-| D4 | gap.md §7.1/§7.2、fix_plan.md F4、problem.md §11.1 |
-| D5 | tactics.md §3、gap.md §10.3/§10.4、fix_plan.md F5 |
-| D6 | charter.md §8、design.md §3、problem.md §7（串行重放协议） |
+| D3 | docs/dev/cycles/20260911_first-principles/fix_plan.md F3、protocol.md §1/§4（校准协议与闭环） |
+| D4 | gap.md §7.1/§7.2、历史 fix_plan F4、problem.md §11.1 |
+| D5 | tactics.md §3、gap.md §10.3/§10.4、历史 fix_plan F5 |
+| D6 | charter.md §8、protocol.md §2、problem.md §7（串行重放协议） |
