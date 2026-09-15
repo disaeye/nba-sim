@@ -288,3 +288,140 @@ fn box_score_fouls_match_foul_events() {
         );
     }
 }
+
+/// 箱体统计的**逐字段**与事件流对平。
+///
+/// ## 为什么需要（evidence/problem.md §23.10 / §23.9 / §27）
+///
+/// 本会话已实测两次同类缺陷：
+/// - `box_score.turnovers` 有 5 种失误终结而只有 2 个自增点，
+///   实测 52 次终结 vs 箱体 12 次（低估约 4 倍）；
+/// - `box_score.fouls` **零自增点**，CLI 恒打印 `Fouls: 0`。
+///
+/// 两者的共同点是「声明字段与事件事实脱钩」，而既有守卫（常数、世界
+/// 私有化、文档、身份）都覆盖不到——它们检查的是**代码形态**，不是
+/// **数据一致性**。本测试补这一层：把 `MatchBoxScore` 的 8 个字段逐个
+/// 与从事件流独立重建的值对平。
+///
+/// 这是 `gap.md` §18.6 第 2 条「事件、回合和账本可独立重建并对平」的
+/// 直接落地，且不依赖静态模式匹配——它对**未来新增的终结路径**同样有效。
+#[test]
+fn box_score_fields_reconcile_with_event_stream() {
+    for seed in [42u64, 1, 7, 100, 999, 31337] {
+        let mut engine = MatchEngine::new(seed);
+        engine.set_scope("1q").expect("1q scope is valid");
+
+        // 从事件流独立重建的计数（不读 box_score）。
+        let mut shot_rel_2 = 0u32;
+        let mut shot_rel_3 = 0u32;
+        let mut made_2 = 0u32;
+        let mut made_3 = 0u32;
+        let mut ft_att = 0u32;
+        let mut ft_made = 0u32;
+        let mut fouls = 0u32;
+        let mut turnover_terminals = 0u32;
+
+        let mut ticks = 0usize;
+        while !engine.is_finished() && ticks < 300_000 {
+            let tick = engine.step();
+            for ev in &tick.frame.event_log {
+                let payload = || ev.data.as_ref();
+                match ev.kind.as_str() {
+                    "SHOT_RELEASE" => {
+                        let is_three = payload()
+                            .and_then(|d| d.get("ShotRelease"))
+                            .and_then(|s| s.get("is_three"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        if is_three {
+                            shot_rel_3 += 1;
+                        } else {
+                            shot_rel_2 += 1;
+                        }
+                    }
+                    // `SCORE` 与 `SHOT_MISS` 都是 `HoopArrival` 载荷，
+                    // 按 `is_made` 区分命中。
+                    "SCORE" | "SHOT_MISS" => {
+                        let arrival = payload().and_then(|d| d.get("HoopArrival"));
+                        let is_made = arrival
+                            .and_then(|a| a.get("is_made"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        let is_three = arrival
+                            .and_then(|a| a.get("is_three"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        if is_made {
+                            if is_three {
+                                made_3 += 1;
+                            } else {
+                                made_2 += 1;
+                            }
+                        }
+                    }
+                    "FREE_THROW" => {
+                        ft_att += 1;
+                        let made = payload()
+                            .and_then(|d| d.get("FreeThrowAttempt"))
+                            .and_then(|f| f.get("made"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        if made {
+                            ft_made += 1;
+                        }
+                    }
+                    "FOUL" | "SHOOTING_FOUL" => fouls += 1,
+                    "POSSESSION_SUMMARY" => {
+                        let terminal = payload()
+                            .and_then(|d| d.get("PossessionSummary"))
+                            .and_then(|s| s.get("terminal_event"))
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("");
+                        if terminal.starts_with("TURNOVER") {
+                            turnover_terminals += 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            ticks += 1;
+        }
+
+        let b = engine.box_score();
+        // 逐字段对平：任一字段失衡都会指出具体是哪一项。
+        assert_eq!(
+            b.fg2_attempts, shot_rel_2,
+            "seed {seed}: box_score.fg2_attempts must equal SHOT_RELEASE(is_three=false)"
+        );
+        assert_eq!(
+            b.fg3_attempts, shot_rel_3,
+            "seed {seed}: box_score.fg3_attempts must equal SHOT_RELEASE(is_three=true)"
+        );
+        assert_eq!(
+            b.fg2_made, made_2,
+            "seed {seed}: box_score.fg2_made must equal HoopArrival(made && !three)"
+        );
+        assert_eq!(
+            b.fg3_made, made_3,
+            "seed {seed}: box_score.fg3_made must equal HoopArrival(made && three)"
+        );
+        assert_eq!(
+            b.ft_attempts, ft_att,
+            "seed {seed}: box_score.ft_attempts must equal FREE_THROW facts"
+        );
+        assert_eq!(
+            b.ft_made, ft_made,
+            "seed {seed}: box_score.ft_made must equal FREE_THROW(made=true)"
+        );
+        assert_eq!(
+            b.fouls, fouls,
+            "seed {seed}: box_score.fouls must equal FOUL facts \
+             (a zero-write field shows here as 0 vs N)"
+        );
+        assert_eq!(
+            b.turnovers, turnover_terminals,
+            "seed {seed}: box_score.turnovers must equal TURNOVER* possession terminals \
+             (a partial-write field shows here, e.g. 12 vs 52)"
+        );
+    }
+}
