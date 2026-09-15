@@ -4,6 +4,8 @@
   "court_width_ft": 94.0,
   "court_height_ft": 50.0,
   "pass_corridor_radius_ft": 4.0,
+  "offensive_rebound_shot_clock_seconds": 14.0,
+  "duration_tolerance_seconds": 2.0,
   "duration_bands": {
     "score": { "min": 2.0, "max": 26.0 },
     "rebound": { "min": 2.0, "max": 56.0 },

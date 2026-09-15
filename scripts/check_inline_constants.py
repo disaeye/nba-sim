@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""内联行为常数守卫（charter C1 / design.md §3.3 / gap.md §17.3）。
+"""内联行为常数守卫（charter C1 / docs/protocol.md §2.1 M7 / gap.md §17.3）。
 
 设计要点（替代历史整文件白名单）：
 
@@ -17,7 +17,7 @@
    证明守卫真的在被测，而不是恒绿。
 
 预算纪律：`scripts/inline_constant_budget.json` 是唯一事实源。收编批次
-只能下调；上调必须在 PR 中说明理由并附证据（design.md §2）。
+只能下调；上调必须在 PR 中说明理由并附证据（docs/protocol.md §1）。
 """
 
 import argparse
@@ -182,9 +182,13 @@ def measure() -> dict:
 
 
 def load_budget() -> dict:
-    if BUDGET_PATH.exists():
+    if not BUDGET_PATH.exists():
+        return {"files": {}, "budget_floats": {}}
+    try:
         return json.loads(BUDGET_PATH.read_text(encoding="utf-8"))
-    return {"files": {}, "budget_floats": {}}
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"❌ Cannot read {BUDGET_PATH.relative_to(ROOT)}: {exc}", file=sys.stderr)
+        return {"files": {}, "budget_floats": {}}
 
 
 def main() -> int:
