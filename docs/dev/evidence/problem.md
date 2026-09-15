@@ -2024,3 +2024,40 @@ hard_gate_failed     = False
 **未修**：属 CLI 工件通道改动（需在 batch 里逐场跑 `check_ledger`
 并把结果纳入聚合与退出码），应与 `plan.md` §7.2 的出口门一起处理，
 避免"顺手补一行"绕过验收设计。已登记。
+
+#### 27.5 补齐：另 9 个候选字段已逐个实证（全部零消费）
+
+§27.2 列出 9 个「未逐个实证」的候选。本节用与 §27.2 相同的方法补测：
+把它们改为**合法但明显不同**的值（避免触发 `validate` 拒绝而中断实验），
+再跑黄金窗口比较哈希。
+
+**方法学修正**：首次尝试用极端值（999）时，8 个字段中有多个触发
+`invalid match setup: tactical movement policy contains an invalid value`
+——`validate()` 在模拟开始前就拒绝了配置，因此实验**无法得出行为结论**
+（测到的是校验器而非消费链）。改用合法值后实验有效。
+
+| 字段 | 默认 | 改为 | 结果 |
+| --- | --- | --- | --- |
+| `def_drop_contain_base` | 0.75 | 0.20 | 哈希未变 → **零消费** |
+| `def_hedge_contain_base` | 0.72 | 0.20 | 哈希未变 → **零消费** |
+| `drive_dunk_max_dist_ft` | 4.0 | 2.0 | 哈希未变 → **零消费** |
+| `drive_dunk_min_finishing` | 0.70 | 0.10 | 哈希未变 → **零消费** |
+| `drive_dunk_max_lane_density` | 0.35 | 0.05 | 哈希未变 → **零消费** |
+| `drive_floater_min_dist_ft` | 7.0 | 3.0 | 哈希未变 → **零消费** |
+| `clutch_period` | 4 | 1 | 哈希未变 → **零消费** |
+| `clutch_score_margin` | 5 | 20 | 哈希未变 → **零消费** |
+| `clutch_time_remaining` | 120.0 | 30.0 | 哈希未变 → **零消费** |
+
+### 汇总：`GameRules` 零消费字段共 21 个（全部实证）
+
+| 分组 | 字段 | 归属子系统 |
+| --- | --- | --- |
+| 防守基础值 | `def_switch_base`、`def_drop_contain_base`、`def_hedge_contain_base` | D9.2 防守责任链 |
+| clutch 情境 | `clutch_period`、`clutch_score_margin`、`clutch_time_remaining` | clutch 机制整体不存在 |
+| 攻框终结 | `drive_dunk_max_dist_ft`、`drive_dunk_min_finishing`、`drive_dunk_max_lane_density`、`drive_floater_min_dist_ft`、`drive_finish_range_ft` | 攻框终结方式未接线 |
+| 转换进攻 | `transition_speed_ratio`、`transition_defense_threshold_ratio`、`transition_sprint_ratio` | 快攻机制未接线 |
+| 掩护几何 | `screen_hold_separation_ft`、`screen_roll_separation_ft` | 掩护执行层未接线 |
+| 运动/拦截 | `ball_bounce_amplitude_ft`、`max_player_turn_rate_rad_per_sec`、`pivot_foot_tolerance_ft`、`intercept_lane_radius_ft`、`flight_intercept_radius_ft` | 待定 |
+
+即 §27.4 的处置判断对全部 21 个字段成立：它们分属**至少六个未接线的
+子系统**，删除会抹掉设计意图，接线则各自是独立的行为改动。
