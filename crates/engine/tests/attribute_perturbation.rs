@@ -216,18 +216,8 @@ fn perturbation_poke_check_responds_to_both_sides() {
     let rules = GameRules::default();
     let handler = attrs_with(|a| a.ball_handling = 0.5);
 
-    let weak_defender = poke_check_success(
-        &rules,
-        &attrs_with(|a| a.steal = 0.1),
-        &handler,
-        0.5,
-    );
-    let strong_defender = poke_check_success(
-        &rules,
-        &attrs_with(|a| a.steal = 0.9),
-        &handler,
-        0.5,
-    );
+    let weak_defender = poke_check_success(&rules, &attrs_with(|a| a.steal = 0.1), &handler, 0.5);
+    let strong_defender = poke_check_success(&rules, &attrs_with(|a| a.steal = 0.9), &handler, 0.5);
     assert!(
         strong_defender > weak_defender,
         "defender steal must raise poke success (weak={weak_defender}, strong={strong_defender})"
