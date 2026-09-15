@@ -1645,3 +1645,90 @@ if self.possession == Possession::Home {
 混在一个提交里，那样会失去逐项归因能力。
 
 **状态：已证明可安全删除，未执行。**
+
+---
+
+## 27. `GameRules` 中的零消费字段（D9.3 前置，逐字段实证）
+
+> 目标（`current/plan.md` §5 D9.3）：为每个档案字段登记消费链，
+> 删除无消费字段。依据：`gap.md` §20.3「档案字段没有未登记消费点」。
+
+### 27.1 方法（含一次自我纠错）
+
+第一版判据：扫描 `crates/domain/src/rules.rs` 里的 `pub` 标量字段，
+检查其在**其它文件**中是否出现。结果报告 26 个「零读取」字段——
+但**这是错的**：`GameRules` 有若干方法在其实现内消费字段，例如
+
+```rust
+pub fn pass_duration(&self, distance_ft: f32, inbound: bool) -> f32 {
+    let speed = if inbound { self.inbound_pass_speed_ftps } else { self.pass_speed_ftps };
+    ...
+}
+```
+
+`pass_speed_ftps` 从不以 `rules.pass_speed_ftps` 形式出现在别处，
+却通过 `rules.pass_duration(...)` 真实生效。实测：把它的默认值
+32.0 → 999.0，seed42 哈希由 `0xa25e5c57…` 变为 `0x41fdf6f2…`。
+**故第一版判据有假阳性，不可信。**
+
+修正判据：在 `rules.rs` 内**保留**方法实现中的 `self.<field>` 消费，
+只排除三类自引用（声明行、`Default` 块、`validate` 块）。
+
+### 27.2 实证结果（逐个字段单独改值 + 跑黄金哈希）
+
+对修正后的候选逐个改值并实测（唯一可信的判据）：
+
+| 字段 | 改值 | 结果 |
+| --- | --- | --- |
+| `ball_bounce_amplitude_ft` | 0.35 → 999.0 | 哈希未变 → **零消费** |
+| `max_player_turn_rate_rad_per_sec` | → 999.0 | 哈希未变 → **零消费** |
+| `pivot_foot_tolerance_ft` | → 999.0 | 哈希未变 → **零消费** |
+| `intercept_lane_radius_ft` | → 999.0 | 哈希未变 → **零消费** |
+| `drive_finish_range_ft` | → 999.0 | 哈希未变 → **零消费** |
+| `screen_hold_separation_ft` | → 999.0 | 哈希未变 → **零消费** |
+| `screen_roll_separation_ft` | → 999.0 | 哈希未变 → **零消费** |
+| `def_switch_base` | → 999.0 | 哈希未变 → **零消费** |
+| `transition_speed_ratio` | 0.91 → 0.50 | 哈希未变 → **零消费** |
+| `flight_intercept_radius_ft` | 3.8 → 0.5 | 哈希未变 → **零消费** |
+| `transition_defense_threshold_ratio` | 0.38 → 0.05 | 哈希未变 → **零消费** |
+| `transition_sprint_ratio` | 0.88 → 0.40 | 哈希未变 → **零消费** |
+
+即 **12 个字段已实证为零消费**（改值后黄金哈希逐位相同）。
+
+另有 9 个候选尚未逐个实证（`clutch_period` / `clutch_time_remaining` /
+`clutch_score_margin` / `def_drop_contain_base` / `def_hedge_contain_base` /
+`drive_dunk_max_dist_ft` / `drive_dunk_min_finishing` /
+`drive_dunk_max_lane_density` / `drive_floater_min_dist_ft`），
+第一版扫描把它们列入，但按 §27.1 的教训，**未实证前不作结论**。
+
+### 27.3 这些字段的性质（为何不能直接删）
+
+与 §22.6 的 `BaseRates` 死字段不同，这里多数是**未接线**而非**重复声明**：
+
+- `def_switch_base` / `def_drop_contain_base` / `def_hedge_contain_base`：
+  与 `DefenseRules` 的 `switch_aggressiveness` 等属同一族（D9.2 的防守
+  责任链要接的就是它们）；
+- `clutch_*`（3 个）：**clutch 时段机制整体不存在**——决策层没有
+  「比赛最后 N 分钟、分差 M 以内」的情境分支；
+- `drive_dunk_*` / `drive_floater_min_dist_ft` / `drive_finish_range_ft`：
+  终结方式（扣篮/抛投）的判定阈值，属攻框体系未接线的部分；
+- `transition_*`（3 个）：**转换进攻（快攻）机制未接线**——`FastBreakTransition`
+  枚举存在，但速度/阈值参数无人读取；
+- `screen_hold_separation_ft` / `screen_roll_separation_ft`：
+  掩护后的分离几何未接入执行层。
+
+因此处置不能是一律删除：删除会抹掉「设计意图」，而 `gap.md` §20.3 要的是
+**登记消费链**。正确做法是二选一——接线（并登记消费点 + 控制场景测试）
+或标记为未批准提案并从运行 schema 移除。
+
+### 27.4 本轮处置
+
+**不改代码。** 理由：这 12（+9 候选）个字段分别属于**四个不同的未完成
+子系统的接线工作**（防守责任链、clutch 情境、攻框终结、转换进攻），
+按 `current/plan.md` §1「结构重构与行为校准分开提交」，它们应与各自
+子系统的接线一起处理，而不是先做一次「删除字段」的大扫除——后者会把
+后续接线所需的声明意图提前抹掉。
+
+**登记为 D9.3 的输入**：`D9.2 防守责任链` 应消费 `def_*` 三字段；
+`transition_*` 与 `clutch_*` 属 `plan.md` §11「暂不纳入本周期」范围内的
+候选（需先决定是否本周期补齐）。
