@@ -292,6 +292,17 @@ pub enum BallState {
         is_made: bool,
         is_three: bool,
         peak_z: f32,
+        /// 本次出手是否造成投篮犯规（含三分犯规）。
+        ///
+        /// 为什么是事实的一部分（evidence/problem.md §23.9）：全仓
+        /// `shooting_foul` 原本只在 `DriveResolution` 产生，即**只有突破能被
+        /// 犯规**，跳投在被干扰时没有任何造犯规可能（实测 seed42 全场
+        /// 仅 12 次犯规，真实 NBA 约 40）。犯规与出手是否命中是**两个独立
+        /// 事实**：真实篮球里 and-one（犯规且命中）与投篮犯规（犯规且不中）
+        /// 都存在，因此不能在落地时从一个布尔反推。
+        fouled: bool,
+        /// 犯规者（`fouled == true` 时存在）。
+        fouler_id: Option<String>,
     },
     /// 松球（传球掉落/篮板弹地）。`last_touch_team` 记录最后触球方
     /// （architecture：InFlight/Loose→最后触球队），是飞行期

@@ -2927,6 +2927,10 @@ impl MatchEngine {
                                 } else {
                                     self.rules.rim_height_ft + 1.5
                                 },
+                                // 突破犯规已在上面单独分支处理（直接进罚球、
+                                // 不创建 Shot 状态），因此本路径的出手必定无犯规。
+                                fouled: false,
+                                fouler_id: None,
                             });
                         }
                     } else {
@@ -2951,6 +2955,8 @@ impl MatchEngine {
                 is_made,
                 is_three,
                 from_pos,
+                fouled,
+                fouler_id,
                 ..
             } => {
                 let tau = ((current_t - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
@@ -2960,6 +2966,8 @@ impl MatchEngine {
                     let s_pos = *from_pos;
                     let made = *is_made;
                     let three = *is_three;
+                    let was_fouled = *fouled;
+                    let fouler = fouler_id.clone();
                     self.pending_events.push(GameEvent::HoopArrival {
                         shooter_id: sid.clone(),
                         shot_origin: (s_pos.x, s_pos.y),
@@ -2967,6 +2975,21 @@ impl MatchEngine {
                         is_three: three,
                         contest_intensity: 0.0,
                     });
+                    // ## 投篮犯规是独立事实（evidence/problem.md §23.9）
+                    //
+                    // 与 `HoopArrival` 并列发出，而不是用命中与否反推：
+                    // and-one（犯规且命中）与投篮犯规（犯规且不中）都要能表达，
+                    // 且犯规的后果（罚球、个人/团队犯规计数、犯满离场）
+                    // 必须走与突破犯规同一条处理链，避免第二套口径。
+                    if was_fouled {
+                        if let Some(ref fid) = fouler {
+                            self.pending_events.push(GameEvent::Foul {
+                                fouled_player_id: sid.clone(),
+                                fouler_id: fid.clone(),
+                                is_shooting: true,
+                            });
+                        }
+                    }
                     if three {
                         self.box_score.fg3_attempts += 1;
                         if made {
@@ -3714,6 +3737,17 @@ impl MatchEngine {
                     is_shooting,
                 } = event
                 {
+                    // 团队犯规是比赛级事实，必须计入箱体。
+                    //
+                    // 此前 `box_score.fouls` **零自增点**，CLI 恒定打印
+                    // `Fouls: 0`（与 §23.10 的 `turnovers` 同类缺陷）：
+                    // 声明的字段与事件事实脱钩。
+                    //
+                    // 口径说明：bonus 判定用的是 `team_fouls_{home,away}`
+                    // （下方 `team_fouls >= bonus_fouls_per_period`），
+                    // 不是本字段；此处是 CLI/批量工件消费的**比赛汇总**，
+                    // 两者都源于同一个 `GameEvent::Foul`。
+                    self.box_score.fouls = self.box_score.fouls.saturating_add(1);
                     if let Some(state) = self.modulation.get_mut(fouled_player_id) {
                         state.catch_equilibrium = (state.catch_equilibrium
                             - self.rules.semantics.contact_minor_speed_ratio * 0.2)
@@ -4164,6 +4198,29 @@ impl MatchEngine {
             .clamp(self.rules.shot_pct_floor, self.rules.shot_pct_ceiling);
         let is_made = self.rng.gen_bool(final_fg_pct as f64);
 
+        // ## 跳投犯规（evidence/problem.md §23.9）
+        //
+        // 此前全仓 `shooting_foul` 只在 `DriveResolution` 产生，即**只有突破
+        // 能被犯规**；跳投（含三分）在被干扰时没有任何造犯规可能。实测 seed42
+        // 全场仅 12 次犯规（全部来自突破，真实 NBA 约 40），使
+        // `free_throw_rate` 只有 0.110（带 [0.20, 0.35]）。
+        //
+        // 判定口径：犯规概率 = 基准 × 干扰强度。干扰是自变量（不受干扰的空位
+        // 跳投不会被犯规），基准经 GameRules 通道（charter C1）。
+        // 犯规与命中相互独立，因此不能从 `is_made` 反推——
+        // and-one（犯规且命中）与投篮犯规（犯规且不中）都要能表达。
+        let foul_probability =
+            (self.rules.resolve.base_rates.foul_on_shot_rate * openness.contest_intensity)
+                .clamp(f32::EPSILON, f32::from(1u8));
+        let fouled = self.rng.gen_bool(foul_probability as f64);
+        let fouler_id = if fouled {
+            openness.closest_defender_id.clone()
+        } else {
+            None
+        };
+        // 没有防守人在附近就不可能犯规（与概率为 0 一致，防御性对齐）。
+        let fouled = fouled && fouler_id.is_some();
+
         // 峰值必须服从规则通道的高度上限：base + dist×factor 在超远距离
         // （约 >84ft）会算出高于 `ball_z_max_ft` 的弧顶，直接违反
         // BALL_HEIGHT_BOUNDS（本轮 seed 6 full 实测 35.17ft > 35.0ft）。
@@ -4189,6 +4246,8 @@ impl MatchEngine {
             is_made,
             is_three,
             peak_z,
+            fouled,
+            fouler_id,
         });
         self.transition_phase(SubPhase::ShotAttempt);
         self.pending_events.push(GameEvent::ShotRelease {

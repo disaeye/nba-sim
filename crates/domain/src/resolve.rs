@@ -240,6 +240,14 @@ pub struct BaseRates {
     pub ft_make: f32,
     pub steal_attempt_success: f32,
     pub foul_on_drive_rate: f32,
+    /// 跳投（含三分）被干扰时造成投篮犯规的概率。
+    ///
+    /// 为什么需要单独一条（evidence/problem.md §23.9）：全仓
+    /// `shooting_foul` 原本只在 `DriveResolution` 产生，即**只有突破能被犯规**，
+    /// 跳投在被干扰时没有任何造犯规可能。实测 seed42 全场仅 12 次犯规
+    /// （真实 NBA 约 40），`free_throw_rate` 因此只有 0.110（带 [0.20,0.35]）。
+    /// 这是缺失的程序路径，不是参数偏差，所以新建字段而非调已有值。
+    pub foul_on_shot_rate: f32,
     pub offensive_rebound_rate: f32,
     pub block_rate: f32,
     /// Pass interception adjudication shape.
@@ -266,6 +274,10 @@ impl Default for BaseRates {
             ft_make: 0.77,
             steal_attempt_success: 0.005,
             foul_on_drive_rate: 0.10,
+            // 跳投犯规基准：真实 NBA 每场约 40 次犯规，其中相当部分来自
+            // 跳投犯规（三分犯规 / 中距离投篮犯规 / and-one）。
+            // 干扰强度在上层作为自变量乘入，此处为“受到实质干扰时”的基准。
+            foul_on_shot_rate: 0.06,
             offensive_rebound_rate: 0.26,
             block_rate: 0.05,
             // round-16 调整（A/B 证据 §17.6）：传球选择修复（距离衰减）后，

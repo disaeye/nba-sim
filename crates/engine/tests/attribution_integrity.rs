@@ -251,3 +251,40 @@ fn box_score_turnovers_match_turnover_terminals() {
         );
     }
 }
+
+/// `box_score.fouls` 必须等于事件流中的 `FOUL` 事实数。
+///
+/// ## 为什么需要（evidence/problem.md §23.9）
+///
+/// `box_score.fouls` 曾经**零自增点**：字段存在、CLI 消费它打印
+/// `Fouls: 0`，但引擎从不写入——与 §23.10 的 `turnovers` 完全同类。
+/// 这类"声明字段与事件事实脱钩"的缺陷，既有的三类守卫（常数、世界
+/// 私有化、文档）都覆盖不到，只能靠对平断言。
+#[test]
+fn box_score_fouls_match_foul_events() {
+    for seed in [42u64, 1, 7, 100, 999, 31337] {
+        let mut engine = MatchEngine::new(seed);
+        engine.set_scope("1q").expect("1q scope is valid");
+
+        let mut foul_events = 0u32;
+        let mut ticks = 0usize;
+        while !engine.is_finished() && ticks < 300_000 {
+            let tick = engine.step();
+            for ev in &tick.frame.event_log {
+                // `SHOOTING_FOUL` 与 `FOUL` 都源于同一个 `GameEvent::Foul`，
+                // 账本按事实计数，因此两类都计入。
+                if ev.kind == "FOUL" || ev.kind == "SHOOTING_FOUL" {
+                    foul_events += 1;
+                }
+            }
+            ticks += 1;
+        }
+        let box_fouls = engine.box_score().fouls;
+        assert_eq!(
+            box_fouls, foul_events,
+            "seed {seed}: box_score.fouls ({box_fouls}) must equal the number of \
+             FOUL facts in the event stream ({foul_events}); a mismatch means the \
+             box score is declared but not written (evidence/problem.md §23.9)"
+        );
+    }
+}
