@@ -19,3 +19,6 @@ nba_*
 node_modules/
 .omo/
 .codegraph/
+
+# Agent 会话产物（pi harness 的任务日志与输出）
+.pi/
