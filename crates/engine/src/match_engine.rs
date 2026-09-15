@@ -252,10 +252,16 @@ fn ensure_disk_headroom(out_path: &str, budget_bytes: u64) -> std::io::Result<()
 }
 
 /// 主模拟状态。每个 possession 是阶段事件流的最小产出单位。
+///
+/// ## 字段可见性（`current/plan.md` D7 / `gap.md` §20.1）
+///
+/// 除展示/审计所需的只读访问器外，所有状态字段均**私有**：外部只能经
+/// `step()` / `snapshot()` / 显式命令推进与观察比赛，不能直接改写真相。
+/// 需变可写的测试场景集中在显式命名的 `*_for_test` 钩子里。
 pub struct MatchEngine {
     /// Monotonic fixed-step index used by semantic facts and replay consumers.
-    pub tick_index: u64,
-    pub physics: PhysicsWorld,
+    tick_index: u64,
+    physics: PhysicsWorld,
     possession: Possession,
     possession_id: u32,
     sub_phase: SubPhase,
@@ -275,7 +281,7 @@ pub struct MatchEngine {
     current_event: Option<String>,
     current_callout: Option<String>,
     current_intensity: Option<String>,
-    pub rng: ChaCha8Rng,
+    rng: ChaCha8Rng,
     target_possessions: usize,
     completed_possessions: usize,
     /// Requested-scope completion is separate from the real game's lifecycle.
@@ -284,24 +290,24 @@ pub struct MatchEngine {
     scope_active: bool,
     scope_boundary: ScopeBoundary,
 
-    pub rules: GameRules,
-    pub decision: DecisionSystem,
-    pub modulation: HashMap<String, PlayerModulationState>,
-    pub coach: CoachStrategy,
-    pub home_team: TeamData,
-    pub away_team: TeamData,
-    pub team_traits: HashMap<String, nba_domain::TeamTraits>,
-    pub home_roster_order: Vec<String>,
-    pub away_roster_order: Vec<String>,
-    pub home_offense_tactic: TacticalSet,
-    pub away_offense_tactic: TacticalSet,
+    rules: GameRules,
+    decision: DecisionSystem,
+    modulation: HashMap<String, PlayerModulationState>,
+    coach: CoachStrategy,
+    home_team: TeamData,
+    away_team: TeamData,
+    team_traits: HashMap<String, nba_domain::TeamTraits>,
+    home_roster_order: Vec<String>,
+    away_roster_order: Vec<String>,
+    home_offense_tactic: TacticalSet,
+    away_offense_tactic: TacticalSet,
     /// D5.1b：生效的进攻战术档案（槽位元数据来源）。此前档案只被用于
     /// 校验 id 合法，从未参与目标生成，导致所有槽位由全局 ratio 推得、
     /// 全队挤在弧顶三分线外。
     home_offense_spec: nba_domain::TacticalSetSpec,
     away_offense_spec: nba_domain::TacticalSetSpec,
-    pub home_defensive_tactic: DefensiveTactic,
-    pub away_defensive_tactic: DefensiveTactic,
+    home_defensive_tactic: DefensiveTactic,
+    away_defensive_tactic: DefensiveTactic,
     last_decision_trace: Option<Box<DecisionDebug>>,
     latest_spacing: Option<SpacingEvaluation>,
     latest_contacts: Vec<SemanticContact>,
@@ -6017,6 +6023,65 @@ impl MatchEngine {
     /// 比赛统计分解（2P/3P/FT、失误、犯规）——只读快照。
     pub fn box_score(&self) -> &MatchBoxScore {
         &self.box_score
+    }
+
+    // ------------------------------------------------------------------
+    // 只读访问器（`current/plan.md` D7：外部不能改真相，只能观察）。
+    //
+    // 这些字段曾为 `pub`，使任何一个库调用方都能直接改写比赛状态（如
+    // `engine.rules.tick_seconds = f32::MAX`），违反 `gap.md` §20.1
+    // 「权威时间、球权和终态没有外部可写真相字段」。现改为私有 +
+    // 只读访问器；需要变可写的测试场景走显式命名的 `*_for_test` 钩子。
+    // ------------------------------------------------------------------
+
+    /// 单调固定步索引（事实与回放消费者用它定位 tick）。
+    pub fn tick_index(&self) -> u64 {
+        self.tick_index
+    }
+
+    /// 本场生效的规则（只读）。外部需自定义规则时用 `with_rules` 构造。
+    pub fn rules(&self) -> &GameRules {
+        &self.rules
+    }
+
+    /// 物理世界（只读）：位置、属性、openness 等查询走这里。
+    pub fn physics(&self) -> &PhysicsWorld {
+        &self.physics
+    }
+
+    /// 所属方名单顺序（只读）；用于验证顺序不携带语义（ADR-005）。
+    pub fn away_roster_order(&self) -> &[String] {
+        &self.away_roster_order
+    }
+
+    /// 主队名单顺序（只读）。
+    pub fn home_roster_order(&self) -> &[String] {
+        &self.home_roster_order
+    }
+
+    /// 物理世界的可变访问（**仅测试**）。
+    ///
+    /// 生产路径不得直接改物理状态：位置/速度必须经引擎的阶段化推进；
+    /// 直接改写会绕过不变量检查（例如把球员瞬移到界外）。属性扰动
+    /// 测试需要它来构造对照场景，因此保留为显式的测试后门。
+    #[doc(hidden)]
+    pub fn physics_mut_for_test(&mut self) -> &mut PhysicsWorld {
+        &mut self.physics
+    }
+
+    /// 球员调制状态（只读）：士气/手感等跨 tick 状态。
+    pub fn modulation_for_test(&self) -> &HashMap<String, PlayerModulationState> {
+        &self.modulation
+    }
+
+    /// 规则的可变访问（**仅测试**）。
+    ///
+    /// 生产路径不得在运行中改规则：规则应在构造时经 `with_rules` 固定，
+    /// 否则同一场比赛内的行为会依赖“何时改的”而不只依赖输入。
+    /// 机制对照测试（如关闭接球噪声）需要它。
+    #[doc(hidden)]
+    pub fn rules_mut_for_test(&mut self) -> &mut GameRules {
+        &mut self.rules
     }
 
     /// 最近一次 `step()` 产生的不变量违反（只读）。

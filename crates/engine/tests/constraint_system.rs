@@ -281,7 +281,7 @@ fn test_shot_clock_violation_triggers_turnover_in_sim() {
     let mut rules = nba_domain::GameRules::default();
     rules.tip_off_duration_seconds = 0.0;
     let mut engine = MatchEngine::with_rules(42, rules);
-    engine.set_shot_clock_for_test(engine.rules.tick_seconds);
+    engine.set_shot_clock_for_test(engine.rules().tick_seconds);
     let previous_possession = engine.possession();
 
     let tick = engine.step();
@@ -358,13 +358,13 @@ fn test_offensive_rebound_does_not_switch_possession() {
     let before = engine.possession();
     let rebound = nba_physics::BallTrajectoryKind::RimRebound {
         from_pos: glam::Vec2::new(88.75, 25.0),
-        from_z: engine.rules.rim_height_ft,
+        from_z: engine.rules().rim_height_ft,
         last_touch_team: engine.possession(),
-        hoop_pos: engine.rules.court.hoop_pos(true),
+        hoop_pos: engine.rules().court.hoop_pos(true),
         target_landing: glam::Vec2::new(70.0, 25.0),
         start_time: engine.current_time(),
         duration: 10.0,
-        peak_z: engine.rules.rebound_peak_ft,
+        peak_z: engine.rules().rebound_peak_ft,
     };
     engine.set_ball_state_for_test(rebound);
     assert_eq!(engine.possession(), before);
@@ -438,7 +438,7 @@ fn test_contact_adjudication_emits_foul_fact_when_policy_calls_it() {
         legal_position: false,
     });
     let before = engine
-        .modulation
+        .modulation_for_test()
         .get("H_01")
         .map(|m| m.catch_equilibrium)
         .unwrap_or(1.0);
@@ -448,7 +448,7 @@ fn test_contact_adjudication_emits_foul_fact_when_policy_calls_it() {
     if foul_seen {
         assert!(
             engine
-                .modulation
+                .modulation_for_test()
                 .get("H_01")
                 .map(|m| m.catch_equilibrium)
                 .unwrap_or(1.0)
@@ -510,7 +510,7 @@ fn test_period_expiration_reaches_break_then_next_period() {
         .iter()
         .any(|event| event == "PHASE_TRANSITION"));
     assert_eq!(engine.period(), period_before);
-    engine.set_period_break_elapsed_for_test(engine.rules.period_break_seconds + 1.0);
+    engine.set_period_break_elapsed_for_test(engine.rules().period_break_seconds + 1.0);
     engine.step();
     assert_eq!(engine.period(), period_before + 1);
 }
@@ -531,7 +531,7 @@ fn test_free_throw_phase_is_visible_in_stream_contract() {
     assert_eq!(tick.frame.team_fouls_away, 1);
     assert_eq!(
         engine
-            .physics
+            .physics()
             .get_player("A_01")
             .expect("fouler")
             .foul_count,
@@ -616,7 +616,7 @@ fn test_bonus_foul_uses_configured_threshold() {
     assert_eq!(engine.game_flow(), nba_domain::GameFlowState::FreeThrow);
     assert_eq!(
         engine
-            .physics
+            .physics()
             .get_player("A_01")
             .expect("fouler")
             .foul_count,
@@ -835,11 +835,11 @@ fn test_decision_uses_custom_hoop_geometry() {
 fn test_builtin_player_attributes_reach_runtime_state() {
     let engine = MatchEngine::new(907);
     let home = engine
-        .physics
+        .physics()
         .get_player("H_01")
         .expect("builtin home player");
     let away = engine
-        .physics
+        .physics()
         .get_player("A_01")
         .expect("builtin away player");
     assert_eq!(home.max_speed_ftps, away.max_speed_ftps);
@@ -918,10 +918,10 @@ fn test_selected_lineup_controls_runtime_roster() {
     let home_bench_id = setup.home_lineup.bench.pop().expect("builtin bench");
     let away_bench_id = setup.away_lineup.bench.pop().expect("builtin bench");
     let engine = MatchEngine::with_setup(setup, 915);
-    assert!(engine.physics.get_player(&home_bench_id).is_none());
-    assert!(engine.physics.get_player(&away_bench_id).is_none());
-    assert_eq!(engine.physics.get_players().len(), 14);
-    assert!(engine.physics.get_players().values().all(|player| {
+    assert!(engine.physics().get_player(&home_bench_id).is_none());
+    assert!(engine.physics().get_player(&away_bench_id).is_none());
+    assert_eq!(engine.physics().get_players().len(), 14);
+    assert!(engine.physics().get_players().values().all(|player| {
         player.action == "Bench" || player.action == "SetPosition" || player.action == "Initiate"
     }));
 }
@@ -979,8 +979,8 @@ fn physics_contact_is_promoted_to_semantic_event_stream() {
     rules.tip_off_duration_seconds = 0.0;
     rules.contact_margin_ft = 0.2;
     let mut engine = MatchEngine::with_rules(808, rules);
-    engine.physics.get_player_mut("H_01").unwrap().pos_ft = Vec2::new(30.0, 25.0);
-    engine.physics.get_player_mut("A_01").unwrap().pos_ft = Vec2::new(33.0, 25.0);
+    engine.physics_mut_for_test().get_player_mut("H_01").unwrap().pos_ft = Vec2::new(30.0, 25.0);
+    engine.physics_mut_for_test().get_player_mut("A_01").unwrap().pos_ft = Vec2::new(33.0, 25.0);
     let tick = engine.step();
     assert!(
         tick.frame
@@ -1000,9 +1000,9 @@ fn screen_contact_classification_uses_tactical_action_context() {
     rules.tip_off_duration_seconds = 0.0;
     rules.contact_margin_ft = 0.2;
     let mut engine = MatchEngine::with_rules(909, rules);
-    engine.physics.get_player_mut("H_01").unwrap().pos_ft = Vec2::new(30.0, 25.0);
-    engine.physics.get_player_mut("H_01").unwrap().action = "SET_HIGH_SCREEN".to_string();
-    engine.physics.get_player_mut("A_01").unwrap().pos_ft = Vec2::new(33.0, 25.0);
+    engine.physics_mut_for_test().get_player_mut("H_01").unwrap().pos_ft = Vec2::new(30.0, 25.0);
+    engine.physics_mut_for_test().get_player_mut("H_01").unwrap().action = "SET_HIGH_SCREEN".to_string();
+    engine.physics_mut_for_test().get_player_mut("A_01").unwrap().pos_ft = Vec2::new(33.0, 25.0);
     let tick = engine.step();
     assert!(
         tick.frame
@@ -1176,7 +1176,7 @@ fn setup_rejects_players_outside_configured_geometry() {
 /// `receive_estimate_noise_ft == 0` 时接球人精确知道落点 —— 这是
 /// round-10 之前的行为，仅用于"与位置无关"的机制测试。
 fn setup_noise_off(engine: &mut nba_engine::MatchEngine) {
-    engine.rules.receive_estimate_noise_ft = 0.0;
+    engine.rules_mut_for_test().receive_estimate_noise_ft = 0.0;
 }
 
 #[test]
@@ -1198,7 +1198,7 @@ fn pass_arrival_replays_release_outcome_and_emits_matching_fact() {
         target_id: "H_02".to_string(),
         start_time: 1.0,
         duration: 0.2,
-        peak_z: engine.rules.pass_peak_ft,
+        peak_z: engine.rules().pass_peak_ft,
         inbound: false,
         receive_success: true,
         intercept: None,
@@ -1217,25 +1217,25 @@ fn pass_arrival_replays_release_outcome_and_emits_matching_fact() {
     // 层 A（P-1）引入后，接球人按自己的估计跑位，可能与冻结点分离 ——
     // 那是另一个被测对象（见 tests/pass_information.rs）。
     {
-        let ids: Vec<String> = engine.physics.get_players().keys().cloned().collect();
+        let ids: Vec<String> = engine.physics().get_players().keys().cloned().collect();
         for id in ids {
-            if let Some(p) = engine.physics.get_player_mut(&id) {
+            if let Some(p) = engine.physics_mut_for_test().get_player_mut(&id) {
                 p.vel_ft = glam::Vec2::ZERO;
                 p.target_speed_ftps = 0.0;
             }
         }
-        if let Some(p) = engine.physics.get_player_mut("H_02") {
+        if let Some(p) = engine.physics_mut_for_test().get_player_mut("H_02") {
             p.pos_ft = glam::Vec2::new(50.0, 25.0);
             p.target_pos_ft = glam::Vec2::new(50.0, 25.0);
         }
     }
     engine
-        .physics
+        .physics_mut_for_test()
         .get_player_mut("H_01")
         .expect("passer")
         .pos_ft = glam::Vec2::new(40.0, 25.0);
     engine
-        .physics
+        .physics_mut_for_test()
         .get_player_mut("H_02")
         .expect("receiver")
         .pos_ft = glam::Vec2::new(50.0, 25.0);
@@ -1243,7 +1243,7 @@ fn pass_arrival_replays_release_outcome_and_emits_matching_fact() {
     // 引擎初始化赋予的战术跑位初速会因惯性把他推出落点（实测 1 tick 滑
     // 1.73 ft > catch_radius），使层 A 失败 —— 那是测试场景污染，不是被测行为。
     engine
-        .physics
+        .physics_mut_for_test()
         .get_player_mut("H_02")
         .expect("receiver")
         .vel_ft = glam::Vec2::ZERO;
@@ -1251,12 +1251,12 @@ fn pass_arrival_replays_release_outcome_and_emits_matching_fact() {
     // `is_receiving_pass && target_speed == 0`。本场景接球人恰好站在落点，
     // 不应有残留的战术移动速度。
     engine
-        .physics
+        .physics_mut_for_test()
         .get_player_mut("H_02")
         .expect("receiver")
         .target_speed_ftps = 0.0;
     engine
-        .physics
+        .physics_mut_for_test()
         .get_player_mut("H_02")
         .expect("receiver")
         .target_pos_ft = glam::Vec2::new(50.0, 25.0);
@@ -1268,14 +1268,14 @@ fn pass_arrival_replays_release_outcome_and_emits_matching_fact() {
     // 不应被无关球员的站位污染。
     {
         let others: Vec<String> = engine
-            .physics
+            .physics()
             .get_players()
             .iter()
             .filter(|(id, p)| p.on_court && id.as_str() != "H_02")
             .map(|(id, _)| id.clone())
             .collect();
         for (i, id) in others.iter().enumerate() {
-            if let Some(p) = engine.physics.get_player_mut(id) {
+            if let Some(p) = engine.physics_mut_for_test().get_player_mut(id) {
                 // 沿边线一字排开，远离接球点
                 p.pos_ft = glam::Vec2::new(5.0, 5.0 + i as f32 * 4.0);
                 p.target_pos_ft = p.pos_ft;
@@ -1323,7 +1323,7 @@ fn pass_release_policy_can_emit_drop_without_redeciding_at_arrival() {
         target_id: "H_02".to_string(),
         start_time: 0.0,
         duration: 0.1,
-        peak_z: engine.rules.pass_peak_ft,
+        peak_z: engine.rules().pass_peak_ft,
         inbound: false,
         receive_success: false,
         intercept: None,
@@ -1354,13 +1354,13 @@ fn shot_release_uses_configured_skill_and_spacing_inputs() {
     engine.force_possession_for_test(nba_domain::Possession::Home);
     engine.ball_pos_3d().0 = glam::Vec2::new(40.0, 25.0);
     engine
-        .physics
+        .physics_mut_for_test()
         .get_player_mut("H_01")
         .expect("shooter")
         .attributes
         .shooting_mid = 1.0;
     engine
-        .physics
+        .physics_mut_for_test()
         .get_player_mut("H_01")
         .expect("shooter")
         .pos_ft = glam::Vec2::new(40.0, 25.0);
@@ -1377,7 +1377,7 @@ fn audit_margin_is_part_of_serialized_rules_contract() {
     let value = serde_json::to_value(engine.step()).expect("frame should serialize");
     assert_eq!(
         value["rules"]["separation_safety_margin_ft"],
-        serde_json::json!(engine.rules.separation_safety_margin_ft)
+        serde_json::json!(engine.rules().separation_safety_margin_ft)
     );
 }
 
@@ -1440,7 +1440,7 @@ fn test_free_throw_never_reports_ball_holder() {
             assert!(
                 tick.frame.ball.holder_id.is_none(),
                 "during FreeThrow the ball must not advertise a holder (tick {}, holder={:?}, status={})",
-                engine.tick_index,
+                engine.tick_index(),
                 tick.frame.ball.holder_id,
                 tick.frame.ball.status
             );
@@ -1480,14 +1480,14 @@ fn test_free_throw_ball_is_dead_or_attached() {
                 tick.frame.ball.x * rules.court_width_ft,
                 tick.frame.ball.y * rules.court_height_ft,
             );
-            if let Some(p) = engine.physics.get_player(holder) {
+            if let Some(p) = engine.physics().get_player(holder) {
                 let d = ((bft.0 - p.pos_ft.x).powi(2) + (bft.1 - p.pos_ft.y).powi(2)).sqrt();
                 assert!(
                     d <= rules.holder_leash_ft,
                     "advertised holder {} is {:.2} ft from ball during free throw (tick {})",
                     holder,
                     d,
-                    engine.tick_index
+                    engine.tick_index()
                 );
             }
         }
@@ -1515,7 +1515,7 @@ fn test_backcourt_clock_resets_on_halfcourt_cross() {
     // 把球与持球人放到前场（Home 攻击右侧，x >= 47 为前场）。
     let frontcourt = glam::Vec2::new(70.0, 25.0);
     engine.set_ball_pos_for_test(frontcourt, 4.0);
-    if let Some(p) = engine.physics.get_player_mut("H_01") {
+    if let Some(p) = engine.physics_mut_for_test().get_player_mut("H_01") {
         p.pos_ft = frontcourt;
         p.target_pos_ft = frontcourt;
     }
@@ -1550,7 +1550,7 @@ fn test_eight_second_violation_requires_continuous_backcourt() {
     });
     let backcourt = glam::Vec2::new(20.0, 25.0);
     engine.set_ball_pos_for_test(backcourt, 4.0);
-    if let Some(p) = engine.physics.get_player_mut("H_01") {
+    if let Some(p) = engine.physics_mut_for_test().get_player_mut("H_01") {
         p.pos_ft = backcourt;
         p.target_pos_ft = backcourt;
         p.target_speed_ftps = 0.0;
@@ -1569,7 +1569,7 @@ fn test_eight_second_violation_requires_continuous_backcourt() {
             break;
         }
         // 保持球员停留在后场，排除运动学把它们带过中线。
-        if let Some(p) = engine.physics.get_player_mut("H_01") {
+        if let Some(p) = engine.physics_mut_for_test().get_player_mut("H_01") {
             p.pos_ft = backcourt;
             p.target_pos_ft = backcourt;
             p.vel_ft = glam::Vec2::ZERO;
@@ -1691,7 +1691,7 @@ fn test_inbounder_reassigned_when_leaving_court() {
             let inbounder_off_court = match &engine.ball_state() {
                 nba_physics::BallTrajectoryKind::InboundTransfer { inbounder_id, .. }
                 | nba_physics::BallTrajectoryKind::InboundReady { inbounder_id, .. } => engine
-                    .physics
+                    .physics()
                     .get_player(inbounder_id)
                     .map(|p| !p.on_court)
                     .unwrap_or(true),

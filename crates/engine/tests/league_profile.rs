@@ -83,24 +83,24 @@ fn forced_substitution_preserves_five_on_five() {
     let mut engine = MatchEngine::new(42);
     let out_id = "A_01".to_string();
     engine
-        .physics
+        .physics_mut_for_test()
         .get_player_mut(&out_id)
         .expect("starter A_1 must exist")
         .foul_count = 5;
     engine.forced_substitution(&out_id);
 
-    let out = engine.physics.get_player(&out_id).unwrap();
+    let out = engine.physics().get_player(&out_id).unwrap();
     assert!(!out.on_court, "fouled-out player must leave court");
     assert!(!out.has_ball);
 
     let home_on = engine
-        .physics
+        .physics()
         .get_players()
         .values()
         .filter(|p| p.team == "home" && p.on_court)
         .count();
     let away_on = engine
-        .physics
+        .physics()
         .get_players()
         .values()
         .filter(|p| p.team == "away" && p.on_court)
@@ -109,7 +109,7 @@ fn forced_substitution_preserves_five_on_five() {
     assert_eq!(away_on, 5, "away must keep 5 on court");
 
     assert!(
-        !engine.away_roster_order.contains(&out_id),
+        !engine.away_roster_order().contains(&out_id),
         "roster order must drop fouled-out player"
     );
 

@@ -9,7 +9,7 @@ fn test_physics_zero_anomalies_full_match() {
     let mut prev_positions: HashMap<String, (f32, f32)> = HashMap::new();
     let mut speed_violations = 0;
     let mut spacing_violations = 0;
-    let rules = engine.rules.clone();
+    let rules = engine.rules().clone();
     let dt = rules.tick_seconds;
     for tick_idx in 0..total_ticks {
         let tick = engine.step();

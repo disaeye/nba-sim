@@ -1433,3 +1433,83 @@ probability = policy.foul_rate(0.12)
 （含掩护、交接球、随即出手），需要决策层候选与执行链两层支持。
 
 两项均**不在本周期范围**，登记为后续周期候选，避免"参数删了 = 功能有了"。
+
+---
+
+## 24. `MatchEngine` 公共边界收敛（D7 执行记录）
+
+> 目标（`current/plan.md` §3 D7）：外部调用者不能直接修改比赛真相。
+> 依据：`gap.md` §20.1「权威时间、球权和终态没有外部可写真相字段」。
+
+### 24.1 收敛前的事实
+
+`MatchEngine` 有 **16 个 `pub` 字段**：
+
+```text
+tick_index, physics, rng, rules, decision, modulation, coach,
+home_team, away_team, team_traits, home_roster_order, away_roster_order,
+home_offense_tactic, away_offense_tactic,
+home_defensive_tactic, away_defensive_tactic
+```
+
+任何一个库调用方都能直接改写比赛状态（例如
+`engine.rules.tick_seconds = f32::MAX` 或
+`engine.physics.get_player_mut(id).pos_ft = <界外>`），绕过阶段化推进与
+不变量检查。既有 `check_world_privacy.py` 只覆盖「真相字段」清单内的 57 项，
+这 16 个字段属于「配置/外部依赖」类别因而未被拦截——但它们的可变性同样
+能让外部改写比赛行为。
+
+### 24.2 外部使用面盘点（改前实测）
+
+对全仓（除 `engine/src/match_engine.rs` 自身）逐字段统计：
+
+| 字段 | 外部引用 | 性质 |
+| --- | --- | --- |
+| `physics` | 21 | 全部为**只读查询**（1 处测试需可变） |
+| `rules` | 14 | 只读（1 处测试需可变；`service.rs` 读 `tick_seconds`） |
+| `tick_index` | 2 | 只读 |
+| `away_roster_order` | 1 | 只读（ADR-005 顺序中性验证） |
+| 其余 12 个字段 | **0** | 无外部引用 |
+
+并已核对：全仓**没有任何外部赋值**（`engine.X = …`）与**可变借用**
+（`&mut engine.X`）。即外部使用面是纯只读的，这使收敛可以做到
+**行为中性**。
+
+### 24.3 收敛结果
+
+- 16 个字段全部改为私有；
+- 新增只读访问器：`tick_index()`、`rules()`、`physics()`、
+  `home_roster_order()`、`away_roster_order()`；
+- 测试所需的可变通道改为**显式命名的测试后门**：
+  `physics_mut_for_test()`、`rules_mut_for_test()`、`modulation_for_test()`
+  （均带 `#[doc(hidden)]` 与说明为何生产路径不得使用）；
+- 实测 `awk` 统计 `pub struct MatchEngine` 内的 `pub` 字段数：**0**。
+
+### 24.4 验证
+
+| 检查 | 结果 |
+| --- | --- |
+| `cargo check --workspace --all-targets` | 退出码 0 |
+| `cargo clippy --workspace --all-targets -D warnings` | 退出码 0 |
+| `golden_hash` | 5 passed，哈希**未变**（行为中性重构） |
+| `league_profile` / `attribute_perturbation` | 各通过 |
+| `check_world_privacy.py` | 通过（57 真相字段 + 16 配置字段全部私有） |
+| 常数棘轮 | 1553，**未变**（未引入新常量） |
+
+### 24.5 过程中的两次编译器拦截
+
+收敛过程中 `cargo check --all-targets` 两次拦下我的遗漏：
+一次是 `league_profile.rs` 的多行 `.physics` 访问，
+一次是 `constraint_system.rs` 的测试改写（需 `rules_mut_for_test`）。
+
+这与本会话早先 `BallState::Shot` 的教训一致：**跨 crate 的结构改动必须用
+`cargo check --workspace --all-targets` 验证**，单个 crate 的构建不足以
+证明完备性。文档与脚本层的 `grep` 也会漏（本次 21 处 `physics` 引用分散在
+4 个文件、含多行书写形式）。
+
+### 24.6 未做（不在本次范围）
+
+- `snapshot()` 的投影面尚未扩充：CLI/回放/评判仍通过既有访问器读取，
+  未统一到单一只读快照（`current/plan.md` D7 的后续项）；
+- `check_world_privacy.py` 目前仍以「字段名清单」为判据；守卫升级为
+  「API 形态」判据（禁止任何 `pub` 字段，而非列出清单）是 D7 的下一项。

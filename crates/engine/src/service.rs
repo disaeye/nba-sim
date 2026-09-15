@@ -165,7 +165,7 @@ impl MatchService {
                 .ok_or_else(|| "match snapshot unavailable".to_string());
         }
 
-        let step_seconds = engine.rules.tick_seconds;
+        let step_seconds = engine.rules().tick_seconds;
         if !step_seconds.is_finite() || step_seconds <= 0.0 {
             return Err("configured logic tick must be finite and positive".to_string());
         }

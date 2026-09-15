@@ -105,9 +105,11 @@ fn perturbation_mental_iq_modulates_risk_tolerance() {
 fn avg_displacement(seed: u64, speed_attr: f32, ticks: usize) -> f32 {
     let mut engine = MatchEngine::new(seed);
     // 直接把目标球员（主队 3 号，非持球人）的能力置为指定值并同步物理上限。
-    if let Some(p) = engine.physics.get_player_mut("H_03") {
+    // 先读规则上限，再取可变物理：避免同一表达式里同时借用 engine。
+    let speed_cap = engine.rules().max_player_speed_ftps;
+    if let Some(p) = engine.physics_mut_for_test().get_player_mut("H_03") {
         p.attributes.speed = speed_attr;
-        p.max_speed_ftps = engine.rules.max_player_speed_ftps * speed_attr.max(0.2);
+        p.max_speed_ftps = speed_cap * speed_attr.max(0.2);
     }
     let mut prev: Option<(f32, f32)> = None;
     let mut total = 0.0f32;
@@ -134,12 +136,12 @@ fn behavioral_speed_perturbation_raises_kinematic_cap() {
     let mut engine = MatchEngine::new(42);
     let _ = rules;
     for attr in [0.6f32, 0.95f32] {
-        if let Some(p) = engine.physics.get_player_mut("H_03") {
+        if let Some(p) = engine.physics_mut_for_test().get_player_mut("H_03") {
             p.attributes.speed = attr;
         }
-        let attrs = &engine.physics.get_player("H_03").unwrap().attributes;
-        let cap = nba_domain::effective_max_speed(&engine.rules, attrs);
-        let expected = engine.rules.max_player_speed_ftps * attr;
+        let attrs = &engine.physics().get_player("H_03").unwrap().attributes;
+        let cap = nba_domain::effective_max_speed(engine.rules(), attrs);
+        let expected = engine.rules().max_player_speed_ftps * attr;
         assert!(
             (cap - expected).abs() < 1e-4,
             "cap must track attribute ({cap} vs {expected})"
