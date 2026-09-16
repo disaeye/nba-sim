@@ -12,7 +12,11 @@ output/
 *.judgments.ndjson
 *.attribution_report.json
 # 测试临时产物（test-support 会在退出时清理，这里兜底）
-nba_*
+/nba_testrun_*
+/nba_test_*
+
+# 静态托管部署所需的 wasm 产物
+!crates/debug-server/static/wasm/**
 
 # System / Cache
 .DS_Store

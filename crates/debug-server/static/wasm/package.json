@@ -1,0 +1,15 @@
+{
+  "name": "nba-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "nba_wasm_bg.wasm",
+    "nba_wasm.js",
+    "nba_wasm.d.ts"
+  ],
+  "main": "nba_wasm.js",
+  "types": "nba_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
