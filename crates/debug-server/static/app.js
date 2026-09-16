@@ -942,14 +942,14 @@
       canvas.width,
       canvas.height,
     );
-    background.addColorStop(0, "#c1aa80");
-    background.addColorStop(0.5, "#ad966e");
-    background.addColorStop(1, "#c7b183");
+    background.addColorStop(0, "#dfcca6");
+    background.addColorStop(0.5, "#ceba92");
+    background.addColorStop(1, "#d8c39e");
     ctx.fillStyle = background;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "rgba(255,255,255,.06)";
+    ctx.fillStyle = "rgba(255,255,255,.05)";
     ctx.fillRect(10, 10, 940, 500);
-    ctx.strokeStyle = "rgba(247,239,214,.82)";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.88)";
     ctx.lineWidth = 1.5;
     ctx.strokeRect(10, 10, 940, 500);
     ctx.beginPath();

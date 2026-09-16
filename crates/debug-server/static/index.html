@@ -3,197 +3,198 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0b1015">
-  <title>NBA-Sim · Arena Simulator</title>
+  <title>NBA-Sim · 专业赛事演练与战术观测台</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <!-- 1. 顶部紧凑导航栏 -->
+  <!-- 1. 顶栏导航与控制组 -->
   <header class="app-header">
-    <div class="header-brand">
-      <span class="brand-logo">NBA<span>/</span>SIM</span>
-      <span id="runStatus" class="status-indicator ready">就绪</span>
-    </div>
-
-    <div class="header-controls">
-      <div class="pill-group">
-        <label class="pill-field" title="随机种子">
-          <span class="pill-label">SEED</span>
-          <input id="seedInput" type="number" value="42" step="1">
-        </label>
-        <label class="pill-field" title="模拟范围">
-          <span class="pill-label">SCOPE</span>
-          <select id="scopeInput">
-            <option value="1p">1 回合</option>
-            <option value="5p" selected>5 回合</option>
-            <option value="10p">10 回合</option>
-            <option value="1q">1 节</option>
-            <option value="full">全场</option>
-          </select>
+    <div class="header-brand-row">
+      <div class="brand-group">
+        <span class="brand-badge">NBA</span>
+        <span class="brand-title">SIM <em>OBSERVATORY</em></span>
+      </div>
+      <div class="header-right-tools">
+        <span id="runStatus" class="status-pill">就绪</span>
+        <label class="btn-tool-icon" title="导入本地 NDJSON 轨迹">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <input id="fileInput" type="file" accept=".ndjson,.json,.txt" hidden>
         </label>
       </div>
+    </div>
 
-      <button id="runButton" class="btn-run" title="开始推演">
+    <!-- 运行参数控制栏 (移动端整齐排开，PC 端紧凑居右) -->
+    <div class="header-action-bar">
+      <div class="field-item seed-field">
+        <span class="field-label">SEED</span>
+        <input id="seedInput" type="number" value="42" step="1">
+      </div>
+      <div class="field-item scope-field">
+        <span class="field-label">SCOPE</span>
+        <select id="scopeInput">
+          <option value="1p">1 回合</option>
+          <option value="5p" selected>5 回合</option>
+          <option value="10p">10 回合</option>
+          <option value="1q">1 节</option>
+          <option value="full">全场</option>
+        </select>
+      </div>
+      <button id="runButton" class="btn-primary-run">
         <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
         <span>运行模拟</span>
       </button>
-
-      <label class="btn-icon-upload" title="导入本地 NDJSON 轨迹">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        <input id="fileInput" type="file" accept=".ndjson,.json,.txt" hidden>
-      </label>
     </div>
   </header>
 
-  <!-- 主工作区 -->
-  <main class="arena-layout">
-    <!-- 2. 中央竞技场舞台（比分 + 球场 + 战术字幕） -->
-    <section class="arena-stage">
-      <!-- 极简赛况记分牌 -->
-      <div class="broadcast-scoreboard">
-        <div class="team-block away">
-          <span class="team-name" id="awayTeamName">客队</span>
-          <span class="team-score" id="awayScore">0</span>
+  <!-- 主视觉区 -->
+  <main class="arena-main">
+    <!-- 2. 赛事演练舞台 -->
+    <section class="broadcast-stage">
+      <!-- 转播级极简比分板 (严格 3 列对称网格，0 偏移错位) -->
+      <div class="scoreboard-bar">
+        <div class="score-team away">
+          <span class="team-indicator away-dot"></span>
+          <span class="team-label" id="awayTeamName">AWAY</span>
+          <span class="score-num" id="awayScore">0</span>
         </div>
 
-        <div class="match-meta">
-          <div class="clock-row">
-            <span class="badge-period" id="periodLabel">Q1</span>
-            <span class="live-clock" id="gameClock">12:00</span>
+        <div class="score-center">
+          <div class="clock-box">
+            <span class="period-pill" id="periodLabel">Q1</span>
+            <span class="game-time" id="gameClock">12:00</span>
           </div>
-          <div class="shot-clock-pill">
-            <span class="sc-label">SHOT</span>
-            <span class="sc-val" id="shotClock">24.0</span>
+          <div class="shot-clock-box">
+            <span class="sc-num" id="shotClock">24.0</span>
           </div>
         </div>
 
-        <div class="team-block home">
-          <span class="team-score" id="homeScore">0</span>
-          <span class="team-name" id="homeTeamName">主队</span>
+        <div class="score-team home">
+          <span class="score-num" id="homeScore">0</span>
+          <span class="team-label" id="homeTeamName">HOME</span>
+          <span class="team-indicator home-dot"></span>
         </div>
       </div>
 
-      <!-- 沉浸式球场容器 -->
-      <div class="court-container">
-        <!-- 悬浮在右上角的事件标签（动态岛，无位移展开） -->
-        <div class="court-overlay-hud">
-          <span id="eventChip" class="event-pill"></span>
-          <span id="phaseLabel" class="hud-tag">INITIATION</span>
-          <span id="possessionLabel" class="hud-tag highlight">POS #1</span>
+      <!-- 沉浸式球场画布视口 -->
+      <div class="court-box">
+        <!-- 悬浮在球场右上角的状态标签 (动态岛，0 像素重排) -->
+        <div class="court-floating-hud">
+          <span id="eventOverlayChip" class="hud-chip-event"></span>
+          <span id="phaseLabel" class="hud-chip">INITIATION</span>
+          <span id="possessionLabel" class="hud-chip pos-chip">POS #1</span>
         </div>
 
         <canvas id="courtCanvas" width="960" height="520" aria-label="篮球场回放"></canvas>
-        <div id="playerTooltip" class="player-tooltip" hidden></div>
+        <div id="playerTooltip" class="player-hud-tooltip" hidden></div>
       </div>
 
-      <!-- 球场下方战术解说字幕条 -->
-      <div class="tactical-subtitle-bar">
-        <span class="subtitle-icon">🎙</span>
-        <span id="calloutText" class="subtitle-text">等待模拟开始…</span>
-        <span id="frameLabel" class="frame-tag">f0</span>
+      <!-- 战术字幕解说条 -->
+      <div class="tactical-subtitle-strip">
+        <span class="subtitle-badge">LIVE</span>
+        <span id="calloutText" class="subtitle-content">等待模拟指令…</span>
+        <span id="frameLabel" class="subtitle-frame">f0</span>
       </div>
     </section>
 
-    <!-- 3. 下方数据与分析抽屉 -->
-    <section class="inspector-card">
-      <nav class="inspector-tabs" role="tablist">
-        <button class="tab-button active" data-tab="timeline">事件流水</button>
-        <button class="tab-button" data-tab="stats">全场统计</button>
-        <button class="tab-button" data-tab="rules">规则设定</button>
-        <button class="tab-button" data-tab="advanced">高级分析</button>
+    <!-- 3. 数据与分析抽屉 (三大核心功能) -->
+    <section class="analytics-drawer">
+      <nav class="drawer-tabs" role="tablist">
+        <button class="tab-button active" data-tab="timeline">事件流</button>
+        <button class="tab-button" data-tab="stats">统计榜</button>
+        <button class="tab-button" data-tab="rules">规则器</button>
+        <button class="tab-button" data-tab="advanced">高级</button>
       </nav>
 
-      <div class="tab-content">
-        <!-- Tab 1: 文字时间轴 -->
+      <div class="drawer-panes">
+        <!-- Tab 1: 实时战报时间轴 -->
         <div id="tab-timeline" class="tab-pane active">
-          <div id="eventFilters" class="filter-chips-wrap"></div>
-          <div id="timeline" class="timeline-stream"></div>
+          <div id="eventFilters" class="timeline-filters"></div>
+          <div id="timeline" class="timeline-scroll"></div>
         </div>
 
-        <!-- Tab 2: 统计数据表 -->
+        <!-- Tab 2: 比赛数据统计表 -->
         <div id="tab-stats" class="tab-pane">
-          <div class="stats-scroll-wrap">
-            <div id="statsTable" class="stats-table-modern"></div>
+          <div class="stats-table-wrapper">
+            <div id="statsTable" class="stats-data-grid"></div>
           </div>
         </div>
 
-        <!-- Tab 3: 规则设定 -->
+        <!-- Tab 3: 规则调节编辑器 -->
         <div id="tab-rules" class="tab-pane">
-          <div class="rules-toolbar">
-            <button id="loadRulesButton" class="btn-sm">恢复默认</button>
-            <button id="runRulesButton" class="btn-sm primary">应用并重新模拟</button>
+          <div class="rules-pane-box">
+            <textarea id="rulesEditor" spellcheck="false" placeholder="正在加载规则配置…"></textarea>
+            <div class="rules-footer-bar">
+              <button id="loadRulesButton" class="btn-subtle">重置默认</button>
+              <button id="runRulesButton" class="btn-action">应用规则并推演</button>
+            </div>
           </div>
-          <textarea id="rulesEditor" class="rules-textarea" spellcheck="false"></textarea>
         </div>
 
-        <!-- Tab 4: 高级/异常分析 -->
+        <!-- Tab 4: 高级洞察 -->
         <div id="tab-advanced" class="tab-pane">
-          <div class="advanced-grid">
-            <div class="adv-card">
-              <h4>投篮图表</h4>
-              <div id="shotChart" class="chart-container"></div>
-            </div>
-            <div class="adv-card">
-              <h4>事件构成</h4>
-              <div id="eventChart" class="chart-container"></div>
-            </div>
-            <div class="adv-card full">
-              <h4>异常与事实追踪</h4>
-              <div id="anomalyList" class="anomaly-stream"></div>
-            </div>
+          <div class="advanced-pane-box">
+            <div id="spaceMetrics" class="metrics-grid"></div>
           </div>
         </div>
       </div>
     </section>
   </main>
 
-  <!-- 4. 底部统一浮动播放控制条 (Floating Dock) -->
-  <footer class="player-dock">
-    <div class="dock-actions">
-      <button id="stepBackButton" class="dock-btn" title="上一帧">⏮</button>
-      <button id="playButton" class="dock-btn-play" title="播放 / 暂停">▶</button>
-      <button id="stepForwardButton" class="dock-btn" title="下一帧">⏭</button>
+  <!-- 4. 底部全宽自适应悬浮播放器 (iOS 风格排布，绝不错位) -->
+  <footer class="bottom-controller">
+    <div class="controller-scrubber-row">
+      <span class="time-label current" id="progressTime">00:00</span>
+      <input id="progressInput" type="range" min="0" max="0" value="0" step="1">
+      <span class="time-label total" id="progressEnd">00:00</span>
     </div>
 
-    <div class="dock-timeline">
-      <input id="progressInput" type="range" min="0" max="0" value="0" step="1">
-      <div class="dock-time-display">
-        <span id="tickReadout">0 / 0</span>
+    <div class="controller-buttons-row">
+      <div class="ctrl-group left">
+        <span id="tickReadout" class="step-counter">0 / 0</span>
+      </div>
+
+      <div class="ctrl-group center">
+        <button id="stepBackButton" class="btn-transport" title="上一帧">⏮</button>
+        <button id="playButton" class="btn-transport play" title="播放 / 暂停">▶</button>
+        <button id="stepForwardButton" class="btn-transport" title="下一帧">⏭</button>
+      </div>
+
+      <div class="ctrl-group right">
+        <span id="timelineCount" class="badge-mini">0 EVT</span>
       </div>
     </div>
   </footer>
 
-  <!-- 隐形兼容容器（保留旧代码引用的罕见 ID 避免报空指针） -->
+  <!-- 隐形兼容容器 (保留旧代码引用 ID，避免报空指针) -->
   <div style="display:none" aria-hidden="true">
+    <span id="eventChip"></span>
     <span id="streamSummary"></span>
     <span id="eventReadout"></span>
+    <span id="freeThrows"></span>
+    <span id="tacticalSet"></span>
+    <span id="progressPossession"></span>
+    <span id="rulesStatus"></span>
+    <span id="foulsReadout"></span>
+    <button id="copyFrameButton"></button>
+    <button id="jumpButton"></button>
+    <button id="prevPossessionButton"></button>
+    <button id="nextPossessionButton"></button>
     <button id="anomalyBadge"></button>
     <div id="anomalyPanel"></div>
+    <div id="anomalyList"></div>
     <div id="flowLabel"></div>
     <div id="intensityReadout"></div>
     <div id="tab-decisions"></div>
     <div id="tab-export"></div>
     <div id="tab-frame"></div>
     <div id="decisionList"></div>
-    <div id="frameJson"></div>
-    <input id="tickJump" type="number">
-    <select id="playbackSpeed"><option value="1">1x</option></select>
-    <span id="progressTime"></span>
-    <span id="freeThrows"></span>
-    <button id="copyFrameButton"></button>
-    <span id="progressPossession"></span>
-    <span id="timelineCount"></span>
-    <button id="jumpButton"></button>
-    <canvas id="shotCanvas"></canvas>
-    <span id="tacticalSet"></span>
-    <span id="progressEnd"></span>
-    <div id="zoneTable"></div>
-    <input id="jumpInput" type="number">
-    <button id="nextPossessionButton"></button>
-    <span id="rulesStatus"></span>
-    <span id="foulsReadout"></span>
     <div id="decisionPanel"></div>
-    <button id="prevPossessionButton"></button>
+    <div id="frameJson"></div>
+    <div id="zoneTable"></div>
+    <canvas id="shotCanvas"></canvas>
+    <input id="tickJump" type="number">
+    <input id="jumpInput" type="number">
+    <select id="playbackSpeed"><option value="1">1x</option></select>
   </div>
 
   <script type="module" src="/app.js"></script>
