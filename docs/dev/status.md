@@ -16,23 +16,33 @@
 
 ## 1.1 最近验证边界
 
-**统计门已关闭（2026-09-15）**：`./scripts/run-tests.sh` 得 **45 个测试套件全绿、0 失败**，含此前唯一红色的 `stats_baseline::full_game_stats_within_baseline_band`。全程**未修改任何门限或分母**。
+**统计门已全部关闭（2026-09-15）**：`./scripts/run-tests.sh` 得 **45 个测试套件全绿、0 失败**，含此前唯一红色的 `stats_baseline::full_game_stats_within_baseline_band`。全程**未修改任何门限或分母**。
 
-累计效果（8 seed full，对照仓库自己的 `nba.v2.json` composition_bands）：
+累计效果（**16 seed** full，对照仓库自己的 `nba.v2.json` composition_bands）：
 
 | 指标 | 起点 | 现在 | 门/带 |
 | --- | --- | --- | --- |
-| `total_p50` | 237.0 ✗ | **213.5** | [140, 230] ✓ |
-| `two_make_pct` | 0.621 ✗ | **0.536** | [0.48, 0.58] ✓ |
-| `three_make_pct` | 0.348 | 0.337 | [0.30, 0.40] ✓ |
-| `three_attempt_rate` | 0.329 | 0.334 | [0.30, 0.45] ✓ |
-| ORB% | 0.070 ✗ | **0.244–0.330** | ~0.245 ✓ |
-| `pace` | 234.5 ✗ | 218.4 | [185, 220] ✓ |
-| `free_throw_rate` | 0.122 ✗ | 0.118 | [0.20, 0.35] **✗ 未闭合** |
+| `total_p50` | 237.0 ✗ | **216.5** | [140, 230] ✓ |
+| `two_make_pct` | 0.621 ✗ | **0.503** | [0.48, 0.58] ✓ |
+| `three_make_pct` | 0.348 | 0.334 | [0.30, 0.40] ✓ |
+| `three_attempt_rate` | 0.329 | 0.330 | [0.30, 0.45] ✓ |
+| `two_attempt_rate` | 0.671 | 0.670 | [0.55, 0.70] ✓ |
+| **`free_throw_rate`** | 0.122 ✗ | **0.204** | [0.20, 0.35] ✓ |
+| ORB% | 0.070 ✗ | 0.244–0.330 | ~0.245 ✓ |
+| `pace` | 234.5 ✗ | 218.6 | [185, 220] ✓ |
 
-三项修复均为**结构性缺陷**而非调参：分区命中率（中距离误用篮下基准）、篮板冲抢指派（无人抢篮板）、箱体失误/犯规零写入。机制定位与 A/B 证据见 `docs/dev/evidence/problem.md` §21–§23。
+（L1 Axiom = 0、Ledger = 0。）
 
-**唯一剩余越界项**：`free_throw_rate`。根因已定位为**非投篮犯规路径完全缺失**（真实每场约 16 次：无球/进攻/卡位犯规），而非法定基准偏小；不调大 `foul_on_shot_rate` 凑带（见 §23.11.1）。
+四项修复均为**结构性缺陷**而非调参：分区命中率（中距离误用廊下基准）、
+篮板冲抢指派（无人抢篮板）、箱体失误/犯规零写入、突破犯规产生率
+（`foul_on_drive_rate` 0.10→0.18，附反事实验证）。机制定位与 A/B 证据见
+`docs/dev/evidence/problem.md` §21–§32。
+
+**已修正的一处判断**（evidence §32.29.2）：黄金哈希（单 seed × 有限窗口）
+**结构性无法**守卫概率类参数（`*_rate` / `*_ratio`）——实测把
+`foul_on_drive_rate` 降 72% 后，2000/5000/10200 三个窗口的哈希全部不变
+（10200 tick 内仅 19 次突破、2 次犯规，采样量不足）。
+概率参数的正确守卫是跨 seed 聚合的 `stats_baseline`。
 
 **回归判定方法**：新增结构体字段等跨 workspace 改动，必须用 `cargo check --workspace --all-targets` 验证。本会话曾因只验证单个 crate 而提交了破坏测试 target 的改动（已在 `cde5084` 修复并记录）。
 
@@ -59,7 +69,7 @@
 | LeagueProfile | partial | `LeagueProfile` 类型、NBA/FIBA fixture 与 league 测试存在；`e63d320` 新增 **6 个程序级情景用例**（节时长/ORB 时钟/三分几何/犯规上限/bonus 门槛/节末终场），其中三分几何用例带负面对照 | **交替拥有与罚球程序仍未覆盖**；评判 fixture 带来源/版本的契约未完成；固定种子矩阵未运行；NCAA 仍是路线项 | `crates/domain/src/league.rs`、`crates/engine/tests/league_profile.rs`、`crates/evaluator/fixtures/` |
 | 确定性与黄金哈希 | verified（现有测试范围） | golden hash 测试和事件 ID 单调测试存在 | 行为改动仍需按 protocol 重新冻结；黄金哈希不能证明真实性 | `crates/engine/tests/golden_hash.rs`、`docs/protocol.md` §3 |
 | 文档与阈值守卫 | verified（脚本范围） | `check_docs.py`、`no_index_identity`、`threshold_integrity`、阈值自测、常数自测、World privacy 自测均可运行；前四项含 `--self-test` 负面对照 | `check_threshold_integrity.py` 与 `check_no_index_identity.py` **尚未接线到任何 CI workflow**；常数守卫计数未排除测试夹具与注释，棘轮对测试代码增长失效（见开放问题） | `scripts/check_docs.py`、`scripts/check_threshold_integrity.py`、`scripts/check_no_index_identity.py`、`.github/workflows/` |
-| 统计形态（G-STATS） | **verified（`stats_baseline` 通过）/ partial（`free_throw_rate` 仍越界）** | `stats_baseline` 全绿；8 seed full 的 `total_p50` 213.5 / `two_make_pct` 0.536 / `three_make_pct` 0.337 / `three_attempt_rate` 0.334 / `pace` 218.4 均在各自带内；ORB% 0.244–0.330（真实 ~0.245） | 唯一未闭合：`free_throw_rate` 0.118 越出 [0.20, 0.35]。根因**已收窄到量级**：实测接触 `impact_speed` 中位数 6.18 ft/s vs 犯规候选门槛 12.76 ft/s——真实犯规多数不以高速碰撞为前提（§23.12）。不得调大 `foul_on_shot_rate` 凑带 | `crates/engine/tests/stats_baseline.rs`、`crates/evaluator/fixtures/nba.v2.json`、`docs/dev/evidence/problem.md` §21–§23 |
+| 统计形态（G-STATS） | **verified（全部构成准则与总门通过）** | 16 seed full 的 `total_p50` 216.5 / `two_make_pct` 0.503 / `three_make_pct` 0.334 / `three_attempt_rate` 0.330 / `two_attempt_rate` 0.670 / **`free_throw_rate` 0.204** / `pace` 218.6 均在各自带内；ORB% 0.244–0.330（真实 ~0.245）；L1 Axiom = 0、Ledger = 0；`stats_baseline` 全绿 | 无未闭合项。注意 0.18 的有效区间**较窄**（0.17 时 FT=0.185 差 0.015、0.19 时 pace 越界），后续其它参数变动需重新校准 | `crates/engine/tests/stats_baseline.rs`、`crates/domain/src/resolve.rs`、`crates/evaluator/fixtures/nba.v2.json`、`docs/dev/evidence/problem.md` §21–§32 |
 
 ## 3. 当前未完成工作
 
@@ -200,7 +210,7 @@ D12 从本周期计划执行完毕后已从 `current/plan.md` 移除（该文件
 
 | 问题 | 依赖 | 下一验证动作 |
 | --- | --- | --- |
-| `free_throw_rate` 越界（唯一未闭合统计项） | 需重建犯规判定口径 | 实测接触 `impact_speed` 中位数 6.18 ft/s vs 犯规门槛 12.76 ft/s；真实犯规多数不以高速碰撞为前提（evidence §23.12）。应在 semantics 分类 + officiating 概率两层重建，附 8 seed 矩阵与反事实；**禁止**调大 `foul_on_shot_rate` 凑数 |
+| `free_throw_rate`（已闭合） | — | 已由 `foul_on_drive_rate` 0.10→0.18 闭合（`8e42bcb`）：FT 率 0.121→**0.204** ∈ [0.20,0.35]，附 6 点 A/B 扫描与反事实（置 0 后 FT→0.032）。**注意有效区间窄**（0.17 差 0.015、0.19 破 pace） |
 | `carrier_idx` 删除阻塞 | 需先定「无关联球员的球态下谁算 ball handler」 | evidence §25 实证非等价重构（8 seed 213.5→212.0）；旧/新语义含义不同，属 gap.md §5.2 状态边责任问题 |
 | `GameRules` 零消费字段 | 分属四个未接线子系统 | 12 个已实证零消费（§27）；`def_*` 三字段随 D9.2 接线，`transition_*`/`clutch_*` 属 plan §10 范围外，需先决定是否本周期补齐 |
 | 能力维度零消费 | 分属四个未实现的战术行为 | 6 个已实证零消费（§29）：`agility`/`shooting_close`/`cut_frequency`/`screen_frequency`/`offensive_rebound_frequency`/`transition_sprint`；接线或标为未批准提案 |
