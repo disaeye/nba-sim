@@ -113,7 +113,7 @@ fn profile(scheme: &str, seed: u64) -> DefenseProfile {
         ticks += 1;
     }
 
-    let b = engine.box_score();
+    let snap = engine.engine_snapshot();
     DefenseProfile {
         mean_defender_dist_to_hoop: if samples > 0 {
             (sum_dist / samples as f64) as f32
@@ -125,8 +125,8 @@ fn profile(scheme: &str, seed: u64) -> DefenseProfile {
         } else {
             0.0
         },
-        turnovers: b.turnovers,
-        score: engine.home_score() + engine.away_score(),
+        turnovers: snap.box_score.turnovers,
+        score: snap.game.home_score + snap.game.away_score,
     }
 }
 

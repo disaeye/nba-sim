@@ -476,7 +476,7 @@ fn test_shooting_foul_enters_free_throw_state_and_scores_free_throws() {
     );
     assert_eq!(engine.game_flow(), nba_domain::GameFlowState::FreeThrow);
     assert_eq!(engine.free_throws_remaining(), 2);
-    let score_before = engine.home_score();
+    let score_before = engine.engine_snapshot().game.home_score;
     for _ in 0..20 {
         engine.step();
         if engine.free_throws_remaining() == 0 {
@@ -484,7 +484,7 @@ fn test_shooting_foul_enters_free_throw_state_and_scores_free_throws() {
         }
     }
     assert_eq!(engine.free_throws_remaining(), 0);
-    assert!(engine.home_score() >= score_before);
+    assert!(engine.engine_snapshot().game.home_score >= score_before);
 }
 #[test]
 fn test_period_expiration_reaches_break_then_next_period() {
@@ -496,7 +496,7 @@ fn test_period_expiration_reaches_break_then_next_period() {
     rules.tactical_initiation_seconds = 0.1;
     rules.league.regulation_periods = 2;
     let mut engine = MatchEngine::with_rules(202, rules);
-    let period_before = engine.period();
+    let period_before = engine.engine_snapshot().game.period;
     engine.set_game_clock_for_test(0.0);
     engine.set_ball_state_for_test(nba_physics::BallTrajectoryKind::Held {
         carrier_id: engine.new_possession_pg_for_test(),

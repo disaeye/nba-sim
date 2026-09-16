@@ -195,4 +195,71 @@ impl<'a> DefensiveContext<'a> {
             },
         )
     }
+
+    /// 依据防守方案中的 ScreenDefenseRules 评估挡拆防守责任动作（D17）。
+    pub fn evaluate_screen_coverage(
+        &self,
+        screener_pos: Vec2,
+        carrier_pos: Vec2,
+        screener_defender_id: &str,
+    ) -> ScoredDefensiveAction {
+        let defense_rules = &self.base_ctx.rules.tactics.defense;
+        let screen_rules = defense_rules.screen_defense;
+        let dist_to_screen = (self.defender_pos - screener_pos).length();
+
+        // 1. 换防判定 (Switch Heavy)
+        if defense_rules.switch_aggressiveness > 0.6
+            || (defense_rules.switch_aggressiveness > 0.2
+                && dist_to_screen <= screen_rules.switch_trigger_distance_ft)
+        {
+            let utility = 0.7 + defense_rules.switch_aggressiveness * 0.3;
+            return ScoredDefensiveAction {
+                action: DefensiveCandidateAction::SwitchAssignment {
+                    target_pos: carrier_pos,
+                    new_assignment_id: screener_defender_id.to_string(),
+                },
+                utility,
+                risk: 0.2,
+            };
+        }
+
+        // 2. 沉退防守判定 (Drop Coverage)
+        if screen_rules.drop_depth_ft > 0.0 {
+            let to_hoop = (self.hoop_pos - screener_pos).normalize_or_zero();
+            let drop_pos = screener_pos + to_hoop * screen_rules.drop_depth_ft;
+            return ScoredDefensiveAction {
+                action: DefensiveCandidateAction::DropAndContain { drop_pos },
+                utility: 0.85,
+                risk: 0.15,
+            };
+        }
+
+        // 3. 延误回防判定 (Hedge and Recover)
+        if screen_rules.hedge_distance_ft > 0.0 {
+            let to_carrier = (carrier_pos - screener_pos).normalize_or_zero();
+            let hedge_pos = screener_pos + to_carrier * screen_rules.hedge_distance_ft;
+            return ScoredDefensiveAction {
+                action: DefensiveCandidateAction::HedgeAndRecover { hedge_pos },
+                utility: 0.80,
+                risk: 0.25,
+            };
+        }
+
+        // 4. 基准人盯人：挤过(Over)或绕过(Under)
+        if self.defender_attrs.defense_perimeter > 75.0 {
+            let over_pos = carrier_pos + (carrier_pos - screener_pos).normalize_or_zero() * 2.0;
+            ScoredDefensiveAction {
+                action: DefensiveCandidateAction::NavigateScreenOver { target_pos: over_pos },
+                utility: 0.75,
+                risk: 0.3,
+            }
+        } else {
+            let under_pos = screener_pos + (self.hoop_pos - screener_pos).normalize_or_zero() * 3.0;
+            ScoredDefensiveAction {
+                action: DefensiveCandidateAction::NavigateScreenUnder { target_pos: under_pos },
+                utility: 0.70,
+                risk: 0.2,
+            }
+        }
+    }
 }

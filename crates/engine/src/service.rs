@@ -270,6 +270,11 @@ impl MatchService {
             .ok_or_else(|| "match snapshot unavailable".to_string())
     }
 
+    /// 返回底层引擎的轻量只读快照视图（D14）。
+    pub fn engine_snapshot(&self) -> Option<crate::snapshot::EngineSnapshot<'_>> {
+        self.engine.as_ref().map(MatchEngine::engine_snapshot)
+    }
+
     pub fn snapshot(&self) -> Option<StreamTick> {
         self.engine.as_ref().map(MatchEngine::snapshot)
     }

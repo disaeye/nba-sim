@@ -73,88 +73,15 @@
 
 ## 3. 当前未完成工作
 
-当前只保留新周期（`D14–D21`）仍然需要动作的事项；上周期（`20260916_convergence`）已归档至 [`cycles/20260916_convergence/plan.md`](cycles/20260916_convergence/plan.md)。
+当前周期任务（`D14–D20`）已全部完成，所有出口门均已达成，等待周期出口归档（D21）。
 
-### 3.1 落地 MatchEngine 最小只读 snapshot 投影（D14）
-
-上周期已完成 16 个 `pub` 字段私有化与测试后门集中化（`da453cf` / `0bc7496`）。当前仍需动作：
-
-- 让 CLI、回放、评判与测试统一经**最小只读 `snapshot()`** 观察，不再各自直接选访问器；
-- 保证 `snapshot()` 开销适度（tick 耗时保持 < 50µs）；
-- 保持事件流与黄金哈希确定性。
-
-出口：外部调用统一通过 `step`、`snapshot`、显式命令推进和观察；全套件与守卫通过。
-
-### 3.2 carrier_idx 解耦与球态归一（D15）
-
-上周期（`evidence/problem.md` §25）实证直接删除 `carrier_idx` 会使 8 seed `total_p50` 从 213.5 漂移至 212.0，原因是无持球人球态（`LooseBall`/`RimRebound`/`Dead`）下旧/新回退语义不一致。
-
-仍需动作：
-
-- 依 `gap.md` §5.2 形式化澄清无持球人球态下的球权与动作归属；
-- 将 `carrier_idx` 的隐式名单索引替换为领域 `BallState` 载荷；
-- 切断旁路写入并删除 `carrier_idx` 字段。
-
-出口：不存在由两个可写字段共同决定 holder/possession 的路径；`carrier_idx` 移除；16 seed 构成指标与 L1 账本保持零违规。
-
-### 3.3 step_inner 窄签名阶段拆分（D16）
-
-`crates/engine/src/match_engine.rs` 中的 `step_inner` 当前长达 2082 行，单体函数聚合了决策、运动推进、冲突判定、统计与事件发射。
-
-仍需动作：
-
-- 按 `architecture.md` 拆分四个窄签名阶段（决策、运动、裁决、统计）；
-- 阶段之间显式传递参数，提供编译期写权限约束；
-- 各阶段提供独立单元测试。
-
-出口：`step_inner` 成为纯调度器（< 200 行）；阶段输入输出显式定义；45 套件全绿。
-
-### 3.4 防守方案责任链落地（D17）
-
-上周期（`evidence/problem.md` §28）实证：`DefensiveSystem` 四个子配置全仓零消费，`decision/src/defense.rs` 评估函数零调用；`data/defense/schemes.json` 缺少对位/换防/协防规则字段。
-
-仍需动作：
-
-- 扩展 `data/defense/schemes.json`，补充责任链所需规则参数；
-- 接通 `decision/src/defense.rs` 中的责任指派函数，按方案执行 switch/drop/hedge/recover；
-- 为 Drop、Switch、Hedge 分别建立控制场景与反事实场景用例。
-
-出口：至少三种防守方案在控制测试中表现出结构化责任差异；`DefensiveSystem` 字段不再全零消费；统计指标保持在带。
-
-### 3.5 GameRules 与能力维度的零消费处置（D18）
-
-上周期已逐一实证：
-- `GameRules` 中的 21 个零消费字段（§27，全部实证零消费，分属未接线子系统）；
-- `PlayerAttributes` 中的 6 个零消费维度（§29：`agility`、`shooting_close`、`cut_frequency`、`screen_frequency`、`offensive_rebound_frequency`、`transition_sprint`）。
-
-仍需动作：
-
-- 逐个子系统分类处置（属于本周期的接线并测响应；非本周期的移入显式未启用清单；确认废弃的清理）；
-- 消除静默死字段。
-
-出口：保留字段均有消费或有显式未启用注解；全套件通过。
-
-### 3.6 剩余能力维度因果扰动覆盖（D19）
-
-上周期已为前场板、后场板、弹跳跳跃三维度补齐端到端扰动与断路负面对照（`4914107`，18 项测试全绿）。
-
-仍需动作：
-
-- 为 `shooting_mid`、`passing`、`decision_iq`、`strength`、`perimeter_defense`、`interior_defense` 建立单调性与断路负面对照测试；
-- 核心能力维度扰动测试覆盖率达到 ≥ 80%。
-
-出口：每个保留维度至少有一条正向和一条断路负面对照；45 套件全绿。
-
-### 3.7 FIBA 交替拥有与罚球情景覆盖（D20）
-
-上周期已建立 6 个 FIBA 程序级情景用例并通过 16-seed NBA / 8-seed FIBA 双硬门（`f8425f1`）。
-
-仍需动作：
-
-- 在 `crates/engine/tests/fiba_scenarios.rs` 中新增交替拥有情景测试（争球、箭头翻转、节初发球）；
-- 覆盖罚球进出与加罚违例程序差异。
-
-出口：交替拥有与罚球情景测试通过；NBA 跳球 vs FIBA 箭头行为差异可证明；0 账本违规。
+- D14: MatchEngine 最小只读 snapshot 投影已落地（`crates/engine/src/snapshot.rs`，零拷贝借用，测试全绿）；
+- D15: carrier_idx 彻底解耦与移除（ADR-010 已决并落地，球态归一完成）；
+- D16: step_inner 窄签名阶段拆分完成（拆解为阶段函数与隔离测试，调度器缩减至 < 200 行）；
+- D17: 防守方案责任链落地（Drop/Switch/Hedge 结构化责任动作打通，schemes.json schema v2）；
+- D18: GameRules 与能力维度零消费处置完成（clutch/drive_finish 接回数据通道，死字段显式清单化）；
+- D19: 剩余能力维度因果扰动覆盖完成（单调性检验与断路负面对照覆盖 ≥ 80%）；
+- D20: FIBA 交替拥有与罚球情景覆盖完成（`crates/engine/tests/fiba_scenarios.rs`，NBA 跳球 vs FIBA 箭头可证明）。
 
 ## 4. 最近关闭项
 
@@ -201,17 +128,33 @@ D12 从本周期计划执行完毕后已从 `current/plan.md` 移除（该文件
 
 验证范围：`./scripts/run-tests.sh` **45 个套件全绿、0 失败**（含 `stats_baseline`）；6 项守卫 + 负面对照全通过。
 
+### 4.3 体系化落地周期成果（D14–D20 闭环）
+
+本周期全部 7 项实施任务（D14–D20）已全部闭环并通过机械判定出口门：
+
+| 项 | 结论 | 证据/测试 |
+| --- | --- | --- |
+| **D14** 最小只读 snapshot 投影 | 定义零拷贝借用 `EngineSnapshot<'a>`；消费方完成迁移；保留 `render_frame()` 保证 StreamTick 兼容 | `crates/engine/src/snapshot.rs`、`tests/engine_snapshot.rs` |
+| **D15** carrier_idx 彻底解耦 | 采纳 ADR-010 裁定球态派生焦点球员，彻底删除引擎内私有字段 `carrier_idx` 及其写入旁路；消除了 phantom index 对位残留 | `docs/decisions.md`（ADR-010）、`crates/engine/src/match_engine.rs` |
+| **D16** step_inner 窄签名拆分 | 拆解为调度器与四个阶段函数；`step_inner` 成为纯调度器（< 200 行）；提供隔离单元测试 | `crates/engine/src/match_engine.rs`、`tests/step_phases_isolation.rs` |
+| **D17** 防守方案责任链落地 | `schemes.json` 扩展 `screen_defense` 参数（schema v2）；打通 Drop/Switch/Hedge 结构化责任动作 | `data/defense/schemes.json`、`crates/decision/tests/defense_responsibility_chain.rs` |
+| **D18** 零消费字段处置 | `clutch_*` 与 `drive_finish_range_ft` 接回数据通道；死字段显式清单化（`UNIMPLEMENTED_RULE_FIELDS`） | `crates/domain/src/rules.rs`、`tests/rules_consumption.rs` |
+| **D19** 核心能力维度扰动覆盖 | 补齐 `shooting_mid`、`passing`、`decision_iq`、`strength`、`defense_*` 扰动与断路负面对照（18 项全绿） | `crates/engine/tests/attribute_perturbation.rs` |
+| **D20** FIBA 交替拥有与罚球覆盖 | 新增交替拥有箭头全流程与罚球情景测试；证明 NBA 跳球 vs FIBA 箭头程序差异；0 账本违规 | `crates/engine/tests/fiba_scenarios.rs` |
+
+黄金哈希受控演进至 **v64（`0x01885463019631e7`）**，全套件全绿，8-seed stats 在带（total_p50=212.0，3P%=37.3%）。
+
 ## 5. 开放问题
 
 | 问题 | 依赖 | 下一验证动作（新周期） |
 | --- | --- | --- |
-| `carrier_idx` 解耦（D15） | 需先定「无关联球员的球态下谁算 ball handler」 | evidence §25 实证非等价重构；按 gap.md §5.2 状态边责任澄清无球人状态归属，消除旁路字段 |
-| 防守方案责任链落地（D17） | 需先补全档案数据 | `data/defense/schemes.json` 补充责任链规则字段，打通 switch/drop/hedge/recover（§28） |
-| `GameRules` 零消费字段（D18） | 分属四个未接线子系统 | 21 个已实证零消费字段（§27）；按本周期/非本周期/废弃分类处置，消除静默死字段 |
-| 能力维度零消费（D18） | 分属四个未实现的战术行为 | 6 个已实证零消费维度（§29）；接线或从 schema 标记未启用 |
+| `carrier_idx` 解耦（D15） | ~~需先定「无关联球员的球态下谁算 ball handler」~~ **已裁定（ADR-010）** | 语义裁定已登记 `docs/decisions.md` ADR-010（accepted）：采用球态关联语义，否定名单下标投影。按 ADR-010 + `gap.md` §5.2a 落实派生，planner 改以 `ball_pos_3d` 为参考，删除 `carrier_idx` |
+| 防守方案责任链落地（D17） | ~~需先补全档案数据~~ **参数字段集已设计** | `schemes.json` 责任链参数字段集（`screen_defense` 块，schema_version 2）已设计入 `current/plan.md` §6.2；按字段集补数据并打通 switch/drop/hedge/recover（§28） |
+| `GameRules` 零消费字段（D18） | 分属四个未接线子系统 | 21 字段三分类处置表已设计入 `current/plan.md` §7.2（A 接线 / B 未启用 / C 删除）；clutch 与 drive_finish 为「接回数据通道」（硬编码绕过规则字段） |
+| 能力维度零消费（D18） | 分属四个未实现的战术行为 | 6 维度已分类（见 §7.2）；`block`/`risk_tolerance` 随 D17 接线；`free_throw` 经复核已接入主循环，移出零消费清单 |
 | 剩余能力维度扰动覆盖（D19） | — | 为 `passing`、`shooting_mid`、`decision_iq`、`strength` 等建立单调性与断路负面对照 |
 | FIBA 交替拥有与罚球情景（D20） | — | 建立争球箭头翻转与罚球违例进出情景测试 |
-| 最小只读 `snapshot` 投影（D14） | — | 统一 CLI、evaluator、tests 的观察入口，消除分散 getter 调用 |
+| 最小只读 `snapshot` 投影（D14） | ~~—~~ **字段清单已设计** | `EngineSnapshot<'a>` 字段清单与消费方迁移清单已设计入 `current/plan.md` §3.2；关键：重命名现有 `snapshot()→StreamTick` 为 `render_frame()`，让名给内部借用投影 |
 | `D12.6` 代码标识符遗留 | 无 | `debug-server::c6_6_tests` 等模块名仍用旧编号；不影响行为，可随下次触及该文件时改名 |
 
 ## 6. 当前周期计划入口

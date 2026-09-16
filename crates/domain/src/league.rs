@@ -45,6 +45,8 @@ pub struct LeagueProfile {
     pub corner_three_distance_ft: f32,
     /// 场地几何。
     pub court: CourtGeometry,
+    /// 争球程序是否使用交替拥有箭头（FIBA 为 true，NBA 为 false 即跳球）。
+    pub use_alternate_possession_arrow: bool,
 }
 
 impl LeagueProfile {
@@ -65,6 +67,7 @@ impl LeagueProfile {
             three_point_distance_ft: 23.75,
             corner_three_distance_ft: 22.0,
             court: CourtGeometry::default(),
+            use_alternate_possession_arrow: false,
         }
     }
 
@@ -86,6 +89,7 @@ impl LeagueProfile {
             three_point_distance_ft: 22.15,
             corner_three_distance_ft: 0.0,
             court: CourtGeometry::fiba(),
+            use_alternate_possession_arrow: true,
         }
     }
 }

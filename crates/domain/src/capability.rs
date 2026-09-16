@@ -50,6 +50,24 @@ pub fn effective_defense_factor(
     raw.max(rules.attribute_response_floor)
 }
 
+/// 中距离投篮命中期望加成（D19）。
+pub fn effective_shooting_mid_factor(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
+    let raw = attributes.shooting_mid.max(rules.attribute_response_floor);
+    0.35 + raw * 0.25
+}
+
+/// 传球技能有效加成（D19）。
+pub fn effective_passing_skill_factor(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
+    let raw = attributes.passing.max(rules.attribute_response_floor);
+    0.5 + raw * 0.5
+}
+
+/// 掩护/卡位力量对抗有效值（D19）。
+pub fn effective_boxout_strength(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
+    let raw = attributes.strength.max(rules.attribute_response_floor);
+    0.6 + raw * 0.4
+}
+
 /// 决策感知与风险规避加成（attributes.md §4 / T5 / M9）：根据球员 basketball_iq / discipline
 /// 和规则通道内的技能权重计算软约束惩罚与风险过滤修正量。高智商球员更少做出高风险愚蠢动作。
 pub fn effective_decision_risk_tolerance(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {

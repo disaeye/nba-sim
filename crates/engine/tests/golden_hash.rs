@@ -184,7 +184,9 @@ fn golden_window_long_covers_fouls_and_free_throws() {
     let mut engine = MatchEngine::new(42);
     // 必须同时覆盖首个犯规（3413）与首次罚球（9918）；
     // 取 10200 留约 3% 余量，避免边界抖动使断言脆弱。
-    let ticks = 10200usize;
+    // 必须同时覆盖首个犯规（9213）与首次罚球（14792）；
+    // 取 15200 留约 3% 余量，避免边界抖动使断言脆弱。
+    let ticks = 15200usize;
     for _ in 0..ticks {
         engine.step();
     }
@@ -193,13 +195,13 @@ fn golden_window_long_covers_fouls_and_free_throws() {
     assert!(
         b.fouls > 0,
         "long window ({ticks} ticks, seed 42) contains no foul \
-         (measured first foul at tick 3413) — foul behaviour unobservable \
+         (measured first foul at tick 9213) — foul behaviour unobservable \
          (evidence/problem.md §32.29)"
     );
     assert!(
         b.ft_attempts > 0,
         "long window ({ticks} ticks, seed 42) contains no free-throw attempt \
-         (measured first attempt at tick 9918)"
+         (measured first attempt at tick 14792)"
     );
 }
 
@@ -542,7 +544,14 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       [0.20,0.35]。根因不在投篮犯规路径，而在**非投篮犯规路径完全缺失**
 //       （真实每场约 16 次：无球犯规/进攻犯规/卡位犯规），已登记为
 //       后续任务；本提交不调基准去凑带。
-const GOLDEN_SEED42_2000: u64 = 0xa25e5c57a026def0;
+// v63 0x4bcbbcf59acde717 - 2026-09-16 D15 carrier_idx 解耦与球态归一（ADR-010）
+// v64 0x01885463019631e7 - 2026-09-16 D17 防守方案责任链落地：
+//   (a) 扩展 data/defense/schemes.json 为 schema_version 2，补充 screen_defense 参数集
+//       （drop_depth_ft, hedge_distance_ft, switch_trigger_distance_ft）；
+//   (b) 在 decision/tactics.rs 中接通 DropCoverage、SwitchAssignment、HedgeAndRecover 责任链；
+//   (c) 主队默认方案 def_drop_coverage 沉退动作真实生效，统计保持在带（total_p50=212.0, 3P%=37.3）；
+//   (d) 跨种子不变量测试 possession_invariants_hold_across_seeds 零违规。
+const GOLDEN_SEED42_2000: u64 = 0x01885463019631e7;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

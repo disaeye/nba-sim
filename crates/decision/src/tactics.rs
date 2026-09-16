@@ -438,8 +438,29 @@ impl TacticalPlanner {
             .and_then(|positions| positions.get(carrier_idx).copied())
             .or_else(|| off_targets.get(carrier_idx).map(|t| t.target_pos))
             .unwrap_or(hoop);
+        let screen_rules = policy.defense.screen_defense;
+        let screener_idx = off_targets
+            .iter()
+            .position(|t| t.slot == "ScreenAndRoll")
+            .unwrap_or(3);
+        let screener_pos = live_off_positions
+            .and_then(|positions| positions.get(screener_idx).copied())
+            .or_else(|| off_targets.get(screener_idx).map(|t| t.target_pos))
+            .unwrap_or(carrier_pos);
+        let dist_to_screener = (carrier_pos - screener_pos).length();
+        let is_screening_action = dist_to_screener < 16.0 && screener_idx != carrier_idx;
+        let is_hedge_scheme = screen_rules.hedge_distance_ft > 0.0;
+        let is_drop_scheme = screen_rules.drop_depth_ft > 0.0;
+        let should_switch = is_screening_action
+            && !is_hedge_scheme
+            && !is_drop_scheme
+            && (policy.defense.switch_aggressiveness > 0.6
+                || (policy.defense.switch_aggressiveness > 0.2
+                    && dist_to_screener <= screen_rules.switch_trigger_distance_ft));
+
         for (i, off) in off_targets.iter().enumerate() {
             let is_guarding_carrier = i == carrier_idx;
+            let is_guarding_screener = i == screener_idx;
             let off_pos = live_off_positions
                 .and_then(|positions| positions.get(i).copied())
                 .unwrap_or(off.target_pos);
@@ -450,7 +471,37 @@ impl TacticalPlanner {
             } else {
                 Vec2::X
             };
-            let (def_pos, action, slot) = if is_guarding_carrier {
+            let (def_pos, action, slot) = if should_switch && (is_guarding_carrier || is_guarding_screener) {
+                if is_guarding_carrier {
+                    let to_screener_hoop = (hoop - screener_pos).normalize_or_zero();
+                    (
+                        screener_pos + to_screener_hoop * 3.0,
+                        "SWITCH_ASSIGNMENT",
+                        "SwitchAnchor",
+                    )
+                } else {
+                    let to_carrier_hoop = (hoop - carrier_pos).normalize_or_zero();
+                    (
+                        carrier_pos + to_carrier_hoop * 2.5,
+                        "SWITCH_ASSIGNMENT",
+                        "SwitchDefender",
+                    )
+                }
+            } else if is_guarding_screener && is_screening_action && screen_rules.drop_depth_ft > 0.0 {
+                let to_hoop_from_screen = (hoop - screener_pos).normalize_or_zero();
+                (
+                    screener_pos + to_hoop_from_screen * screen_rules.drop_depth_ft,
+                    "DROP_CONTAIN",
+                    "DropAnchor",
+                )
+            } else if is_guarding_screener && is_screening_action && screen_rules.hedge_distance_ft > 0.0 {
+                let to_carrier_from_screen = (carrier_pos - screener_pos).normalize_or_zero();
+                (
+                    screener_pos + to_carrier_from_screen * screen_rules.hedge_distance_ft,
+                    "HEDGE_AND_RECOVER",
+                    "HedgeDefender",
+                )
+            } else if is_guarding_carrier {
                 // 领防人：建立紧逼与滑步阻截线 (Pursuit Contest)。
                 // round-6：间隔经防守方案倍率调制（迫使贴防或退到纵深）。
                 let gap = (policy.defensive_gap_ft * policy.defense.on_ball_gap_multiplier)

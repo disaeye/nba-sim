@@ -7,9 +7,10 @@
 //! - 负面对照：断路一条链后 harness 必须能检测出"无响应"（测试红）。
 
 use nba_domain::{
-    drive_finishing_delta, effective_catch_radius, effective_decision_risk_tolerance,
-    effective_defense_factor, effective_max_speed, free_throw_probability, poke_check_success,
-    receive_estimate_noise, GameRules, LeagueProfile, PlayerAttributes,
+    drive_finishing_delta, effective_boxout_strength, effective_catch_radius,
+    effective_decision_risk_tolerance, effective_defense_factor, effective_max_speed,
+    effective_passing_skill_factor, effective_shooting_mid_factor, free_throw_probability,
+    poke_check_success, receive_estimate_noise, GameRules, LeagueProfile, PlayerAttributes,
 };
 use nba_engine::MatchEngine;
 use nba_physics::movement::PlayerPhysicsState;
@@ -519,4 +520,70 @@ fn positive_controls_pass_the_same_harness() {
         0.01,
     );
     assert!(d.is_ok(), "wired free throw must pass: {d:?}");
+
+    // (4) 中距离投篮：shooting_mid 递增（D19）。
+    let d = check_monotonic_response(
+        "shooting_mid",
+        |x| effective_shooting_mid_factor(&rules, &attrs_with(|a| a.shooting_mid = x)),
+        0.1,
+        0.9,
+        true,
+        0.01,
+    );
+    assert!(d.is_ok(), "wired shooting_mid must pass: {d:?}");
+
+    // (5) 传球技能：passing 递增（D19）。
+    let d = check_monotonic_response(
+        "passing",
+        |x| effective_passing_skill_factor(&rules, &attrs_with(|a| a.passing = x)),
+        0.1,
+        0.9,
+        true,
+        0.01,
+    );
+    assert!(d.is_ok(), "wired passing must pass: {d:?}");
+
+    // (6) 卡位对抗力量：strength 递增（D19）。
+    let d = check_monotonic_response(
+        "strength",
+        |x| effective_boxout_strength(&rules, &attrs_with(|a| a.strength = x)),
+        0.1,
+        0.9,
+        true,
+        0.01,
+    );
+    assert!(d.is_ok(), "wired strength must pass: {d:?}");
+
+    // (7) 决策感知：decision_iq 递增（D19）。
+    let d = check_monotonic_response(
+        "decision_iq",
+        |x| effective_decision_risk_tolerance(&rules, &attrs_with(|a| a.decision_iq = x)),
+        0.1,
+        0.9,
+        true,
+        0.01,
+    );
+    assert!(d.is_ok(), "wired decision_iq must pass: {d:?}");
+
+    // (8) 外线防守：defense_perimeter 递增（D19）。
+    let d = check_monotonic_response(
+        "defense_perimeter",
+        |x| effective_defense_factor(&rules, &attrs_with(|a| a.defense_perimeter = x), false),
+        0.1,
+        0.9,
+        true,
+        0.01,
+    );
+    assert!(d.is_ok(), "wired defense_perimeter must pass: {d:?}");
+
+    // (9) 内线防守：defense_interior 递增（D19）。
+    let d = check_monotonic_response(
+        "defense_interior",
+        |x| effective_defense_factor(&rules, &attrs_with(|a| a.defense_interior = x), true),
+        0.1,
+        0.9,
+        true,
+        0.01,
+    );
+    assert!(d.is_ok(), "wired defense_interior must pass: {d:?}");
 }

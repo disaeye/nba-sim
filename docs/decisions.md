@@ -109,3 +109,54 @@ G/M/D/L/F/Round 是不同层级的计划或执行编号，不是完成度。任�
 **状态：proposed**
 
 构成准则、证据覆盖和机制守卫稳定前，旧的真实度目标线不能直接继承。重标定必须基于新 fixture 版本、固定分母和盲区登记，不得用当前模拟输出反推参考带。
+
+### ADR-010 · 无持球人球态下的归属语义
+
+**状态：accepted**
+
+背景：`carrier_idx` 删除（D8.1 → D15）被证实**不是等价重构**——`carrier_id()` 对
+`Held` / `InboundReady` / `InboundTransfer` 之外的 7 种球态（Drive / ControlTransfer /
+Pass / Shot / LooseBall / RimRebound / Dead）落入 `roster[possession][carrier_idx]` 回退，
+即「上一次控制权的序号在当前球权队名单上的投影」；改为球态关联人后 8-seed
+`total_p50` 由 213.5 漂移至 212.0（实证见 `docs/dev/evidence/problem.md` §25）。
+
+裁定：**ball handler 是球态的函数，不是独立的可写字段**。无持球人球态下不存在 ball
+handler，读取方得到 `None` 并走自己的无持球人分支；不得用名单下标投影出一个
+"占位 handler"顶替。逐球态语义：
+
+| 球态 | handler（`BallState::associated_player()`） | team possession（`BallState::possessing_team()`） |
+| --- | --- | --- |
+| `Held` / `Drive` | 持球人 / 突破人 | 持球人所在队 |
+| `ControlTransfer` | 无（`None`） | 交接发起方（见下方衔接规则） |
+| `Pass` | 接球人（`target_id`） | 接球人所在队 |
+| `Shot` | 出手人（`shooter_id`） | 出手方 |
+| `InboundReady` / `InboundTransfer` | 发球人 | 发球人所在队 |
+| `LooseBall` / `RimRebound` | 无（`None`） | `last_touch_team`（最后触球方） |
+| `Dead` | 进入死球时快照的 `last_touch_player`（可空） | 进入死球时快照的 `last_touch_team` |
+
+规则与理由：
+
+1. **控球归属（handler）与球队球权（team possession）是两个独立派生量**，都由
+   `BallState` 载荷单一派生，互不顶替。无 handler 不等于无球权队——`LooseBall` /
+   `RimRebound` / `Dead` 期间没有 handler，但仍有由 `last_touch_team` 决定的球权队。
+2. **handler 缺省（`None`）必须由读取方显式处理**，不静默回退到名单序号。旧回退
+   `roster[possession][carrier_idx]` 违反 ADR-005（名册顺序不是身份）——它让行为
+   取决于球员在同队名单中的位置序号。`docs/dev/evidence/problem.md` §25.4 实测
+   "从不跨队"只是当前转移序列的巧合（球权翻转后总是立即 `Held`），不是可依赖的
+   契约。
+3. **唯一已知消费者是战术 planner 的进攻几何参考点**（`plan_possession_targets_with_rules`
+   的 `carrier_idx` 实参）。无 handler 球态（`ControlTransfer` / `LooseBall` / `RimRebound`
+   期间的阵地与攻防转换布置）下，planner 以 `ball_pos_3d`（球的实际位置）为参考，
+   不假设存在持球人；这与 D9.1 已删除的"按持球人槽位硬编码几何"一致——几何参考
+   应跟随球，不跟随一个虚构的持球人。
+4. 由此 `carrier_idx` 成为纯冗余：handler 永远可从 `BallState` 派生，下标投影不再是
+   任何读取方的输入。删除是上述语义落地后的机械结果，而非独立的取舍。
+
+对既有判断的修正：`docs/dev/status.md` 与 `docs/dev/evidence/problem.md` §25 原结论
+"两个语义都不是显然正确的那一个，需先明确语义再重构"——本条即该语义裁定：采用
+球态关联语义（`associated_player()` / `possessing_team()`），否定名单下标投影。
+迁移期的行为变化（planner 几何参考点从"同队序号球员"改为"球位置"）是**有意的语义
+修正**，须附 8-seed 矩阵与反事实证据，不按行为中性重构提交。
+
+规范落点：`docs/architecture.md` §3（球权状态机）、`docs/dev/gap.md` §5；
+实证依据：`docs/dev/evidence/problem.md` §25；执行入口：`docs/dev/current/plan.md` §4（D15）。

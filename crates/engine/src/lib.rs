@@ -7,10 +7,12 @@
 pub mod match_engine;
 pub mod service;
 pub mod setup;
+pub mod snapshot;
 
 pub use service::{MatchInfo, MatchService, SessionState};
 
 pub use setup::{LineupConfig, MatchSetup};
+pub use snapshot::{BallStateView, EngineSnapshot, GameStateView, LineupStateView};
 
 pub use match_engine::{
     frame_rules_from_game_rules, ExportSummary, MatchBoxScore, MatchEngine, Simulation, StreamMode,

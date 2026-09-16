@@ -736,6 +736,28 @@ pub struct DefenseRules {
     pub help_hoop_weight_min: f32,
     /// 人-筐权重上限（防止协防退化为纯护框而放弃外线）。
     pub help_hoop_weight_max: f32,
+    /// 挡拆/掩护防守行为参数（D17 / schemes.json v2）
+    pub screen_defense: ScreenDefenseRules,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ScreenDefenseRules {
+    pub drop_depth_ft: f32,
+    pub hedge_distance_ft: f32,
+    pub switch_trigger_distance_ft: f32,
+    pub recover_timeout_seconds: f32,
+}
+
+impl Default for ScreenDefenseRules {
+    fn default() -> Self {
+        Self {
+            drop_depth_ft: 0.0,
+            hedge_distance_ft: 0.0,
+            switch_trigger_distance_ft: 5.0,
+            recover_timeout_seconds: 1.2,
+        }
+    }
 }
 
 impl Default for DefenseRules {
@@ -790,6 +812,8 @@ impl DefenseRules {
             on_ball_gap_multiplier: f32,
             help_priority: f32,
             switch_aggressiveness: f32,
+            #[serde(default)]
+            screen_defense: ScreenDefenseRules,
         }
         const RAW: &str = include_str!("../../../data/defense/schemes.json");
         let parsed: File = serde_json::from_str(RAW)
@@ -810,6 +834,7 @@ impl DefenseRules {
                         help_priority_tilt_gain: parsed.help_blend.priority_tilt_gain,
                         help_hoop_weight_min: parsed.help_blend.hoop_weight_min,
                         help_hoop_weight_max: parsed.help_blend.hoop_weight_max,
+                        screen_defense: e.screen_defense,
                     },
                 )
             })
@@ -1536,4 +1561,19 @@ mod modulation_tests {
         };
         assert!(policy.validate().is_err());
     }
+
+    #[test]
+    fn unhandled_rule_fields_are_explicitly_documented() {
+        assert!(!super::UNIMPLEMENTED_RULE_FIELDS.is_empty());
+    }
 }
+
+/// 显式标记当前周期未接入因果链的 GameRules 候选字段清单（D18）。
+pub const UNIMPLEMENTED_RULE_FIELDS: &[&str] = &[
+    "risk_tolerance",
+    "defensive_rebound_boxout_bonus",
+    "offensive_rebound_putback_bias",
+    "help_defense_awareness",
+    "post_defense_physicality",
+    "transition_leakout_chance",
+];

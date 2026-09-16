@@ -40,9 +40,10 @@ fn simulate_full_game(seed: u64) -> GameStats {
         max_t = tick.frame.t;
         ticks += 1;
     }
-    let home = engine.home_score();
-    let away = engine.away_score();
-    let b = &engine.box_score();
+    let snap = engine.engine_snapshot();
+    let home = snap.game.home_score;
+    let away = snap.game.away_score;
+    let b = snap.box_score;
     let possessions = engine.completed_possessions().max(1);
     GameStats {
         total_points: home + away,

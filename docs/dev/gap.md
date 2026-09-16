@@ -120,6 +120,15 @@ enum BallMotion {
 
 所有传球、投篮、抢断、篮板、出界、罚球和发球边都必须经过唯一的状态转移通道。状态转换函数接收当前状态与已发生事实，返回新状态和事件；普通调用路径不能直接改写旁路字段。
 
+### 5.2a 无持球人球态的归属语义（ADR-010）
+
+ball handler 是球态的函数，不是独立可写字段。无持球人球态（`ControlTransfer` /
+`LooseBall` / `RimRebound` / `Dead`）下 handler 派生为 `None`，由读取方显式处理，
+不得用名单下标投影出占位 handler；team possession 是独立派生量，由 `last_touch_team`
+决定，不因无 handler 而消失。逐球态的 handler / possession 裁定表见 `docs/decisions.md`
+ADR-010（accepted）。该裁定否定了旧 `carrier_idx` 回退 `roster[possession][idx]`
+（违反 ADR-005），是删除 `carrier_idx` 的前提。
+
 ### 5.3 状态边完整性
 
 状态机必须列出合法边、非法边和每条边的责任事件。非法边在领域层拒绝；没有足够事实时输出证据不足或完整性失败，不静默选择一个看似合理的状态。

@@ -19,6 +19,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 
 use crate::setup::{LineupConfig, MatchSetup};
+use crate::snapshot::{BallStateView, EngineSnapshot, GameStateView, LineupStateView};
 use nba_decision::constraint::{
     CandidateAction, ConstraintContext, EnforcementAction, PhaseType, ViolationKind,
 };
@@ -267,7 +268,6 @@ pub struct MatchEngine {
     sub_phase: SubPhase,
     sub_phase_timer: f32,
     tactical_set: TacticalSet,
-    carrier_idx: usize,
     shot_clock: f32,
     game_clock: f32,
     current_time: f32,
@@ -388,6 +388,8 @@ pub struct MatchEngine {
     /// 正在执行后场推进（`Advance`）的球员：其运动目标由推进决定，
     /// 本回合内不得被战术槽位覆盖（第一性原理：8 秒规则优先于落位）。
     advancing_player: Option<String>,
+    /// FIBA 交替拥有球权指示箭头（D20）。
+    possession_arrow: Option<Possession>,
 }
 
 /// 比赛投篮分解与核心统计。
@@ -593,7 +595,6 @@ impl MatchEngine {
             sub_phase: SubPhase::Initiation,
             sub_phase_timer: 0.0,
             tactical_set: home_tactic,
-            carrier_idx: 0,
             shot_clock: rules.league.shot_clock_seconds,
             game_clock: rules.period_duration(1),
             current_time: 0.0,
@@ -699,6 +700,7 @@ impl MatchEngine {
             pending_pass_inbound: false,
             current_possession_turnover_player: Some(initial_carrier_id),
             advancing_player: None,
+            possession_arrow: None,
         }
     }
 
@@ -1017,26 +1019,34 @@ impl MatchEngine {
         self.ball_state.phase()
     }
 
-    /// 持球人 id。
-    fn carrier_id(&self) -> String {
+    /// 依 ADR-010 裁定从权威球态派生焦点持球人 / 战术发起人 ID。
+    pub fn active_carrier_or_focus_id(&self) -> String {
         match &self.ball_state {
             BallTrajectoryKind::Held { carrier_id }
+            | BallTrajectoryKind::Drive {
+                driver_id: carrier_id,
+                ..
+            }
             | BallTrajectoryKind::InboundReady {
                 inbounder_id: carrier_id,
                 ..
-            } => carrier_id.clone(),
-            BallTrajectoryKind::InboundTransfer { inbounder_id, .. } => inbounder_id.clone(),
-            _ => {
-                let roster = match self.possession {
-                    Possession::Home => &self.home_roster_order,
-                    Possession::Away => &self.away_roster_order,
-                };
-                roster
-                    .get(self.carrier_idx)
-                    .cloned()
-                    .unwrap_or_else(|| roster.first().cloned().unwrap_or_default())
             }
+            | BallTrajectoryKind::InboundTransfer {
+                inbounder_id: carrier_id,
+                ..
+            }
+            | BallTrajectoryKind::ControlTransfer { carrier_id, .. } => carrier_id.clone(),
+            BallTrajectoryKind::Pass { target_id, .. } => target_id.clone(),
+            BallTrajectoryKind::Shot { shooter_id, .. } => shooter_id.clone(),
+            _ => self
+                .current_turnover_player_id()
+                .unwrap_or_else(|| self.new_possession_pg()),
         }
+    }
+
+    /// 持球人 id（ADR-010：由球态派生焦点人，不再使用独立 carrier_idx 字段）。
+    fn carrier_id(&self) -> String {
+        self.active_carrier_or_focus_id()
     }
     /// Keeps the active offensive scheme derived from the configured team
     /// owning the ball; transitions must not replace setup with random data.
@@ -1604,14 +1614,21 @@ impl MatchEngine {
         tick
     }
 
-    fn step_inner(&mut self) -> StreamTick {
+    fn check_early_tick_exit(&mut self) -> Option<StreamTick> {
         if self.scope_active && self.simulation_complete {
             self.current_event = None;
             self.current_event_types.clear();
             self.current_enforcements.clear();
             self.current_event_log.clear();
             self.last_decision_trace = None;
-            return self.build_tick();
+            return Some(self.build_tick());
+        }
+        None
+    }
+
+    fn step_inner(&mut self) -> StreamTick {
+        if let Some(tick) = self.check_early_tick_exit() {
+            return tick;
         }
         self.tick_index = self.tick_index.saturating_add(1);
 
@@ -2821,7 +2838,7 @@ impl MatchEngine {
                         let dist_to_hoop = (driver_pos - hoop_pos).length();
                         // Spatial gate: if driver is still outside the paint / perimeter,
                         // this drive was stalled before reaching finishing position.
-                        let finish_range = 16.0_f32;
+                        let finish_range = self.rules.tactics.drive_finish_range_ft;
                         if dist_to_hoop > finish_range {
                             self.ball_pos_3d = (driver_pos, holder_height);
                             new_ball_state = Some(BallTrajectoryKind::Held {
@@ -3406,6 +3423,25 @@ impl MatchEngine {
         );
         TacticalPlanner::bind_targets(&mut off_targets, &filled_ids);
 
+        // 场内战术对位焦点（ADR-010）：
+        // 1. 若球在场内被持有/突破/合球，焦点为持球人；
+        // 2. 若球在传球飞行中，焦点为接球人（防守人保持对位）；
+        // 3. 界外发球/死球/争球/投篮飞行等无场内持球人状态，焦点为场内战术发起人（PG/Playmaker）。
+        let focus_player_id = match &self.ball_state {
+            BallTrajectoryKind::Held { carrier_id }
+            | BallTrajectoryKind::Drive {
+                driver_id: carrier_id,
+                ..
+            }
+            | BallTrajectoryKind::ControlTransfer { carrier_id, .. } => carrier_id.clone(),
+            BallTrajectoryKind::Pass { target_id, .. } => target_id.clone(),
+            _ => self.new_possession_pg(),
+        };
+        let carrier_idx = off_roster_owned
+            .iter()
+            .position(|id| id == &focus_player_id)
+            .unwrap_or(0);
+
         // 防守目标沿用对位/协防逻辑（含 D5.2 的执行器）。
         let (mut home_targets, mut away_targets) =
             TacticalPlanner::plan_possession_targets_with_rules(
@@ -3413,7 +3449,7 @@ impl MatchEngine {
                 self.sub_phase,
                 self.possession,
                 self.ball_pos_3d.0,
-                self.carrier_idx,
+                carrier_idx,
                 self.sub_phase_timer,
                 &mut self.rng,
                 &self.rules,
@@ -3686,15 +3722,27 @@ impl MatchEngine {
         self.build_tick()
     }
 
+    fn is_clutch_situation(&self) -> bool {
+        let policy = &self.rules.modulation;
+        self.period >= policy.clutch_period
+            && self.game_clock <= policy.clutch_time_remaining
+            && (self.home_score as i32 - self.away_score as i32).abs() <= policy.clutch_score_margin
+    }
+
     fn morale_bias_for(&self, player_id: &str) -> f32 {
         let policy = &self.rules.modulation;
-        match self.modulation.get(player_id).map(|m| m.morale) {
+        let base_bias = match self.modulation.get(player_id).map(|m| m.morale) {
             Some(nba_decision::modulation::MoraleState::HotHand) => policy.hot_hand_bias,
             Some(nba_decision::modulation::MoraleState::Clutch) => policy.clutch_bias,
             Some(nba_decision::modulation::MoraleState::Normal) => 0.0,
             Some(nba_decision::modulation::MoraleState::Frustrated) => policy.frustrated_bias,
             Some(nba_decision::modulation::MoraleState::Exhausted) => policy.exhausted_bias,
             None => 0.0,
+        };
+        if self.is_clutch_situation() {
+            base_bias + policy.clutch_bias
+        } else {
+            base_bias
         }
     }
 
@@ -4539,9 +4587,6 @@ impl MatchEngine {
             from_pos: (from_pos.x, from_pos.y),
             to_pos: (target_lead_pos.x, target_lead_pos.y),
         });
-        if let Some(index) = self.player_index_for_id(receiver_id) {
-            self.carrier_idx = index;
-        }
         // F1.3：发球员从界外 placement 回场内由 `sync_ball_holder` 在
         // 球态离开 InboundTransfer/InboundReady 时统一处理（单一机制）。
         self.current_event = Some(if inbound { "INBOUND_PASS" } else { "PASS" }.to_string());
@@ -5550,7 +5595,6 @@ impl MatchEngine {
         }
         self.update_coach_strategy();
         self.sync_team_tactics();
-        self.carrier_idx = self.player_index_for_id(&player_id).unwrap_or(0);
         self.current_possession_turnover_player = Some(player_id.clone());
         // The secured ball remains in a transfer trajectory until it reaches
         // the receiver's frozen catch point. Do not advertise Held here: that
@@ -5699,7 +5743,6 @@ impl MatchEngine {
         self.update_coach_strategy();
         self.shot_clock = self.rules.league.shot_clock_seconds;
         self.sync_team_tactics();
-        self.carrier_idx = 0;
         self.transition_phase(SubPhase::Initiation);
         self.set_game_flow(GameFlowState::DeadBall);
         self.inbound_baseline = baseline_pos;
@@ -6059,6 +6102,35 @@ impl MatchEngine {
         &self.home_roster_order
     }
 
+    /// FIBA 交替拥有箭头指向（只读，D20）。
+    pub fn possession_arrow(&self) -> Option<Possession> {
+        self.possession_arrow
+    }
+
+    /// 设置交替拥有箭头（仅测试钩子，D20）。
+    pub fn set_possession_arrow_for_test(&mut self, arrow: Option<Possession>) {
+        self.possession_arrow = arrow;
+    }
+
+    /// 裁决争球 / 纠缠球（Held Ball，D20）。
+    /// 在 FIBA 模式下（use_alternate_possession_arrow=true）依据球权箭头裁定，并翻转箭头；
+    /// 在 NBA 模式下执行跳球争顶程序。
+    pub fn resolve_held_ball(&mut self) -> Possession {
+        if self.rules.league.use_alternate_possession_arrow {
+            let awarded = self.possession_arrow.unwrap_or(Possession::Away);
+            let next_arrow = match awarded {
+                Possession::Home => Possession::Away,
+                Possession::Away => Possession::Home,
+            };
+            self.possession_arrow = Some(next_arrow);
+            self.possession = awarded;
+            awarded
+        } else {
+            // NBA: 跳球
+            self.possession
+        }
+    }
+
     /// 物理世界的可变访问（**仅测试**）。
     ///
     /// 生产路径不得直接改物理状态：位置/速度必须经引擎的阶段化推进；
@@ -6256,6 +6328,7 @@ impl MatchEngine {
         self.team_roster_ids(team).into_iter().nth(index)
     }
 
+    #[allow(dead_code)]
     fn player_index_for_id(&self, player_id: &str) -> Option<usize> {
         let team = self.physics.get_player(player_id)?.team.as_str();
         self.team_roster_ids(team)
@@ -6264,12 +6337,52 @@ impl MatchEngine {
     }
 
     // ========================================================================
-    // Tick 协议输出
+    // Snapshot 只读投影与 Tick 协议输出
     // ========================================================================
+
+    /// 返回对引擎内部状态的零拷贝借用只读投影（D14）。
+    ///
+    /// 供 CLI、评判器、测试、回放等统一获取只读视图，不产生任何副作用。
+    pub fn engine_snapshot(&self) -> EngineSnapshot<'_> {
+        EngineSnapshot {
+            game: GameStateView {
+                period: self.period,
+                game_clock: self.game_clock,
+                shot_clock: self.shot_clock,
+                current_time: self.current_time,
+                home_score: self.home_score,
+                away_score: self.away_score,
+                possession: self.possession,
+                possession_id: self.possession_id,
+                sub_phase: self.sub_phase,
+                sub_phase_timer: self.sub_phase_timer,
+                tactical_set: self.tactical_set,
+                game_flow: &self.game_flow,
+                possession_arrow: self.possession_arrow,
+            },
+            ball: BallStateView {
+                pos_3d: self.ball_pos_3d,
+                state: &self.ball_state,
+                active_carrier_or_focus_id: self.active_carrier_or_focus_id(),
+            },
+            lineups: LineupStateView {
+                home_roster_order: &self.home_roster_order,
+                away_roster_order: &self.away_roster_order,
+            },
+            rules: &self.rules,
+            box_score: &self.box_score,
+            physics: &self.physics,
+        }
+    }
+
+    /// 构建面向前端/协议传输的完整渲染帧（包含克隆与序列化准备）。
+    pub fn render_frame(&self) -> StreamTick {
+        self.build_tick()
+    }
 
     /// Returns a protocol snapshot without advancing the simulation.
     pub fn snapshot(&self) -> StreamTick {
-        self.build_tick()
+        self.render_frame()
     }
 
     fn build_tick(&self) -> StreamTick {

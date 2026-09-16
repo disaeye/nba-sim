@@ -17,9 +17,10 @@ pub mod resolve;
 pub mod rules;
 pub mod tactics;
 pub use capability::{
-    drive_finishing_delta, effective_catch_radius, effective_decision_risk_tolerance,
-    effective_defense_factor, effective_max_accel, effective_max_speed, free_throw_probability,
-    poke_check_success, receive_estimate_noise,
+    drive_finishing_delta, effective_boxout_strength, effective_catch_radius,
+    effective_decision_risk_tolerance, effective_defense_factor, effective_max_accel,
+    effective_max_speed, effective_passing_skill_factor, effective_shooting_mid_factor,
+    free_throw_probability, poke_check_success, receive_estimate_noise,
 };
 pub use court::CourtGeometry;
 pub use data::{
@@ -40,6 +41,7 @@ pub use resolve::{
 };
 pub use rules::{
     DecisionRules, DefenseRules, GameRules, ModulationRules, SemanticRules, TacticalRules,
+    UNIMPLEMENTED_RULE_FIELDS,
 };
 pub use tactics::{
     DefensiveSystem, HelpDefenseConfig, MatchupRule, OffensiveSystem, OnBallDefenseConfig,
