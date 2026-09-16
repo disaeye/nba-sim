@@ -1,184 +1,193 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>NBA-Sim · 专业赛事演练与战术观测台</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>NBA-Sim · 现代战术与比赛演练台</title>
   <link rel="stylesheet" href="/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <!-- 1. 顶栏导航与控制组 -->
-  <header class="app-header">
-    <div class="header-brand-row">
-      <div class="brand-group">
-        <span class="brand-badge">NBA</span>
-        <span class="brand-title">SIM <em>OBSERVATORY</em></span>
-      </div>
-      <div class="header-right-tools">
-        <span id="runStatus" class="status-pill">就绪</span>
-        <label class="btn-tool-icon" title="导入本地 NDJSON 轨迹">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <input id="fileInput" type="file" accept=".ndjson,.json,.txt" hidden>
-        </label>
-      </div>
+  <!-- 顶栏：沉浸极简，聚焦品牌与状态 -->
+  <header class="app-nav">
+    <div class="nav-brand">
+      <div class="brand-logo">NBA<span>·</span>SIM</div>
+      <div class="brand-badge" id="runStatus">就绪</div>
     </div>
-
-    <!-- 运行参数控制栏 (移动端整齐排开，PC 端紧凑居右) -->
-    <div class="header-action-bar">
-      <div class="field-item seed-field">
-        <span class="field-label">SEED</span>
-        <input id="seedInput" type="number" value="42" step="1">
-      </div>
-      <div class="field-item scope-field">
-        <span class="field-label">SCOPE</span>
-        <select id="scopeInput">
-          <option value="1p">1 回合</option>
-          <option value="5p" selected>5 回合</option>
-          <option value="10p">10 回合</option>
-          <option value="1q">1 节</option>
-          <option value="full">全场</option>
-        </select>
-      </div>
-      <button id="runButton" class="btn-primary-run">
-        <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-        <span>运行模拟</span>
+    <div class="nav-actions">
+      <button id="quickSimBtn" class="btn-primary-action" title="立即模拟">
+        <span class="btn-icon">⚡</span>
+        <span class="btn-text">开始模拟</span>
+      </button>
+      <button id="openSettingsBtn" class="btn-icon-subtle" title="调测设置与种子">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       </button>
     </div>
   </header>
 
-  <!-- 主视觉区 -->
-  <main class="arena-main">
-    <!-- 2. 赛事演练舞台 -->
+  <!-- 主屏内容流 -->
+  <main class="main-content">
+    
+    <!-- 赛事主舞台卡片 (The Stage) -->
     <section class="broadcast-stage">
-      <!-- 转播级极简比分板 (严格 3 列对称网格，0 偏移错位) -->
-      <div class="scoreboard-bar">
-        <div class="score-team away">
-          <span class="team-indicator away-dot"></span>
-          <span class="team-label" id="awayTeamName">AWAY</span>
-          <span class="score-num" id="awayScore">0</span>
+      
+      <!-- 转播比分卡 (Broadcast Scoreboard) -->
+      <div class="match-scoreboard">
+        <div class="team-block away">
+          <div class="team-meta">
+            <span class="team-badge away-badge"></span>
+            <span id="awayTeamName" class="team-name">客队</span>
+          </div>
+          <div id="awayScore" class="team-score">0</div>
         </div>
 
-        <div class="score-center">
-          <div class="clock-box">
-            <span class="period-pill" id="periodLabel">Q1</span>
-            <span class="game-time" id="gameClock">12:00</span>
-          </div>
-          <div class="shot-clock-box">
-            <span class="sc-num" id="shotClock">24.0</span>
+        <div class="clock-hub">
+          <div class="period-pill" id="periodLabel">第 1 节</div>
+          <div class="clocks-row">
+            <span id="gameClock" class="game-clock">12:00</span>
+            <span class="clock-divider">·</span>
+            <span id="shotClock" class="shot-clock">24</span>
           </div>
         </div>
 
-        <div class="score-team home">
-          <span class="score-num" id="homeScore">0</span>
-          <span class="team-label" id="homeTeamName">HOME</span>
-          <span class="team-indicator home-dot"></span>
+        <div class="team-block home">
+          <div id="homeScore" class="team-score">0</div>
+          <div class="team-meta">
+            <span id="homeTeamName" class="team-name">主队</span>
+            <span class="team-badge home-badge"></span>
+          </div>
         </div>
       </div>
 
-      <!-- 沉浸式球场画布视口 -->
-      <div class="court-box">
-        <!-- 悬浮在球场右上角的状态标签 (动态岛，0 像素重排) -->
-        <div class="court-floating-hud">
-          <span id="eventOverlayChip" class="hud-chip-event"></span>
-          <span id="phaseLabel" class="hud-chip">INITIATION</span>
-          <span id="possessionLabel" class="hud-chip pos-chip">POS #1</span>
-        </div>
+      <!-- 球场主视口 (Court Stage) -->
+      <div class="court-stage-wrap">
+        <canvas id="courtCanvas" width="960" height="520"></canvas>
+        
+        <!-- 浮动动态岛标签 (Floating Event Pill) -->
+        <div id="eventOverlayChip" class="floating-event-pill"></div>
 
-        <canvas id="courtCanvas" width="960" height="520" aria-label="篮球场回放"></canvas>
-        <div id="playerTooltip" class="player-hud-tooltip" hidden></div>
+        <!-- 球员触摸卡片 (Player HUD) -->
+        <div id="playerTooltip" class="player-hud-card" hidden></div>
       </div>
 
-      <!-- 战术字幕解说条 -->
-      <div class="tactical-subtitle-strip">
-        <span class="subtitle-badge">LIVE</span>
-        <span id="calloutText" class="subtitle-content">等待模拟指令…</span>
-        <span id="frameLabel" class="subtitle-frame">f0</span>
+      <!-- 战术呼叫与战况单行解说字幕 -->
+      <div class="subtitle-bar">
+        <span class="subtitle-badge">实时战况</span>
+        <div id="calloutText" class="subtitle-content">等待推演开始…</div>
+        <span id="frameLabel" class="subtitle-frame">帧 0</span>
+      </div>
+
+      <!-- 一体化媒体控制栏 (Native Media Controller) -->
+      <div class="stage-controller">
+        <div class="timeline-bar-wrap">
+          <input id="progressInput" type="range" min="0" max="0" value="0" step="1">
+        </div>
+        <div class="controller-actions">
+          <div class="time-readout-box">
+            <span id="tickReadout">0 / 0</span>
+          </div>
+          <div class="transport-btns">
+            <button id="stepBackButton" class="btn-media" title="后退一帧">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="3"></line></svg>
+            </button>
+            <button id="playButton" class="btn-media-play" title="播放 / 暂停">
+              <svg id="playIconSvg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>
+            </button>
+            <button id="stepForwardButton" class="btn-media" title="前进一帧">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="3"></line></svg>
+            </button>
+          </div>
+          <div class="quick-scope-selector">
+            <select id="scopeInput" class="select-scope-pill">
+              <option value="1p">1 回合</option>
+              <option value="5p" selected>5 回合</option>
+              <option value="10p">10 回合</option>
+              <option value="1q">1 完整单节</option>
+              <option value="full">全场 48 分钟</option>
+            </select>
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- 3. 数据与分析抽屉 (三大核心功能) -->
-    <section class="analytics-drawer">
-      <nav class="drawer-tabs" role="tablist">
-        <button class="tab-button active" data-tab="timeline">事件流</button>
-        <button class="tab-button" data-tab="stats">统计榜</button>
-        <button class="tab-button" data-tab="rules">规则器</button>
-        <button class="tab-button" data-tab="advanced">高级</button>
-      </nav>
+    <!-- 底部数据与分析卡片 (iOS Segmented Sheet) -->
+    <section class="analysis-section">
+      <div class="segmented-nav">
+        <button class="tab-button active" data-tab="timeline">文字直播</button>
+        <button class="tab-button" data-tab="stats">球队数据</button>
+        <button class="tab-button" data-tab="rules">规则调测</button>
+      </div>
 
-      <div class="drawer-panes">
-        <!-- Tab 1: 实时战报时间轴 -->
+      <div class="tab-content-card">
+        <!-- Tab 1: 文字时间轴流 -->
         <div id="tab-timeline" class="tab-pane active">
-          <div id="eventFilters" class="timeline-filters"></div>
-          <div id="timeline" class="timeline-scroll"></div>
+          <div id="eventFilters" class="filter-pill-row"></div>
+          <div id="timeline" class="feed-timeline-stream"></div>
         </div>
 
-        <!-- Tab 2: 比赛数据统计表 -->
+        <!-- Tab 2: 球队数据统计 -->
         <div id="tab-stats" class="tab-pane">
-          <div class="stats-table-wrapper">
-            <div id="statsTable" class="stats-data-grid"></div>
-          </div>
+          <div id="statsTable" class="stats-grid-wrap"></div>
         </div>
 
-        <!-- Tab 3: 规则调节编辑器 -->
+        <!-- Tab 3: 规则编辑器 -->
         <div id="tab-rules" class="tab-pane">
-          <div class="rules-pane-box">
-            <textarea id="rulesEditor" spellcheck="false" placeholder="正在加载规则配置…"></textarea>
-            <div class="rules-footer-bar">
-              <button id="loadRulesButton" class="btn-subtle">重置默认</button>
-              <button id="runRulesButton" class="btn-action">应用规则并推演</button>
+          <div class="rules-editor-wrapper">
+            <div class="rules-toolbar">
+              <span class="rules-hint">修改 JSON 后点击下方按钮重跑模拟</span>
+              <div class="rules-btns">
+                <button id="loadRulesButton" class="btn-secondary-sm">恢复默认</button>
+                <button id="runRulesButton" class="btn-primary-sm">应用并推演</button>
+              </div>
             </div>
-          </div>
-        </div>
-
-        <!-- Tab 4: 高级洞察 -->
-        <div id="tab-advanced" class="tab-pane">
-          <div class="advanced-pane-box">
-            <div id="spaceMetrics" class="metrics-grid"></div>
+            <textarea id="rulesEditor" spellcheck="false"></textarea>
           </div>
         </div>
       </div>
     </section>
   </main>
 
-  <!-- 4. 底部全宽自适应悬浮播放器 (iOS 风格排布，绝不错位) -->
-  <footer class="bottom-controller">
-    <div class="controller-scrubber-row">
-      <span class="time-label current" id="progressTime">00:00</span>
-      <input id="progressInput" type="range" min="0" max="0" value="0" step="1">
-      <span class="time-label total" id="progressEnd">00:00</span>
+  <!-- 调测与高级参数抽屉 (Modal Bottom Sheet) -->
+  <div id="settingsSheet" class="modal-sheet-backdrop" hidden>
+    <div class="modal-sheet-panel">
+      <div class="sheet-header">
+        <h3>引擎推演参数</h3>
+        <button id="closeSettingsBtn" class="btn-close-sheet">✕</button>
+      </div>
+      <div class="sheet-body">
+        <div class="setting-item">
+          <label for="seedInput">随机数种子 (Seed)</label>
+          <div class="input-with-actions">
+            <input id="seedInput" type="number" value="42">
+            <button id="randomSeedBtn" class="btn-secondary-sm">🎲 随机</button>
+          </div>
+        </div>
+        <div class="setting-item">
+          <label>比赛尺度 (Scope)</label>
+          <div class="scope-chip-selector">
+            <button class="scope-chip active" data-scope="5p">5 回合</button>
+            <button class="scope-chip" data-scope="1p">单回合</button>
+            <button class="scope-chip" data-scope="1q">单节</button>
+            <button class="scope-chip" data-scope="full">整场比赛</button>
+          </div>
+        </div>
+        <div class="setting-item">
+          <label>导入本地模拟数据</label>
+          <input id="fileInput" type="file" accept=".ndjson" style="display:none">
+          <button id="uploadTriggerBtn" class="btn-outline-block">📂 选择 .ndjson 轨迹文件</button>
+        </div>
+      </div>
+      <div class="sheet-footer">
+        <button id="applyAndRunBtn" class="btn-full-primary">开始推演</button>
+      </div>
     </div>
+  </div>
 
-    <div class="controller-buttons-row">
-      <div class="ctrl-group left">
-        <span id="tickReadout" class="step-counter">0 / 0</span>
-      </div>
-
-      <div class="ctrl-group center">
-        <button id="stepBackButton" class="btn-transport" title="上一帧">⏮</button>
-        <button id="playButton" class="btn-transport play" title="播放 / 暂停">▶</button>
-        <button id="stepForwardButton" class="btn-transport" title="下一帧">⏭</button>
-      </div>
-
-      <div class="ctrl-group right">
-        <span id="timelineCount" class="badge-mini">0 EVT</span>
-      </div>
-    </div>
-  </footer>
-
-  <!-- 隐形兼容容器 (保留旧代码引用 ID，避免报空指针) -->
+  <!-- 隐藏的兼容桩（100% 保持原有 JS 读取安全） -->
   <div style="display:none" aria-hidden="true">
-    <span id="eventChip"></span>
-    <span id="streamSummary"></span>
-    <span id="eventReadout"></span>
-    <span id="freeThrows"></span>
-    <span id="tacticalSet"></span>
-    <span id="progressPossession"></span>
-    <span id="rulesStatus"></span>
-    <span id="foulsReadout"></span>
-    <button id="copyFrameButton"></button>
-    <button id="jumpButton"></button>
-    <button id="prevPossessionButton"></button>
-    <button id="nextPossessionButton"></button>
+    <button id="runButton"></button>
     <button id="anomalyBadge"></button>
     <div id="anomalyPanel"></div>
     <div id="anomalyList"></div>
@@ -187,6 +196,7 @@
     <div id="tab-decisions"></div>
     <div id="tab-export"></div>
     <div id="tab-frame"></div>
+    <div id="tab-advanced"></div>
     <div id="decisionList"></div>
     <div id="decisionPanel"></div>
     <div id="frameJson"></div>
@@ -195,6 +205,23 @@
     <input id="tickJump" type="number">
     <input id="jumpInput" type="number">
     <select id="playbackSpeed"><option value="1">1x</option></select>
+    <span id="eventChip"></span>
+    <span id="phaseLabel"></span>
+    <span id="possessionLabel"></span>
+    <span id="streamSummary"></span>
+    <span id="eventReadout"></span>
+    <button id="jumpButton"></button>
+    <button id="prevPossessionButton"></button>
+    <button id="nextPossessionButton"></button>
+    <span id="rulesStatus"></span>
+    <span id="foulsReadout"></span>
+    <span id="tacticalSet"></span>
+    <span id="timelineCount"></span>
+    <span id="progressTime"></span>
+    <span id="progressEnd"></span>
+    <span id="progressPossession"></span>
+    <span id="freeThrows"></span>
+    <button id="copyFrameButton"></button>
   </div>
 
   <script type="module" src="/app.js"></script>

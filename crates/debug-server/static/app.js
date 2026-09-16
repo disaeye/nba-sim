@@ -1846,6 +1846,60 @@
         setRunStatus("浏览器拒绝访问剪贴板", true);
       }
     });
+
+    const quickBtn = $("quickSimBtn");
+    if (quickBtn) quickBtn.addEventListener("click", () => runSimulation());
+
+    const openSet = $("openSettingsBtn");
+    const closeSet = $("closeSettingsBtn");
+    const sheet = $("settingsSheet");
+    if (openSet && sheet) {
+      openSet.addEventListener("click", () => {
+        sheet.hidden = false;
+      });
+    }
+    if (closeSet && sheet) {
+      closeSet.addEventListener("click", () => {
+        sheet.hidden = true;
+      });
+    }
+    if (sheet) {
+      sheet.addEventListener("click", (e) => {
+        if (e.target === sheet) sheet.hidden = true;
+      });
+    }
+
+    const applyRun = $("applyAndRunBtn");
+    if (applyRun && sheet) {
+      applyRun.addEventListener("click", () => {
+        sheet.hidden = true;
+        runSimulation();
+      });
+    }
+
+    const randomBtn = $("randomSeedBtn");
+    if (randomBtn) {
+      randomBtn.addEventListener("click", () => {
+        $("seedInput").value = String(
+          Math.floor(Math.random() * 90000) + 1000,
+        );
+      });
+    }
+
+    const uploadTrigger = $("uploadTriggerBtn");
+    if (uploadTrigger) {
+      uploadTrigger.addEventListener("click", () => $("fileInput").click());
+    }
+
+    document.querySelectorAll(".scope-chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        document
+          .querySelectorAll(".scope-chip")
+          .forEach((c) => c.classList.remove("active"));
+        chip.classList.add("active");
+        $("scopeInput").value = chip.dataset.scope;
+      });
+    });
     function handlePointer(clientX, clientY, canvas) {
       const rect = canvas.getBoundingClientRect();
       const x = ((clientX - rect.left) * canvas.width) / rect.width;
