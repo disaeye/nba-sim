@@ -18,9 +18,12 @@ pub mod rules;
 pub mod tactics;
 pub use capability::{
     drive_finishing_delta, effective_boxout_strength, effective_catch_radius,
-    effective_decision_risk_tolerance, effective_defense_factor, effective_max_accel,
-    effective_max_speed, effective_passing_skill_factor, effective_shooting_mid_factor,
-    free_throw_probability, poke_check_success, receive_estimate_noise,
+    effective_decision_risk_tolerance, effective_defense_factor, effective_defensive_boxout_bonus,
+    effective_help_awareness, effective_max_accel, effective_max_speed,
+    effective_passing_skill_factor, effective_post_defense_physicality, effective_putback_bias,
+    effective_risk_tolerance, effective_shooting_mid_factor,
+    effective_transition_leakout_chance, free_throw_probability, poke_check_success,
+    receive_estimate_noise,
 };
 pub use court::CourtGeometry;
 pub use data::{

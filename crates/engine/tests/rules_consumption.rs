@@ -2,10 +2,9 @@ use nba_domain::{GameRules, UNIMPLEMENTED_RULE_FIELDS};
 use nba_engine::MatchEngine;
 
 #[test]
-fn test_unimplemented_rule_fields_are_explicit() {
-    assert!(!UNIMPLEMENTED_RULE_FIELDS.is_empty());
-    assert!(UNIMPLEMENTED_RULE_FIELDS.contains(&"risk_tolerance"));
-    assert!(UNIMPLEMENTED_RULE_FIELDS.contains(&"defensive_rebound_boxout_bonus"));
+fn test_unimplemented_rule_fields_are_fully_closed() {
+    // D27: 全部规则字段均已接入因果链，清单清零
+    assert!(UNIMPLEMENTED_RULE_FIELDS.is_empty());
 }
 
 #[test]

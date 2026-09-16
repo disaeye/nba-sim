@@ -18,7 +18,8 @@ pub struct DefensiveContext<'a> {
     pub ball_carrier_is_driving: bool,
     pub hoop_pos: Vec2,
     pub scheme: DefensiveTactic,
-    pub base_ctx: &'a ConstraintContext<'a>,
+    pub rules: &'a nba_domain::rules::GameRules,
+    pub base_ctx: Option<&'a ConstraintContext<'a>>,
 }
 
 /// 防守自主体生成的候选决策动作。
@@ -73,6 +74,11 @@ pub enum DefensiveCandidateAction {
         target_pos: Vec2,
         new_assignment_id: String,
     },
+    /// 弱侧 X-Out 轮转：弱侧高位防守人同时兼顾底角与翼侧射手
+    XOutCloseout {
+        x_out_pos: Vec2,
+        covered_shooter_ids: (String, String),
+    },
 }
 
 /// 防守动作评分载荷
@@ -94,7 +100,7 @@ impl<'a> DefensiveContext<'a> {
     ) -> ScoredDefensiveAction {
         let segment = to - from;
         let len_sq = segment.length_squared();
-        let rules = self.base_ctx.rules;
+        let rules = self.rules;
         let dec_rules = &rules.decision;
 
         if len_sq < 1e-4 {
@@ -157,7 +163,7 @@ impl<'a> DefensiveContext<'a> {
         driver_pos: Vec2,
         driver_finishing_skill: f32,
     ) -> (ScoredDefensiveAction, ScoredDefensiveAction) {
-        let rules = self.base_ctx.rules;
+        let rules = self.rules;
         let dec_rules = &rules.decision;
 
         // 协防护框效用：阻止篮下高期望终结的收益
@@ -203,7 +209,7 @@ impl<'a> DefensiveContext<'a> {
         carrier_pos: Vec2,
         screener_defender_id: &str,
     ) -> ScoredDefensiveAction {
-        let defense_rules = &self.base_ctx.rules.tactics.defense;
+        let defense_rules = &self.rules.tactics.defense;
         let screen_rules = defense_rules.screen_defense;
         let dist_to_screen = (self.defender_pos - screener_pos).length();
 
@@ -259,6 +265,37 @@ impl<'a> DefensiveContext<'a> {
                 action: DefensiveCandidateAction::NavigateScreenUnder { target_pos: under_pos },
                 utility: 0.70,
                 risk: 0.2,
+            }
+        }
+    }
+
+    /// 评估弱侧协同轮转 (Weak-side Help Chain & X-Out, D26)。
+    /// 当禁区被突破时，弱侧 Low-man 下沉护筐，弱侧 High-man 执行 X-Out 填补底角与 45 度双重传球航线。
+    pub fn evaluate_weak_side_rotation(
+        &self,
+        driver_pos: Vec2,
+        corner_shooter_pos: Vec2,
+        wing_shooter_pos: Vec2,
+        is_low_man: bool,
+    ) -> ScoredDefensiveAction {
+        if is_low_man {
+            // Low-man (弱侧底角防守人) 责任：下沉护筐，封堵突破人上篮
+            let contest_spot = self.hoop_pos + (driver_pos - self.hoop_pos).normalize_or_zero() * 3.0;
+            ScoredDefensiveAction {
+                action: DefensiveCandidateAction::RotateRimHelp { contest_pos: contest_spot },
+                utility: 0.85,
+                risk: 0.15,
+            }
+        } else {
+            // High-man (弱侧 45 度防守人) 责任：执行 X-Out 轮转，卡在底角与翼侧两名射手正中间
+            let x_out_spot = (corner_shooter_pos + wing_shooter_pos) * 0.5;
+            ScoredDefensiveAction {
+                action: DefensiveCandidateAction::XOutCloseout {
+                    x_out_pos: x_out_spot,
+                    covered_shooter_ids: ("corner_shooter".to_string(), "wing_shooter".to_string()),
+                },
+                utility: 0.80,
+                risk: 0.20,
             }
         }
     }

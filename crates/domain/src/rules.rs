@@ -1564,16 +1564,10 @@ mod modulation_tests {
 
     #[test]
     fn unhandled_rule_fields_are_explicitly_documented() {
-        assert!(!super::UNIMPLEMENTED_RULE_FIELDS.is_empty());
+        // D27 周期实现因果闭环，未实现字段清单已清空
+        assert!(super::UNIMPLEMENTED_RULE_FIELDS.is_empty());
     }
 }
 
-/// 显式标记当前周期未接入因果链的 GameRules 候选字段清单（D18）。
-pub const UNIMPLEMENTED_RULE_FIELDS: &[&str] = &[
-    "risk_tolerance",
-    "defensive_rebound_boxout_bonus",
-    "offensive_rebound_putback_bias",
-    "help_defense_awareness",
-    "post_defense_physicality",
-    "transition_leakout_chance",
-];
+/// 显式标记未接入因果链的 GameRules 候选字段清单（D27 已全部闭环并清零）。
+pub const UNIMPLEMENTED_RULE_FIELDS: &[&str] = &[];

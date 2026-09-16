@@ -135,3 +135,56 @@ fn test_conservative_baseline_no_screen_mutation() {
     assert_eq!(def[0].action, "ON_BALL_CONTEST");
     assert_eq!(def[3].action, "HELP_SIDE_SHELL");
 }
+
+#[test]
+fn test_weak_side_help_and_x_out_rotation_chain() {
+    use nba_decision::defense::{DefensiveCandidateAction, DefensiveContext};
+    use nba_decision::tactics::DefensiveTactic;
+    use nba_domain::data::{PlayerAttributes, PlayerTendencies};
+
+    let rules = GameRules::default();
+    let attrs = PlayerAttributes::default();
+    let tendencies = PlayerTendencies::default();
+
+    let ctx = DefensiveContext {
+        defender_id: "def_low_man",
+        defender_pos: Vec2::new(10.0, 10.0),
+        defender_vel: Vec2::ZERO,
+        defender_attrs: &attrs,
+        defender_tendencies: &tendencies,
+        assignment_offense_id: Some("corner_shooter"),
+        assignment_pos: Vec2::new(5.0, 5.0),
+        assignment_is_shooter: true,
+        ball_pos: Vec2::new(20.0, 25.0),
+        ball_flight_segment: None,
+        ball_carrier_is_driving: true,
+        hoop_pos: Vec2::new(5.25, 25.0),
+        scheme: DefensiveTactic::DropCoverage,
+        rules: &rules,
+        base_ctx: None,
+    };
+
+    // 1. 弱侧 Low-man 测试：突破深入禁区，Low-man 必须生成下沉护筐 RotateRimHelp 动作
+    let low_man_action = ctx.evaluate_weak_side_rotation(
+        Vec2::new(12.0, 25.0),
+        Vec2::new(5.0, 5.0),
+        Vec2::new(18.0, 8.0),
+        true,
+    );
+    assert!(matches!(
+        low_man_action.action,
+        DefensiveCandidateAction::RotateRimHelp { .. }
+    ));
+
+    // 2. 弱侧 High-man 测试：High-man 必须生成补位 XOutCloseout 动作
+    let high_man_action = ctx.evaluate_weak_side_rotation(
+        Vec2::new(12.0, 25.0),
+        Vec2::new(5.0, 5.0),
+        Vec2::new(18.0, 8.0),
+        false,
+    );
+    assert!(matches!(
+        high_man_action.action,
+        DefensiveCandidateAction::XOutCloseout { .. }
+    ));
+}

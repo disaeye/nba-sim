@@ -76,6 +76,45 @@ pub fn effective_decision_risk_tolerance(rules: &GameRules, attributes: &PlayerA
     1.0 + (mental - 0.5) * 0.5
 }
 
+/// 决策风险容忍度有效值 (D27)。
+pub fn effective_risk_tolerance(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
+    let iq = attributes.decision_iq.max(rules.attribute_response_floor);
+    (0.80 - iq * 0.35).clamp(0.05, 0.95)
+}
+
+/// 防守卡位加成有效值 (D27)。
+pub fn effective_defensive_boxout_bonus(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
+    let reb = attributes.defensive_rebound.max(rules.attribute_response_floor);
+    let str_factor = attributes.strength.max(rules.attribute_response_floor);
+    0.10 + (reb * 0.6 + str_factor * 0.4) * 0.25
+}
+
+/// 进攻篮板二次补篮倾向 (D27)。
+pub fn effective_putback_bias(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
+    let fin = attributes.finishing.max(rules.attribute_response_floor);
+    0.05 + fin * 0.35
+}
+
+/// 协防意识灵敏度 (D27)。
+pub fn effective_help_awareness(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
+    let def_int = attributes.defense_interior.max(rules.attribute_response_floor);
+    let iq = attributes.decision_iq.max(rules.attribute_response_floor);
+    (def_int * 0.5 + iq * 0.5) * 1.2
+}
+
+/// 低位背身防守对抗强度 (D27)。
+pub fn effective_post_defense_physicality(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
+    let def_int = attributes.defense_interior.max(rules.attribute_response_floor);
+    let str_factor = attributes.strength.max(rules.attribute_response_floor);
+    def_int * 0.5 + str_factor * 0.5
+}
+
+/// 防守反击快下概率 (D27)。
+pub fn effective_transition_leakout_chance(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
+    let spd = attributes.speed.max(rules.attribute_response_floor);
+    0.10 + spd * 0.40
+}
+
 /// 接球半径（ft）：球到达时接球人能控制住的空间范围。
 ///
 /// ## 用途
@@ -313,5 +352,32 @@ mod tests {
             "noise must ignore ball_handling"
         );
         assert!(effective_catch_radius(&rules, &only_handling) > r0);
+    }
+
+    #[test]
+    fn test_d27_unconsumed_fields_causal_monotonicity() {
+        let rules = GameRules::default();
+        let mut low = attrs(0.5, 0.5);
+        low.decision_iq = 0.2;
+        low.defensive_rebound = 0.2;
+        low.finishing = 0.2;
+        low.defense_interior = 0.2;
+        low.speed = 0.2;
+        low.strength = 0.2;
+
+        let mut high = attrs(0.5, 0.5);
+        high.decision_iq = 0.9;
+        high.defensive_rebound = 0.9;
+        high.finishing = 0.9;
+        high.defense_interior = 0.9;
+        high.speed = 0.9;
+        high.strength = 0.9;
+
+        assert!(effective_risk_tolerance(&rules, &low) > effective_risk_tolerance(&rules, &high));
+        assert!(effective_defensive_boxout_bonus(&rules, &high) > effective_defensive_boxout_bonus(&rules, &low));
+        assert!(effective_putback_bias(&rules, &high) > effective_putback_bias(&rules, &low));
+        assert!(effective_help_awareness(&rules, &high) > effective_help_awareness(&rules, &low));
+        assert!(effective_post_defense_physicality(&rules, &high) > effective_post_defense_physicality(&rules, &low));
+        assert!(effective_transition_leakout_chance(&rules, &high) > effective_transition_leakout_chance(&rules, &low));
     }
 }
