@@ -30,6 +30,7 @@ body { min-height: 100vh; overflow-x: hidden; background:
 button, input, select, textarea { font: inherit; }
 button { color: inherit; cursor: pointer; }
 .topbar { position: relative; z-index: 2; min-height: 72px; padding: 14px clamp(18px, 3vw, 44px); display: flex; align-items: center; gap: 28px; border-bottom: 1px solid var(--line); background: rgba(10, 17, 22, .78); backdrop-filter: blur(18px); }
+.topbar-main { display: flex; align-items: center; gap: 20px; }
 .brand-lockup { display: flex; align-items: center; gap: 12px; min-width: 210px; }
 .brand-mark { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid rgba(44, 229, 155, .65); color: var(--home); font: 700 15px/1 "IBM Plex Mono", monospace; letter-spacing: -2px; transform: skew(-8deg); box-shadow: 0 0 22px rgba(44, 229, 155, .11); }
 .brand-mark span { color: var(--orange); }
@@ -149,5 +150,225 @@ h1 em { color: var(--muted); font: 500 13px/1 "IBM Plex Sans", sans-serif; font-
 .frame-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }.text-button { padding: 4px 7px; color: var(--muted); background: rgba(255,255,255,.035); border: 1px solid var(--line); border-radius: 4px; font: 9px "IBM Plex Mono", monospace; }.frame-json { height: 425px; overflow: auto; margin: 0; padding: 11px; color: #c1e9d9; background: rgba(5, 10, 13, .55); border: 1px solid rgba(190,215,224,.08); border-radius: 5px; font: 10px/1.5 "IBM Plex Mono", monospace; white-space: pre-wrap; word-break: break-word; }
 .rules-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }.rules-toolbar p { margin: 5px 0 0; color: var(--muted); font-size: 10px; }.rules-actions { display: flex; gap: 6px; }.button-small { height: 27px; padding: 0 9px; font-size: 9px; }.preset-row { display: flex; align-items: center; gap: 5px; margin: 13px 0 7px; color: var(--faint); font: 9px "IBM Plex Mono", monospace; }.rules-editor { display: block; width: 100%; height: 365px; resize: vertical; padding: 10px; color: #c1e9d9; background: rgba(5, 10, 13, .55); border: 1px solid rgba(190,215,224,.08); border-radius: 5px; outline: none; font: 10px/1.5 "IBM Plex Mono", monospace; }.rules-status { min-height: 22px; padding-top: 7px; color: var(--muted); font: 10px "IBM Plex Mono", monospace; }.rules-status.error { color: var(--red); }.rules-status.success { color: var(--green); }
 .playback { position: fixed; z-index: 5; right: clamp(12px, 2.5vw, 40px); bottom: 15px; left: clamp(12px, 2.5vw, 40px); min-height: 62px; padding: 10px 14px; display: flex; align-items: center; gap: 17px; background: rgba(18, 29, 36, .95); border-color: rgba(190,215,224,.2); backdrop-filter: blur(18px); }.transport-group, .speed-group, .jump-group { display: flex; align-items: center; gap: 4px; }.transport-button { width: 28px; height: 28px; padding: 0; color: var(--muted); background: rgba(255,255,255,.045); border: 1px solid transparent; border-radius: 4px; font: 12px "IBM Plex Mono", monospace; }.transport-button:hover { color: var(--ink); border-color: var(--line); }.play-button { color: #071a13; background: var(--home); }.progress-wrap { flex: 1; min-width: 100px; }.progress-wrap input { display: block; width: 100%; accent-color: var(--home); }.progress-labels { display: flex; justify-content: space-between; margin-top: 4px; color: var(--faint); font: 9px "IBM Plex Mono", monospace; }.speed-group { color: var(--faint); font: 9px "IBM Plex Mono", monospace; }.speed-group button { padding: 4px 5px; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 3px; font: 9px "IBM Plex Mono", monospace; }.speed-group button.active { color: var(--home); border-color: rgba(44,229,155,.3); background: rgba(44,229,155,.08); }.jump-group { color: var(--faint); font: 9px "IBM Plex Mono", monospace; }.jump-group input { width: 66px; height: 25px; padding: 0 5px; color: var(--ink); background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: 3px; font: 10px "IBM Plex Mono", monospace; }
-@media (max-width: 1150px) { .workspace { grid-template-columns: 1fr; }.inspector-column { display: grid; grid-template-columns: minmax(260px, .65fr) minmax(500px, 1.35fr); align-items: start; }.tabs-panel { min-height: 550px; } }
-@media (max-width: 760px) { .topbar { flex-wrap: wrap; gap: 11px; }.brand-lockup { min-width: 160px; }.run-controls { order: 3; flex-basis: 100%; flex-wrap: wrap; }.run-status { margin-left: auto; }.workspace { padding-right: 10px; padding-left: 10px; }.scoreboard { padding: 12px; }.team-score small { font-size: 7px; }.team-score strong { font-size: 29px; }.micro-grid { grid-template-columns: repeat(2, 1fr); }.inspector-column { display: flex; }.shot-layout { grid-template-columns: 1fr; }.playback { gap: 6px; padding: 8px; }.speed-group, .jump-group { display: none; }.event-row { grid-template-columns: 43px 37px 102px 1fr; gap: 4px; } }
+@media (max-width: 1150px) {
+  .workspace { grid-template-columns: 1fr; }
+  .inspector-column { display: grid; grid-template-columns: minmax(260px, .65fr) minmax(500px, 1.35fr); align-items: start; }
+  .tabs-panel { min-height: 550px; }
+}
+
+@media (max-width: 768px) {
+  /* 1. 顶部控制栏移动端重构 */
+  .topbar {
+    padding: 10px 14px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    min-height: auto;
+  }
+  .topbar-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+  }
+  .brand-lockup {
+    min-width: auto;
+  }
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+    font-size: 13px;
+  }
+  h1 {
+    font-size: 17px;
+  }
+  h1 em {
+    display: none;
+  }
+  .run-status {
+    min-width: auto;
+    font-size: 10px;
+    text-align: right;
+  }
+  .run-controls {
+    display: grid;
+    grid-template-columns: 1fr 1.3fr auto;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+  }
+  .compact-field {
+    width: 100%;
+    gap: 4px;
+    font-size: 8px;
+  }
+  .compact-field input {
+    width: 100%;
+    height: 34px;
+    font-size: 13px;
+  }
+  .compact-field select {
+    width: 100%;
+    height: 34px;
+    font-size: 11px;
+  }
+  .button-primary {
+    height: 34px;
+    padding: 0 14px;
+    font-size: 11px;
+    font-weight: 800;
+  }
+  .file-button {
+    display: none; /* 移动端隐藏手动上传文件按钮以精简布局 */
+  }
+
+  /* 2. 警报与辅助栏 */
+  .alert-strip {
+    padding: 6px 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .alert-copy {
+    font-size: 10px;
+  }
+  .alert-meta {
+    width: 100%;
+    justify-content: flex-end;
+    margin-left: 0;
+    font-size: 9px;
+  }
+
+  /* 3. 工作区网格与防遮挡边距 */
+  .workspace {
+    padding: 10px 10px calc(110px + env(safe-area-inset-bottom, 16px));
+    gap: 12px;
+  }
+  .inspector-column {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* 4. 比分栏与数据微卡片 */
+  .scoreboard {
+    padding: 10px 14px;
+    min-height: 80px;
+    gap: 8px;
+  }
+  .team-score strong {
+    font-size: 26px;
+  }
+  .team-swatch {
+    height: 28px;
+    width: 6px;
+  }
+  .game-clock-block > strong {
+    font-size: 22px;
+  }
+  .micro-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .micro-card {
+    padding: 10px 12px;
+  }
+  .micro-card strong {
+    font-size: 12px;
+  }
+
+  /* 5. 球场画布 */
+  .court-wrap {
+    padding: 6px;
+  }
+  .court-toolbar, .court-footer {
+    padding: 8px 10px;
+  }
+  .court-note {
+    font-size: 10px;
+  }
+
+  /* 6. 事件流移动端流式重排（重点：两行舒适排版） */
+  .tabs-panel {
+    height: auto;
+    min-height: 380px;
+    max-height: 520px;
+  }
+  .event-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    padding: 8px 10px;
+    min-height: auto;
+  }
+  .event-row > :first-child {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .event-row .event-time {
+    font-size: 10px;
+  }
+  .event-row .event-possession {
+    font-size: 10px;
+    margin-right: 4px;
+  }
+  .event-row .event-tag {
+    font-size: 9px;
+    padding: 1px 5px;
+  }
+  .event-row .event-detail {
+    font-size: 12px;
+    line-height: 1.4;
+    padding-left: 2px;
+  }
+
+  /* 7. 统计表与图表在手机端的自适应 */
+  .stat-row {
+    grid-template-columns: 1fr 55px 75px 8px;
+    gap: 4px;
+    font-size: 10.5px;
+  }
+  .stat-value {
+    font-size: 11px;
+  }
+  .stat-baseline {
+    font-size: 9px;
+  }
+  .shot-layout {
+    grid-template-columns: 1fr;
+  }
+
+  /* 8. 移动端悬浮播放底栏（加大人性化触控区域，支持 iPhone 底部黑条） */
+  .playback {
+    right: 8px;
+    left: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    min-height: 54px;
+    padding: 6px 10px;
+    gap: 8px;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, .5);
+  }
+  .transport-group {
+    gap: 2px;
+  }
+  .transport-button {
+    width: 32px;
+    height: 32px;
+    font-size: 13px;
+  }
+  .play-button {
+    width: 36px;
+    height: 36px;
+    font-size: 15px;
+  }
+  .progress-wrap {
+    min-width: 60px;
+  }
+  .progress-wrap input {
+    height: 20px;
+  }
+  .speed-group, .jump-group {
+    display: none; /* 移动端屏幕窄，隐藏次要的跳帧与倍速，保留主控条 */
+  }
+}

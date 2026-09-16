@@ -4,8 +4,10 @@ use nba_engine::MatchEngine;
 #[test]
 fn scenario_held_ball_possession_arrow_fiba_vs_nba() {
     // 1. FIBA 模式：争球依据箭头分配球权并翻转
-    let mut fiba_rules = GameRules::default();
-    fiba_rules.league = LeagueProfile::fiba();
+    let fiba_rules = GameRules {
+        league: LeagueProfile::fiba(),
+        ..Default::default()
+    };
     assert!(fiba_rules.league.use_alternate_possession_arrow);
 
     let mut fiba_engine = MatchEngine::with_rules(42, fiba_rules);
@@ -23,21 +25,22 @@ fn scenario_held_ball_possession_arrow_fiba_vs_nba() {
     assert_eq!(fiba_engine.possession_arrow(), Some(Possession::Away));
 
     // 2. NBA 模式：争球不依赖静态交替箭头
-    let mut nba_rules = GameRules::default();
-    nba_rules.league = LeagueProfile::nba();
+    let nba_rules = GameRules {
+        league: LeagueProfile::nba(),
+        ..Default::default()
+    };
     assert!(!nba_rules.league.use_alternate_possession_arrow);
 
     let nba_engine = MatchEngine::with_rules(42, nba_rules);
-    assert_eq!(
-        nba_engine.rules().league.use_alternate_possession_arrow,
-        false
-    );
+    assert!(!nba_engine.rules().league.use_alternate_possession_arrow);
 }
 
 #[test]
 fn scenario_possession_arrow_flips_on_held_ball() {
-    let mut rules = GameRules::default();
-    rules.league = LeagueProfile::fiba();
+    let rules = GameRules {
+        league: LeagueProfile::fiba(),
+        ..Default::default()
+    };
 
     let mut engine = MatchEngine::with_rules(100, rules);
     engine.set_possession_arrow_for_test(Some(Possession::Home));
@@ -58,8 +61,10 @@ fn scenario_possession_arrow_flips_on_held_ball() {
 
 #[test]
 fn scenario_free_throw_in_and_out_resolution() {
-    let mut rules = GameRules::default();
-    rules.league = LeagueProfile::fiba();
+    let rules = GameRules {
+        league: LeagueProfile::fiba(),
+        ..Default::default()
+    };
 
     let engine = MatchEngine::with_rules(7, rules);
     // 验证初始状态下零罚球违规

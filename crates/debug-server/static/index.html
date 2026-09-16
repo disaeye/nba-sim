@@ -10,12 +10,15 @@
 <body>
   <div class="grain" aria-hidden="true"></div>
   <header class="topbar">
-    <div class="brand-lockup">
-      <div class="brand-mark">N<span>/</span>S</div>
-      <div>
-        <div class="eyebrow">RUNTIME OBSERVATORY</div>
-        <h1>NBA-Sim <em>调试台</em></h1>
+    <div class="topbar-main">
+      <div class="brand-lockup">
+        <div class="brand-mark">N<span>/</span>S</div>
+        <div>
+          <div class="eyebrow">RUNTIME OBSERVATORY</div>
+          <h1>NBA-Sim <em>调试台</em></h1>
+        </div>
       </div>
+      <div id="runStatus" class="run-status" role="status">等待模拟</div>
     </div>
     <div class="run-controls">
       <label class="compact-field">SEED <input id="seedInput" type="number" value="42" step="1"></label>
@@ -31,7 +34,6 @@
       <button id="runButton" class="button button-primary"><span class="button-icon">↻</span> RUN SIM</button>
       <label class="button button-quiet file-button"><span>⇧</span> OPEN NDJSON<input id="fileInput" type="file" accept=".ndjson,.json,.txt"></label>
     </div>
-    <div id="runStatus" class="run-status" role="status">等待模拟</div>
   </header>
 
   <section class="alert-strip">
