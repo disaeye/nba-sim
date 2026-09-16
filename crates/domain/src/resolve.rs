@@ -270,7 +270,7 @@ impl Default for BaseRates {
             shot_make_mid: 0.42,
             shot_make_3pt: 0.34,
             ft_make: 0.77,
-            foul_on_drive_rate: 0.10,
+            foul_on_drive_rate: 0.18,
             // 跳投犯规基准：真实 NBA 每场约 40 次犯规，其中相当部分来自
             // 跳投犯规（三分犯规 / 中距离投篮犯规 / and-one）。
             // 干扰强度在上层作为自变量乘入，此处为“受到实质干扰时”的基准。
