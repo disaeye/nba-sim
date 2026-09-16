@@ -50,7 +50,8 @@ docs/dev/
 │   └── impact_assessment.md
 └── cycles/
     ├── 20260901_historical/
-    └── 20260911_first-principles/
+    ├── 20260911_first-principles/
+    └── 20260916_convergence/
 ```
 
 | 层级 | 唯一职责 | 完成后的动作 |
@@ -84,7 +85,8 @@ docs/dev/
 | G0–G9 | `gap.md` | 跨周期差距程序 | 依赖地图 |
 | M1–M10 | `roadmap.md` / `protocol.md` | 迭代里程碑 | 路线与验收定义 |
 | D0–D6 | `cycles/20260911_first-principles/plan.md` | 已结束周期的任务分解 | 追溯旧证据，不新增 |
-| D7– | `current/plan.md` | 当前周期任务分解 | 当前周期未完成工作 |
+| D7–D13 | `cycles/20260916_convergence/plan.md` | 已结束周期的任务分解（从可运行收敛到可证明） | 追溯旧证据，不新增 |
+| D14– | `current/plan.md` | 当前周期任务分解（体系化落地） | 当前周期未完成工作 |
 | F1–F7 | 历史周期 | 遗留项编号 | 追溯旧证据，不新增 |
 | Round-N | 周期归档 | 执行顺序 | 历史检索，不代表当前状态 |
 

@@ -1,7 +1,7 @@
 # NBA-Sim · 当前实现状态
 
 > 状态类型：当前快照，不是执行日志。
-> 当前工作周期：`20260911_first-principles` 的后续收敛周期。
+> 当前工作周期：`20260916_convergence` 结束后的体系化落地周期（`D14–D21`）。
 > 证据原则：本文件只写当前工作区可以由代码、测试或守卫复核的结论；历史轮次见 `docs/dev/cycles/`，原始实验见 `docs/dev/evidence/`。
 
 ## 1. 结论摘要
@@ -73,96 +73,88 @@
 
 ## 3. 当前未完成工作
 
-当前只保留仍然需要动作的事项；已完成的 Round 记录不在这里复制。
+当前只保留新周期（`D14–D21`）仍然需要动作的事项；上周期（`20260916_convergence`）已归档至 [`cycles/20260916_convergence/plan.md`](cycles/20260916_convergence/plan.md)。
 
-### 3.1 收敛公共边界（字段可见性已完成，快照投影待做）
+### 3.1 落地 MatchEngine 最小只读 snapshot 投影（D14）
 
-已完成（`da453cf` / `0bc7496`）：
+上周期已完成 16 个 `pub` 字段私有化与测试后门集中化（`da453cf` / `0bc7496`）。当前仍需动作：
 
-- 16 个 `pub` 字段全部私有，只保留只读访问器（`tick_index`/`rules`/
-  `physics`/`home_roster_order`/`away_roster_order`）；
-- 测试后门集中为显式命名的 `physics_mut_for_test` / `rules_mut_for_test` /
-  `modulation_for_test`；
-- `check_world_privacy.py` 判据由「字段清单」升级为「零 `pub` 字段」，
-  两类负面对照（真相字段 / 配置字段）均能变红。
+- 让 CLI、回放、评判与测试统一经**最小只读 `snapshot()`** 观察，不再各自直接选访问器；
+- 保证 `snapshot()` 开销适度（tick 耗时保持 < 50µs）；
+- 保持事件流与黄金哈希确定性。
 
-仍需动作：
+出口：外部调用统一通过 `step`、`snapshot`、显式命令推进和观察；全套件与守卫通过。
 
-- 让 CLI、回放、评判与测试统一经**最小只读 `snapshot()`** 观察，
-  不再各自选访问器；
-- 事件流与黄金哈希在此过程中的变更需可解释（本步尚未触及）。
+### 3.2 carrier_idx 解耦与球态归一（D15）
 
-出口：外部调用只能通过 `step`、`snapshot`、只读访问器和显式命令观察/推进比赛；守卫与编译测试同时通过。
-
-### 3.2 完成球态与阶段边界
-
-- 将 engine 对 `BallTrajectoryKind` 的兼容别名收敛为领域 `BallState` 的明确消费面；
-- 分离 `BallControl` 与 `BallMotion` 的内部职责，避免 `ball_pos_3d`、`carrier_idx` 和球态载荷重复承担真相；
-- 把 `step_inner` 拆为可单测的窄签名阶段，并证明 `InvariantPhase` 无旁路。
-
-出口：所有状态边有穷举测试；阶段写权限可由类型或编译边界表达；相关黄金哈希按协议重验。
-
-### 3.3 完成战术/防守行为链
-
-- 删除旧 `TacticalSet` 作为主路径的几何分支，统一从版本化档案生成机会；
-- 让防守 scheme 进入责任分配、协防/换防/恢复动作和裁决，而不仅是目标点倍率；
-- 为每个档案字段登记消费链和扰动链，移除无效字段与 roster-order fallback。
-
-出口：新增档案不改 Rust；能力、进攻档案和防守档案都能在控制场景与比赛场景改变可解释的过程/结果；反事实负面对照有效。
-
-### 3.4 补齐能力与阵容覆盖（部分完成）
-
-已完成（`6726506`、`3631ef6`、`528d8c6`；清单见 evidence §29）：
-
-- 逐维列出 29 个维度的消费点（19 有真实消费点、6 已实证零消费、
-  3 名义有消费点但未接线）；
-- 补齐 `effective_catch_radius` / `receive_estimate_noise` /
-  `poke_check_success` 三条零覆盖链路（含分离性断言：接球半径不得消费
-  `off_ball_sense`）；
-- 补齐篮板轴三条端到端扰动（`offensive_rebound` / `defensive_rebound` /
-  `off_ball_sense`，用固定种子 4000 次采样估概率后比较方向）；
-- 把单调性判定抽成可复用 harness（含幅度门），并用**同一函数**验证三类
-  断路负面对照 + 三条真实链路。扰动测试共 18 项，全部通过。
+上周期（`evidence/problem.md` §25）实证直接删除 `carrier_idx` 会使 8 seed `total_p50` 从 213.5 漂移至 212.0，原因是无持球人球态（`LooseBall`/`RimRebound`/`Dead`）下旧/新回退语义不一致。
 
 仍需动作：
 
-- 剩余维度（`passing` / `shooting_mid` / `shooting_three` / `decision_iq` /
-  `strength` / `vertical` 等）仍无独立响应证据；
-- 6 个零消费维度待接线或标为未批准提案（§29）；
-- 明确轮换、疲劳、教练策略是否属于当前周期。
+- 依 `gap.md` §5.2 形式化澄清无持球人球态下的球权与动作归属；
+- 将 `carrier_idx` 的隐式名单索引替换为领域 `BallState` 载荷；
+- 切断旁路写入并删除 `carrier_idx` 字段。
 
-出口：每个保留维度至少有一条正向和一条断路负面对照；死维度被接线或从 schema 移除。
+出口：不存在由两个可写字段共同决定 holder/possession 的路径；`carrier_idx` 移除；16 seed 构成指标与 L1 账本保持零违规。
 
-### 3.5 形成真实的多联赛证据包（部分完成）
+### 3.3 step_inner 窄签名阶段拆分（D16）
 
-已完成（`e63d320`、`c13131b`、`f178e32`）：
-
-- 6 个程序级情景用例（节时长 / ORB 时钟 / 三分几何 / 犯规上限 /
-  bonus 门槛 / 节末终场），三分几何用例带负面对照；
-- **16 seed full 固定矩阵已运行**（seeds 0..15，NBA，fixture nba.v2，
-  121.5s），四类结果**分期记录**而非只留综合指数（evidence §30）：
-  L1 violations = 0；评判 32894 条裁决、coverage 0.995、140 defect
-  全为 Soft、hard_gate_failed=false；构成准则除 `free_throw_rate`
-  0.119 外全部入带；`total_p50` 219.0 在门内；
-- 16 seed 与 8 seed 结论一致，无新暴露的越界项；
-- 矩阵运行**暴露并修复**了批量模式不做账本对平的缺陷（`f178e32`：
-  batch 现逐场跑 `check_ledger`、落盘 `ledger_report.json`、
-  违规则非零退出）。
+`crates/engine/src/match_engine.rs` 中的 `step_inner` 当前长达 2082 行，单体函数聚合了决策、运动推进、冲突判定、统计与事件发射。
 
 仍需动作：
 
-- 交替拥有与罚球程序的专题情景仍未覆盖；
-- **FIBA 侧 8 seed full 矩阵已跑并通过**（`5504281` 定位、`f8425f1` 修复）：
-  初次运行报 **2 Hard**（`POSSESSION_DURATION_BOUNDS`），根因定位为
-  **容差标定不足**而非引擎缺陷——`duration_tolerance_seconds` 是 `1c86c49`
-  新加字段，值 `fiba.v1/nba.v1=2.0`、`nba.v2=6.0`，互不一致且未经测量。
-  按 **2843 个回合**的停表开销实测分布（FIBA p95=6.32/p99=8.59/max=12.89；
-  NBA p95=6.45/p99=8.47/max=12.89）统一标定为 **15.0s**，两 league 的
-  HARD gate 现均通过（FIBA Hard 2→0、NBA 判定不变）；
-  门的区分力经负面对照验证（tol=−40 时报 439 Hard）；
-- 评判 fixture 带来源/版本的契约未完成（`protocol.md` §1）。
+- 按 `architecture.md` 拆分四个窄签名阶段（决策、运动、裁决、统计）；
+- 阶段之间显式传递参数，提供编译期写权限约束；
+- 各阶段提供独立单元测试。
 
-出口：每个 profile 的情景门、回放一致性和评判工件完整；未覆盖的 NCAA 继续标记为路线项。
+出口：`step_inner` 成为纯调度器（< 200 行）；阶段输入输出显式定义；45 套件全绿。
+
+### 3.4 防守方案责任链落地（D17）
+
+上周期（`evidence/problem.md` §28）实证：`DefensiveSystem` 四个子配置全仓零消费，`decision/src/defense.rs` 评估函数零调用；`data/defense/schemes.json` 缺少对位/换防/协防规则字段。
+
+仍需动作：
+
+- 扩展 `data/defense/schemes.json`，补充责任链所需规则参数；
+- 接通 `decision/src/defense.rs` 中的责任指派函数，按方案执行 switch/drop/hedge/recover；
+- 为 Drop、Switch、Hedge 分别建立控制场景与反事实场景用例。
+
+出口：至少三种防守方案在控制测试中表现出结构化责任差异；`DefensiveSystem` 字段不再全零消费；统计指标保持在带。
+
+### 3.5 GameRules 与能力维度的零消费处置（D18）
+
+上周期已逐一实证：
+- `GameRules` 中的 21 个零消费字段（§27，全部实证零消费，分属未接线子系统）；
+- `PlayerAttributes` 中的 6 个零消费维度（§29：`agility`、`shooting_close`、`cut_frequency`、`screen_frequency`、`offensive_rebound_frequency`、`transition_sprint`）。
+
+仍需动作：
+
+- 逐个子系统分类处置（属于本周期的接线并测响应；非本周期的移入显式未启用清单；确认废弃的清理）；
+- 消除静默死字段。
+
+出口：保留字段均有消费或有显式未启用注解；全套件通过。
+
+### 3.6 剩余能力维度因果扰动覆盖（D19）
+
+上周期已为前场板、后场板、弹跳跳跃三维度补齐端到端扰动与断路负面对照（`4914107`，18 项测试全绿）。
+
+仍需动作：
+
+- 为 `shooting_mid`、`passing`、`decision_iq`、`strength`、`perimeter_defense`、`interior_defense` 建立单调性与断路负面对照测试；
+- 核心能力维度扰动测试覆盖率达到 ≥ 80%。
+
+出口：每个保留维度至少有一条正向和一条断路负面对照；45 套件全绿。
+
+### 3.7 FIBA 交替拥有与罚球情景覆盖（D20）
+
+上周期已建立 6 个 FIBA 程序级情景用例并通过 16-seed NBA / 8-seed FIBA 双硬门（`f8425f1`）。
+
+仍需动作：
+
+- 在 `crates/engine/tests/fiba_scenarios.rs` 中新增交替拥有情景测试（争球、箭头翻转、节初发球）；
+- 覆盖罚球进出与加罚违例程序差异。
+
+出口：交替拥有与罚球情景测试通过；NBA 跳球 vs FIBA 箭头行为差异可证明；0 账本违规。
 
 ## 4. 最近关闭项
 
@@ -185,48 +177,54 @@ D12 从本周期计划执行完毕后已从 `current/plan.md` 移除（该文件
 
 > 编号说明：`D12` 是本周期状态快照对已关闭任务的登记号；项内 `c6_6_tests` 等标识符是代码中的模块名，保留不改。
 
-### 4.2 本周期后续收敛（统计门关闭与结构欠账）
+### 4.2 收敛周期成果（20260916_convergence，D7–D13 归档）
 
-在本周期内完成、已验证、且不再作为待办的项：
+本周期已按 `docs/dev/README.md` §7 完成周期出口并归档至 [`cycles/20260916_convergence/plan.md`](cycles/20260916_convergence/plan.md)；以下为本周期关闭与验证项：
 
 | 项 | 结论 | 证据/提交 |
 | --- | --- | --- |
-| **G-STATS 统计门关闭** | 8 seed full：`total_p50` 237.0→**213.5**、`two_make_pct` 0.621→**0.536**、ORB% 0.070→**0.244–0.330**、`pace` 234.5→**218.4**；`stats_baseline` 转绿。**未改任何门限或分母** | `7e331fc`、`10f2a53`、`ef4bd39`；机制见 evidence §21–§23 |
-| 分区命中率模型（D8.4） | 修结构性缺陷：旧三分支只产生两种基准，使中距离按廊下基准（0.565）结算 | `7e331fc` |
-| 篮板冲抢指派（D8.5） | 修行为缺失：球在空中时守方靠近速率是攻方约 42 倍而两者近零 | `10f2a53` |
-| 失误计数单一入口（D8.6） | 修零写入字段：5 种失误终结只有 2 个自增点（实测 52 vs 12） | `ef4bd39` |
-| 抛投犯规路径（D8.7，部分） | 新增 `foul_on_shot_rate` 与 `box_score.fouls` 计数；`free_throw_rate` 仅升至 0.118（未闭合） | `9bef004`、`b47e88f` |
-| `BaseRates` 死参数清理（D9.4） | 删四个零消费字段，并区分「重复声明」与「未实现功能」两类 | `320bcaf`、`22bb764` |
-| 旧 `TacticalSet` 几何退役（D9.1） | 删 330 行死计算；三组对照实验 + 8 seed 逐字段比对差异 0 | `3e9011b`、`db31fe7` |
+| **G-STATS 统计门全部关闭** | 16 seed full：七项构成指标全绿（`two_make_pct` 0.503、`three_make_pct` 0.334、`free_throw_rate` **0.204**、`pace` 218.6、`total_p50` 216.5）；`stats_baseline` 转绿。未改任何门限或分母 | `8e42bcb`；机制见 evidence §32 |
+| 多联赛双硬门通过（D11.2） | 16-seed NBA / 8-seed FIBA 矩阵硬门全部通过；按 2843 回合实测分布统一标定 `duration_tolerance_seconds = 15.0s` | `f8425f1`、`c13131b` |
+| 批量模式账本盲区修复（D11.3） | batch 现逐场跑 `check_ledger`、落盘 `ledger_report.json`、违规非零退出 | `f178e32` |
+| 篮板端到端扰动（D10.2） | 补齐前场板、后场板、弹跳三维度端到端因果扰动，18 项测试全绿，三类断路负面对照有效 | `4914107` |
+| 能力消费链清单（D10.1） | 29 维逐维清单，6 个零消费维度经实证确认（§29） | `8410f75` |
+| 公共边界私有化（D7.1） | 16 个 `pub` 字段全部私有；测试后门集中化；`check_world_privacy.py` 升级为「零 pub 字段」守卫 | `da453cf`、`0bc7496` |
 | 球态边穷举矩阵（D8.3） | 10×10=100 种组合全覆盖（49 合法 / 51 非法），替代样例式测试 | `72661d5` |
-| NBA/FIBA 程序级 fixture（D11.1，部分） | 6 个程序级情景用例 + 负面对照 | `e63d320` |
-| 能力消费链清单（D10.1） | 29 维逐维清单，6 个零消费维度经实证确认 | `8410f75` |
-| 黄金哈希窗口缺口 | 窗口内无 2 分出手而不报错，现改为断言覆盖 | `041cdfe` |
-| 守卫失效面修复 | 常数棘轮不再把测试夹具计入生产预算；两项守卫接入 CI；文档守卫新增编号命名空间校验 | `323a012`、`0bc7496` |
+| 旧 `TacticalSet` 几何退役（D9.1） | 删 330 行死计算；三组对照实验 + 8 seed 逐字段比对差异 0 | `3e9011b`、`db31fe7` |
+| `BaseRates` 死参数清理（D9.4） | 删四个零消费字段，并区分「重复声明」与「未实现功能」两类 | `320bcaf`、`22bb764` |
+| 分区命中率模型（D8.4） | 修结构性缺陷：中距离命中率基准与廊下解耦 | `7e331fc` |
+| 篮板冲抢指派（D8.5） | 修行为缺失：球在空中时守方与攻方冲抢速率平衡 | `10f2a53` |
+| 失误计数单一入口（D8.6） | 修零写入字段：5 种失误终结统一步进 | `ef4bd39` |
+| 黄金哈希长窗口覆盖断言 | 10200-tick 长窗口覆盖断言；明确黄金哈希结构上无法守卫概率类参数的认知 | `872443d` |
+| 守卫失效面修复 | 常数棘轮测试预算分离；两项守卫接入 CI；文档守卫编号命名空间校验 | `323a012`、`0bc7496` |
+| 周期归档出口（D13） | 归档 D7–D13 计划至 `cycles/20260916_convergence/plan.md`，结转 D14–D21 至新周期 | `docs/dev/cycles/20260916_convergence/plan.md` |
 
 验证范围：`./scripts/run-tests.sh` **45 个套件全绿、0 失败**（含 `stats_baseline`）；6 项守卫 + 负面对照全通过。
 
 ## 5. 开放问题
 
-| 问题 | 依赖 | 下一验证动作 |
+| 问题 | 依赖 | 下一验证动作（新周期） |
 | --- | --- | --- |
-| `free_throw_rate`（已闭合） | — | 已由 `foul_on_drive_rate` 0.10→0.18 闭合（`8e42bcb`）：FT 率 0.121→**0.204** ∈ [0.20,0.35]，附 6 点 A/B 扫描与反事实（置 0 后 FT→0.032）。**注意有效区间窄**（0.17 差 0.015、0.19 破 pace） |
-| `carrier_idx` 删除阻塞 | 需先定「无关联球员的球态下谁算 ball handler」 | evidence §25 实证非等价重构（8 seed 213.5→212.0）；旧/新语义含义不同，属 gap.md §5.2 状态边责任问题 |
-| `GameRules` 零消费字段 | 分属四个未接线子系统 | 12 个已实证零消费（§27）；`def_*` 三字段随 D9.2 接线，`transition_*`/`clutch_*` 属 plan §10 范围外，需先决定是否本周期补齐 |
-| 能力维度零消费 | 分属四个未实现的战术行为 | 6 个已实证零消费（§29）：`agility`/`shooting_close`/`cut_frequency`/`screen_frequency`/`offensive_rebound_frequency`/`transition_sprint`；接线或标为未批准提案 |
-| 防守责任链三层未接线 | 需先补全档案数据 | `data/defense/schemes.json` 只有 4 个几何倍率，缺对位/换防/协防规则字段（§28） |
+| `carrier_idx` 解耦（D15） | 需先定「无关联球员的球态下谁算 ball handler」 | evidence §25 实证非等价重构；按 gap.md §5.2 状态边责任澄清无球人状态归属，消除旁路字段 |
+| 防守方案责任链落地（D17） | 需先补全档案数据 | `data/defense/schemes.json` 补充责任链规则字段，打通 switch/drop/hedge/recover（§28） |
+| `GameRules` 零消费字段（D18） | 分属四个未接线子系统 | 21 个已实证零消费字段（§27）；按本周期/非本周期/废弃分类处置，消除静默死字段 |
+| 能力维度零消费（D18） | 分属四个未实现的战术行为 | 6 个已实证零消费维度（§29）；接线或从 schema 标记未启用 |
+| 剩余能力维度扰动覆盖（D19） | — | 为 `passing`、`shooting_mid`、`decision_iq`、`strength` 等建立单调性与断路负面对照 |
+| FIBA 交替拥有与罚球情景（D20） | — | 建立争球箭头翻转与罚球违例进出情景测试 |
+| 最小只读 `snapshot` 投影（D14） | — | 统一 CLI、evaluator、tests 的观察入口，消除分散 getter 调用 |
 | `D12.6` 代码标识符遗留 | 无 | `debug-server::c6_6_tests` 等模块名仍用旧编号；不影响行为，可随下次触及该文件时改名 |
 
 ## 6. 当前周期计划入口
 
-详见 [`current/plan.md`](current/plan.md)。计划只描述上述未完成工作的依赖和验收，不复制已经完成的 Round-6–17 执行记录。
+详见 [`current/plan.md`](current/plan.md)（本周期任务：`D14–D21`）。
 
 ## 7. 证据索引
 
 - 历史问题复现与逐 seed 结果：[`evidence/problem.md`](evidence/problem.md)；
 - 历史伤害排序：[`evidence/impact_assessment.md`](evidence/impact_assessment.md)；
+- 20260916 收敛周期归档计划：[`cycles/20260916_convergence/plan.md`](cycles/20260916_convergence/plan.md)；
 - Round-6–9 闭环修复：[`cycles/20260911_first-principles/closure_plan.md`](cycles/20260911_first-principles/closure_plan.md)；
 - Round-10–17 传球与身份修复：[`cycles/20260911_first-principles/pass_and_identity_fix.md`](cycles/20260911_first-principles/pass_and_identity_fix.md)；
-- 本周期原始状态历史：[`cycles/20260911_first-principles/status_history.md`](cycles/20260911_first-principles/status_history.md)。
+- 第一原则周期原始状态历史：[`cycles/20260911_first-principles/status_history.md`](cycles/20260911_first-principles/status_history.md)。
 
 历史记录中的数字只回答“当时观察到什么”，不自动回答“现在是什么”。
