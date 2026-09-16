@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>NBA-Sim · 现代战术与比赛演练台</title>
-  <link rel="stylesheet" href="/style.css?v=20260916_nba_chinese_v2">
+  <link rel="stylesheet" href="/style.css?v=20260916_nba_aesthetic_v1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 </head>
 <body>
   <!-- 顶栏：沉浸极简，聚焦品牌与状态 -->
@@ -35,35 +35,34 @@
       
       <!-- 转播比分卡 (Broadcast Scoreboard) -->
       <div class="match-scoreboard">
-        <div class="team-block away">
-          <div class="team-meta">
-            <div class="team-title-row">
-              <span class="team-badge away-badge"></span>
-              <span id="awayTeamName" class="team-name">客队 (LAL)</span>
-            </div>
-            <span class="team-scheme-label">挡拆突分体系</span>
+        <div class="team-side away-side">
+          <div class="team-badge-pill away-pill">
+            <span class="team-dot away-dot"></span>
+            <span id="awayTeamName" class="team-title">LAL · 湖人</span>
           </div>
-          <div id="awayScore" class="team-score">0</div>
+          <span class="team-tactic-tag">高位挡拆体系</span>
         </div>
 
-        <div class="clock-hub">
-          <div class="period-pill" id="periodLabel">第 1 节</div>
-          <div class="clocks-row">
-            <span id="gameClock" class="game-clock">12:00</span>
-            <span class="clock-divider">·</span>
-            <span id="shotClock" class="shot-clock">24</span>
+        <div class="score-center-cluster">
+          <div class="clock-capsule">
+            <span id="periodLabel" class="period-indicator">第 1 节</span>
+            <span class="clock-sep">/</span>
+            <span id="gameClock" class="clock-time">12:00</span>
+            <span id="shotClock" class="shot-clock-badge">24</span>
+          </div>
+          <div class="score-display-row">
+            <span id="awayScore" class="score-num away-score-color">0</span>
+            <span class="score-divider-dash">:</span>
+            <span id="homeScore" class="score-num home-score-color">0</span>
           </div>
         </div>
 
-        <div class="team-block home">
-          <div id="homeScore" class="team-score">0</div>
-          <div class="team-meta">
-            <div class="team-title-row">
-              <span id="homeTeamName" class="team-name">主队 (BOS)</span>
-              <span class="team-badge home-badge"></span>
-            </div>
-            <span class="team-scheme-label">沉退护筐体系</span>
+        <div class="team-side home-side">
+          <div class="team-badge-pill home-pill">
+            <span id="homeTeamName" class="team-title">凯尔特人 · BOS</span>
+            <span class="team-dot home-dot"></span>
           </div>
+          <span class="team-tactic-tag">沉退护筐体系</span>
         </div>
       </div>
 
@@ -230,6 +229,6 @@
     <button id="copyFrameButton"></button>
   </div>
 
-  <script type="module" src="/app.js?v=20260916_nba_chinese_v2"></script>
+  <script type="module" src="/app.js?v=20260916_nba_aesthetic_v1"></script>
 </body>
 </html>

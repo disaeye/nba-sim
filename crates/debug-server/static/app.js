@@ -637,13 +637,7 @@
         BASELINES.turnoverRate,
         pct,
       ],
-      [
-        "每回合犯规率",
-        stats.foulRate,
-        "6 – 32%",
-        BASELINES.foulRate,
-        pct,
-      ],
+      ["每回合犯规率", stats.foulRate, "6 – 32%", BASELINES.foulRate, pct],
     ];
     const statsTable = $("statsTable");
     statsTable.replaceChildren();
@@ -656,7 +650,8 @@
     headerRow.style.fontSize = "10.5px";
     headerRow.style.textTransform = "uppercase";
     headerRow.style.letterSpacing = "0.5px";
-    headerRow.innerHTML = "<span>统计指标</span><span style=\"text-align:right\">本场数据</span><span style=\"text-align:right\">标准区间</span><span></span>";
+    headerRow.innerHTML =
+      '<span>统计指标</span><span style="text-align:right">本场数据</span><span style="text-align:right">标准区间</span><span></span>';
     statsTable.appendChild(headerRow);
 
     for (const [name, value, baseline, range, format] of rows) {
@@ -753,7 +748,7 @@
     for (const name of names) {
       const button = el(
         "button",
-        `filter-button ${state.filters.has(name) ? "active" : ""}`,
+        `filter-chip ${state.filters.has(name) ? "active" : ""}`,
       );
       button.dataset.filter = name;
       button.textContent = getEventNameZh(name);
@@ -762,7 +757,7 @@
         else state.filters.add(name);
         renderTimeline();
       });
-      filterBox.appendChild(button);
+      filterBox.append(button);
     }
     const visible = state.events.filter((event) => {
       if (!state.filters.has(event.name)) return false;
@@ -779,17 +774,31 @@
     const fragment = document.createDocumentFragment();
     for (const event of visible) {
       const row = document.createElement("div");
-      row.className = `event-row ${event.index === state.idx ? "current" : ""}`;
+      row.className = `event-row ${event.index === state.idx ? "current-tick" : ""}`;
       row.dataset.index = String(event.index);
-      const detail = getEventDetail(event);
-      row.append(
-        el("span", "event-time", timeClock(event.tick.t_game)),
-        el("span", "event-possession", `第${event.tick.possession_id ?? "—"}回合`),
-        el("span", `event-tag ${eventClass(event.name)}`, getEventNameZh(event.name)),
-        el("span", "event-detail", detail),
+
+      const topRow = el("div", "event-row-top");
+      const meta = el("div", "event-meta");
+      meta.append(
+        el("span", "event-clock-badge", timeClock(event.tick.t_game)),
+        el(
+          "span",
+          "event-possession-badge",
+          `第 ${event.tick.possession_id ?? "—"} 回合`,
+        ),
       );
+      const tag = el(
+        "span",
+        `event-tag ${eventClass(event.name)}`,
+        getEventNameZh(event.name),
+      );
+      topRow.append(meta, tag);
+
+      const detail = el("div", "event-detail-text", getEventDetail(event));
+      row.append(topRow, detail);
+
       row.addEventListener("click", () => seek(event.index));
-      fragment.appendChild(row);
+      fragment.append(row);
       state.eventElements.push(row);
     }
     $("timeline").replaceChildren(fragment);
@@ -876,7 +885,8 @@
     $("tickReadout").textContent =
       `${state.idx.toLocaleString()} / ${state.ticks.length.toLocaleString()} 帧`;
     $("progressTime").textContent = timeWithTenths(tick.t);
-    $("progressPossession").textContent = `第 ${tick.possession_id ?? "—"} 回合`;
+    $("progressPossession").textContent =
+      `第 ${tick.possession_id ?? "—"} 回合`;
     if (forceJson || !state.playing || state.idx % 3 === 0)
       renderFrameJson(tick);
     renderDecision(tick);
