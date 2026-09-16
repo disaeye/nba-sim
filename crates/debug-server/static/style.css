@@ -721,13 +721,19 @@ body {
  gap: 6px;
 }
 .stat-row {
- display: grid;
- grid-template-columns: 1fr 60px 80px 10px;
- align-items: center;
- padding: 8px 12px;
- border-radius: var(--radius-sm);
- background: rgba(255, 255, 255, 0.02);
- font-size: 11.5px;
+  display: grid;
+  grid-template-columns: 1fr 60px 80px 10px;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 11.5px;
+}
+.stat-row.stat-header {
+  background: transparent;
+  border-bottom: 1px solid var(--line-hairline);
+  padding-bottom: 6px;
+  margin-bottom: 2px;
 }
 .stat-label {
  color: var(--text-secondary);

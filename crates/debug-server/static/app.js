@@ -165,6 +165,32 @@
     if (Array.isArray(tick.events) && tick.events.length) return tick.events;
     return tick.eventType ? [tick.eventType] : [];
   }
+
+  const EVENT_NAME_ZH = {
+    TIPOFF: "争顶跳球",
+    TIPOFF_SECURED: "获得球权",
+    CONTACT_BUMP: "身体对抗",
+    ACTION_WINDOW_SHIFT: "战术推进",
+    PHASE_TRANSITION: "战术流转",
+    PASS: "传球配合",
+    PASS_RECEIVED: "接球就绪",
+    SHOT_RELEASE: "投篮出手",
+    SCORE: "进球得分",
+    SHOT_MISS: "投篮打铁",
+    REBOUND: "争抢篮板",
+    STEAL: "防守抢断",
+    OUT_OF_BOUNDS: "出界停表",
+    VIOLATION: "违例判罚",
+    FOUL: "犯规吹罚",
+    SCREEN_CONTACT: "设立掩护",
+    POSSESSION_SUMMARY: "回合总结",
+    TURNOVER: "进攻失误",
+    BLOCK: "盖帽封盖",
+  };
+  function getEventNameZh(name) {
+    return EVENT_NAME_ZH[name] || name;
+  }
+
   function eventClass(name) {
     const upper = String(name).toUpperCase();
     if (upper.includes("SCORE") || upper === "DRIVE_SCORE") return "tag-score";
@@ -574,54 +600,65 @@
 
   function renderStats(stats) {
     const rows = [
-      ["Points per possession", stats.ppp, "0.90 – 1.15", BASELINES.ppp, two],
+      ["每回合得分 (PPP)", stats.ppp, "0.90 – 1.15", BASELINES.ppp, two],
       [
-        "Median possession",
+        "回合耗时中位数",
         stats.medianPossession,
-        "8 – 18 s",
+        "8 – 18 秒",
         BASELINES.medianPossession,
-        (value) => `${one(value)} s`,
+        (value) => `${one(value)} 秒`,
       ],
       [
-        "Passes / possession",
+        "每回合传球次数",
         stats.passesPerPossession,
-        "1 – 5",
+        "1 – 5 次",
         BASELINES.passesPerPossession,
         two,
       ],
-      ["Field-goal percentage", stats.fgPct, "40 – 52%", BASELINES.fgPct, pct],
+      ["投篮命中率 (FG%)", stats.fgPct, "40 – 52%", BASELINES.fgPct, pct],
       [
-        "3PT attempt share",
+        "三分出手占比 (3P%)",
         stats.threeShare,
         "25 – 48%",
         BASELINES.threeShare,
         pct,
       ],
       [
-        "Offensive rebound rate",
+        "进攻篮板率 (ORB%)",
         stats.offensiveReboundPct,
         "18 – 34%",
         BASELINES.offensiveReboundPct,
         pct,
       ],
       [
-        "Turnover proxy rate",
+        "失误率 (TOV%)",
         stats.turnoverRate,
         "8 – 20%",
         BASELINES.turnoverRate,
         pct,
       ],
       [
-        "Fouls / possession",
+        "每回合犯规率",
         stats.foulRate,
         "6 – 32%",
         BASELINES.foulRate,
         pct,
       ],
     ];
-    // C6.2：DOM API 构建（textContent 赋值，无 HTML 拼接）。
     const statsTable = $("statsTable");
     statsTable.replaceChildren();
+
+    // 统计表头
+    const headerRow = document.createElement("div");
+    headerRow.className = "stat-row stat-header";
+    headerRow.style.fontWeight = "700";
+    headerRow.style.color = "var(--text-muted)";
+    headerRow.style.fontSize = "10.5px";
+    headerRow.style.textTransform = "uppercase";
+    headerRow.style.letterSpacing = "0.5px";
+    headerRow.innerHTML = "<span>统计指标</span><span style=\"text-align:right\">本场数据</span><span style=\"text-align:right\">标准区间</span><span></span>";
+    statsTable.appendChild(headerRow);
+
     for (const [name, value, baseline, range, format] of rows) {
       const status = metricStatus(value, range[0], range[1]);
       const row = document.createElement("div");
@@ -643,9 +680,9 @@
     const summary = document.createElement("div");
     summary.className = "stats-summary";
     const summaryA = document.createElement("span");
-    summaryA.textContent = `${stats.attempts} FGA · ${stats.makes} FGM · ${stats.threeAttempts} 3PA`;
+    summaryA.textContent = `总投篮 ${stats.attempts} 次 · 命中 ${stats.makes} 球 · 三分出手 ${stats.threeAttempts} 次`;
     const summaryB = document.createElement("span");
-    summaryB.textContent = `${stats.drives} DRV · ${stats.driveScores} FIN · ${stats.rebounds} REB · ${stats.fouls} FOUL`;
+    summaryB.textContent = `突破 ${stats.drives} 次 · 禁区终结 ${stats.driveScores} 次 · 篮板 ${stats.rebounds} 个 · 犯规 ${stats.fouls} 次`;
     summary.append(summaryA, summaryB);
     statsTable.appendChild(summary);
   }
@@ -719,7 +756,7 @@
         `filter-button ${state.filters.has(name) ? "active" : ""}`,
       );
       button.dataset.filter = name;
-      button.textContent = name;
+      button.textContent = getEventNameZh(name);
       button.addEventListener("click", () => {
         if (state.filters.has(name)) state.filters.delete(name);
         else state.filters.add(name);
@@ -738,7 +775,7 @@
         return false;
       return true;
     });
-    $("timelineCount").textContent = `${visible.length} events`;
+    $("timelineCount").textContent = `共 ${visible.length} 条赛事事件`;
     const fragment = document.createDocumentFragment();
     for (const event of visible) {
       const row = document.createElement("div");
@@ -747,8 +784,8 @@
       const detail = getEventDetail(event);
       row.append(
         el("span", "event-time", timeClock(event.tick.t_game)),
-        el("span", "event-possession", `#${event.tick.possession_id}`),
-        el("span", `event-tag ${eventClass(event.name)}`, event.name),
+        el("span", "event-possession", `第${event.tick.possession_id ?? "—"}回合`),
+        el("span", `event-tag ${eventClass(event.name)}`, getEventNameZh(event.name)),
         el("span", "event-detail", detail),
       );
       row.addEventListener("click", () => seek(event.index));
@@ -818,7 +855,7 @@
       : "流已加载 · 引擎不变量 0 违规";
   }
   function updateReadouts(source) {
-    $("eventReadout").textContent = `${state.events.length} events`;
+    $("eventReadout").textContent = `共 ${state.events.length} 条事件`;
     $("streamSummary").textContent =
       `${source} · ${state.possessions.length} possessions · ${state.shots.length} shots`;
   }
@@ -837,9 +874,9 @@
     $("jumpInput").value = String(state.idx);
     if ($("frameLabel")) $("frameLabel").textContent = `frame ${state.idx}`;
     $("tickReadout").textContent =
-      `${state.idx.toLocaleString()} / ${state.ticks.length.toLocaleString()} ticks`;
+      `${state.idx.toLocaleString()} / ${state.ticks.length.toLocaleString()} 帧`;
     $("progressTime").textContent = timeWithTenths(tick.t);
-    $("progressPossession").textContent = `POS #${tick.possession_id ?? "—"}`;
+    $("progressPossession").textContent = `第 ${tick.possession_id ?? "—"} 回合`;
     if (forceJson || !state.playing || state.idx % 3 === 0)
       renderFrameJson(tick);
     renderDecision(tick);
@@ -860,7 +897,7 @@
     const chip = $("eventChip");
     const overlay = $("eventOverlayChip");
     if (names.length) {
-      const txt = names.join(" · ");
+      const txt = names.map(getEventNameZh).join(" · ");
       if (chip) {
         chip.textContent = txt;
         chip.classList.add("active");
@@ -873,7 +910,7 @@
       if (chip) chip.classList.remove("active");
       if (overlay) overlay.classList.remove("active");
     }
-    $("possessionLabel").textContent = `POS #${tick.possession_id ?? "—"}`;
+    $("possessionLabel").textContent = `第 ${tick.possession_id ?? "—"} 回合`;
     const newHome = finite(tick.score?.home).toFixed(0);
     const newAway = finite(tick.score?.away).toFixed(0);
     if (
@@ -894,7 +931,7 @@
     }
     $("homeScore").textContent = newHome;
     $("awayScore").textContent = newAway;
-    $("periodLabel").textContent = `Q${tick.period || 1}`;
+    $("periodLabel").textContent = `第 ${tick.period || 1} 节`;
     $("gameClock").textContent = timeClock(tick.gameClock ?? tick.t_game);
     const sc = finite(tick.shotClock);
     $("shotClock").textContent = one(tick.shotClock);
@@ -925,7 +962,7 @@
     state.lastFrameJson = state.idx;
   }
 
-    function drawCourt(tick) {
+  function drawCourt(tick) {
     const canvas = $("courtCanvas");
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -1057,11 +1094,17 @@
           finite(player.target_x) * rules.courtWidth,
           finite(player.target_y) * rules.courtHeight,
         );
-        const dist = Math.hypot(targetPt.x - playerPoint.x, targetPt.y - playerPoint.y);
+        const dist = Math.hypot(
+          targetPt.x - playerPoint.x,
+          targetPt.y - playerPoint.y,
+        );
         if (dist > 18) {
           ctx.save();
           ctx.setLineDash([4, 4]);
-          ctx.strokeStyle = player.team === "home" ? "rgba(16, 185, 129, 0.45)" : "rgba(245, 158, 11, 0.45)";
+          ctx.strokeStyle =
+            player.team === "home"
+              ? "rgba(16, 185, 129, 0.45)"
+              : "rgba(245, 158, 11, 0.45)";
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.moveTo(playerPoint.x, playerPoint.y);
@@ -1069,7 +1112,10 @@
           ctx.stroke();
           ctx.beginPath();
           ctx.arc(targetPt.x, targetPt.y, 4, 0, Math.PI * 2);
-          ctx.fillStyle = player.team === "home" ? "rgba(16, 185, 129, 0.7)" : "rgba(245, 158, 11, 0.7)";
+          ctx.fillStyle =
+            player.team === "home"
+              ? "rgba(16, 185, 129, 0.7)"
+              : "rgba(245, 158, 11, 0.7)";
           ctx.fill();
           ctx.restore();
         }
@@ -1077,7 +1123,15 @@
 
       // 球员地面阴影
       ctx.beginPath();
-      ctx.ellipse(playerPoint.x, playerPoint.y + 2, playerRadius * 0.9, playerRadius * 0.45, 0, 0, Math.PI * 2);
+      ctx.ellipse(
+        playerPoint.x,
+        playerPoint.y + 2,
+        playerRadius * 0.9,
+        playerRadius * 0.45,
+        0,
+        0,
+        Math.PI * 2,
+      );
       ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
       ctx.fill();
 
@@ -1107,7 +1161,10 @@
       ctx.fillStyle = "#ffffff";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const num = player.number === undefined ? String(player.id || "") : String(player.number);
+      const num =
+        player.number === undefined
+          ? String(player.id || "")
+          : String(player.number);
       ctx.fillText(num, playerPoint.x, playerPoint.y + 0.5);
     }
 
@@ -1164,7 +1221,10 @@
         (tick.event || "").includes("3PT") ||
         (tick.event || "").includes("2PT");
       if (hasScoreEvent) {
-        const hoopX = tick.ball && tick.ball.x > 0.5 ? (30 + rules.rightHoopX * 10) : (30 + rules.leftHoopX * 10);
+        const hoopX =
+          tick.ball && tick.ball.x > 0.5
+            ? 30 + rules.rightHoopX * 10
+            : 30 + rules.leftHoopX * 10;
         ctx.beginPath();
         ctx.arc(hoopX, 280, 22, 0, Math.PI * 2);
         ctx.strokeStyle = "rgba(44, 229, 155, 0.85)";
