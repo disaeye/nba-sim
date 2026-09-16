@@ -405,32 +405,32 @@ html, body {
   z-index: 10;
   max-width: 0;
   opacity: 0;
-  transform: scale(0.85);
+  transform: scale(0.92) translateY(-2px);
   overflow: hidden;
   white-space: nowrap;
   pointer-events: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
+  gap: 7px;
+  padding: 6px 14px;
   border-radius: var(--radius-full);
-  background: rgba(16, 20, 29, 0.88);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(13, 17, 26, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   color: #ffffff;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.3px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
-  transition: max-width 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              opacity 0.25s ease,
-              transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transition: max-width 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.28s ease,
+              transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .floating-event-pill.active {
-  max-width: 320px;
+  max-width: 380px;
   opacity: 1;
-  transform: scale(1);
+  transform: scale(1) translateY(0);
 }
 
 /* 球员触摸 HUD 卡片 */

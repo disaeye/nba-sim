@@ -191,6 +191,39 @@
     return EVENT_NAME_ZH[name] || name;
   }
 
+  // 动态岛核心高光事件白名单（过滤 CONTACT_BUMP 等底层物理微小碰擦杂音）
+  const HIGHLIGHT_EVENTS = new Set([
+    "SCORE",
+    "SHOT_RELEASE",
+    "SHOT_MISS",
+    "REBOUND",
+    "STEAL",
+    "BLOCK",
+    "FOUL",
+    "TURNOVER",
+    "SCREEN_CONTACT",
+    "OUT_OF_BOUNDS",
+    "TIPOFF",
+    "TIPOFF_SECURED",
+  ]);
+
+  const EVENT_ICONS = {
+    SCORE: "🏀",
+    SHOT_RELEASE: "🎯",
+    SHOT_MISS: "💥",
+    REBOUND: "🛡️",
+    STEAL: "⚡",
+    BLOCK: "🚫",
+    FOUL: "⚠️",
+    TURNOVER: "🔄",
+    SCREEN_CONTACT: "🧱",
+    OUT_OF_BOUNDS: "🛑",
+    TIPOFF: "⏱️",
+    TIPOFF_SECURED: "✋",
+  };
+
+  let overlayTimer = null;
+
   function eventClass(name) {
     const upper = String(name).toUpperCase();
     if (upper.includes("SCORE") || upper === "DRIVE_SCORE") return "tag-score";
@@ -903,11 +936,15 @@
     $("phaseLabel").textContent = String(tick.phase || "—")
       .replaceAll("_", " ")
       .toUpperCase();
-    const names = eventNames(tick);
+    const allNames = eventNames(tick);
+    const highlightNames = allNames.filter((name) =>
+      HIGHLIGHT_EVENTS.has(name),
+    );
     const chip = $("eventChip");
     const overlay = $("eventOverlayChip");
-    if (names.length) {
-      const txt = names.map(getEventNameZh).join(" · ");
+    if (highlightNames.length) {
+      const icon = EVENT_ICONS[highlightNames[0]] || "⚡";
+      const txt = `${icon} ${highlightNames.map(getEventNameZh).join(" · ")}`;
       if (chip) {
         chip.textContent = txt;
         chip.classList.add("active");
@@ -915,10 +952,11 @@
       if (overlay) {
         overlay.textContent = txt;
         overlay.classList.add("active");
+        if (overlayTimer) clearTimeout(overlayTimer);
+        overlayTimer = setTimeout(() => {
+          overlay.classList.remove("active");
+        }, 2200);
       }
-    } else {
-      if (chip) chip.classList.remove("active");
-      if (overlay) overlay.classList.remove("active");
     }
     $("possessionLabel").textContent = `第 ${tick.possession_id ?? "—"} 回合`;
     const newHome = finite(tick.score?.home).toFixed(0);
