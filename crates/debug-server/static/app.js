@@ -215,6 +215,8 @@
 
   async function runSimulation(withRules = null) {
     stopPlayback();
+    // 移动端体验：模拟开始时视口保持在球场核心区域，杜绝下滚遮挡
+    window.scrollTo({ top: 0, behavior: "smooth" });
     const parsedSeed = Number.parseInt($("seedInput").value, 10);
     const seed = Number.isFinite(parsedSeed) ? parsedSeed : 42;
     const scope = $("scopeInput").value;
@@ -770,7 +772,15 @@
     }
     if (current) {
       current.classList.add("current");
-      if (state.playing) current.scrollIntoView({ block: "nearest" });
+      if (state.playing) {
+        // 关键修复：仅在 timeline 容器内部滚动，杜绝整页 window 向下翻卷离开球场！
+        const timeline = $("timeline");
+        if (timeline && timeline.scrollHeight > timeline.clientHeight) {
+          const rowTop = current.offsetTop - timeline.offsetTop;
+          const target = rowTop - timeline.clientHeight / 2 + current.clientHeight / 2;
+          timeline.scrollTop = Math.max(0, target);
+        }
+      }
     }
   }
   function renderAnomalies() {
@@ -855,8 +865,20 @@
       }
     }
     $("possessionLabel").textContent = `POS #${tick.possession_id ?? "—"}`;
-    $("homeScore").textContent = finite(tick.score?.home).toFixed(0);
-    $("awayScore").textContent = finite(tick.score?.away).toFixed(0);
+    const newHome = finite(tick.score?.home).toFixed(0);
+    const newAway = finite(tick.score?.away).toFixed(0);
+    if ($("homeScore").textContent !== newHome && $("homeScore").textContent !== "") {
+      $("homeScore").classList.remove("score-pulse");
+      void $("homeScore").offsetWidth;
+      $("homeScore").classList.add("score-pulse");
+    }
+    if ($("awayScore").textContent !== newAway && $("awayScore").textContent !== "") {
+      $("awayScore").classList.remove("score-pulse");
+      void $("awayScore").offsetWidth;
+      $("awayScore").classList.add("score-pulse");
+    }
+    $("homeScore").textContent = newHome;
+    $("awayScore").textContent = newAway;
     $("periodLabel").textContent = `Q${tick.period || 1}`;
     $("gameClock").textContent = timeClock(tick.gameClock ?? tick.t_game);
     $("shotClock").textContent = one(tick.shotClock);
@@ -1802,13 +1824,12 @@
         setRunStatus("浏览器拒绝访问剪贴板", true);
       }
     });
-    $("courtCanvas").addEventListener("mousemove", (event) => {
-      const canvas = event.currentTarget;
+    function handlePointer(clientX, clientY, canvas) {
       const rect = canvas.getBoundingClientRect();
-      const x = ((event.clientX - rect.left) * canvas.width) / rect.width;
-      const y = ((event.clientY - rect.top) * canvas.height) / rect.height;
+      const x = ((clientX - rect.left) * canvas.width) / rect.width;
+      const y = ((clientY - rect.top) * canvas.height) / rect.height;
       const hit = state.hitPlayers.find(
-        (item) => Math.hypot(item.x - x, item.y - y) < 23,
+        (item) => Math.hypot(item.x - x, item.y - y) < 26,
       );
       const tooltip = $("playerTooltip");
       if (!hit) {
@@ -1817,8 +1838,16 @@
       }
       const player = hit.player;
       tooltip.hidden = false;
-      tooltip.style.left = `${Math.min(rect.width - 165, (x / canvas.width) * rect.width + 12)}px`;
-      tooltip.style.top = `${Math.max(4, (y / canvas.height) * rect.height - 35)}px`;
+      const isMobile = window.innerWidth <= 640;
+      if (isMobile) {
+        tooltip.style.left = "50%";
+        tooltip.style.transform = "translateX(-50%)";
+        tooltip.style.top = "8px";
+      } else {
+        tooltip.style.transform = "none";
+        tooltip.style.left = `${Math.min(rect.width - 165, (x / canvas.width) * rect.width + 12)}px`;
+        tooltip.style.top = `${Math.max(4, (y / canvas.height) * rect.height - 35)}px`;
+      }
       tooltip.replaceChildren(
         el("strong", null, `${player.id} · #${player.jersey}`),
         el("span", null, `${player.action} · ${player.slot}`),
@@ -1828,9 +1857,25 @@
           `stamina ${one(player.stm)}/${one(player.stmMax)} · ${player.morale}`,
         ),
       );
+    }
+    $("courtCanvas").addEventListener("mousemove", (event) => {
+      handlePointer(event.clientX, event.clientY, event.currentTarget);
     });
+    $("courtCanvas").addEventListener("touchstart", (event) => {
+      if (event.touches.length === 1) {
+        handlePointer(event.touches[0].clientX, event.touches[0].clientY, event.currentTarget);
+      }
+    }, { passive: true });
+    $("courtCanvas").addEventListener("touchmove", (event) => {
+      if (event.touches.length === 1) {
+        handlePointer(event.touches[0].clientX, event.touches[0].clientY, event.currentTarget);
+      }
+    }, { passive: true });
     $("courtCanvas").addEventListener("mouseleave", () => {
       $("playerTooltip").hidden = true;
+    });
+    $("courtCanvas").addEventListener("touchend", () => {
+      setTimeout(() => { $("playerTooltip").hidden = true; }, 2500);
     });
     document.addEventListener("keydown", (event) => {
       if (event.target.matches("input, textarea, select")) return;
