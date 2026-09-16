@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>NBA-Sim · 现代战术与比赛演练台</title>
-  <link rel="stylesheet" href="/style.css?v=20260916_halfcourt_v7">
+  <link rel="stylesheet" href="/style.css?v=20260916_nba_standard_v1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -69,13 +69,7 @@
 
       <!-- 球场主视口 (Court Stage) -->
       <div class="court-stage-wrap">
-        <canvas id="courtCanvas" width="960" height="580"></canvas>
-        
-        <!-- 视角切换芯片 (Half / Full Court Toggle) -->
-        <button id="courtViewBtn" class="court-view-toggle" type="button" title="点击切换 半场战术特写 / 全场鸟瞰">
-          <span id="courtViewIcon">🔍</span>
-          <span id="courtViewLabel">半场特写</span>
-        </button>
+        <canvas id="courtCanvas" width="1000" height="560"></canvas>
 
         <!-- 浮动动态岛标签 (Floating Event Pill) -->
         <div id="eventOverlayChip" class="floating-event-pill"></div>
@@ -236,6 +230,6 @@
     <button id="copyFrameButton"></button>
   </div>
 
-  <script type="module" src="/app.js?v=20260916_halfcourt_v7"></script>
+  <script type="module" src="/app.js?v=20260916_nba_standard_v1"></script>
 </body>
 </html>
