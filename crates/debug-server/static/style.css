@@ -219,26 +219,26 @@ body {
 }
 
 .team-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+ display: flex;
+ flex-direction: column;
+ gap: 2px;
 }
 .team-title-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+ display: flex;
+ align-items: center;
+ gap: 6px;
 }
 .team-scheme-label {
-  font-size: 9.5px;
-  color: var(--text-muted);
-  font-weight: 500;
-  letter-spacing: 0.2px;
+ font-size: 9.5px;
+ color: var(--text-muted);
+ font-weight: 500;
+ letter-spacing: 0.2px;
 }
 .team-block.home .team-meta {
-  align-items: flex-end;
+ align-items: flex-end;
 }
 .team-block.away .team-meta {
-  align-items: flex-start;
+ align-items: flex-start;
 }
 .team-badge {
  width: 8px;
@@ -342,7 +342,7 @@ body {
 .court-stage-wrap {
  position: relative;
  width: 100%;
- aspect-ratio: 960 / 520;
+ aspect-ratio: 960 / 580;
  background: #11141a;
  overflow: hidden;
  display: flex;
@@ -355,6 +355,41 @@ body {
  width: 100%;
  height: 100%;
  object-fit: contain;
+}
+
+/* 视角切换控制芯片 (Half / Full Court Toggle) */
+.court-view-toggle {
+ position: absolute;
+ top: 12px;
+ left: 12px;
+ z-index: 15;
+ display: inline-flex;
+ align-items: center;
+ gap: 6px;
+ padding: 6px 12px;
+ font-size: 11px;
+ font-weight: 700;
+ color: #ffffff;
+ background: rgba(15, 23, 42, 0.75);
+ border: 1px solid rgba(255, 255, 255, 0.22);
+ backdrop-filter: blur(16px);
+ -webkit-backdrop-filter: blur(16px);
+ border-radius: var(--radius-full);
+ cursor: pointer;
+ box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+ transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+ -webkit-tap-highlight-color: transparent;
+}
+.court-view-toggle:hover {
+ background: rgba(30, 41, 59, 0.9);
+ border-color: rgba(255, 255, 255, 0.4);
+ transform: translateY(-1px);
+}
+.court-view-toggle:active {
+ transform: scale(0.94);
+}
+.court-view-toggle .view-icon {
+ font-size: 12px;
 }
 
 /* 浮动动态岛事件徽章 */
