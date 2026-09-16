@@ -1243,10 +1243,28 @@
         }
       }
       if (player.hasBall) {
+        // 持球人聚光脉冲能量环（一眼识别核心战术点）
+        const nowSec = performance.now() / 280;
+        const pulseR = radius + 5 + Math.sin(nowSec) * 2.2;
+        const auraGrad = ctx.createRadialGradient(
+          playerPoint.x,
+          playerPoint.y,
+          radius,
+          playerPoint.x,
+          playerPoint.y,
+          pulseR + 5,
+        );
+        auraGrad.addColorStop(0, "rgba(245, 158, 11, 0.4)");
+        auraGrad.addColorStop(1, "rgba(245, 158, 11, 0)");
         ctx.beginPath();
-        ctx.arc(playerPoint.x, playerPoint.y, radius + 7, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255,255,255,.92)";
-        ctx.lineWidth = 2;
+        ctx.arc(playerPoint.x, playerPoint.y, pulseR + 5, 0, Math.PI * 2);
+        ctx.fillStyle = auraGrad;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, pulseR, 0, Math.PI * 2);
+        ctx.strokeStyle = "#f59e0b";
+        ctx.lineWidth = 2.2;
         ctx.stroke();
       }
       ctx.beginPath();
@@ -1357,6 +1375,19 @@
       ctx.strokeStyle = "rgba(45, 15, 2, 0.65)";
       ctx.lineWidth = 0.8;
       ctx.stroke();
+
+      const hasScoreEvent =
+        (tick.event || "").includes("MADE") ||
+        (tick.event || "").includes("3PT") ||
+        (tick.event || "").includes("2PT");
+      if (hasScoreEvent) {
+        const hoopX = tick.ball && tick.ball.x > 47 ? 890 : 70;
+        ctx.beginPath();
+        ctx.arc(hoopX, 260, 24, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(44, 229, 155, 0.75)";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
     }
     const holderTeam = (tick.players || []).find(
       (player) => player.hasBall,
@@ -1880,9 +1911,7 @@
     const randomBtn = $("randomSeedBtn");
     if (randomBtn) {
       randomBtn.addEventListener("click", () => {
-        $("seedInput").value = String(
-          Math.floor(Math.random() * 90000) + 1000,
-        );
+        $("seedInput").value = String(Math.floor(Math.random() * 90000) + 1000);
       });
     }
 

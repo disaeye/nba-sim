@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>NBA-Sim · 现代战术与比赛演练台</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/style.css?v=20260916_nba_arena_v5">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -37,8 +37,11 @@
       <div class="match-scoreboard">
         <div class="team-block away">
           <div class="team-meta">
-            <span class="team-badge away-badge"></span>
-            <span id="awayTeamName" class="team-name">客队</span>
+            <div class="team-title-row">
+              <span class="team-badge away-badge"></span>
+              <span id="awayTeamName" class="team-name">客队 (LAL)</span>
+            </div>
+            <span class="team-scheme-label">挡拆突分体系</span>
           </div>
           <div id="awayScore" class="team-score">0</div>
         </div>
@@ -55,8 +58,11 @@
         <div class="team-block home">
           <div id="homeScore" class="team-score">0</div>
           <div class="team-meta">
-            <span id="homeTeamName" class="team-name">主队</span>
-            <span class="team-badge home-badge"></span>
+            <div class="team-title-row">
+              <span id="homeTeamName" class="team-name">主队 (BOS)</span>
+              <span class="team-badge home-badge"></span>
+            </div>
+            <span class="team-scheme-label">沉退护筐体系</span>
           </div>
         </div>
       </div>
@@ -224,6 +230,6 @@
     <button id="copyFrameButton"></button>
   </div>
 
-  <script type="module" src="/app.js"></script>
+  <script type="module" src="/app.js?v=20260916_nba_arena_v5"></script>
 </body>
 </html>
