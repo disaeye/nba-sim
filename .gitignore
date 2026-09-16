@@ -26,3 +26,5 @@ node_modules/
 # Python 字节码缓存（守卫脚本被 import 时产生）
 __pycache__/
 *.pyc
+.vercel
+.env*

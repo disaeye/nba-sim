@@ -114,6 +114,70 @@ impl Default for WasmMatchService {
     }
 }
 
+/// 返回默认 GameRules 的 JSON 字符串（供前端直接初始化规则编辑器）。
+#[wasm_bindgen(js_name = "getDefaultRulesJson")]
+pub fn get_default_rules_json() -> Result<String, JsError> {
+    serde_json::to_string_pretty(&nba_domain::GameRules::default())
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// 在浏览器内存中直接运行指定 scope 的模拟，输出 NDJSON 字符串。
+/// 完全无需后端服务器参与，0 磁盘消耗。
+#[wasm_bindgen(js_name = "simulateToNdjson")]
+pub fn simulate_to_ndjson(
+    seed: u64,
+    scope: &str,
+    rules_json: Option<String>,
+) -> Result<String, JsError> {
+    let rules = if let Some(json_str) = rules_json {
+        let trimmed = json_str.trim();
+        if trimmed.is_empty() {
+            nba_domain::GameRules::default()
+        } else {
+            serde_json::from_str(trimmed)
+                .map_err(|e| JsError::new(&format!("invalid rules json: {e}")))?
+        }
+    } else {
+        nba_domain::GameRules::default()
+    };
+
+    let mut engine = nba_engine::MatchEngine::with_rules(seed, rules);
+    engine.set_scope(scope).map_err(|e| JsError::new(&e))?;
+
+    let mut output = String::new();
+    let max_ticks = match scope.trim().to_ascii_lowercase().as_str() {
+        "possession" => 1_000,
+        "clutch" => 5_000,
+        "quarter" => 15_000,
+        "half" => 30_000,
+        _ => 150_000,
+    };
+
+    let mut ticks = 0;
+    while !engine.is_finished() && ticks < max_ticks {
+        let tick = engine.step();
+        let line = serde_json::to_string(&tick).map_err(|e| JsError::new(&e.to_string()))?;
+        output.push_str(&line);
+        output.push('\n');
+        ticks += 1;
+    }
+
+    let snap = engine.engine_snapshot();
+    let summary_obj = serde_json::json!({
+        "type": "run_summary",
+        "home_score": snap.game.home_score,
+        "away_score": snap.game.away_score,
+        "period": snap.game.period,
+        "current_time": snap.game.current_time,
+        "total_ticks": ticks,
+        "completed_possessions": engine.completed_possessions(),
+    });
+    output.push_str(&summary_obj.to_string());
+    output.push('\n');
+
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::WasmMatchService;

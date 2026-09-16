@@ -1,0 +1,5 @@
+{
+  "version": 2,
+  "outputDirectory": "crates/debug-server/static",
+  "cleanUrls": true
+}

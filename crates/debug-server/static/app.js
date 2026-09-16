@@ -1,4 +1,21 @@
 (() => {
+  let wasmPromise = null;
+  function ensureWasm() {
+    if (!wasmPromise) {
+      wasmPromise = (async () => {
+        try {
+          const mod = await import("./wasm/nba_wasm.js");
+          await mod.default();
+          return mod;
+        } catch {
+          return null;
+        }
+      })();
+    }
+    return wasmPromise;
+  }
+  ensureWasm();
+
   const DEFAULT_RULES = {
     tick_seconds: 0.04,
     max_player_speed_ftps: 22,
@@ -177,9 +194,18 @@
   async function fetchDefaultRules(updateEditor) {
     let rules;
     try {
-      rules = JSON.parse(await fetchText("/api/rules"));
+      const wasm = await ensureWasm();
+      if (wasm && wasm.getDefaultRulesJson) {
+        rules = JSON.parse(wasm.getDefaultRulesJson());
+      } else {
+        rules = JSON.parse(await fetchText("/api/rules"));
+      }
     } catch (error) {
-      throw new Error(`规则加载失败：${error.message}`);
+      try {
+        rules = JSON.parse(await fetchText("/api/rules"));
+      } catch {
+        throw new Error(`规则加载失败：${error.message}`);
+      }
     }
     state.rules = rules;
     state.rulesLoaded = true;
@@ -196,15 +222,27 @@
     setControlsBusy(true);
     try {
       if (!withRules) await fetchDefaultRules(false);
-      const responseText = withRules
-        ? await fetchText("/api/simulate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ seed, scope, rules: withRules }),
-          })
-        : await fetchText(
-            `/api/simulate?seed=${encodeURIComponent(seed)}&scope=${encodeURIComponent(scope)}`,
-          );
+      const wasm = await ensureWasm();
+      let responseText;
+      if (wasm && wasm.simulateToNdjson) {
+        let rulesJson = null;
+        if (withRules) {
+          rulesJson = JSON.stringify(withRules);
+        } else if (state.rules) {
+          rulesJson = JSON.stringify(state.rules);
+        }
+        responseText = wasm.simulateToNdjson(BigInt(seed), scope, rulesJson);
+      } else {
+        responseText = withRules
+          ? await fetchText("/api/simulate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ seed, scope, rules: withRules }),
+            })
+          : await fetchText(
+              `/api/simulate?seed=${encodeURIComponent(seed)}&scope=${encodeURIComponent(scope)}`,
+            );
+      }
       if (withRules) state.rules = { ...state.rules, ...withRules };
       loadStream(responseText, `seed ${seed} · ${scope}`);
       setRunStatus(`${state.ticks.length.toLocaleString()} ticks`);

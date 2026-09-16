@@ -7,6 +7,7 @@ edition.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+getrandom = { version = "0.2", features = ["js"] }
 nba-domain.workspace = true
 nba-engine.workspace = true
 serde_json.workspace = true
