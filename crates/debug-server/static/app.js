@@ -857,13 +857,20 @@
       .toUpperCase();
     const names = eventNames(tick);
     const chip = $("eventChip");
-    if (chip) {
-      if (names.length) {
-        chip.textContent = names.join(" · ");
+    const overlay = $("eventOverlayChip");
+    if (names.length) {
+      const txt = names.join(" · ");
+      if (chip) {
+        chip.textContent = txt;
         chip.classList.add("active");
-      } else {
-        chip.classList.remove("active");
       }
+      if (overlay) {
+        overlay.textContent = txt;
+        overlay.classList.add("active");
+      }
+    } else {
+      if (chip) chip.classList.remove("active");
+      if (overlay) overlay.classList.remove("active");
     }
     $("possessionLabel").textContent = `POS #${tick.possession_id ?? "—"}`;
     const newHome = finite(tick.score?.home).toFixed(0);

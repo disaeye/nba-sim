@@ -1,533 +1,968 @@
+/* ==========================================================================
+   NBA-Sim Modern Arena Theme · 极简·沉浸·零抖动·动效先锋
+   ========================================================================== */
+
 :root {
-  --ink: #f0f5f8;
-  --muted: #a4b4bf;
-  --faint: #728491;
-  --line: rgba(190, 215, 224, .13);
-  --panel: rgba(22, 32, 40, .92);
-  --panel-2: rgba(28, 40, 49, .94);
-  --bg: #0e151b;
-  --bg-2: #131f27;
-  --home: #2ce59b;
-  --home-deep: #0b9d6b;
-  --away: #f5bd45;
-  --orange: #ff875e;
-  --blue: #77b9ff;
-  --purple: #c89cff;
-  --red: #ff6f7e;
-  --green: #55e3a9;
-  --radius: 14px;
-  --shadow: 0 18px 50px rgba(0, 0, 0, .22);
-  color-scheme: dark;
-  font-family: "IBM Plex Sans", "Noto Sans CJK SC", "Noto Sans", sans-serif;
+  --bg-base: #0a0e13;
+  --bg-surface: #121820;
+  --bg-surface-elevated: #1a222c;
+  --bg-glass: rgba(18, 26, 35, 0.78);
+  --bg-glass-card: rgba(22, 32, 43, 0.65);
+  
+  --line-subtle: rgba(255, 255, 255, 0.06);
+  --line-border: rgba(255, 255, 255, 0.12);
+  --line-focus: rgba(44, 229, 155, 0.45);
+
+  --text-primary: #f0f4f8;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  --accent-home: #2ce59b;
+  --accent-home-glow: rgba(44, 229, 155, 0.28);
+  --accent-away: #f5a623;
+  --accent-away-glow: rgba(245, 166, 35, 0.28);
+  --accent-danger: #ff4757;
+  --accent-danger-glow: rgba(255, 71, 87, 0.35);
+
+  --font-mono: ui-monospace, SFMono-Regular, "Roboto Mono", Menlo, Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+
+  --dock-height: 56px;
 }
-* { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); }
-body { min-height: 100vh; overflow-x: hidden; background:
-  radial-gradient(circle at 78% -8%, rgba(44, 229, 155, .10), transparent 30rem),
-  radial-gradient(circle at -12% 45%, rgba(119, 185, 255, .08), transparent 28rem),
-  linear-gradient(130deg, #0d141a 0%, #101a21 58%, #0e151b 100%); }
-.grain { position: fixed; inset: 0; pointer-events: none; opacity: .045; z-index: 10; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.7'/%3E%3C/svg%3E"); mix-blend-mode: screen; }
-button, input, select, textarea { font: inherit; }
-button { color: inherit; cursor: pointer; }
-.topbar { position: relative; z-index: 2; min-height: 72px; padding: 14px clamp(18px, 3vw, 44px); display: flex; align-items: center; gap: 28px; border-bottom: 1px solid var(--line); background: rgba(10, 17, 22, .78); backdrop-filter: blur(18px); }
-.topbar-main { display: flex; align-items: center; gap: 20px; }
-.brand-lockup { display: flex; align-items: center; gap: 12px; min-width: 210px; }
-.brand-mark { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid rgba(44, 229, 155, .65); color: var(--home); font: 700 15px/1 "IBM Plex Mono", monospace; letter-spacing: -2px; transform: skew(-8deg); box-shadow: 0 0 22px rgba(44, 229, 155, .11); }
-.brand-mark span { color: var(--orange); }
-.eyebrow, .section-kicker { color: var(--home); font: 700 9px/1.1 "IBM Plex Mono", monospace; letter-spacing: .18em; text-transform: uppercase; }
-h1 { margin: 4px 0 0; font: 650 20px/1 "DM Serif Display", Georgia, serif; letter-spacing: .01em; }
-h1 em { color: var(--muted); font: 500 13px/1 "IBM Plex Sans", sans-serif; font-style: normal; margin-left: 7px; }
-.run-controls { display: flex; align-items: center; gap: 8px; flex: 1; }
-.compact-field { display: flex; align-items: center; gap: 7px; color: var(--muted); font: 700 9px "IBM Plex Mono", monospace; letter-spacing: .12em; }
-.compact-field input, .compact-field select { width: 75px; height: 31px; padding: 0 8px; color: var(--ink); background: rgba(255,255,255,.055); border: 1px solid var(--line); border-radius: 6px; outline: none; font: 12px "IBM Plex Mono", monospace; }
-.compact-field select { width: 130px; }
-.compact-field input:focus, .compact-field select:focus, .rules-editor:focus { border-color: rgba(44, 229, 155, .68); box-shadow: 0 0 0 3px rgba(44, 229, 155, .08); }
-.button { height: 31px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 13px; border: 1px solid var(--line); border-radius: 6px; font: 700 10px "IBM Plex Mono", monospace; letter-spacing: .06em; white-space: nowrap; }
-.button-primary { color: #061b13; background: var(--home); border-color: var(--home); box-shadow: 0 0 22px rgba(44, 229, 155, .15); }
-.button-primary:hover { background: #73f5be; }
-.button-quiet { color: var(--muted); background: rgba(255,255,255,.04); }
-.button-quiet:hover, .text-button:hover, .preset-button:hover { color: var(--ink); border-color: rgba(190, 215, 224, .35); }
-.button-icon { font-size: 14px; line-height: 0; }
-.file-button { position: relative; overflow: hidden; }
-.file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-.run-status { min-width: 92px; color: var(--muted); text-align: right; font: 10px "IBM Plex Mono", monospace; }
-.alert-strip { position: relative; z-index: 2; min-height: 42px; padding: 7px clamp(18px, 3vw, 44px); display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--line); background: rgba(13, 22, 28, .66); }
-.anomaly-badge { border: 0; padding: 5px 8px; border-radius: 4px; font: 700 10px "IBM Plex Mono", monospace; letter-spacing: .05em; }
-.anomaly-ok { color: var(--green); background: rgba(85, 227, 169, .11); }
-.anomaly-warn { color: var(--away); background: rgba(245, 189, 69, .13); }
-.anomaly-danger { color: var(--red); background: rgba(255, 111, 126, .13); }
-.alert-copy { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.signal-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--home); box-shadow: 0 0 10px var(--home); }
-.alert-meta { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--faint); font: 10px "IBM Plex Mono", monospace; }
-.divider { color: var(--line); }
-.anomaly-panel { position: relative; z-index: 3; margin: 0 clamp(18px, 3vw, 44px); padding: 12px 15px; border: 1px solid rgba(255,111,126,.28); border-top: 0; background: rgba(39, 24, 30, .84); box-shadow: var(--shadow); }
-.anomaly-panel[hidden] { display: none; }
-.panel-heading { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 11px; font: 700 11px "IBM Plex Mono", monospace; letter-spacing: .08em; }
-.panel-heading small { color: var(--faint); font: 10px "IBM Plex Sans", sans-serif; letter-spacing: 0; }
-.anomaly-list { display: flex; flex-wrap: wrap; gap: 5px; max-height: 130px; overflow: auto; }
-.anomaly-item { padding: 5px 7px; color: #ffcbd0; background: rgba(255,111,126,.09); border: 1px solid rgba(255,111,126,.17); border-radius: 4px; font: 10px "IBM Plex Mono", monospace; }
-.workspace { position: relative; z-index: 1; max-width: 1850px; margin: 0 auto; padding: 18px clamp(18px, 3vw, 44px) 92px; display: grid; grid-template-columns: minmax(460px, 1.08fr) minmax(500px, .92fr); gap: 18px; align-items: start; }
-.stage-column, .inspector-column { min-width: 0; display: flex; flex-direction: column; gap: 13px; }
-.glass-panel { background: linear-gradient(135deg, rgba(27, 40, 48, .86), rgba(17, 26, 33, .93)); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
-.scoreboard { min-height: 93px; padding: 14px 20px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; }
-.team-score { display: flex; align-items: center; gap: 11px; }
-.away-score { justify-content: flex-end; text-align: right; }
-.team-score small { display: block; color: var(--muted); font: 700 9px "IBM Plex Mono", monospace; letter-spacing: .11em; }
-.team-score strong { display: block; margin-top: 3px; font: 500 35px/.88 "DM Serif Display", Georgia, serif; }
-.home-score strong { color: var(--home); }
-.away-score strong { color: var(--away); }
-.team-swatch { width: 8px; height: 34px; display: block; border-radius: 1px; }
-.home-swatch { background: var(--home); box-shadow: 0 0 15px rgba(44,229,155,.3); }
-.away-swatch { background: var(--away); box-shadow: 0 0 15px rgba(245,189,69,.3); }
-.game-clock-block { text-align: center; }
-.period-line { display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--muted); font: 700 9px "IBM Plex Mono", monospace; letter-spacing: .14em; }
-.live-pill { padding: 3px 5px; color: var(--home); border: 1px solid rgba(44,229,155,.3); border-radius: 3px; font-size: 8px; letter-spacing: .08em; }
-.game-clock-block > strong { display: block; margin: 5px 0 4px; font: 500 27px/.8 "IBM Plex Mono", monospace; letter-spacing: -.06em; }
-.clock-sub { color: var(--faint); font: 9px "IBM Plex Mono", monospace; }
-.clock-sub b { color: var(--orange); font-size: 11px; }
-.court-panel { overflow: hidden; contain: layout; }
-.court-toolbar, .court-footer { box-sizing: border-box; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: nowrap; overflow: hidden; }
-.court-toolbar { height: 40px; min-height: 40px; max-height: 40px; border-bottom: 1px solid var(--line); }
-.court-toolbar .section-kicker { margin-right: 11px; flex-shrink: 0; }
-#frameLabel { color: var(--faint); font: 10px "IBM Plex Mono", monospace; flex-shrink: 0; }
-.toolbar-chips, .legend { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; overflow: hidden; }
-.data-chip { flex-shrink: 0; padding: 4px 6px; color: var(--muted); background: rgba(255,255,255,.045); border-radius: 3px; font: 9px "IBM Plex Mono", monospace; white-space: nowrap; }
-.accent-chip { color: var(--home); background: rgba(44,229,155,.09); }
-.event-chip {
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  min-height: 100%;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: calc(var(--dock-height) + 24px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ==========================================================================
+   1. 顶部极简导航
+   ========================================================================== */
+
+.app-header {
+  height: 54px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--line-subtle);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-logo {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: -0.5px;
+  color: var(--text-primary);
+}
+.brand-logo span {
+  color: var(--accent-home);
+}
+
+.status-indicator {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.3s ease;
+}
+.status-indicator::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background 0.3s ease;
+}
+.status-indicator.ready::before {
+  background: var(--accent-home);
+  box-shadow: 0 0 8px var(--accent-home);
+}
+.status-indicator.running::before {
+  background: var(--accent-away);
+  box-shadow: 0 0 8px var(--accent-away);
+  animation: blink 0.8s infinite alternate;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pill-group {
+  display: flex;
+  align-items: center;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--line-border);
+  border-radius: var(--radius-full);
+  padding: 2px 6px;
+  gap: 8px;
+}
+
+.pill-field {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.pill-label {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+.pill-field input, .pill-field select {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  outline: none;
+  cursor: pointer;
+}
+.pill-field input {
+  width: 48px;
+  text-align: center;
+}
+.pill-field select {
+  padding-right: 2px;
+}
+.pill-field select option {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.btn-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, #2ce59b 0%, #1ecc86 100%);
+  color: #05160e;
+  border: none;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 14px var(--accent-home-glow);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-run:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px var(--accent-home-glow);
+}
+.btn-run:active {
+  transform: scale(0.96);
+}
+.icon-play {
+  width: 14px;
+  height: 14px;
+}
+
+.btn-icon-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--line-border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-icon-upload:hover {
+  color: var(--text-primary);
+  border-color: var(--line-focus);
+}
+.btn-icon-upload svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ==========================================================================
+   2. 主工作区布局 (Arena Layout)
+   ========================================================================== */
+
+.arena-layout {
+  max-width: 1040px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.arena-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 2.1 转播级比分卡 */
+.broadcast-scoreboard {
+  height: 64px;
+  background: var(--bg-glass-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-md);
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.team-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+.team-block.away {
+  justify-content: flex-start;
+}
+.team-block.home {
+  justify-content: flex-end;
+}
+
+.team-name {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.team-block.away .team-name {
+  color: var(--accent-away);
+}
+.team-block.home .team-name {
+  color: var(--accent-home);
+}
+
+.team-score {
+  font-family: var(--font-mono);
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--text-primary);
+  min-width: 44px;
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+
+.match-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 16px;
+  border-left: 1px solid var(--line-subtle);
+  border-right: 1px solid var(--line-subtle);
+}
+
+.clock-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.badge-period {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+}
+
+.live-clock {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-primary);
+}
+
+.shot-clock-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+.sc-val {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+.sc-val.urgent-shot-clock {
+  color: var(--accent-danger);
+  animation: urgentPulse 0.75s infinite ease-in-out;
+}
+
+/* 2.2 沉浸式球场视口 */
+.court-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 960 / 520;
+  background: #151b18;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--line-border);
+  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+  contain: layout paint;
+}
+
+#courtCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+/* 悬浮在右上角的 HUD 动态岛（绝对定位，彻底杜绝任何 DOM 挤压与高度变化！） */
+.court-overlay-hud {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.hud-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(10, 14, 19, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
+}
+.hud-tag.highlight {
+  border-color: rgba(44, 229, 155, 0.4);
+  color: var(--accent-home);
+}
+
+/* 动态岛平滑弹性展开事件胶囊 */
+.event-pill {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  color: #ffca4f;
+  background: rgba(255, 188, 66, 0.22);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 188, 66, 0.55);
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 16px rgba(255, 188, 66, 0.35);
+  white-space: nowrap;
+  overflow: hidden;
   max-width: 0;
   opacity: 0;
   transform: scale(0.85);
-  margin: 0;
   padding: 0;
-  border: 0 solid rgba(255, 188, 66, .45);
-  overflow: hidden;
-  white-space: nowrap;
-  font-weight: 700;
-  color: #ffca4f;
-  background: rgba(255, 188, 66, .18);
-  border-radius: 4px;
-  box-shadow: 0 0 16px rgba(255, 188, 66, 0.25);
   transition: max-width 0.35s cubic-bezier(0.16, 1, 0.3, 1),
               opacity 0.25s ease,
               transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275),
-              padding 0.25s ease,
-              margin 0.25s ease;
-  pointer-events: none;
+              padding 0.25s ease;
 }
-.event-chip.active {
-  max-width: 170px;
+.event-pill.active {
+  max-width: 180px;
   opacity: 1;
   transform: scale(1);
-  padding: 3px 8px;
-  margin-right: 4px;
-  border-width: 1px;
-  pointer-events: auto;
-  animation: chipPulse 1.2s infinite alternate ease-in-out;
+  padding: 3px 10px;
 }
-@keyframes chipPulse { from { opacity: .82; transform: scale(.98); } to { opacity: 1; transform: scale(1.02); } }
+
+/* 球员悬浮 HUD 卡片 */
+.player-tooltip {
+  position: absolute;
+  z-index: 15;
+  padding: 8px 12px;
+  pointer-events: none;
+  background: rgba(10, 15, 20, 0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--accent-home);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  font-size: 11px;
+  color: var(--text-primary);
+  line-height: 1.4;
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.player-tooltip[hidden] {
+  display: block;
+  opacity: 0;
+  transform: scale(0.9) translateY(4px);
+  pointer-events: none;
+}
+.player-tooltip strong {
+  display: block;
+  font-size: 12px;
+  color: var(--accent-home);
+}
+.player-tooltip span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+/* 2.3 球场战术字幕条 */
+.tactical-subtitle-bar {
+  height: 36px;
+  padding: 0 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  overflow: hidden;
+}
+.subtitle-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.subtitle-text {
+  flex: 1;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+.frame-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   3. 下方数据与分析抽屉 (Inspector Card)
+   ========================================================================== */
+
+.inspector-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.inspector-tabs {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line-subtle);
+  padding: 0 12px;
+  background: rgba(0, 0, 0, 0.2);
+  gap: 4px;
+}
+
+.tab-button, .tab-btn {
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.tab-button:hover, .tab-btn:hover {
+  color: var(--text-secondary);
+}
+.tab-button.active, .tab-btn.active {
+  color: var(--accent-home);
+  border-bottom-color: var(--accent-home);
+}
+
+.tab-content {
+  padding: 14px;
+  min-height: 260px;
+}
+
+.tab-pane {
+  display: none;
+}
+.tab-pane.active {
+  display: block;
+}
+
+/* 时间轴与战报 */
+.timeline-stream {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 4px;
+}
+
+.event-row {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-left: 3px solid transparent;
+}
+.event-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+  transform: translateX(2px);
+}
+.event-row.current {
+  background: linear-gradient(90deg, rgba(44, 229, 155, 0.12) 0%, transparent 100%);
+  border-left-color: var(--accent-home);
+  color: #fff;
+  font-weight: 600;
+}
+.event-row.passed {
+  opacity: 0.55;
+}
+.event-row > :first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+.event-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.event-chip {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--accent-away);
+}
+.event-detail {
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+/* 统计表 */
+.stats-scroll-wrap {
+  overflow-x: auto;
+}
+.stats-table-modern {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stat-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 100px 12px;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.stat-label {
+  color: var(--text-secondary);
+}
+.stat-value {
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+.stat-baseline {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.status-pill {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-pill.in-band {
+  background: var(--accent-home);
+  box-shadow: 0 0 6px var(--accent-home);
+}
+.status-pill.out-band {
+  background: var(--accent-danger);
+  box-shadow: 0 0 6px var(--accent-danger);
+}
+
+/* 规则编辑器 */
+.rules-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.btn-sm {
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--line-border);
+  cursor: pointer;
+}
+.btn-sm.primary {
+  background: var(--accent-home);
+  color: #05160e;
+  border: none;
+  font-weight: 700;
+}
+.rules-textarea {
+  width: 100%;
+  height: 220px;
+  background: #080c10;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  color: #a7b8c8;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 10px;
+  resize: vertical;
+  outline: none;
+}
+
+/* 高级图表卡片 */
+.advanced-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.adv-card {
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-subtle);
+}
+.adv-card.full {
+  grid-column: 1 / -1;
+}
+.adv-card h4 {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.chart-container {
+  min-height: 120px;
+}
+
+/* ==========================================================================
+   4. 底部统一浮动控制器 (Player Dock)
+   ========================================================================== */
+
+.player-dock {
+  position: fixed;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 24px);
+  max-width: 680px;
+  height: var(--dock-height);
+  padding: 0 14px;
+  background: rgba(16, 22, 29, 0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-full);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  z-index: 50;
+}
+
+.dock-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dock-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+.dock-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+.dock-btn:active {
+  transform: scale(0.92);
+}
+
+.dock-btn-play {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2ce59b 0%, #1ecc86 100%);
+  border: none;
+  color: #05160e;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px var(--accent-home-glow);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dock-btn-play:hover {
+  transform: scale(1.06);
+  filter: brightness(1.1);
+}
+.dock-btn-play:active {
+  transform: scale(0.94);
+}
+
+.dock-timeline {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dock-timeline input[type="range"] {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  accent-color: var(--accent-home);
+  cursor: pointer;
+  outline: none;
+}
+
+.dock-time-display {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  min-width: 60px;
+  text-align: right;
+}
+
+/* ==========================================================================
+   5. 动效关键帧 (Keyframes)
+   ========================================================================== */
+
 @keyframes scorePulse {
   0% { transform: scale(1); filter: brightness(1); }
-  35% { transform: scale(1.26) translateY(-2px); filter: brightness(1.7) drop-shadow(0 0 14px rgba(44, 229, 155, 0.8)); }
-  70% { transform: scale(0.96); filter: brightness(1.2); }
+  35% { transform: scale(1.25) translateY(-2px); filter: brightness(1.6) drop-shadow(0 0 14px var(--accent-home-glow)); }
+  70% { transform: scale(0.96); }
   100% { transform: scale(1); filter: brightness(1); }
 }
 .score-pulse {
-  display: inline-block;
-  animation: scorePulse 0.48s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  animation: scorePulse 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
+
 @keyframes urgentPulse {
-  0% { transform: scale(1); text-shadow: 0 0 4px rgba(255, 111, 126, 0.4); color: #ff6f7e; }
-  50% { transform: scale(1.14); text-shadow: 0 0 14px rgba(255, 111, 126, 0.9); color: #ff3b50; }
-  100% { transform: scale(1); text-shadow: 0 0 4px rgba(255, 111, 126, 0.4); color: #ff6f7e; }
+  0% { transform: scale(1); text-shadow: 0 0 4px var(--accent-danger-glow); }
+  50% { transform: scale(1.15); text-shadow: 0 0 14px var(--accent-danger); }
+  100% { transform: scale(1); text-shadow: 0 0 4px var(--accent-danger-glow); }
 }
-#shotClock.urgent-shot-clock {
-  display: inline-block;
-  animation: urgentPulse 0.75s infinite ease-in-out;
-  font-weight: 800;
-}
+
 @keyframes calloutFlash {
-  0% { opacity: 0.25; transform: translateX(-6px); filter: brightness(1.6); color: #2ce59b; }
+  0% { opacity: 0.3; transform: translateX(-4px); filter: brightness(1.5); }
   100% { opacity: 1; transform: translateX(0); filter: brightness(1); }
 }
 .callout-flash {
-  display: inline-block;
   animation: calloutFlash 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.court-wrap { position: relative; padding: 10px; background: #18221f; box-sizing: border-box; contain: layout; }
-#courtCanvas { display: block; width: 100%; height: auto; border-radius: 6px; background: #b8a27d; cursor: crosshair; aspect-ratio: 960 / 520; }
-.court-footer { height: 38px; min-height: 38px; max-height: 38px; box-sizing: border-box; padding: 0 14px; gap: 12px; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; flex-wrap: nowrap; overflow: hidden; }
-.legend { color: var(--muted); font: 9px "IBM Plex Mono", monospace; }
-.legend > span { display: inline-flex; align-items: center; gap: 4px; }
-.legend-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; }
-.home-dot { background: var(--home); }.away-dot { background: var(--away); }
-.legend-ball { width: 7px; height: 7px; display: inline-block; border: 1px solid #ff9e4f; border-radius: 50%; background: #e97531; }
-.court-note { flex: 1; color: #c5d0d3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; font: 11px "Noto Sans CJK SC", sans-serif; }
-.player-tooltip { position: absolute; z-index: 4; min-width: 150px; padding: 8px 9px; pointer-events: none; background: rgba(10, 17, 22, .94); border: 1px solid rgba(44,229,155,.35); border-radius: 5px; box-shadow: var(--shadow); font-size: 10px; }
-.player-tooltip strong { display: block; margin-bottom: 4px; color: var(--home); font: 700 11px "IBM Plex Mono", monospace; }
-.player-tooltip span { display: block; color: var(--muted); line-height: 1.5; }
-.micro-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-.micro-card { padding: 12px 14px; min-width: 0; background: rgba(255,255,255,.03); border: 1px solid rgba(190,215,224,.1); border-radius: 8px; }
-.micro-card span { display: block; color: #8fa0ac; font: 600 9px "IBM Plex Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
-.micro-card strong { display: block; margin-top: 6px; overflow: hidden; color: #f0f5f8; text-overflow: ellipsis; white-space: nowrap; font: 700 13px "IBM Plex Mono", monospace; }
-.stats-panel { padding: 14px; }
-.stats-table { display: grid; gap: 4px; }
-.stat-row { min-height: 32px; display: grid; grid-template-columns: minmax(140px, 1fr) 72px 105px 10px; align-items: center; gap: 8px; padding: 2px 6px; border-bottom: 1px solid rgba(190,215,224,.07); font-size: 11.5px; }
-.stat-row:last-child { border-bottom: 0; }
-.stat-name { color: #c4d2dc; font-weight: 500; letter-spacing: 0.01em; }.stat-value { color: var(--ink); font: 700 12.5px "IBM Plex Mono", monospace; }.stat-baseline { color: #8fa0ac; font: 10px "IBM Plex Mono", monospace; }.stat-indicator { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }.stat-good { background: var(--green); box-shadow: 0 0 8px rgba(85,227,169,.65); }.stat-warn { background: var(--away); box-shadow: 0 0 6px rgba(245,189,69,.4); }.stat-bad { background: var(--red); box-shadow: 0 0 8px rgba(255,111,126,.55); }
-.stats-summary { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; color: #8fa0ac; font: 10px "IBM Plex Mono", monospace; }
-.decision-next { display: block; margin: 16px 0 4px; }
-.flag-row { display: grid; grid-template-columns: 115px 1fr 45px; gap: 6px; padding: 5px 0; border-bottom: 1px solid rgba(190,215,224,.05); font-size: 10px; }
-.flag-row b { color: var(--blue); font: 9px "IBM Plex Mono", monospace; }
-.flag-row span { color: var(--muted); }
-.flag-row em { color: var(--orange); text-align: right; font: 9px "IBM Plex Mono", monospace; font-style: normal; }
-.stats-footnote { margin-top: 9px; color: var(--faint); font-size: 9px; }
-.tabs-panel { height: 290px; flex: none; display: flex; flex-direction: column; overflow: hidden; }
-.tabs { flex-shrink: 0; display: flex; gap: 1px; padding: 8px 8px 0; overflow-x: auto; border-bottom: 1px solid var(--line); background: rgba(8, 14, 18, .25); }
-.tab-button { position: relative; padding: 9px 10px 10px; color: var(--muted); border: 0; background: none; font: 700 9px "IBM Plex Mono", monospace; letter-spacing: .05em; white-space: nowrap; }
-.tab-button:hover { color: var(--ink); }.tab-button.active { color: var(--home); }.tab-button.active::after { content: ""; position: absolute; bottom: -1px; left: 8px; right: 8px; height: 2px; background: var(--home); }
-.tab-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.tab-pane { flex: 1; min-height: 0; padding: 13px; display: flex; flex-direction: column; }
-.tab-pane[hidden] { display: none; }
-.tab-toolbar { flex-shrink: 0; min-height: 25px; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-.filter-row { display: flex; flex-wrap: wrap; gap: 5px; }.filter-button, .preset-button { padding: 4px 8px; color: #b8c7d1; background: rgba(255,255,255,.06); border: 1px solid rgba(190,215,224,.12); border-radius: 4px; font: 500 10px "IBM Plex Mono", monospace; transition: all .15s ease; }.filter-button:hover { background: rgba(255,255,255,.12); color: var(--ink); }.filter-button.active { color: #071912; border-color: rgba(44,229,155,.8); background: #2ce59b; font-weight: 700; box-shadow: 0 0 10px rgba(44,229,155,.25); }
-.muted-label { color: #8fa0ac; font: 10px "IBM Plex Mono", monospace; white-space: nowrap; }
-.timeline { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; scrollbar-color: rgba(190,215,224,.3) transparent; }
-.timeline::-webkit-scrollbar, .anomaly-list::-webkit-scrollbar, .frame-json::-webkit-scrollbar { width: 6px; height: 6px; }.timeline::-webkit-scrollbar-thumb, .anomaly-list::-webkit-scrollbar-thumb, .frame-json::-webkit-scrollbar-thumb { background: rgba(190,215,224,.28); border-radius: 4px; }
-.event-row { display: grid; grid-template-columns: 58px 48px 125px 1fr; align-items: center; gap: 8px; min-height: 32px; padding: 5px 9px; border-left: 3px solid transparent; border-bottom: 1px solid rgba(190,215,224,.07); color: #c4d2dc; font-size: 11px; cursor: pointer; transition: all .12s ease; opacity: .88; }.event-row:hover { background: rgba(255,255,255,.08); opacity: 1; }.event-row.passed { opacity: .75; color: #9bb0bc; }.event-row.current { opacity: 1; color: #ffffff; background: rgba(44,229,155,.18); border-left-color: var(--home); font-weight: 600; box-shadow: inset 0 0 0 1px rgba(44,229,155,.35); }.event-time { font: 600 10.5px "IBM Plex Mono", monospace; color: #8fa0ac; }.event-possession { font: 700 10.5px "IBM Plex Mono", monospace; color: var(--purple); }.event-tag { display: inline-flex; align-items: center; justify-content: center; padding: 2px 6px; border-radius: 3px; font: 700 9.5px "IBM Plex Mono", monospace; letter-spacing: 0.02em; }.event-detail { font: 11px "Noto Sans CJK SC", "IBM Plex Sans", sans-serif; color: #e1e9ee; line-height: 1.4; }
-.event-tag.tag-score { color: #0b4528; background: #34d399; font-weight: 800; }
-.event-tag.tag-shot { color: #431c03; background: #fb923c; }
-.event-tag.tag-foul { color: #450a0a; background: #f87171; }
-.event-tag.tag-turnover, .event-tag.tag-violation { color: #4c0519; background: #fb7185; }
-.event-tag.tag-screen { color: #1e1b4b; background: #818cf8; }
-.event-tag.tag-rebound { color: #083344; background: #38bdf8; }
-.event-tag.tag-tipoff { color: #3b0764; background: #c084fc; }
-.event-tag.tag-drive { color: #2e1065; background: #a78bfa; }
-.empty-state { display: grid; place-items: center; min-height: 100px; color: var(--faint); font: 11px "IBM Plex Mono", monospace; text-align: center; }
-.decision-panel { height: 450px; overflow: auto; padding-right: 4px; }.decision-head { display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid var(--line); }.decision-head strong { color: var(--home); font: 600 14px "IBM Plex Mono", monospace; }.decision-head span { color: var(--muted); font: 10px "IBM Plex Mono", monospace; }.decision-section { margin-top: 13px; }.decision-title { margin-bottom: 6px; color: var(--faint); font: 700 9px "IBM Plex Mono", monospace; letter-spacing: .1em; text-transform: uppercase; }.score-bar-row { display: grid; grid-template-columns: 120px 1fr 48px; align-items: center; gap: 7px; min-height: 24px; }.score-bar-label { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font: 10px "IBM Plex Mono", monospace; }.score-bar-track { height: 6px; overflow: hidden; background: rgba(255,255,255,.07); border-radius: 3px; }.score-bar-fill { height: 100%; min-width: 1px; background: var(--blue); border-radius: 3px; transition: width .18s ease; }.score-bar-fill.chosen { background: var(--home); }.score-bar-value { text-align: right; color: var(--ink); font: 10px "IBM Plex Mono", monospace; }.chips { display: flex; flex-wrap: wrap; gap: 5px; }.chip { padding: 4px 6px; color: var(--muted); background: rgba(255,255,255,.05); border: 1px solid rgba(190,215,224,.1); border-radius: 3px; font: 9px "IBM Plex Mono", monospace; }.chip.bad { color: #ffc2c9; background: rgba(255,111,126,.09); border-color: rgba(255,111,126,.22); }.chip.warn { color: #ffe0a0; background: rgba(245,189,69,.09); border-color: rgba(245,189,69,.22); }..flag-row { display: grid; grid-template-columns: 115px 1fr 45px; gap: 6px; padding: 5px 0; border-bottom: 1px solid rgba(190,215,224,.05); font-size: 10px; }.flag-row b { color: var(--blue); font: 9px "IBM Plex Mono", monospace; }.flag-row span { color: var(--muted); }.flag-row em { color: var(--orange); text-align: right; font: 9px "IBM Plex Mono", monospace; font-style: normal; }
-.shot-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(130px, .7fr); gap: 12px; align-items: start; }.shot-layout canvas { display: block; width: 100%; height: auto; border-radius: 5px; background: #b8a27d; }.zone-table { display: grid; gap: 5px; }.zone-row { padding: 7px; background: rgba(255,255,255,.035); border-left: 2px solid var(--blue); }.zone-row strong { display: block; color: var(--ink); font: 10px "IBM Plex Mono", monospace; }.zone-row span { display: block; margin-top: 3px; color: var(--muted); font: 9px "IBM Plex Mono", monospace; }
-.frame-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }.text-button { padding: 4px 7px; color: var(--muted); background: rgba(255,255,255,.035); border: 1px solid var(--line); border-radius: 4px; font: 9px "IBM Plex Mono", monospace; }.frame-json { height: 425px; overflow: auto; margin: 0; padding: 11px; color: #c1e9d9; background: rgba(5, 10, 13, .55); border: 1px solid rgba(190,215,224,.08); border-radius: 5px; font: 10px/1.5 "IBM Plex Mono", monospace; white-space: pre-wrap; word-break: break-word; }
-.rules-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }.rules-toolbar p { margin: 5px 0 0; color: var(--muted); font-size: 10px; }.rules-actions { display: flex; gap: 6px; }.button-small { height: 27px; padding: 0 9px; font-size: 9px; }.preset-row { display: flex; align-items: center; gap: 5px; margin: 13px 0 7px; color: var(--faint); font: 9px "IBM Plex Mono", monospace; }.rules-editor { display: block; width: 100%; height: 365px; resize: vertical; padding: 10px; color: #c1e9d9; background: rgba(5, 10, 13, .55); border: 1px solid rgba(190,215,224,.08); border-radius: 5px; outline: none; font: 10px/1.5 "IBM Plex Mono", monospace; }.rules-status { min-height: 22px; padding-top: 7px; color: var(--muted); font: 10px "IBM Plex Mono", monospace; }.rules-status.error { color: var(--red); }.rules-status.success { color: var(--green); }
-.playback { position: fixed; z-index: 5; right: clamp(12px, 2.5vw, 40px); bottom: 15px; left: clamp(12px, 2.5vw, 40px); min-height: 62px; padding: 10px 14px; display: flex; align-items: center; gap: 17px; background: rgba(18, 29, 36, .95); border-color: rgba(190,215,224,.2); backdrop-filter: blur(18px); }.transport-group, .speed-group, .jump-group { display: flex; align-items: center; gap: 4px; }.transport-button { width: 28px; height: 28px; padding: 0; color: var(--muted); background: rgba(255,255,255,.045); border: 1px solid transparent; border-radius: 4px; font: 12px "IBM Plex Mono", monospace; }.transport-button:hover { color: var(--ink); border-color: var(--line); }.play-button { color: #071a13; background: var(--home); }.progress-wrap { flex: 1; min-width: 100px; }.progress-wrap input { display: block; width: 100%; accent-color: var(--home); }.progress-labels { display: flex; justify-content: space-between; margin-top: 4px; color: var(--faint); font: 9px "IBM Plex Mono", monospace; }.speed-group { color: var(--faint); font: 9px "IBM Plex Mono", monospace; }.speed-group button { padding: 4px 5px; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 3px; font: 9px "IBM Plex Mono", monospace; }.speed-group button.active { color: var(--home); border-color: rgba(44,229,155,.3); background: rgba(44,229,155,.08); }.jump-group { color: var(--faint); font: 9px "IBM Plex Mono", monospace; }.jump-group input { width: 66px; height: 25px; padding: 0 5px; color: var(--ink); background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: 3px; font: 10px "IBM Plex Mono", monospace; }
-@media (max-width: 1150px) {
-  .workspace { grid-template-columns: 1fr; }
-  .inspector-column { display: grid; grid-template-columns: minmax(260px, .65fr) minmax(500px, 1.35fr); align-items: start; }
-  .tabs-panel { min-height: 550px; }
+
+@keyframes blink {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
 }
 
-@media (max-width: 768px) {
-  /* 1. 顶部控制栏移动端重构 */
-  .topbar {
-    padding: 10px 14px;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
-    min-height: auto;
+/* ==========================================================================
+   6. 移动端专门响应适配 (@media <= 640px)
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  .app-header {
+    height: 48px;
+    padding: 0 12px;
   }
-  .topbar-main {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-  }
-  .brand-lockup {
-    min-width: auto;
-  }
-  .brand-mark {
-    width: 36px;
-    height: 36px;
-    font-size: 13px;
-  }
-  h1 {
-    font-size: 17px;
-  }
-  h1 em {
-    display: none;
-  }
-  .run-status {
-    min-width: auto;
-    font-size: 10px;
-    text-align: right;
-  }
-  .run-controls {
-    display: grid;
-    grid-template-columns: 1fr 1.3fr auto;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-  }
-  .compact-field {
-    width: 100%;
+  
+  .pill-group {
+    padding: 2px 4px;
     gap: 4px;
-    font-size: 8px;
   }
-  .compact-field input {
-    width: 100%;
-    height: 34px;
-    font-size: 13px;
+  .pill-label {
+    display: none; /* 移动端隐藏 SEED/SCOPE 标签，留出空间 */
   }
-  .compact-field select {
-    width: 100%;
-    height: 34px;
+  .pill-field input {
+    width: 36px;
     font-size: 11px;
   }
-  .button-primary {
-    height: 34px;
-    padding: 0 14px;
+  .pill-field select {
     font-size: 11px;
-    font-weight: 800;
+    max-width: 64px;
   }
-  .file-button {
-    display: none; /* 移动端隐藏手动上传文件按钮以精简布局 */
+  .btn-run {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 11px;
   }
-
-  /* 2. 警报与辅助栏 */
-  .alert-strip {
-    padding: 6px 12px;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .alert-copy {
-    font-size: 10px;
-  }
-  .alert-meta {
-    width: 100%;
-    justify-content: flex-end;
-    margin-left: 0;
-    font-size: 9px;
+  .btn-icon-upload {
+    display: none; /* 手机端隐藏上传按钮 */
   }
 
-  /* 3. 工作区网格与防遮挡边距 */
-  .workspace {
-    padding: 10px 10px calc(110px + env(safe-area-inset-bottom, 16px));
+  .arena-layout {
+    padding: 10px 10px;
     gap: 12px;
   }
-  .inspector-column {
-    display: flex;
-    flex-direction: column;
-  }
 
-  /* 4. 比分栏与数据微卡片 */
-  .scoreboard {
-    padding: 10px 14px;
-    min-height: 80px;
-    gap: 8px;
+  .broadcast-scoreboard {
+    height: 52px;
+    padding: 0 12px;
   }
-  .team-score strong {
-    font-size: 26px;
-  }
-  .team-swatch {
-    height: 28px;
-    width: 6px;
-  }
-  .game-clock-block > strong {
-    font-size: 22px;
-  }
-  .micro-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
-  }
-  .micro-card {
-    padding: 10px 12px;
-  }
-  .micro-card strong {
-    font-size: 12px;
-  }
-
-  /* 5. 球场画布与工具栏（彻底消除 CONTACT_BUMP 造成的跳动挤压） */
-  .court-wrap {
-    padding: 6px;
-    contain: layout paint;
-  }
-  .court-toolbar {
-    height: 36px;
-    min-height: 36px;
-    max-height: 36px;
-    box-sizing: border-box;
-    padding: 0 10px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: nowrap;
-    overflow: hidden;
-  }
-  .court-toolbar .section-kicker {
-    display: none;
-  }
-  .court-toolbar > div:first-child {
-    flex-shrink: 0;
-    margin-right: 6px;
-  }
-  .toolbar-chips {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex-wrap: nowrap;
-    overflow: hidden;
-    flex-shrink: 1;
-    justify-content: flex-end;
-  }
-  .data-chip {
-    flex-shrink: 0;
-    padding: 3px 5px;
-    font-size: 8.5px;
-    line-height: 1;
-    white-space: nowrap;
-  }
-  .event-chip {
-    max-width: 0;
-    opacity: 0;
-    transform: scale(0.85);
-    margin: 0;
-    padding: 0;
-    border: 0 solid rgba(255, 188, 66, .45);
-    overflow: hidden;
-    white-space: nowrap;
-    font-size: 8px;
-    flex-shrink: 0;
-    transition: max-width 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-                opacity 0.25s ease,
-                transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275),
-                padding 0.25s ease;
-  }
-  .event-chip.active {
-    max-width: 120px;
-    opacity: 1;
-    transform: scale(1);
-    padding: 2px 6px;
-    margin-right: 3px;
-    border-width: 1px;
-    text-overflow: ellipsis;
-  }
-  .court-footer {
-    height: 34px;
-    min-height: 34px;
-    max-height: 34px;
-    box-sizing: border-box;
-    padding: 0 10px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: nowrap;
-    overflow: hidden;
-  }
-  .court-note {
-    font-size: 9.5px;
-    flex: 1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .player-tooltip {
-    min-width: 220px;
-    padding: 8px 14px;
-    border-radius: 8px;
-    backdrop-filter: blur(12px);
-    background: rgba(12, 19, 24, 0.94);
-    border: 1px solid rgba(44, 229, 155, 0.5);
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
-    text-align: center;
-  }
-
-  /* 6. 事件流移动端流式重排（重点：两行舒适排版） */
-  .tabs-panel {
-    height: auto;
-    min-height: 380px;
-    max-height: 520px;
-  }
-  .event-row {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 4px;
-    padding: 8px 10px;
-    min-height: auto;
-  }
-  .event-row > :first-child {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .event-row .event-time {
-    font-size: 10px;
-  }
-  .event-row .event-possession {
-    font-size: 10px;
-    margin-right: 4px;
-  }
-  .event-row .event-tag {
-    font-size: 9px;
-    padding: 1px 5px;
-  }
-  .event-row .event-detail {
-    font-size: 12px;
-    line-height: 1.4;
-    padding-left: 2px;
-  }
-
-  /* 7. 统计表与图表在手机端的自适应 */
-  .stat-row {
-    grid-template-columns: 1fr 55px 75px 8px;
-    gap: 4px;
-    font-size: 10.5px;
-  }
-  .stat-value {
+  .team-name {
     font-size: 11px;
   }
-  .stat-baseline {
-    font-size: 9px;
+  .team-score {
+    font-size: 24px;
+    min-width: 32px;
   }
-  .shot-layout {
-    grid-template-columns: 1fr;
-  }
-
-  /* 8. 移动端悬浮播放底栏（加大人性化触控区域，支持 iPhone 底部黑条） */
-  .playback {
-    right: 8px;
-    left: 8px;
-    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-    min-height: 54px;
-    padding: 6px 10px;
-    gap: 8px;
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, .5);
-  }
-  .transport-group {
-    gap: 2px;
-  }
-  .transport-button {
-    width: 32px;
-    height: 32px;
+  .live-clock {
     font-size: 13px;
   }
-  .play-button {
-    width: 36px;
-    height: 36px;
-    font-size: 15px;
-  }
-  .progress-wrap {
-    min-width: 60px;
-  }
-  .progress-wrap input {
-    height: 20px;
-  }
-  .speed-group, .jump-group {
-    display: none; /* 移动端屏幕窄，隐藏次要的跳帧与倍速，保留主控条 */
+  .match-meta {
+    padding: 0 10px;
   }
 
-  /* 9. 移动端触控物理反馈与自然过渡 */
-  .button:active, .transport-button:active, .play-button:active {
-    transform: scale(0.94);
-    transition: transform 0.08s ease;
+  .court-container {
+    border-radius: var(--radius-md);
   }
-  .tabs {
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+  .court-overlay-hud {
+    top: 6px;
+    right: 8px;
+    gap: 4px;
   }
-  .tabs::-webkit-scrollbar {
-    display: none;
+  .hud-tag {
+    font-size: 7.5px;
+    padding: 2px 6px;
   }
-  .court-panel {
-    border-radius: 12px;
-    box-shadow: 0 12px 36px -8px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  .event-pill.active {
+    max-width: 120px;
+    font-size: 8px;
+    padding: 2px 6px;
+  }
+
+  .tactical-subtitle-bar {
+    height: 32px;
+    padding: 0 10px;
+    font-size: 10.5px;
+  }
+
+  .inspector-card {
+    border-radius: var(--radius-md);
+  }
+  .tab-btn {
+    padding: 10px 12px;
+    font-size: 11.5px;
+  }
+  .tab-content {
+    padding: 10px;
+    min-height: 220px;
+  }
+
+  .player-dock {
+    width: calc(100% - 16px);
+    height: 50px;
+    padding: 0 10px;
+    gap: 8px;
+  }
+  .dock-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+  }
+  .dock-btn-play {
+    width: 34px;
+    height: 34px;
+    font-size: 12px;
+  }
+  .dock-time-display {
+    font-size: 10px;
+    min-width: 50px;
+  }
+
+  .advanced-grid {
+    grid-template-columns: 1fr;
   }
 }
