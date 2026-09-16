@@ -777,7 +777,8 @@
         const timeline = $("timeline");
         if (timeline && timeline.scrollHeight > timeline.clientHeight) {
           const rowTop = current.offsetTop - timeline.offsetTop;
-          const target = rowTop - timeline.clientHeight / 2 + current.clientHeight / 2;
+          const target =
+            rowTop - timeline.clientHeight / 2 + current.clientHeight / 2;
           timeline.scrollTop = Math.max(0, target);
         }
       }
@@ -859,20 +860,26 @@
     if (chip) {
       if (names.length) {
         chip.textContent = names.join(" · ");
-        chip.style.display = "";
+        chip.classList.add("active");
       } else {
-        chip.style.display = "none";
+        chip.classList.remove("active");
       }
     }
     $("possessionLabel").textContent = `POS #${tick.possession_id ?? "—"}`;
     const newHome = finite(tick.score?.home).toFixed(0);
     const newAway = finite(tick.score?.away).toFixed(0);
-    if ($("homeScore").textContent !== newHome && $("homeScore").textContent !== "") {
+    if (
+      $("homeScore").textContent !== newHome &&
+      $("homeScore").textContent !== ""
+    ) {
       $("homeScore").classList.remove("score-pulse");
       void $("homeScore").offsetWidth;
       $("homeScore").classList.add("score-pulse");
     }
-    if ($("awayScore").textContent !== newAway && $("awayScore").textContent !== "") {
+    if (
+      $("awayScore").textContent !== newAway &&
+      $("awayScore").textContent !== ""
+    ) {
       $("awayScore").classList.remove("score-pulse");
       void $("awayScore").offsetWidth;
       $("awayScore").classList.add("score-pulse");
@@ -881,9 +888,9 @@
     $("awayScore").textContent = newAway;
     $("periodLabel").textContent = `Q${tick.period || 1}`;
     $("gameClock").textContent = timeClock(tick.gameClock ?? tick.t_game);
+    const sc = finite(tick.shotClock);
     $("shotClock").textContent = one(tick.shotClock);
-    $("shotClock").style.color =
-      finite(tick.shotClock) <= 5 ? "var(--red)" : "";
+    $("shotClock").classList.toggle("urgent-shot-clock", sc <= 5 && sc > 0);
     $("flowLabel").textContent = String(tick.game_flow || "LIVE")
       .replaceAll("Ball", "")
       .toUpperCase();
@@ -891,7 +898,15 @@
       `${tick.team_fouls_home ?? 0} / ${tick.team_fouls_away ?? 0}`;
     $("freeThrows").textContent = String(tick.free_throws_remaining ?? 0);
     $("intensityReadout").textContent = tick.intensity || "—";
-    $("calloutText").textContent = tick.callout || "—";
+    const callout = tick.callout || "—";
+    if ($("calloutText").textContent !== callout) {
+      $("calloutText").textContent = callout;
+      if (callout !== "—") {
+        $("calloutText").classList.remove("callout-flash");
+        void $("calloutText").offsetWidth;
+        $("calloutText").classList.add("callout-flash");
+      }
+    }
     const dead = /Dead|Free|Quarter|Half|GameEnd/.test(String(tick.game_flow));
     $("flowLabel").style.color = dead ? "var(--away)" : "";
   }
@@ -1861,21 +1876,39 @@
     $("courtCanvas").addEventListener("mousemove", (event) => {
       handlePointer(event.clientX, event.clientY, event.currentTarget);
     });
-    $("courtCanvas").addEventListener("touchstart", (event) => {
-      if (event.touches.length === 1) {
-        handlePointer(event.touches[0].clientX, event.touches[0].clientY, event.currentTarget);
-      }
-    }, { passive: true });
-    $("courtCanvas").addEventListener("touchmove", (event) => {
-      if (event.touches.length === 1) {
-        handlePointer(event.touches[0].clientX, event.touches[0].clientY, event.currentTarget);
-      }
-    }, { passive: true });
+    $("courtCanvas").addEventListener(
+      "touchstart",
+      (event) => {
+        if (event.touches.length === 1) {
+          handlePointer(
+            event.touches[0].clientX,
+            event.touches[0].clientY,
+            event.currentTarget,
+          );
+        }
+      },
+      { passive: true },
+    );
+    $("courtCanvas").addEventListener(
+      "touchmove",
+      (event) => {
+        if (event.touches.length === 1) {
+          handlePointer(
+            event.touches[0].clientX,
+            event.touches[0].clientY,
+            event.currentTarget,
+          );
+        }
+      },
+      { passive: true },
+    );
     $("courtCanvas").addEventListener("mouseleave", () => {
       $("playerTooltip").hidden = true;
     });
     $("courtCanvas").addEventListener("touchend", () => {
-      setTimeout(() => { $("playerTooltip").hidden = true; }, 2500);
+      setTimeout(() => {
+        $("playerTooltip").hidden = true;
+      }, 2500);
     });
     document.addEventListener("keydown", (event) => {
       if (event.target.matches("input, textarea, select")) return;

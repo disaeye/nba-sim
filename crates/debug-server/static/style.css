@@ -93,16 +93,65 @@ h1 em { color: var(--muted); font: 500 13px/1 "IBM Plex Sans", sans-serif; font-
 .toolbar-chips, .legend { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; overflow: hidden; }
 .data-chip { flex-shrink: 0; padding: 4px 6px; color: var(--muted); background: rgba(255,255,255,.045); border-radius: 3px; font: 9px "IBM Plex Mono", monospace; white-space: nowrap; }
 .accent-chip { color: var(--home); background: rgba(44,229,155,.09); }
-.event-chip { flex-shrink: 0; font-weight: 700; color: #ffbc42; background: rgba(255, 188, 66, .15); border: 1px solid rgba(255, 188, 66, .35); animation: chipPulse .8s infinite alternate; }
-@keyframes chipPulse { from { opacity: .75; transform: scale(.98); } to { opacity: 1; transform: scale(1.02); } }
+.event-chip {
+  max-width: 0;
+  opacity: 0;
+  transform: scale(0.85);
+  margin: 0;
+  padding: 0;
+  border: 0 solid rgba(255, 188, 66, .45);
+  overflow: hidden;
+  white-space: nowrap;
+  font-weight: 700;
+  color: #ffca4f;
+  background: rgba(255, 188, 66, .18);
+  border-radius: 4px;
+  box-shadow: 0 0 16px rgba(255, 188, 66, 0.25);
+  transition: max-width 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.25s ease,
+              transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+              padding 0.25s ease,
+              margin 0.25s ease;
+  pointer-events: none;
+}
+.event-chip.active {
+  max-width: 170px;
+  opacity: 1;
+  transform: scale(1);
+  padding: 3px 8px;
+  margin-right: 4px;
+  border-width: 1px;
+  pointer-events: auto;
+  animation: chipPulse 1.2s infinite alternate ease-in-out;
+}
+@keyframes chipPulse { from { opacity: .82; transform: scale(.98); } to { opacity: 1; transform: scale(1.02); } }
 @keyframes scorePulse {
   0% { transform: scale(1); filter: brightness(1); }
-  40% { transform: scale(1.25); filter: brightness(1.7) drop-shadow(0 0 12px rgba(255, 188, 66, 0.8)); color: #ffca4f; }
+  35% { transform: scale(1.26) translateY(-2px); filter: brightness(1.7) drop-shadow(0 0 14px rgba(44, 229, 155, 0.8)); }
+  70% { transform: scale(0.96); filter: brightness(1.2); }
   100% { transform: scale(1); filter: brightness(1); }
 }
 .score-pulse {
   display: inline-block;
-  animation: scorePulse 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  animation: scorePulse 0.48s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+@keyframes urgentPulse {
+  0% { transform: scale(1); text-shadow: 0 0 4px rgba(255, 111, 126, 0.4); color: #ff6f7e; }
+  50% { transform: scale(1.14); text-shadow: 0 0 14px rgba(255, 111, 126, 0.9); color: #ff3b50; }
+  100% { transform: scale(1); text-shadow: 0 0 4px rgba(255, 111, 126, 0.4); color: #ff6f7e; }
+}
+#shotClock.urgent-shot-clock {
+  display: inline-block;
+  animation: urgentPulse 0.75s infinite ease-in-out;
+  font-weight: 800;
+}
+@keyframes calloutFlash {
+  0% { opacity: 0.25; transform: translateX(-6px); filter: brightness(1.6); color: #2ce59b; }
+  100% { opacity: 1; transform: translateX(0); filter: brightness(1); }
+}
+.callout-flash {
+  display: inline-block;
+  animation: calloutFlash 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .court-wrap { position: relative; padding: 10px; background: #18221f; box-sizing: border-box; contain: layout; }
 #courtCanvas { display: block; width: 100%; height: auto; border-radius: 6px; background: #b8a27d; cursor: crosshair; aspect-ratio: 960 / 520; }
@@ -325,13 +374,29 @@ h1 em { color: var(--muted); font: 500 13px/1 "IBM Plex Sans", sans-serif; font-
     white-space: nowrap;
   }
   .event-chip {
-    flex-shrink: 0;
-    max-width: 130px;
+    max-width: 0;
+    opacity: 0;
+    transform: scale(0.85);
+    margin: 0;
+    padding: 0;
+    border: 0 solid rgba(255, 188, 66, .45);
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 8px;
-    padding: 2px 4px;
+    flex-shrink: 0;
+    transition: max-width 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.25s ease,
+                transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+                padding 0.25s ease;
+  }
+  .event-chip.active {
+    max-width: 120px;
+    opacity: 1;
+    transform: scale(1);
+    padding: 2px 6px;
+    margin-right: 3px;
+    border-width: 1px;
+    text-overflow: ellipsis;
   }
   .court-footer {
     height: 34px;
@@ -447,5 +512,22 @@ h1 em { color: var(--muted); font: 500 13px/1 "IBM Plex Sans", sans-serif; font-
   }
   .speed-group, .jump-group {
     display: none; /* 移动端屏幕窄，隐藏次要的跳帧与倍速，保留主控条 */
+  }
+
+  /* 9. 移动端触控物理反馈与自然过渡 */
+  .button:active, .transport-button:active, .play-button:active {
+    transform: scale(0.94);
+    transition: transform 0.08s ease;
+  }
+  .tabs {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .court-panel {
+    border-radius: 12px;
+    box-shadow: 0 12px 36px -8px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
   }
 }
