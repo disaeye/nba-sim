@@ -145,6 +145,20 @@ D12 从本周期计划执行完毕后已从 `current/plan.md` 移除（该文件
 
 黄金哈希受控演进至 **v64（`0x01885463019631e7`）**，全套件全绿，8-seed stats 在带（total_p50=212.0，3P%=37.3%）。
 
+### 4.4 第一性原理与 ECS 动力学周期成果（D22–D28 闭环）
+
+本周期全部 7 项任务（D22–D28）已全部闭环并通过机械判定出口门：
+
+| 项 | 结论 | 证据/测试 |
+| --- | --- | --- |
+| **D22** ECS 纯数据实体世界解耦 | 实现 `MatchWorld` 纯数据实体组件化，提取 4 大无状态管线系统与调度器解耦 | `crates/engine/src/world.rs`、`tests/match_world.rs` |
+| **D23** 空间 Voronoi 拓扑与防守压迫密度 | 实现基于加权高斯核衰减与 Voronoi 空间开阔度估算，防守退后压迫单调递减 | `crates/engine/src/world.rs`、`tests/match_world.rs::test_spatial_perception_monotonicity` |
+| **D24** 连续受限势能动力学 | 球员位移由驱动力、合法圆柱体排斥势能、侧向抓地力与惯性制动约束 | `crates/engine/src/world.rs`、`tests/match_world.rs::test_traction_envelope_lateral_limit` |
+| **D25** 微观动作链状态机 | 建立 Gather ➔ Elevate ➔ Release ➔ Land 强类型状态机与盖帽/犯规合法窗口 | `crates/engine/src/world.rs`、`tests/match_world.rs::test_action_kinematics_phase_transitions_and_windows` |
+| **D26** 弱侧协防与 X-Out 责任链 | 打通 Low-man 下沉护筐与 High-man X-Out 轮转回位责任链 | `crates/decision/src/defense.rs`、`crates/decision/tests/defense_responsibility_chain.rs` |
+| **D27** 零消费剩余规则字段闭环 | 接入全部 6 项未接线规则，`UNIMPLEMENTED_RULE_FIELDS` 正式清零 | `crates/domain/src/capability.rs`、`crates/domain/src/rules.rs`、`tests/rules_consumption.rs` |
+| **D28** 周期出口全矩阵回归 | 46 个测试套件全绿，黄金哈希 v64 保持，三面文档守卫 100% 通过 | `./scripts/run-tests.sh`、`python3 scripts/check_docs.py` |
+
 ## 5. 开放问题
 
 | 问题 | 依赖 | 下一验证动作（新周期） |
