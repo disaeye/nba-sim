@@ -156,6 +156,53 @@ fn golden_window_covers_scoring_behaviour() {
     );
 }
 
+/// 长窗口**覆盖**犯规与罚球——但它**不是**犯规概率参数的守卫。
+///
+/// ## 为何需要这个长窗口（覆盖）
+///
+/// 探针实测（seed42 逐 tick）：
+/// - `first_foul`       = tick **3413**
+/// - `first_ft_attempt` = tick **9918**
+///
+/// 而 `golden_window_covers_scoring_behaviour` 的窗口只有 2000 tick，
+/// 在第一次犯规前就结束。
+///
+/// ## 但它验证不了概率参数（已实测，evidence §32.29.2）
+///
+/// 把 `foul_on_drive_rate` 从 0.18 降到 0.05（降 72%），
+/// **本窗口的哈希完全不变**：10200 tick 内只有 `drives=19, fouls=2`，
+/// 两种取值都掷出 2 次犯规。
+///
+/// 即这是**采样量**问题，不是窗口长度问题——单 seed 的有限窗口内
+/// 概率参数掷骰结果极可能相同。延长到 10200 甚至更长也无法解决。
+///
+/// **概率参数的守卫必须是跨 seed 聚合的统计门**
+/// （`stats_baseline` 8 seed：FT 率 0.121→0.204 确实被它抓到）。
+/// 本测试只负责「窗口里确实有犯规与罚球可被观察」这一**覆盖**前提。
+#[test]
+fn golden_window_long_covers_fouls_and_free_throws() {
+    let mut engine = MatchEngine::new(42);
+    // 必须同时覆盖首个犯规（3413）与首次罚球（9918）；
+    // 取 10200 留约 3% 余量，避免边界抖动使断言脆弱。
+    let ticks = 10200usize;
+    for _ in 0..ticks {
+        engine.step();
+    }
+    let b = engine.box_score();
+    // 覆盖断言：窗口必须真的包含这两类行为，否则本测试没有观察对象。
+    assert!(
+        b.fouls > 0,
+        "long window ({ticks} ticks, seed 42) contains no foul \
+         (measured first foul at tick 3413) — foul behaviour unobservable \
+         (evidence/problem.md §32.29)"
+    );
+    assert!(
+        b.ft_attempts > 0,
+        "long window ({ticks} ticks, seed 42) contains no free-throw attempt \
+         (measured first attempt at tick 9918)"
+    );
+}
+
 // 基线常量冻结记录（校准协议 docs/protocol.md §3）：
 //   v1 0x76e41f2a83f74b38 — 重构前锚点（BallState 写入口收敛，行为保持）
 //   v2 0xef68d18205abaa12 — 2026-08-31 回合节奏校准
