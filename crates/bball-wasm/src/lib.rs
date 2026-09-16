@@ -142,15 +142,26 @@ pub fn simulate_to_ndjson(
     };
 
     let mut engine = nba_engine::MatchEngine::with_rules(seed, rules);
-    engine.set_scope(scope).map_err(|e| JsError::new(&e))?;
+    let trimmed_scope = scope.trim().to_ascii_lowercase();
+    let normalized_scope = match trimmed_scope.as_str() {
+        "possession" | "1p" => "1p",
+        "5p" => "5p",
+        "10p" => "10p",
+        "quarter" | "1q" => "1q",
+        "full" => "full",
+        other => other,
+    };
+    engine
+        .set_scope(normalized_scope)
+        .map_err(|e| JsError::new(&e))?;
 
     let mut output = String::new();
-    let max_ticks = match scope.trim().to_ascii_lowercase().as_str() {
-        "possession" => 1_000,
-        "clutch" => 5_000,
-        "quarter" => 15_000,
-        "half" => 30_000,
-        _ => 150_000,
+    let max_ticks = match normalized_scope {
+        "1p" => 2_000,
+        "5p" => 10_000,
+        "10p" => 20_000,
+        "1q" => 30_000,
+        _ => 200_000,
     };
 
     let mut ticks = 0;
