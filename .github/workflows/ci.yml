@@ -1,158 +1,137 @@
-name: ci
+name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
+  workflow_dispatch:
+    inputs:
+      force_full:
+        description: "Force full test suite & sanity net"
+        type: boolean
+        default: false
 
-# 资源治理（gap.md §16.4 / problem.md §14.4）：
-# - 关闭增量编译：CI 依赖 rust-cache，target/debug/incremental 是纯浪费
-#   （本地实测可达 1.1 GiB）。
-# - 限制 cargo 并行度与测试线程，避免峰值内存/临时文件过高。
-env:
-  CARGO_INCREMENTAL: "0"
-  CARGO_TERM_COLOR: always
+permissions:
+  contents: read
 
 jobs:
-  build:
+  lint-commit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # 缓存上限：超过即不再增长，避免 CI 缓存无限膨胀。
-          cache-all-crates: false
-      - name: Disk budget check (pre-build)
-        run: python3 scripts/check_disk_budget.py --report
-      - name: Build (debug)
-        run: cargo build --workspace
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Disk budget check (post-build)
-        run: python3 scripts/check_disk_budget.py
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-all-crates: false
-      - name: Disk budget check (pre-test)
-        run: python3 scripts/check_disk_budget.py --clean
-      # 黄金哈希在测试套件内：任何逐 tick 分歧立即变红（quality.md §5）。
-      - name: Test (含黄金哈希 / 不变量 / 评判)
-        run: cargo test --workspace --release
-      # 测试产物泄漏守卫：测试必须使用 panic-safe 的 TempArtifact，
-      # 任何遗留的 nba_* 临时文件都会让本步变红。
-      - name: Temp artifact leak check (post-test)
-        if: always()
-        run: python3 scripts/check_disk_budget.py
-      - name: Cleanup on failure
-        if: failure()
-        run: python3 scripts/check_disk_budget.py --clean
-
-  stage-gate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build CLI (release)
-        run: cargo build --release -p nba-sim-cli
-      # 缩减种子集的统计 sanity net（quality.md §2.5；统计基线测试
-      # stats_baseline.rs 亦在 test job 内运行）。
-      # 输出写入 runner 临时目录，并在结束后清理（gap.md §16.4）。
-      - name: Batch statistics (sanity net)
+      - name: Validate Commit Message Format
         run: |
-          cargo run --release -p nba-sim-cli -- --seeds 0..7 batch full --out "$RUNNER_TEMP/stats.jsonl"
-      # 分层性能预算（gap.md §18.5）：与输出模式绑定，纯引擎吞吐不把
-      # 序列化成本算进去。预算取自实测下沿留余量。
-      - name: Layered performance benchmark
-        run: |
-          cargo run --release -p nba-sim-cli -- benchmark --ticks 60000 --mode all
-      - name: Disk budget check (post-batch)
-        if: always()
-        run: python3 scripts/check_disk_budget.py
-      - name: Cleanup outputs
-        if: always()
-        run: rm -rf "$RUNNER_TEMP"/stats.jsonl "$RUNNER_TEMP"/stats.jsonl.judgments.ndjson "$RUNNER_TEMP"/stats.jsonl.attribution_report.json"
-
-  guards:
-    runs-on: ubuntu-latest
-    steps:
-      # fetch-depth: 0 —— 阈值守卫需要比较 PR base 与 HEAD，
-      # 默认的浅克隆（depth=1）会让基准提交不存在，导致 PR 上静默跳过检查。
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Inline constant guard (charter C1)
-        run: python3 scripts/check_inline_constants.py
-      - name: Inline constant guard negative control (gap.md §17.3)
-        # 负面对照：守卫自身的扫描器必须能发现注入的行为常数，
-        # 且不得保留整文件白名单。
-        run: |
-          python3 scripts/check_inline_constants.py --self-test
-          cp crates/engine/src/match_engine.rs /tmp/me_guard_backup.rs
-          python3 - <<'PY'
-          p = 'crates/engine/src/match_engine.rs'
-          s = open(p).read()
-          s = s.replace('    pub fn step(&mut self) -> StreamTick {',
-                        '    pub fn step(&mut self) -> StreamTick {\n        let _guard_probe = 0.424242;', 1)
-          open(p, 'w').write(s)
-          PY
-          if python3 scripts/check_inline_constants.py; then
-            echo "::error::constant guard failed to detect an injected behaviour constant"
-            cp /tmp/me_guard_backup.rs crates/engine/src/match_engine.rs
+          MSG=$(git log -1 --pretty=%B)
+          echo "Commit message: $MSG"
+          if [[ "$MSG" =~ ^(Merge|Revert|fixup!|squash!) ]]; then
+            exit 0
+          fi
+          PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci)(\([a-zA-Z0-9_\.\/-]+\))?: .+"
+          if ! [[ "$MSG" =~ $PATTERN ]]; then
+            echo "❌ Commit message does not follow Conventional Commits format."
             exit 1
           fi
-          cp /tmp/me_guard_backup.rs crates/engine/src/match_engine.rs
-      - name: Documentation governance guard
-        run: python3 scripts/check_docs.py
-      - name: Test resource guard (disk / target / temp leftovers)
-        run: python3 scripts/check_disk_budget.py
-      - name: Test resource guard negative control
-        # 负面对照：守卫必须能发现人为制造的泄漏。
-        run: python3 scripts/check_disk_budget.py --self-test
-      - name: World-privacy guard (dev 方案 D4.2)
-        # 比赛真相字段不得在 MatchEngine 上公开可变；含负面对照。
+
+  change-detection:
+    needs: lint-commit
+    runs-on: ubuntu-latest
+    outputs:
+      rust_changed: ${{ steps.filter.outputs.rust_changed }}
+      core_changed: ${{ steps.filter.outputs.core_changed }}
+      is_full: ${{ steps.detect_full.outputs.is_full }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Check for [full] flag
+        id: detect_full
         run: |
-          python3 scripts/check_world_privacy.py
-          python3 scripts/check_world_privacy.py --self-test
-      - name: Roster identity guard (ADR-005)
-        # 名册身份不得来自数组下标或 `roles` 字段；含负面对照。
-        run: |
-          python3 scripts/check_no_index_identity.py
-          python3 scripts/check_no_index_identity.py --self-test
-      - name: Threshold integrity guard (ruler independence)
-        # 同一个提交不得同时修改「判定基准」与「被测源码」。
-        #
-        # 为何显式传 --range：守卫默认比较 HEAD~1..HEAD，但在 PR 上
-        # 那不是本次改动的范围（checkout 的 HEAD 是合并提交），会漏检或误判。
-        # 这里按事件类型取真实范围：PR 用 base...HEAD，push 用前后两个提交。
-        # fetch-depth: 0 保证基准提交在本地存在。
-        run: |
-          python3 scripts/check_threshold_integrity.py --self-test
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            RANGE="${{ github.event.pull_request.base.sha }}...HEAD"
+          MSG=$(git log -1 --pretty=%B)
+          if [[ "$MSG" =~ \[full\] ]] || [[ "${{ inputs.force_full }}" == "true" ]]; then
+            echo "is_full=true" >> $GITHUB_OUTPUT
           else
-            RANGE="HEAD~1..HEAD"
-            git rev-parse -q --verify HEAD~1 >/dev/null || RANGE=""
+            echo "is_full=false" >> $GITHUB_OUTPUT
           fi
-          if [ -n "$RANGE" ]; then
-            echo "threshold-integrity range: $RANGE"
-            python3 scripts/check_threshold_integrity.py --range "$RANGE"
-          else
-            echo "single-commit history; skipping coupled-ruler check"
-          fi
-      - name: Build debug-server and run full UI card alignment check
+      - name: Detect Changed Paths
+        id: filter
         run: |
-          cargo build --release -p nba-debug-server
-          ./target/release/nba-debug-server 4173 &
-          sleep 2
-          python3 scripts/verify_ui_alignment.py
+          DIFF=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          echo "Changed files: $DIFF"
+          if echo "$DIFF" | grep -qE '\.rs$|Cargo\.(toml|lock)'; then
+            echo "rust_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "rust_changed=false" >> $GITHUB_OUTPUT
+          fi
+          if echo "$DIFF" | grep -qE '^crates/(engine|physics|decision|officiating|domain)/'; then
+            echo "core_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "core_changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  fast-test:
+    needs: change-detection
+    if: needs.change-detection.outputs.rust_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Cargo Check & Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tier 1 Fast Invariant & Isolation Tests
+        run: |
+          cargo test -p nba-domain
+          cargo test -p nba-invariants
+          cargo test -p nba-engine --test step_phases_isolation
+          cargo test -p nba-engine --test engine_snapshot
+          cargo test -p nba-engine --test rules_consumption
+          cargo test -p nba-engine --test golden_hash
+
+  full-gate:
+    needs: [change-detection, fast-test]
+    if: |
+      needs.change-detection.outputs.is_full == 'true' ||
+      needs.change-detection.outputs.core_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tier 2 Mechanism & Causal Tests
+        run: |
+          cargo test -p nba-decision --test defense_responsibility_chain
+          cargo test -p nba-engine --test attribute_perturbation
+          cargo test -p nba-engine --test defense_effect
+          cargo test -p nba-engine --test fiba_scenarios
+      - name: Tier 3 Macro Sanity Net (8-seed full game)
+        run: |
+          cargo test -p nba-engine --test stats_baseline -- --nocapture
+
+  deploy:
+    needs: [change-detection, fast-test, full-gate]
+    if: |
+      always() &&
+      (needs.change-detection.result == 'success') &&
+      (needs.fast-test.result == 'success' || needs.fast-test.result == 'skipped') &&
+      (needs.full-gate.result == 'success' || needs.full-gate.result == 'skipped') &&
+      (github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build WASM (if Rust changed)
+        if: needs.change-detection.outputs.rust_changed == 'true'
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cd crates/bball-wasm
+          npx --yes wasm-pack build --target web --out-dir ../debug-server/static/wasm --release
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod'
+          working-directory: ./

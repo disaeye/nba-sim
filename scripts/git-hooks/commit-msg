@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# NBA-Sim commit-msg hook
+# 机械校验 commit message 格式：<type>(<scope>): <subject> [flag]
+
+commit_file="$1"
+commit_msg=$(head -n 1 "$commit_file")
+
+# 豁免 merge / revert / fixup
+if [[ "$commit_msg" =~ ^(Merge|Revert|fixup!|squash!) ]]; then
+  exit 0
+fi
+
+# 正则定义：
+# 类型：feat, fix, docs, style, refactor, perf, test, chore, ci
+# scope 可选：(xxx)
+# subject：空格后跟具体内容
+# 可选尾随标记：[full]
+pattern="^(feat|fix|docs|style|refactor|perf|test|chore|ci)(\([a-zA-Z0-9_\.\/-]+\))?: .+"
+
+if ! [[ "$commit_msg" =~ $pattern ]]; then
+  echo ""
+  echo "❌ Commit message 格式不合规！"
+  echo "   当前内容: '$commit_msg'"
+  echo ""
+  echo "📌 正确格式: <type>(<scope>): <subject> [flag]"
+  echo "   合法类型: feat | fix | docs | style | refactor | perf | test | chore | ci"
+  echo "   可选标签: [full]  (强制启动 Tier 3 全量 8 场比赛批处理大检)"
+  echo ""
+  echo "💡 正确示例:"
+  echo "   git commit -m \"feat(defense): 优化沉退防守间距\""
+  echo "   git commit -m \"fix(flow): 修复发球后球权归属 [full]\""
+  echo "   git commit -m \"docs: 更新接口设计文档\""
+  echo "   git commit -m \"chore(deps): 升级依赖版本\""
+  echo ""
+  exit 1
+fi
+
+exit 0
