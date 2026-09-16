@@ -5,6 +5,7 @@ pub mod match_engine;
 pub mod service;
 pub mod setup;
 pub mod snapshot;
+pub mod world;
 
 pub use service::{MatchInfo, MatchService, SessionState};
 
