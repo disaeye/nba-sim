@@ -160,3 +160,53 @@ handler，读取方得到 `None` 并走自己的无持球人分支；不得用�
 
 规范落点：`docs/architecture.md` §3（球权状态机）、`docs/dev/gap.md` §5；
 实证依据：`docs/dev/evidence/problem.md` §25；执行入口：`docs/dev/current/plan.md` §4（D15）。
+
+### ADR-011 · 从单体 MatchEngine 向纯数据管线与 ECS 架构演进
+
+**状态：accepted**
+
+背景：现有 `MatchEngine` 结构体已膨胀至 6,600+ 行，集成了时钟管理、名单物理、弹道积分、
+战术槽位决策、裁判判定、事件发布与解说生成等全部职责。虽然 D14–D16 完成了只读快照与部分阶段隔离，
+但核心主循环依然依赖于庞大的全局 `&mut self` 集中突变，导致：
+1. 模块间隐式耦合深，单一字段修改难以做无副作用单元隔离测试；
+2. 架构设计中宣称的“13 阶段窄签名函数式管线”无法彻底落地；
+3. 并行与向量化计算受阻。
+
+裁定：**将 MatchEngine 解构为纯数据世界（World）与无状态系统管线（Systems）**：
+1. **纯数据世界（Component World）**：世界仅包含扁平的纯数据组件，包括 `Transform`（坐标/朝向/速度）、
+   `Kinematics`（加速度/抓地力/动量）、`PlayerState`（体能/犯规/士气）、`BallComponent`（三维弹道与归属）、
+   `MatchClock`（游戏时钟与进攻时钟）和 `GameFlowLedger`（比分与账本）。
+2. **纯函数式系统（Stateless Systems Pipeline）**：主循环每个 tick 严格执行以下阶段，
+   阶段之间仅通过窄数据契约流动：
+   - `PerceptionSystem`：空间 Voronoi 拓扑与防守压迫密度计算；
+   - `DecisionSystem`：基于意图评价的动作决策（纯函数，无状态突变）；
+   - `PhysicsSystem`：刚体运动、动力学积分与弹道解算；
+   - `OfficiatingSystem`：规则越界裁决、犯规吹罚与账本守恒审计；
+   - `EventDispatcher`：不可变事件流与渲染帧打包。
+3. **迁移策略**：采取渐进式解耦。`MatchEngine` 降级为单纯的外部协调器（Facade），
+   内部逐步将各逻辑块抽离为独立 crate（`crates/engine-core`、`crates/physics`、`crates/decision`），
+   保证每一步重构均有 16-seed 黄金哈希与 G-STATS 基准守卫。
+
+规范落点：`docs/architecture.md` §4；执行入口：`docs/dev/current/plan.md`（D22–D28）。
+
+### ADR-012 · 连续受限势能场动力学与空间 Voronoi 拓扑模型
+
+**状态：accepted**
+
+背景：现有移动与突破防守系统采用“离散目标槽位插值 + 经验概率骰子判定”范式。
+球员根据预设战术插槽获得 `target_pos` 后做匀速或加减速位移，防守成功率依赖属性线性映射的骰子判定。
+这种机制导致：
+1. 球员位移生硬，缺乏真实身体惯性、变向制动距离与失位真实感；
+2. 战术跑位死板依赖静态坐标，无法根据防守真实压迫形成动态空间拉扯（Spacing）。
+
+裁定：**引入连续势能场动力学（Spatial Force Field）与沃罗诺伊空间分析（Voronoi Spacing）**：
+1. **势能场动力学（Movement by Potential Field）**：
+   - 球员移动受合力 $F = F_{attractor} + F_{repulsion} + F_{traction}$ 驱动；
+   - 篮筐与无球空位为引力源，对位防守人构成具有朝向椭圆衰减的斥力阻力场；
+   - 引入最大加速度、制动距离与变向抓地力（Traction Limit），超速或急停变向将受真实牛顿力学惯性惩罚；
+2. **空间重力与沃罗诺伊面积（Voronoi Gravity）**：
+   - 实时计算进攻球员拥有的 Voronoi 拓扑面积与局部防守压迫密度（Contestation Density）；
+   - 战术决策（传球/突破/出手）不再依赖死板槽位，而是以“空间收益导数（Spacing Yield Gradient）”驱动，
+     防守协防内缩必然自然导致外线 Voronoi 面积激增涌现空位。
+
+规范落点：`docs/tactics.md`、`docs/architecture.md`；执行入口：`docs/dev/current/plan.md`。

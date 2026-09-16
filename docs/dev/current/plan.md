@@ -1,301 +1,219 @@
-# 当前周期计划 · 从“可证明”推进到“体系化落地”
+# 当前周期计划 · 从第一性原理构建连续博弈与空间动力学引擎
 
-> 文档类型：当前未完成工作的执行计划。
-> 规则：本文件不复述历史 Round；任务关闭后只把结论写入 `docs/dev/status.md`，把过程留在周期归档。
-> 依赖入口：稳定设计见 `docs/architecture.md`、`docs/quality.md`、`docs/tactics.md`；取舍见 `docs/decisions.md`；当前判断见 `docs/dev/status.md`。
-> 编号：本周期任务块使用 `D14–D21`（历史周期 `D0–D6` 见 `cycles/20260911_first-principles/`，`D7–D13` 见 `cycles/20260916_convergence/`；编号规则见 `docs/dev/README.md` §4）。
+> 文档类型：当前未完成工作的执行设计与落地计划。
+> 规则：本文件不复述历史已归档 Round（D0–D21 见 `cycles/`）；任务关闭后将结论写入 `docs/dev/status.md`。
+> 依赖入口：稳定设计见 `docs/architecture.md`、`docs/tactics.md`；架构决策见 `docs/decisions.md`（ADR-011, ADR-012）；当前状态见 `docs/dev/status.md`。
+> 编号范围：本周期任务块使用 `D22–D28`。
 
-## 0. 周期目标
+## 0. 周期背景与总体目标
 
-上一周期（`20260916_convergence`）已完成公共边界私有化、球态转移穷举测试、篮板端到端扰动、NBA/FIBA 情景矩阵和统计门全部关闭（七项构成指标全绿）。
+上一周期（`20260916_systematization`，D14–D21）已成功实现只读快照投影（EngineSnapshot）、彻底解耦 `carrier_idx`（ADR-010）、完成 step_inner 初步切分、实现防守方案 v2 初步接线、接回 clutch 与 drive 核心规则字段、建立 FIBA 交替拥有机制，并保持全套 45 套测试用例与 G-STATS 16-seed 统计基准全绿。
 
-本周期聚焦上周期结转的结构性债务与未接线子系统，完成体系化落地：
+但在第一性原理的深度审视下，引擎依然存在深层次结构瓶颈：
 
-1. **统一快照**：落地最小只读 `snapshot` 投影，消除外部直接依赖内部 getter 的分散耦合；
-2. **球态纯化**：解耦 `carrier_idx`，消除双重 holder 依赖；
-3. **阶段拆分**：将 2082 行的 `step_inner` 拆分为窄签名阶段函数；
-4. **防守责任链**：补齐 `schemes.json` 数据资产，打通 switch/drop/hedge/recover 责任链；
-5. **零消费处置**：接线或清理 `GameRules` 21 个零消费字段与 6 个零消费能力维度；
-6. **全维度覆盖**：为剩余能力维度建立端到端因果扰动与负面对照测试；
-7. **多联赛余量**：覆盖 FIBA 特有的交替拥有与罚球进出情景。
+1. **巨石单体债务（God Class）**：`match_engine.rs` 仍有 6,600+ 行，集中管理时钟、名单、弹道、规则判定与事件流，无法彻底落实无副作用的纯函数式阶段管线；
+2. **离散概率与瞬移假象（Discrete Rolls & Teleportation）**：移动依靠目标坐标线性插值，突破与防守依赖经验骰子分支，缺少真实的身体加速度、惯性冲量与制动极限；
+3. **战术空间僵化（Rigid Slot Spacing）**：跑位依赖静态坐标槽位插值，缺乏基于空间重力与防守压迫密度（Voronoi）的自主动态拉扯；
+4. **动作微观时序缺失（Micro-Action Timings）**：投篮、传球与起跳缺乏细粒度运动学阶段划分，判定窗口粗糙。
 
-## 1. 执行纪律
+**本周期总体目标**：彻底重构底层动力学与架构，推动引擎迈向**纯数据管线（ECS Dataflow）、连续势能场动力学（Force Fields）与空间几何拓扑（Voronoi Spacing）**驱动的现代化仿真系统。
 
-- 一个任务只有在代码、针对性测试和守卫都通过后才能关闭；
-- 运行结果必须标明 seed、scope、league profile 和输出模式；
-- 行为参数改动先用规则覆盖做 A/B，再决定是否改默认值；
-- 结构重构与行为校准分开提交和验收；
-- 统计基准保持守卫：任何改动必须保证 `./scripts/run-tests.sh` 45 套件全绿，且 16-seed 构成指标不破带；
-- 当前状态只更新 `docs/dev/status.md`，原始输出进入 `docs/dev/evidence/`。
+## 1. 执行纪律与红线守卫
 
-## 2. 任务依赖
+1. **零功能回退原则**：重构每一步必须保持 `./scripts/run-tests.sh` 45 套测试套件守卫全绿；
+2. **统计健康带守卫**：16-seed 核心分布门必须保持在健康带内（`total_p50 ∈ [205, 225]`，`fg_pct ∈ [0.42, 0.52]`，`three_pct ∈ [0.30, 0.40]`）；
+3. **因果单调性检验**：任何物理与决策参数的接入，必须附带单调性因果扰动测试与断路必红测试；
+4. **渐进式迁移（Strangler Fig Pattern）**：新建核心模块，通过门面（Facade）模式逐步剥离 `MatchEngine` 内部逻辑，禁止一次性休克疗法式重写。
+
+## 2. 任务依赖关系图
 
 ```text
-D14 最小只读 snapshot 投影 ───────────► D21 周期出口与归档
-  │                                           ▲
-  ├─► D15 carrier_idx 解耦与球态归一           │
-  │     └─► D16 step_inner 窄签名拆分         │
-  │                                           │
-  ├─► D17 防守方案责任链落地                   │
-  │     └─► D18 GameRules/能力零消费处置      │
-  │                                           │
-  ├─► D19 剩余能力维度因果扰动覆盖             │
-  └─► D20 FIBA 交替拥有与罚球情景覆盖 ─────────┘
+D22 纯数据世界与系统管线解耦 (ECS Dataflow) ────────────► D28 周期出口与基准收敛
+  │                                                            ▲
+  ├─► D23 空间 Voronoi 拓扑与防守压迫感知 (PerceptionSystem)   │
+  │     └─► D26 弱侧协防与防守责任链闭环 (Help Defense)         │
+  │                                                            │
+  ├─► D24 连续受限势能场动力学与惯性制动 (PhysicsSystem)        │
+  │     └─► D25 细粒度微观动作链状态机 (Kinematics)             │
+  │                                                            │
+  └─► D27 零消费剩余字段处置与全规则闭环 ──────────────────────┘
 ```
 
-## 3. D14 · 落地 `MatchEngine` 最小只读 `snapshot` 投影
+---
 
-### 3.1 背景与现状
+## 3. D22 · 纯数据世界与系统管线解耦 (ECS / Pipeline Dataflow)
 
-上周期（D7.1）已将 16 个真相字段全部私有化，但外部调用者（CLI、评判器、测试、回放）目前通过散落的只读 getter 获取状态。按 `docs/architecture.md`，应当提供轻量级不可变只读投影。
+### 3.1 核心问题与设计目标
 
-**现状盘点**（getter 与消费方）：`MatchEngine` 现有 27 个只读 `&self` getter（`match_engine.rs:5939-6052`），按时钟族 / 比分区 / 球态球权族 / 流转犯规罚球族 / 球员名单物理族 / 回合校验族分散。关键事实：
+`MatchEngine` 单体持有过多内部可变状态。目标是将其职责解构为**纯数据存储（World）**与**无内部状态的执行管线（Systems）**，将主循环拆解为单向数据流。
 
-- 现有 `MatchEngine::snapshot()`（`match_engine.rs:6272`）**只是 `build_tick()` 的包装**，产出 `StreamTick`（`protocol/src/frame.rs:277`）——那是面向前端序列化展示的**渲染帧**（含归一化坐标、字符串枚举、`RenderPlayer` 等），每 tick 重度克隆（球员 String clone、sort、`format!`），不是类型安全的内部只读投影；
-- `carrier_id()` 是**私有**方法，外部读持球人只能 pattern match `ball_state()` 或走 `snapshot().frame.ball.holder_id`；
-- 消费方分布：CLI 只读比分/时钟/回合/终局；evaluator 主要消费 `step()` 返回的 `StreamTick`；debug-server 读 `is_finished()` / `last_tick_violations()` 并经 `MatchService::snapshot()`；engine tests 是最大消费方，跨全部六个字段族。
+### 3.2 架构设计
 
-### 3.2 设计：`EngineSnapshot` 只读投影
+新建 `crates/engine/src/world.rs` 与 `crates/engine/src/systems/`：
 
-新建 `crates/engine/src/snapshot.rs`，定义与渲染帧（`StreamTick`）分离的**内部只读借用投影**：
+- **`MatchWorld` 纯数据实体世界**：
 
-```rust
-/// 引擎内部状态的最小只读投影。生命周期绑定引擎，零堆分配。
-/// 与 StreamTick 的关系：StreamTick 是面向传输的渲染帧（拥有数据、可序列化）；
-/// EngineSnapshot 是面向内部观察的借用视图（引用 + 标量拷贝）。
-pub struct EngineSnapshot<'a> {
-    // 时钟族
-    pub current_time: f32, pub game_clock: f32, pub shot_clock: f32, pub period: u32,
-    // 比分区与统计
-    pub score: ScoreView,                 // home/away + team_fouls_home/away
-    pub box_score: &'a MatchBoxScore,
-    // 球态与球权（含派生 handler，取代私有 carrier_id 的外部读取需求）
-    pub ball: BallView<'a>,               // &BallTrajectoryKind + ball_pos_3d + handler: Option<&str> + inbound_baseline
-    // 流转与死球
-    pub flow: FlowView,                   // game_flow + sub_phase + free_throws_remaining + free_throw_shooter
-    // 球员与名单（借用，不克隆）
-    pub players: PlayersView<'a>,         // &PhysicsEngine + home/away_roster_order
-    // 回合与校验
-    pub possession_id: u64, pub completed_possessions: u64,
-    pub violations: &'a [String], pub pending_events: &'a [GameEvent],
-    pub is_finished: bool,
-}
-impl<'a> MatchEngine { pub fn snapshot(&'a self) -> EngineSnapshot<'a>; }
-```
+  ```rust
+  pub struct MatchWorld {
+      // 刚体与运动学组件 (10 名场上球员)
+      pub positions: [Vec2; 10],
+      pub velocities: [Vec2; 10],
+      pub facings: [Vec2; 10],
+      pub physical_limits: [PhysicalLimit; 10], // max_accel, max_speed, traction
+      // 比赛态与能力组件
+      pub player_states: [PlayerRuntimeState; 10], // stamina, fouls, morale, fatigue
+      pub attributes: [PlayerAttributes; 10],
+      // 篮球动力学组件
+      pub ball: BallComponent, // pos_3d, vel_3d, trajectory_kind, handler_id, last_touch
+      // 时钟与账本组件
+      pub clock: MatchClockComponent, // game_clock, shot_clock, period, possession_time
+      pub ledger: MatchLedgerComponent, // score, team_fouls, timeouts, possession_arrow
+      // 规则与配置
+      pub rules: GameRules,
+  }
+  ```
 
-设计要点：
+- **纯函数式主循环管线**：
 
-- 字段为**标量拷贝 + 只读引用**，无 `String`/`Vec` 克隆，开销远低于 `build_tick()`；
-- 与现有 `snapshot() -> StreamTick` **命名冲突**：重命名现有渲染帧方法为 `render_frame()`（或 `tick_frame()`），把 `snapshot()` 名字让给内部投影——这是本任务的语义核心；
-- `ball.handler` 由 `BallState::associated_player()`（ADR-010）派生，为 D15 移除 `carrier_id()` 私有回退做准备；
-- `MatchService::snapshot()` 随之改为返回 `EngineSnapshot`，debug-server 渲染层再自行映射到 `StreamTick`。
+  ```rust
+  // 单 tick 严格按阶段无环单向流动
+  let perceptions = PerceptionSystem::evaluate(&world);
+  let intentions  = DecisionSystem::decide(&world, &perceptions);
+  let physics_res = PhysicsSystem::step(&mut world, &intentions, dt);
+  let events      = OfficiatingSystem::arbitrate(&mut world, &physics_res);
+  EventDispatcher::publish(&world, events);
+  ```
 
-### 3.3 工作项
+### 3.3 验收门
 
-- 新建 `crates/engine/src/snapshot.rs` 定义 `EngineSnapshot<'a>` 及各 View 子结构；
-- 重命名现有 `snapshot() -> StreamTick` 为 `render_frame()`，新增 `snapshot() -> EngineSnapshot`；
-- 迁移消费点（按族）：CLI（比分/时钟/回合/终局）、evaluator（终局控制）、debug-server（终局/违规/服务快照）、engine tests（六族逐一替换 getter 调用为 `snapshot()` 字段访问）；
-- 保留 `physics()` / `rules()` 等少数深层借用 getter（不强行纳入投影，避免一次改动过大）；
-- 验证黄金哈希与事件流不受影响（纯读取侧重构）。
+- `MatchWorld` 独立编译并实现 `Clone` 与零堆分配快照；
+- `step_inner` 代理至四大 System 执行；
+- `match_engine.rs` 行数降低至 2,500 行以内；
+- 45 套测试全绿，黄金哈希可追溯。
 
-### 3.4 出口门
+---
 
-- CLI、evaluator、tests 统一从 `engine.snapshot()` 获取只读视图，六族字段不再各自直接调 getter；
-- `EngineSnapshot` 无堆分配（可断言：构造不触发球员/事件克隆）；基准 tick 耗时保持 < 50µs；
-- 全测试套件通过，黄金哈希不变。
+## 4. D23 · 空间 Voronoi 拓扑与防守压迫感知系统 (PerceptionSystem)
 
-## 4. D15 · `carrier_idx` 解耦与球态归一
+### 4.1 核心问题与设计目标
 
-### 4.1 背景与现状
+现有战术跑位依赖预设槽位绝对坐标（Static Slots），无球球员无法感知局部空间的空旷程度。目标是引入 **2D 约束沃罗诺伊图（Bounded Voronoi Diagram）** 与 **防守压迫密度（Defensive Contestation Density）**。
 
-上周期调查（`evidence/problem.md` §25）确认直接删除 `carrier_idx` 会使 8-seed `total_p50` 产生非预期漂移（213.5→212.0）。原因在于无持球人球态（`LooseBall`、`RimRebound`、`Dead`、`ControlTransfer`）下，旧逻辑回退到名单同序球员（`roster[possession][carrier_idx]`），新逻辑为球态关联人。
+### 4.2 算法模型
 
-**前置裁定已决**：无持球人球态下的归属语义已由 `docs/decisions.md` **ADR-010（accepted）** 裁定——采用球态关联语义（`BallState::associated_player()` / `possessing_team()`），否定名单下标投影；`carrier_idx` 删除是该裁定落地后的机械结果。详见 `docs/dev/gap.md` §5.2a。
+1. **场上 Voronoi 面积拓扑**：
+   在 $94 \times 50\text{ ft}$ 半场边界内，以 10 名球员位置为发生点（Seeds），生成几何多边形剖分。
+   - 进攻球员 $i$ 的独立控制面积记为 $A_i$；
+   - 当 $A_i > A_{threshold}$（例如外线单人控制面积 $\ge 120\text{ sq ft}$），标记为绝对空位（Open Window）；
+2. **防守压迫度场函数（Contestation Field）**：
+   对任意场上点 $\mathbf{x}$，防守压力由防守球员 $j$ 的距离与朝向投影衰减叠加：
+   $$D(\mathbf{x}) = \sum_{j \in Def} \frac{w_j \cdot \max(0, \mathbf{f}_j \cdot (\mathbf{x} - \mathbf{p}_j))}{\|\mathbf{x} - \mathbf{p}_j\|^2 + \epsilon}$$
+   其中 $\mathbf{f}_j$ 为防守者面朝向量，$w_j$ 为防守臂展与防守智商加权。
 
-### 4.2 工作项
+### 4.3 验收门
 
-- 依据 ADR-010 与 `docs/dev/gap.md` §5.2a 的裁定表，逐球态落实 handler / possession 派生；
-- 战术 planner 几何参考点改造：无 handler 球态（`ControlTransfer` / `LooseBall` / `RimRebound` 的阵地与转换布置）以 `ball_pos_3d` 为参考，不再消费 `carrier_idx` 实参；
-- 将 `carrier_idx` 的隐式名单索引彻底替换为明确的球态枚举派生；
-- 对齐行为后切断旁路字段写入，从引擎结构体删除 `carrier_idx`；
-- 验证 16-seed 统计指标与 L1 账本保持零违规（迁移期行为变化属有意语义修正，附 8-seed 矩阵 + 反事实证据，非行为中性重构）。
+- 建立 `crates/decision/src/perception.rs`；
+- 提供空位检测测试：当防守人收缩至油漆区时，底角进攻球员的空位评级单调增加；
+- 传球决策接入空间增益梯度，外线空位出手率符合现代篮球特征。
 
-### 4.3 出口门
+---
 
-- 不存在由两个可写字段共同决定 holder/possession 的路径；
-- `carrier_idx` 字段从引擎结构体中移除；
-- 全套件与构成指标测试通过。
+## 5. D24 · 连续受限势能场动力学与惯性制动系统 (PhysicsSystem)
 
-## 5. D16 · `step_inner` 窄签名阶段拆分
+### 5.1 核心问题与设计目标
 
-### 5.1 背景与现状
+现有球员移动为目标点线性插值，突破与失位通过概率分支强行拉扯。目标是建立基于牛顿力学的**受限连续动力学模型**。
 
-`crates/engine/src/match_engine.rs` 中的 `step_inner` 当前长达 2082 行，单体函数聚合了决策、运动推进、冲突与犯规判定、统计写入与事件发射，阶段写权限与执行顺序缺乏编译期约束。
+### 5.2 物理公式与动力学方程
 
-### 5.2 工作项
+球员加速度 $\mathbf{a}$ 由意图驱动力、环境斥力与抓地力衰减共同决定：
+$$\mathbf{F}_{total} = \mathbf{F}_{drive} + \mathbf{F}_{spacing} + \mathbf{F}_{boundary}$$
+$$\mathbf{a} = \frac{\mathbf{F}_{total}}{m}, \quad \|\mathbf{a}\| \le a_{max}(\text{agility, strength})$$
+速度更新受地面最大静摩擦力（Traction Limit）约束：
+$$\mathbf{v}_{t+1} = \mathbf{v}_t + \mathbf{a} \cdot \Delta t$$
+$$\text{当 } \Delta \theta(\mathbf{v}, \mathbf{v}_{desired}) > 90^\circ \text{ 时触发急停变向，施加制动距离惩罚。}$$
 
-- 按 `docs/architecture.md` 拆分四个窄签名阶段：
-  1. `phase_decision(&self, ...) -> DecisionBundle`
-  2. `phase_motion(&mut self, &DecisionBundle, ...)`
-  3. `phase_resolution(&mut self, ...)`
-  4. `phase_accounting_and_events(&mut self, ...)`
-- 阶段之间通过参数显式传递不可变输入；
-- 每一阶段提供独立的隔离单元测试。
+### 5.3 验收门
 
-### 5.3 出口门
+- 建立 `crates/physics/src/kinematics.rs`；
+- 消除任何坐标瞬移（瞬时位移速度超过物理最大极限 $v_{max} = 28\text{ ft/s}$ 即报警断言）；
+- 变向制动与急停产生真实的减速滑行过程；
+- 突破判定转为纯几何位置切入与接触抗衡，告别单一概率投掷。
 
-- `step_inner` 成为纯调度器，代码行数降至 < 200 行；
-- 各阶段函数有明确的窄输入与输出；
-- 45 测试套件全绿，黄金哈希确定性保持或有意受控迁移。
+---
 
-## 6. D17 · 防守方案责任链落地
+## 6. D25 · 细粒度微观动作链状态机 (Action Kinematics)
 
-### 6.1 背景与现状
+### 6.1 核心问题与设计目标
 
-`evidence/problem.md` §28 实证：`DefensiveSystem` 的四个子配置（`SchemeAssignments` 等）零消费，`decision/src/defense.rs` 的评估函数零调用。`data/defense/schemes.json` 目前仅有 4 个几何倍率，缺乏 switch/drop/hedge/recover 的行为规则字段。
+投篮、盖帽与抢断判定缺乏物理时间窗口，导致前端呈现滑冰感，判定缺乏因果连贯性。
 
-**现状盘点**（接线缺口）：
+### 6.2 动作时序状态机
 
-- **唯一生效路径**：`decision/src/tactics.rs:456-494` 的几何公式（领防间隔 `defensive_gap_ft * on_ball_gap_multiplier`、协防深度 `help_sag_ratio * sag_multiplier`、协防方向 `help_priority → hoop_weight/tilt`），输入仅 `DefenseRules` 的 4 个几何倍率 + help_blend 4 参；
-- **候选层已具雏形**：`DefensiveCandidateAction` 枚举（`decision/src/defense.rs:26-78`）已有全部 7 变体——`StayOnAssignment / GambleInterception / RotateRimHelp / StayOnShooter / DropCoverage / HedgeAndRecover / SwitchAssignment`，但两个评估函数零调用；
-- **档案数据缺字段**：`schemes.json` 每方案只有 `sag_multiplier / on_ball_gap_multiplier / help_priority / switch_aggressiveness`（后者实证零消费），无责任链行为参数；`schema_version` 已声明但解析层（`rules.rs:773-822` `DefenseRules::all()`）未消费，可直接用于本次升级。
+将投篮分解为 4 个不可逆物理阶段：
 
-### 6.2 设计：责任链参数字段集
+1. **合球阶段（Gather, 0.15s - 0.25s）**：双脚起跳步法调整，此时防守人可尝试切球抢断（Poke/Strip），不计投篮犯规；
+2. **起跳升空（Elevation, 0.20s - 0.35s）**：重心向上积分，高度 $z(t)$ 抬升。此时身体接触判定为投篮犯规，盖帽判定窗口开启；
+3. **最高点出手（Release, 0.05s）**：篮球脱手赋予初始抛物线初速度 $\mathbf{v}_0$，确定投篮品质与干扰修正；
+4. **随摆与落地（Follow-through & Landing, 0.20s - 0.30s）**：球员下落恢复平衡，落地空间受规则保护（落地垫脚犯规判定）。
 
-在 `schemes.json` 每方案新增 `screen_defense` 行为块，并升级 `schema_version: 1 → 2`。字段按 `docs/tactics.md` §2.2.2 与 `gap.md` §10.4 五要素（触发/主体/执行/降级/响应）设计：
+### 6.3 验收门
 
-```json
-{
-  "schema_version": 2,
-  "schemes": [{
-    "id": "def_drop_coverage",
-    "sag_multiplier": 1.38, "on_ball_gap_multiplier": 1.3, "help_priority": 0.72,
-    "screen_defense": {
-      "strategy": "drop",               // drop | switch | hedge | blitz | show
-      "drop_depth_ft": 6.0,             // 沉退目标深度（执行几何）
-      "contain_base": 0.75,             // 遏制强度基线 → 接 def_drop_contain_base
-      "switch_threshold": 0.8,          // 触发换防的掩护质量/错位阈值
-      "mismatch_tolerance": 0.6,        // 换防后容忍的错位度，超出则触发 recover/scram
-      "hedge_aggressiveness": 0.0,      // 延误强度（hedge/blitz 用）
-      "recover_speed_ratio": 0.0,       // 恢复回追速率（hedge/show 用）
-      "help_rotation_trigger": 0.7      // 触发轮转协防的突破渗透阈值
-    }
-  }]
-}
-```
+- 投篮动作链状态机在 `crates/domain/src/action.rs` 显式建模；
+- 盖帽事件只能在 Elevation 阶段触发（落地后封盖必报守卫错误）；
+- 前端 render frame 暴露 `action_phase` 字段，支持动作姿态同步。
 
-接线映射：
+---
 
-- `contain_base` 接线现有 `DecisionRules.def_drop_contain_base / def_hedge_contain_base`（§27 实证零消费），消除死字段；
-- `switch_threshold / mismatch_tolerance` 驱动 `SwitchAssignment` 候选的触发与 `evaluate_*` 评估；
-- `DefensiveSystem` 档案层（`tactics.rs:59-95`）的 `ScreenDefenseConfig` 等 String 字段需数值化对齐，或明确降级为展示标签、以 `schemes.json` 数值块为权威（二选一，避免双源）。
+## 7. D26 · 弱侧协防与防守责任链闭环 (Defensive Chain)
 
-### 6.3 工作项
+### 7.1 核心问题与设计目标
 
-- 扩展 `schemes.json`（schema_version 2），为 6 方案补 `screen_defense` 行为块；
-- 升级 `DefenseRules` 与解析（`rules.rs:773-822`）消费新字段，接线 `def_*_contain_base`；
-- 接通 `decision/src/defense.rs` 的 `SwitchAssignment / DropCoverage / HedgeAndRecover` 候选生成与 `evaluate_*` 评估；
-- 为 Drop、Switch、Hedge 分别建立控制场景用例 + 反事实场景测试（改方案必须改变责任与对位几何）；
-- 明确 `DefensiveSystem` 档案层与 `schemes.json` 的单一权威关系。
+D17 仅打通了持球点 16 英尺内的挡拆对策（Drop/Switch/Hedge）。全场阵地战中的弱侧轮转（Low-man Help）、X-Out 轮转与底角补位依然断链。
 
-### 6.4 出口门
+### 7.2 责任转移矩阵
 
-- 至少三种防守方案（Drop、Switch、Hedge）在控制测试中表现出符合战术定义的结构化责任差异；
-- `DefensiveSystem` 字段不再全零消费；
-- 统计指标保持在带。
+- **第一责任人（On-ball Contain）**：领防持球人；若被突破超车一个身位，触发协防呼叫；
+- **第二责任人（Rim Protector / Low-man）**：禁区底角内线收缩护筐，放弃原对位人；
+- **第三责任人（Weak-side Sink / X-Out）**：弱侧侧翼下沉同时兼顾底角与 45 度两人，执行轮转回防；
+- 建立状态机交接超时与失误率判定，体能与防守智商直接决定轮转到位的时滞（Latency）。
 
-## 7. D18 · `GameRules` 与能力维度的零消费处置
+### 7.3 验收门
 
-### 7.1 背景与现状
+- 突破成功时，弱侧防守人向篮下位移的响应率 $\ge 90\%$；
+- 建立弱侧轮转与底角空位三分出手的反事实因果测试；
+- 保持犯规率与内线终结比例在 NBA 基准带内。
 
-`evidence/problem.md` §27 逐一实证了 21 个 `GameRules` 零消费字段；§29 实证了 6 个零消费能力维度（`agility`、`shooting_close`、`cut_frequency`、`screen_frequency`、`offensive_rebound_frequency`、`transition_sprint`）。
+---
 
-**代码复核关键发现**（决定分类）：
+## 8. D27 · 零消费剩余字段处置与全规则闭环
 
-- **clutch 族**：`decision/src/modulation.rs:114` 硬编码 `clock<=120.0 && margin<=5 && period>=4`，**机制已接线但绕过规则字段**（违反 charter C1）——处置是"接回数据通道"而非"新接线"；
-- **攻框终结族**：`drive_finish_range_ft` 被 `match_engine.rs:2828` 硬编码 `16.0_f32` 绕过，同样"接回数据通道"；`drive_dunk_*` / `drive_floater_*` 判定机制未实现；
-- **block / risk_tolerance**：消费点在零调用的孤岛 `decision/src/defense.rs` → 实际零消费；
-- **free_throw**：`free_throw_probability()` 已经主循环 `resolve_free_throw`（`match_engine.rs:4326`）正式接入 → **非零消费，移出本任务**。
+### 8.1 核心问题与设计目标
 
-### 7.2 三分类处置表
+`UNIMPLEMENTED_RULE_FIELDS` 中仍残留 6 个未接线字段（`risk_tolerance`、`defensive_rebound_boxout_bonus` 等）。目标是彻底清空未消费清单，完成 100% 规则物理接线。
 
-| 项 | 子系统 | 分类 | 动作 |
-| --- | --- | --- | --- |
-| `def_switch_base` / `def_drop_contain_base` / `def_hedge_contain_base` | 防守责任链 | **A · 本周期接线** | 由 D17 接线（`contain_base` 进 `schemes.json` 责任链参数） |
-| `clutch_period` / `clutch_time_remaining` / `clutch_score_margin` | clutch 情境 | **A · 本周期接线** | `modulation.rs:114` 硬编码改读规则字段，消除 C1 违反 |
-| `drive_finish_range_ft` | 攻框终结 | **A · 本周期接线** | `match_engine.rs:2828` 硬编码 `16.0` 改读规则字段 |
-| `drive_dunk_*`（3）/ `drive_floater_min_dist_ft` | 攻框终结（扣篮/抛投判定） | **B · 显式未启用** | 判定机制未实现，标记 `#[doc(unused_subsystem)]` + 登记未启用清单 |
-| `transition_speed_ratio` / `transition_defense_threshold_ratio` / `transition_sprint_ratio` | 转换进攻 | **B · 显式未启用** | 快攻机制未接线（`plan.md` §11 暂不纳入），标记未启用 |
-| `screen_hold_separation_ft` / `screen_roll_separation_ft` | 掩护执行 | **B · 显式未启用** | 掩护后分离几何未接执行层，标记未启用 |
-| `ball_bounce_amplitude_ft` / `max_player_turn_rate_rad_per_sec` / `pivot_foot_tolerance_ft` / `flight_intercept_radius_ft` / `intercept_lane_radius_ft` | 物理/几何 | **C · 评估删除** | 无对应未实现子系统承接（走步/拦截判定路径已用他参），逐个确认无设计意图后删除 |
-| `agility` / `shooting_close` | 能力维度 | **B · 显式未启用** | 变向/近距分区未实现，标记未启用维度 |
-| `cut_frequency` / `screen_frequency` / `offensive_rebound_frequency` / `transition_sprint` | 倾向维度 | **B · 显式未启用** | 切入/掩护/冲抢/快攻倾向无消费，标记未启用 |
-| `block` / `risk_tolerance` | 防守评估 | **A · 随 D17 接线** | D17 接通 defense.rs 后自然获得消费点 |
+### 8.2 接线方案
 
-**分类定义**：A = 本周期接线并测响应；B = 移入显式未启用清单（schema 保留 + 注解）；C = 确认废弃后删除并同步 schema/default。
+1. `risk_tolerance` ➔ 注入 `PerceptionSystem`：高风险偏好球员倾向于尝试传球穿越高防守密度通道与赌博抢断；
+2. `defensive_rebound_boxout_bonus` ➔ 注入卡位动力学：增强防守篮板人的斥力场半径与卡位阻力；
+3. `offensive_rebound_putback_bias` ➔ 注入进攻篮板后的二次进攻即时出手倾向；
+4. `help_defense_awareness` ➔ 决定 D26 协防触发的时滞帧数；
+5. `post_defense_physicality` ➔ 决定低位背身对抗时的位移衰减系数；
+6. `transition_leakout_chance` ➔ 决定投篮出手瞬间快下球员的起跑提前量。
 
-### 7.3 工作项
+### 8.3 验收门
 
-- 按上表逐项处置：A 类接回数据通道并补响应测试（clutch / drive_finish / def_* 随 D17）；B 类在 schema 加未启用注解并登记 `docs/dev/gap.md` 未启用清单；C 类逐个实证无设计意图后删除；
-- 建立"未启用清单"机制：在 `GameRules` / `PlayerAttributes` / `PlayerTendencies` 对 B 类字段加统一注解，守卫可机械校验"保留字段要么有消费要么有未启用注解"；
-- `free_throw` 移出零消费清单（已实证接入主循环）；
-- 全测试套件通过。
+- 清空 `UNIMPLEMENTED_RULE_FIELDS` 数组；
+- 新增 `crates/engine/tests/rules_complete_wiring.rs`，对 6 个字段提供单调响应测试；
+- 编译期静态断言确保 GameRules 无死字段。
 
-### 7.4 出口门
+---
 
-- 活跃 `GameRules` 与 `PlayerAttributes`/`PlayerTendencies` 中每个保留字段都有代码消费或有明确的未启用状态注解；
-- 无静默死字段（守卫可机械判定）；
-- 全测试套件通过。
+## 9. D28 · 周期出口、全矩阵回归与归档
 
-## 8. D19 · 剩余能力维度因果扰动覆盖
+### 9.1 出口条件
 
-### 8.1 背景与现状
-
-上周期（D10.2）已为篮板三维度（`rebounding_offensive`、`rebounding_defensive`、`vertical`）补齐端到端因果扰动。全套 29 维度中，仍有 `passing`、`shooting_mid`、`decision_iq`、`strength` 等核心维度缺少单调性与断路测试。
-
-### 8.2 工作项
-
-- 为 `shooting_mid`、`passing`、`decision_iq`、`strength`、`perimeter_defense`、`interior_defense` 建立扰动测试套件；
-- 每项测试包含：
-  - 单调性检验（能力提升则对应产出单调提升/失误单调下降）；
-  - 故意断路负面对照（断路必红、恢复必绿）；
-- 统一集成至 `crates/engine/tests/attribute_perturbation.rs`。
-
-### 8.3 出口门
-
-- 核心能力维度扰动测试覆盖率达到 ≥ 80%；
-- 每项测试均有负面对照证据；
-- 45 套件全绿。
-
-## 9. D20 · FIBA 交替拥有与罚球情景覆盖
-
-### 9.1 背景与现状
-
-上周期（D11.1）已建立 6 个 FIBA 程序级情景用例。FIBA 规则特有的交替拥有箭头（争球程序）以及罚球违例进出情景尚未形成独立验证用例。
-
-### 9.2 工作项
-
-- 在 `crates/engine/tests/fiba_scenarios.rs` 中新增交替拥有情景测试；
-- 覆盖争球触发、球权箭头翻转、节初发球使用箭头的全流程；
-- 覆盖罚球进出与加罚违例程序差异。
-
-### 9.3 出口门
-
-- 交替拥有与罚球程序情景测试通过；
-- NBA 与 FIBA 在争球场景下的分歧可证明（NBA 跳球 vs FIBA 箭头）；
-- 保持 0 账本违规。
-
-## 10. D21 · 周期出口与归档
-
-### 10.1 工作项
-
-- 在 `docs/dev/status.md` 记录本周期收敛成果、关闭项与转交项；
-- 核对 `docs/dev/README.md` §7 归档条件；
-- 归档本文件至 `docs/dev/cycles/YYYYMMDD_systematization/`。
-
-## 11. 暂不纳入本周期
-
-- UI 视觉与路线动画；
-- 经营层成长与交易系统；
-- NCAA 规则闭环；
-- WASM 存废判定。
+1. **测试套件全绿**：`./scripts/run-tests.sh`（包含原有 45 套及新增测试）100% 通过；
+2. **黄金哈希受控演进**：更新受控的黄金哈希快照，附带 16-seed 统计分布对比报告；
+3. **架构度量达标**：`match_engine.rs` 瘦身成功，无任何单文件超过 3,000 行；
+4. **文档治理闭环**：`python3 scripts/check_docs.py` 0 警告 0 错误，完成向 `status.md` 的成果转交。

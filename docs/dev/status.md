@@ -1,7 +1,8 @@
 # NBA-Sim · 当前实现状态
 
 > 状态类型：当前快照，不是执行日志。
-> 当前工作周期：`20260916_convergence` 结束后的体系化落地周期（`D14–D21`）。
+> 当前工作周期：`20260917_first_principles_next`（第一性原理驱动的连续动力学与 ECS 解耦周期，`D22–D28`）。
+> 历史归档：上周期体系化落地（`D14–D21`）已完整归档至 [`cycles/20260916_systematization/plan.md`](cycles/20260916_systematization/plan.md)。
 > 证据原则：本文件只写当前工作区可以由代码、测试或守卫复核的结论；历史轮次见 `docs/dev/cycles/`，原始实验见 `docs/dev/evidence/`。
 
 ## 1. 结论摘要
@@ -73,15 +74,15 @@
 
 ## 3. 当前未完成工作
 
-当前周期任务（`D14–D20`）已全部完成，所有出口门均已达成，等待周期出口归档（D21）。
+当前周期任务为第一性原理动力学与架构演进（`D22–D28`），详细设计见 [`current/plan.md`](current/plan.md)：
 
-- D14: MatchEngine 最小只读 snapshot 投影已落地（`crates/engine/src/snapshot.rs`，零拷贝借用，测试全绿）；
-- D15: carrier_idx 彻底解耦与移除（ADR-010 已决并落地，球态归一完成）；
-- D16: step_inner 窄签名阶段拆分完成（拆解为阶段函数与隔离测试，调度器缩减至 < 200 行）；
-- D17: 防守方案责任链落地（Drop/Switch/Hedge 结构化责任动作打通，schemes.json schema v2）；
-- D18: GameRules 与能力维度零消费处置完成（clutch/drive_finish 接回数据通道，死字段显式清单化）；
-- D19: 剩余能力维度因果扰动覆盖完成（单调性检验与断路负面对照覆盖 ≥ 80%）；
-- D20: FIBA 交替拥有与罚球情景覆盖完成（`crates/engine/tests/fiba_scenarios.rs`，NBA 跳球 vs FIBA 箭头可证明）。
+- D22: 纯数据世界与系统管线解耦 (ECS / Pipeline Dataflow)
+- D23: 空间 Voronoi 拓扑与防守压迫感知系统 (PerceptionSystem)
+- D24: 连续受限势能场动力学与惯性制动系统 (PhysicsSystem)
+- D25: 细粒度微观动作链状态机 (Action Kinematics)
+- D26: 弱侧协防与防守责任链闭环 (Defensive Chain)
+- D27: 零消费剩余字段处置与全规则闭环 (GameRules 100% Wiring)
+- D28: 周期出口、全矩阵回归与归档 (Cycle Exit & Convergence)
 
 ## 4. 最近关闭项
 
@@ -159,7 +160,7 @@ D12 从本周期计划执行完毕后已从 `current/plan.md` 移除（该文件
 
 ## 6. 当前周期计划入口
 
-详见 [`current/plan.md`](current/plan.md)（本周期任务：`D14–D21`）。
+详见 [`current/plan.md`](current/plan.md)（本周期任务：`D22–D28`，第一性原理连续博弈与空间动力学引擎）。
 
 ## 7. 证据索引
 
