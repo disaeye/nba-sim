@@ -76,13 +76,35 @@ fn percentile(sorted: &[u32], p: f32) -> f32 {
 fn full_game_stats_within_baseline_band() {
     // 种子矩阵 ≥ 8（quality.md §2.5 判定口径）；分布回归靠跨种子聚合。
     let seeds: [u64; 8] = [42, 1, 7, 100, 999, 31337, 2024, 555];
+    
+    // 多线程并行模拟（利用多核 CPU 并发执行各独立 seed，消除串行长耗时阻塞）
+    let sim_results: Vec<(u64, GameStats)> = std::thread::scope(|s| {
+        let handles: Vec<_> = seeds
+            .iter()
+            .copied()
+            .map(|seed| {
+                s.spawn(move || {
+                    eprintln!("starting seed {seed} in thread");
+                    let stats = simulate_full_game(seed);
+                    (seed, stats)
+                })
+            })
+            .collect();
+        let mut results = Vec::with_capacity(handles.len());
+        for h in handles {
+            match h.join() {
+                Ok(res) => results.push(res),
+                Err(e) => std::panic::resume_unwind(e),
+            }
+        }
+        results
+    });
+
     let mut totals: Vec<u32> = Vec::new();
     let mut poss: Vec<usize> = Vec::new();
     let mut dur: Vec<f32> = Vec::new();
     let mut fg3_pct: Vec<f32> = Vec::new();
-    for seed in seeds {
-        eprintln!("starting seed {}", seed);
-        let s = simulate_full_game(seed);
+    for (seed, s) in sim_results {
         eprintln!(
             "seed {:>5}: total={:>3} poss={:>3} avg_poss={:>5.2}s 2P={}/{} 3P={}/{} ({:.1}%) FT={}/{}",
             seed, s.total_points, s.possessions, s.avg_possession_secs,

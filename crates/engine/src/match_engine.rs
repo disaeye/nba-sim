@@ -390,6 +390,8 @@ pub struct MatchEngine {
     advancing_player: Option<String>,
     /// FIBA 交替拥有球权指示箭头（D20）。
     possession_arrow: Option<Possession>,
+    /// 纯数据 ECS 世界实体核 (ADR-011)，收敛引擎核心物理、时钟与账本状态。
+    pub world: crate::world::MatchWorld,
 }
 
 /// 比赛投篮分解与核心统计。
@@ -701,6 +703,7 @@ impl MatchEngine {
             current_possession_turnover_player: Some(initial_carrier_id),
             advancing_player: None,
             possession_arrow: None,
+            world: crate::world::MatchWorld::new_initial(rules.clone()),
         }
     }
 
@@ -1631,6 +1634,8 @@ impl MatchEngine {
             return tick;
         }
         self.tick_index = self.tick_index.saturating_add(1);
+        self.sync_to_world();
+        let _ = crate::world::PerceptionSystem::evaluate(&self.world);
 
         let dt = self.rules.tick_seconds;
         let was_tip_off = self.game_flow == GameFlowState::TipOff;
@@ -3640,10 +3645,28 @@ impl MatchEngine {
                 } else {
                     (target.target_pos, target.speed, target.action)
                 };
+                let effective_speed = if action == "ROTATE_RIM_HELP"
+                    || action == "X_OUT_CLOSEOUT"
+                    || action == "HELP_SIDE_SHELL"
+                {
+                    let awareness = self
+                        .physics
+                        .get_player(&player_id)
+                        .map(|p| {
+                            nba_domain::capability::effective_help_awareness(
+                                &self.rules,
+                                &p.attributes,
+                            )
+                        })
+                        .unwrap_or(0.5);
+                    speed * (0.95 + awareness * 0.15)
+                } else {
+                    speed
+                };
                 self.physics.set_player_target(
                     &player_id,
                     target_pos,
-                    speed,
+                    effective_speed,
                     &action,
                     &target.slot,
                     &target.morale,
@@ -3864,6 +3887,10 @@ impl MatchEngine {
                         self.transition_ball_state(
                             self.dead_state(ft_spot, self.rules.ball_holder_height_ft),
                         );
+                    } else {
+                        // 普通犯规（非投篮且未到奖励罚球）：进攻方保留球权，重置进攻时间至 14 秒重新组织！
+                        self.shot_clock = self.shot_clock.max(14.0);
+                        self.transition_phase(SubPhase::Initiation);
                     }
                 }
             }
@@ -4656,12 +4683,20 @@ impl MatchEngine {
                 .then(a.0.cmp(&b.0))
         });
 
+        let passer_risk = self
+            .physics
+            .get_player(passer_id)
+            .map(|p| nba_domain::capability::effective_risk_tolerance(&self.rules, &p.attributes))
+            .unwrap_or(0.5);
+
         for (defender_id, clearance, steal_skill) in defenders {
             let base_contest = (one - (clearance / scale)).clamp(zero, one);
             let skill_factor = half + steal_skill.clamp(zero, one);
-            let steal_prob = (base_contest * policy.intercept_steal_slope * skill_factor)
-                .clamp(policy.intercept_steal_floor, policy.intercept_steal_ceiling);
-            let tip_prob = (base_contest * policy.intercept_tip_slope * skill_factor)
+            let risk_factor = 0.85 + passer_risk * 0.3;
+            let steal_prob =
+                (base_contest * policy.intercept_steal_slope * skill_factor * risk_factor)
+                    .clamp(policy.intercept_steal_floor, policy.intercept_steal_ceiling);
+            let tip_prob = (base_contest * policy.intercept_tip_slope * skill_factor * risk_factor)
                 .clamp(policy.intercept_tip_floor, policy.intercept_tip_ceiling);
             let roll = self.rng.gen::<f32>();
             if roll < steal_prob {
@@ -4951,11 +4986,22 @@ impl MatchEngine {
             return Some(offensive_id.clone());
         };
 
+        let def_boxout_bonus = nba_domain::capability::effective_defensive_boxout_bonus(
+            &self.rules,
+            &defensive_player.attributes,
+        );
+        let off_putback_bias = nba_domain::capability::effective_putback_bias(
+            &self.rules,
+            &offensive_player.attributes,
+        );
+        let effective_def_dist = (*defensive_distance * (1.0 - def_boxout_bonus * 0.25)).max(0.0);
+        let effective_off_dist = (*offensive_distance * (1.0 - off_putback_bias * 0.15)).max(0.0);
+
         match ResolutionLayer::resolve_rebound(
             &offensive_player,
             &defensive_player,
-            *offensive_distance,
-            *defensive_distance,
+            effective_off_dist,
+            effective_def_dist,
             &self.rules.resolve.rebound,
             &mut self.rng,
         ) {
@@ -6090,6 +6136,44 @@ impl MatchEngine {
     /// 物理世界（只读）：位置、属性、openness 等查询走这里。
     pub fn physics(&self) -> &PhysicsWorld {
         &self.physics
+    }
+
+    /// 获取底层 ECS MatchWorld 纯数据实体世界核的只读引用 (ADR-011)。
+    pub fn world(&self) -> &crate::world::MatchWorld {
+        &self.world
+    }
+
+    /// 获取底层 ECS MatchWorld 纯数据实体世界核的可变引用 (ADR-011)。
+    pub fn world_mut(&mut self) -> &mut crate::world::MatchWorld {
+        &mut self.world
+    }
+
+    /// 同步 MatchEngine 内部状态至 MatchWorld 纯数据实体世界核 (ADR-011)。
+    pub fn sync_to_world(&mut self) {
+        self.world.clock.period = self.period;
+        self.world.clock.game_clock = self.game_clock;
+        self.world.clock.shot_clock = self.shot_clock;
+        self.world.clock.current_time = self.current_time;
+        self.world.clock.sub_phase = self.sub_phase;
+        self.world.clock.sub_phase_timer = self.sub_phase_timer;
+
+        self.world.ledger.home_score = self.home_score;
+        self.world.ledger.away_score = self.away_score;
+        self.world.ledger.possession = self.possession;
+        self.world.ledger.possession_id = self.possession_id;
+        self.world.ledger.home_fouls_in_period = self.team_fouls_home as u8;
+        self.world.ledger.away_fouls_in_period = self.team_fouls_away as u8;
+        self.world.ledger.possession_arrow = self.possession_arrow;
+
+        self.world.ball.pos_3d = self.ball_pos_3d;
+        self.world.ball.state = self.ball_state.clone();
+        self.world.ball.associated_player_id =
+            self.ball_state.associated_player().map(str::to_string);
+        self.world.ball.last_touch_team =
+            self.ball_state.possessing_team().unwrap_or(self.possession);
+
+        self.world.game_flow = self.game_flow;
+        self.world.tactical_set = self.tactical_set;
     }
 
     /// 所属方名单顺序（只读）；用于验证顺序不携带语义（ADR-005）。

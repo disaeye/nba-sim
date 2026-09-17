@@ -458,6 +458,18 @@ impl TacticalPlanner {
                 || (policy.defense.switch_aggressiveness > 0.2
                     && dist_to_screener <= screen_rules.switch_trigger_distance_ft));
 
+        // 连续多体势能场求解器 (ADR-012 空间动力学与涌现模型)
+        let potential_solver =
+            crate::potential_field::DefensePotentialFieldSolver::new(Default::default());
+        let off_coords: Vec<Vec2> = (0..5)
+            .map(|idx| {
+                live_off_positions
+                    .and_then(|positions| positions.get(idx).copied())
+                    .or_else(|| off_targets.get(idx).map(|t| t.target_pos))
+                    .unwrap_or(carrier_pos)
+            })
+            .collect();
+
         for (i, off) in off_targets.iter().enumerate() {
             let is_guarding_carrier = i == carrier_idx;
             let is_guarding_screener = i == screener_idx;
@@ -471,82 +483,67 @@ impl TacticalPlanner {
             } else {
                 Vec2::X
             };
-            let (def_pos, action, slot) = if should_switch && (is_guarding_carrier || is_guarding_screener) {
-                if is_guarding_carrier {
-                    let to_screener_hoop = (hoop - screener_pos).normalize_or_zero();
+            let (def_pos, action, slot) =
+                if should_switch && (is_guarding_carrier || is_guarding_screener) {
+                    if is_guarding_carrier {
+                        let to_screener_hoop = (hoop - screener_pos).normalize_or_zero();
+                        (
+                            screener_pos + to_screener_hoop * 3.0,
+                            "SWITCH_ASSIGNMENT",
+                            "SwitchAnchor",
+                        )
+                    } else {
+                        let to_carrier_hoop = (hoop - carrier_pos).normalize_or_zero();
+                        (
+                            carrier_pos + to_carrier_hoop * 2.5,
+                            "SWITCH_ASSIGNMENT",
+                            "SwitchDefender",
+                        )
+                    }
+                } else if is_guarding_screener
+                    && is_screening_action
+                    && screen_rules.drop_depth_ft > 0.0
+                {
+                    let to_hoop_from_screen = (hoop - screener_pos).normalize_or_zero();
                     (
-                        screener_pos + to_screener_hoop * 3.0,
-                        "SWITCH_ASSIGNMENT",
-                        "SwitchAnchor",
+                        screener_pos + to_hoop_from_screen * screen_rules.drop_depth_ft,
+                        "DROP_CONTAIN",
+                        "DropAnchor",
+                    )
+                } else if is_guarding_screener
+                    && is_screening_action
+                    && screen_rules.hedge_distance_ft > 0.0
+                {
+                    let to_carrier_from_screen = (carrier_pos - screener_pos).normalize_or_zero();
+                    (
+                        screener_pos + to_carrier_from_screen * screen_rules.hedge_distance_ft,
+                        "HEDGE_AND_RECOVER",
+                        "HedgeDefender",
+                    )
+                } else if is_guarding_carrier {
+                    // 领防人：建立紧逼与滑步阻截线 (Pursuit Contest)。
+                    // round-6：间隔经防守方案倍率调制（迫使贴防或退到纵深）。
+                    let gap = (policy.defensive_gap_ft * policy.defense.on_ball_gap_multiplier)
+                        .min(dist_to_hoop * 0.4)
+                        .max(2.5);
+                    (
+                        off_pos + to_hoop_dir * gap,
+                        "ON_BALL_CONTEST",
+                        "PointDefender",
                     )
                 } else {
-                    let to_carrier_hoop = (hoop - carrier_pos).normalize_or_zero();
-                    (
-                        carrier_pos + to_carrier_hoop * 2.5,
-                        "SWITCH_ASSIGNMENT",
-                        "SwitchDefender",
-                    )
-                }
-            } else if is_guarding_screener && is_screening_action && screen_rules.drop_depth_ft > 0.0 {
-                let to_hoop_from_screen = (hoop - screener_pos).normalize_or_zero();
-                (
-                    screener_pos + to_hoop_from_screen * screen_rules.drop_depth_ft,
-                    "DROP_CONTAIN",
-                    "DropAnchor",
-                )
-            } else if is_guarding_screener && is_screening_action && screen_rules.hedge_distance_ft > 0.0 {
-                let to_carrier_from_screen = (carrier_pos - screener_pos).normalize_or_zero();
-                (
-                    screener_pos + to_carrier_from_screen * screen_rules.hedge_distance_ft,
-                    "HEDGE_AND_RECOVER",
-                    "HedgeDefender",
-                )
-            } else if is_guarding_carrier {
-                // 领防人：建立紧逼与滑步阻截线 (Pursuit Contest)。
-                // round-6：间隔经防守方案倍率调制（迫使贴防或退到纵深）。
-                let gap = (policy.defensive_gap_ft * policy.defense.on_ball_gap_multiplier)
-                    .min(dist_to_hoop * 0.4)
-                    .max(2.5);
-                (
-                    off_pos + to_hoop_dir * gap,
-                    "ON_BALL_CONTEST",
-                    "PointDefender",
-                )
-            } else {
-                // 弱侧协防人：真实球-人-筐三角 (Ball-Man-Basket Defensive Triangle)
-                // 防守人目标点位于对位人与篮筐、持球人位置的外心，绝不盲目扎堆禁区中心
-                let to_carrier = carrier_pos - off_pos;
-                let to_carrier_dir = if to_carrier.length() > 0.1 {
-                    to_carrier.normalize()
-                } else {
-                    Vec2::ZERO
+                    // 弱侧协防人与轮转体系：完全由连续多体势能场梯度与能量极小值求解驱动
+                    // 绝不依赖硬编码 if-else 判定，自然涌现出 ROTATE_RIM_HELP、X_OUT_CLOSEOUT 或 HELP_SIDE_SHELL
+                    let emergent = potential_solver.solve_equilibrium(
+                        carrier_pos,
+                        hoop,
+                        &off_coords,
+                        i,
+                        carrier_idx,
+                        rules,
+                    );
+                    (emergent.target_pos, emergent.action, emergent.slot)
                 };
-                // 综合人-筐方向与人-球方向，保持在传球拦截视野与回防扑防（Closeout）边界。
-                // （round-6 起该合成由下方按防守方案加权，不再用固定 0.7/0.3。）
-                // round-6：协防深度与优先级经防守方案调制。
-                // - `sag_multiplier` 直接缩放协防深度（联防/沉退更收缩）；
-                // - `help_priority` 按**偏离中性值 0.5 的量**倾斜人-筐 / 人-球向权重。
-                //
-                // 关键：`help_priority == 0.5` 时必须**逐位复原**历史公式
-                // `to_hoop * 0.7 + to_carrier * 0.3`，否则默认方案的行为也会漂移，
-                // 「默认不变」的声明就不成立。
-                let tilt = policy.defense.help_priority - 0.5;
-                let d = &policy.defense;
-                let hoop_weight = (d.help_hoop_weight_base + tilt * d.help_priority_tilt_gain)
-                    .clamp(d.help_hoop_weight_min, d.help_hoop_weight_max);
-                let carrier_weight = 1.0 - hoop_weight;
-                let blended_dir = (to_hoop_dir * hoop_weight + to_carrier_dir * carrier_weight)
-                    .normalize_or_zero();
-                let effective_sag =
-                    (dist_to_hoop * policy.help_sag_ratio * policy.defense.sag_multiplier)
-                        .min(policy.defensive_gap_ft * 2.0 * policy.defense.sag_multiplier)
-                        .max(rules.player_radius_ft * 2.0);
-                (
-                    off_pos + blended_dir * effective_sag,
-                    "HELP_SIDE_SHELL",
-                    "HelpAnchor",
-                )
-            };
             def_targets.push(TargetAssignment {
                 player_id: None,
                 target_pos: court.clamp_playable(def_pos, rules.player_radius_ft),

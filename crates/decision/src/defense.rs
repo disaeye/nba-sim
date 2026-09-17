@@ -255,14 +255,18 @@ impl<'a> DefensiveContext<'a> {
         if self.defender_attrs.defense_perimeter > 75.0 {
             let over_pos = carrier_pos + (carrier_pos - screener_pos).normalize_or_zero() * 2.0;
             ScoredDefensiveAction {
-                action: DefensiveCandidateAction::NavigateScreenOver { target_pos: over_pos },
+                action: DefensiveCandidateAction::NavigateScreenOver {
+                    target_pos: over_pos,
+                },
                 utility: 0.75,
                 risk: 0.3,
             }
         } else {
             let under_pos = screener_pos + (self.hoop_pos - screener_pos).normalize_or_zero() * 3.0;
             ScoredDefensiveAction {
-                action: DefensiveCandidateAction::NavigateScreenUnder { target_pos: under_pos },
+                action: DefensiveCandidateAction::NavigateScreenUnder {
+                    target_pos: under_pos,
+                },
                 utility: 0.70,
                 risk: 0.2,
             }
@@ -280,9 +284,12 @@ impl<'a> DefensiveContext<'a> {
     ) -> ScoredDefensiveAction {
         if is_low_man {
             // Low-man (弱侧底角防守人) 责任：下沉护筐，封堵突破人上篮
-            let contest_spot = self.hoop_pos + (driver_pos - self.hoop_pos).normalize_or_zero() * 3.0;
+            let contest_spot =
+                self.hoop_pos + (driver_pos - self.hoop_pos).normalize_or_zero() * 3.0;
             ScoredDefensiveAction {
-                action: DefensiveCandidateAction::RotateRimHelp { contest_pos: contest_spot },
+                action: DefensiveCandidateAction::RotateRimHelp {
+                    contest_pos: contest_spot,
+                },
                 utility: 0.85,
                 risk: 0.15,
             }

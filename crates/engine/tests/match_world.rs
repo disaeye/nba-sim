@@ -177,7 +177,9 @@ fn test_spatial_perception_monotonicity() {
 
 #[test]
 fn test_traction_envelope_lateral_limit() {
-    use nba_engine::world::{MatchIntentions, PhysicalLimitComponent, PhysicsSystem, PlayerIntentAction};
+    use nba_engine::world::{
+        MatchIntentions, PhysicalLimitComponent, PhysicsSystem, PlayerIntentAction,
+    };
 
     let rules = GameRules::default();
     let mut world = MatchWorld::new_initial(rules);
@@ -266,4 +268,27 @@ fn test_action_kinematics_phase_transitions_and_windows() {
     let trans = phase.step(0.20);
     assert_eq!(trans, ActionPhaseTransition::Completed);
     assert_eq!(phase, ActionPhase::Idle);
+}
+
+#[test]
+fn test_match_engine_world_convergence_and_step_sync() {
+    use nba_engine::MatchEngine;
+
+    let mut engine = MatchEngine::new(42);
+    // 初始验证：内部 world 核已经就绪
+    assert_eq!(engine.world().clock.period, 1);
+    assert_eq!(engine.world().ledger.possession_id, 1);
+
+    // 运行 10 个 tick
+    for _ in 0..10 {
+        let _ = engine.step();
+    }
+
+    // 验证：world 核与 MatchEngine 时钟、步进、物理完全同步收敛
+    assert_eq!(engine.world().clock.period, engine.period());
+    assert_eq!(engine.world().clock.game_clock, engine.game_clock());
+    assert_eq!(engine.world().clock.shot_clock, engine.shot_clock());
+    assert_eq!(engine.world().ledger.home_score, engine.home_score());
+    assert_eq!(engine.world().ledger.away_score, engine.away_score());
+    assert_eq!(engine.world().ledger.possession, engine.possession());
 }

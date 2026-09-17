@@ -363,6 +363,23 @@ fn perturbation_defensive_rebound_lowers_offensive_board_rate() {
     );
 }
 
+/// 守方力量 `strength` 越高 → 卡位优势更强，攻方进攻篮板率单调下降（D27因果闭环）。
+#[test]
+fn perturbation_strength_boxout_lowers_offensive_board_rate() {
+    let mut weak_d = rebound_player("D_weak_str", 0.5, 0.5, 0.5, 100.0);
+    weak_d.attributes.strength = 0.1;
+    let mut strong_d = rebound_player("D_strong_str", 0.5, 0.5, 0.5, 100.0);
+    strong_d.attributes.strength = 0.9;
+    let offense = rebound_player("O_1", 0.5, 0.5, 0.5, 100.0);
+
+    let weak_rate = estimate_offensive_rebound_rate(&offense, &weak_d);
+    let strong_rate = estimate_offensive_rebound_rate(&offense, &strong_d);
+    assert!(
+        strong_rate < weak_rate,
+        "strength boxout must lower offensive rebound rate: weak={weak_rate:.3}, strong={strong_rate:.3}"
+    );
+}
+
 /// `off_ball_sense` 作为**站位预判**参与篮板争夺（正向）。
 #[test]
 fn perturbation_off_ball_sense_raises_offensive_board_rate() {

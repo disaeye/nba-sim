@@ -61,7 +61,10 @@ impl ActionPhase {
 
     /// 是否处于投篮犯规侵犯圆柱体保护期 (起跳到落地全周期)
     pub fn is_shooting_foul_protected_window(&self) -> bool {
-        matches!(self, Self::Elevate { .. } | Self::Release { .. } | Self::Landing { .. })
+        matches!(
+            self,
+            Self::Elevate { .. } | Self::Release { .. } | Self::Landing { .. }
+        )
     }
 
     /// 动作阶段步进
@@ -70,7 +73,10 @@ impl ActionPhase {
             Self::Gather { elapsed, duration } => {
                 *elapsed += dt;
                 if *elapsed >= *duration {
-                    *self = Self::Elevate { elapsed: 0.0, duration: 0.25 };
+                    *self = Self::Elevate {
+                        elapsed: 0.0,
+                        duration: 0.25,
+                    };
                     ActionPhaseTransition::Elevating
                 } else {
                     ActionPhaseTransition::Continuing
@@ -88,7 +94,10 @@ impl ActionPhase {
             Self::Release { released } => {
                 if !*released {
                     *released = true;
-                    *self = Self::Landing { elapsed: 0.0, duration: 0.20 };
+                    *self = Self::Landing {
+                        elapsed: 0.0,
+                        duration: 0.20,
+                    };
                     ActionPhaseTransition::Released
                 } else {
                     ActionPhaseTransition::Continuing
@@ -336,7 +345,11 @@ impl DecisionSystem {
                 continue;
             }
             // 若为持球人且受到高压迫，倾向于传球或突破；若空位则倾向于终结
-            let contest = perception.defensive_contest_density.get(idx).copied().unwrap_or(0.0);
+            let contest = perception
+                .defensive_contest_density
+                .get(idx)
+                .copied()
+                .unwrap_or(0.0);
             if contest > 2.0 {
                 actions.push(PlayerIntentAction::MoveTo {
                     target: world.transforms[idx].pos_ft + world.transforms[idx].facing * 2.0,
@@ -368,7 +381,8 @@ impl PhysicsSystem {
 
                     // 1. 意图期望速度
                     let desired_vel = dir * max_speed;
-                    let mut accel = (desired_vel - world.transforms[idx].vel_ft).clamp_length_max(max_accel);
+                    let mut accel =
+                        (desired_vel - world.transforms[idx].vel_ft).clamp_length_max(max_accel);
 
                     // 2. 地面抓地力限制侧向变向 (Traction Envelope)
                     let current_vel = world.transforms[idx].vel_ft;

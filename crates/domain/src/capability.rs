@@ -84,7 +84,9 @@ pub fn effective_risk_tolerance(rules: &GameRules, attributes: &PlayerAttributes
 
 /// 防守卡位加成有效值 (D27)。
 pub fn effective_defensive_boxout_bonus(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
-    let reb = attributes.defensive_rebound.max(rules.attribute_response_floor);
+    let reb = attributes
+        .defensive_rebound
+        .max(rules.attribute_response_floor);
     let str_factor = attributes.strength.max(rules.attribute_response_floor);
     0.10 + (reb * 0.6 + str_factor * 0.4) * 0.25
 }
@@ -97,20 +99,27 @@ pub fn effective_putback_bias(rules: &GameRules, attributes: &PlayerAttributes) 
 
 /// 协防意识灵敏度 (D27)。
 pub fn effective_help_awareness(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
-    let def_int = attributes.defense_interior.max(rules.attribute_response_floor);
+    let def_int = attributes
+        .defense_interior
+        .max(rules.attribute_response_floor);
     let iq = attributes.decision_iq.max(rules.attribute_response_floor);
     (def_int * 0.5 + iq * 0.5) * 1.2
 }
 
 /// 低位背身防守对抗强度 (D27)。
 pub fn effective_post_defense_physicality(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
-    let def_int = attributes.defense_interior.max(rules.attribute_response_floor);
+    let def_int = attributes
+        .defense_interior
+        .max(rules.attribute_response_floor);
     let str_factor = attributes.strength.max(rules.attribute_response_floor);
     def_int * 0.5 + str_factor * 0.5
 }
 
 /// 防守反击快下概率 (D27)。
-pub fn effective_transition_leakout_chance(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
+pub fn effective_transition_leakout_chance(
+    rules: &GameRules,
+    attributes: &PlayerAttributes,
+) -> f32 {
     let spd = attributes.speed.max(rules.attribute_response_floor);
     0.10 + spd * 0.40
 }
@@ -374,10 +383,19 @@ mod tests {
         high.strength = 0.9;
 
         assert!(effective_risk_tolerance(&rules, &low) > effective_risk_tolerance(&rules, &high));
-        assert!(effective_defensive_boxout_bonus(&rules, &high) > effective_defensive_boxout_bonus(&rules, &low));
+        assert!(
+            effective_defensive_boxout_bonus(&rules, &high)
+                > effective_defensive_boxout_bonus(&rules, &low)
+        );
         assert!(effective_putback_bias(&rules, &high) > effective_putback_bias(&rules, &low));
         assert!(effective_help_awareness(&rules, &high) > effective_help_awareness(&rules, &low));
-        assert!(effective_post_defense_physicality(&rules, &high) > effective_post_defense_physicality(&rules, &low));
-        assert!(effective_transition_leakout_chance(&rules, &high) > effective_transition_leakout_chance(&rules, &low));
+        assert!(
+            effective_post_defense_physicality(&rules, &high)
+                > effective_post_defense_physicality(&rules, &low)
+        );
+        assert!(
+            effective_transition_leakout_chance(&rules, &high)
+                > effective_transition_leakout_chance(&rules, &low)
+        );
     }
 }

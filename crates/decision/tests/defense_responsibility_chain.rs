@@ -188,3 +188,117 @@ fn test_weak_side_help_and_x_out_rotation_chain() {
         DefensiveCandidateAction::XOutCloseout { .. }
     ));
 }
+
+#[test]
+fn test_tactical_planner_weak_side_rotation_and_x_out_integration() {
+    let rules = GameRules::default();
+    let mut rng = rand::rngs::mock::StepRng::new(42, 1);
+
+    // 进攻方布局（Home 攻右侧篮筐 hoop=(88.75, 25.0)）：
+    // 0: 持球突破人（杀入禁区 80.0, 25.0，距篮筐 8.75 尺）
+    // 1: 弱侧底角射手 (86.0, 5.0) -> Low-man 防守人应该下沉护筐
+    // 2: 弱侧 45 度射手 (72.0, 8.0) -> High-man 防守人应该执行 X-Out
+    // 3: 强侧掩护人 (82.0, 35.0)
+    // 4: 强侧翼侧射手 (72.0, 42.0)
+    let deep_carrier_pos = Vec2::new(80.0, 25.0);
+    let off_positions_drive = [
+        deep_carrier_pos,
+        Vec2::new(86.0, 5.0),
+        Vec2::new(72.0, 8.0),
+        Vec2::new(82.0, 35.0),
+        Vec2::new(72.0, 42.0),
+    ];
+
+    let (_off, def_drive) = TacticalPlanner::plan_possession_targets_with_rules(
+        TacticalSet::HighPickAndRoll,
+        SubPhase::ActionExecution,
+        Possession::Home,
+        deep_carrier_pos,
+        0,
+        2.0,
+        &mut rng,
+        &rules,
+        Some(&off_positions_drive),
+    );
+
+    // 弱侧 Low-man (index 1) 必须分配到 ROTATE_RIM_HELP
+    assert_eq!(def_drive[1].action, "ROTATE_RIM_HELP");
+    assert_eq!(def_drive[1].slot, "LowManRimHelp");
+    // 弱侧 High-man (index 2) 必须分配到 X_OUT_CLOSEOUT
+    assert_eq!(def_drive[2].action, "X_OUT_CLOSEOUT");
+    assert_eq!(def_drive[2].slot, "HighManXOut");
+
+    // 反事实对照组：持球人退回外线（65.0, 25.0，距篮筐 23.75 尺），未深入禁区
+    let perimeter_carrier_pos = Vec2::new(65.0, 25.0);
+    let off_positions_perimeter = [
+        perimeter_carrier_pos,
+        Vec2::new(86.0, 5.0),
+        Vec2::new(72.0, 8.0),
+        Vec2::new(82.0, 35.0),
+        Vec2::new(72.0, 42.0),
+    ];
+
+    let (_off, def_perimeter) = TacticalPlanner::plan_possession_targets_with_rules(
+        TacticalSet::HighPickAndRoll,
+        SubPhase::ActionExecution,
+        Possession::Home,
+        perimeter_carrier_pos,
+        0,
+        2.0,
+        &mut rng,
+        &rules,
+        Some(&off_positions_perimeter),
+    );
+
+    // 外线持球时，弱侧防守人必须保持常规 HELP_SIDE_SHELL 站位，不可盲目下沉放空射手
+    assert_eq!(def_perimeter[1].action, "HELP_SIDE_SHELL");
+    assert_eq!(def_perimeter[2].action, "HELP_SIDE_SHELL");
+}
+
+#[test]
+fn test_potential_field_continuity_and_threat_monotonicity() {
+    use nba_decision::potential_field::{DefensePotentialFieldSolver, PotentialFieldConfig};
+
+    let solver = DefensePotentialFieldSolver::new(PotentialFieldConfig::default());
+    let hoop = Vec2::new(88.75, 25.0);
+    let rules = GameRules::default();
+
+    let off_positions = [
+        Vec2::new(60.0, 25.0),
+        Vec2::new(86.0, 5.0), // Low-man 对位人
+        Vec2::new(72.0, 8.0), // High-man 对位人
+        Vec2::new(82.0, 35.0),
+        Vec2::new(72.0, 42.0),
+    ];
+
+    // 持球人从 30 尺外向禁区突破：距离篮筐逐步递减
+    let distances = [30.0, 24.0, 18.0, 14.0, 10.0, 6.0];
+    let mut prev_threat = 0.0_f32;
+    let mut prev_low_man_dist_to_hoop = f32::MAX;
+
+    for &dist in &distances {
+        let carrier_pos = hoop - Vec2::new(dist, 0.0);
+        let low_man = solver.solve_equilibrium(carrier_pos, hoop, &off_positions, 1, 0, &rules);
+
+        // 威胁占比必须随着突破深入严格单调递增！
+        assert!(
+            low_man.threat_ratio >= prev_threat,
+            "Threat ratio must increase monotonically with drive depth: dist={}, curr={}, prev={}",
+            dist,
+            low_man.threat_ratio,
+            prev_threat
+        );
+        prev_threat = low_man.threat_ratio;
+
+        // Low-man 的平衡点距离篮筐必须平滑下沉靠近！
+        let curr_dist_to_hoop = (low_man.target_pos - hoop).length();
+        assert!(
+            curr_dist_to_hoop <= prev_low_man_dist_to_hoop + 0.001,
+            "Low-man must sink smoothly toward rim: dist={}, curr_d={}, prev_d={}",
+            dist,
+            curr_dist_to_hoop,
+            prev_low_man_dist_to_hoop
+        );
+        prev_low_man_dist_to_hoop = curr_dist_to_hoop;
+    }
+}

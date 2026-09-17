@@ -41,12 +41,14 @@ impl DriveResolution {
             .clamp(0.0, 1.0);
         let successful = rng.gen_bool(reach_probability as f64);
 
-        let foul_probability =
-            (foul_rate * (0.5 + contest_intensity * policy.foul_contest_weight)).clamp(0.0, 1.0);
+        let foul_probability = (foul_rate
+            * (0.30 + contest_intensity * policy.foul_contest_weight * 0.65))
+            .clamp(0.0, 1.0);
         let shooting_foul = rng.gen_bool(foul_probability as f64);
 
         let finish_probability = (finish_rate + skill_delta + fatigue_delta
-            - contest_intensity * policy.finish_contest_penalty * finish_block_bias)
+            - contest_intensity * policy.finish_contest_penalty * finish_block_bias
+            - lane_density * policy.lane_density_penalty * 0.8)
             .clamp(0.0, 1.0);
         let finish_made = successful && !shooting_foul && rng.gen_bool(finish_probability as f64);
         let finish_kind = if contest_intensity > 0.65 {
@@ -193,11 +195,13 @@ impl ResolutionLayer {
         let stamina_advantage = normalized_stamina(offensive) - normalized_stamina(defensive);
         let positioning_advantage =
             offensive.attributes.off_ball_sense - defensive.attributes.off_ball_sense;
+        let strength_advantage = offensive.attributes.strength - defensive.attributes.strength;
         let score = policy.base_offensive_rate
             + distance_advantage * policy.distance_weight
             + attribute_advantage * policy.attribute_weight
             + stamina_advantage * policy.stamina_weight
-            + positioning_advantage * policy.positioning_weight;
+            + positioning_advantage * policy.positioning_weight
+            + strength_advantage * policy.strength_rebound_weight * 0.15;
         let offensive_probability = score.clamp(0.0, 1.0);
         let is_offensive = rng.gen_bool(offensive_probability as f64);
         ResolutionOutcome::ReboundSecured {
@@ -359,9 +363,7 @@ impl ResolutionLayer {
                 fouler_id,
                 is_shooting: matches!(
                     contact.kind,
-                    nba_semantics::ContactKind::BlockingCandidate
-                        | nba_semantics::ContactKind::ChargingCandidate
-                        | nba_semantics::ContactKind::ShootingContactCandidate
+                    nba_semantics::ContactKind::ShootingContactCandidate
                 ),
             }
         } else {

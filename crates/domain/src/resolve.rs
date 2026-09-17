@@ -264,13 +264,13 @@ impl Default for BaseRates {
         Self {
             pass_success: 0.94,
             drive_success: 0.78,
-            shot_make_2pt: 0.565,
+            shot_make_2pt: 0.54,
             // 中距离基准：公开赛季口径约 0.42。此前与廊下共用 0.565，
             // 使 8ft–三分线的出手被按廊下结算（evidence/problem.md §21.3）。
-            shot_make_mid: 0.42,
+            shot_make_mid: 0.40,
             shot_make_3pt: 0.34,
             ft_make: 0.77,
-            foul_on_drive_rate: 0.18,
+            foul_on_drive_rate: 0.12,
             // 跳投犯规基准：真实 NBA 每场约 40 次犯规，其中相当部分来自
             // 跳投犯规（三分犯规 / 中距离投篮犯规 / and-one）。
             // 干扰强度在上层作为自变量乘入，此处为“受到实质干扰时”的基准。
@@ -309,7 +309,7 @@ impl Default for ShotTypeRates {
             pull_up_2pt: 0.40,
             pull_up_3pt: 0.27,
             post_2pt: 0.45,
-            drive_finish_2pt: 0.60,
+            drive_finish_2pt: 0.50,
             other_2pt: 0.42,
         }
     }

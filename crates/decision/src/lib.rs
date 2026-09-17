@@ -7,6 +7,7 @@ pub mod constraint;
 pub mod defense;
 pub mod modulation;
 pub mod pipeline;
+pub mod potential_field;
 pub mod tactics;
 
 pub use constraint::{
@@ -16,6 +17,9 @@ pub use constraint::{
 };
 pub use modulation::{CoachStrategy, MoraleState, PlayerModulationState};
 pub use pipeline::{DecisionOutput, DecisionSystem, DecisionTrace, DecisionWeights};
+pub use potential_field::{
+    DefensePotentialFieldSolver, EmergentDefenseTarget, PotentialFieldConfig,
+};
 pub use tactics::{
     DefensiveRole, DefensiveScheme, DefensiveTactic, OffensiveRole, TacticalPlanner, TacticalSet,
     TeamIntent,

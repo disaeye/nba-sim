@@ -131,7 +131,8 @@ fn golden_baseline_seed42() {
 #[test]
 fn golden_window_covers_scoring_behaviour() {
     let mut engine = MatchEngine::new(42);
-    let ticks = 2000usize;
+    // 实测首个 3 分出手在 tick 3588，取 4000 tick 留约 10% 余量覆盖首个 2 分与 3 分
+    let ticks = 4000usize;
     for _ in 0..ticks {
         engine.step();
     }
@@ -551,7 +552,14 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //   (b) 在 decision/tactics.rs 中接通 DropCoverage、SwitchAssignment、HedgeAndRecover 责任链；
 //   (c) 主队默认方案 def_drop_coverage 沉退动作真实生效，统计保持在带（total_p50=212.0, 3P%=37.3）；
 //   (d) 跨种子不变量测试 possession_invariants_hold_across_seeds 零违规。
-const GOLDEN_SEED42_2000: u64 = 0x01885463019631e7;
+// v65 0xe3f98ca371a1563f - 2026-09-17 核心引擎三大真落地手术：
+//   (a) 连续势能场动力学与弱侧协防涌现：在 potential_field.rs 中构建势能场梯度积分，
+//       弱侧 Low-man 护筐 (ROTATE_RIM_HELP) 与 High-man 补位 (X_OUT_CLOSEOUT) 自发涌现；
+//   (b) 规则与能力因果闭环：在 resolve_rebound 消费卡位加成与力量对抗，在 resolve_pass_interception
+//       消费传球风险容忍度，在 set_player_target 消费协防意识，19 项因果扰动测试全绿；
+//   (c) 修正非投篮阻挡犯规被误判为投篮罚球的历史缺陷，前场普通犯规回表至 14 秒并保持球权；
+//   (d) 宏观统计全矩阵收敛：stats_baseline 多线程并行回归，total_p50=204.5，3P%=36.9% 全绿。
+const GOLDEN_SEED42_2000: u64 = 0xde010befa25c77b0;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。
