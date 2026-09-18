@@ -373,8 +373,13 @@ base_value (战术) = tactical_base (档案：sequence[].utility_weight)
                   + context_utility (architecture.md §5.1：比分、时间、对位经调制层)
 
 FinalUtility = (base_value + preference_bonus) × feasibility × stamina_modulation
-               − soft_penalty − risk_penalty + morale_bias
+               − soft_penalty − risk_penalty + morale(action family)
 ```
+
+`morale(action family)` 是士气标量与**动作族权重**的乘积（`ModulationRules.morale_*_affinity`）：
+终结与突破为正权的族在自信高时提升，组织观察为零权的族在自信高时降低。
+士气不能作为全候选共享的加性常数——采样是 softmax，共享项在归一化中抵消，
+阶参数则对选择分布零影响。
 
 ---
 

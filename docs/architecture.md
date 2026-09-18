@@ -222,22 +222,23 @@ BallTrajectoryKind (运动学采样参数 · crates/physics · 私有于执行)
 
 ### 4.1 设计：阶段管线
 
-将 `step()` 重构为**显式阶段序列的顺序调度**。每个阶段是独立函数，只接收它需要的字段 `&mut`（**不是**整个 `&mut World`）：
+`step()` 是**显式阶段序列的顺序调度**。每个阶段是独立方法，只接收它需要的状态组 `&mut`，整个 `&mut MatchEngine` 不出现在签名里：
 
 ```rust
-enum PhaseOutcome {
-    Continue,                     // 进入下一阶段
-    ShortCircuit(Vec<GameEvent>), // 本 tick 提前结束（如违例/节末）
+pub(crate) enum PhaseOutcome {
+    Continue,     // 进入下一阶段
+    ShortCircuit, // 本 tick 提前结束（跳球/节末/死球重置/终场），由调度器补齐帧输出
 }
 
-// 示例签名：每个阶段只声明它需要的字段
-fn clock_advance(clock: &mut ClockState, rules: &GameRules) -> PhaseOutcome;
-fn decision_phase(sys: &mut DecisionSystem, clock: &ClockState,
-                  ctx: &ConstraintContext, rng: &mut ChaCha8Rng) -> PhaseOutcome;
-// 调度器（step 主体）解构 World、按固定顺序调用，静态分发。
+// 阶段签名只声明它确实写入的状态组。状态组定义见 §4.3。
+fn clock_advance_phase(&mut self, dt: f32, was_tip_off: bool);
+fn tip_off_phase(&mut self, dt: f32) -> PhaseOutcome;
+fn dead_flow_phase(&mut self, dt: f32, was_period_break: bool) -> PhaseOutcome;
 ```
 
-> 阶段必须保持窄写权限：实现可以采用静态分发或其他等价机制，但不能把整个可变世界交给任意阶段。若改变阶段编排机制，必须在 `docs/decisions.md` 登记其借用隔离取舍。
+> 阶段必须保持窄写权限：实现可以采用静态分发或其他等价机制，但不能把整个可变世界交给任意阶段。若改变阶段编排机制，必须在 `docs/decisions.md` 登记其借用隔离取舍（当前编排机制见 ADR-014）。
+
+**写权限的可核验形式**：阶段签名列出它写入的状态组名，`&mut self` 的全部状态不出现在签名里。实测 59 个含写入的函数中 35 个（59%）只写单一状态组，其余 24 个跨 2–7 组；跨组函数的组名必须在签名中逐一列出，跨组写入因此从隐式变为显式。
 
 阶段序列（对应 §2 的 12 步；`FreeThrowPhase` 为死球罚球分支，条件激活，未出现在 §2 主数据流图中）：
 
@@ -264,25 +265,51 @@ EmitPhase
 - **InvariantPhase 不可绕过**：它是调度序列固定最后一环，任何路径都经过它；
 - **ShortCircuit 显式化**：取代分散的提前 `return` 出口。
 
-### 4.3 World 结构拆分
+### 4.3 状态组划分
 
-`MatchEngine` 的字段按阶段归属拆成子结构：
+`MatchEngine` 的 82 个字段收敛为十个具名状态组。分组依据是**写入点的同现关系**（同一函数同时写入的字段归入同组），按此准则 82 个字段无遗漏、无重叠：
 
 ```rust
-struct World {
-    clock: ClockState,           // current/game/shot clock, period
-    ball: BallState,             // §3 唯一事实源
-    flow: FlowState,             // game_flow + sub_phase + timers
-    score: ScoreState,
-    dead_ball: DeadBallState,    // inbound/free-throw 子状态
-    physics: PhysicsWorld,       // 物理后端
-    decision: DecisionSystem,
-    events: Vec<GameEvent>,      // 本 tick 待发布
-    // ...
+pub struct MatchEngine {
+    clock: state::MatchClock,                      // 11 字段：tick_index, game_clock, shot_clock,
+                                                   //   current_time, period, sub_phase(_timer),
+                                                   //   inbound/backcourt/period_break elapsed,
+                                                   //   last_decision_time
+    flow: state::GameFlow,                         // 10：game_flow, possession(_id), possession_arrow,
+                                                   //   scope_active/boundary, target/completed_possessions,
+                                                   //   simulation_complete, inbound_baseline
+    ball: state::BallRuntime,                      //  9：ball_pos_3d, ball_state, last_passer_id,
+                                                   //   pending_pass_receiver, receiver_estimate,
+                                                   //   pending_loose_ball_terminal, pending_pass_inbound,
+                                                   //   prev_observed_ball_pos, beaten_defender_id
+    config: state::TeamConfig,                     // 13：rules, tactical_set, home/away_team, team_traits,
+                                                   //   home/away_roster_order, home/away_offense_tactic,
+                                                   //   home/away_offense_spec, home/away_defensive_tactic
+    systems: state::Systems,                       //  5：physics, decision, coach, rng, world
+    observations: state::RuntimeObservations,      //  7：active_windows, last_decision_trace, latest_spacing,
+                                                   //   latest_contacts, beaten_recovery_until,
+                                                   //   advancing_player, modulation
+    journal: state::EventJournal,                  // 10：pending_events, current_event, current_event_types,
+                                                   //   current_enforcements, event_id_counter, causal_links,
+                                                   //   current_event_log, event_sequence, current_callout,
+                                                   //   current_intensity
+    ledger: state::ScoreLedger,                    //  8：home/away_score, team_fouls_home/away,
+                                                   //   free_throws_remaining, free_throw_attempt/shooter, box_score
+    possession_ctx: state::PossessionContext,      //  7：current_possession start_clock/start_time/passes/
+                                                   //   shooter/contest/turnover_player,
+                                                   //   last_possession_summary_index
+    audit: state::AuditTrail,                      //  2：invariant_checker, last_tick_violations
 }
 ```
 
-每个阶段函数只取得它签名声明的 `&mut` 字段，调度器按签名解构 `World` 传参——越界修改是编译错误，用借用检查器替代纪律（该承诺依赖 §4.1 的窄签名静态分发）。
+**分组定义访问路径**。状态组的字段以 `pub(crate)` 对同 crate 的模块可见，模块通过
+`self.clock.game_clock` 这样的具名路径访问；一个阶段拿不到它没有在签名里声明的组。
+字段归错组从「无代价」变为类型不匹配。组定义在 `crates/engine/src/match_engine/state.rs`，
+由 `scripts/check_engine_state_groups.py` 守卫（断言零裸字段、组字段不泄出 crate、`mod.rs` ≤ 400 行）。
+
+**空间量的单一事实源（ADR-015）**：球员级空间事实的唯一实现是 `crates/physics/src/spatial.rs` 的 `SpatialGeometry`（经 `SpatialPhysics::openness` / `pass_corridor` 被 decision 与 semantics 读取）；全场拓扑量（压迫密度、开阔度、弱侧空位）的唯一实现是 `crates/engine/src/world.rs` 的 `PerceptionSystem`；多体均衡与涌现防守目标归 `crates/decision/src/potential_field.rs` 的 `DefensePotentialFieldSolver`。三者分别对应球员级事实、全场聚合、决策目标，不重叠。
+
+**未采用的形式**：不把 `MatchEngine` 换成纯数据 `World` 加无状态 System 管线。实测 47 个字段存在多写入点（其中 37 个被 2 个以上模块共同写入，最多 5 个模块），`step_inner` 单函数跨 7 个状态组，弹道裁决块引用 25 个状态字段、调用 20 个引擎方法；在该形态下把字段按 `&mut` 解构传给窄签名函数需要重写这些函数体，行为等价性无法由黄金哈希证明。代价与收益的比较见 ADR-014。
 
 ---
 
@@ -300,11 +327,14 @@ struct World {
 ```
 FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + PreferenceBonus)
                × Feasibility × StaminaModulation
-               − SoftPenalty − RiskPenalty + MoraleBias
+               − SoftPenalty − RiskPenalty + MoraleBias(action family)
 ```
 
 - 乘性部分是**物理与可行性门**：Feasibility 为 [0, 1] 连续系数（几何/防守封堵，不可行直接乘零）；StaminaModulation 为体力衰减因子；
-- 加性部分是**偏好与惩罚修正**：战术基值、个体技能加成、倾向偏好、情境偏好在 BaseValue 侧求和；软约束、风险与士气作为独立项修正；
+- 加性部分是**偏好与惩罚修正**：战术基值、个体技能加成、倾向偏好、情境偏好在 BaseValue 侧求和；软约束、风险与士气作为独立项修正。
+  士气项按**动作族**加权后相加（`ModulationRules.morale_*_affinity`）：采样是 softmax，
+  全候选共享的加性常数在归一化中相互抵消，阶参数因此对选择分布零影响；
+  按族加权使同一标量对不同候选产生不同修正，参数扰动可改变选择分布；
 - `RoleFit` 因子已随 roles 降级移除（`attributes.md` §2.7）：`PlayerData` 无 `role` 字段，效用管线禁止读取任何身份性 role；战术槽位适配只能作为 `TacticalFit` 输入由 `(attributes, tendencies)` 经 `tactics.md` §2.3 适配分派生。
 
 > **涌现要求（P7）**：上式所有因子必须可从 `(PlayerAttributes/PlayerTendencies, DecisionRules, 当前状态)` 派生；`TacticalFit` / 任何权重禁止是与能力无关的硬编码常数。能力耦合与扰动验证见 `quality.md` §6。
@@ -339,6 +369,14 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 | officiating | `SemanticContact` + 规则 | `Foul` / `NoCall` / `Violation` / 罚则 | 物理计算 |
 
 **单向数据流**：physics → semantics → officiating，禁止反向。
+
+**物理模块内部边界**（D29）：`crates/physics/src/movement/` 分为
+`mod.rs`（对外值类型、`SpatialPhysics` 契约、门面 `PhysicsWorld`、
+两个具体后端 `RapierSpatialPhysics` / `SimpleCirclePhysics`）与
+`kinematics.rs`（两个后端共用的规则化运动学：速度提案、碰撞求解、
+端点投影与边界事实发射）。边界依据是「能否被两个后端共用」——
+后端只负责积分与接触检测，规则化的运动学约束全部在 `kinematics`，
+否则两个后端会互相反向依赖。
 
 ### 6.2 裁决的确定性
 

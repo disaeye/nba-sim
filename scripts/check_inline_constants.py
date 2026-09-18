@@ -41,8 +41,32 @@ NON_PRODUCTION_CRATES = {
 }
 
 # 核心行为文件：新增数值常量一律视为回归（除非预算已由 PR 证据更新）。
+# `match_engine` 的散落常量按模块分别计入预算（原单文件拆分后预算不合并，
+# 使每一条仍可追溯来源）。
 CORE_BEHAVIOR_FILES = {
     "crates/engine/src/match_engine.rs",
+    "crates/engine/src/match_engine/mod.rs",
+    "crates/engine/src/match_engine/accessors.rs",
+    "crates/engine/src/match_engine/action_windows.rs",
+    "crates/engine/src/match_engine/ball_flight.rs",
+    "crates/engine/src/match_engine/bookkeeping.rs",
+    "crates/engine/src/match_engine/construction.rs",
+    "crates/engine/src/match_engine/decision.rs",
+    "crates/engine/src/match_engine/test_hooks.rs",
+    "crates/engine/src/match_engine/phases.rs",
+    "crates/engine/src/match_engine/contests.rs",
+    "crates/engine/src/match_engine/events.rs",
+    "crates/engine/src/match_engine/execution.rs",
+    "crates/engine/src/match_engine/flow.rs",
+    "crates/engine/src/match_engine/projection.rs",
+    "crates/engine/src/match_engine/receiver.rs",
+    "crates/engine/src/match_engine/roster.rs",
+    "crates/engine/src/match_engine/runtime_phase.rs",
+    "crates/engine/src/match_engine/stream.rs",
+    "crates/engine/src/match_engine/state.rs",
+    "crates/engine/src/match_engine/tactics_phase.rs",
+    "crates/engine/src/match_engine/transitions.rs",
+    "crates/engine/src/match_engine/types.rs",
     "crates/decision/src/tactics.rs",
     "crates/decision/src/pipeline.rs",
     "crates/decision/src/constraint.rs",

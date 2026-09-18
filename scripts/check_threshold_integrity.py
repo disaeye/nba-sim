@@ -50,6 +50,7 @@ THRESHOLD_PATTERNS: list[str] = [
     r"^crates/evaluator/fixtures/.*\.json$",
     r"^scripts/check_inline_constants\.py$",
     r"^scripts/check_world_privacy\.py$",
+    r"^scripts/check_engine_state_groups\.py$",
     r"^scripts/check_disk_budget\.py$",
     r"^scripts/check_threshold_integrity\.py$",
 ]
@@ -122,7 +123,7 @@ def check_self_registration() -> list[str]:
         problems.append("SUBJECT_PATTERNS is empty — the guard cannot detect anything")
 
     must_match_threshold = "scripts/inline_constant_budget.json"
-    must_match_subject = "crates/engine/src/match_engine.rs"
+    must_match_subject = "crates/engine/src/match_engine/mod.rs"
     if not matches_any(must_match_threshold, THRESHOLD_PATTERNS):
         problems.append(f"guard fails to classify {must_match_threshold} as a threshold")
     if not matches_any(must_match_subject, SUBJECT_PATTERNS):
@@ -149,7 +150,7 @@ def self_test() -> int:
         print("   ✅ self-registration: 清单可识别已知基准与被测源码")
 
     # 2. 正样本：同时改预算与源码 → 必须检出
-    fake = ["scripts/inline_constant_budget.json", "crates/engine/src/match_engine.rs"]
+    fake = ["scripts/inline_constant_budget.json", "crates/engine/src/match_engine/mod.rs"]
     t, s = classify(fake)
     if t and s:
         print(f"   ✅ detects coupled change: thresholds={t} subjects={s}")
@@ -158,7 +159,7 @@ def self_test() -> int:
         print(f"   ❌ failed to detect coupled change: thresholds={t} subjects={s}")
 
     # 3. 负样本：只改源码 → 不应误报
-    t, s = classify(["crates/engine/src/match_engine.rs"])
+    t, s = classify(["crates/engine/src/match_engine/mod.rs"])
     if t == [] and s:
         print("   ✅ no false positive: source-only change is clean")
     else:

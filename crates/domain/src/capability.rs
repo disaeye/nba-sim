@@ -77,33 +77,48 @@ pub fn effective_decision_risk_tolerance(rules: &GameRules, attributes: &PlayerA
 }
 
 /// 决策风险容忍度有效值 (D27)。
+///
+/// 曲线从 `rules.capability` 读取（charter C1）：`base - iq * gain`，
+/// 智商越高越容忍不了风险。
 pub fn effective_risk_tolerance(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
     let iq = attributes.decision_iq.max(rules.attribute_response_floor);
-    (0.80 - iq * 0.35).clamp(0.05, 0.95)
+    let curve = &rules.capability;
+    (curve.risk_tolerance_base - iq * curve.risk_tolerance_gain).clamp(0.05, 0.95)
 }
 
 /// 防守卡位加成有效值 (D27)。
+///
+/// 曲线从 `rules.capability` 读取：主属性 `defensive_rebound` 与次属性
+/// `strength` 各自带增量。
 pub fn effective_defensive_boxout_bonus(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
     let reb = attributes
         .defensive_rebound
         .max(rules.attribute_response_floor);
     let str_factor = attributes.strength.max(rules.attribute_response_floor);
-    0.10 + (reb * 0.6 + str_factor * 0.4) * 0.25
+    let curve = &rules.capability;
+    curve.boxout_bonus_base
+        + reb * curve.boxout_bonus_primary_gain
+        + str_factor * curve.boxout_bonus_secondary_gain
 }
 
 /// 进攻篮板二次补篮倾向 (D27)。
 pub fn effective_putback_bias(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
     let fin = attributes.finishing.max(rules.attribute_response_floor);
-    0.05 + fin * 0.35
+    let curve = &rules.capability;
+    curve.putback_bias_base + fin * curve.putback_bias_gain
 }
 
 /// 协防意识灵敏度 (D27)。
+///
+/// `help_awareness_*_gain` 已包含原式的外层系数（原式 `(x*0.5 + y*0.5) * 1.2`
+/// 等价于两个 0.6 的增量之和）。
 pub fn effective_help_awareness(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
     let def_int = attributes
         .defense_interior
         .max(rules.attribute_response_floor);
     let iq = attributes.decision_iq.max(rules.attribute_response_floor);
-    (def_int * 0.5 + iq * 0.5) * 1.2
+    let curve = &rules.capability;
+    def_int * curve.help_awareness_primary_gain + iq * curve.help_awareness_secondary_gain
 }
 
 /// 低位背身防守对抗强度 (D27)。
@@ -112,7 +127,8 @@ pub fn effective_post_defense_physicality(rules: &GameRules, attributes: &Player
         .defense_interior
         .max(rules.attribute_response_floor);
     let str_factor = attributes.strength.max(rules.attribute_response_floor);
-    def_int * 0.5 + str_factor * 0.5
+    let curve = &rules.capability;
+    def_int * curve.post_defense_primary_gain + str_factor * curve.post_defense_secondary_gain
 }
 
 /// 防守反击快下概率 (D27)。
@@ -121,7 +137,8 @@ pub fn effective_transition_leakout_chance(
     attributes: &PlayerAttributes,
 ) -> f32 {
     let spd = attributes.speed.max(rules.attribute_response_floor);
-    0.10 + spd * 0.40
+    let curve = &rules.capability;
+    curve.transition_leakout_base + spd * curve.transition_leakout_gain
 }
 
 /// 接球半径（ft）：球到达时接球人能控制住的空间范围。

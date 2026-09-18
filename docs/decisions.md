@@ -189,7 +189,9 @@ handler，读取方得到 `None` 并走自己的无持球人分支；不得用�
    内部逐步将各逻辑块抽离为独立 crate（`crates/engine-core`、`crates/physics`、`crates/decision`），
    保证每一步重构均有 16-seed 黄金哈希与 G-STATS 基准守卫。
 
-规范落点：`docs/architecture.md` §4；执行入口：`docs/dev/current/plan.md`（D22–D28）。
+规范落点：`docs/architecture.md` §4；执行入口：`docs/dev/current/plan.md`（D22–D29）。
+> 本条的「阶段函数接收字段级 `&mut` 切片」条款已由 ADR-014 根据实测数据修订；
+> 其余要求（行为的纯函数性、不建与主引擎脱节的并行孤岛、渐进式解耦）继续有效。
 
 ### ADR-012 · 连续受限势能场动力学与空间 Voronoi 拓扑模型
 
@@ -214,3 +216,126 @@ handler，读取方得到 `None` 并走自己的无持球人分支；不得用�
      防守协防内缩必然自然导致外线 Voronoi 面积激增涌现空位。
 
 规范落点：`docs/tactics.md`、`docs/architecture.md`；执行入口：`docs/dev/current/plan.md`。
+
+### ADR-013 · 编排层巨石按职责拆分模块
+
+**状态：accepted**
+
+背景：`crates/engine/src/match_engine.rs` 已膨胀至 6,700 行，把时钟、名单、弹道状态机、
+动作执行、对抗裁定、球权转移、战术导航、事件发布、流导出与只读投影全部集中在
+一个文件与一个 `impl` 块内。ADR-011 已裁定向纯数据管线演进，但文件级边界缺失
+使“哪些代码属于哪个阶段”只能靠行号与注释判断，阶段划分无法单测也无法审阅。
+
+裁定：**按职责把编排层拆为同一模块下的多个文件，保持行为逐字节不变**：
+
+1. **模块边界以阶段与事实类型划分**，不以行数划分：
+   - `mod.rs`：状态字段、构造、时钟与球态唯一写入口、`step()` 调度、只读访问器；
+   - `tactics_phase.rs`：战术目标生成与移动导航；
+   - `execution.rs`：动作执行与决策输出应用；
+   - `contests.rs`：传球拦截、贴身切球、传球成败、篮板归属；
+   - `transitions.rs`：球权与生命周期状态转移；
+   - `events.rs`：事件裁决、强制项应用与因果链发布；
+   - `receiver.rs`：接球人感知与领传几何；
+   - `stream.rs`：流导出与资源治理；
+   - `projection.rs`：只读快照与渲染帧，以及领域事实到协议事件的适配；
+   - `construction.rs`：从 `MatchSetup` 与种子建立初始状态（`with_setup`）；
+   - `accessors.rs`：只读访问器与 `sync_to_world`；
+   - `test_hooks.rs`：40 个 `*_for_test` 受控写入钩子（隔离在一处便于审计）；
+   - `ball_flight.rs`：弹道裁决（按球态逐 tick 推进球位、产出 `BallFlightOutcome`）
+     与球态写入口（`transition_ball_state` / `sync_ball_holder` / `mark_receiver`）；
+   - `roster.rs`：名册与换人（`forced_substitution` / `new_possession_pg` /
+     `team_roster_ids` / `select_jumper_id`）；
+   - `flow.rs`：阶段标签投影（`phase_type` / `ball_phase`）、宏观生命周期与子阶段
+     迁移、作用域边界（`parse_scope*` / `set_scope` / `update_scope_completion`）、
+     回合边界与阶参数（`complete_possession` / `is_clutch_situation` /
+     `morale_bias_for`）、回合总结发射口（`emit_possession_summary`）；
+   - `action_windows.rs`：动作窗口推进与运动学锁同步；
+   - `decision.rs`：决策阶段的触发条件与上下文装配；
+   - `bookkeeping.rs`：每 tick 收尾的持球人同步、体力推进、语义接触归集与事实抽取；
+   - `runtime_phase.rs`：运行时约束求值、贴身切球、罚球结算、节末与终场短路；
+   - `types.rs`：对外值类型（`MatchBoxScore` / `ExportSummary`）。
+2. **子模块直接访问父模块私有字段**（Rust 隐私规则），因此拆分不引入任何
+   `pub` 字段或绕过不变量的新入口；`MatchEngine` 仍保持零 `pub` 字段。
+3. **行为不变的判据是黄金哈希**：拆分期间每一步都必须保持 `golden_hash` 通过，
+   模块移动不得伴随任何逻辑改写。
+
+规范落点：`docs/architecture.md` §4；执行入口：`docs/dev/current/plan.md`。
+
+### ADR-014 · 编排层按命名状态组收敛访问面（修订 ADR-011 的阶段窄签名条款）
+
+**状态：accepted**
+
+背景：ADR-011 裁定向纯数据世界（World）加无状态系统管线演进，`architecture.md` §4.1/§4.3 给出
+其具体形式：阶段函数接收它需要的字段 `&mut`，调度器解构 `World` 传参，目标是让越界修改成为编译错误。
+ADR-013 已完成文件级划分，但未改变字段共享：全部子模块仍可访问 `MatchEngine` 的同一批私有字段。
+
+对当前代码实测后的结论：
+
+1. 82 个字段共 1,215 处 `self.<字段>` 引用；按「同一函数同时写入」为边，47 个字段存在多写入点、
+   其中 37 个字段被 2 个以上模块共同写入（`pending_events`、`current_event`、`ball_pos_3d`、
+   `shot_clock`、`receiver_estimate` 各被 5 个模块写入）；
+2. 按「同一函数同时读取」为边，去掉 `step_inner` 与 `with_setup` 后 81/82 字段仍在单一连通分量内，
+   即不存在可按读取关系自治划分的字段簇；
+3. 按「同一函数同时写入」为边，59 个含写入的函数中 35 个只写单一字段簇，其余 24 个跨 2–7 簇，
+   `step_inner` 单函数跨 7 簇；
+4. 弹道裁决块（1,138 行）引用 25 个状态字段、调用 20 个引擎方法。
+
+因此按字段 `&mut` 解构的窄签名管线在保持行为不变的前提下无法落地：它需要重写上述跨组函数体，
+而重写的等价性不能由 `golden_hash`（只观测输出帧，不观测字段归属）证明。
+
+裁定：
+
+1. **状态核心是 `MatchEngine` 的命名状态组**（分组与字段清单见 `architecture.md` §4.3），
+   不另立一份与它并行的权威状态。组字段以 `pub(crate)` 对同 crate 的模块可见
+   （Rust 的字段可见性以模块为界，`state.rs` 的私有字段对它自己以外的模块不可见，
+   因此 `pub(crate)` 是子模块能访问组字段的最小可见性），模块经 `self.<组名>.<字段>`
+   具名路径访问；组结构体本身不 `pub`，外部 crate 拿不到它；
+2. **窄签名的单位是状态组**：阶段与命令签名列出它写入的组名，跨组函数必须逐一列出，
+   跨组写入从隐式变为显式；
+3. **ADR-011 的「阶段函数接收字段级 `&mut` 切片」条款由本条修订**；ADR-011 关于
+   「行为是 `(能力, 规则, 状态)` 的纯函数」「不建与主引擎脱节的并行孤岛」的要求仍然有效；
+4. **`MatchWorld` 的定位是衍生视图**：它当前由 `sync_to_world` 逐 tick 写入，生产代码从不读取
+   （唯一读取方是结果被丢弃的 `PerceptionSystem::evaluate`）。按 P1（单一事实源），
+   权威状态保持在 `MatchEngine` 的状态组里；让感知结果进入行为因果链作为独立任务推进，
+   其验收门是 `crates/engine/tests/wiring_proof.rs`，不以架构承诺代替。
+
+规范落点：`docs/architecture.md` §4.1、§4.3；执行入口：`docs/dev/current/plan.md`（D22、D28）。
+
+取舍代价：状态组不提供编译期的字段级写权限隔离，越组写入对本模块代码仍可编译。
+替代手段是签名显式列出组名与 `scripts/check_engine_state_groups.py` 守卫
+（断言 `MatchEngine` 零裸字段、断言组字段均为 `pub(crate)` 不泄出 crate、断言 `mod.rs` ≤ 400 行）。
+
+### ADR-015 · 空间量的单一事实源
+
+**状态：accepted**
+
+背景：空间计算在四个位置各自实现，`plan.md` §4.3 要求先裁定单一事实源再补进攻侧。
+对四处实测后的职责与消费面：
+
+| 位置 | 提供的量 | 消费面 |
+| --- | --- | --- |
+| `physics/src/spatial.rs` `SpatialGeometry` | 对位人距离与朝向、传球走廊、队友密度 | 经 `SpatialPhysics::openness` / `pass_corridor` 被 decision 与 semantics 大量读取 |
+| `physics/src/perception.rs` `PerceptionSnapshot` | 球员级只读事实（到球/筐距离、最近对位人） | **零消费**（全仓无任何引用，只在 `lib.rs` 的 `pub mod` 出现） |
+| `engine/src/world.rs` `PerceptionSystem` | 全场压迫密度、局部 Voronoi 开阔度近似、弱侧空位 | 引擎逐 tick 调用但结果被丢弃；契约测试 `match_world.rs` 验证其单调性 |
+| `decision/src/potential_field.rs` `DefensePotentialFieldSolver` | 多体均衡位置与涌现防守动作 | `decision/src/tactics.rs` 的防守目标生成 |
+
+裁定：
+
+1. **球员级空间事实的唯一实现是 `SpatialGeometry`**（`physics` crate）：
+   它已是 decision 与 semantics 的实际数据源，有自己的规则通道与契约测试。
+   新增的球员级空间量一律加在这里，不得另建平行的球员级抽象；
+2. **`physics/src/perception.rs` 删除**：它零消费，且其四个量中三个
+   （到球距离、到筐距离、最近对位人）已由 `SpatialGeometry::get_openness` 与
+   `nearest_opponent` 覆盖，保留它就是第四套平行模型；
+3. **全场拓扑量的唯一实现是 `PerceptionSystem`**：压迫密度与开阔度是**全场**量
+   （以十人为输入的聚合），不是球员级对位量，因此与 `SpatialGeometry` 不重叠。
+   它先前不可用的根因是输入为空（`MatchWorld` 的球员数组从未填充），
+   已由 `sync_to_world` 投影在册且在场球员修复；
+4. **多体均衡求解的唯一实现是 `DefensePotentialFieldSolver`**：它输出的是
+   防守目标与动作，属决策层的目标生成，与前三者的「事实描述」不同层。
+
+规范落点：`docs/architecture.md` §4.3；执行入口：`docs/dev/current/plan.md`（D23）。
+
+取舍代价：`PerceptionSystem` 仍是 `engine` 内的全场实现，而 `SpatialGeometry`
+在 `physics`；两层不能共用一个球员级缓存。这是依赖方向的结果——`physics` 不能
+依赖 `engine`，而全场聚合需要十人的完整视图。

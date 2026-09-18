@@ -262,7 +262,13 @@ impl DecisionSystem {
                 }
                 CandidateAction::Dwell { player_id } => format!("DWELL({})", player_id),
                 CandidateAction::Advance { player_id, .. } => format!("ADVANCE({})", player_id),
-                _ => "OTHER".to_string(),
+                // `PostUp` 与 `TripleThreatJab` 此前都落到 `OTHER`，使两个候选族
+                // 在决策追踪与评判器的 `utilities` 里无法区分：诊断「PostUp
+                // 从未被选中」时会得到假阴（它其实进了候选，只是标签不叫 POST_UP）。
+                CandidateAction::PostUp { player_id, .. } => format!("POST_UP({})", player_id),
+                CandidateAction::TripleThreatJab { player_id, .. } => {
+                    format!("JAB({})", player_id)
+                }
             }
         };
 
@@ -366,6 +372,28 @@ impl DecisionSystem {
         let team_traits = ctx.team_traits.get(ctx.possession_team);
         let style = team_traits.cloned().unwrap_or_default();
         let centered = |value: f32| value.clamp(0.0, 1.0) - 0.5;
+        // ## 士气必须按动作族加权（round-20 接线）
+        //
+        // 采样是 `exp((u - max_u) / temperature)` 的 softmax。若士气作为
+        // 全候选共享的加性常数，它在归一化中完全抵消，`hot_hand_bias` /
+        // `clutch_bias` / `frustrated_bias` / `exhausted_bias` 对选择分布
+        // 零影响（4 个 seed 实测 0 个行为改变）。把同一个标量乘以各动作族
+        // 的权重后再相加，则同一候选集合内各族的修正不同，比值不再恒定，
+        // 参数扰动可改变选择分布。权重走 `ModulationRules` 通道。
+        let policy = &ctx.rules.modulation;
+        // 士气按**动作族**取权重：同一标量对不同候选产生不同修正。
+        let morale_affinity = match &s.action {
+            CandidateAction::Shoot { .. } => policy.morale_shoot_affinity,
+            CandidateAction::Drive { .. } | CandidateAction::PostUp { .. } => {
+                policy.morale_drive_affinity
+            }
+            CandidateAction::Pass { .. } | CandidateAction::InboundPass { .. } => {
+                policy.morale_pass_affinity
+            }
+            CandidateAction::Dwell { .. }
+            | CandidateAction::TripleThreatJab { .. }
+            | CandidateAction::Advance { .. } => -policy.morale_dwell_affinity,
+        };
         let base = match &s.action {
             CandidateAction::Advance { .. } => {
                 // 推进的紧迫性：后场停留越久越必须推进（8 秒规则）。
@@ -536,11 +564,49 @@ impl DecisionSystem {
             CandidateAction::PostUp { target_pos, .. } => {
                 let hoop = ctx.rules.court.hoop_pos(ctx.possession_team == "home");
                 let dist = (*target_pos - hoop).length();
-                let finishing_skill = attributes.map(|a| a.finishing).unwrap_or(0.5);
-                self.weights.drive_base * finishing_skill * (1.0 - (dist / 15.0).clamp(0.0, 0.8))
+                let finishing_skill = attributes
+                    .map(|a| a.finishing)
+                    .unwrap_or(ctx.rules.capability.neutral_attribute);
+                // ## 低位背身是独立的动作族（D27）
+                //
+                // 本式原先与 `Drive` 共用 `drive_base`，且距离因子用 `dist/15`
+                // （而 `PostUp` 只在距篮 18 ft 内生成），因此它在距篮 8 ft 处
+                // 只得 ≈0.20，而 Drive 得 ≈0.65：`PostUp` 进入候选 15 次、
+                // 被选中 0 次（seed 42、20000 tick 实测）。
+                //
+                // 低位背身看的是**对位强弱**，不是道路空旷：
+                // 用背身者的 `strength` 与对位防守人的物理性对抗得到错位优势，
+                // 这是它与 Drive 的结构差异。防守人属性不可知时取中性值。
+                let defender_resistance = ctx
+                    .physics
+                    .openness(s.action.actor_id())
+                    .closest_defender_id
+                    .and_then(|id| ctx.physics.get_player(&id))
+                    .map(|p| {
+                        nba_domain::capability::effective_post_defense_physicality(
+                            ctx.rules,
+                            &p.attributes,
+                        )
+                    })
+                    .unwrap_or(ctx.rules.capability.neutral_attribute)
+                    .clamp(0.0, 1.0);
+                let neutral = ctx.rules.capability.neutral_attribute;
+                let post_strength = attributes.map(|a| a.strength).unwrap_or(neutral);
+                let body_mismatch = post_strength - defender_resistance;
+                // 距离因子：低位背身在篮下附近成立，远离篮筐时快速衰减。
+                // 除数取 18（与候选生成的距离门一致），使它在整个低位区间内
+                // 连续取值而不是一离开篮下就被 clamp 压到下限。
+                let close_factor = 1.0 - (dist / 18.0).clamp(0.0, 0.8);
+                ctx.rules.decision.post_up_base
+                    * finishing_skill
+                    * close_factor
+                    * (ctx.rules.capability.post_defense_resistance_floor
+                        + ctx.rules.capability.post_defense_resistance_gain
+                            * (neutral - defender_resistance))
+                    * (1.0 + ctx.rules.decision.post_up_mismatch_weight * body_mismatch)
             }
         };
-        base * s.feasibility_score * stamina_mult + morale_bias + s.constraint_penalty
+        base * s.feasibility_score * stamina_mult + morale_bias * morale_affinity + s.constraint_penalty
             - s.risk * self.weights.risk_aversion
     }
 

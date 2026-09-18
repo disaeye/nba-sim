@@ -2,10 +2,12 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MoraleState {
     Normal,
-    HotHand,    // Made multiple consecutive shots: boosts confidence & shot utility
+    /// Made multiple consecutive shots: boosts confidence & shot utility.
+    /// 由 [`PlayerModulationState::record_shot`] 累积，在
+    /// `update_stamina_with_rules` 里比较 `ModulationRules::hot_hand_makes`。
+    HotHand,
     Frustrated, // Turnovers/blocked: increases error rate and erratic decision-making
     Exhausted,  // Low stamina: heavily dampens explosive drive & sprint weights
-    Clutch,     // High focus in tight 4th quarter moments
 }
 
 #[derive(Debug, Clone)]

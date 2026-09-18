@@ -21,7 +21,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ENGINE_SRC = ROOT / "crates" / "engine" / "src" / "match_engine.rs"
+# 巨石拆分后 `MatchEngine` 结构体声明位于 `match_engine/mod.rs`；
+# 旧路径保留作为回退，使守卫在两种布局下都能定位结构体。
+ENGINE_SRC = ROOT / "crates" / "engine" / "src" / "match_engine" / "mod.rs"
+if not ENGINE_SRC.exists():
+    ENGINE_SRC = ROOT / "crates" / "engine" / "src" / "match_engine.rs"
 
 # 比赛真相字段：球权/球态/时钟/比分/阶段/回合上下文/事件会计。
 # 每一条都必须私有，写入只能走引擎内部唯一入口（或显式的 *_for_test 钩子）。

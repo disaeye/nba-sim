@@ -5,7 +5,6 @@
 
 pub mod ballistics;
 pub mod movement;
-pub mod perception;
 pub mod spatial;
 
 pub use ballistics::{BallTrajectoryKind, BallisticsEngine, ReboundLandingSpot};

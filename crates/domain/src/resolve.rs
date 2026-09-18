@@ -182,6 +182,18 @@ pub struct ReboundPolicy {
     pub strength_rebound_weight: f32,
     pub strength_positioning_weight: f32,
     pub strength_stamina_weight: f32,
+    /// 防守卡位加成对防守球员**有效距离**的缩减系数：
+    /// `eff_def_dist = def_dist × (1 - boxout_bonus × 此值)`。
+    ///
+    /// ## 为何走规则通道（D27）
+    ///
+    /// 原为内联 0.25，使 `effective_defensive_boxout_bonus`（0.225..0.40）
+    /// 的全部影响压缩到有效距离的 6%——它在 4 个 seed 上不足以改变模拟指纹。
+    pub boxout_distance_discount: f32,
+    /// 二次补篮倾向对进攻球员**有效距离**的缩减系数：
+    /// `eff_off_dist = off_dist × (1 - putback_bias × 此值)`。
+    /// 原为内联 0.15，同样把 `effective_putback_bias` 的影响压得过小。
+    pub putback_distance_discount: f32,
 }
 
 impl Default for ReboundPolicy {
@@ -195,6 +207,8 @@ impl Default for ReboundPolicy {
             strength_rebound_weight: 0.70,
             strength_positioning_weight: 0.20,
             strength_stamina_weight: 0.10,
+            boxout_distance_discount: 0.60,
+            putback_distance_discount: 0.60,
         }
     }
 }
@@ -257,6 +271,18 @@ pub struct BaseRates {
     pub intercept_steal_ceiling: f32,
     pub intercept_tip_floor: f32,
     pub intercept_tip_ceiling: f32,
+    /// 持球人风险容忍度对拦截概率的乘数区间：
+    /// `risk_factor = floor + passer_risk * gain`。
+    ///
+    /// ## 为何走规则通道（D27）
+    ///
+    /// `effective_risk_tolerance` 先前只以 `0.85 + risk * 0.3` 的内联常数
+    /// 进入拦截概率，把风险容忍度的全部影响压缩到 ±5%——该系数在 4 个 seed
+    /// 上不足以改变模拟指纹，「规则系数可校准」不成立。
+    /// 本字段给出可控的区间：默认 0.6..1.4（±40%）使决策智商的差异
+    /// 真正体现在丢球倾向上。
+    pub intercept_risk_factor_floor: f32,
+    pub intercept_risk_factor_gain: f32,
 }
 
 impl Default for BaseRates {
@@ -285,6 +311,8 @@ impl Default for BaseRates {
             intercept_steal_ceiling: 0.25,
             intercept_tip_floor: 0.02,
             intercept_tip_ceiling: 0.40,
+            intercept_risk_factor_floor: 0.6,
+            intercept_risk_factor_gain: 0.8,
         }
     }
 }
