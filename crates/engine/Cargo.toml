@@ -20,3 +20,4 @@ flate2.workspace = true
 
 [dev-dependencies]
 nba-test-support.workspace = true
+rayon.workspace = true

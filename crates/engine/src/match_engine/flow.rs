@@ -195,6 +195,9 @@ impl MatchEngine {
         if next == SubPhase::Initiation {
             self.clock.inbound_elapsed = 0.0;
             self.clock.backcourt_elapsed = 0.0;
+            // 死球换人窗口随活球恢复而关闭（gap.md G6）：下一个死球窗口
+            // 重新评估轮换。窗口在 `evaluate_dead_ball_rotation` 入口置位。
+            self.observations.rotation_window_done = false;
         }
         let next_phase = self.phase_type();
         if previous != next_phase {

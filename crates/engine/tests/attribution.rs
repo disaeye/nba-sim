@@ -14,6 +14,7 @@ mod support;
 use std::collections::HashMap;
 
 use nba_engine::{MatchEngine, StreamMode};
+use rayon::prelude::*;
 
 /// 一个回合窗口内观察到的事件种类计数。
 #[derive(Default, Debug)]
@@ -51,74 +52,226 @@ fn classify_mismatch(terminal: &str, w: &WindowKinds) -> Option<String> {
     }
 }
 
-fn audit_seed(seed: u64) -> Vec<(u64, String)> {
-    let mut engine = MatchEngine::new(seed);
-    // 结构性质（归因类别一致性）与比赛长度无关；用 `1q` 而非 `full`
-    // 使单个测试从约 85s 降到约 20s，同时保留 8 种子判定口径
-    // （quality.md §2.5）。分布类指标才需要 full。
-    engine.set_scope("1q").expect("1q scope is valid");
+/// 共享的 1q 模拟矩阵：同一批种子各跑一次 1q，把事件流逐 tick 暂存，
+/// 三个矩阵类测试（终结原因、跨节窗口、箱体对平）从同一份事件流各自
+/// 统计，消掉 22 次重复模拟中的 14 次。
+struct SeedAudit {
+    seed: u64,
+    mismatches: Vec<(u64, String)>,
+    spanning: usize,
+    box_failures: Vec<String>,
+}
 
-    let mut mismatches: Vec<(u64, String)> = Vec::new();
-    let mut w = WindowKinds::default();
-    let mut idx: u64 = 0;
-    let mut prev_period: u32 = 0;
-    let mut ticks = 0usize;
+fn shared_seed_audits() -> &'static Vec<SeedAudit> {
+    static AUDITS: std::sync::OnceLock<Vec<SeedAudit>> = std::sync::OnceLock::new();
+    AUDITS.get_or_init(|| {
+        let seeds: [u64; 8] = [42, 1, 7, 100, 999, 31337, 2024, 555];
+        seeds
+            .par_iter()
+            .copied()
+            .map(|seed| {
+                let mut engine = MatchEngine::new(seed);
+                engine.set_scope("1q").expect("1q scope is valid");
 
-    while !engine.is_finished() && ticks < 300_000 {
-        let tick = engine.step();
-        let period = tick.frame.period;
-        if prev_period != 0 && period != prev_period {
-            w.crossed_period = true;
-        }
-        prev_period = period;
-        for ev in &tick.frame.event_log {
-            match ev.kind.as_str() {
-                "VIOLATION" => w.violation += 1,
-                "PASS_DROPPED" => w.dropped += 1,
-                "PASS_TIPPED" => w.tipped += 1,
-                "STEAL" => w.steal += 1,
-                "LOOSE_BALL_SECURED" => w.loose_secured += 1,
-                // 带球被切掉是 TURNOVER_LOOSE_BALL 的**原因事实**（round-14/15）：
-                // 球被拨离后可能直接出界或被防守方收下，此时没有
-                // LOOSE_BALL_SECURED，但 BALL_POKED_LOOSE 事实仍在。
-                "BALL_POKED_LOOSE" => w.loose_secured += 1,
-                "SCORE" => w.made += 1,
-                "SHOT_RELEASE" => w.shot_release += 1,
-                "POSSESSION_SUMMARY" => {
-                    // POSSESSION_SUMMARY 关闭窗口；其前的归本回合。
-                    let terminal = ev
-                        .data
-                        .as_ref()
-                        .and_then(|d| d.get("PossessionSummary"))
-                        .and_then(|s| s.get("terminal_event"))
-                        .and_then(|t| t.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if let Some(reason) = classify_mismatch(&terminal, &w) {
-                        mismatches.push((idx, reason));
+                let mut mismatches: Vec<(u64, String)> = Vec::new();
+                let mut spanning = 0usize;
+                let mut w = WindowKinds::default();
+                let mut idx: u64 = 0;
+                let mut prev_period: u32 = 0;
+                let mut ticks = 0usize;
+                // 自上一个 POSSESSION_SUMMARY 以来是否又发生了事实。
+                let mut facts_since_summary = false;
+
+                // 从事件流独立重建的箱体计数（不读 box_score）。
+                let mut shot_rel_2 = 0u32;
+                let mut shot_rel_3 = 0u32;
+                let mut made_2 = 0u32;
+                let mut made_3 = 0u32;
+                let mut ft_att = 0u32;
+                let mut ft_made = 0u32;
+                let mut fouls = 0u32;
+                let mut turnover_terminals = 0u32;
+
+                while !engine.is_finished() && ticks < 300_000 {
+                    let tick = engine.step();
+                    let period = tick.frame.period;
+                    if prev_period != 0 && period != prev_period {
+                        w.crossed_period = true;
                     }
-                    idx += 1;
-                    w = WindowKinds::default();
+                    if prev_period != 0 && period != prev_period && facts_since_summary {
+                        spanning += 1;
+                        eprintln!(
+                            "seed {seed}: possession {idx} was still open when the period changed"
+                        );
+                    }
+                    prev_period = period;
+                    for ev in &tick.frame.event_log {
+                        let payload = || ev.data.as_ref();
+                        match ev.kind.as_str() {
+                            "VIOLATION" => w.violation += 1,
+                            "PASS_DROPPED" => w.dropped += 1,
+                            "PASS_TIPPED" => w.tipped += 1,
+                            "STEAL" => w.steal += 1,
+                            "LOOSE_BALL_SECURED" => w.loose_secured += 1,
+                            "BALL_POKED_LOOSE" => w.loose_secured += 1,
+                            "SHOT_RELEASE" => {
+                                w.shot_release += 1;
+                                let is_three = payload()
+                                    .and_then(|d| d.get("ShotRelease"))
+                                    .and_then(|s| s.get("is_three"))
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false);
+                                if is_three {
+                                    shot_rel_3 += 1;
+                                } else {
+                                    shot_rel_2 += 1;
+                                }
+                            }
+                            // `SCORE` 与 `SHOT_MISS` 都是 `HoopArrival` 载荷，
+                            // 按 `is_made` 区分命中；`SCORE` 同时关闭回合窗口。
+                            "SCORE" | "SHOT_MISS" => {
+                                if ev.kind == "SCORE" {
+                                    w.made += 1;
+                                }
+                                let arrival = payload().and_then(|d| d.get("HoopArrival"));
+                                let is_made = arrival
+                                    .and_then(|a| a.get("is_made"))
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false);
+                                let is_three = arrival
+                                    .and_then(|a| a.get("is_three"))
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false);
+                                if is_made {
+                                    if is_three {
+                                        made_3 += 1;
+                                    } else {
+                                        made_2 += 1;
+                                    }
+                                }
+                            }
+                            "FREE_THROW" => {
+                                ft_att += 1;
+                                let made = payload()
+                                    .and_then(|d| d.get("FreeThrowAttempt"))
+                                    .and_then(|f| f.get("made"))
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false);
+                                if made {
+                                    ft_made += 1;
+                                }
+                            }
+                            "FOUL" | "SHOOTING_FOUL" => fouls += 1,
+                            "POSSESSION_SUMMARY" => {
+                                let terminal = payload()
+                                    .and_then(|d| d.get("PossessionSummary"))
+                                    .and_then(|s| s.get("terminal_event"))
+                                    .and_then(|t| t.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                if terminal.starts_with("TURNOVER") {
+                                    turnover_terminals += 1;
+                                }
+                                if let Some(reason) = classify_mismatch(&terminal, &w) {
+                                    mismatches.push((idx, reason));
+                                }
+                                idx += 1;
+                                w = WindowKinds::default();
+                                facts_since_summary = false;
+                            }
+                            // 节间布置与阶段迁移不属于「回合仍在进行」。
+                            "PLACEMENT_APPLIED" | "PHASE_TRANSITION" => {}
+                            _ => {
+                                facts_since_summary = true;
+                            }
+                        }
+                    }
+                    ticks += 1;
                 }
-                _ => {}
-            }
-        }
-        ticks += 1;
-    }
-    mismatches
+
+                let b = engine.box_score();
+                let mut box_failures = Vec::new();
+                let check = |what: &str, expected: u32, actual: u32,
+                             failures: &mut Vec<String>| {
+                    if expected != actual {
+                        failures.push(format!(
+                            "seed {seed}: {what}: box_score {actual} vs event-stream {expected}"
+                        ));
+                    }
+                };
+                check(
+                    "fg2_attempts = SHOT_RELEASE(is_three=false)",
+                    shot_rel_2,
+                    b.fg2_attempts,
+                    &mut box_failures,
+                );
+                check(
+                    "fg3_attempts = SHOT_RELEASE(is_three=true)",
+                    shot_rel_3,
+                    b.fg3_attempts,
+                    &mut box_failures,
+                );
+                check(
+                    "fg2_made = HoopArrival(made && !three)",
+                    made_2,
+                    b.fg2_made,
+                    &mut box_failures,
+                );
+                check(
+                    "fg3_made = HoopArrival(made && three)",
+                    made_3,
+                    b.fg3_made,
+                    &mut box_failures,
+                );
+                check(
+                    "ft_attempts = FREE_THROW facts",
+                    ft_att,
+                    b.ft_attempts,
+                    &mut box_failures,
+                );
+                check(
+                    "ft_made = FREE_THROW(made=true)",
+                    ft_made,
+                    b.ft_made,
+                    &mut box_failures,
+                );
+                check(
+                    "fouls = FOUL facts (a zero-write field shows here as 0 vs N)",
+                    fouls,
+                    b.fouls,
+                    &mut box_failures,
+                );
+                check(
+                    "turnovers = TURNOVER* possession terminals (a partial-write field shows here, e.g. 12 vs 52)",
+                    turnover_terminals,
+                    b.turnovers,
+                    &mut box_failures,
+                );
+
+                SeedAudit {
+                    seed,
+                    mismatches,
+                    spanning,
+                    box_failures,
+                }
+            })
+            .collect()
+    })
 }
 
 #[test]
 fn turnover_terminal_reason_matches_window_facts() {
-    // 8 个种子（quality.md §2.5 判定口径 ≥8）。
-    let seeds: [u64; 8] = [42, 1, 7, 100, 999, 31337, 2024, 555];
+    let audits = shared_seed_audits();
     let mut total = 0usize;
-    for seed in seeds {
-        let mism = audit_seed(seed);
-        if !mism.is_empty() {
-            total += mism.len();
-            eprintln!("seed {seed}: {} mismatched possessions", mism.len());
-            for (i, reason) in mism.iter().take(5) {
+    for audit in audits {
+        if !audit.mismatches.is_empty() {
+            total += audit.mismatches.len();
+            eprintln!(
+                "seed {}: {} mismatched possessions",
+                audit.seed,
+                audit.mismatches.len()
+            );
+            for (i, reason) in audit.mismatches.iter().take(5) {
                 eprintln!("   possession {i}: {reason}");
             }
         }
@@ -139,39 +292,9 @@ fn possession_windows_do_not_span_period_boundaries() {
     // 判定口径：周期变化发生时，若自上一个回合总结以来**又积累了事实**，
     // 说明有回合跨过了节边界。仅凭"period 变了"会误报——节末总结在
     // period 仍是旧值的 tick 发出，而新周期从下一 tick 才开始。
-    let seeds: [u64; 8] = [42, 1, 7, 100, 999, 31337, 2024, 555];
-    let mut spanning = 0usize;
-    for seed in seeds {
-        let mut engine = MatchEngine::new(seed);
-        engine.set_scope("1q").unwrap();
-        let mut prev_period: u32 = 0;
-        let mut ticks = 0usize;
-        let mut idx = 0u64;
-        // 自上一个 POSSESSION_SUMMARY 以来是否又发生了事实。
-        let mut facts_since_summary = false;
-
-        while !engine.is_finished() && ticks < 300_000 {
-            let tick = engine.step();
-            let period = tick.frame.period;
-            if prev_period != 0 && period != prev_period && facts_since_summary {
-                spanning += 1;
-                eprintln!("seed {seed}: possession {idx} was still open when the period changed");
-            }
-            prev_period = period;
-            for ev in &tick.frame.event_log {
-                match ev.kind.as_str() {
-                    "POSSESSION_SUMMARY" => {
-                        idx += 1;
-                        facts_since_summary = false;
-                    }
-                    // 节间布置与阶段迁移不属于"回合仍在进行"。
-                    "PLACEMENT_APPLIED" | "PHASE_TRANSITION" => {}
-                    _ => facts_since_summary = true,
-                }
-            }
-            ticks += 1;
-        }
-    }
+    //
+    // 模拟来自 shared_seed_audits 共享矩阵（与终结原因测试同一次模拟）。
+    let spanning: usize = shared_seed_audits().iter().map(|a| a.spanning).sum();
     assert_eq!(
         spanning, 0,
         "a possession must not span a period boundary: it must be settled by \
@@ -190,128 +313,20 @@ fn possession_windows_do_not_span_period_boundaries() {
 /// - `box_score.fouls` **零自增点**，CLI 恒打印 `Fouls: 0`。
 ///
 /// 两者的共同点是「声明字段与事件事实脱钩」，而既有守卫（常数、世界私有化、
-/// 文档、身份）都覆盖不到——它们检查的是**代码形态**，不是**数据一致性**。
+/// 文档、身份）都覆盖不到——它们检查的是**代码形态**，**不是**数据一致性。
 /// 本测试把 `MatchBoxScore` 的 8 个字段逐个与从事件流独立重建的值对平，
 /// 对**未来新增的终结路径**同样有效。
+/// 模拟来自 shared_seed_audits 共享矩阵（8 种子全矩阵覆盖）。
 #[test]
 fn box_score_fields_reconcile_with_event_stream() {
-    for seed in [42u64, 1, 7, 100, 999, 31337] {
-        let mut engine = MatchEngine::new(seed);
-        engine.set_scope("1q").expect("1q scope is valid");
-
-        // 从事件流独立重建的计数（不读 box_score）。
-        let mut shot_rel_2 = 0u32;
-        let mut shot_rel_3 = 0u32;
-        let mut made_2 = 0u32;
-        let mut made_3 = 0u32;
-        let mut ft_att = 0u32;
-        let mut ft_made = 0u32;
-        let mut fouls = 0u32;
-        let mut turnover_terminals = 0u32;
-
-        let mut ticks = 0usize;
-        while !engine.is_finished() && ticks < 300_000 {
-            let tick = engine.step();
-            for ev in &tick.frame.event_log {
-                let payload = || ev.data.as_ref();
-                match ev.kind.as_str() {
-                    "SHOT_RELEASE" => {
-                        let is_three = payload()
-                            .and_then(|d| d.get("ShotRelease"))
-                            .and_then(|s| s.get("is_three"))
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        if is_three {
-                            shot_rel_3 += 1;
-                        } else {
-                            shot_rel_2 += 1;
-                        }
-                    }
-                    // `SCORE` 与 `SHOT_MISS` 都是 `HoopArrival` 载荷，
-                    // 按 `is_made` 区分命中。
-                    "SCORE" | "SHOT_MISS" => {
-                        let arrival = payload().and_then(|d| d.get("HoopArrival"));
-                        let is_made = arrival
-                            .and_then(|a| a.get("is_made"))
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        let is_three = arrival
-                            .and_then(|a| a.get("is_three"))
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        if is_made {
-                            if is_three {
-                                made_3 += 1;
-                            } else {
-                                made_2 += 1;
-                            }
-                        }
-                    }
-                    "FREE_THROW" => {
-                        ft_att += 1;
-                        let made = payload()
-                            .and_then(|d| d.get("FreeThrowAttempt"))
-                            .and_then(|f| f.get("made"))
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        if made {
-                            ft_made += 1;
-                        }
-                    }
-                    "FOUL" | "SHOOTING_FOUL" => fouls += 1,
-                    "POSSESSION_SUMMARY" => {
-                        let terminal = payload()
-                            .and_then(|d| d.get("PossessionSummary"))
-                            .and_then(|s| s.get("terminal_event"))
-                            .and_then(|t| t.as_str())
-                            .unwrap_or("");
-                        if terminal.starts_with("TURNOVER") {
-                            turnover_terminals += 1;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            ticks += 1;
-        }
-
-        let b = engine.box_score();
-        // 逐字段对平：任一字段失衡都会指出具体是哪一项。
-        assert_eq!(
-            b.fg2_attempts, shot_rel_2,
-            "seed {seed}: box_score.fg2_attempts must equal SHOT_RELEASE(is_three=false)"
-        );
-        assert_eq!(
-            b.fg3_attempts, shot_rel_3,
-            "seed {seed}: box_score.fg3_attempts must equal SHOT_RELEASE(is_three=true)"
-        );
-        assert_eq!(
-            b.fg2_made, made_2,
-            "seed {seed}: box_score.fg2_made must equal HoopArrival(made && !three)"
-        );
-        assert_eq!(
-            b.fg3_made, made_3,
-            "seed {seed}: box_score.fg3_made must equal HoopArrival(made && three)"
-        );
-        assert_eq!(
-            b.ft_attempts, ft_att,
-            "seed {seed}: box_score.ft_attempts must equal FREE_THROW facts"
-        );
-        assert_eq!(
-            b.ft_made, ft_made,
-            "seed {seed}: box_score.ft_made must equal FREE_THROW(made=true)"
-        );
-        assert_eq!(
-            b.fouls, fouls,
-            "seed {seed}: box_score.fouls must equal FOUL facts \
-             (a zero-write field shows here as 0 vs N)"
-        );
-        assert_eq!(
-            b.turnovers, turnover_terminals,
-            "seed {seed}: box_score.turnovers must equal TURNOVER* possession terminals \
-             (a partial-write field shows here, e.g. 12 vs 52)"
-        );
-    }
+    let failures: Vec<String> = shared_seed_audits()
+        .iter()
+        .flat_map(|a| a.box_failures.clone())
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "box_score fields must reconcile with the event stream: {failures:?}"
+    );
 }
 
 /// D0.1 回合终结归因穷举：`UNATTRIBUTED_END` 必须在全矩阵下为 0。
@@ -337,74 +352,110 @@ fn run_1q_and_count_unattributed(label: &str, seed: u64) -> (usize, String) {
 
 #[test]
 fn no_unattributed_end_across_seed_matrix_1q() {
-    let mut total_unattributed = 0usize;
-    for seed in 0..20u64 {
-        let (unattributed, _content) = run_1q_and_count_unattributed("attr_matrix", seed);
-        if unattributed > 0 {
+    // 判定口径：quality.md §2.5 的 8 种子矩阵。`UNATTRIBUTED_END` 已从
+    // `PossessionEndCause` 物理删除（domain/event.rs），编译期写不出无归因
+    // 终结；本测试守的是导出管道（ledger 解析）不重新引入它——分支覆盖
+    // 由 8 个种子的 ~440 个回合提供，与矩阵大小无关。
+    // 种子间并行；TempArtifact 路径含 seed，8 个线程互不覆盖。
+    let per_seed: Vec<(u64, usize)> = (0..8u64)
+        .into_par_iter()
+        .map(|seed| {
+            let (unattributed, _content) = run_1q_and_count_unattributed("attr_matrix", seed);
+            (seed, unattributed)
+        })
+        .collect();
+    for (seed, unattributed) in &per_seed {
+        if *unattributed > 0 {
             eprintln!("seed {seed}: UNATTRIBUTED_END × {unattributed}");
         }
-        total_unattributed += unattributed;
     }
+    let total_unattributed: usize = per_seed.iter().map(|(_, u)| u).sum();
     assert_eq!(total_unattributed, 0, "UNATTRIBUTED_END 必须为 0");
 }
 
 /// full scope 下同样不允许兜底终结（含历史活锁种子）。
 #[test]
 fn no_unattributed_end_full_scope() {
-    for seed in [0u64, 3, 6, 42, 555, 999] {
-        let mut engine = MatchEngine::new(seed);
-        let guard = nba_test_support::TempArtifact::new(&format!("possession_attr_full_{seed}"));
-        engine
-            .simulate_scope_and_export_with_mode("full", &guard.path_str(), StreamMode::Facts)
-            .expect("run full");
-        let content = std::fs::read_to_string(guard.path()).unwrap_or_default();
-        let unattributed = content
-            .lines()
-            .filter(|line| line.contains("\"UNATTRIBUTED_END\""))
-            .count();
-        assert_eq!(unattributed, 0, "seed {seed} full scope 存在兜底终结");
-    }
+    // 种子间并行：六场完整比赛互不共享状态；TempArtifact 路径含 seed 互不冲突。
+    let failures: Vec<String> = [0u64, 3, 6, 42, 555, 999]
+        .par_iter()
+        .map(|&seed| {
+            let mut engine = MatchEngine::new(seed);
+            let guard = nba_test_support::TempArtifact::new(&format!("possession_attr_full_{seed}"));
+            engine
+                .simulate_scope_and_export_with_mode("full", &guard.path_str(), StreamMode::Facts)
+                .expect("run full");
+            let content = std::fs::read_to_string(guard.path()).unwrap_or_default();
+            let unattributed = content
+                .lines()
+                .filter(|line| line.contains("\"UNATTRIBUTED_END\""))
+                .count();
+            if unattributed == 0 {
+                None
+            } else {
+                Some(format!("seed {seed} full scope 存在兜底终结 × {unattributed}"))
+            }
+        })
+        .flatten()
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "full scope 下不允许存在兜底终结: {failures:?}"
+    );
 }
 
 /// 违例回合必须带责任球员（problem.md §13.2：`turnover_player_id` 缺失）。
 #[test]
 fn violation_turnover_summary_carries_player_id() {
-    let mut checked = 0u32;
-    for seed in 0..10u64 {
-        let (_unattributed, content) = run_1q_and_count_unattributed("attr_violation", seed);
-        for line in content.lines() {
-            if !line.contains("TURNOVER_VIOLATION") {
-                continue;
-            }
-            let json: serde_json::Value = serde_json::from_str(line).expect("summary json");
-            // facts 流结构：event_log 数组内 data.PossessionSummary（可能多条），
-            // 逐条检查终结为 TURNOVER_VIOLATION 的总结必须带责任球员。
-            let entries: Vec<&serde_json::Value> = json
-                .get("event_log")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().collect())
-                .unwrap_or_else(|| vec![&json]);
-            for entry in entries {
-                let Some(summary) = entry
-                    .pointer("/data/PossessionSummary")
-                    .or_else(|| json.pointer("/payload/summary"))
-                else {
-                    continue;
-                };
-                if summary.get("terminal_event").and_then(|v| v.as_str())
-                    != Some("TURNOVER_VIOLATION")
-                {
+    // 与矩阵测试同口径：8 种子。
+    let per_seed: Vec<(u32, Option<String>)> = (0..8u64)
+        .into_par_iter()
+        .map(|seed| {
+            let mut checked = 0u32;
+            let mut violation = None;
+            let (_unattributed, content) = run_1q_and_count_unattributed("attr_violation", seed);
+            for line in content.lines() {
+                if !line.contains("TURNOVER_VIOLATION") {
                     continue;
                 }
-                checked += 1;
-                let turnover_player = summary.get("turnover_player_id").and_then(|v| v.as_str());
-                assert!(
-                    turnover_player.is_some(),
-                    "seed {seed} 的 TURNOVER_VIOLATION 总结缺 turnover_player_id: {summary}"
-                );
+                let json: serde_json::Value = serde_json::from_str(line).expect("summary json");
+                // facts 流结构：event_log 数组内 data.PossessionSummary（可能多条），
+                // 逐条检查终结为 TURNOVER_VIOLATION 的总结必须带责任球员。
+                let entries: Vec<&serde_json::Value> = json
+                    .get("event_log")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().collect())
+                    .unwrap_or_else(|| vec![&json]);
+                for entry in entries {
+                    let Some(summary) = entry
+                        .pointer("/data/PossessionSummary")
+                        .or_else(|| json.pointer("/payload/summary"))
+                    else {
+                        continue;
+                    };
+                    if summary.get("terminal_event").and_then(|v| v.as_str())
+                        != Some("TURNOVER_VIOLATION")
+                    {
+                        continue;
+                    }
+                    checked += 1;
+                    let turnover_player = summary.get("turnover_player_id").and_then(|v| v.as_str());
+                    if turnover_player.is_none() {
+                        violation = Some(format!(
+                            "seed {seed} 的 TURNOVER_VIOLATION 总结缺 turnover_player_id: {summary}"
+                        ));
+                    }
+                }
             }
-        }
-    }
+            (checked, violation)
+        })
+        .collect();
+    let checked: u32 = per_seed.iter().map(|(c, _)| c).sum();
+    let violations: Vec<String> = per_seed.iter().filter_map(|(_, v)| v.clone()).collect();
+    assert!(
+        violations.is_empty(),
+        "violation turnovers missing player id: {violations:?}"
+    );
     assert!(checked > 0, "矩阵中未观察到违例回合，测试无判别力");
 }
 

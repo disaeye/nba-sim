@@ -285,6 +285,23 @@ pub enum SubstitutionReason {
     Injury,
 }
 
+impl SubstitutionReason {
+    /// 换人播报文案：原因决定措辞，替补登场动作用词统一。
+    pub fn callout(&self, out_player: &str, in_player: &str) -> String {
+        let why = match self {
+            Self::FoulTrouble => "犯满离场",
+            Self::StaminaExhaustion => "体力耗尽下场休息",
+            Self::TacticalAdjustment => "教练战术调整换下",
+            Self::GarbageTime => "垃圾时间轮换休息",
+            Self::Injury => "受伤离场",
+        };
+        format!(
+            "球员 {} {}，替补 {} 死球登场入位！",
+            out_player, why, in_player
+        )
+    }
+}
+
 /// 换人请求（tactics.md §2.3.3 SubstitutionEvent）。
 ///
 /// 这是**请求**而不是事实：引擎在死球窗口评估它，接受时发出

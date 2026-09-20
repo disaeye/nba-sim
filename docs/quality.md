@@ -184,6 +184,8 @@ nba-sim --rules rules.json --seeds 0..20 batch --out stats.jsonl
 | 每 tick 堆分配 | 稳态为 0（复用缓冲；`build_tick` 的 Vec/String 复用） | 分配计数器或 heaptrack 抽查 |
 | `String` clone / tick | 消除（球员 id/jersey 预分配 Arc/静态） | 代码审查 + 分配计数 |
 | 批量跑批 | 由资源预算 fixture 冻结 | batch 资源报告 |
+| 测试套件执行 | tier1 ≤ 2 分钟；tier2 ≤ 6 分钟；tier2+3 ≤ 15 分钟；全量 ≤ 20 分钟（4 核 3.7GB 参考机，`scripts/run-tests.sh` 分层实测：tier1 62s、全量 945s）；单目标不得无界挂起（`par_test.py --timeout` 600s 硬上限） | `scripts/run-tests.sh` 分层计时 |
+| 测试并行调度 | 两级并行：目标间（`par_test.py --jobs`）× 目标内种子间（rayon `par_iter`，在 `fingerprint_for_setup` 与各测试的多 seed 循环）；内存大户 `stats_baseline` 串行独占 | `par_test.py --serial` 默认值 |
 
 ### 4.2 纪律
 

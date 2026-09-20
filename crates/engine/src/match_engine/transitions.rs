@@ -558,6 +558,10 @@ impl MatchEngine {
         self.update_coach_strategy();
         self.clock.shot_clock = self.config.rules.league.shot_clock_seconds;
         self.sync_team_tactics();
+        // 死球换人窗口（gap.md G6）：必须在发球员选定**之前**评估——
+        // 若发球员被换下，`new_possession_pg` 会按在场名单重新选定，
+        // 不产生「发球员中途离场」的矛盾事实。
+        self.evaluate_dead_ball_rotation();
         self.transition_phase(SubPhase::Initiation);
         self.set_game_flow(GameFlowState::DeadBall);
         self.flow.inbound_baseline = baseline_pos;
@@ -675,6 +679,10 @@ impl MatchEngine {
                 );
                 self.complete_possession();
             }
+            // 节间是真实篮球里换人量最大的死球窗口（gap.md G6）：
+            // 体力在整节消耗，节末重置轮换表。窗口标记复位使评估可执行。
+            self.observations.rotation_window_done = false;
+            self.evaluate_dead_ball_rotation();
             self.journal
                 .pending_events
                 .push(GameEvent::PhaseTransition {

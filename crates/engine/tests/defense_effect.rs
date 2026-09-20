@@ -31,6 +31,7 @@
 use nba_domain::GameRules;
 use nba_engine::MatchEngine;
 use nba_engine::MatchSetup;
+use rayon::prelude::*;
 
 /// 一场比赛聚合出的防守侧过程量。
 #[derive(Debug, Clone, Copy)]
@@ -135,14 +136,18 @@ fn defensive_scheme_changes_defensive_geometry() {
     let seeds: [u64; 4] = [42, 1, 7, 100];
     let schemes = ["def_man_conservative", "def_zone_23", "def_drop_coverage"];
 
-    let mut by_scheme: Vec<(&str, Vec<DefenseProfile>)> = Vec::new();
-    for s in schemes {
-        let mut v = Vec::new();
-        for seed in seeds {
-            v.push(profile(s, seed));
-        }
-        by_scheme.push((s, v));
-    }
+    // （方案 × seed）组合间并行：12 场 1q 模拟互不共享状态。
+    let by_scheme: Vec<(&str, Vec<DefenseProfile>)> = schemes
+        .par_iter()
+        .map(|&scheme| {
+            let v: Vec<DefenseProfile> = seeds
+                .par_iter()
+                .copied()
+                .map(|seed| profile(scheme, seed))
+                .collect();
+            (scheme, v)
+        })
+        .collect();
 
     for (s, v) in &by_scheme {
         let mean = v.iter().map(|p| p.mean_defender_dist_to_hoop).sum::<f32>() / v.len() as f32;
@@ -201,12 +206,19 @@ fn defensive_scheme_changes_game_outcome_distribution() {
     // 更强的门：过程改变必须传导到结果量（失误/得分分布），
     // 否则防守只是"站位好看"。用 4 seed 聚合，断言不是逐字节相同。
     let seeds: [u64; 4] = [42, 1, 7, 100];
-    let mut press_total = 0u32;
-    let mut zone_total = 0u32;
-    for seed in seeds {
-        press_total += profile("def_man_pressure", seed).turnovers;
-        zone_total += profile("def_zone_23", seed).turnovers;
-    }
+    // （方案 × seed）组合间并行：8 场 1q 模拟互不共享状态。
+    let totals: Vec<(u32, u32)> = seeds
+        .par_iter()
+        .copied()
+        .map(|seed| {
+            (
+                profile("def_man_pressure", seed).turnovers,
+                profile("def_zone_23", seed).turnovers,
+            )
+        })
+        .collect();
+    let press_total: u32 = totals.iter().map(|(p, _)| p).sum();
+    let zone_total: u32 = totals.iter().map(|(_, z)| z).sum();
     assert_ne!(
         press_total, zone_total,
         "press and zone must not produce identical turnover totals \

@@ -11,6 +11,7 @@
 mod support;
 
 use nba_engine::MatchEngine;
+use rayon::prelude::*;
 
 /// 封盖事实必须真实出现在比赛里，且比率处于真实区间。
 ///
@@ -18,22 +19,28 @@ use nba_engine::MatchEngine;
 /// 单 seed 2.4%–4.9%；真实 NBA 约 5.5%。这里只断言一个宽松区间——精确标定属于 `stats_baseline`。
 #[test]
 fn blocked_shots_occur_at_a_plausible_rate() {
-    let mut blocks = 0u32;
-    let mut shots = 0u32;
-    for seed in [42u64, 100] {
-        let mut engine = MatchEngine::new(seed);
-        engine.set_scope("full").expect("full scope is valid");
-        while !engine.is_finished() {
-            let tick = engine.step();
-            for ev in &tick.frame.event_log {
-                match ev.kind.as_str() {
-                    "BLOCKED_SHOT" => blocks += 1,
-                    "SHOT_RELEASE" => shots += 1,
-                    _ => {}
+    // 种子间并行：两场完整比赛互不共享状态，并行只改变 wall time。
+    let (blocks, shots) = [42u64, 100]
+        .par_iter()
+        .copied()
+        .map(|seed| {
+            let mut engine = MatchEngine::new(seed);
+            engine.set_scope("full").expect("full scope is valid");
+            let mut blocks = 0u32;
+            let mut shots = 0u32;
+            while !engine.is_finished() {
+                let tick = engine.step();
+                for ev in &tick.frame.event_log {
+                    match ev.kind.as_str() {
+                        "BLOCKED_SHOT" => blocks += 1,
+                        "SHOT_RELEASE" => shots += 1,
+                        _ => {}
+                    }
                 }
             }
-        }
-    }
+            (blocks, shots)
+        })
+        .reduce(|| (0u32, 0u32), |a, b| (a.0 + b.0, a.1 + b.1));
     assert!(shots > 0, "a full game must contain shot attempts");
     let rate = f64::from(blocks) / f64::from(shots);
     assert!(
@@ -98,27 +105,30 @@ fn block_rate_responds_to_the_block_attribute() {
     use nba_engine::MatchSetup;
 
     let run = |block_value: f32| -> u32 {
-        let mut blocks = 0u32;
-        for seed in [42u64, 100] {
-            let mut setup = MatchSetup::builtin(GameRules::default());
-            for team in [&mut setup.home_team, &mut setup.away_team] {
-                for p in team.players.iter_mut() {
-                    p.attributes.block = block_value;
-                    p.attributes.vertical = block_value;
-                }
-            }
-            let mut engine = MatchEngine::with_setup(setup, seed);
-            engine.set_scope("full").expect("full scope is valid");
-            while !engine.is_finished() {
-                let tick = engine.step();
-                for ev in &tick.frame.event_log {
-                    if ev.kind == "BLOCKED_SHOT" {
-                        blocks += 1;
+        [42u64, 100]
+            .par_iter()
+            .map(|&seed| {
+                let mut setup = MatchSetup::builtin(GameRules::default());
+                for team in [&mut setup.home_team, &mut setup.away_team] {
+                    for p in team.players.iter_mut() {
+                        p.attributes.block = block_value;
+                        p.attributes.vertical = block_value;
                     }
                 }
-            }
-        }
-        blocks
+                let mut engine = MatchEngine::with_setup(setup, seed);
+                engine.set_scope("full").expect("full scope is valid");
+                let mut blocks = 0u32;
+                while !engine.is_finished() {
+                    let tick = engine.step();
+                    for ev in &tick.frame.event_log {
+                        if ev.kind == "BLOCKED_SHOT" {
+                            blocks += 1;
+                        }
+                    }
+                }
+                blocks
+            })
+            .sum()
     };
 
     let low = run(0.05);

@@ -54,6 +54,23 @@ pub(crate) struct RuntimeObservations {
     pub(crate) beaten_recovery_until: HashMap<String, f32>,
     pub(crate) advancing_player: Option<String>,
     pub(crate) modulation: HashMap<String, PlayerModulationState>,
+    /// 每名球员最近的出场/离场时刻（比赛时钟秒）：换人体息时间判据
+    /// （gap.md G6）。在场者存出场时刻，替补存离场时刻。
+    pub(crate) rotation_clock: HashMap<String, RotationClock>,
+    /// 当前死球窗口内已执行的换人次数（每队）：受
+    /// `RotationRules::max_substitutions_per_window` 约束，窗口结束时清零。
+    pub(crate) substitutions_this_window: (u32, u32),
+    /// 当前死球窗口是否已评估过轮换：同一窗口只评估一次。
+    pub(crate) rotation_window_done: bool,
+}
+
+/// 一名球员的轮换时刻记录。
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RotationClock {
+    /// 上次状态翻转（入场或离场）发生时的比赛时钟秒。
+    pub(crate) since: f32,
+    /// 当前是否在场。
+    pub(crate) on_court: bool,
 }
 
 impl RuntimeObservations {
@@ -69,6 +86,9 @@ impl RuntimeObservations {
             beaten_recovery_until: HashMap::new(),
             advancing_player: None,
             modulation,
+            rotation_clock: HashMap::new(),
+            substitutions_this_window: (0, 0),
+            rotation_window_done: false,
         }
     }
 }

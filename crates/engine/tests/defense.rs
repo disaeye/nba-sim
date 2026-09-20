@@ -30,29 +30,33 @@ mod support;
 
 use nba_domain::GameRules;
 use nba_engine::MatchEngine;
+use rayon::prelude::*;
 
 /// 统计弱侧协防动作在整个 scope 内出现的帧数。
 ///
 /// 计数对象是 `potential_field.rs` 直接产出的动作标签，因此它同时是
-/// 「势能场系数是否真的进入计算」的探针。
+/// 「势能场系数是否真的进入计算」的探针。种子间并行，逐 seed 累加。
 fn help_action_frames(rules: GameRules, seeds: &[u64]) -> (u32, u32) {
-    let mut rotate = 0u32;
-    let mut x_out = 0u32;
-    for &seed in seeds {
-        let mut engine = MatchEngine::with_rules(seed, rules.clone());
-        engine.set_scope("1q").expect("scope must be valid");
-        while !engine.is_finished() {
-            let tick = engine.step();
-            for p in tick.frame.players.iter().filter(|p| p.on_court) {
-                match p.action.as_str() {
-                    "ROTATE_RIM_HELP" => rotate += 1,
-                    "X_OUT_CLOSEOUT" => x_out += 1,
-                    _ => {}
+    seeds
+        .par_iter()
+        .map(|&seed| {
+            let mut engine = MatchEngine::with_rules(seed, rules.clone());
+            engine.set_scope("1q").expect("scope must be valid");
+            let mut rotate = 0u32;
+            let mut x_out = 0u32;
+            while !engine.is_finished() {
+                let tick = engine.step();
+                for p in tick.frame.players.iter().filter(|p| p.on_court) {
+                    match p.action.as_str() {
+                        "ROTATE_RIM_HELP" => rotate += 1,
+                        "X_OUT_CLOSEOUT" => x_out += 1,
+                        _ => {}
+                    }
                 }
             }
-        }
-    }
-    (rotate, x_out)
+            (rotate, x_out)
+        })
+        .reduce(|| (0u32, 0u32), |a, b| (a.0 + b.0, a.1 + b.1))
 }
 
 /// 护筐引力必须真实产生下沉护筐动作，且归零后该动作消失。

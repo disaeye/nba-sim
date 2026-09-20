@@ -32,6 +32,7 @@
 use nba_domain::GameRules;
 use nba_engine::MatchEngine;
 use nba_engine::MatchSetup;
+use rayon::prelude::*;
 
 fn mean(v: &[f32]) -> f32 {
     if v.is_empty() {
@@ -49,14 +50,16 @@ fn receiver_must_estimate_not_know_the_frozen_landing() {
     // 因此改为**同种子逐样本配对比较**：同一 seed 下，仅 `off_ball_sense`
     // 不同，若逐样本结果完全一致，则接球过程与该能力无关 ⇒ 全知全能。
     let seeds: [u64; 4] = [42, 1, 7, 100];
-    let mut identical_traces = 0;
-    for seed in seeds {
-        let a = trace(seed, 0.95);
-        let b = trace(seed, 0.05);
-        if a == b {
-            identical_traces += 1;
-        }
-    }
+    // 种子间并行：四场 60k-tick 模拟互不共享状态。
+    let identical_traces = seeds
+        .par_iter()
+        .copied()
+        .filter(|&seed| {
+            let a = trace(seed, 0.95);
+            let b = trace(seed, 0.05);
+            a == b
+        })
+        .count();
     assert_eq!(
         identical_traces,
         0,
@@ -115,10 +118,11 @@ fn trace(seed: u64, receiver_sense: f32) -> Vec<i64> {
 #[test]
 fn receiver_landing_estimate_diverges_from_passer_intent() {
     let seeds: [u64; 4] = [42, 1, 7, 100];
-    let mut divergences: Vec<f32> = Vec::new();
-    for seed in seeds {
-        divergences.extend(landing_divergences(seed));
-    }
+    let divergences: Vec<f32> = seeds
+        .par_iter()
+        .copied()
+        .flat_map_iter(landing_divergences)
+        .collect();
     eprintln!(
         "PASS_LANDING_CORRECTED: n={} mean={:.3} ft max={:.3} ft",
         divergences.len(),

@@ -190,8 +190,12 @@ pub fn fingerprint_for_setup(
     seeds: &[u64],
     ticks: usize,
 ) -> Vec<BehaviorFingerprint> {
+    // 种子间并行（rayon）：接线测试的成本主体就是多种子长窗口模拟，
+    // 种子互不共享状态，并行只改变 wall time，不改变任一 seed 的指纹。
+    // 返回顺序仍与 seeds 一致（par_iter 的 collect 保序）。
+    use rayon::prelude::*;
     seeds
-        .iter()
+        .par_iter()
         .map(|&seed| {
             let mut engine = nba_engine::MatchEngine::with_rules(seed, rules.clone());
             fingerprint(&mut engine, ticks)

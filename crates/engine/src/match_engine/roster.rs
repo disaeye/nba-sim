@@ -18,29 +18,44 @@ impl MatchEngine {
     /// 翻转在场标志并交接场上位置。候选按 id 字典序取最小者（确定性）。
     /// 若替补全部不可用，则保留原球员（保持 5v5 不变量优先）。
     pub fn forced_substitution(&mut self, out_player_id: &str) {
+        self.substitute(
+            out_player_id,
+            nba_domain::SubstitutionReason::FoulTrouble,
+            None,
+        );
+    }
+
+    /// 一次换人（gap.md G6）：把 `out_player_id` 换下，同队替补登场。
+    ///
+    /// ## 确定性替补选取
+    ///
+    /// 候选 = 同队不在场且个人犯规未达上限的球员，按 id 字典序取最小者。
+    /// 原因仅影响**谁被换下**（由各轮换评估器决定），不影响替补顺序。
+    ///
+    /// ## holder 引用必须按球态投影判定（round-18 修复，适用于所有原因）
+    //
+    // 只查 `has_ball` 旗标不够：进攻犯规时球先进 `Dead` 态（旗标已清），
+    // 但 `Dead.last_touch_player` 仍指向犯规的持球人——把他换下场后，
+    // 帧投影的 holder 引用一个不在场的人，触发
+    // `BALL_HOLDER_ON_COURT` Hard（实测 seed 31337：190 次/场）。
+    // 改为：`has_ball` **或** 球态投影（`current_turnover_player_id`）
+    // 命中任一即拒绝。飞行中的传球目标同理（被已下场的人接住）。
+    pub(crate) fn substitute(
+        &mut self,
+        out_player_id: &str,
+        reason: nba_domain::SubstitutionReason,
+        in_player_id: Option<String>,
+    ) {
         let team = match self.systems.physics.get_player(out_player_id) {
             Some(p) => p.team.clone(),
             None => return,
         };
-        // 犯规方不可能持球；若命中持球者（异常调用），拒绝换人以保球权一致。
-        //
-        // ## holder 引用必须按球态投影判定（round-18 修复）
-        //
-        // 只查 `has_ball` 旗标不够：进攻犯规时球先进 `Dead` 态（旗标已清），
-        // 但 `Dead.last_touch_player` 仍指向犯规的持球人——把他换下场后，
-        // 帧投影的 holder 引用一个不在场的人，触发
-        // `BALL_HOLDER_ON_COURT` Hard（实测 seed 31337：190 次/场）。
-        // 改为：`has_ball` **或** 球态投影（`current_turnover_player_id`）
-        // 命中任一即拒绝。
         if self
             .systems
             .physics
             .get_player(out_player_id)
             .is_some_and(|p| p.has_ball)
             || self.current_turnover_player_id().as_deref() == Some(out_player_id)
-            // 飞行中的传球目标也不可换下：飞行 ~0.4s 内换人会让球到达时
-            // 「被已下场的人接住」（实测 seed 31337：t=3142 H_08 在飞行中
-            // 被罚下，到达帧起 Held{H_08} 引用下场者 190 tick）。
             || self.ball.pending_pass_receiver.as_deref() == Some(out_player_id)
             || matches!(&self.ball.ball_state,
                 BallTrajectoryKind::Pass { target_id, .. } if target_id == out_player_id)
@@ -48,17 +63,37 @@ impl MatchEngine {
             return;
         }
         let max_fouls = self.config.rules.league.max_personal_fouls;
-        let mut candidates: Vec<String> = self
-            .systems
-            .physics
-            .get_players()
-            .values()
-            .filter(|p| p.team == team && !p.on_court && p.foul_count < max_fouls)
-            .map(|p| p.id.clone())
-            .collect();
-        candidates.sort();
-        let Some(in_player_id) = candidates.first().cloned() else {
-            return;
+        // 登场者：调用方指定（evaluate 已按体力/休息时间过滤），否则取
+        // 字典序首位（forced_substitution 的历史行为，犯满路径别无选择）。
+        let in_player_id = match in_player_id {
+            Some(id) => {
+                // 指定者必须确实可登场：不在场、未犯满。异常指定按字典序回退。
+                let valid = self
+                    .systems
+                    .physics
+                    .get_player(&id)
+                    .is_some_and(|p| p.team == team && !p.on_court && p.foul_count < max_fouls);
+                if valid {
+                    id
+                } else {
+                    return;
+                }
+            }
+            None => {
+                let mut candidates: Vec<String> = self
+                    .systems
+                    .physics
+                    .get_players()
+                    .values()
+                    .filter(|p| p.team == team && !p.on_court && p.foul_count < max_fouls)
+                    .map(|p| p.id.clone())
+                    .collect();
+                candidates.sort();
+                let Some(first) = candidates.first().cloned() else {
+                    return;
+                };
+                first
+            }
         };
         let (out_pos, out_action_slot) = match self.systems.physics.get_player(out_player_id) {
             Some(p) => (p.pos_ft, p.slot.clone()),
@@ -100,10 +135,7 @@ impl MatchEngine {
             p.vel_ft = Vec2::ZERO;
             p.slot = out_action_slot;
         }
-        self.journal.current_callout = Some(format!(
-            "球员 {} 犯满离场，替补 {} 死球登场入位！",
-            out_player_id, in_player_id
-        ));
+        self.journal.current_callout = Some(reason.callout(out_player_id, &in_player_id));
         // 战术绑定名册同步（slot 绑定按名册顺序索引）。
         for roster in [
             &mut self.config.home_roster_order,
@@ -113,11 +145,159 @@ impl MatchEngine {
                 *slot_ref = in_player_id.clone();
             }
         }
+        // 轮换钟：双方状态翻转时刻都记为本次换人的比赛时间。
+        let now = self.clock.current_time;
+        self.observations.rotation_clock.insert(
+            out_player_id.to_string(),
+            super::state::RotationClock {
+                since: now,
+                on_court: false,
+            },
+        );
+        self.observations.rotation_clock.insert(
+            in_player_id.clone(),
+            super::state::RotationClock {
+                since: now,
+                on_court: true,
+            },
+        );
+        let quota = self
+            .observations
+            .substitutions_this_window
+            .1
+            .max(self.observations.substitutions_this_window.0);
+        let _ = quota;
+        if team == "home" {
+            self.observations.substitutions_this_window.0 += 1;
+        } else {
+            self.observations.substitutions_this_window.1 += 1;
+        }
         self.journal.pending_events.push(GameEvent::Substitution {
             team,
             out_player: out_player_id.to_string(),
             in_player: in_player_id,
+            reason,
         });
+    }
+
+    /// 死球窗口的轮换评估（gap.md G6）。
+    ///
+    /// 在**发球准备**（`start_inbound_transition`）与**节末**（`finish_period`）
+    /// 两个必经死球点调用。同一窗口只评估一次：`rotation_window_done` 在窗口
+    /// 进入时置位，活球恢复（进入 `Initiation`）时复位。
+    ///
+    /// 每队每窗口最多换 `max_substitutions_per_window` 人；被换下者必须满足
+    /// `min_rest_seconds` 休息后才可再次登场（由候选过滤保证）。
+    pub(crate) fn evaluate_dead_ball_rotation(&mut self) {
+        if self.observations.rotation_window_done {
+            return;
+        }
+        self.observations.rotation_window_done = true;
+        self.observations.substitutions_this_window = (0, 0);
+        let now = self.clock.current_time;
+        let rotation = self.config.rules.rotation;
+        let score_diff = self.ledger.home_score as i32 - self.ledger.away_score as i32;
+        let garbage_time = score_diff.abs() >= rotation.garbage_time_score_margin
+            && self.config.rules.league.regulation_periods as f32
+                * self.config.rules.league.period_duration_seconds
+                - now
+                <= rotation.garbage_time_remaining_seconds;
+        // 两个原因的出场候选（体力枯竭、垃圾时间轮休），逐队评估。
+        let fatigue_threshold = rotation.fatigue_substitution_threshold
+            + if garbage_time {
+                rotation.garbage_time_fatigue_relief
+            } else {
+                0.0
+            };
+        for team in ["home", "away"] {
+            let quota = if team == "home" {
+                self.observations.substitutions_this_window.0
+            } else {
+                self.observations.substitutions_this_window.1
+            };
+            if quota >= rotation.max_substitutions_per_window {
+                continue;
+            }
+            // 候选离场者：在场、体力低于阈值（枯竭）或垃圾时间轮休主力。
+            // 按体力升序 + id 升序取确定性首位。
+            let mut candidates: Vec<(f32, f32, String)> = self
+                .systems
+                .physics
+                .get_players()
+                .values()
+                .filter(|p| p.on_court && p.team == team)
+                .filter(|p| {
+                    let norm = p.stamina / p.max_stamina.max(1.0);
+                    norm < fatigue_threshold
+                })
+                .map(|p| {
+                    (
+                        p.stamina / p.max_stamina.max(1.0),
+                        p.foul_count as f32,
+                        p.id.clone(),
+                    )
+                })
+                .collect();
+            candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.2.cmp(&b.2)));
+            let Some((_, _, out_id)) = candidates.first().cloned() else {
+                continue;
+            };
+            // 替补必须已休息满 `min_rest_seconds`（无记录视为长期休息），
+            // 且体力必须高于换下阈值一定裕量：否则刚登场就到线，造成
+            // 「换下 B、C 上场两分钟又到线」的高频横跳（实测 138–176 次/场，
+            // 真实 NBA 每队 30–40 次）。
+            let entry_stamina_floor =
+                fatigue_threshold + rotation.garbage_time_fatigue_relief.max(0.15);
+            let rested = |id: &str, norm: f32| -> bool {
+                if norm < entry_stamina_floor {
+                    return false;
+                }
+                match self.observations.rotation_clock.get(id) {
+                    Some(clock) if !clock.on_court => {
+                        now - clock.since >= rotation.min_rest_seconds
+                    }
+                    Some(_) => false,
+                    None => true,
+                }
+            };
+            let max_fouls = self.config.rules.league.max_personal_fouls;
+            let mut bench: Vec<(f32, String)> = self
+                .systems
+                .physics
+                .get_players()
+                .values()
+                .filter(|p| p.team == team && !p.on_court && p.foul_count < max_fouls)
+                .map(|p| {
+                    let norm = p.stamina / p.max_stamina.max(1.0);
+                    (norm, p.id.clone())
+                })
+                .filter(|(norm, id)| rested(id, *norm))
+                .collect();
+            // 替补中取体力最高者（最接近满状态）。
+            bench.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            if bench.is_empty() {
+                continue;
+            }
+            // 换下者不能是当前持球/发球相关者（`substitute` 内部也有守卫，
+            // 此处提前过滤避免白耗窗口配额）。
+            let is_holder = self
+                .systems
+                .physics
+                .get_player(&out_id)
+                .is_some_and(|p| p.has_ball)
+                || self.current_turnover_player_id().as_deref() == Some(out_id.as_str());
+            if is_holder {
+                continue;
+            }
+            let Some((_, in_id)) = bench.first().cloned() else {
+                continue;
+            };
+            self.substitute(
+                &out_id,
+                nba_domain::SubstitutionReason::StaminaExhaustion,
+                Some(in_id),
+            );
+        }
     }
 
     /// Returns the first configured starter for the team currently in control.

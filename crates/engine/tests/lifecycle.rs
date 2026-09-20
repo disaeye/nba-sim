@@ -13,6 +13,7 @@ mod support;
 use glam::Vec2;
 use nba_domain::GameFlowState;
 use nba_engine::MatchEngine;
+use rayon::prelude::*;
 
 #[test]
 fn test_engine_clock_advances_only_in_live_flow() {
@@ -160,23 +161,35 @@ fn test_period_end_waits_for_shot_in_flight() {
 fn test_full_scope_reaches_game_end_without_deadball_livelock() {
     // 三个独立活锁根因分别由不同 seed 触发：555/999（发球点被 clamp）、
     // 6/9/11（分离投影推回发球员）、3/15/26（发球员被指派到替补）。
-    for seed in [999u64, 555, 6, 9, 11, 3, 15, 26] {
-        let mut engine = MatchEngine::new(seed);
-        engine.set_scope("full").unwrap();
-        let mut ticks = 0usize;
-        while !engine.is_finished() && ticks < 200_000 {
-            engine.step();
-            ticks += 1;
-        }
-        assert!(
-            engine.is_finished(),
-            "seed {} livelocked before GameEnd (ticks={}, flow={:?}, clock={:.1})",
-            seed,
-            ticks,
-            engine.game_flow(),
-            engine.game_clock()
-        );
-    }
+    // 种子间并行：八场完整比赛互不共享状态，并行只改变 wall time。
+    let failures: Vec<String> = [999u64, 555, 6, 9, 11, 3, 15, 26]
+        .par_iter()
+        .map(|&seed| {
+            let mut engine = MatchEngine::new(seed);
+            engine.set_scope("full").unwrap();
+            let mut ticks = 0usize;
+            while !engine.is_finished() && ticks < 200_000 {
+                engine.step();
+                ticks += 1;
+            }
+            if engine.is_finished() {
+                None
+            } else {
+                Some(format!(
+                    "seed {} livelocked before GameEnd (ticks={}, flow={:?}, clock={:.1})",
+                    seed,
+                    ticks,
+                    engine.game_flow(),
+                    engine.game_clock()
+                ))
+            }
+        })
+        .flatten()
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "full-scope livelock regressions: {failures:?}"
+    );
 }
 
 #[test]

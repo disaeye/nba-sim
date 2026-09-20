@@ -412,7 +412,7 @@ impl DecisionSystem {
                 let distance_factor = 1.0
                     - (dist_to_hoop / ctx.rules.shot_distance_reference_ft.max(1.0))
                         .clamp(0.0, 1.0);
-                let open_bonus = openness.contest_free_score() * 0.5;
+                let open_bonus = openness.contest_free_score() * self.weights.shot_openness_weight;
                 let shooting_skill = attributes
                     .map(|a| {
                         if dist_to_hoop < ctx.rules.rim_shot_distance_ft {
@@ -458,7 +458,7 @@ impl DecisionSystem {
                 };
                 self.weights.shoot_base
                     * three_mult
-                    * (0.45 + distance_factor * 0.7 + open_bonus)
+                    * (0.45 + distance_factor * self.weights.shot_distance_slope + open_bonus)
                     * (1.0 + (shooting_skill - 0.5) * self.weights.tendency_weight)
                     + (shoot_preference - 0.5) * self.weights.tendency_weight
                     + range_bias * self.weights.team_style_weight

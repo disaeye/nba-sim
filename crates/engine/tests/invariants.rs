@@ -15,6 +15,13 @@ use std::collections::HashMap;
 
 use nba_domain::GameRules;
 use nba_engine::MatchEngine;
+use rayon::prelude::*;
+
+/// 多种子并行跑同一断言，逐 seed 收集结果；种子间互不共享状态，
+/// 并行调度只改变 wall time，不改变任一 seed 的模拟轨迹。
+fn for_each_seed<T: Send>(seeds: &[u64], f: impl Fn(u64) -> T + Send + Sync) -> Vec<T> {
+    seeds.par_iter().copied().map(f).collect()
+}
 
 // ============================================================================
 // L1：引擎每 tick 自检
@@ -24,21 +31,30 @@ use nba_engine::MatchEngine;
 #[test]
 fn axiom_fuzzing_multi_seed_long_run() {
     let seeds = [42, 7, 100, 999, 1201, 31337, 2024, 8888];
-    for seed in seeds {
+    let results = for_each_seed(&seeds, |seed| {
         let mut engine = MatchEngine::new(seed);
+        let mut violations: Vec<(u64, String)> = Vec::new();
         for tick_idx in 0..2500 {
             let _tick = engine.step();
-            assert!(
-                engine.last_tick_violations().is_empty(),
-                "Seed {} at tick {} violated axioms: {:?}",
-                seed,
-                tick_idx,
-                engine.last_tick_violations()
-            );
+            if !engine.last_tick_violations().is_empty() {
+                violations.push((
+                    tick_idx as u64,
+                    format!("{:?}", engine.last_tick_violations()),
+                ));
+                break;
+            }
             if engine.is_finished() {
                 break;
             }
         }
+        (seed, violations)
+    });
+    for (seed, violations) in results {
+        assert!(
+            violations.is_empty(),
+            "Seed {seed} violated axioms: {:?}",
+            violations
+        );
     }
 }
 
@@ -51,7 +67,7 @@ fn axiom_fuzzing_multi_seed_long_run() {
 /// 膨胀至 6.8GB 直到磁盘耗尽）。
 #[test]
 fn full_game_completes_on_formerly_wedged_seeds() {
-    for seed in [2u64, 4] {
+    let results = for_each_seed(&[2, 4], |seed| {
         let mut engine = MatchEngine::new(seed);
         engine.set_scope("full").expect("full scope is valid");
         let mut ticks = 0usize;
@@ -60,15 +76,17 @@ fn full_game_completes_on_formerly_wedged_seeds() {
             let _ = engine.step();
             ticks += 1;
         }
+        (seed, engine.is_finished(), ticks, engine.completed_possessions())
+    });
+    for (seed, finished, ticks, possessions) in results {
         assert!(
-            engine.is_finished(),
+            finished,
             "seed {seed} wedged: game did not finish after {ticks} ticks \
              (dead-ball lifelock regression; see 2026-09-02 GAP review)"
         );
         assert!(
-            engine.completed_possessions() >= 150,
-            "seed {seed} finished with only {} possessions — implausible full game",
-            engine.completed_possessions()
+            possessions >= 150,
+            "seed {seed} finished with only {possessions} possessions — implausible full game"
         );
     }
 }
@@ -227,9 +245,12 @@ fn allowed_transitions() -> HashMap<String, Vec<String>> {
 #[test]
 fn phase_transitions_are_legal_across_seeds() {
     let allowed = allowed_transitions();
-    // 全场约 87000 tick；用多种子覆盖不同比赛分支。
+    // 全场约 87000 tick；用多种子覆盖不同比赛分支。种子间并行。
+    // 历史上另有一条 under_default_rules 测试（seed 12 默认规则，90000 tick）：
+    // `MatchEngine::new` 与 `with_rules(seed, GameRules::default())` 是同一构造
+    // 路径，其判定与跨种子矩阵的 seed 12 逐位重复，已并入本矩阵。
     let seeds: [u64; 4] = [42, 12, 7, 31337];
-    for seed in seeds {
+    let results = for_each_seed(&seeds, |seed| {
         let mut engine = MatchEngine::new(seed);
         let mut prev: Option<String> = None;
         for tick in 0..90000u32 {
@@ -239,38 +260,23 @@ fn phase_transitions_are_legal_across_seeds() {
                 if from != &phase {
                     // 表里没有的来源阶段视为允许（与评判器同一口径）。
                     if let Some(targets) = allowed.get(from) {
-                        assert!(
-                            targets.contains(&phase),
-                            "seed {seed} tick {tick}: illegal phase transition \
-                             {from} -> {phase}; allowed from {from}: {targets:?} \
-                             (contract: crates/evaluator/fixtures/nba.v2.json)"
-                        );
+                        if !targets.contains(&phase) {
+                            return Some(format!(
+                                "seed {seed} tick {tick}: illegal phase transition \
+                                 {from} -> {phase}; allowed from {from}: {targets:?} \
+                                 (contract: crates/evaluator/fixtures/nba.v2.json)"
+                            ));
+                        }
                     }
                 }
             }
             prev = Some(phase);
         }
-    }
-}
-
-/// 空规则下的迁移同样必须合法：合法性表不依赖具体规则档案。
-#[test]
-fn phase_transitions_are_legal_under_default_rules() {
-    let allowed = allowed_transitions();
-    let mut engine = MatchEngine::with_rules(12, GameRules::default());
-    let mut prev: Option<String> = None;
-    for tick in 0..90000u32 {
-        let phase = engine.step().frame.phase.clone();
-        if let Some(from) = &prev {
-            if from != &phase {
-                if let Some(targets) = allowed.get(from) {
-                    assert!(
-                        targets.contains(&phase),
-                        "tick {tick}: illegal phase transition {from} -> {phase}"
-                    );
-                }
-            }
-        }
-        prev = Some(phase);
-    }
+        None
+    });
+    let violations: Vec<String> = results.into_iter().flatten().collect();
+    assert!(
+        violations.is_empty(),
+        "illegal phase transitions: {violations:?}"
+    );
 }

@@ -6,3 +6,4 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+rayon.workspace = true

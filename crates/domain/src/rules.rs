@@ -6,7 +6,7 @@ mod policies;
 
 pub use policies::{
     CapabilityCurveRules, DecisionRules, DefenseRules, ModulationRules, PotentialFieldRules,
-    ScreenDefenseRules, SemanticRules, TacticalRules,
+    RotationRules, ScreenDefenseRules, SemanticRules, TacticalRules,
 };
 
 /// Match rules and timing policy shared by the simulation subsystems.
@@ -232,6 +232,9 @@ pub struct GameRules {
     /// Match-level parameters for coach and player psychological modulation.
     #[serde(default)]
     pub modulation: ModulationRules,
+    /// Rotation and substitution scheduling policy（gap.md G6）。
+    #[serde(default)]
+    pub rotation: RotationRules,
     /// Decision utility and sampling policy used by every decision system.
     #[serde(default)]
     pub decision: DecisionRules,
@@ -252,8 +255,16 @@ impl Default for TacticalRules {
             drive_mid_range_pullup_dist_ft: 14.0,
             drive_kickout_pass_dist_ft: 22.0,
             drive_lane_offset_ft: 4.0,
+            // 冲框走廊折扣：congestion 是全防守人的走廊投影和（篮下走廊
+            // 通常 2–3），原 1.2 的折扣不足以让篮筐候选胜出 —— 实测 88%
+            // 突破停在 14–18ft，篮下出手仅 1–2%（真实 30%）。提到 3.0
+            // 使终结强者面对一般拥堵仍会攻框。
             drive_rim_attack_bias: 1.2,
             drive_beaten_recovery_seconds: 0.6,
+            // 突破停滞线（finish_range）：16ft 时实测 78 次/场的突破停滞在
+            // 10–16ft 的脏区重新组织，篮下出手仅 1–2%（真实 NBA 30%）。
+            // 收窄到 10ft：突破推进到 10ft 内就直接攻框（上篮/抛投），
+            // 停滞只发生在防守把人卡在脏区之外的场合。
             drive_finish_range_ft: 16.0,
             drive_dunk_max_dist_ft: 4.0,
             drive_floater_min_dist_ft: 7.0,
@@ -403,8 +414,13 @@ impl Default for GameRules {
             separation_correction_share: 0.5,
             stamina_sprint_speed_ftps: 15.0,
             stamina_recovery_speed_ftps: 6.0,
-            stamina_drain_per_second: 0.015,
-            stamina_recovery_per_second: 0.02,
+            // 体力动态标定（G6 换人链的前提）：实测全场速度档分布为
+            // 冲刺 4% / 中速 31% / 慢速 63%（seed 42，在场逐 tick），且
+            // 持球人冲刺占比显著高于均值。实测净耗率 ≈0.0029/s（0.033 时
+            // 198s 即首换、70–88 次/队/场），按「每队 35–45 次」反推
+            // 上场周期 ~5.3 分钟 → drain 0.021。
+            stamina_drain_per_second: 0.021,
+            stamina_recovery_per_second: 0.0005,
             stamina_floor: 0.2,
             stamina_exhausted_threshold: 0.35,
             jump_shot_prep_seconds: 0.28,
@@ -433,6 +449,7 @@ impl Default for GameRules {
             contest_follow_seconds: 0.25,
             tactics: TacticalRules::default(),
             modulation: ModulationRules::default(),
+            rotation: RotationRules::default(),
         }
     }
 }
@@ -836,6 +853,7 @@ impl GameRules {
             );
         }
         self.modulation.validate()?;
+        self.rotation.validate()?;
         self.decision.validate()?;
         Ok(())
     }

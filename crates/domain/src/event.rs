@@ -202,11 +202,13 @@ pub enum GameEvent {
     },
     /// 回合结束时的完整语义与因果图总结（用于 L2 叙事一致性校验）。
     PossessionSummary(PossessionSummary),
-    /// 犯满离场触发的强制换人（tactics 换人调度规范）。
+    /// 换人事实（tactics.md §2.3.3 / gap.md G6）：`reason` 区分强制
+    /// （犯满）与主动（枯竭、轮休）轮换，评判器用它核算轮换与出场时间。
     Substitution {
         team: String,
         out_player: String,
         in_player: String,
+        reason: crate::data::SubstitutionReason,
     },
     /// 双方倒地争抢地板球导致争球（Held Ball / Jump Ball）。
     JumpBallTriggered {

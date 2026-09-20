@@ -11,9 +11,19 @@
 #   3. 结束后再次检查并报告磁盘变化。
 #
 # 用法：
-#   ./scripts/run-tests.sh                     # workspace release 测试
-#   ./scripts/run-tests.sh -p nba-engine       # 传给 cargo test 的参数
-#   ./scripts/run-tests.sh --release --test constraint_system
+#   ./scripts/run-tests.sh tier1      # CI fast-test 层：不变量与隔离测试（分钟级）
+#   ./scripts/run-tests.sh tier2      # CI full-gate 层：机制与因果测试
+#   ./scripts/run-tests.sh tier3      # 8 种子全场统计基线（最重，建议后台任务执行）
+#   ./scripts/run-tests.sh tier2+3    # CI full-gate 等价：tier2 与 tier3 连续执行
+#   ./scripts/run-tests.sh -- ...     # 传统全量 workspace 测试（不受 CI 依赖，最重）
+#
+# 全部模式都经 scripts/par_test.py 并行执行：cargo 自身按目标串行调度，
+# 4 核机器上全量超过 1000s；按目标并行 + 目标内多种子并行后实测约 950s。
+# 4 核 / 3.7GB 内存下全量 5 分钟不可达：总核秒约 2400，理论下限 600s，
+# 且多路全场模拟同跑会触发 OOM（实测 stats_baseline 与其他重目标同跑
+# 被内核杀掉，par_test 已把 stats_baseline 排除出并行池串行独占）。
+# 日常验证用 tier1（约 1 分钟）/ tier2（约 4 分钟）/ tier2+3（约 11 分钟），
+# 全量留在提交前或 CI。
 set -uo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -37,10 +47,73 @@ fail() {
     exit 1
 }
 
+# ── 分层定义：与 .github/workflows/ci.yml 的三层保持一致 ──
+# tier1：fast-test 层（不变量、快照、投影、golden hash）
+TIER1=(
+    "-p nba-domain"
+    "-p nba-invariants"
+    "-p nba-engine --test world_state_equivalence"
+    "-p nba-engine --test engine_snapshot"
+    "-p nba-engine --test projection"
+    "-p nba-engine --test golden_hash"
+)
+# tier2：full-gate 层（机制、因果、接线证明）
+TIER2=(
+    "-p nba-decision --test defense_responsibility_chain"
+    "-p nba-engine --test attribute_perturbation"
+    "-p nba-engine --test block"
+    "-p nba-engine --test decision_wiring"
+    "-p nba-engine --test defense"
+    "-p nba-engine --test rules_complete_wiring"
+    "-p nba-engine --test wiring_proof"
+    "-p nba-engine --test defense_effect"
+    "-p nba-engine --test fiba_scenarios"
+)
+# tier3：宏观统计网（8 种子完整比赛，最重的一层）
+TIER3=(
+    "-p nba-engine --test stats_baseline"
+)
+
+tier_args() {
+    case "$1" in
+    tier1) echo "${TIER1[@]}" ;;
+    tier2) echo "${TIER2[@]}" ;;
+    tier3) echo "${TIER3[@]}" ;;
+    tier2+3) echo "${TIER2[@]}" "${TIER3[@]}" ;;
+    *) fail "unknown tier: $1 (expected tier1 | tier2 | tier3 | tier2+3)" ;;
+    esac
+}
+
+# 把 tier 的 cargo 目标列表转成 par_test.py 的 --include 正则
+# （匹配测试二进制名：crate 名或集成测试文件名）。
+tier_regex() {
+    local names=()
+    for arg in $(tier_args "$1"); do
+        case "$arg" in
+            -p | --test) : ;;
+            *) names+=("$arg") ;;
+        esac
+    done
+    local IFS="|"
+    echo "${names[*]}"
+}
+
+MODE="$1"
+shift || true
+if [ "$MODE" = "--" ]; then
+    # 传统全量：其余参数原样传给 cargo test
+    CARGO_ARGS=("$@")
+    MODE_LABEL="full workspace"
+else
+    mapfile -t CARGO_ARGS < <(tier_args "$MODE")
+    MODE_LABEL="$MODE"
+fi
+
 echo "🧪 NBA-Sim constrained test runner"
 echo "   temp root  : $TEMP_ROOT"
 echo "   run TMPDIR : $RUN_TMP"
 echo "   free start : ${START_FREE} MiB"
+echo "   mode       : $MODE_LABEL"
 
 # 1. 前置资源门
 if [ "$START_FREE" -lt "$MIN_FREE_MB" ]; then
@@ -58,10 +131,24 @@ export CARGO_INCREMENTAL=0
 export TMPDIR="$RUN_TMP"
 export NBA_TEST_TMP="$RUN_TMP"
 
-echo "   cargo args : $*"
+echo "   cargo args : ${CARGO_ARGS[*]}"
 echo
 
-cargo test --release "$@"
+# 先构建全部测试二进制（并行执行的调度单元是二进制，必须先全部就位）。
+cargo test --release --workspace --no-run
+BUILD_STATUS=$?
+if [ "$BUILD_STATUS" -ne 0 ]; then
+    exit "$BUILD_STATUS"
+fi
+
+# 按目标并行执行。tier 模式用 --filter 只跑该层的目标；
+# "--" 全量模式不过滤。
+FILTER_ARGS=()
+if [ "$MODE" != "--" ]; then
+    # tier 列表里的 crate/test 目标转成 par_test 的 --include 正则。
+    FILTER_ARGS=(--include "$(tier_regex "$MODE")")
+fi
+python3 scripts/par_test.py --jobs 2 --threads-per-bin 2 "${FILTER_ARGS[@]}"
 STATUS=$?
 
 # 3. 后置检查与清理

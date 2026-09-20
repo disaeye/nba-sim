@@ -10,6 +10,7 @@
 mod support;
 
 use nba_engine::MatchEngine;
+use rayon::prelude::*;
 
 /// 默认（facts）流必须远小于逐 tick 帧流，且仍然可评判。
 ///
@@ -19,18 +20,36 @@ use nba_engine::MatchEngine;
 fn test_bounded_stream_modes_are_much_smaller() {
     use nba_engine::StreamMode;
 
-    let run = |mode: StreamMode, label: &str| -> u64 {
+    // 三种模式的导出互不共享状态，模式间并行（各自独立模拟 + 写盘）。
+    // 模式间大小关系（frames > facts > summary ×10）是流管道的结构性质，
+    // 5 个回合已产出三种模式的全部结构差异；full scope 的 MB 级判定
+    // 在本函数末尾用 facts 模式单独守住。
+    let (frames, facts, summary) = [
+        (StreamMode::Frames, "frames"),
+        (StreamMode::Facts, "facts"),
+        (StreamMode::Summary, "summary"),
+    ]
+    .par_iter()
+    .map(|&(mode, label)| {
         let mut engine = MatchEngine::new(42);
         // RAII：panic 展开也会删除临时流（test-support）。
         let artifact = nba_test_support::TempArtifact::new(&format!("stream_mode_{label}"));
-        let result = engine.simulate_scope_and_export_with_mode("1q", &artifact.path_str(), mode);
-        assert!(result.is_ok(), "mode {:?} failed: {:?}", mode, result.err());
-        artifact.assert_within_limit()
-    };
-
-    let frames = run(StreamMode::Frames, "frames");
-    let facts = run(StreamMode::Facts, "facts");
-    let summary = run(StreamMode::Summary, "summary");
+        let result = engine.simulate_scope_and_export_with_mode("5p", &artifact.path_str(), mode);
+        assert!(result.is_ok(), "mode {mode:?} failed: {:?}", result.err());
+        (label, artifact.assert_within_limit())
+    })
+    .fold(
+        || (0u64, 0u64, 0u64),
+        |acc, (label, size)| match label {
+            "frames" => (size, acc.1, acc.2),
+            "facts" => (acc.0, size, acc.2),
+            _ => (acc.0, acc.1, size),
+        },
+    )
+    .reduce(
+        || (0u64, 0u64, 0u64),
+        |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2),
+    );
 
     assert!(frames > 0 && facts > 0 && summary > 0);
     // facts 模式必须比帧模式小一个数量级以上。

@@ -3,6 +3,7 @@
 //!
 use nba_domain::{GameRules, LeagueProfile};
 use nba_engine::MatchEngine;
+use rayon::prelude::*;
 
 #[test]
 fn fiba_profile_produces_fiba_shapes() {
@@ -295,32 +296,47 @@ fn scenario_personal_foul_limit_program_differs() {
     }
 
     // 端到端：让一场 FIBA 1q 跑完，确认犯规离场路径不因阈值差异而违反 5v5。
-    let rules = GameRules::with_league(LeagueProfile::fiba());
-    let mut engine = MatchEngine::with_setup(nba_engine::MatchSetup::builtin(rules), 13);
-    engine.set_scope("1q").expect("1q scope is valid");
-    let mut ticks = 0usize;
-    while !engine.is_finished() && ticks < 200_000 {
-        engine.step();
-        ticks += 1;
-        // 在场人数必须始终为 5v5（犯规离场后由替补补位）。
-        let home_on = engine
-            .physics()
-            .get_players()
-            .values()
-            .filter(|p| p.team == "home" && p.on_court)
-            .count();
-        let away_on = engine
-            .physics()
-            .get_players()
-            .values()
-            .filter(|p| p.team == "away" && p.on_court)
-            .count();
-        assert_eq!(
-            (home_on, away_on),
-            (5, 5),
-            "tick {ticks}: FIBA foul-out must keep five on five (home={home_on}, away={away_on})"
-        );
-    }
+    // 两个 profile 的模拟互不共享状态，profile 间并行。
+    let mismatch: Vec<String> = [
+        ("NBA", GameRules::default()),
+        ("FIBA", GameRules::with_league(LeagueProfile::fiba())),
+    ]
+    .par_iter()
+    .map(|(name, rules)| {
+        let mut engine =
+            MatchEngine::with_setup(nba_engine::MatchSetup::builtin(rules.clone()), 13);
+        engine.set_scope("1q").expect("1q scope is valid");
+        let mut ticks = 0usize;
+        while !engine.is_finished() && ticks < 200_000 {
+            engine.step();
+            ticks += 1;
+            // 在场人数必须始终为 5v5（犯规离场后由替补补位）。
+            let home_on = engine
+                .physics()
+                .get_players()
+                .values()
+                .filter(|p| p.team == "home" && p.on_court)
+                .count();
+            let away_on = engine
+                .physics()
+                .get_players()
+                .values()
+                .filter(|p| p.team == "away" && p.on_court)
+                .count();
+            if (home_on, away_on) != (5, 5) {
+                return Some(format!(
+                    "{name} tick {ticks}: foul-out must keep five on five (home={home_on}, away={away_on})"
+                ));
+            }
+        }
+        None
+    })
+    .flatten()
+    .collect();
+    assert!(
+        mismatch.is_empty(),
+        "foul-out must keep five on five: {mismatch:?}"
+    );
 }
 
 /// 情景 5：bonus 门槛——进入罚球奖励的团队犯规数按 profile 生效。
@@ -338,10 +354,13 @@ fn scenario_bonus_threshold_program() {
 /// 情景 6：节末程序——同一 scope 下两 profile 的节数与终场判定一致。
 #[test]
 fn scenario_period_end_program() {
-    for rules in [
+    // 两 profile 的模拟互不共享状态，profile 间并行。
+    let failures: Vec<String> = [
         GameRules::default(),
         GameRules::with_league(LeagueProfile::fiba()),
-    ] {
+    ]
+    .par_iter()
+    .map(|rules| {
         let mut e = MatchEngine::with_setup(nba_engine::MatchSetup::builtin(rules.clone()), 5);
         e.set_scope("1q").expect("1q scope is valid");
         let mut ticks = 0usize;
@@ -349,11 +368,22 @@ fn scenario_period_end_program() {
             e.step();
             ticks += 1;
         }
-        assert!(
-            e.is_finished(),
-            "{} 1q scope must terminate without relying on the tick cap",
-            rules.league.name
-        );
+        if e.is_finished() {
+            None
+        } else {
+            Some(format!(
+                "{} 1q scope must terminate without relying on the tick cap",
+                rules.league.name
+            ))
+        }
+    })
+    .flatten()
+    .collect();
+    assert!(
+        failures.is_empty(),
+        "1q scope must terminate naturally: {failures:?}"
+    );
+    for rules in [GameRules::default(), GameRules::with_league(LeagueProfile::fiba())] {
         assert_eq!(
             rules.league.regulation_periods, 4,
             "both profiles use four regulation periods"

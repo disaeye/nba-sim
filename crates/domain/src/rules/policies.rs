@@ -721,6 +721,16 @@ pub struct DecisionRules {
     /// shot clock 递减，没有时间价值项，导致 46% 出手发生在 8 秒内
     /// （真实约 15%），每回合传球仅 1.3 次（真实 ~3.5）。
     pub early_shot_penalty: f32,
+    /// 出手效用中空位加成的量级：`open_bonus = contest_free_score × 本值`。
+    ///
+    /// 真实篮球里「空位」的价值随出手距离的变长而变高，但空间拉扯
+    /// （五外站位）会让三分线外常年空位 —— 实测旧值 0.5 时三分线外
+    /// 出手占 74%（真实 40%），空位加成压倒了命中率的距离衰减。
+    pub shot_openness_weight: f32,
+    /// 出手效用中距离衰减的斜率：`distance_factor = 1 − dist / 参考`。
+    /// 与参考距离共同决定「篮下 vs 三分」的效用落差，必须能覆盖
+    /// 空位加成的量级，否则外线空位永远压倒篮下攻击。
+    pub shot_distance_slope: f32,
     /// `Advance`（后场推进）在 8 秒规则下的效用放大倍数。
     ///
     /// 紧迫度 = backcourt_elapsed / backcourt_seconds，效用 =
@@ -797,6 +807,14 @@ impl Default for DecisionRules {
         Self {
             shoot_base: 0.60,
             early_shot_penalty: 0.35,
+            // 出手效用形状（G6a 三次校准迭代的结论，负结果全记录）：
+            // 原值 (0.5, 0.7)；激进 (0.25, 1.2) → 3P% 23.5 跳带；
+            // 折中 (0.45, 0.8) → 29.8 仍跳带；微调 (0.5, 0.75) → 25.9 更糟。
+            // 命中率对效用形状高度敏感且方向非单调 —— 分布失真的根因是
+            // 攻框行为链缺失（见 gap.md G6a），效用参数无法闭合，
+            // 故恢复 v66 原值，禁止再盲调这两个系数。
+            shot_openness_weight: 0.50,
+            shot_distance_slope: 0.70,
             advance_urgency_boost: 3.0,
             advance_overshoot_ratio: 0.075,
             // round-16 调整（A/B 证据 §17.5）：0.82 → 1.15。
@@ -897,6 +915,65 @@ impl DecisionRules {
             || self.def_switch_base < 0.0
         {
             return Err("decision policy contains an invalid value".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// 轮换与换人调度参数（tactics.md §2.3.3 / gap.md G6）。
+///
+/// ## 裁决时机
+///
+/// 换人意图统一在死球窗口评估（发球准备、罚球间隙、节末），活球中
+/// 产生的枯竭信号先被登记，进入下一个死球窗口时才被消费——真实篮球
+/// 里教练无法在活球中换人。每条规则都有对应的 `SubstitutionReason`。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RotationRules {
+    /// 体力枯竭换人阈值（归一化体力，0..1）：低于此值的在场球员进入
+    /// 换人候选。`stamina_exhausted_threshold`（0.35）决定士气进入
+    /// `Exhausted`，此阈值应高于它——枯竭到影响心态之前就该休息。
+    pub fatigue_substitution_threshold: f32,
+    /// 垃圾时间换人的分差阈值（分）：分差绝对值超过此值时，双方进入
+    /// 垃圾时间轮换（替补优先登场）。
+    pub garbage_time_score_margin: i32,
+    /// 垃圾时间换人的最少剩余比赛时间（秒）：两者同时满足才触发。
+    pub garbage_time_remaining_seconds: f32,
+    /// 换下者在再次登场前必须休息的最短时间（秒）：防止抖动换人
+    /// （同一对球员来回切换）。
+    pub min_rest_seconds: f32,
+    /// 同一死球窗口内每队最多换人次数：真实篮球的换人由教练发出，
+    /// 一个停表窗口内同时换下全部五人极少见。
+    pub max_substitutions_per_window: u32,
+    /// 领先方垃圾时间的体力换人阈值放宽量：垃圾时间里领先方更愿意
+    /// 让主力休息，枯竭阈值按此值上浮。
+    pub garbage_time_fatigue_relief: f32,
+}
+
+impl Default for RotationRules {
+    fn default() -> Self {
+        Self {
+            fatigue_substitution_threshold: 0.42,
+            garbage_time_score_margin: 20,
+            garbage_time_remaining_seconds: 300.0,
+            min_rest_seconds: 240.0,
+            max_substitutions_per_window: 2,
+            garbage_time_fatigue_relief: 0.15,
+        }
+    }
+}
+
+impl RotationRules {
+    pub fn validate(&self) -> Result<(), String> {
+        let fatigue = self.fatigue_substitution_threshold;
+        if !(0.0..=1.0).contains(&fatigue)
+            || self.garbage_time_score_margin < 0
+            || self.garbage_time_remaining_seconds < 0.0
+            || self.min_rest_seconds < 0.0
+            || self.max_substitutions_per_window == 0
+            || self.garbage_time_fatigue_relief < 0.0
+        {
+            return Err("rotation policy contains an invalid value".to_string());
         }
         Ok(())
     }

@@ -12,6 +12,7 @@ mod support;
 use glam::Vec2;
 use nba_domain::Possession;
 use nba_engine::MatchEngine;
+use rayon::prelude::*;
 
 #[test]
 fn test_offensive_rebound_does_not_switch_possession() {
@@ -94,9 +95,15 @@ fn test_inbound_pass_arrival_releases_dead_ball() {
 /// 口径：计数从「任意球员越界的连续 tick」改为「**同一球员**连续越界的 tick 数」。
 /// 前者把多名球员接力越界累加成一个长 streak，与 `gap.md` §4.3 的僵局定义
 /// （单球员被永久固定在边界）不符，会产生假阳性。
+/// 多种子并行跑完整场，逐 seed 返回观测结果；种子间互不共享状态，
+/// 并行调度只改变 wall time，不改变任一 seed 的模拟轨迹。
+fn for_each_full_seed<T: Send>(seeds: &[u64], f: impl Fn(u64) -> T + Send + Sync) -> Vec<T> {
+    seeds.par_iter().copied().map(f).collect()
+}
+
 #[test]
 fn test_wall_pinned_defender_does_not_block_inbound() {
-    for seed in [6u64, 9, 11, 16, 21] {
+    let results = for_each_full_seed(&[6, 9, 11, 16, 21], |seed| {
         let mut engine = MatchEngine::new(seed);
         engine.set_scope("full").unwrap();
         let mut ticks = 0usize;
@@ -132,7 +139,16 @@ fn test_wall_pinned_defender_does_not_block_inbound() {
             }
             ticks += 1;
         }
-        assert!(engine.is_finished(), "seed {} livelocked", seed);
+        let violations = engine.last_tick_violations().to_vec();
+        (
+            seed,
+            engine.is_finished(),
+            max_oob_streak,
+            violations,
+        )
+    });
+    for (seed, finished, max_oob_streak, violations) in results {
+        assert!(finished, "seed {} livelocked", seed);
         assert!(
             max_oob_streak < 200,
             "seed {} had a player pinned out of bounds for {} consecutive ticks",
@@ -140,10 +156,10 @@ fn test_wall_pinned_defender_does_not_block_inbound() {
             max_oob_streak
         );
         assert!(
-            engine.last_tick_violations().is_empty(),
+            violations.is_empty(),
             "seed {} ended with violations: {:?}",
             seed,
-            engine.last_tick_violations()
+            violations
         );
     }
 }
@@ -154,7 +170,7 @@ fn test_wall_pinned_defender_does_not_block_inbound() {
 /// 替补不参与物理步进，`inbounder_arrived` 永不成立。
 #[test]
 fn test_inbounder_reassigned_when_leaving_court() {
-    for seed in [3u64, 15, 26] {
+    let results = for_each_full_seed(&[3, 15, 26], |seed| {
         let mut engine = MatchEngine::new(seed);
         engine.set_scope("full").unwrap();
         let mut ticks = 0usize;
@@ -179,7 +195,10 @@ fn test_inbounder_reassigned_when_leaving_court() {
             }
             ticks += 1;
         }
-        assert!(engine.is_finished(), "seed {} livelocked", seed);
+        (seed, engine.is_finished(), max_stalled)
+    });
+    for (seed, finished, max_stalled) in results {
+        assert!(finished, "seed {} livelocked", seed);
         // 恢复应在极短窗口内完成，而不是无限期停留。
         assert!(
             max_stalled < 60,
@@ -246,7 +265,7 @@ fn test_inbounder_out_of_bounds_does_not_emit_boundary_turnover() {
 /// 活锁，全场仅 11 个回合、10 分。
 #[test]
 fn test_control_transfer_never_hangs_forever() {
-    for seed in [6u64, 21, 42] {
+    let results = for_each_full_seed(&[6, 21, 42], |seed| {
         let mut engine = MatchEngine::with_rules(seed, nba_domain::GameRules::default());
         engine.set_scope("full").unwrap();
         let mut max_ct_streak = 0usize;
@@ -265,16 +284,19 @@ fn test_control_transfer_never_hangs_forever() {
                 streak = 0;
             }
         }
-        assert!(engine.is_finished(), "seed {seed} did not reach GameEnd");
+        let possessions = engine.completed_possessions();
+        (seed, engine.is_finished(), max_ct_streak, possessions)
+    });
+    for (seed, finished, max_ct_streak, possessions) in results {
+        assert!(finished, "seed {seed} did not reach GameEnd");
         // 交接是一次短飞行（约 0.5s = 13 tick）；超过数秒即为悬置。
         assert!(
             max_ct_streak < 500,
             "seed {seed}: ControlTransfer hung for {max_ct_streak} consecutive ticks"
         );
         assert!(
-            engine.completed_possessions() > 150,
-            "seed {seed}: only {} possessions completed (expected a full game)",
-            engine.completed_possessions()
+            possessions > 150,
+            "seed {seed}: only {possessions} possessions completed (expected a full game)"
         );
     }
 }
@@ -283,20 +305,30 @@ fn test_control_transfer_never_hangs_forever() {
 ///
 /// 根因：`arc = A·p·(1-p)` 的真实极值点在 p>0.5，线性缩放的 A 使实际峰值
 /// 高于请求值（请求 35.0 ft → 采样 35.08 ft）。
+///
+/// 口径：弧线峰值是**逐次投篮**的物理性质，观测样本在 1q（约 22k tick，
+/// 数百次出手）内已远超判定所需；全场跑不增加任何新的失败模式。
 #[test]
 fn test_shot_arc_respects_height_ceiling() {
     let rules = nba_domain::GameRules::default();
     let ceiling = rules.ball_z_max_ft;
-    for seed in [6u64, 21, 42] {
-        let mut engine = MatchEngine::with_rules(seed, rules.clone());
-        engine.set_scope("full").unwrap();
-        let mut worst = 0.0f32;
-        let mut ticks = 0usize;
-        while !engine.is_finished() && ticks < 250_000 {
-            let tick = engine.step();
-            ticks += 1;
-            worst = worst.max(tick.frame.ball.z);
-        }
+    let results: Vec<(u64, f32)> = [6u64, 21, 42]
+        .par_iter()
+        .copied()
+        .map(|seed| {
+            let mut engine = MatchEngine::with_rules(seed, rules.clone());
+            engine.set_scope("1q").unwrap();
+            let mut worst = 0.0f32;
+            let mut ticks = 0usize;
+            while !engine.is_finished() && ticks < 100_000 {
+                let tick = engine.step();
+                ticks += 1;
+                worst = worst.max(tick.frame.ball.z);
+            }
+            (seed, worst)
+        })
+        .collect();
+    for (seed, worst) in results {
         assert!(
             worst <= ceiling,
             "seed {seed}: ball reached {worst:.4} ft, above the {ceiling} ft ceiling"
