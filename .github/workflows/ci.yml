@@ -74,6 +74,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 守卫用 HEAD~1..HEAD 取本次提交的改动清单；浅克隆下 HEAD~1 无法
+          # 解析，回退分支会把整棵树当作改动，误报判定基准被修改。
+          fetch-depth: 2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
