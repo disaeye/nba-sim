@@ -27,6 +27,9 @@ node_modules/
 # Agent 会话产物（pi harness 的任务日志与输出）
 .pi/
 
+# 基准与对比的中间结果（不进入版本控制）
+/.work/
+
 # Python 字节码缓存（守卫脚本被 import 时产生）
 __pycache__/
 *.pyc

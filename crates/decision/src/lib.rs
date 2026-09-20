@@ -4,7 +4,6 @@
 //! 效用评分 → softmax 个性化采样；以及战术规划与体能/士气调制。
 
 pub mod constraint;
-pub mod defense;
 pub mod modulation;
 pub mod pipeline;
 pub mod potential_field;
@@ -17,9 +16,7 @@ pub use constraint::{
 };
 pub use modulation::{CoachStrategy, MoraleState, PlayerModulationState};
 pub use pipeline::{DecisionOutput, DecisionSystem, DecisionTrace, DecisionWeights};
-pub use potential_field::{
-    DefensePotentialFieldSolver, EmergentDefenseTarget, PotentialFieldConfig,
-};
+pub use potential_field::{DefensePotentialFieldSolver, EmergentDefenseTarget};
 pub use tactics::{
     DefensiveRole, DefensiveScheme, DefensiveTactic, OffensiveRole, TacticalPlanner, TacticalSet,
     TeamIntent,

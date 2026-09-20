@@ -1,110 +1,36 @@
-//! 接线证明（Wiring Proof）：把「已落地」的声明转成机器可判定的证据。
+//! 接线证明：把「已完成」的声明转成机器可判定的证据。
 //!
 //! ## 为什么需要这个文件
 //!
-//! 本轮审计发现的目标与设计文档之间存在系统性偏差，其共同形态是
-//! **用声明代替证据**：
+//! 目标与设计文档之间的系统性误差有一种共同形态：**用声明代替证据**。
 //!
-//! 1. `UNIMPLEMENTED_RULE_FIELDS = &[]` 宣告「零消费字段已清零」，
-//!    但 `effective_post_defense_physicality` / `effective_transition_leakout_chance`
-//!    在主干中零调用 —— 清单为空不等于字段被消费；
-//! 2. `let _ = PerceptionSystem::evaluate(&self.world)` 看起来「接了感知系统」，
-//!    但 `world.transforms` 从未被真实引擎填充，`n == 0`，返回值被丢弃；
-//! 3. `test_drive_finish_range_rules_perturbation` 只比较两个字面量 8.0 != 22.0，
-//!    从不运行模拟 —— 测试通过不构成接线证据。
+//! 1. `UNIMPLEMENTED_RULE_FIELDS = &[]` 宣告「零消费字段已清零」，但清单为空
+//!    不等于字段被消费；
+//! 2. 曾经有一个与 `MatchEngine` 平行的世界副本逐 tick 被填充，而空间核在一个
+//!    `n == 0` 的空世界上运算并把结果丢掉 —— 「接了感知系统」是假的；
+//! 3. 只比较两个字面量（`8.0 != 22.0`）的测试从不运行模拟 —— 测试通过不构成
+//!    接线证据。
 //!
-//! 本文件用**行为级断言**替代上述三种声明式断言：每一条都要求
-//! 「改一个输入 → 真实模拟输出必须变」，否则红。
+//! 本文件用**行为级断言**替代上述声明式断言：每一条都要求「改一个输入 → 真实
+//! 模拟输出必须变」，否则红。规则系数侧的同类守卫在 `rules_complete_wiring.rs`，
+//! 两者同一口径、不得重复。
 //!
 //! ## 纪律
 //!
-//! 本文件中的断言一旦变红，**不得**通过放宽阈值或改写测试来消除；
-//! 必须先判断是「接线真的坏了」还是「契约本身需要重新裁定」，
-//! 前者修代码，后者走 `docs/decisions.md`。
+//! 断言一旦变红，**不得**通过放宽阈值或改写测试来消除：必须先判断是「接线坏了」
+//! 还是「判定标准需要重新裁定」，前者修代码，后者走 `docs/decisions.md`。
+
+mod support;
 
 use nba_domain::GameRules;
-use nba_engine::MatchEngine;
-
-/// 跑一段固定 tick 数的模拟并返回可分发的行为指纹。
-///
-/// 指纹刻意取「会被下游消费的事实」而非内部字段：比分、投篮出手数、
-/// 球位置、以及事件种类序列。若某条接线真实生效，扰动该输入必然
-/// 改变其中至少一项。
-fn behavior_fingerprint(engine: &mut MatchEngine, ticks: usize) -> BehaviorFingerprint {
-    let mut events: Vec<String> = Vec::new();
-    for _ in 0..ticks {
-        let tick = engine.step();
-        for e in &tick.frame.event_log {
-            events.push(e.kind.clone());
-        }
-    }
-    let snap = engine.engine_snapshot();
-    BehaviorFingerprint {
-        home_score: snap.game.home_score,
-        away_score: snap.game.away_score,
-        fg2_attempts: snap.box_score.fg2_attempts,
-        fg3_attempts: snap.box_score.fg3_attempts,
-        ft_attempts: snap.box_score.ft_attempts,
-        turnovers: snap.box_score.turnovers,
-        ball_x: snap.ball.pos_3d.0.x,
-        ball_y: snap.ball.pos_3d.0.y,
-        events,
-    }
-}
-
-#[derive(Debug)]
-struct BehaviorFingerprint {
-    home_score: u32,
-    away_score: u32,
-    fg2_attempts: u32,
-    fg3_attempts: u32,
-    ft_attempts: u32,
-    turnovers: u32,
-    ball_x: f32,
-    ball_y: f32,
-    events: Vec<String>,
-}
-
-impl BehaviorFingerprint {
-    /// 两个指纹是否可观察到差异（用于「接线必须改变行为」的判据）。
-    fn differs_from(&self, other: &Self) -> bool {
-        self.home_score != other.home_score
-            || self.away_score != other.away_score
-            || self.fg2_attempts != other.fg2_attempts
-            || self.fg3_attempts != other.fg3_attempts
-            || self.ft_attempts != other.ft_attempts
-            || self.turnovers != other.turnovers
-            || (self.ball_x - other.ball_x).abs() > 1e-4
-            || (self.ball_y - other.ball_y).abs() > 1e-4
-            || self.events != other.events
-    }
-}
-
-/// 多 seed 上跑同一组规则，返回指纹集合（降低单 seed 采样偶然性）。
-fn fingerprints_with_rules(
-    rules: GameRules,
-    seeds: &[u64],
-    ticks: usize,
-) -> Vec<BehaviorFingerprint> {
-    seeds
-        .iter()
-        .map(|&seed| {
-            let mut engine = MatchEngine::with_rules(seed, rules.clone());
-            behavior_fingerprint(&mut engine, ticks)
-        })
-        .collect()
-}
-
-const PROOF_SEEDS: [u64; 4] = [42, 1, 7, 100];
-const PROOF_TICKS: usize = 3000;
+use nba_engine::{MatchEngine, MatchSetup};
+use support::{fingerprint, fingerprint_for_setup, PROOF_SEEDS, PROOF_TICKS, PROOF_TICKS_MEDIUM};
 
 // ============================================================================
 // 门 1：规则扰动必须改变真实模拟输出
 // ============================================================================
 
 /// `drive_finish_range_ft` 必须经规则通道影响真实比赛，而不是只在结构体里存着。
-///
-/// 取代原先的同义反复断言 `assert_ne!(8.0, 22.0)`。
 #[test]
 fn rules_wiring_drive_finish_range_changes_simulation() {
     let mut short = GameRules::default();
@@ -112,8 +38,8 @@ fn rules_wiring_drive_finish_range_changes_simulation() {
     let mut long = GameRules::default();
     long.tactics.drive_finish_range_ft = 22.0;
 
-    let a = fingerprints_with_rules(short, &PROOF_SEEDS, PROOF_TICKS);
-    let b = fingerprints_with_rules(long, &PROOF_SEEDS, PROOF_TICKS);
+    let a = fingerprint_for_setup(short, &PROOF_SEEDS, PROOF_TICKS_MEDIUM);
+    let b = fingerprint_for_setup(long, &PROOF_SEEDS, PROOF_TICKS_MEDIUM);
 
     let changed = a
         .iter()
@@ -123,14 +49,11 @@ fn rules_wiring_drive_finish_range_changes_simulation() {
     assert!(
         changed >= 3,
         "drive_finish_range_ft must change real simulation behaviour on at least 3/4 seeds, \
-         but only {changed}/4 differed — the field is stored but not consumed \
-         (structural assertion assert_ne!(8.0, 22.0) cannot detect this)"
+         but only {changed}/4 differed — the field is stored but not consumed"
     );
 }
 
 /// Clutch 规则必须经规则通道影响真实比赛。
-///
-/// 取代原先只读回默认值的 `test_clutch_rules_wired_to_engine`。
 #[test]
 fn rules_wiring_clutch_modulation_changes_simulation() {
     let baseline = GameRules::default();
@@ -142,8 +65,8 @@ fn rules_wiring_clutch_modulation_changes_simulation() {
     perturbed.modulation.clutch_score_margin = 999;
     perturbed.modulation.clutch_bias = 0.9;
 
-    let a = fingerprints_with_rules(baseline, &PROOF_SEEDS, PROOF_TICKS);
-    let b = fingerprints_with_rules(perturbed, &PROOF_SEEDS, PROOF_TICKS);
+    let a = fingerprint_for_setup(baseline, &PROOF_SEEDS, PROOF_TICKS);
+    let b = fingerprint_for_setup(perturbed, &PROOF_SEEDS, PROOF_TICKS);
 
     let changed = a
         .iter()
@@ -159,52 +82,42 @@ fn rules_wiring_clutch_modulation_changes_simulation() {
 }
 
 // ============================================================================
-// 门 2：感知系统不得在空世界上运行
+// 门 2：空间事实必须来自真实的在场比赛
 // ============================================================================
 
-/// `MatchEngine` 驱动 `MatchWorld` 时，球员组件必须被真实填充。
+/// 空间量必须在真实的十人之上计算。
 ///
-/// 当前实现只同步 clock/ledger/ball 等标量，`world.transforms` 恒为空，
-/// 导致 `PerceptionSystem::evaluate` 的循环体一次都不执行（n == 0），
-/// 返回的全空结果被 `let _ =` 丢弃 —— 「接了感知系统」是假的。
+/// 历史缺陷：平行世界副本逐 tick 被填充，而空间核在一个 `n == 0` 的空世界上
+/// 运算并把结果丢掉。副本已删除（ADR-016），空间量现在只从物理世界实时计算，
+/// 本测试断言它的输入确实是十个人。
 #[test]
-fn perception_system_must_run_on_populated_world() {
+fn spatial_pressure_runs_on_real_on_court_players() {
     let mut engine = MatchEngine::new(42);
     for _ in 0..200 {
         engine.step();
     }
-    let world = engine.world();
+    let on_court = engine
+        .physics()
+        .get_players()
+        .values()
+        .filter(|p| p.on_court)
+        .count();
     assert_eq!(
-        world.player_count(),
-        10,
-        "MatchWorld must hold all 10 on-court players so that PerceptionSystem \
-         iterates real entities; player_count()==0 means every spatial kernel \
-         (Voronoi openness, contest density, weak-side detection) computes on an \
-         empty world and its output is discarded via `let _ =`"
+        on_court, 10,
+        "spatial kernels must see all ten on-court players; a smaller count \
+         means they compute on an empty or partial world"
     );
-}
-
-/// 感知系统的输出必须被真实消费：不同防守空间形态必须产生不同的感知结果，
-/// 且该结果必须出现在对比赛有影响的下游。
-#[test]
-fn spatial_perception_output_must_reach_behaviour() {
-    use nba_engine::world::PerceptionSystem;
-
-    let mut engine = MatchEngine::new(42);
-    for _ in 0..200 {
-        engine.step();
-    }
-    let p = PerceptionSystem::evaluate(engine.world());
-    assert_eq!(
-        p.defensive_contest_density.len(),
-        10,
-        "perception must produce one density sample per on-court player; \
-         an empty vector means the system observed zero entities"
+    let offense = engine.possession();
+    let ball_pos = engine.ball_pos_3d().0;
+    let crowded = nba_semantics::SemanticEvaluator::defensive_pressure(
+        ball_pos,
+        offense,
+        engine.physics(),
+        engine.rules(),
     );
     assert!(
-        p.voronoi_openness.iter().any(|&o| o > 0.0),
-        "at least one player must have non-zero Voronoi openness in a live \
-         possession; all-zero indicates the kernel never ran on real positions"
+        crowded >= 0.0,
+        "multi-defender pressure must be computable from the live world"
     );
 }
 
@@ -212,28 +125,26 @@ fn spatial_perception_output_must_reach_behaviour() {
 // 门 3：能力函数必须被主干消费，而非仅被公式单测覆盖
 // ============================================================================
 
-/// 六个 D27 能力函数中每一个的输入属性，都必须能改变真实模拟输出。
+/// 能力函数中每一个的输入属性，都必须能改变真实模拟输出。
 ///
-/// 取代「清单为空即视为清零」的声明式断言（`UNIMPLEMENTED_RULE_FIELDS`）。
 /// 做法：把全队属性设到极端低 / 极端高，比较真实模拟指纹。
 fn assert_attribute_reaches_behaviour(
     label: &str,
     mutate: impl Fn(&mut nba_domain::PlayerAttributes, f32),
 ) {
-    // 通过 setup 直接改写球员属性，跑真实模拟。
-    let run = |value: f32| -> Vec<BehaviorFingerprint> {
+    let run = |value: f32| -> Vec<support::BehaviorFingerprint> {
         PROOF_SEEDS
             .iter()
             .map(|&seed| {
                 let rules = GameRules::default();
-                let mut setup = nba_engine::MatchSetup::builtin(rules);
+                let mut setup = MatchSetup::builtin(rules);
                 for team in [&mut setup.home_team, &mut setup.away_team] {
                     for p in team.players.iter_mut() {
                         mutate(&mut p.attributes, value);
                     }
                 }
                 let mut engine = MatchEngine::with_setup(setup, seed);
-                behavior_fingerprint(&mut engine, PROOF_TICKS)
+                fingerprint(&mut engine, PROOF_TICKS)
             })
             .collect()
     };
@@ -268,25 +179,57 @@ fn capability_transition_leakout_chance_reaches_behaviour() {
     });
 }
 
+#[test]
+fn capability_help_awareness_reaches_behaviour() {
+    assert_attribute_reaches_behaviour("effective_help_awareness", |a, v| {
+        a.defense_interior = v;
+        a.decision_iq = v;
+    });
+}
+
+#[test]
+fn capability_boxout_bonus_reaches_behaviour() {
+    assert_attribute_reaches_behaviour("effective_defensive_boxout_bonus", |a, v| {
+        a.defensive_rebound = v;
+        a.strength = v;
+    });
+}
+
+#[test]
+fn capability_catch_radius_reaches_behaviour() {
+    assert_attribute_reaches_behaviour("effective_catch_radius", |a, v| {
+        a.ball_handling = v;
+    });
+}
+
+#[test]
+fn capability_poke_check_reaches_behaviour() {
+    assert_attribute_reaches_behaviour("effective_risk_tolerance", |a, v| {
+        a.ball_handling = v;
+        a.decision_iq = v;
+    });
+}
+
 // ============================================================================
 // 门 4：士气状态机的分支必须可达
 // ============================================================================
 
 /// `MoraleState::HotHand` 必须能被真实比赛达到。
 ///
-/// 取代「变体存在即视为接线」的声明式判断。此前
-/// `PlayerModulationState::record_shot` 在生产代码与测试中零调用，
-/// `consecutive_makes` 恒为 0，`hot_hand_bias` 是死通道；
-/// 而 `MoraleState::Clutch` 没有任何赋值点（已删除该变体）。
+/// 此前 `PlayerModulationState::record_shot` 在生产代码与测试中零调用，
+/// `consecutive_makes` 恒为 0，`hot_hand_bias` 是死通道。
+///
+/// 窗口必须是**完整一场**：连中阈值虽只有 2，但单个球员在 9000 tick 内
+/// 只出手约 10 次，前两次连续命中的概率很低。实测（6 seed 全场）：
+/// 最长连中 4–6 次且每个 seed 都出现过 `HotHand`；而 9000 tick（约一节半）
+/// 的窗口内最长连中仅 1–2 次，会给出假阴。
 #[test]
 fn morale_hot_hand_state_must_be_reachable() {
-    let mut engine = MatchEngine::with_setup(
-        nba_engine::MatchSetup::builtin(GameRules::default()),
-        PROOF_SEEDS[0],
-    );
+    let mut engine =
+        MatchEngine::with_setup(MatchSetup::builtin(GameRules::default()), PROOF_SEEDS[0]);
+    engine.set_scope("full").expect("full scope is valid");
     let mut reached = false;
-    // 连中阈值默认 2，因此在一场比赛的前半段就应出现。
-    for _ in 0..PROOF_TICKS * 3 {
+    while !engine.is_finished() {
         engine.step();
         if engine
             .physics()

@@ -127,26 +127,103 @@ impl OffensiveSystem {
     }
 }
 
-/// 兼容老接口的槽位规格（TacticalSlotSpec）
+/// 进攻槽位在档案里的**行为标签**。
+///
+/// 槽位过去的 `is_screener` / `is_corner_spacer` / `is_wing_relocate` 三个
+/// 布尔字段是「角色」而非「能力需求」，且引擎按 `role` 字符串分支
+/// （`role.contains("playmaker")`），违反 tactics.md TA3（槽位需求用能力
+/// 表达、不按身份字符串分支）与 charter C1。现改为：能力需求进
+/// `requirements`，槽位允许的行为进本枚举。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum SlotBehaviour {
+    /// 持球在手，向篮筐压迫。
+    DribbleTop,
+    /// 固定在点位上拉开（不切入、不 relocate）。
+    SpotUp,
+    /// 在弧顶与内线之间做纵向 relocate，制造切入时机。
+    PerimeterRelocate,
+    /// 设立掩护后向篮筐滚动。
+    HighScreenRoll,
+}
+
+impl SlotBehaviour {
+    /// 该行为在球场上对应的动作标签（进入物理层的 `action` 字段）。
+    ///
+    /// 参数是当前子阶段与进攻进度 `action_t`（0..1）；同一个行为在不同阶段
+    /// 给出不同标签，使播放/渲染与评判能分辨初始落位与后续移动。
+    pub fn action_label(self, initiating: bool) -> &'static str {
+        match self {
+            Self::DribbleTop => {
+                if initiating {
+                    "DRIBBLE_TOP"
+                } else {
+                    "DRIVE_OFF_SCREEN"
+                }
+            }
+            Self::SpotUp => "SPOT_UP_3PT",
+            Self::PerimeterRelocate => "PERIMETER_CUT",
+            Self::HighScreenRoll => {
+                if initiating {
+                    "SET_HIGH_SCREEN"
+                } else {
+                    "ROLL_TO_RIM"
+                }
+            }
+        }
+    }
+}
+
+/// 槽位的能力需求：`(属性, 权重)` 列表。权重只表达「多看重这项能力」，
+/// 不预设任何具体球员。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SlotRequirement {
+    pub attribute: PlayerAttributeKey,
+    pub weight: f32,
+}
+
+/// slot fill 可引用的能力维度。用枚举而不是字符串：档案里写错维度名会
+/// 在反序列化时报错，而不是静默变成 0 分（`attributes.md` §4 「维度必须经
+/// 映射层」的可核验形式）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlayerAttributeKey {
+    Speed,
+    Acceleration,
+    Agility,
+    Strength,
+    Vertical,
+    Stamina,
+    BallHandling,
+    Passing,
+    ShootingClose,
+    ShootingMid,
+    ShootingThree,
+    FreeThrow,
+    Finishing,
+    DefensePerimeter,
+    DefenseInterior,
+    Steal,
+    Block,
+    OffensiveRebound,
+    DefensiveRebound,
+    DecisionIq,
+    OffBallSense,
+}
+
+/// 档案槽位规格：一个槽位 = 空间提示 + 能力需求 + 允许行为。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TacticalSlotSpec {
-    pub role: String,
+    /// 槽位标识（档案内唯一；不再作为身份来源，只作为槽位名的来源）。
+    pub id: String,
     pub name_zh: String,
     /// 距**进攻底线**的距离（ft）。home 攻右篮时 x = width - base_offset_x。
     pub base_offset_x: f32,
     /// 绝对 y（0 = 一侧边线，height = 另一侧）。
     pub base_offset_y: f32,
-    #[serde(default)]
-    pub target_lane: u8,
-    /// 该槽位是否为掩护人（决定 roll/screen 行为）。
-    #[serde(default)]
-    pub is_screener: bool,
-    /// 该槽位是否为底角拉开者。
-    #[serde(default)]
-    pub is_corner_spacer: bool,
-    /// 该槽位是否为翼位纵向 relocate 者。
-    #[serde(default)]
-    pub is_wing_relocate: bool,
+    /// 填此槽位需要的能力（权重之和不为 0）。
+    pub requirements: Vec<SlotRequirement>,
+    /// 此槽位允许的行为。
+    pub behaviour: SlotBehaviour,
 }
 
 /// 兼容老接口的阵型规格（TacticalSetSpec）
@@ -159,18 +236,61 @@ pub struct TacticalSetSpec {
 }
 
 impl TacticalSetSpec {
+    /// 校验档案自洽：槽位标识唯一、能力需求非空且权重为正。
+    ///
+    /// 档案是行为输入（charter C1），写错的档案必须在构造时被拒绝，
+    /// 而不是在场上静默退化为 0 分匹配。
+    pub fn validate(&self) -> Result<(), String> {
+        if self.slots.is_empty() {
+            return Err(format!("tactical spec `{}` declares no slots", self.id));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for slot in &self.slots {
+            if slot.id.trim().is_empty() {
+                return Err(format!("tactical spec `{}` has a slot without id", self.id));
+            }
+            if !seen.insert(slot.id.as_str()) {
+                return Err(format!(
+                    "tactical spec `{}` declares duplicate slot id `{}`",
+                    self.id, slot.id
+                ));
+            }
+            if slot.requirements.is_empty() {
+                return Err(format!(
+                    "slot `{}` declares no capability requirement",
+                    slot.id
+                ));
+            }
+            if slot.requirements.iter().any(|r| r.weight < 0.0) {
+                return Err(format!("slot `{}` has a negative weight", slot.id));
+            }
+            if slot.requirements.iter().all(|r| r.weight == 0.0) {
+                return Err(format!(
+                    "slot `{}` has no positive capability weight",
+                    slot.id
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn from_json(json_str: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json_str)
     }
 
     pub fn high_pick_and_roll() -> Self {
         const JSON: &str = include_str!("../../../data/tactics/high_pick_and_roll.json");
-        Self::from_json(JSON).expect("内置 high_pick_and_roll.json 必须合法")
+        let spec = Self::from_json(JSON).expect("内置 high_pick_and_roll.json 必须合法");
+        spec.validate()
+            .expect("内置 high_pick_and_roll.json 必须自洽");
+        spec
     }
 
     pub fn five_out_motion() -> Self {
         const JSON: &str = include_str!("../../../data/tactics/five_out_motion.json");
-        Self::from_json(JSON).expect("内置 five_out_motion.json 必须合法")
+        let spec = Self::from_json(JSON).expect("内置 five_out_motion.json 必须合法");
+        spec.validate().expect("内置 five_out_motion.json 必须自洽");
+        spec
     }
 
     pub fn builtin(id: &str) -> Option<Self> {

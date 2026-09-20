@@ -23,7 +23,13 @@ impl MatchEngine {
 
     #[doc(hidden)]
     pub fn execute_shot_for_test(&mut self, shooter_id: &str, from_pos: Vec2, is_three: bool) {
-        self.execute_shot(shooter_id, from_pos, is_three, None, self.clock.current_time);
+        self.execute_shot(
+            shooter_id,
+            from_pos,
+            is_three,
+            None,
+            self.clock.current_time,
+        );
     }
 
     /// 设置交替拥有箭头（仅测试钩子，D20）。
@@ -175,8 +181,7 @@ impl MatchEngine {
             );
         }
         let pos = self.ball.ball_pos_3d;
-        let baseline =
-            Court::nearest_boundary_with_geometry(pos.0, self.config.rules.court);
+        let baseline = Court::nearest_boundary_with_geometry(pos.0, self.config.rules.court);
         self.start_inbound_transition(baseline, pos);
     }
 }

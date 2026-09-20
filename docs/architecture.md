@@ -83,7 +83,7 @@
 | ------ | ------ | --------- |
 | **C1 无硬编码** | 一切影响行为的数字必经规则/数据通道；一切行为是 `(能力, 规则, 状态)` 的纯函数，禁止剧本化战术与"让画面像"的经验常数 | 内联常数 grep 守卫（protocol.md §2.1 M7 阈值）+ 能力扰动测试（quality.md §6） |
 | **C2 评判落地** | 真实度判断逐回合、逐阶段产出裁决；禁止以"多场模拟原始结果统计"作为真实性评判；仅允许把"裁决结果"聚合为真实度指数 | 回合/阶段评判工件逐条落盘（quality.md §2.1–2.3） |
-| **C3 约束分轴** | 物理约束严格遵守且与联赛无关（可配置校准）；语义/规则约束按联赛档案 `LeagueProfile` 参数化（NBA/FIBA/NCAA），灵活可配 | LeagueProfile 切换验收（§6.3、protocol.md §2.1 M10） |
+| **C3 约束分轴** | 物理约束严格遵守且与联赛无关（可配置校准）；语义/规则约束按联赛档案 `LeagueProfile` 参数化（NBA/FIBA），灵活可配 | LeagueProfile 切换验收（§6.3、protocol.md §2.1 M10） |
 | **C4 确定性** | 相同种子 → 逐 tick 完全相同的世界；一切评判、归因、校准对比的前提 | 黄金哈希（quality.md §5）入库且必须常绿 |
 
 > 条款与原则的映射：P6 是 C1 的数值通道，P7 是 C1 的行为要求，P8 即 C2，C3 落地为 §6.3 的规则档案参数化，C4 是 P5 的宪章级强化。
@@ -240,23 +240,26 @@ fn dead_flow_phase(&mut self, dt: f32, was_period_break: bool) -> PhaseOutcome;
 
 **写权限的可核验形式**：阶段签名列出它写入的状态组名，`&mut self` 的全部状态不出现在签名里。实测 59 个含写入的函数中 35 个（59%）只写单一状态组，其余 24 个跨 2–7 组；跨组函数的组名必须在签名中逐一列出，跨组写入因此从隐式变为显式。
 
-阶段序列（对应 §2 的 12 步；`FreeThrowPhase` 为死球罚球分支，条件激活，未出现在 §2 主数据流图中）：
+阶段序列（对应 §2 的 12 步；条件激活的分支未出现在 §2 主数据流图中）。以下为调度器顺序调用的阶段函数，与代码一一对应：
 
 ```
-ClockAdvancePhase
-RuntimeConstraintPhase
-ActionWindowPhase
-FreeThrowPhase          (条件激活)
-DecisionPhase           (条件激活：活球或死球发球就绪；到达决策间隔)
-ExecutionPhase          (含执行重校验)
-PhysicsStepPhase
-BallisticsResolutionPhase
-SemanticPhase
-OfficiatingPhase
-PhaseTransitionPhase
-InvariantPhase          (最后的校验环节；其后仅 EmitPhase)
-EmitPhase
+clock_advance_phase          // 时间轴、子阶段计时、后场计时、进攻钟
+runtime_constraint_phase     // 24 秒/出界/死球等运行时约束；可短路
+advance_action_windows       // 动作窗口推进与运动学锁同步
+free_throw_and_period_phase  // 罚球结算与节末；可短路（条件激活）
+tip_off_phase / dead_flow_phase  // 跳球、节间、暂停、终场；可短路（条件激活）
+decision_phase               // 候选生成→约束→效用→采样（条件激活：到达决策间隔）
+apply_decision_output        // 执行重校验与应用动作
+physics.step                 // 刚体运动、碰撞、弹道采样
+resolve_ball_flight          // 弹道裁决（含封盖判定）
+apply_ball_flight_outcome    // 结果消费：出界/抢断/松球/新球态；可短路
+plan_tactics_and_navigation  // 战术目标生成与移动导航
+collect_tick_facts           // 语义接触归集与事实抽取
+publish_events               // 事件裁决与因果发布
+build_tick                   // 快照输出（无副作用）
 ```
+
+阶段顺序有三条不变式：时钟与生命周期在约束求值之前；不变量校验在 `step()` 包装器里、任何短路路径都不能绕过（见 §2 时序不变式）；`build_tick` 无副作用。
 
 ### 4.2 收益
 
@@ -390,16 +393,16 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 - **物理约束**（人体运动极限、球飞行与碰撞、最小间距）：严格遵守、全局可配置校准，但**与联赛无关**——FIBA 球员和 NBA 球员受同一套人体物理；
 - **语义/规则约束**（计时结构、犯规政策、罚球与 bonus、违例尺度、几何）：必须按 `LeagueProfile` 参数化。语义层与裁决层是纯函数 `f(接触/空间事实, LeagueProfile)`——同一接触事实在不同档案下可以有不同判罚（边际吹罚尺度、bonus 触发、犯规上限）。
 
-**LeagueProfile 差异表（首批三联赛）**：
+**LeagueProfile 差异表（首批两联赛；NCAA 为路线项）**：
 
-| 档案字段 | NBA | FIBA | NCAA（男） |
-| --- | --- | --- | --- |
-| 计时结构 | 4×12 min | 4×10 min | 2×20 min |
-| 进攻时钟 | 24 s，前场板重置 14 s | 24 s，重置 14 s | 30 s |
-| 个人犯满 | 6 犯 | 5 犯 | 5 犯 |
-| 球队犯规罚则 | 单节 bonus（第 5 次犯规起） | 单节 bonus（第 5 次犯规起） | 半场 bonus / 双 bonus |
-| 三分线 | ~23.75 ft（底角 22） | 6.75 m | 6.75 m |
-| 交替拥有 | 节间轮换 | 交替拥有箭头 | 交替拥有箭头 |
+| 档案字段 | NBA | FIBA |
+| --- | --- | --- |
+| 计时结构 | 4×12 min | 4×10 min |
+| 进攻时钟 | 24 s，前场板重置 14 s | 24 s，前场板重置 14 s |
+| 个人犯满 | 6 犯 | 5 犯 |
+| 球队犯规罚则 | 单节 bonus（第 5 次犯规起） | 单节 bonus（第 4 次犯规起） |
+| 三分线 | ~23.75 ft（底角 22） | 6.75 m（等半径，无底角特例） |
+| 交替拥有 | 跳球 | 交替拥有箭头 |
 
 **验收原则**：切换联赛 = 切换一份规则档案（数据），计时、几何、犯规政策和罚球程序随之生效；引擎代码路径不因联赛而分叉。具体阶段顺序和证据要求见 `docs/protocol.md`。
 

@@ -7,9 +7,7 @@
 //! - 负面对照：断路一条链后 harness 必须能检测出"无响应"（测试红）。
 
 use nba_domain::{
-    drive_finishing_delta, effective_boxout_strength, effective_catch_radius,
-    effective_decision_risk_tolerance, effective_defense_factor, effective_max_speed,
-    effective_passing_skill_factor, effective_shooting_mid_factor, free_throw_probability,
+    drive_finishing_delta, effective_catch_radius, effective_max_speed, free_throw_probability,
     poke_check_success, receive_estimate_noise, GameRules, LeagueProfile, PlayerAttributes,
 };
 use nba_engine::MatchEngine;
@@ -41,6 +39,39 @@ fn perturbation_acceleration_response_is_monotonic() {
     assert!(low < high, "acceleration must raise max accel");
 }
 
+/// `agility` → 变向减速代价（`attributes.md` §2.2 声明的消费链）。
+///
+/// 该维度曾只在档案里存在、生产零消费。现经 `effective_turn_decel_retention`
+/// 进入物理层的转身分支：敏捷者转向时保留更多速度。
+///
+/// 同时守住「不得复用 `attribute_response_floor`（默认 0.5）」——那个 floor
+/// 会把 0..0.5 整段压成同一个值（实测 0.05 与 0.5 行为逐位相同），
+/// 而 `attributes.md` §4 明令禁止内联 floor 造成死区。
+#[test]
+fn perturbation_agility_lowers_turn_decel_cost() {
+    let rules = GameRules::default();
+    let anchor =
+        nba_domain::effective_turn_decel_retention(&rules, &attrs_with(|a| a.agility = 0.5));
+    let low = nba_domain::effective_turn_decel_retention(&rules, &attrs_with(|a| a.agility = 0.2));
+    let high = nba_domain::effective_turn_decel_retention(&rules, &attrs_with(|a| a.agility = 0.9));
+    assert!(
+        low < anchor && anchor < high,
+        "agility must raise the retained ratio around the neutral anchor: 
+         low={low}, anchor={anchor}, high={high}"
+    );
+    // 中位锚定：`agility = 0.5` 必须逐位等于全局基准，保证接入前后行为连续。
+    assert_eq!(
+        anchor, rules.turn_decel_retention,
+        "the neutral anchor must reproduce the global base exactly"
+    );
+    // 无死区：属性下限必须真的允许低值生效。
+    let floor = rules.capability.turn_decel_retention_attribute_floor;
+    assert!(
+        floor < 0.2,
+        "the input floor ({floor}) must not clamp the low half of agility into a dead zone"
+    );
+}
+
 #[test]
 fn perturbation_free_throw_response_is_monotonic() {
     let rules = GameRules::default();
@@ -68,22 +99,9 @@ fn perturbation_finishing_response_is_monotonic() {
 }
 
 #[test]
-fn perturbation_defense_interior_vs_perimeter_differentiates() {
-    let rules = GameRules::default();
-    let lockdown_interior = attrs_with(|a| {
-        a.defense_interior = 0.95;
-        a.defense_perimeter = 0.40;
-    });
-    let factor_in = effective_defense_factor(&rules, &lockdown_interior, true);
-    let factor_out = effective_defense_factor(&rules, &lockdown_interior, false);
-    assert!(
-        factor_in > factor_out,
-        "interior specialist must have stronger interior contest factor"
-    );
-}
-
-#[test]
 fn perturbation_mental_iq_modulates_risk_tolerance() {
+    // 高 `decision_iq` → 更低的风险容忍（`base - iq × gain`）：高智商球员
+    // 更少做高风险选择，这是该维度的法定语义（`policies.rs` 的曲线注释）。
     let rules = GameRules::default();
     let low = PlayerAttributes {
         decision_iq: 0.25,
@@ -94,8 +112,9 @@ fn perturbation_mental_iq_modulates_risk_tolerance() {
         ..Default::default()
     };
     assert!(
-        effective_decision_risk_tolerance(&rules, &high)
-            > effective_decision_risk_tolerance(&rules, &low)
+        nba_domain::effective_risk_tolerance(&rules, &high)
+            < nba_domain::effective_risk_tolerance(&rules, &low),
+        "higher decision_iq must lower risk tolerance"
     );
 }
 
@@ -538,69 +557,115 @@ fn positive_controls_pass_the_same_harness() {
     );
     assert!(d.is_ok(), "wired free throw must pass: {d:?}");
 
-    // (4) 中距离投篮：shooting_mid 递增（D19）。
-    let d = check_monotonic_response(
-        "shooting_mid",
-        |x| effective_shooting_mid_factor(&rules, &attrs_with(|a| a.shooting_mid = x)),
-        0.1,
-        0.9,
-        true,
-        0.01,
-    );
-    assert!(d.is_ok(), "wired shooting_mid must pass: {d:?}");
+    // 已删除的无消费函数（`effective_defense_factor` /
+    // `effective_decision_risk_tolerance` / `effective_shooting_mid_factor` /
+    // `effective_passing_skill_factor` / `effective_boxout_strength`）曾在此各占一条
+    // 「接线」断言，但它们在生产代码中零调用——那种断言只是公式单测，
+    // 对「属性是否真的影响比赛」零信息量。它们指向的能力现在由下列**已接线**
+    // 函数承担（见当前文件后面的行为级断言与 `wiring_proof.rs`）：
+    //
+    // - 防守：`officiating` 直读 `defense_perimeter` / `defense_interior`
+    //   （`resolution.rs` 的干扰与犯规曲线）；
+    // - 中距离与传球：`resolve.player_skill.shooting_weight` / `passing_weight`
+    //   经 `execute_shot` 与传球裁决消费；
+    // - 卡位：`effective_defensive_boxout_bonus`（篮板冲抢）；
+    // - 决策：`effective_risk_tolerance`（贴身切球倾向）。
 
-    // (5) 传球技能：passing 递增（D19）。
-    let d = check_monotonic_response(
-        "passing",
-        |x| effective_passing_skill_factor(&rules, &attrs_with(|a| a.passing = x)),
-        0.1,
-        0.9,
-        true,
-        0.01,
-    );
-    assert!(d.is_ok(), "wired passing must pass: {d:?}");
-
-    // (6) 卡位对抗力量：strength 递增（D19）。
-    let d = check_monotonic_response(
-        "strength",
-        |x| effective_boxout_strength(&rules, &attrs_with(|a| a.strength = x)),
-        0.1,
-        0.9,
-        true,
-        0.01,
-    );
-    assert!(d.is_ok(), "wired strength must pass: {d:?}");
-
-    // (7) 决策感知：decision_iq 递增（D19）。
+    // (4) 决策风险容忍：`decision_iq` 递增 → 风险容忍**递减**
+    // （曲线是 `base - iq × gain`：高智商球员更少做高风险选择）。
     let d = check_monotonic_response(
         "decision_iq",
-        |x| effective_decision_risk_tolerance(&rules, &attrs_with(|a| a.decision_iq = x)),
+        |x| nba_domain::effective_risk_tolerance(&rules, &attrs_with(|a| a.decision_iq = x)),
         0.1,
         0.9,
-        true,
+        /* expect_increase = */ false,
         0.01,
     );
     assert!(d.is_ok(), "wired decision_iq must pass: {d:?}");
 
-    // (8) 外线防守：defense_perimeter 递增（D19）。
+    // (5) 防守卡位：defensive_rebound 与 strength 递增（D27）。
     let d = check_monotonic_response(
-        "defense_perimeter",
-        |x| effective_defense_factor(&rules, &attrs_with(|a| a.defense_perimeter = x), false),
+        "defensive_rebound",
+        |x| {
+            nba_domain::effective_defensive_boxout_bonus(
+                &rules,
+                &attrs_with(|a| a.defensive_rebound = x),
+            )
+        },
         0.1,
         0.9,
         true,
         0.01,
     );
-    assert!(d.is_ok(), "wired defense_perimeter must pass: {d:?}");
+    assert!(d.is_ok(), "wired defensive_rebound must pass: {d:?}");
 
-    // (9) 内线防守：defense_interior 递增（D19）。
+    // (6) 低位背身对抗：defense_interior 递增（D27）。
     let d = check_monotonic_response(
-        "defense_interior",
-        |x| effective_defense_factor(&rules, &attrs_with(|a| a.defense_interior = x), true),
+        "post_defense_physicality",
+        |x| {
+            nba_domain::effective_post_defense_physicality(
+                &rules,
+                &attrs_with(|a| a.defense_interior = x),
+            )
+        },
         0.1,
         0.9,
         true,
         0.01,
     );
-    assert!(d.is_ok(), "wired defense_interior must pass: {d:?}");
+    assert!(d.is_ok(), "wired post defense must pass: {d:?}");
+
+    // (7) 协防意识：defense_interior 递增（D27）。
+    let d = check_monotonic_response(
+        "help_awareness",
+        |x| nba_domain::effective_help_awareness(&rules, &attrs_with(|a| a.defense_interior = x)),
+        0.1,
+        0.9,
+        true,
+        0.01,
+    );
+    assert!(d.is_ok(), "wired help awareness must pass: {d:?}");
+
+    // (8) 二次补篮倾向：finishing 递增（D27）。
+    let d = check_monotonic_response(
+        "putback_bias",
+        |x| nba_domain::effective_putback_bias(&rules, &attrs_with(|a| a.finishing = x)),
+        0.1,
+        0.9,
+        true,
+        0.01,
+    );
+    assert!(d.is_ok(), "wired putback bias must pass: {d:?}");
+
+    // (9) 快下机会：speed 递增（D27）。
+    let d = check_monotonic_response(
+        "transition_leakout",
+        |x| nba_domain::effective_transition_leakout_chance(&rules, &attrs_with(|a| a.speed = x)),
+        0.1,
+        0.9,
+        true,
+        0.01,
+    );
+    assert!(d.is_ok(), "wired transition leakout must pass: {d:?}");
+
+    // (10) 横向敏捷：agility 递增 → 变向保留比例递增（attributes.md §2.2）。
+    let d = check_monotonic_response(
+        "agility",
+        |x| nba_domain::effective_turn_decel_retention(&rules, &attrs_with(|a| a.agility = x)),
+        0.1,
+        0.9,
+        true,
+        0.01,
+    );
+    assert!(d.is_ok(), "wired agility must pass: {d:?}");
+
+    // `shooting_close` 与 `finishing` 的分解已在 `execution.rs` 的 near-rim
+    // 分支按 `contest_intensity` 接入（非对抗 → shooting_close，对抗 → finishing，
+    // 符合 attributes.md §2.3 的可辨识性配对）。
+    //
+    // 但此处**没有**行为级扰动断言，因为实测不可观测：内置名册每两节 15000 tick
+    // 只产生 5–10 次近筐出手（seed 42: rim=6 / mid=19 / three=10），
+    // 把全队 `shooting_close` 推到 0.05 或 0.95 只能改变 1/4 与 0/4 个 seed 的指纹。
+    // 这是**证据缺口**（样本量不足），不是接线缺口：不得把它写成已接线。
+    // 关闭该缺口需要先把近筐出手量的量级提上去（另立任务）。
 }

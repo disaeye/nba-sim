@@ -46,6 +46,8 @@ pub(crate) struct BallFlightOutcome {
     pub drive_kickout_action: Option<(String, String, Vec2, Vec2, f32)>,
     /// 突破急停跳投（Pull-up）待执行的动作参数。
     pub drive_pullup_action: Option<(String, Vec2, f32)>,
+    /// 封盖发生时发布的比赛事实。
+    pub blocked_shot_event: Option<GameEvent>,
 }
 
 impl MatchEngine {
@@ -62,6 +64,67 @@ impl MatchEngine {
         let mut loose_ball_out_of_bounds: Option<(Vec2, (Vec2, f32))> = None;
         let mut drive_kickout_action = None;
         let mut drive_pullup_action = None;
+        let mut blocked_shot_event: Option<GameEvent> = None;
+        // ## 封盖判定必须在 match 之前（D25）
+        //
+        // `match &self.ball.ball_state` 在整个匹配期间持有不可变借用，
+        // 而封盖裁定需要 `&mut self`（读物理世界、掷骰、写事件）。
+        // 因此把所需字段先取出来（靠 `Copy` 与克隆），在借用开始前裁定。
+        //
+        // 时机上这也更正确：封盖是出手者在**可干扰区间**内发生的触及，
+        // 与“球是否已到达篮筐”无关——先判封盖，再让后续分支看到新球态。
+        let block_candidate = match &self.ball.ball_state {
+            BallTrajectoryKind::Shot {
+                shooter_id,
+                from_pos,
+                start_time,
+                duration,
+                is_made,
+                is_three,
+                ..
+            } => {
+                let tau = ((current_t - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
+                let _ = tau;
+                // 只在**刚进入 `Execution` 阶段**的那一个 tick 上掷一次。
+                //
+                // 掷骰是“这一发会不会被封”的一次判定，不是逐 tick 重复的抽样：
+                // 若每个飞行 tick 都掷，0.95s 的飞行有 24 次机会，单次概率会被
+                // 放大成几乎必然（实测逐 tick 掷得到 36.6% 的出手被封）。
+                //
+                // 触发点是**阶段刚变为 `Execution`**，而不是窗口起点：
+                // 后者的 `interference_start` 位于合球阶段（`Preparation`），
+                // 那个窗口属于切球（Strip），与封盖是两个不同的判定口径。
+                let window = self.observations.active_windows.get(shooter_id);
+                let just_entered_execution = window
+                    .map(|w| {
+                        let elapsed = current_t - w.start_time;
+                        let prev = elapsed - self.config.rules.tick_seconds;
+                        elapsed >= w.prep_duration && prev < w.prep_duration
+                    })
+                    .unwrap_or(false);
+                just_entered_execution.then(|| {
+                    (
+                        shooter_id.clone(),
+                        *from_pos,
+                        *start_time,
+                        *duration,
+                        *is_made,
+                        *is_three,
+                    )
+                })
+            }
+            _ => None,
+        };
+        if let Some((shooter_id, from_pos, _start_time, _duration, is_made, is_three)) =
+            block_candidate
+        {
+            if let Some(outcome) =
+                self.try_resolve_shot_block(&shooter_id, &from_pos, current_t, is_made, is_three)
+            {
+                new_ball_state = Some(outcome.next_state);
+                blocked_shot_event = Some(outcome.event);
+            }
+        }
         match &self.ball.ball_state {
             BallTrajectoryKind::Held { carrier_id } => {
                 let cid = carrier_id.clone();
@@ -205,13 +268,15 @@ impl MatchEngine {
                             player.action = "InboundPositioning".to_string();
                             player.out_of_bounds_placement = true;
                         }
-                        self.journal.pending_events.push(GameEvent::PlacementApplied {
-                            player_id: replacement.clone(),
-                            from: (baseline_pos.x, baseline_pos.y),
-                            to: (baseline_pos.x, baseline_pos.y),
-                            reason: "INBOUNDER_REASSIGNED".to_string(),
-                            phase: self.phase_type().as_str().to_string(),
-                        });
+                        self.journal
+                            .pending_events
+                            .push(GameEvent::PlacementApplied {
+                                player_id: replacement.clone(),
+                                from: (baseline_pos.x, baseline_pos.y),
+                                to: (baseline_pos.x, baseline_pos.y),
+                                reason: "INBOUNDER_REASSIGNED".to_string(),
+                                phase: self.phase_type().as_str().to_string(),
+                            });
                         new_ball_state = Some(BallTrajectoryKind::InboundTransfer {
                             from_pos: self.ball.ball_pos_3d.0,
                             from_z: self.ball.ball_pos_3d.1,
@@ -290,8 +355,8 @@ impl MatchEngine {
                 let mut intercept: Option<(String, bool)> = None;
                 if let Some((defender_id, is_steal)) = intercept_fact.clone() {
                     if let Some(defender) = self.systems.physics.get_player(&defender_id) {
-                        let reach =
-                            self.config.rules.player_radius_ft + self.config.rules.defender_reach_ft;
+                        let reach = self.config.rules.player_radius_ft
+                            + self.config.rules.defender_reach_ft;
                         let dist_to_ball = (defender.pos_ft - self.ball.ball_pos_3d.0).length();
                         // 球在可及范围内，或已飞过该防守者所在位置（投影已过），
                         // 则视为拦截成立；否则继续飞行。
@@ -348,12 +413,14 @@ impl MatchEngine {
                 if let Some((defender_id, secured)) = intercept {
                     let position = self.ball.ball_pos_3d.0;
                     if secured {
-                        self.journal.pending_events.push(GameEvent::PassIntercepted {
-                            passer_id,
-                            receiver_id: target_id.clone(),
-                            defender_id: defender_id.clone(),
-                            position: (position.x, position.y),
-                        });
+                        self.journal
+                            .pending_events
+                            .push(GameEvent::PassIntercepted {
+                                passer_id,
+                                receiver_id: target_id.clone(),
+                                defender_id: defender_id.clone(),
+                                position: (position.x, position.y),
+                            });
                         // 拦截成立时把球锚定到抢断者身上：`Held{stealer}`
                         // 要求球与持球人一致（否则 BALL_WITH_HOLDER）。
                         // 拦截点与抢断者的距离可能达 reach（1.8+ 可达 ft），
@@ -422,7 +489,10 @@ impl MatchEngine {
                             .physics
                             .get_player(&receiver_id)
                             .map(|r| {
-                                nba_domain::effective_catch_radius(&self.config.rules, &r.attributes)
+                                nba_domain::effective_catch_radius(
+                                    &self.config.rules,
+                                    &r.attributes,
+                                )
                             })
                             .unwrap_or(self.config.rules.player_radius_ft);
                         let ball_to_receiver = self
@@ -463,12 +533,14 @@ impl MatchEngine {
                             // 事实账本自洽（不允许下游各自解释同一传球）。
                             let divergence = (catch_spot - *to_pos).length();
                             if divergence > f32::EPSILON {
-                                self.journal.pending_events.push(GameEvent::PassLandingCorrected {
-                                    receiver_id: receiver_id.clone(),
-                                    intended: (to_pos.x, to_pos.y),
-                                    actual: (catch_spot.x, catch_spot.y),
-                                    divergence_ft: divergence,
-                                });
+                                self.journal
+                                    .pending_events
+                                    .push(GameEvent::PassLandingCorrected {
+                                        receiver_id: receiver_id.clone(),
+                                        intended: (to_pos.x, to_pos.y),
+                                        actual: (catch_spot.x, catch_spot.y),
+                                        divergence_ft: divergence,
+                                    });
                             }
                             self.journal.pending_events.push(GameEvent::PassReceived {
                                 receiver_id: receiver_id.clone(),
@@ -573,7 +645,12 @@ impl MatchEngine {
                 // 1. 中途分流决策（Drive Branching: 突分 Kickout 或急停中投 Pull-up）
                 let elapsed = current_t - start_time;
                 let mut branched = false;
-                if elapsed >= self.config.rules.tactics.drive_decision_check_interval_seconds
+                if elapsed
+                    >= self
+                        .config
+                        .rules
+                        .tactics
+                        .drive_decision_check_interval_seconds
                     && tau < 0.85
                 {
                     let paint_crowding = SemanticEvaluator::spacing(
@@ -590,8 +667,13 @@ impl MatchEngine {
                         let mut min_opp_dist =
                             self.config.rules.tactics.drive_kickout_min_defender_dist_ft;
 
-                        let all_players: Vec<_> =
-                            self.systems.physics.get_players().values().cloned().collect();
+                        let all_players: Vec<_> = self
+                            .systems
+                            .physics
+                            .get_players()
+                            .values()
+                            .cloned()
+                            .collect();
                         let off_team_str = match self.flow.possession {
                             Possession::Home => "home",
                             Possession::Away => "away",
@@ -638,7 +720,8 @@ impl MatchEngine {
                                 current_t,
                             ));
                             branched = true;
-                        } else if paint_crowding > self.config.rules.tactics.drive_pullup_min_crowding
+                        } else if paint_crowding
+                            > self.config.rules.tactics.drive_pullup_min_crowding
                             && dist_to_hoop > self.config.rules.tactics.drive_early_finish_dist_ft
                             && dist_to_hoop
                                 <= self.config.rules.tactics.drive_mid_range_pullup_dist_ft
@@ -651,12 +734,13 @@ impl MatchEngine {
                 }
 
                 // 2. 提前进入冲框终结判定：进入终结区（Early Finish Gate）或时间耗尽
-                let early_finish =
-                    dist_to_hoop <= self.config.rules.tactics.drive_early_finish_dist_ft
-                        && elapsed >= self.config.rules.tactics.drive_min_duration_seconds;
+                let early_finish = dist_to_hoop
+                    <= self.config.rules.tactics.drive_early_finish_dist_ft
+                    && elapsed >= self.config.rules.tactics.drive_min_duration_seconds;
                 if !branched && (tau >= 1.0 || early_finish) {
                     let driver_id = driver_id.clone();
-                    self.possession_ctx.current_possession_turnover_player = Some(driver_id.clone());
+                    self.possession_ctx.current_possession_turnover_player =
+                        Some(driver_id.clone());
                     let successful = *successful;
                     let finish_made = *finish_made;
                     let fouler_id = fouler_id.clone();
@@ -767,7 +851,8 @@ impl MatchEngine {
                                 contest_level: 0.2,
                                 make_probability: if finish_made { 1.0 } else { 0.0 },
                             });
-                            self.possession_ctx.current_possession_shooter = Some(driver_id.clone());
+                            self.possession_ctx.current_possession_shooter =
+                                Some(driver_id.clone());
                             let contest_val = if finish_made { 0.35 } else { 0.65 };
                             self.possession_ctx.current_possession_contest = Some(contest_val);
                             self.journal.current_event = Some("SHOT_RELEASE".to_string());
@@ -912,8 +997,10 @@ impl MatchEngine {
                             } else {
                                 self.ledger.away_score += points;
                             }
-                            let baseline =
-                                Court::nearest_boundary_with_geometry(h_pos, self.config.rules.court);
+                            let baseline = Court::nearest_boundary_with_geometry(
+                                h_pos,
+                                self.config.rules.court,
+                            );
                             self.ball.ball_pos_3d = (h_pos, self.config.rules.rim_height_ft);
                             self.emit_possession_summary(
                                 nba_domain::PossessionEndCause::Score,
@@ -985,8 +1072,9 @@ impl MatchEngine {
                 };
                 if tau >= 1.0 {
                     let reb_pos = *target_landing;
-                    let max_reach =
-                        self.config.rules.player_radius_ft + self.config.rules.defender_reach_ft + 1.5;
+                    let max_reach = self.config.rules.player_radius_ft
+                        + self.config.rules.defender_reach_ft
+                        + 1.5;
                     let maybe_reb_id = self.try_resolve_rebounder(reb_pos, max_reach);
 
                     if let Some(reb_id) = maybe_reb_id {
@@ -1111,10 +1199,12 @@ impl MatchEngine {
                 }
                 candidates.sort();
                 if let Some(player_id) = candidates.into_iter().next() {
-                    self.journal.pending_events.push(GameEvent::LooseBallSecured {
-                        player_id: player_id.clone(),
-                        position: (next_pos.x, next_pos.y),
-                    });
+                    self.journal
+                        .pending_events
+                        .push(GameEvent::LooseBallSecured {
+                            player_id: player_id.clone(),
+                            position: (next_pos.x, next_pos.y),
+                        });
                     loose_ball_secured_player = Some((player_id, next_pos, next_z));
                 } else {
                     new_ball_state = Some(BallTrajectoryKind::LooseBall {
@@ -1136,7 +1226,7 @@ impl MatchEngine {
             loose_ball_out_of_bounds,
             drive_kickout_action,
             drive_pullup_action,
+            blocked_shot_event,
         }
     }
-
 }

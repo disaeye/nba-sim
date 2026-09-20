@@ -3,6 +3,7 @@
 //! 本模块是 `rules` 的叶子层：这些策略结构不依赖 `GameRules`，
 //! 方向是单向的 `GameRules` → 各策略。
 
+use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -74,6 +75,19 @@ pub struct CapabilityCurveRules {
     /// 能力的中性参考值：属性缺失或对位人不可知时的回退值
     /// （属性域的 0.5 中点，也是 `contest` 类度量的中性点）。
     pub neutral_attribute: f32,
+    /// `effective_turn_decel_retention`：变向减速后保留的速度变化量。
+    ///
+    /// `attributes.md` §2.2 声明 `agility` 的消费链是「防守滑步最大速度、
+    /// 变向减速代价」——后者就是本值。锚点是 `TacticalRules.turn_decel_retention`，
+    /// 本值表示 `agility` 高于或低于中位（0.5）时保留比例的增减。
+    pub turn_decel_retention_gain: f32,
+    /// 该维度属性的独立下限。
+    ///
+    /// 不得复用 `attribute_response_floor`（默认 0.5）：那会把 0..0.5 整段
+    /// agility 压成同一个值，底部半程成为死区——实测 `agility = 0.05` 与
+    /// `agility = 0.5` 行为逐位相同，而 `attributes.md` §4 明令禁止
+    /// 「内联 floor 把有效区间压缩成死区」。
+    pub turn_decel_retention_attribute_floor: f32,
 }
 
 impl Default for CapabilityCurveRules {
@@ -98,6 +112,10 @@ impl Default for CapabilityCurveRules {
             post_defense_resistance_floor: 0.8,
             post_defense_resistance_gain: 0.4,
             neutral_attribute: 0.5,
+            // 锚点为全局 `turn_decel_retention = 0.4`：`agility = 0.5` 时该系数
+            // 对结果零影响，高于/低于中位各 0.5 时保留比例在 0.4 上下浮动 ±0.1。
+            turn_decel_retention_gain: 0.2,
+            turn_decel_retention_attribute_floor: 0.0,
         }
     }
 }
@@ -273,6 +291,42 @@ pub struct SemanticRules {
     pub contest_dist_weight: f32,
     pub contest_speed_weight: f32,
     pub contest_speed_factor_cap: f32,
+    /// 全场防守压迫密度核的作用半径（ft）。
+    ///
+    /// 「压迫」与 `contest_intensity` 是两个不同的空间量：后者是**最近一名**
+    /// 防守人的距离/朝向/速度合成的单人对位干扰；前者是**多名**防守人的
+    /// 覆盖叠加，用于判断某个位置是否处在协防网之内。两者不重复，
+    /// 压力核只统计这个半径内的防守人。
+    pub pressure_radius_ft: f32,
+    /// 压力核的距离衰减尺度（ft）：核形状为 `alignment / ((d/scale)^2 + 1)`，
+    /// 数值越大压迫衰减越慢。
+    pub pressure_distance_scale_ft: f32,
+    /// 防守人背向进攻人时的最小朝向系数（避免背身防守完全不计压力）。
+    pub pressure_facing_floor: f32,
+}
+
+impl SemanticRules {
+    /// 位置 `pos` 处的防守压迫密度：`pressure_radius_ft` 内每名防守人的
+    /// 朝向投影与距离衰减之和。零名防守人在范围内时为 0。
+    pub fn defensive_pressure(
+        &self,
+        pos: Vec2,
+        defenders: impl IntoIterator<Item = (Vec2, Vec2)>,
+    ) -> f32 {
+        let mut press = 0.0_f32;
+        for (defender_pos, facing) in defenders {
+            let delta = pos - defender_pos;
+            let distance = delta.length();
+            if distance >= self.pressure_radius_ft || distance <= f32::EPSILON {
+                continue;
+            }
+            let to_offense = delta / distance;
+            let alignment = facing.dot(to_offense).max(self.pressure_facing_floor);
+            let scale = self.pressure_distance_scale_ft.max(f32::EPSILON);
+            press += alignment / ((distance / scale).powi(2) + 1.0);
+        }
+        press
+    }
 }
 
 impl Default for SemanticRules {
@@ -318,6 +372,9 @@ impl Default for SemanticRules {
             contest_dist_weight: 0.8,
             contest_speed_weight: 1.0,
             contest_speed_factor_cap: 0.4,
+            pressure_radius_ft: 16.0,
+            pressure_distance_scale_ft: 4.0,
+            pressure_facing_floor: 0.1,
         }
     }
 }
@@ -352,6 +409,81 @@ pub struct DefenseRules {
     pub help_hoop_weight_max: f32,
     /// 挡拆/掩护防守行为参数（D17 / schemes.json v2）
     pub screen_defense: ScreenDefenseRules,
+    /// 多体势能场求解器的参数（`decision::potential_field`）。
+    ///
+    /// ## 为何进规则通道（charter C1）
+    ///
+    /// 势能场是防守跑位的**生成器**：它的系数直接决定每个无球防守人跑去哪里。
+    /// 这些量曾以字段默认值与字面量两种形式散在 `potential_field.rs` 里，
+    /// 既无法用 `--rules` 覆盖，也无法被常数守卫看到（该文件当时不在预算名单内）。
+    pub potential_field: PotentialFieldRules,
+}
+
+/// 多体势能场参数（`decision::potential_field`）。
+///
+/// 势能分量 = 对位牵引（弹簧） + 护筐引力 + 外线真空吸力；系数全部可校准。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PotentialFieldRules {
+    /// 篮筐威胁特征半径（ft）：突破深度对全场势能的非线性放大陡峭度。
+    pub threat_radius_ft: f32,
+    /// 禁区内线局部响应半径（ft）：不同距篮距离的引力衰减。
+    pub rim_response_radius_ft: f32,
+    /// 对位羁绊基础弹性系数。
+    pub k_man_base: f32,
+    /// 禁区护筐威胁引力基准系数。
+    pub k_threat_base: f32,
+    /// 空间覆盖真空吸力系数（X-Out 驱动源）。
+    pub k_void_base: f32,
+    /// 外线对位的下沉距离（ft，对位人距篮超过 22 ft 时）。
+    pub sag_distance_perimeter_ft: f32,
+    /// 中距离/内线对位的下沉距离（ft）。
+    pub sag_distance_interior_ft: f32,
+    /// 下沉锚点方向中「朝篮筐」的权重（与朝持球人权重互补，两者和应为 1）。
+    pub sag_anchor_hoop_weight: f32,
+    /// 护筐目标点距篮筐的缓冲带（ft）：威胁中心位于持球人与篮筐连线上此距离处。
+    pub rim_buffer_ft: f32,
+    /// 弱侧低位人（Low-man）的护筐引力倍率。
+    pub low_man_threat_gain: f32,
+    /// 弱侧高位人（High-man）的护筐引力倍率（保留在外线，防备三分）。
+    pub high_man_threat_gain: f32,
+    /// 其余防守人的护筐引力倍率。
+    pub default_threat_gain: f32,
+    /// 真空吸力倍率。
+    pub void_gain: f32,
+    /// 涌现为「护筐轮转」的威胁占比阈值。
+    pub rim_help_threat_ratio: f32,
+    /// 涌现为「X-Out 补位」的真空占比阈值。
+    pub x_out_void_ratio: f32,
+    /// 判定为「已在护筐位置」的距篮距离（ft）。
+    pub rim_help_radius_ft: f32,
+    /// 弱侧判定的人力横向差值（ft）：与持球人 y 相差超过此值的进攻人
+    /// 归入弱侧轮转区（在持球人居中时补充中轴线的几何判定）。
+    pub weak_side_lateral_ft: f32,
+    /// 对位人距篮超过此值时按外线处理（贴防阻截出手），否则按内线处理。
+    pub perimeter_attribution_ft: f32,
+    /// 掩护判定半径（ft）：持球人与掩护人相距小于此值即视为正在发生掩护。
+    pub screen_detection_radius_ft: f32,
+    /// 换防激进程度的两个档：（高，低）。
+    ///
+    /// - 大于 `switch_high_threshold` 时逢掩护必换；
+    /// - 大于 `switch_low_threshold` 且距掩护小于档案的触发距离时换防。
+    pub switch_high_threshold: f32,
+    pub switch_low_threshold: f32,
+    /// 换防后防守人距被接管者的分离距离（ft）。
+    pub switch_anchor_gap_ft: f32,
+    /// 换防后对掩护人的分离距离（ft）。
+    pub switch_screener_gap_ft: f32,
+    /// 领防人间隔中「距篮比例」因子的上限（防止远离篮筐时间隔过大）。
+    pub on_ball_gap_hoop_ratio: f32,
+    /// 领防人间隔的下限（ft）。
+    pub on_ball_gap_min_ft: f32,
+    /// 下沉系数 `sag_multiplier` 的可用区间下限。
+    pub sag_multiplier_min: f32,
+    /// 下沉系数 `sag_multiplier` 的可用区间上限。
+    pub sag_multiplier_max: f32,
+    /// 势能权重的极小正数下限（避免三分量同时为零时除以零）。
+    pub total_weight_floor: f32,
 }
 
 impl Default for DefenseRules {
@@ -430,10 +562,46 @@ impl DefenseRules {
                         help_hoop_weight_min: parsed.help_blend.hoop_weight_min,
                         help_hoop_weight_max: parsed.help_blend.hoop_weight_max,
                         screen_defense: e.screen_defense,
+                        potential_field: PotentialFieldRules::default(),
                     },
                 )
             })
             .collect()
+    }
+}
+
+impl Default for PotentialFieldRules {
+    fn default() -> Self {
+        Self {
+            threat_radius_ft: 15.0,
+            rim_response_radius_ft: 18.0,
+            k_man_base: 1.0,
+            k_threat_base: 1.6,
+            k_void_base: 1.2,
+            sag_distance_perimeter_ft: 2.0,
+            sag_distance_interior_ft: 5.5,
+            sag_anchor_hoop_weight: 0.75,
+            rim_buffer_ft: 3.0,
+            low_man_threat_gain: 2.8,
+            high_man_threat_gain: 0.15,
+            default_threat_gain: 0.4,
+            void_gain: 4.0,
+            rim_help_threat_ratio: 0.40,
+            x_out_void_ratio: 0.32,
+            rim_help_radius_ft: 12.0,
+            weak_side_lateral_ft: 12.0,
+            perimeter_attribution_ft: 22.0,
+            screen_detection_radius_ft: 16.0,
+            switch_high_threshold: 0.6,
+            switch_low_threshold: 0.2,
+            switch_anchor_gap_ft: 3.0,
+            switch_screener_gap_ft: 2.5,
+            on_ball_gap_hoop_ratio: 0.4,
+            on_ball_gap_min_ft: 2.5,
+            sag_multiplier_min: 0.5,
+            sag_multiplier_max: 2.5,
+            total_weight_floor: 0.001,
+        }
     }
 }
 
@@ -541,32 +709,6 @@ pub struct TacticalRules {
     ///
     /// 三个方案各自实例见 `DefensiveSchemeSpec`。
     pub defense: DefenseRules,
-    /// slot fill 能力权重（tactics.md §3 契约）：持球槽位的 ball_handling 权重。
-    pub slot_handler_ball_handling_weight: f32,
-    /// slot fill 能力权重：持球槽位的 decision_iq 权重。
-    pub slot_handler_decision_iq_weight: f32,
-    /// slot fill / 处理球人选择：传球能力权重（round-11 Step4b）。
-    ///
-    /// 处理球人身份由能力派生（`tactics.md TA3`），而不是名册数组位置。
-    /// 与 `slot_handler_ball_handling_weight` / `slot_handler_decision_iq_weight`
-    /// 同源，保证「填槽」与「选处理球人」用同一套能力口径。
-    pub slot_handler_passing_weight: f32,
-    /// slot fill 能力权重：掩护槽位的 strength 权重。
-    pub slot_screener_strength_weight: f32,
-    /// slot fill 能力权重：掩护槽位的 finishing 权重。
-    pub slot_screener_finishing_weight: f32,
-    /// slot fill 能力权重：底角槽位的 shooting_three 权重。
-    pub slot_corner_three_weight: f32,
-    /// slot fill 能力权重：底角槽位的 off_ball_sense 权重。
-    pub slot_corner_off_ball_weight: f32,
-    /// slot fill 能力权重：翼位槽位的 shooting_mid 权重。
-    pub slot_wing_mid_weight: f32,
-    /// slot fill 能力权重：翼位槽位的 off_ball_sense 权重。
-    pub slot_wing_off_ball_weight: f32,
-    /// slot fill 能力权重：通用槽位的 decision_iq 权重。
-    pub slot_generic_decision_weight: f32,
-    /// slot fill 能力权重：通用槽位的 off_ball_sense 权重。
-    pub slot_generic_off_ball_weight: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

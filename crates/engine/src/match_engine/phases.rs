@@ -32,7 +32,10 @@ impl MatchEngine {
         }
         if self.clock.sub_phase == SubPhase::Initiation
             && self.flow.game_flow == GameFlowState::DeadBall
-            && matches!(self.ball.ball_state, BallTrajectoryKind::InboundReady { .. })
+            && matches!(
+                self.ball.ball_state,
+                BallTrajectoryKind::InboundReady { .. }
+            )
         {
             self.clock.inbound_elapsed += dt;
         } else if self.clock.sub_phase != SubPhase::DeadBallReset {
@@ -145,8 +148,7 @@ impl MatchEngine {
         }
         self.set_game_flow(GameFlowState::LiveBall);
         self.transition_phase(SubPhase::Initiation);
-        self.journal.current_callout =
-            Some("比赛开始，跳球后主队获得第一攻球权。".to_string());
+        self.journal.current_callout = Some("比赛开始，跳球后主队获得第一攻球权。".to_string());
         PhaseOutcome::Continue
     }
 

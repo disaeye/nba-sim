@@ -2,7 +2,7 @@ use crate::court::CourtGeometry;
 use serde::{Deserialize, Serialize};
 
 /// Static player capabilities consumed by decision, movement, and officiating systems.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlayerAttributes {
     pub speed: f32,
@@ -155,7 +155,7 @@ impl TeamTraits {
 
 /// Decision preferences are separate from ability so the same skill can produce
 /// different styles without branching on a roster-specific player id.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlayerTendencies {
     pub shoot_frequency: f32,
@@ -231,7 +231,11 @@ impl Default for TeamTraits {
     }
 }
 
-/// 教练策略档案（tactics.md §2.4 CoachProfile）
+/// 教练策略档案（tactics.md §2.4 CoachProfile）。
+///
+/// 消费点：`MatchEngine` 在每次回合转换边界重建教练策略（比分差、节次、
+/// 剩余时间 → `CoachStrategy`），再由决策效用读取 `pace_factor` /
+/// `three_point_bias` / `defense_aggression`。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CoachProfile {
     pub id: String,
@@ -259,15 +263,10 @@ impl Default for CoachProfile {
     }
 }
 
-/// 槽位能力需求（tactics.md §2.3.1 SlotRequirement）
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SlotRequirement {
-    pub slot_id: String,
-    pub required_attributes: Vec<(String, f32)>,
-    pub min_fitness: f32,
-}
-
-/// 轮换表配置项（tactics.md §2.3.3 RotationEntry）
+/// 轮换表配置项（tactics.md §2.3.3 RotationEntry）。
+///
+/// 消费点：`MatchEngine` 在死球窗口按 `foul_trouble_threshold` 与
+/// `stint_max_sec` 判定是否换人；`target_minutes` 用于节间重置累计出场时间。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RotationEntry {
     pub player_id: String,
@@ -276,7 +275,7 @@ pub struct RotationEntry {
     pub foul_trouble_threshold: u8,
 }
 
-/// 换人原因（tactics.md §2.3.3 SubstitutionReason）
+/// 换人原因（tactics.md §2.3.3 SubstitutionReason）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SubstitutionReason {
     FoulTrouble,
@@ -286,7 +285,10 @@ pub enum SubstitutionReason {
     Injury,
 }
 
-/// 换人事件定义（tactics.md §2.3.3 SubstitutionEvent）
+/// 换人请求（tactics.md §2.3.3 SubstitutionEvent）。
+///
+/// 这是**请求**而不是事实：引擎在死球窗口评估它，接受时发出
+/// `GameEvent::Substitution`，被拒绝时记入强制项。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubstitutionEvent {
     pub team_id: String,
@@ -408,33 +410,50 @@ fn load_roster(json: &str, geometry: CourtGeometry) -> Vec<PlayerData> {
 
 /// D5.1b：slot fill 的能力画像（tactics.md §3 契约）。
 ///
-/// 只暴露与槽位职责相关的能力子集，避免 slot fill 退化成"全局 IQ 排序"。
-/// 由引擎从 `PlayerData.attributes` 投影而来，不承担任何可变状态。
+/// 承载全部 21 个能力维度，因为档案槽位的 `requirements` 可以声明任意一维
+/// （`TacticalSlotSpec::requirements`），只暴露子集会让档案声明一维不在
+/// 子集内的能力时静默拿到 0 分。本身不承担任何可变状态。
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerSlotFitness {
     pub player_id: String,
-    pub ball_handling: f32,
-    pub decision_iq: f32,
-    pub strength: f32,
-    pub finishing: f32,
-    pub shooting_three: f32,
-    pub shooting_mid: f32,
-    pub off_ball_sense: f32,
+    pub attributes: PlayerAttributes,
 }
 
 impl PlayerSlotFitness {
     /// 从球员档案投影（纯函数）。
     pub fn from_player(player: &PlayerData) -> Self {
-        let a = &player.attributes;
         Self {
             player_id: player.id.clone(),
-            ball_handling: a.ball_handling,
-            decision_iq: a.decision_iq,
-            strength: a.strength,
-            finishing: a.finishing,
-            shooting_three: a.shooting_three,
-            shooting_mid: a.shooting_mid,
-            off_ball_sense: a.off_ball_sense,
+            attributes: player.attributes.clone(),
+        }
+    }
+
+    /// 按维度键取能力值（slot fill 的唯一取值入口）。
+    pub fn attribute(&self, key: crate::tactics::PlayerAttributeKey) -> f32 {
+        use crate::tactics::PlayerAttributeKey as K;
+        let a = &self.attributes;
+        match key {
+            K::Speed => a.speed,
+            K::Acceleration => a.acceleration,
+            K::Agility => a.agility,
+            K::Strength => a.strength,
+            K::Vertical => a.vertical,
+            K::Stamina => a.stamina,
+            K::BallHandling => a.ball_handling,
+            K::Passing => a.passing,
+            K::ShootingClose => a.shooting_close,
+            K::ShootingMid => a.shooting_mid,
+            K::ShootingThree => a.shooting_three,
+            K::FreeThrow => a.free_throw,
+            K::Finishing => a.finishing,
+            K::DefensePerimeter => a.defense_perimeter,
+            K::DefenseInterior => a.defense_interior,
+            K::Steal => a.steal,
+            K::Block => a.block,
+            K::OffensiveRebound => a.offensive_rebound,
+            K::DefensiveRebound => a.defensive_rebound,
+            K::DecisionIq => a.decision_iq,
+            K::OffBallSense => a.off_ball_sense,
         }
     }
 }

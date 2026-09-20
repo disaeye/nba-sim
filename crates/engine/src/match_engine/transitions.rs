@@ -4,9 +4,9 @@
 //! 并统一经 `transition_ball_state` 唯一写入口落地。
 
 use glam::Vec2;
+use nba_decision::constraint::{PhaseType, ViolationKind};
 use nba_domain::court::Court;
 use nba_domain::{GameEvent, GameFlowState, Possession, SubPhase};
-use nba_decision::constraint::{PhaseType, ViolationKind};
 use nba_physics::ballistics::BallTrajectoryKind;
 
 use super::projection::opposite;
@@ -159,7 +159,10 @@ impl MatchEngine {
         self.sync_team_tactics();
         self.possession_ctx.current_possession_turnover_player = Some(rebounder_id.clone());
         self.clock.shot_clock = if is_offensive {
-            self.config.rules.league.offensive_rebound_shot_clock_seconds
+            self.config
+                .rules
+                .league
+                .offensive_rebound_shot_clock_seconds
         } else {
             self.config.rules.league.shot_clock_seconds
         };
@@ -425,13 +428,15 @@ impl MatchEngine {
         }
         // Rapier 后端从刚体回写坐标，必须同步刚体否则放置会被覆盖。
         self.systems.physics.teleport_player(player_id, to);
-        self.journal.pending_events.push(GameEvent::PlacementApplied {
-            player_id: player_id.to_string(),
-            from: (from.x, from.y),
-            to: (to.x, to.y),
-            reason: "INBOUND_SETUP".to_string(),
-            phase: self.phase_type().as_str().to_string(),
-        });
+        self.journal
+            .pending_events
+            .push(GameEvent::PlacementApplied {
+                player_id: player_id.to_string(),
+                from: (from.x, from.y),
+                to: (to.x, to.y),
+                reason: "INBOUND_SETUP".to_string(),
+                phase: self.phase_type().as_str().to_string(),
+            });
     }
 
     /// 为一个即将从界外 placement 回场的球员选择一个界内且不与他人
@@ -670,10 +675,12 @@ impl MatchEngine {
                 );
                 self.complete_possession();
             }
-            self.journal.pending_events.push(GameEvent::PhaseTransition {
-                from: PhaseType::SetPlay,
-                to: PhaseType::DeadBallReset,
-            });
+            self.journal
+                .pending_events
+                .push(GameEvent::PhaseTransition {
+                    from: PhaseType::SetPlay,
+                    to: PhaseType::DeadBallReset,
+                });
             self.journal.current_event = Some("PERIOD_END".to_string());
             self.journal.current_callout = Some(format!(
                 "第{}节结束，进入{}休息",
@@ -695,10 +702,12 @@ impl MatchEngine {
         } else {
             self.set_game_flow(GameFlowState::GameEnd);
             self.transition_phase(SubPhase::DeadBallReset);
-            self.journal.pending_events.push(GameEvent::PhaseTransition {
-                from: self.phase_type(),
-                to: PhaseType::DeadBallReset,
-            });
+            self.journal
+                .pending_events
+                .push(GameEvent::PhaseTransition {
+                    from: self.phase_type(),
+                    to: PhaseType::DeadBallReset,
+                });
             self.journal.current_event = Some("GAME_END".to_string());
             self.journal.current_callout = Some(format!(
                 "比赛结束，{}获胜",

@@ -7,7 +7,10 @@ use glam::Vec2;
 use nba_domain::court::Court;
 use nba_domain::{GameEvent, Possession};
 use nba_physics::ballistics::BallTrajectoryKind;
-use nba_protocol::{DecisionDebug, DebugFlag, DebugProb, DebugUtility, RenderBall, RenderFrame, RenderPlayer, RenderScore, RenderTeam, StreamTick};
+use nba_protocol::{
+    DebugFlag, DebugProb, DebugUtility, DecisionDebug, RenderBall, RenderFrame, RenderPlayer,
+    RenderScore, RenderTeam, StreamTick,
+};
 use nba_semantics::SemanticContact;
 
 use crate::snapshot::{BallStateView, EngineSnapshot, GameStateView, LineupStateView};
@@ -80,8 +83,7 @@ impl MatchEngine {
             .get_players()
             .values()
             .map(|p| {
-                let norm =
-                    Court::ft_to_norm_with_geometry(p.pos_ft, self.config.rules.court);
+                let norm = Court::ft_to_norm_with_geometry(p.pos_ft, self.config.rules.court);
                 let target_norm = if p.on_court {
                     Some(Court::ft_to_norm_with_geometry(
                         p.target_pos_ft,

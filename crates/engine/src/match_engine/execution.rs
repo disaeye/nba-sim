@@ -178,12 +178,18 @@ impl MatchEngine {
                 })
                 .map(|q| q.id.clone());
             for (bid, spot, sp, slot, morale) in beat_spots {
-                self.systems
-                    .physics
-                    .set_player_target(&bid, spot, sp, "BeatenRecovery", &slot, &morale);
+                self.systems.physics.set_player_target(
+                    &bid,
+                    spot,
+                    sp,
+                    "BeatenRecovery",
+                    &slot,
+                    &morale,
+                );
                 self.observations.beaten_recovery_until.insert(
                     bid,
-                    self.clock.current_time + self.config.rules.tactics.drive_beaten_recovery_seconds,
+                    self.clock.current_time
+                        + self.config.rules.tactics.drive_beaten_recovery_seconds,
                 );
             }
             if let Some(pid) = primary {
@@ -268,7 +274,22 @@ impl MatchEngine {
         let skill = shooter
             .map(|player| {
                 if dist_to_hoop < self.config.rules.rim_shot_distance_ft {
-                    player.attributes.finishing
+                    // 近筐出手按**对抗强度**在两维技能间过渡
+                    // （attributes.md §2.3 的可辨识性配对）：
+                    //
+                    // - `shooting_close` ↔ 非对抗近筐（挑篮/勾手）
+                    // - `finishing`      ↔ 对抗近筐（顶人上篮 / and-1）
+                    //
+                    // 两维解释同一出手族，若只用其一会使另一维成为死维度，
+                    // 且使「无对抗的近筐准度」与「对抗下的完成度」不可区分。
+                    // 过渡权重取自 `contest_intensity`（距离 + 朝向 + 逼近速度），
+                    // 不另立阈值。
+                    let contest = openness
+                        .contest_intensity
+                        .clamp(f32::from(0u8), f32::from(1u8));
+                    let uncontested = f32::from(1u8) - contest;
+                    player.attributes.shooting_close * uncontested
+                        + player.attributes.finishing * contest
                 } else if is_three {
                     player.attributes.shooting_three
                 } else {
@@ -284,7 +305,8 @@ impl MatchEngine {
             (skill - 0.5) * self.config.rules.resolve.player_skill.shooting_weight * 2.0;
         let stamina_adjustment =
             (stamina - 1.0) * self.config.rules.resolve.player_skill.shooting_weight;
-        let contest_penalty = openness.contest_intensity * self.config.rules.shot_contest_sensitivity;
+        let contest_penalty =
+            openness.contest_intensity * self.config.rules.shot_contest_sensitivity;
         // 分区命中基准（charter C1：三种基准走 GameRules 数据通道）：
         //   廊下      dist < rim_shot_distance_ft        -> shot_make_2pt
         //   中距离    rim 以外、三分线以内             -> shot_make_mid
@@ -336,8 +358,7 @@ impl MatchEngine {
         let peak_z = (self.config.rules.shot_peak_base_ft
             + dist_to_hoop * self.config.rules.shot_peak_distance_factor)
             .min(self.config.rules.ball_z_max_ft);
-        let flight_time =
-            BallisticsEngine::shot_duration(dist_to_hoop, peak_z, &self.config.rules);
+        let flight_time = BallisticsEngine::shot_duration(dist_to_hoop, peak_z, &self.config.rules);
         self.observations.active_windows.insert(
             shooter_id.to_string(),
             ActionTimeWindow::new_jump_shot(shooter_id, current_t, &self.config.rules),
@@ -459,14 +480,7 @@ impl MatchEngine {
                 from_pos,
                 to_pos,
             } => {
-                self.execute_pass(
-                    &passer_id,
-                    &receiver_id,
-                    from_pos,
-                    to_pos,
-                    current_t,
-                    false,
-                );
+                self.execute_pass(&passer_id, &receiver_id, from_pos, to_pos, current_t, false);
             }
             CandidateAction::InboundPass {
                 passer_id,
@@ -474,14 +488,7 @@ impl MatchEngine {
                 from_pos,
                 to_pos,
             } => {
-                self.execute_pass(
-                    &passer_id,
-                    &receiver_id,
-                    from_pos,
-                    to_pos,
-                    current_t,
-                    true,
-                );
+                self.execute_pass(&passer_id, &receiver_id, from_pos, to_pos, current_t, true);
             }
             CandidateAction::Dwell { .. } => {
                 // 观察等待：无操作。
@@ -640,10 +647,10 @@ impl MatchEngine {
         self.journal
             .pending_events
             .push(GameEvent::FreeThrowAttempt {
-            shooter_id: shooter_id.clone(),
-            attempt,
-            made,
-        });
+                shooter_id: shooter_id.clone(),
+                attempt,
+                made,
+            });
         self.ledger.box_score.ft_attempts += 1;
         if made {
             self.ledger.box_score.ft_made += 1;
@@ -654,8 +661,7 @@ impl MatchEngine {
             }
         }
         self.ledger.free_throw_attempt = attempt;
-        self.ledger.free_throws_remaining =
-            self.ledger.free_throws_remaining.saturating_sub(1);
+        self.ledger.free_throws_remaining = self.ledger.free_throws_remaining.saturating_sub(1);
         self.clock.sub_phase_timer = 0.0;
         if self.ledger.free_throws_remaining == 0 {
             self.ledger.free_throw_shooter = None;
@@ -691,8 +697,16 @@ impl MatchEngine {
             &self.config.rules,
         );
         self.ball.ball_pos_3d = (rebound_from.0, rebound_from.1);
-        self.clock.shot_clock = self.config.rules.league.offensive_rebound_shot_clock_seconds;
+        self.clock.shot_clock = self
+            .config
+            .rules
+            .league
+            .offensive_rebound_shot_clock_seconds;
         self.set_game_flow(GameFlowState::LiveBall);
+        // 自由球也是一次投篮尝试，因此子阶段先到 `ShotAttempt` 再到
+        // `FlightAndRebound`：`nba.v2` 的合法迁移表里 `Initiation` 不允许直接到
+        // `FlightAndRebound`（只允许 `ActionExecution`/`DeadBallReset`/`ShotAttempt`）。
+        self.transition_phase(SubPhase::ShotAttempt);
         self.transition_phase(SubPhase::FlightAndRebound);
         let rebound = BallTrajectoryKind::RimRebound {
             from_pos: rebound_from.0,
@@ -737,10 +751,10 @@ impl MatchEngine {
         self.journal
             .pending_events
             .push(GameEvent::FreeThrowAttempt {
-            shooter_id: shooter_id.clone(),
-            attempt,
-            made,
-        });
+                shooter_id: shooter_id.clone(),
+                attempt,
+                made,
+            });
         if made {
             if shooter_is_home {
                 self.ledger.home_score += 1;
@@ -749,8 +763,7 @@ impl MatchEngine {
             }
         }
         self.ledger.free_throw_attempt = attempt;
-        self.ledger.free_throws_remaining =
-            self.ledger.free_throws_remaining.saturating_sub(1);
+        self.ledger.free_throws_remaining = self.ledger.free_throws_remaining.saturating_sub(1);
         self.clock.sub_phase_timer = 0.0;
         if self.ledger.free_throws_remaining == 0 {
             self.ledger.free_throw_shooter = None;
@@ -765,7 +778,10 @@ impl MatchEngine {
                 );
                 self.transition_phase(SubPhase::Initiation);
                 self.set_game_flow(GameFlowState::DeadBall);
-                self.start_inbound_transition(Court::hoop_pos(shooter_is_home), self.ball.ball_pos_3d);
+                self.start_inbound_transition(
+                    Court::hoop_pos(shooter_is_home),
+                    self.ball.ball_pos_3d,
+                );
             } else {
                 let hoop = self.config.rules.court.hoop_pos(shooter_is_home);
                 self.ball.ball_pos_3d = (hoop, self.config.rules.rim_height_ft);
@@ -852,7 +868,8 @@ impl MatchEngine {
         });
         // F1.3：发球员从界外 placement 回场内由 `sync_ball_holder` 在
         // 球态离开 InboundTransfer/InboundReady 时统一处理（单一机制）。
-        self.journal.current_event = Some(if inbound { "INBOUND_PASS" } else { "PASS" }.to_string());
+        self.journal.current_event =
+            Some(if inbound { "INBOUND_PASS" } else { "PASS" }.to_string());
         self.journal.current_callout = Some(if inbound {
             "界外发球进入飞行，接应点开始读取防守".to_string()
         } else {

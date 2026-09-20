@@ -121,6 +121,33 @@ impl SemanticEvaluator {
         }
     }
 
+    /// 位置 `pos` 上进攻方承担的**多人**防守压迫：把 `pressure_radius_ft` 内
+    /// 每名防守人的朝向投影与距离衰减求和。
+    ///
+    /// 与 `contest_intensity` 的分工（ADR-016）：后者是**最近一人**的距离、
+    /// 朝向与速度合成的单人对位干扰，用于出手与传球的直接对抗；本量是
+    /// **多人**覆盖叠加，用于判断一个位置是否处在协防网之内。
+    pub fn defensive_pressure(
+        pos: Vec2,
+        offense: Possession,
+        physics: &dyn SpatialPhysics,
+        rules: &GameRules,
+    ) -> f32 {
+        let team = team_name(offense);
+        let pressure = &rules.semantics;
+        let ids = physics.query_nearby(
+            pos,
+            pressure.pressure_radius_ft,
+            &nba_physics::EntityFilter::OpposingTeam(team.to_string()),
+        );
+        let players = physics.get_players();
+        let defenders = ids
+            .into_iter()
+            .filter_map(|id| players.get(&id))
+            .map(|player| (player.pos_ft, player.facing_dir));
+        pressure.defensive_pressure(pos, defenders)
+    }
+
     pub fn shot(
         shooter_id: &str,
         physics: &dyn SpatialPhysics,

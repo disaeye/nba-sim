@@ -80,40 +80,39 @@
 
 ### 2.2 战术层（Tactics）
 
-**目标 schema**：战术档案 = **阵型（Formation）+ 动作序列（ActionSequence）+ 触发条件（Triggers）** 的数据声明。
+**目标 schema**：战术档案 = **阵型（Formation）+ 槽位能力需求（Requirements）+ 槽位允许行为（Behaviour）** 的数据声明。
 
-#### 2.2.1 进攻体系（OffensiveSystem）
+> **为何不设动作序列（`sequence`）与触发条件（`triggers`）**：声明「先掩护再决策」的固定顺序与「比分在 0.4–0.8 时切换」的触发条件在形式上与剧本不可区分（违反 TA1 与宪章 C1）。决策层的实时选择权由 `architecture.md` §5 的效用管线承担；战术档案只回答「需要什么样的球员、允许他做什么、站在哪里」。
+
+#### 2.2.1 进攻体系（TacticalSetSpec）
 
 ```json
 {
-  "id": "high_pnr_v1",
-  "name": "高位挡拆",
-  "formation": {
-    "slots": [
-      {"id": "handler", "pos_hint": [25.0, 25.0], "requirements": {"ball_handling": 0.7}},
-      {"id": "screener", "pos_hint": [30.0, 25.0], "requirements": {"strength": 0.7, "screen_frequency": 0.6}},
-      {"id": "corner_left", "pos_hint": [5.0, 5.0], "requirements": {"shooting_three": 0.6}},
-      {"id": "corner_right", "pos_hint": [5.0, 45.0], "requirements": {"shooting_three": 0.6}},
-      {"id": "dunker", "pos_hint": [10.0, 25.0], "requirements": {"finishing": 0.7}}
-    ]
-  },
-  "sequence": [
-    {"action": "screen", "actor": "screener", "target": "handler", "duration_sec": 1.5},
-    {"action": "drive_or_pass", "actor": "handler", "options": ["drive", "pass_roll", "pass_pop", "pass_corner"], "decision_point": true}
-  ],
-  "triggers": {
-    "preferred_score_range": [0.4, 0.8],
-    "pace_multiplier": 1.0,
-    "counter_to_defense": ["def_drop_coverage"]
-  }
+  "id": "off_horns_pnr",
+  "name_zh": "高位挡拆战术",
+  "spacing_style": "Spread",
+  "slots": [
+    {
+      "id": "top",
+      "name_zh": "持球发起人",
+      "base_offset_x": 28.0,
+      "base_offset_y": 25.0,
+      "requirements": [
+        {"attribute": "BallHandling", "weight": 1.0},
+        {"attribute": "DecisionIq", "weight": 0.8},
+        {"attribute": "Passing", "weight": 0.6}
+      ],
+      "behaviour": "DribbleTop"
+    }
+  ]
 }
 ```
 
 **关键字段**：
 
-- `formation.slots`：阵型槽位 + **能力需求**（TA3）——slot 是战术的输入接口，不是球员身份；
-- `sequence`：动作序列——每个动作声明 actor（slot id）、类型（screen/cut/drive/pass/shoot）、目标、时长；`decision_point: true` 标记需要 decision 管线实时裁决的分支；
-- `triggers`：触发条件——比分范围、节奏调制、对特定防守体系的克制关系。
+- `slots[].requirements`：**能力需求**（TA3）——属性名取自 `attributes.md` §2 的枚举，权重表达「多看重这项能力」；槽位是战术的输入接口，不是球员身份；
+- `slots[].behaviour`：该槽位允许的行为（`DribbleTop` / `SpotUp` / `PerimeterRelocate` / `HighScreenRoll`）——决定该槽位的目标点如何随进攻进度移动；
+- `base_offset_x/y`：空间提示（距进攻底线的距离与绝对 y），不是硬编码脚本：目标点仍经 `clamp_playable` 与物理约束。
 
 **规范对照**：
 

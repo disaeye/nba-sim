@@ -606,7 +606,9 @@ impl DecisionSystem {
                     * (1.0 + ctx.rules.decision.post_up_mismatch_weight * body_mismatch)
             }
         };
-        base * s.feasibility_score * stamina_mult + morale_bias * morale_affinity + s.constraint_penalty
+        base * s.feasibility_score * stamina_mult
+            + morale_bias * morale_affinity
+            + s.constraint_penalty
             - s.risk * self.weights.risk_aversion
     }
 

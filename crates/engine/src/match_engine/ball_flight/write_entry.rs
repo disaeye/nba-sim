@@ -30,13 +30,7 @@ impl MatchEngine {
     /// （见 `physics::movement` 的 `is_receiving_pass` 分支）。
     /// 传 `None` 表示清除全部标记。
     pub(crate) fn mark_receiver(&mut self, receiver_id: Option<&str>) {
-        let ids: Vec<String> = self
-            .systems
-            .physics
-            .get_players()
-            .keys()
-            .cloned()
-            .collect();
+        let ids: Vec<String> = self.systems.physics.get_players().keys().cloned().collect();
         for id in ids {
             let should = receiver_id == Some(id.as_str());
             if let Some(p) = self.systems.physics.get_player_mut(&id) {
@@ -149,13 +143,7 @@ impl MatchEngine {
             | BallTrajectoryKind::InboundReady { inbounder_id, .. } => Some(inbounder_id.clone()),
             _ => None,
         };
-        let ids: Vec<String> = self
-            .systems
-            .physics
-            .get_players()
-            .keys()
-            .cloned()
-            .collect();
+        let ids: Vec<String> = self.systems.physics.get_players().keys().cloned().collect();
         let mut placements: Vec<(String, Vec2, Vec2)> = Vec::new();
         for id in ids {
             let should_exempt = exempt_inbounder.as_deref() == Some(id.as_str());
@@ -198,13 +186,15 @@ impl MatchEngine {
         }
         for (id, from, to) in placements {
             self.systems.physics.teleport_player(&id, to);
-            self.journal.pending_events.push(GameEvent::PlacementApplied {
-                player_id: id,
-                from: (from.x, from.y),
-                to: (to.x, to.y),
-                reason: "INBOUND_PROGRAM_EXIT".to_string(),
-                phase: self.phase_type().as_str().to_string(),
-            });
+            self.journal
+                .pending_events
+                .push(GameEvent::PlacementApplied {
+                    player_id: id,
+                    from: (from.x, from.y),
+                    to: (to.x, to.y),
+                    reason: "INBOUND_PROGRAM_EXIT".to_string(),
+                    phase: self.phase_type().as_str().to_string(),
+                });
         }
     }
 }

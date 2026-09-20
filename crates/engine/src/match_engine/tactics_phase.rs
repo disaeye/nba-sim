@@ -5,9 +5,9 @@
 //! 交给物理层，不裁判任何归属或结果。
 
 use glam::Vec2;
+use nba_decision::tactics::TacticalPlanner;
 use nba_domain::action_window::ActionTimeWindow;
 use nba_domain::{Possession, SubPhase};
-use nba_decision::tactics::TacticalPlanner;
 use nba_physics::ballistics::BallTrajectoryKind;
 
 use super::MatchEngine;
@@ -69,8 +69,7 @@ impl MatchEngine {
         let mut best_handle = f32::MIN;
         for (i, pid) in filled_ids.iter().enumerate() {
             if let Some(p) = fitness.iter().find(|f| &f.player_id == pid) {
-                let s = p.ball_handling * self.config.rules.tactics.slot_handler_ball_handling_weight
-                    + p.decision_iq * self.config.rules.tactics.slot_handler_decision_iq_weight;
+                let s = TacticalPlanner::handler_score(off_spec, &p.attributes);
                 if s > best_handle {
                     best_handle = s;
                     carrier_slot = i;
@@ -235,10 +234,7 @@ impl MatchEngine {
 
                 // If tactical assignment is setting a high screen, initialize a ScreenSet action window
                 if target.action == "SET_HIGH_SCREEN"
-                    && !self
-                        .observations
-                        .active_windows
-                        .contains_key(&player_id)
+                    && !self.observations.active_windows.contains_key(&player_id)
                 {
                     self.observations.active_windows.insert(
                         player_id.clone(),

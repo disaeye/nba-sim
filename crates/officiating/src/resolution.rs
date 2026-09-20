@@ -10,7 +10,6 @@ pub struct DriveResolution {
     pub successful: bool,
     pub finish_made: bool,
     pub shooting_foul: bool,
-    pub finish_kind: nba_domain::action_window::RimFinishKind,
 }
 impl DriveResolution {
     /// Resolve the semantic outcome of a drive from spatial facts and policy.
@@ -33,7 +32,7 @@ impl DriveResolution {
         policy: &nba_domain::resolve::DrivePolicy,
         rng: &mut impl Rng,
     ) -> Self {
-        let skill_delta = (finishing_skill - 0.5) * finishing_weight * 2.0;
+        let skill_delta = (finishing_skill - 0.5) * finishing_weight * policy.skill_delta_scale;
         let fatigue_delta = (stamina - 1.0) * finishing_weight;
         let reach_probability = (base_success + skill_delta + fatigue_delta
             - lane_density * policy.lane_density_penalty
@@ -42,28 +41,21 @@ impl DriveResolution {
         let successful = rng.gen_bool(reach_probability as f64);
 
         let foul_probability = (foul_rate
-            * (0.30 + contest_intensity * policy.foul_contest_weight * 0.65))
+            * (policy.foul_base_share
+                + contest_intensity * policy.foul_contest_weight * policy.foul_contest_scale))
             .clamp(0.0, 1.0);
         let shooting_foul = rng.gen_bool(foul_probability as f64);
 
         let finish_probability = (finish_rate + skill_delta + fatigue_delta
             - contest_intensity * policy.finish_contest_penalty * finish_block_bias
-            - lane_density * policy.lane_density_penalty * 0.8)
+            - lane_density * policy.lane_density_penalty * policy.finish_lane_density_scale)
             .clamp(0.0, 1.0);
         let finish_made = successful && !shooting_foul && rng.gen_bool(finish_probability as f64);
-        let finish_kind = if contest_intensity > 0.65 {
-            nba_domain::action_window::RimFinishKind::Floater
-        } else if finishing_skill > 0.75 && lane_density < 0.3 {
-            nba_domain::action_window::RimFinishKind::Dunk
-        } else {
-            nba_domain::action_window::RimFinishKind::Layup
-        };
 
         Self {
             successful,
             finish_made,
             shooting_foul,
-            finish_kind,
         }
     }
 }

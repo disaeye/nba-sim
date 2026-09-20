@@ -184,6 +184,33 @@ impl TargetAssignment {
 pub struct TacticalPlanner;
 
 impl TacticalPlanner {
+    /// 档案槽位的标准权重：按该档案的**持球槽位**能力需求打分。
+    ///
+    /// 处理球人的身份与「谁填哪个槽位」必须用同一套能力口径，否则会出现
+    /// 「slot fill 认为是持球人、实际选出的持球人不是」。持球槽位由档案声明
+    /// （`SlotBehaviour::DribbleTop`），因此权重也取自该槽位的 `requirements`。
+    pub fn handler_score(
+        spec: &nba_domain::TacticalSetSpec,
+        attributes: &nba_domain::PlayerAttributes,
+    ) -> f32 {
+        let fitness = nba_domain::PlayerSlotFitness {
+            player_id: String::new(),
+            attributes: attributes.clone(),
+        };
+        spec.slots
+            .iter()
+            .find(|slot| slot.behaviour == nba_domain::SlotBehaviour::DribbleTop)
+            .map(|slot| {
+                slot.requirements
+                    .iter()
+                    .map(|requirement| {
+                        requirement.weight * fitness.attribute(requirement.attribute)
+                    })
+                    .sum()
+            })
+            .unwrap_or(0.0)
+    }
+
     pub fn plan_possession_targets(
         tactical_set: TacticalSet,
         sub_phase: SubPhase,
@@ -276,11 +303,19 @@ impl TacticalPlanner {
     /// 2. 按**稀缺性**降序处理槽位（候选人少者优先），避免被通用球员抢占；
     /// 3. 每个槽位取当前剩余球员中最高分者；分数相同时按 player_id 排序决胜。
     ///
-    /// 评分只使用与槽位职责相关的能力（不引入全局 IQ 乘数）。
+    /// 评分只使用档案声明的能力需求（不引入全局 IQ 乘数，也不按角色字符串分支）。
+    ///
+    /// ## 为什么不再读 `rules`（rules.md C1）
+    ///
+    /// 过去每类槽位的能力权重写在 `TacticalRules` 的 `slot_*_weight` 字段里，
+    /// 而“哪类槽位看哪几维能力”写在代码的 `role.contains("playmaker")` 分支里。
+    /// 后者是行为硬编码（charter C1：一切影响行为的判断必须来自数据通道）。
+    /// 现在权重与维度都由 `data/tactics/*.json` 的 `requirements` 声明，
+    /// `rules` 参数因此不再被读取。
     pub fn fill_slots(
         spec: &nba_domain::TacticalSetSpec,
         players: &[nba_domain::data::PlayerSlotFitness],
-        rules: &GameRules,
+        _rules: &GameRules,
     ) -> Result<Vec<Option<String>>, String> {
         if players.is_empty() {
             return Err("slot fill requires at least one available player".to_string());
@@ -288,26 +323,12 @@ impl TacticalPlanner {
         if spec.slots.is_empty() {
             return Err("tactical spec declares no slots".to_string());
         }
-        let policy = &rules.tactics;
         let score =
             |slot: &nba_domain::TacticalSlotSpec, p: &nba_domain::data::PlayerSlotFitness| -> f32 {
-                let role = slot.role.to_ascii_lowercase();
-                if role.contains("playmaker") || role.contains("handler") {
-                    p.ball_handling * policy.slot_handler_ball_handling_weight
-                        + p.decision_iq * policy.slot_handler_decision_iq_weight
-                } else if slot.is_screener {
-                    p.strength * policy.slot_screener_strength_weight
-                        + p.finishing * policy.slot_screener_finishing_weight
-                } else if slot.is_corner_spacer {
-                    p.shooting_three * policy.slot_corner_three_weight
-                        + p.off_ball_sense * policy.slot_corner_off_ball_weight
-                } else if slot.is_wing_relocate {
-                    p.shooting_mid * policy.slot_wing_mid_weight
-                        + p.off_ball_sense * policy.slot_wing_off_ball_weight
-                } else {
-                    p.decision_iq * policy.slot_generic_decision_weight
-                        + p.off_ball_sense * policy.slot_generic_off_ball_weight
-                }
+                slot.requirements
+                    .iter()
+                    .map(|requirement| requirement.weight * p.attribute(requirement.attribute))
+                    .sum()
             };
 
         // 稀缺性：候选人数（分数显著高于 0 的球员数）升序 → 先处理难填的槽位。
@@ -341,7 +362,7 @@ impl TacticalPlanner {
                     assignment[slot_idx] = Some(players[pi].player_id.clone());
                 }
                 None => {
-                    return Err(format!("no available player fits slot `{}`", slot.role));
+                    return Err(format!("no available player fits slot `{}`", slot.id));
                 }
             }
         }
@@ -439,6 +460,7 @@ impl TacticalPlanner {
             .or_else(|| off_targets.get(carrier_idx).map(|t| t.target_pos))
             .unwrap_or(hoop);
         let screen_rules = policy.defense.screen_defense;
+        let field_rules = policy.defense.potential_field;
         let screener_idx = off_targets
             .iter()
             .position(|t| t.slot == "ScreenAndRoll")
@@ -448,19 +470,25 @@ impl TacticalPlanner {
             .or_else(|| off_targets.get(screener_idx).map(|t| t.target_pos))
             .unwrap_or(carrier_pos);
         let dist_to_screener = (carrier_pos - screener_pos).length();
-        let is_screening_action = dist_to_screener < 16.0 && screener_idx != carrier_idx;
+        let is_screening_action = dist_to_screener < field_rules.screen_detection_radius_ft
+            && screener_idx != carrier_idx;
         let is_hedge_scheme = screen_rules.hedge_distance_ft > 0.0;
         let is_drop_scheme = screen_rules.drop_depth_ft > 0.0;
         let should_switch = is_screening_action
             && !is_hedge_scheme
             && !is_drop_scheme
-            && (policy.defense.switch_aggressiveness > 0.6
-                || (policy.defense.switch_aggressiveness > 0.2
+            && (policy.defense.switch_aggressiveness > field_rules.switch_high_threshold
+                || (policy.defense.switch_aggressiveness > field_rules.switch_low_threshold
                     && dist_to_screener <= screen_rules.switch_trigger_distance_ft));
 
-        // 连续多体势能场求解器 (ADR-012 空间动力学与涌现模型)
-        let potential_solver =
-            crate::potential_field::DefensePotentialFieldSolver::new(Default::default());
+        // 连续多体势能场求解器 (ADR-012 空间动力学与涌现模型)。
+        //
+        // 系数取自**当前生效的防守方案**（`rules.tactics.defense` 由
+        // `sync_team_tactics` 按防守方档案写入），因此势能场随防守方案变化，
+        // 而不是每次都用同一份默认值。
+        let potential_solver = crate::potential_field::DefensePotentialFieldSolver::new(
+            rules.tactics.defense.potential_field,
+        );
         let off_coords: Vec<Vec2> = (0..5)
             .map(|idx| {
                 live_off_positions
@@ -488,14 +516,14 @@ impl TacticalPlanner {
                     if is_guarding_carrier {
                         let to_screener_hoop = (hoop - screener_pos).normalize_or_zero();
                         (
-                            screener_pos + to_screener_hoop * 3.0,
+                            screener_pos + to_screener_hoop * field_rules.switch_anchor_gap_ft,
                             "SWITCH_ASSIGNMENT",
                             "SwitchAnchor",
                         )
                     } else {
                         let to_carrier_hoop = (hoop - carrier_pos).normalize_or_zero();
                         (
-                            carrier_pos + to_carrier_hoop * 2.5,
+                            carrier_pos + to_carrier_hoop * field_rules.switch_screener_gap_ft,
                             "SWITCH_ASSIGNMENT",
                             "SwitchDefender",
                         )
@@ -524,8 +552,8 @@ impl TacticalPlanner {
                     // 领防人：建立紧逼与滑步阻截线 (Pursuit Contest)。
                     // round-6：间隔经防守方案倍率调制（迫使贴防或退到纵深）。
                     let gap = (policy.defensive_gap_ft * policy.defense.on_ball_gap_multiplier)
-                        .min(dist_to_hoop * 0.4)
-                        .max(2.5);
+                        .min(dist_to_hoop * field_rules.on_ball_gap_hoop_ratio)
+                        .max(field_rules.on_ball_gap_min_ft);
                     (
                         off_pos + to_hoop_dir * gap,
                         "ON_BALL_CONTEST",
@@ -620,51 +648,55 @@ impl TacticalPlanner {
             .map(|(i, slot)| {
                 let base = Self::spec_slot_world_pos(slot, is_home, court, rules);
                 let is_carrier = i == carrier_slot_index;
-                // 持球人在执行阶段向篮筐压迫；其余槽位保持在档案声明的位置，
-                // 以保证中距离/底角/内线距离真实存在。
-                let (target_pos, speed_ratio, action) = if is_carrier {
-                    let pressed = match sub_phase {
-                        SubPhase::Initiation => base,
-                        _ => base + (hoop - base) * (action_t * policy.drive_distance_ratio),
-                    };
-                    (
-                        pressed,
-                        policy.carrier_speed_ratio,
-                        if sub_phase == SubPhase::Initiation {
-                            "DRIBBLE_TOP"
+                let initiating = sub_phase == SubPhase::Initiation;
+                // 持球人在执行阶段向篮筐压迫；其余槽位按档案声明的行为移动。
+                let (target_pos, speed_ratio, action) = match slot.behaviour {
+                    nba_domain::SlotBehaviour::DribbleTop => {
+                        let pressed = if initiating {
+                            base
                         } else {
-                            "DRIVE_OFF_SCREEN"
-                        },
-                    )
-                } else if slot.is_screener {
-                    let rolled = match sub_phase {
-                        SubPhase::Initiation => base,
-                        _ => base + (hoop - base) * action_t * 0.5,
-                    };
-                    (
-                        rolled,
-                        policy.screener_speed_ratio,
-                        if sub_phase == SubPhase::Initiation {
-                            "SET_HIGH_SCREEN"
+                            base + (hoop - base) * (action_t * policy.drive_distance_ratio)
+                        };
+                        (
+                            pressed,
+                            policy.carrier_speed_ratio,
+                            slot.behaviour.action_label(initiating),
+                        )
+                    }
+                    nba_domain::SlotBehaviour::HighScreenRoll => {
+                        let rolled = if initiating {
+                            base
                         } else {
-                            "ROLL_TO_RIM"
-                        },
-                    )
-                } else if slot.is_corner_spacer {
-                    (base, policy.support_speed_ratio, "SPOT_UP_3PT")
-                } else if slot.is_wing_relocate {
-                    // 翼位球员在弧顶与内线之间做纵向 relocate，制造切入时机。
-                    let drift = Vec2::new(0.0, dir * action_t * 6.0);
-                    (base + drift, policy.support_speed_ratio, "PERIMETER_CUT")
-                } else {
-                    (base, policy.support_speed_ratio, "SPOT_UP_3PT")
+                            base + (hoop - base) * action_t * 0.5
+                        };
+                        (
+                            rolled,
+                            policy.screener_speed_ratio,
+                            slot.behaviour.action_label(initiating),
+                        )
+                    }
+                    nba_domain::SlotBehaviour::SpotUp => (
+                        base,
+                        policy.support_speed_ratio,
+                        slot.behaviour.action_label(initiating),
+                    ),
+                    nba_domain::SlotBehaviour::PerimeterRelocate => {
+                        // 翼位球员在弧顶与内线之间做纵向 relocate，制造切入时机。
+                        let drift = Vec2::new(0.0, dir * action_t * 6.0);
+                        (
+                            base + drift,
+                            policy.support_speed_ratio,
+                            slot.behaviour.action_label(initiating),
+                        )
+                    }
                 };
+                let _ = is_carrier;
                 TargetAssignment {
                     player_id: None,
                     target_pos: court.clamp_playable(target_pos, rules.player_radius_ft),
                     speed: speed(speed_ratio),
                     action: action.to_string(),
-                    slot: slot.role.clone(),
+                    slot: slot.id.clone(),
                     morale: "Normal".to_string(),
                 }
             })

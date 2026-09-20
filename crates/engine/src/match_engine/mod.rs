@@ -10,6 +10,7 @@
 mod accessors;
 mod action_windows;
 mod ball_flight;
+mod block;
 mod bookkeeping;
 mod construction;
 mod contests;
@@ -22,8 +23,8 @@ mod projection;
 mod receiver;
 mod roster;
 mod runtime_phase;
-mod stream;
 mod state;
+mod stream;
 mod tactics_phase;
 mod test_hooks;
 mod transitions;
@@ -161,8 +162,6 @@ impl MatchEngine {
             return tick;
         }
         self.clock.tick_index = self.clock.tick_index.saturating_add(1);
-        self.sync_to_world();
-        let _ = crate::world::PerceptionSystem::evaluate(&self.systems.world);
 
         let dt = self.config.rules.tick_seconds;
         let was_tip_off = self.flow.game_flow == GameFlowState::TipOff;

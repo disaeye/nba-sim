@@ -139,28 +139,37 @@ def find_violations(source: str) -> list[str]:
 
 
 def self_test() -> int:
-    """负面对照：把一条真相字段改回 pub，守卫必须变红。"""
+    """负面对照：把一个字段改回 `pub`，守卫必须变红。
+
+    ## 为何注入的是状态组字段而不是具体真相字段
+
+    D22 把 82 个字段收为十个具名状态组（`state.rs`），`MatchEngine` 上只剩
+    组字段。外部要绕过封装，现在能公开的只能是组字段（`pub clock:` 一次
+    交出整组真相）。真相比字段位于 `state.rs` 的组内、以 `pub(crate)` 对
+    同 crate 模块可见，组结构体自身不 `pub`，因此外部 crate 拿不到——
+    那部分由 `scripts/check_engine_state_groups.py` 守卫。
+    """
     original = ENGINE_SRC.read_text()
-    field = "home_score"
-    # 该字段当前应为私有（无 pub 前缀）。
+    field = "clock"
+    # 该组字段当前应为私有（无 pub 前缀）。
     if re.search(rf"^\s*pub {field}\s*:", struct_body(original), re.M):
         print("❌ self-test: fixture field is already pub; cannot test")
         return 1
     mutated = re.sub(
-        rf"^(\s*){field}:", rf"\1pub {field}:", original, count=1, flags=re.M
+        rf"^(\s*){field}: (state::\w+)", rf"\1pub {field}: \2", original, count=1, flags=re.M
     )
     if mutated == original:
-        print("❌ self-test: failed to inject a pub truth field")
+        print("❌ self-test: failed to inject a pub state-group field")
         return 1
     violations = find_violations(mutated)
     if field not in violations:
-        print("❌ self-test: guard did not detect the injected pub truth field")
+        print("❌ self-test: guard did not detect the injected pub state-group field")
         return 1
     # 正常源码必须无违规（否则守卫基线本身是红的）。
     if find_violations(original):
         print("❌ self-test: baseline source already has violations")
         return 1
-    print("✅ World-privacy guard self-test passed (detects pub truth fields).")
+    print("✅ World-privacy guard self-test passed (detects pub state-group fields).")
     return 0
 
 

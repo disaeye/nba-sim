@@ -1,28 +1,19 @@
-//! 归因正确性回归（round-5 审计发现的 98 条 `TURNOVER_ATTRIBUTION` Hard 的根因）。
+//! 归因与账本一致性：回合终结原因、事件因果链、箱体统计与事件事实对平。
 //!
-//! ## 缺陷
+//! 守卫对象：
+//! - 回合终结原因必须与窗口内存在的事实类别一致（不是「字段非空」）；
+//! - 回合不得跨节边界；
+//! - `box_score` 的每个字段必须与从事件流独立重建的值对平；
+//! - `event_id` 单调唯一，结果事件的父链语义正确，不伪造因果。
 //!
-//! 实测 seed 42 full：32 个 `TURNOVER_VIOLATION` 回合中 **15 个**窗口内没有任何
-//! `VIOLATION` 事实，而窗口尾部是 `PASS_DROPPED` / `PASS_TIPPED` /
-//! `LOOSE_BALL_SECURED`。即**回合终结原因与窗口内事实类别不符**。
-//!
-//! 根因（`match_engine.rs::start_out_of_bounds_transition`）：松球出界时无条件
-//! 以 `PossessionEndCause::TurnoverViolation` 结算，**覆盖**了本已成立的
-//! 传球失误原因；且 `OUT_OF_BOUNDS` 在事件流中出现 **0 次**——出界这一事实
-//! 在因果账本里不存在。
-//!
-//! 另一个实例：`PossessionEndCause::PeriodEnd` 在 domain 中已定义，但引擎
-//! **从未 emit**；跨节回合（实测 3 个/场，其中一个 41.6s）被记在上一节名下。
-//!
-//! ## 本测试的判定口径
-//!
-//! 不是"字段非空"（D0.1 只做到这一层，因此 98 条错配全部漏过），而是
-//! **"终结原因类别必须与窗口内存在的事实类别一致"**。
-//!
-//! 每个种子在完整全场模拟中逐回合断言，失败时打印回合号、终结原因与窗口
-//! 内实际出现的事件种类，便于定位。
+//! 对应 `docs/gap.md` §7.1/§7.5、§18.6 第 2 条（事件、回合和账本可独立重建
+//! 并对平）与 ADR-001（事件序列是比赛唯一真相）。
 
-use nba_engine::MatchEngine;
+mod support;
+
+use std::collections::HashMap;
+
+use nba_engine::{MatchEngine, StreamMode};
 
 /// 一个回合窗口内观察到的事件种类计数。
 #[derive(Default, Debug)]
@@ -146,7 +137,7 @@ fn possession_windows_do_not_span_period_boundaries() {
     // 不再记在上一节名下（修复前实测 3 个/场，最长 41.6s，越出回合时长上界）。
     //
     // 判定口径：周期变化发生时，若自上一个回合总结以来**又积累了事实**，
-    // 说明有回合跨过了节边界。仅凭“period 变了”会误报——节末总结在
+    // 说明有回合跨过了节边界。仅凭"period 变了"会误报——节末总结在
     // period 仍是旧值的 tick 发出，而新周期从下一 tick 才开始。
     let seeds: [u64; 8] = [42, 1, 7, 100, 999, 31337, 2024, 555];
     let mut spanning = 0usize;
@@ -173,7 +164,7 @@ fn possession_windows_do_not_span_period_boundaries() {
                         idx += 1;
                         facts_since_summary = false;
                     }
-                    // 节间布置与阶段迁移不属于“回合仍在进行”。
+                    // 节间布置与阶段迁移不属于"回合仍在进行"。
                     "PLACEMENT_APPLIED" | "PHASE_TRANSITION" => {}
                     _ => facts_since_summary = true,
                 }
@@ -189,122 +180,19 @@ fn possession_windows_do_not_span_period_boundaries() {
     );
 }
 
-/// `box_score.turnovers` 必须等于事件流中的 `TURNOVER*` 回合终结数。
-///
-/// ## 为什么需要这条断言（evidence/problem.md §23.10）
-///
-/// `box_score.turnovers` 曾只有**两个**自增点（`start_violation_turnover`
-/// 与 `start_steal_transition`），而 `PossessionEndCause` 有**五种**
-/// `Turnover*` 终结：`PassTipped`、`PassDropped`、`LooseBall` 三条路径
-/// 只发布回合总结、不写箱体。实测 seed42 全场的对比是：
-///
-/// ```text
-/// 事件流 TURNOVER* 终结合计 = 52
-/// box_score.turnovers       = 12     ← 低估约 4 倍
-/// ```
-///
-/// 后果不止于报表：守恒式 `possessions ≈ FGA + TO + 0.44·FTA − OREB`
-/// 的 TO 项失真，回合残差由 +4 被撑到 +44，使 `pace` 校准失去可信输入。
-///
-/// 该缺陷能长期存活，是因为既有守卫分别只检查「数值字面量」（常数守卫）、
-/// 「字段可见性」（World privacy）与「文档引用」（文档守卫），
-/// **没有任何一项对平「汇总字段」与「事件事实」**。本测试补这一层。
-#[test]
-fn box_score_turnovers_match_turnover_terminals() {
-    // 失误计数与比赛长度无关；用 `1q` 保持测试时长可控（quality.md §2.5）。
-    for seed in [42u64, 1, 7, 100, 999, 31337] {
-        let mut engine = MatchEngine::new(seed);
-        engine.set_scope("1q").expect("1q scope is valid");
-
-        let mut terminals = 0u32;
-        let mut ticks = 0usize;
-        while !engine.is_finished() && ticks < 300_000 {
-            let tick = engine.step();
-            for ev in &tick.frame.event_log {
-                if ev.kind != "POSSESSION_SUMMARY" {
-                    continue;
-                }
-                let terminal = ev
-                    .data
-                    .as_ref()
-                    .and_then(|d| d.get("PossessionSummary"))
-                    .and_then(|s| s.get("terminal_event"))
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("");
-                if terminal.starts_with("TURNOVER") {
-                    terminals += 1;
-                }
-            }
-            ticks += 1;
-        }
-        let box_score_turnovers = engine.box_score().turnovers;
-        assert_eq!(
-            box_score_turnovers, terminals,
-            "seed {seed}: box_score.turnovers ({box_score_turnovers}) must equal the number of \
-             TURNOVER* possession terminals in the event stream ({terminals}); a \
-             mismatch means some turnover path bypasses the box score \
-             (evidence/problem.md §23.10)"
-        );
-        assert!(
-            terminals > 0,
-            "seed {seed}: a quarter of basketball must contain at least one turnover"
-        );
-    }
-}
-
-/// `box_score.fouls` 必须等于事件流中的 `FOUL` 事实数。
-///
-/// ## 为什么需要（evidence/problem.md §23.9）
-///
-/// `box_score.fouls` 曾经**零自增点**：字段存在、CLI 消费它打印
-/// `Fouls: 0`，但引擎从不写入——与 §23.10 的 `turnovers` 完全同类。
-/// 这类"声明字段与事件事实脱钩"的缺陷，既有的三类守卫（常数、世界
-/// 私有化、文档）都覆盖不到，只能靠对平断言。
-#[test]
-fn box_score_fouls_match_foul_events() {
-    for seed in [42u64, 1, 7, 100, 999, 31337] {
-        let mut engine = MatchEngine::new(seed);
-        engine.set_scope("1q").expect("1q scope is valid");
-
-        let mut foul_events = 0u32;
-        let mut ticks = 0usize;
-        while !engine.is_finished() && ticks < 300_000 {
-            let tick = engine.step();
-            for ev in &tick.frame.event_log {
-                // `SHOOTING_FOUL` 与 `FOUL` 都源于同一个 `GameEvent::Foul`，
-                // 账本按事实计数，因此两类都计入。
-                if ev.kind == "FOUL" || ev.kind == "SHOOTING_FOUL" {
-                    foul_events += 1;
-                }
-            }
-            ticks += 1;
-        }
-        let box_fouls = engine.box_score().fouls;
-        assert_eq!(
-            box_fouls, foul_events,
-            "seed {seed}: box_score.fouls ({box_fouls}) must equal the number of \
-             FOUL facts in the event stream ({foul_events}); a mismatch means the \
-             box score is declared but not written (evidence/problem.md §23.9)"
-        );
-    }
-}
-
 /// 箱体统计的**逐字段**与事件流对平。
 ///
 /// ## 为什么需要（evidence/problem.md §23.10 / §23.9 / §27）
 ///
-/// 本会话已实测两次同类缺陷：
+/// 已实测两次同类缺陷：
 /// - `box_score.turnovers` 有 5 种失误终结而只有 2 个自增点，
 ///   实测 52 次终结 vs 箱体 12 次（低估约 4 倍）；
 /// - `box_score.fouls` **零自增点**，CLI 恒打印 `Fouls: 0`。
 ///
-/// 两者的共同点是「声明字段与事件事实脱钩」，而既有守卫（常数、世界
-/// 私有化、文档、身份）都覆盖不到——它们检查的是**代码形态**，不是
-/// **数据一致性**。本测试补这一层：把 `MatchBoxScore` 的 8 个字段逐个
-/// 与从事件流独立重建的值对平。
-///
-/// 这是 `gap.md` §18.6 第 2 条「事件、回合和账本可独立重建并对平」的
-/// 直接落地，且不依赖静态模式匹配——它对**未来新增的终结路径**同样有效。
+/// 两者的共同点是「声明字段与事件事实脱钩」，而既有守卫（常数、世界私有化、
+/// 文档、身份）都覆盖不到——它们检查的是**代码形态**，不是**数据一致性**。
+/// 本测试把 `MatchBoxScore` 的 8 个字段逐个与从事件流独立重建的值对平，
+/// 对**未来新增的终结路径**同样有效。
 #[test]
 fn box_score_fields_reconcile_with_event_stream() {
     for seed in [42u64, 1, 7, 100, 999, 31337] {
@@ -424,4 +312,172 @@ fn box_score_fields_reconcile_with_event_stream() {
              (a partial-write field shows here, e.g. 12 vs 52)"
         );
     }
+}
+
+/// D0.1 回合终结归因穷举：`UNATTRIBUTED_END` 必须在全矩阵下为 0。
+///
+/// 纪律：不允许通过「把兜底标签改名」来糊弄本测试；修复必须让
+/// `complete_possession()` 的每条调用路径在到达前已经发射带显式归因的
+/// `PossessionSummary`。
+fn run_1q_and_count_unattributed(label: &str, seed: u64) -> (usize, String) {
+    let mut engine = MatchEngine::new(seed);
+    // label 必须逐测试唯一：并行运行的两个测试若共用路径会互相覆盖
+    // （实测导致偶发「未观察到违例回合」假红）。
+    let guard = nba_test_support::TempArtifact::new(&format!("{label}_{seed}"));
+    engine
+        .simulate_scope_and_export_with_mode("1q", &guard.path_str(), StreamMode::Facts)
+        .expect("run 1q");
+    let content = std::fs::read_to_string(guard.path()).unwrap_or_default();
+    let unattributed = content
+        .lines()
+        .filter(|line| line.contains("\"UNATTRIBUTED_END\""))
+        .count();
+    (unattributed, content)
+}
+
+#[test]
+fn no_unattributed_end_across_seed_matrix_1q() {
+    let mut total_unattributed = 0usize;
+    for seed in 0..20u64 {
+        let (unattributed, _content) = run_1q_and_count_unattributed("attr_matrix", seed);
+        if unattributed > 0 {
+            eprintln!("seed {seed}: UNATTRIBUTED_END × {unattributed}");
+        }
+        total_unattributed += unattributed;
+    }
+    assert_eq!(total_unattributed, 0, "UNATTRIBUTED_END 必须为 0");
+}
+
+/// full scope 下同样不允许兜底终结（含历史活锁种子）。
+#[test]
+fn no_unattributed_end_full_scope() {
+    for seed in [0u64, 3, 6, 42, 555, 999] {
+        let mut engine = MatchEngine::new(seed);
+        let guard = nba_test_support::TempArtifact::new(&format!("possession_attr_full_{seed}"));
+        engine
+            .simulate_scope_and_export_with_mode("full", &guard.path_str(), StreamMode::Facts)
+            .expect("run full");
+        let content = std::fs::read_to_string(guard.path()).unwrap_or_default();
+        let unattributed = content
+            .lines()
+            .filter(|line| line.contains("\"UNATTRIBUTED_END\""))
+            .count();
+        assert_eq!(unattributed, 0, "seed {seed} full scope 存在兜底终结");
+    }
+}
+
+/// 违例回合必须带责任球员（problem.md §13.2：`turnover_player_id` 缺失）。
+#[test]
+fn violation_turnover_summary_carries_player_id() {
+    let mut checked = 0u32;
+    for seed in 0..10u64 {
+        let (_unattributed, content) = run_1q_and_count_unattributed("attr_violation", seed);
+        for line in content.lines() {
+            if !line.contains("TURNOVER_VIOLATION") {
+                continue;
+            }
+            let json: serde_json::Value = serde_json::from_str(line).expect("summary json");
+            // facts 流结构：event_log 数组内 data.PossessionSummary（可能多条），
+            // 逐条检查终结为 TURNOVER_VIOLATION 的总结必须带责任球员。
+            let entries: Vec<&serde_json::Value> = json
+                .get("event_log")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().collect())
+                .unwrap_or_else(|| vec![&json]);
+            for entry in entries {
+                let Some(summary) = entry
+                    .pointer("/data/PossessionSummary")
+                    .or_else(|| json.pointer("/payload/summary"))
+                else {
+                    continue;
+                };
+                if summary.get("terminal_event").and_then(|v| v.as_str())
+                    != Some("TURNOVER_VIOLATION")
+                {
+                    continue;
+                }
+                checked += 1;
+                let turnover_player = summary.get("turnover_player_id").and_then(|v| v.as_str());
+                assert!(
+                    turnover_player.is_some(),
+                    "seed {seed} 的 TURNOVER_VIOLATION 总结缺 turnover_player_id: {summary}"
+                );
+            }
+        }
+    }
+    assert!(checked > 0, "矩阵中未观察到违例回合，测试无判别力");
+}
+
+/// D4.1 事件 ID 与语义因果链（dev 方案 §7.1）。
+///
+/// 断言三条不变量：
+/// 1. `event_id` 全场唯一且单调递增（跨 tick 稳定，供账本按 ID 重建因果）；
+/// 2. 结果事件携带语义正确的父（`SCORE`/`SHOT_MISS` ← `SHOT_RELEASE`，
+///    `PASS_RECEIVED` ← `PASS`，`FREE_THROW` ← `FOUL`）；
+/// 3. **不伪造因果**：同 tick 内的独立事实（如两条 `CONTACT_BUMP`）之间
+///    不得互相串链（同 tick 串链会被读成因果关系，违反"事件只陈述事实"）。
+#[test]
+fn event_ids_and_semantic_causal_links_hold() {
+    let mut engine = MatchEngine::new(0);
+    let guard = nba_test_support::TempArtifact::new("d4_causal");
+    engine
+        .simulate_scope_and_export_with_mode("1q", &guard.path_str(), StreamMode::Facts)
+        .expect("run 1q");
+    let content = std::fs::read_to_string(guard.path()).unwrap_or_default();
+
+    let mut kind_of: HashMap<u64, String> = HashMap::new();
+    let mut last_id = 0u64;
+    let mut linked = 0usize;
+    let mut same_tick_independent = 0usize;
+    for line in content.lines() {
+        let Ok(tick) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(events) = tick.get("event_log").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for e in events {
+            let eid = e.get("event_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let kind = e.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+            assert!(
+                eid > last_id,
+                "event_id must increase monotonically ({eid} after {last_id})"
+            );
+            last_id = eid;
+            kind_of.insert(eid, kind.to_string());
+            if let Some(pid) = e.get("parent_event_id").and_then(|v| v.as_u64()) {
+                let parent_kind = kind_of.get(&pid).map(String::as_str).unwrap_or("");
+                linked += 1;
+                match kind {
+                    "SCORE" | "SHOT_MISS" | "REBOUND" => assert_eq!(
+                        parent_kind, "SHOT_RELEASE",
+                        "{kind} must chain to SHOT_RELEASE, got {parent_kind}"
+                    ),
+                    "PASS_RECEIVED" | "PASS_TIPPED" | "PASS_DROPPED" | "STEAL" => assert_eq!(
+                        parent_kind, "PASS",
+                        "{kind} must chain to PASS, got {parent_kind}"
+                    ),
+                    "FREE_THROW" => assert_eq!(
+                        parent_kind, "FOUL",
+                        "FREE_THROW must chain to FOUL, got {parent_kind}"
+                    ),
+                    _ => {}
+                }
+            }
+        }
+    }
+    assert!(
+        linked > 0,
+        "matrix must exercise causal links (no links found)"
+    );
+    // 不伪造因果：接触类事实不得携带父（它们之间无因果关系）。
+    for kind in kind_of.values() {
+        if kind == "CONTACT_BUMP" {
+            same_tick_independent += 1;
+        }
+    }
+    assert!(
+        same_tick_independent > 0,
+        "contact facts must exist to make the no-fabricated-causality check meaningful"
+    );
 }

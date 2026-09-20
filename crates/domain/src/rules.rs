@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 mod policies;
 
 pub use policies::{
-    CapabilityCurveRules, DecisionRules, DefenseRules, ModulationRules, ScreenDefenseRules,
-    SemanticRules, TacticalRules,
+    CapabilityCurveRules, DecisionRules, DefenseRules, ModulationRules, PotentialFieldRules,
+    ScreenDefenseRules, SemanticRules, TacticalRules,
 };
 
 /// Match rules and timing policy shared by the simulation subsystems.
@@ -99,8 +99,15 @@ pub struct GameRules {
     pub arrival_speed_scale: f32,
     /// 目标速度缩放的下限比例（避免远距离时速度被压得过低）。
     pub arrival_speed_floor: f32,
-    /// 转身减速期间保留的速度比例（round-10 从内联 0.4 收编）。
+    /// 转身减速期间保留的速度比例基准（round-10 从内联 0.4 收编）。
+    ///
+    /// 实际值经 `capability::effective_turn_decel_retention` 按 `agility` 调制
+    /// （attributes.md §2.2：「变向减速代价」是 agility 的法定消费链）。
     pub turn_decel_retention: f32,
+    /// 调制后保留比例的下限（防止低敏捷者转向失速至停）。
+    pub turn_decel_retention_floor: f32,
+    /// 调制后保留比例的上限（防止高敏捷者转向零损失）。
+    pub turn_decel_retention_ceiling: f32,
     pub contact_margin_ft: f32,
     /// 最大转体角速度（弧度/秒，真实人体转向速率上限）
     pub max_player_turn_rate_rad_per_sec: f32,
@@ -278,17 +285,6 @@ impl Default for TacticalRules {
             screen_roll_separation_ft: 8.0,
             drop_coverage_depth_ft: 14.0,
             defense: DefenseRules::default(),
-            slot_handler_ball_handling_weight: 1.0,
-            slot_handler_decision_iq_weight: 0.8,
-            slot_handler_passing_weight: 0.6,
-            slot_screener_strength_weight: 0.8,
-            slot_screener_finishing_weight: 0.6,
-            slot_corner_three_weight: 1.0,
-            slot_corner_off_ball_weight: 0.3,
-            slot_wing_mid_weight: 0.6,
-            slot_wing_off_ball_weight: 0.8,
-            slot_generic_decision_weight: 0.5,
-            slot_generic_off_ball_weight: 0.5,
         }
     }
 }
@@ -368,6 +364,8 @@ impl Default for GameRules {
             arrival_speed_scale: 0.25,
             arrival_speed_floor: 0.15,
             turn_decel_retention: 0.4,
+            turn_decel_retention_floor: 0.2,
+            turn_decel_retention_ceiling: 0.7,
             contact_margin_ft: 0.6,
             max_player_turn_rate_rad_per_sec: 18.0,
             pivot_foot_tolerance_ft: 0.35,

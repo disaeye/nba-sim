@@ -69,6 +69,30 @@ jobs:
             echo "core_changed=false" >> $GITHUB_OUTPUT
           fi
 
+  guards:
+    needs: lint-commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Behaviour, identity, threshold, boundary and resource guards
+        run: |
+          python3 scripts/check_inline_constants.py
+          python3 scripts/check_no_index_identity.py
+          python3 scripts/check_threshold_integrity.py
+          python3 scripts/check_world_privacy.py
+          python3 scripts/check_engine_state_groups.py
+          python3 scripts/check_disk_budget.py --report
+      - name: Negative controls (each guard must be able to turn red)
+        run: |
+          python3 scripts/check_inline_constants.py --self-test
+          python3 scripts/check_no_index_identity.py --self-test
+          python3 scripts/check_threshold_integrity.py --self-test
+          python3 scripts/check_world_privacy.py --self-test
+          python3 scripts/check_engine_state_groups.py --self-test
+
   fast-test:
     needs: change-detection
     if: needs.change-detection.outputs.rust_changed == 'true'
@@ -85,9 +109,9 @@ jobs:
         run: |
           cargo test -p nba-domain
           cargo test -p nba-invariants
-          cargo test -p nba-engine --test step_phases_isolation
+          cargo test -p nba-engine --test world_state_equivalence
           cargo test -p nba-engine --test engine_snapshot
-          cargo test -p nba-engine --test rules_consumption
+          cargo test -p nba-engine --test projection
           cargo test -p nba-engine --test golden_hash
 
   full-gate:
@@ -104,6 +128,11 @@ jobs:
         run: |
           cargo test -p nba-decision --test defense_responsibility_chain
           cargo test -p nba-engine --test attribute_perturbation
+          cargo test -p nba-engine --test block
+          cargo test -p nba-engine --test decision_wiring
+          cargo test -p nba-engine --test defense
+          cargo test -p nba-engine --test rules_complete_wiring
+          cargo test -p nba-engine --test wiring_proof
           cargo test -p nba-engine --test defense_effect
           cargo test -p nba-engine --test fiba_scenarios
       - name: Tier 3 Macro Sanity Net (8-seed full game)
@@ -111,10 +140,11 @@ jobs:
           cargo test -p nba-engine --test stats_baseline -- --nocapture
 
   deploy:
-    needs: [change-detection, fast-test, full-gate]
+    needs: [change-detection, guards, fast-test, full-gate]
     if: |
       always() &&
       (needs.change-detection.result == 'success') &&
+      (needs.guards.result == 'success') &&
       (needs.fast-test.result == 'success' || needs.fast-test.result == 'skipped') &&
       (needs.full-gate.result == 'success' || needs.full-gate.result == 'skipped') &&
       (github.ref == 'refs/heads/main')

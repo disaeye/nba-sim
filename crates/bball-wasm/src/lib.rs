@@ -12,6 +12,20 @@ pub struct WasmMatchService {
     inner: MatchService,
 }
 
+/// 把一个来自 JavaScript 的毫秒时长转换成 `FixedDt`。
+///
+/// 输入必须有限、非负且换算后能放进 `f32`。未通过就拒绝，而不是截断成
+/// 一个看似合法的值——静默截断会把「前端传了 NaN」变成「引擎按 0 推进」。
+fn milliseconds_to_fixed_dt(value: f64, label: &str) -> Result<FixedDt, JsError> {
+    const MILLIS_PER_SECOND: f64 = 1000.0;
+    if !value.is_finite() || value < 0.0 || value > f32::MAX as f64 * MILLIS_PER_SECOND {
+        return Err(JsError::new(&format!(
+            "{label} must be finite, non-negative, and fit in f32 milliseconds"
+        )));
+    }
+    Ok(FixedDt((value / MILLIS_PER_SECOND) as f32))
+}
+
 #[wasm_bindgen]
 impl WasmMatchService {
     #[wasm_bindgen(constructor)]
@@ -40,13 +54,9 @@ impl WasmMatchService {
 
     #[wasm_bindgen(js_name = "tickMs")]
     pub fn tick_ms(&mut self, dt_ms: f64) -> Result<String, JsError> {
-        if !dt_ms.is_finite() || dt_ms < 0.0 || dt_ms > f32::MAX as f64 * 1000.0 {
-            return Err(JsError::new(
-                "tick duration must be finite, non-negative, and fit in f32 milliseconds",
-            ));
-        }
+        let dt = milliseconds_to_fixed_dt(dt_ms, "tick duration")?;
         self.inner
-            .tick(FixedDt((dt_ms / 1000.0) as f32))
+            .tick(dt)
             .and_then(|tick| {
                 serde_json::to_string(&tick)
                     .map_err(|error| format!("tick serialization failed: {error}"))
@@ -64,13 +74,9 @@ impl WasmMatchService {
 
     #[wasm_bindgen(js_name = "fastForwardMs")]
     pub fn fast_forward_ms(&mut self, duration_ms: f64) -> Result<String, JsError> {
-        if !duration_ms.is_finite() || duration_ms < 0.0 || duration_ms > f32::MAX as f64 * 1000.0 {
-            return Err(JsError::new(
-                "fast-forward duration must be finite, non-negative, and fit in f32 milliseconds",
-            ));
-        }
+        let duration = milliseconds_to_fixed_dt(duration_ms, "fast-forward duration")?;
         self.inner
-            .fast_forward((duration_ms / 1000.0) as f32)
+            .fast_forward(duration.0)
             .and_then(|tick| {
                 serde_json::to_string(&tick)
                     .map_err(|error| format!("snapshot serialization failed: {error}"))

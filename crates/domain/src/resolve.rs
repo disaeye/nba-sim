@@ -29,6 +29,8 @@ pub struct ResolveConfig {
     pub pass: PassPolicy,
     /// On-ball ball-security policy: pressure, containment, and poke-check shape.
     pub ball_security: BallSecurityPolicy,
+    /// 封盖裁定策略：出手过程中的触摸判定（D25）。
+    pub block: BlockPolicy,
 }
 
 /// 持球安全（on-ball security）裁决策略。
@@ -73,6 +75,55 @@ pub struct BallSecurityPolicy {
     /// 切球弹出速度占 `本次球速上限` 的比例（保底用，使不同规则档案下
     /// 仍不越过不变量）。
     pub poke_ball_speed_ratio: f32,
+}
+
+/// 封盖裁定策略（`attributes.md` §2.4 的 `block` 与 `vertical` 消费链）。
+///
+/// 封盖是**出手过程中**防守方触及球的事实（`GameEvent::BlockedShot`），
+/// 与「投失 + 篮板」是两条不同的后续：封盖后是松球争夺。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BlockPolicy {
+    /// 防守人必须距出手者多近才具备封盖机会（ft）。
+    pub contest_radius_ft: f32,
+    /// 单次封盖机会的基础概率（技能调制前）。
+    pub base_probability: f32,
+    /// 封盖者 `block` 能力对概率的权重。
+    pub blocker_skill_weight: f32,
+    /// 封盖者 `vertical` 与身高对**触及高度**的权重。
+    pub blocker_reach_weight: f32,
+    /// 出手者出手点越高，越难被封盖（每英尺降低的概率）。
+    pub release_height_penalty_per_ft: f32,
+    /// 概率上限（防止高技能组合给出必封）。
+    pub probability_ceiling: f32,
+    /// 「触及高度」中身高因子的权重（与 `vertical` 权重互补，两者和应为 1）。
+    pub reach_height_weight: f32,
+    /// 封盖后球的弹出速度占 `ball_max_speed_ftps` 的比例。
+    ///
+    /// 封盖是把出手拍向侧后方，不是全力发射；比例过大时球会“瞬移”并
+    /// 可能撞上 `BALL_SPEED` 不变量。
+    pub deflection_speed_ratio: f32,
+}
+
+impl Default for BlockPolicy {
+    fn default() -> Self {
+        Self {
+            contest_radius_ft: 5.0,
+            // 标定目标：被封出手占全部出手约 5–6%（真实 NBA 约 5.5%）。
+            // 只有 5 ft 内有防守人时才掷骰，因此单次机会的期望概率高于 5.5%：
+            // 中性能力（block 0.5 / vertical 0.5 / 身高 6'7"）下约 0.07。
+            base_probability: 0.02,
+            blocker_skill_weight: 0.08,
+            blocker_reach_weight: 0.08,
+            // 出手点越高越难封。系数取小：出手点 8 ft 时约抵掉 0.03。
+            release_height_penalty_per_ft: 0.004,
+            probability_ceiling: 0.25,
+            // 触及高度是「身高因子」与「弹跳」的对半混合：跳不高但个子高的
+            // 与跳得高但个子矮的都能护筐。
+            reach_height_weight: 0.5,
+            deflection_speed_ratio: 0.35,
+        }
+    }
 }
 
 impl Default for BallSecurityPolicy {
@@ -130,6 +181,18 @@ pub struct DrivePolicy {
     pub foul_contest_weight: f32,
     /// Additional contest penalty applied to the finishing attempt.
     pub finish_contest_penalty: f32,
+    /// 技能差异对“到达篮下”与“终结”两个概率的增益倍率。
+    ///
+    /// `skill_delta = (finishing_skill - 0.5) × finishing_weight × 本值`。
+    /// 原先写死为内联 2.0，与 `player_skill.finishing_weight` 一起决定技巧差异的
+    /// 量级，因此是可校准参数而非公式结构。
+    pub skill_delta_scale: f32,
+    /// 罚球概率的基准占比：`foul_rate × (本值 + contest × foul_contest_weight × contest_scale)`。
+    pub foul_base_share: f32,
+    /// 干扰强度对罚球概率的额外权重。
+    pub foul_contest_scale: f32,
+    /// `lane_density` 对终结概率的惩罚相对“到达篮下”惩罚的倍率。
+    pub finish_lane_density_scale: f32,
 }
 
 impl Default for DrivePolicy {
@@ -139,6 +202,10 @@ impl Default for DrivePolicy {
             contest_penalty: 0.22,
             foul_contest_weight: 0.5,
             finish_contest_penalty: 0.18,
+            skill_delta_scale: 2.0,
+            foul_base_share: 0.30,
+            foul_contest_scale: 0.65,
+            finish_lane_density_scale: 0.8,
         }
     }
 }
@@ -374,6 +441,7 @@ impl Default for ResolveConfig {
             rebound: ReboundPolicy::default(),
             pass: PassPolicy::default(),
             ball_security: BallSecurityPolicy::default(),
+            block: BlockPolicy::default(),
         }
     }
 }

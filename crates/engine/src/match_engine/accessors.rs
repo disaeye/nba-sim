@@ -9,9 +9,7 @@
 //! `engine.rules.tick_seconds = f32::MAX`），因此访问器集中在本文件便于审计
 //! 「外部究竟能观察什么」。
 //!
-//! 本文件另有唯一一个写入方法 [`MatchEngine::sync_to_world`]：它把引擎状态
-//! 单向投影到 `MatchWorld` 镜像（ADR-011）。它不是访问器，保留在此是因为
-//! 它与上述字段一一对应，分散到别处反而看不出两边字段是否同步。
+//! 访问器集中在本文件便于审计「外部究竟能观察什么」。
 
 use glam::Vec2;
 use nba_domain::{GameEvent, GameFlowState, GameRules, Possession, SubPhase};
@@ -136,107 +134,6 @@ impl MatchEngine {
         &self.systems.physics
     }
 
-    /// 获取底层 ECS MatchWorld 纯数据实体世界核的只读引用 (ADR-011)。
-    pub fn world(&self) -> &crate::world::MatchWorld {
-        &self.systems.world
-    }
-
-    /// 同步 MatchEngine 内部状态至 MatchWorld 纯数据实体世界核 (ADR-011)。
-    pub fn sync_to_world(&mut self) {
-        self.systems.world.clock.period = self.clock.period;
-        self.systems.world.clock.game_clock = self.clock.game_clock;
-        self.systems.world.clock.shot_clock = self.clock.shot_clock;
-        self.systems.world.clock.current_time = self.clock.current_time;
-        self.systems.world.clock.sub_phase = self.clock.sub_phase;
-        self.systems.world.clock.sub_phase_timer = self.clock.sub_phase_timer;
-
-        self.systems.world.ledger.home_score = self.ledger.home_score;
-        self.systems.world.ledger.away_score = self.ledger.away_score;
-        self.systems.world.ledger.possession = self.flow.possession;
-        self.systems.world.ledger.possession_id = self.flow.possession_id;
-        self.systems.world.ledger.home_fouls_in_period = self.ledger.team_fouls_home as u8;
-        self.systems.world.ledger.away_fouls_in_period = self.ledger.team_fouls_away as u8;
-        self.systems.world.ledger.possession_arrow = self.flow.possession_arrow;
-
-        self.systems.world.ball.pos_3d = self.ball.ball_pos_3d;
-        self.systems.world.ball.state = self.ball.ball_state.clone();
-        self.systems.world.ball.associated_player_id =
-            self.ball.ball_state.associated_player().map(str::to_string);
-        self.systems.world.ball.last_touch_team = self
-            .ball
-            .ball_state
-            .possessing_team()
-            .unwrap_or(self.flow.possession);
-
-        self.systems.world.game_flow = self.flow.game_flow;
-        self.systems.world.tactical_set = self.config.tactical_set;
-
-        self.sync_world_players();
-    }
-
-    /// 把物理层的在册球员投影到 `MatchWorld` 的实体数组。
-    ///
-    /// ## 为何需要（D23）
-    ///
-    /// `sync_to_world` 此前只写时钟、账本、球与生命周期四个标量组，
-    /// `transforms` / `states` / `limits` 永远是空向量。后果是
-    /// `PerceptionSystem::evaluate` 的循环 `for i in 0..n` 一次都不执行
-    /// （`n == 0`），每个空间核心（Voronoi 开阔度、压迫密度、弱侧探测）都在
-    /// 空世界上计算，返回值被丢弃——「接了感知系统」不成立。
-    ///
-    /// 数组按 player id 排序后逐个 push，使三个平行数组的下标与
-    /// `states[i]` 一一对应（`PerceptionSystem` 按下标取两队身份与位置）。
-    ///
-    /// ## 只投影在场球员
-    ///
-    /// `physics.get_players()` 含场上与替补（后者为换人而保持注册），
-    /// 而空间拓扑只能看到场上十人。过滤条件用 `on_court`，与物理层的
-    /// 分离射线、接触检测口径一致。
-    fn sync_world_players(&mut self) {
-        let mut ids: Vec<String> = self.systems.physics.get_players().keys().cloned().collect();
-        ids.sort();
-        let world = &mut self.systems.world;
-        world.transforms.clear();
-        world.states.clear();
-        world.limits.clear();
-        let players = self.systems.physics.get_players();
-        for id in ids {
-            let Some(player) = players.get(&id) else {
-                continue;
-            };
-            if !player.on_court {
-                continue;
-            }
-            world.transforms.push(crate::world::TransformComponent {
-                pos_ft: player.pos_ft,
-                vel_ft: player.vel_ft,
-                accel_ft: player.accel_ft,
-                facing: player.facing_dir,
-            });
-            world.limits.push(crate::world::PhysicalLimitComponent {
-                max_speed_ftps: player.max_speed_ftps,
-                max_accel_ftps2: player.max_accel_ftps2,
-                // 生产物理对「速度改变量」的唯一约束是 `velocity_is_feasible`
-                // 的 `|v - current| <= max_accel * dt`（movement.rs）；侧向变向
-                // 与前进共用同一上限，不存在单独的抓地力常数。因此镜像值取同一量。
-                traction_limit: player.max_accel_ftps2,
-            });
-            world.states.push(crate::world::PlayerRuntimeComponent {
-                id: player.id.clone(),
-                team: player.team.clone(),
-                jersey: player.jersey.clone(),
-                on_court: player.on_court,
-                stamina: player.stamina,
-                max_stamina: player.max_stamina,
-                foul_count: player.foul_count,
-                morale: player.morale.clone(),
-                action: player.action.clone(),
-                slot: player.slot.clone(),
-                locomotion: player.locomotion,
-            });
-        }
-    }
-
     /// 所属方名单顺序（只读）；用于验证顺序不携带语义（ADR-005）。
     pub fn away_roster_order(&self) -> &[String] {
         &self.config.away_roster_order
@@ -248,8 +145,17 @@ impl MatchEngine {
     }
 
     /// 裁决争球 / 纠缠球（Held Ball，D20）。
-    /// 在 FIBA 模式下（use_alternate_possession_arrow=true）依据球权箭头裁定，并翻转箭头；
-    /// 在 NBA 模式下执行跳球争顶程序。
+    ///
+    /// 在 FIBA 模式下（use_alternate_possession_arrow=true）依据球权箭头裁定并
+    /// 翻转箭头；在 NBA 模式下执行跳球争顶程序（保持当前球权）。
+    ///
+    /// ## 为什么这里不做运行时状态改写（ADR-016）
+    ///
+    /// 它曾经直接改写 `flow.possession`（球权）并把它当作可写真相，
+    /// 而球权按 ADR-010 应当从权威球态派生。现改为返回裁定结果：
+    /// 真实比赛中争球的接续动作是“把球交给被裁定的一方”（一次显式球态转移），
+    /// 那时球队归属自然从球态的 `team` 载荷读出，不需要另写一个字段。
+    /// NBA 分支对应跳球后的松球争夺，同样由球态决定归属。
     pub fn resolve_held_ball(&mut self) -> Possession {
         if self.config.rules.league.use_alternate_possession_arrow {
             let awarded = self.flow.possession_arrow.unwrap_or(Possession::Away);
@@ -258,10 +164,8 @@ impl MatchEngine {
                 Possession::Away => Possession::Home,
             };
             self.flow.possession_arrow = Some(next_arrow);
-            self.flow.possession = awarded;
             awarded
         } else {
-            // NBA: 跳球
             self.flow.possession
         }
     }
@@ -281,7 +185,19 @@ impl MatchEngine {
         &self.journal.pending_events
     }
 
+    /// 球权归属（只读）。
+    ///
+    /// ## 它是派生量（ADR-016）
+    ///
+    /// 权威球态 `BallState` 的每一个变体都携带球队归属：持球族带持球人
+    /// 所在队（`team`），飞行/松球/死球族带 `last_touch_team`。本访问器
+    /// 直接从球态派生，不再有独立的可写 `possession` 字段可供与球态分叉。
+    /// 球态载荷里的球队是构造时的断言：调用方在写球态时就知道球权归谁，
+    /// 之后双方永远一致。
     pub fn possession(&self) -> nba_domain::Possession {
-        self.flow.possession
+        self.ball
+            .ball_state
+            .possessing_team()
+            .unwrap_or(self.flow.possession)
     }
 }

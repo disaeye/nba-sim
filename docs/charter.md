@@ -100,7 +100,7 @@ O1 不能由单一综合分数直接证明。合法的逼近路径是同时建�
 
 ## 7. 多联赛目标
 
-首批档案覆盖 NBA、FIBA 和 NCAA 的计时、进攻时钟、犯规政策、罚球/bonus、几何和拥有权程序。档案的具体字段由 `docs/architecture.md` §6.3 定义，验收顺序由 `docs/protocol.md` 定义。
+首批档案覆盖 NBA 与 FIBA 的计时、进攻时钟、犯规政策、罚球/bonus、几何和拥有权程序；NCAA 是路线项（见 `docs/dev/roadmap.md`），不在首批验收范围内。档案的具体字段由 `docs/architecture.md` §6.3 定义，验收顺序由 `docs/protocol.md` 定义。
 
 成功的多联赛切换必须同时证明：
 

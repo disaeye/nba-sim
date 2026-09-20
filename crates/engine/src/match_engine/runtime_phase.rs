@@ -5,8 +5,8 @@
 //! 每个分支在本 tick 需要提前结束时返回 [`PhaseOutcome::ShortCircuit`]，
 //! 由调度器统一发布事件与输出帧——阶段函数自身不做帧输出，也不吞掉事件。
 
-use nba_domain::{GameEvent, GameFlowState};
 use nba_decision::constraint::EnforcementAction;
+use nba_domain::{GameEvent, GameFlowState};
 use nba_physics::ballistics::BallTrajectoryKind;
 
 use super::projection::physics_fact_to_event;
@@ -41,8 +41,11 @@ impl MatchEngine {
                 reason: kind.as_str().to_string(),
             });
             self.journal.current_event = Some("VIOLATION".to_string());
-            let violation_callout =
-                format!("{}！{} 失去球权", constraint_id, super::team_name_zh(is_home));
+            let violation_callout = format!(
+                "{}！{} 失去球权",
+                constraint_id,
+                super::team_name_zh(is_home)
+            );
             self.start_violation_turnover(kind);
             // 确保违例判定帧忠实呈现哨响违例事实，不被随后的发球准备覆写
             self.journal.current_callout = Some(violation_callout);

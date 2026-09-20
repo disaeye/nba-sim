@@ -3,9 +3,9 @@
 //!
 //! 依据 `gap.md` §7.1/§7.2：只有真实因果关系才串链，同 tick 相邻不等于因果。
 
+use nba_decision::constraint::{ConstraintStatus, EnforcementAction, PhaseType, ViolationKind};
 use nba_domain::court::Court;
 use nba_domain::{GameEvent, GameFlowState, Possession, SubPhase};
-use nba_decision::constraint::{ConstraintStatus, EnforcementAction, PhaseType, ViolationKind};
 use nba_officiating::resolution::{ResolutionLayer, ResolutionOutcome};
 use nba_protocol::FrameEvent;
 
@@ -49,9 +49,11 @@ impl MatchEngine {
                     player_a, player_b, ..
                 } = &event
                 {
-                    if let Some(contact) = self.observations.latest_contacts.iter().find(|contact| {
-                        contact.raw.entity_a == *player_a && contact.raw.entity_b == *player_b
-                    }) {
+                    if let Some(contact) =
+                        self.observations.latest_contacts.iter().find(|contact| {
+                            contact.raw.entity_a == *player_a && contact.raw.entity_b == *player_b
+                        })
+                    {
                         if let ResolutionOutcome::Foul {
                             fouled_player_id,
                             fouler_id,
@@ -112,24 +114,19 @@ impl MatchEngine {
                         .map(|p| p.team == "home")
                         .unwrap_or(false);
                     let team_fouls = if fouler_is_home {
-                        self.ledger.team_fouls_home =
-                            self.ledger.team_fouls_home.saturating_add(1);
+                        self.ledger.team_fouls_home = self.ledger.team_fouls_home.saturating_add(1);
                         self.ledger.team_fouls_home
                     } else {
-                        self.ledger.team_fouls_away =
-                            self.ledger.team_fouls_away.saturating_add(1);
+                        self.ledger.team_fouls_away = self.ledger.team_fouls_away.saturating_add(1);
                         self.ledger.team_fouls_away
                     };
                     if let Some(player) = self.systems.physics.get_player_mut(fouler_id) {
                         player.foul_count = player.foul_count.saturating_add(1);
                     }
                     // 犯满离场（charter 7：个人犯满上限为联赛档案参数）。
-                    if self
-                        .systems
-                        .physics
-                        .get_player(fouler_id)
-                        .is_some_and(|p| p.foul_count >= self.config.rules.league.max_personal_fouls)
-                    {
+                    if self.systems.physics.get_player(fouler_id).is_some_and(|p| {
+                        p.foul_count >= self.config.rules.league.max_personal_fouls
+                    }) {
                         self.forced_substitution(fouler_id);
                     }
                     self.journal.current_event = Some(
@@ -140,7 +137,8 @@ impl MatchEngine {
                         }
                         .to_string(),
                     );
-                    if *is_shooting || team_fouls >= self.config.rules.league.bonus_fouls_per_period {
+                    if *is_shooting || team_fouls >= self.config.rules.league.bonus_fouls_per_period
+                    {
                         self.ledger.free_throws_remaining = if *is_shooting {
                             self.config.rules.league.shooting_foul_free_throws
                         } else {
@@ -196,7 +194,24 @@ impl MatchEngine {
                                 | nba_domain::BallPhase::Loose
                                 | nba_domain::BallPhase::Rebound
                         );
-                        if !in_flight {
+                        // ## 罚球程序进行中时同样不得重置子阶段
+                        //
+                        // 罚球间隙（球为 `Dead`，所以 `in_flight` 为假）再判一次
+                        // 非投篮犯规时，本条会把子阶段拉回 `Initiation`；而罚球
+                        // 不中后的篮板裁决随后执行 `Initiation -> FlightAndRebound`，
+                        // 这是合法表禁止的迁移（`Initiation` 只允许到
+                        // `ActionExecution`/`DeadBallReset`/`ShotAttempt`）。
+                        //
+                        // 实测（seed 42 tick 39675）：罚球程序进行中判一次
+                        // 非投篮犯规 → 子阶段回 `Initiation` → tick 39731 罚球不中
+                        // 进入篮板，产生一条 Hard `PHASE_TRANSITION_LEGALITY`。
+                        //
+                        // 罚球程序属于投篮族，其子阶段不应被无球犯规打断；
+                        // 只需重置进攻时间，与球在飞行时的处理一致。
+                        let free_throw_program_active = self.flow.game_flow
+                            == GameFlowState::FreeThrow
+                            && self.ledger.free_throws_remaining > 0;
+                        if !in_flight && !free_throw_program_active {
                             self.transition_phase(SubPhase::Initiation);
                         }
                     }
@@ -234,8 +249,8 @@ impl MatchEngine {
                 let event_id = self.journal.event_id_counter;
                 let kind = event.event_type_str().to_string();
                 // D4.1：按语义槽位解析父事件，并登记本事件作为新的触发事件。
-                let parent_event_id =
-                    causal_parent_of(&kind).and_then(|slot| self.journal.causal_links.get(slot).copied());
+                let parent_event_id = causal_parent_of(&kind)
+                    .and_then(|slot| self.journal.causal_links.get(slot).copied());
                 if let Some(slot) = causal_trigger_slot(&kind) {
                     self.journal.causal_links.insert(slot, event_id);
                 }
@@ -272,19 +287,23 @@ impl MatchEngine {
                     constraint_id: finding.constraint.id.to_string(),
                     reason: action.clone(),
                 });
-                self.journal.pending_events.push(GameEvent::EnforcementApplied {
-                    constraint_id: finding.constraint.id.to_string(),
-                    action,
-                });
+                self.journal
+                    .pending_events
+                    .push(GameEvent::EnforcementApplied {
+                        constraint_id: finding.constraint.id.to_string(),
+                        action,
+                    });
             }
             EnforcementAction::ChangePossession { reason } => {
                 self.journal
                     .current_enforcements
                     .push(format!("{}:{}", finding.constraint.id, reason));
-                self.journal.pending_events.push(GameEvent::EnforcementApplied {
-                    constraint_id: finding.constraint.id.to_string(),
-                    action: format!("CHANGE_POSSESSION:{}", reason),
-                });
+                self.journal
+                    .pending_events
+                    .push(GameEvent::EnforcementApplied {
+                        constraint_id: finding.constraint.id.to_string(),
+                        action: format!("CHANGE_POSSESSION:{}", reason),
+                    });
                 self.start_violation_turnover(ViolationKind::IllegalAction);
             }
             EnforcementAction::EndPhase { next } => {
@@ -292,10 +311,12 @@ impl MatchEngine {
                 self.journal
                     .current_enforcements
                     .push(format!("{}:{}", finding.constraint.id, action));
-                self.journal.pending_events.push(GameEvent::EnforcementApplied {
-                    constraint_id: finding.constraint.id.to_string(),
-                    action,
-                });
+                self.journal
+                    .pending_events
+                    .push(GameEvent::EnforcementApplied {
+                        constraint_id: finding.constraint.id.to_string(),
+                        action,
+                    });
                 if *next == PhaseType::DeadBallReset {
                     self.set_game_flow(GameFlowState::DeadBall);
                     self.transition_phase(SubPhase::DeadBallReset);
@@ -305,10 +326,12 @@ impl MatchEngine {
                 self.journal
                     .current_enforcements
                     .push(format!("{}:TURNOVER:{}", finding.constraint.id, reason));
-                self.journal.pending_events.push(GameEvent::EnforcementApplied {
-                    constraint_id: finding.constraint.id.to_string(),
-                    action: format!("TURNOVER:{}", reason),
-                });
+                self.journal
+                    .pending_events
+                    .push(GameEvent::EnforcementApplied {
+                        constraint_id: finding.constraint.id.to_string(),
+                        action: format!("TURNOVER:{}", reason),
+                    });
                 self.start_violation_turnover(ViolationKind::IllegalAction);
             }
         }

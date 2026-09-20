@@ -37,6 +37,30 @@ pub enum GameEvent {
         is_three: bool,
         contest_intensity: f32,
     },
+    /// 防守方在出手飞行中触及球并将其终止（封盖）。
+    ///
+    /// ## 为何是独立事实（而非 HoopArrival 的一个布尔）
+    ///
+    /// 封盖与“投失”是两种不同的比赛事件：封盖把球打向别处（后续是松球
+    /// 争夺），投失则是球触筐弹出（后续是篮板）。同时封盖的**责任主体是
+    /// 防守人**，而投失没有防守责任方——归因账本需要能区分。
+    ///
+    /// `phase` 记录封盖发生时出手者的动作阶段：按 `architecture.md` §6
+    /// 与 `action_window.rs`，合法的封盖窗口只在 `Execution`（起跳上升与
+    /// 出手瞬间），球出手后的“封盖”是不合法事实，由不变量层报错。
+    BlockedShot {
+        shooter_id: String,
+        blocker_id: String,
+        /// 封盖发生位置的球坐标。
+        ball_pos: (f32, f32, f32),
+        /// 封盖者触及球的高度（决定后续松球下落起点）。
+        contact_height_ft: f32,
+        /// 出手被终止时，出手者所处的动作阶段。
+        phase: ActionPhase,
+        /// 该次出手是否原本会命中（封盖前的裁定）。
+        would_have_made: bool,
+        is_three: bool,
+    },
     /// Player crosses boundary line
     BoundaryCross {
         player_id: String,
@@ -294,6 +318,7 @@ impl GameEvent {
                     "SHOT_MISS"
                 }
             }
+            GameEvent::BlockedShot { .. } => "BLOCKED_SHOT",
             GameEvent::BoundaryCross { .. } => "OUT_OF_BOUNDS",
             GameEvent::WindowTransition { .. } => "ACTION_WINDOW_SHIFT",
             GameEvent::PassRelease { .. } => "PASS",

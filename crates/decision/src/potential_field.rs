@@ -1,42 +1,23 @@
 //! 连续受限势能场动力学与空间涌现系统 (Continuous Potential Field Dynamics)
 //!
-//! 依据 ADR-012 与 docs/architecture.md：
-//! 防守战术跑位与轮转不再由离散 if-else 规则指定硬编码目标，
-//! 而是由全场球员与空间拓扑构成的多体势能场 (Potential Field) 求导，
-//! 求解局部能量极小值平衡点（Equilibrium Point）并由主导场力自然涌现出：
+//! 防守战术跑位与轮转不由离散 if-else 规则指定硬编码目标，而是由全场球员与
+//! 空间拓扑构成的多体势能场求导，求解局部能量极小值平衡点（Equilibrium Point）
+//! 并由主导场力自然涌现出：
+//!
 //! 1. 弱侧 Low-man 威胁引力主导的下沉护筐 (ROTATE_RIM_HELP)
 //! 2. 弱侧 High-man 空间真空主导的轮转补位 (X_OUT_CLOSEOUT)
 //! 3. 稳态球-人-筐三角协防 (HELP_SIDE_SHELL)
+//!
+//! ## 系数的唯一来源（charter C1）
+//!
+//! 本模块**不保存任何行为系数**：五个势能分量系数、两个下沉距离、锚点权重、
+//! 缓冲带与三个引力倍率、两个涌现阈值全部从 `PotentialFieldRules` 读取。
+//! 这些量过去以字段默认值与函数内字面量两种形式散在这里，既无法用 `--rules`
+//! 覆盖，也逃过常数守卫（该文件当时不在预算名单内）。
 
 use glam::Vec2;
 use nba_domain::rules::GameRules;
-
-/// 防守势能场配置参数
-#[derive(Debug, Clone)]
-pub struct PotentialFieldConfig {
-    /// 篮筐威胁特征半径 (英尺)，决定突破深度对全场势能的非线性放大陡峭度
-    pub threat_radius_ft: f32,
-    /// 禁区内线局部响应半径 (英尺)，决定距篮筐不同距离防守人的引力响应衰减
-    pub rim_response_radius_ft: f32,
-    /// 对位羁绊基础弹性系数
-    pub k_man_base: f32,
-    /// 禁区护筐威胁引力系数
-    pub k_threat_base: f32,
-    /// 空间覆盖真空吸力系数 (X-Out 驱动源)
-    pub k_void_base: f32,
-}
-
-impl Default for PotentialFieldConfig {
-    fn default() -> Self {
-        Self {
-            threat_radius_ft: 15.0,
-            rim_response_radius_ft: 18.0,
-            k_man_base: 1.0,
-            k_threat_base: 1.6,
-            k_void_base: 1.2,
-        }
-    }
-}
+use nba_domain::PotentialFieldRules;
 
 /// 势能场平衡点求解结果与涌现动作
 #[derive(Debug, Clone)]
@@ -53,13 +34,15 @@ pub struct EmergentDefenseTarget {
     pub void_ratio: f32,
 }
 
-/// 连续势能场求解器
+/// 连续势能场求解器。
+///
+/// 构造时只持有系数；求解时不读任何模块级常量。
 pub struct DefensePotentialFieldSolver {
-    pub config: PotentialFieldConfig,
+    pub config: PotentialFieldRules,
 }
 
 impl DefensePotentialFieldSolver {
-    pub fn new(config: PotentialFieldConfig) -> Self {
+    pub fn new(config: PotentialFieldRules) -> Self {
         Self { config }
     }
 
@@ -71,9 +54,7 @@ impl DefensePotentialFieldSolver {
     /// - `off_positions`: 场上 5 名进攻球员当前位置
     /// - `assigned_off_idx`: 该防守人对位的进攻球员索引
     /// - `carrier_idx`: 持球人索引
-    /// - `screener_idx`: 掩护人索引
-    /// - `is_screening`: 是否发生掩护事件
-    /// - `rules`: 比赛规则配置
+    /// - `rules`: 比赛规则配置（提供本模块系数的唯一来源）
     pub fn solve_equilibrium(
         &self,
         carrier_pos: Vec2,
@@ -83,6 +64,9 @@ impl DefensePotentialFieldSolver {
         carrier_idx: usize,
         rules: &GameRules,
     ) -> EmergentDefenseTarget {
+        // 系数从规则档案读取（`DefenseRules` 经防守方案实例化，`potential_field`
+        // 随方案一起进入规则通道）。
+        let config = &rules.tactics.defense.potential_field;
         let assigned_pos = off_positions
             .get(assigned_off_idx)
             .copied()
@@ -90,17 +74,17 @@ impl DefensePotentialFieldSolver {
 
         // 1. 持球人到篮筐的欧几里得距离与全场连续突破威胁度 (0.0 ~ 1.0)
         let carrier_dist_to_hoop = (carrier_pos - hoop_pos).length();
-        let r_threat = self.config.threat_radius_ft;
+        let r_threat = config.threat_radius_ft;
         // Cauchy-Lorentz 形式连续非线性势能核：深入内线时平滑激增，外线游弋时平滑衰减
         let global_threat = 1.0 / (1.0 + (carrier_dist_to_hoop / r_threat).powi(2));
 
         // 2. 该防守人所看管对位人距离篮筐的拓扑距离，决定其局域护筐响应权重
         let assigned_dist_to_hoop = (assigned_pos - hoop_pos).length();
-        let r_rim = self.config.rim_response_radius_ft;
+        let r_rim = config.rim_response_radius_ft;
         let local_rim_proximity = 1.0 / (1.0 + (assigned_dist_to_hoop / r_rim).powi(2));
 
         // 3. 寻找弱侧进攻球员：
-        // 弱侧定义：远离持球人一侧（跨越球场中轴线 mid_y，或横向差值 >= 10.0 ft）
+        // 弱侧定义：远离持球人一侧（跨越球场中轴线 mid_y，或横向差值超过阈值）
         let mid_y = hoop_pos.y;
         let ref_carrier_y = if (carrier_pos.y - mid_y).abs() < 1.0 {
             // 居中突破时，将 y 坐标较低（底角射手一侧）视为主防弱侧轮转区
@@ -113,7 +97,7 @@ impl DefensePotentialFieldSolver {
         for (i, p) in off_positions.iter().enumerate() {
             if i != carrier_idx {
                 let is_opposite = (ref_carrier_y - mid_y) * (p.y - mid_y) < 0.0
-                    || (carrier_pos.y - p.y).abs() >= 12.0;
+                    || (carrier_pos.y - p.y).abs() >= config.weak_side_lateral_ft;
                 if is_opposite {
                     weak_side_teammates.push((i, *p, (*p - hoop_pos).length()));
                 }
@@ -128,30 +112,46 @@ impl DefensePotentialFieldSolver {
 
         // 4. 势能分量一：对位牵引势能 (Assignment Spring)
         // 外线射手贴防阻截出手，内线球员深度向篮筐收缩护筐；受方案下沉系数 sag_multiplier 调控
-        let sag_mult = rules.tactics.defense.sag_multiplier.clamp(0.5, 2.5);
+        let sag_mult = rules
+            .tactics
+            .defense
+            .sag_multiplier
+            .clamp(config.sag_multiplier_min, config.sag_multiplier_max);
         let dist_assigned_to_hoop = (assigned_pos - hoop_pos).length();
-        let base_sag = if dist_assigned_to_hoop > 22.0 {
-            2.0_f32 // 外线三分射手
+        let base_sag = if dist_assigned_to_hoop > config.perimeter_attribution_ft {
+            config.sag_distance_perimeter_ft
         } else {
-            5.5_f32 // 中距离/内线：深度下沉收缩
+            config.sag_distance_interior_ft
         };
         let sag_distance = base_sag * sag_mult;
         let to_hoop = (hoop_pos - assigned_pos).normalize_or_zero();
         let to_carrier = (carrier_pos - assigned_pos).normalize_or_zero();
-        let shell_anchor =
-            assigned_pos + (to_hoop * 0.75 + to_carrier * 0.25).normalize_or_zero() * sag_distance;
-        let w_man = self.config.k_man_base;
+        let hoop_weight = config.sag_anchor_hoop_weight;
+        let carrier_weight = 1.0 - hoop_weight;
+        let shell_anchor = assigned_pos
+            + (to_hoop * hoop_weight + to_carrier * carrier_weight).normalize_or_zero()
+                * sag_distance;
+        let w_man = config.k_man_base;
 
         // 5. 势能分量二：禁区威胁引力势能 (Rim Protection Attraction)
-        // 威胁中心点位于持球人与篮筐之间的禁区缓冲带 (距篮筐 3.0 尺)；受 sag_multiplier 协同下沉
-        let rim_target = hoop_pos + (carrier_pos - hoop_pos).normalize_or_zero() * 3.0;
+        // 威胁中心点位于持球人与篮筐之间的禁区缓冲带；受 sag_multiplier 协同下沉
+        let rim_target =
+            hoop_pos + (carrier_pos - hoop_pos).normalize_or_zero() * config.rim_buffer_ft;
         // 只有弱侧低位人拥有高耦合的护筐引力；高位人需保留在外线，防备三分
         let w_threat = if is_low_man {
-            self.config.k_threat_base * global_threat * local_rim_proximity * 2.8 * sag_mult
+            config.k_threat_base
+                * global_threat
+                * local_rim_proximity
+                * config.low_man_threat_gain
+                * sag_mult
         } else if is_high_man {
-            self.config.k_threat_base * global_threat * local_rim_proximity * 0.15
+            config.k_threat_base * global_threat * local_rim_proximity * config.high_man_threat_gain
         } else {
-            self.config.k_threat_base * global_threat * local_rim_proximity * 0.4 * sag_mult
+            config.k_threat_base
+                * global_threat
+                * local_rim_proximity
+                * config.default_threat_gain
+                * sag_mult
         };
 
         // 6. 势能分量三：弱侧外线空间真空吸力 (Voronoi Space Deficit Pull)
@@ -174,12 +174,12 @@ impl DefensePotentialFieldSolver {
             // 空间真空目标点为弱侧两名射手连线的几何重心
             void_target = (corner_pos + wing_pos) * 0.5;
             // 真空吸力强度严格由 Low-man 的下沉激发度调制，外线无威胁时真空吸力自然归零
-            w_void = self.config.k_void_base * low_man_excitation * 4.0;
+            w_void = config.k_void_base * low_man_excitation * config.void_gain;
         }
 
         // 7. 多体势能场平衡点闭式求解 (Analytical Force Equilibrium)
         // \sum F = w_man * (shell_anchor - x) + w_threat * (rim_target - x) + w_void * (void_target - x) = 0
-        let total_weight = (w_man + w_threat + w_void).max(0.001);
+        let total_weight = (w_man + w_threat + w_void).max(config.total_weight_floor);
         let equilibrium_pos =
             (shell_anchor * w_man + rim_target * w_threat + void_target * w_void) / total_weight;
 
@@ -187,10 +187,11 @@ impl DefensePotentialFieldSolver {
         let threat_ratio = w_threat / total_weight;
         let void_ratio = w_void / total_weight;
 
-        let (action, slot) = if threat_ratio > 0.40 && (equilibrium_pos - hoop_pos).length() < 12.0
+        let (action, slot) = if threat_ratio > config.rim_help_threat_ratio
+            && (equilibrium_pos - hoop_pos).length() < config.rim_help_radius_ft
         {
             ("ROTATE_RIM_HELP", "LowManRimHelp")
-        } else if void_ratio > 0.32 {
+        } else if void_ratio > config.x_out_void_ratio {
             ("X_OUT_CLOSEOUT", "HighManXOut")
         } else {
             ("HELP_SIDE_SHELL", "HelpAnchor")

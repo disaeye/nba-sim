@@ -130,18 +130,23 @@ impl MatchEngine {
     /// `attributes.md §2.7`）要求身份由**能力适配**派生。
     ///
     /// 现在按能力排序：`ball_handling × w1 + passing × w2 + decision_iq × w3`，
-    /// 权重走规则通道（`TacticalRules.slot_handler_*`，与 `fill_slots` 同源）。
+    /// 权重与维度都来自档案（`TacticalPlanner::handler_score`，与 `fill_slots` 同源）。
     /// 名册数组顺序**完全不参与**。
     ///
     /// 约束：必须是**在场**球员。若把球交给替补（`on_court=false`），他永远
     /// 不会被物理步进，`inbounder_arrived` 永不成立，比赛卡死在 DeadBall
     /// （历史实测：发球员 `action=Bench`、位置停在替补席）。
+    /// 权重取当前进攻档案的持球槽位需求（`TacticalPlanner::handler_score`，
+    /// 与 `fill_slots` 同源）。
     pub(crate) fn new_possession_pg(&self) -> String {
         let team = match self.flow.possession {
             Possession::Home => "home",
             Possession::Away => "away",
         };
-        let policy = &self.config.rules.tactics;
+        let spec = match self.flow.possession {
+            Possession::Home => &self.config.home_offense_spec,
+            Possession::Away => &self.config.away_offense_spec,
+        };
         let mut candidates: Vec<(f32, String)> = self
             .systems
             .physics
@@ -149,9 +154,8 @@ impl MatchEngine {
             .values()
             .filter(|p| p.on_court && p.team == team)
             .map(|p| {
-                let score = p.attributes.ball_handling * policy.slot_handler_ball_handling_weight
-                    + p.attributes.passing * policy.slot_handler_passing_weight
-                    + p.attributes.decision_iq * policy.slot_handler_decision_iq_weight;
+                let score =
+                    nba_decision::tactics::TacticalPlanner::handler_score(spec, &p.attributes);
                 (score, p.id.clone())
             })
             .collect();

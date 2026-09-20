@@ -290,7 +290,12 @@ impl MatchEngine {
         else {
             return;
         };
-        let spread = self.config.rules.resolve.ball_security.poke_deflection_spread_rad;
+        let spread = self
+            .config
+            .rules
+            .resolve
+            .ball_security
+            .poke_deflection_spread_rad;
         // 基准方向：防守人 → 持球人（球被从持球人身上拨离防守人方向）。
         let base_dir = (carrier_pos - defender_pos).normalize_or_zero();
         let base_dir = if base_dir.length_squared() <= f32::EPSILON {
@@ -332,10 +337,10 @@ impl MatchEngine {
         self.journal
             .pending_events
             .push(nba_domain::GameEvent::BallPokedLoose {
-            handler_id: carrier_id.to_string(),
-            defender_id: defender_id.to_string(),
-            position: (ball_pos.x, ball_pos.y),
-        });
+                handler_id: carrier_id.to_string(),
+                defender_id: defender_id.to_string(),
+                position: (ball_pos.x, ball_pos.y),
+            });
         // 归因：带球丢球（真实 NBA 占比最大的失误类型）。
         self.ball.pending_loose_ball_terminal =
             Some(nba_domain::PossessionEndCause::TurnoverLooseBall);
@@ -361,7 +366,11 @@ impl MatchEngine {
 
     /// Resolves the rebound winner from the landing window, then delegates
     /// the contest probability to the officiating layer.
-    pub(crate) fn try_resolve_rebounder(&mut self, landing: Vec2, max_reach: f32) -> Option<String> {
+    pub(crate) fn try_resolve_rebounder(
+        &mut self,
+        landing: Vec2,
+        max_reach: f32,
+    ) -> Option<String> {
         let defensive_team = match self.flow.possession {
             Possession::Home => "away",
             Possession::Away => "home",
@@ -392,12 +401,10 @@ impl MatchEngine {
         let Some((defensive_id, defensive_distance)) = defensive_candidates.first() else {
             return Some(offensive_id.clone());
         };
-        let Some(offensive_player) = self.systems.physics.get_player(offensive_id).cloned()
-        else {
+        let Some(offensive_player) = self.systems.physics.get_player(offensive_id).cloned() else {
             return Some(defensive_id.clone());
         };
-        let Some(defensive_player) = self.systems.physics.get_player(defensive_id).cloned()
-        else {
+        let Some(defensive_player) = self.systems.physics.get_player(defensive_id).cloned() else {
             return Some(offensive_id.clone());
         };
 
@@ -434,8 +441,7 @@ impl MatchEngine {
 
     #[allow(dead_code)]
     pub(crate) fn resolve_rebounder(&mut self, landing: Vec2) -> String {
-        let max_r =
-            self.config.rules.player_radius_ft + self.config.rules.defender_reach_ft + 1.5;
+        let max_r = self.config.rules.player_radius_ft + self.config.rules.defender_reach_ft + 1.5;
         self.try_resolve_rebounder(landing, max_r)
             .or_else(|| {
                 let search_radius = self

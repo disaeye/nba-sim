@@ -41,39 +41,34 @@ NON_PRODUCTION_CRATES = {
 }
 
 # 核心行为文件：新增数值常量一律视为回归（除非预算已由 PR 证据更新）。
-# `match_engine` 的散落常量按模块分别计入预算（原单文件拆分后预算不合并，
-# 使每一条仍可追溯来源）。
-CORE_BEHAVIOR_FILES = {
-    "crates/engine/src/match_engine.rs",
-    "crates/engine/src/match_engine/mod.rs",
-    "crates/engine/src/match_engine/accessors.rs",
-    "crates/engine/src/match_engine/action_windows.rs",
-    "crates/engine/src/match_engine/ball_flight.rs",
-    "crates/engine/src/match_engine/bookkeeping.rs",
-    "crates/engine/src/match_engine/construction.rs",
-    "crates/engine/src/match_engine/decision.rs",
-    "crates/engine/src/match_engine/test_hooks.rs",
-    "crates/engine/src/match_engine/phases.rs",
-    "crates/engine/src/match_engine/contests.rs",
-    "crates/engine/src/match_engine/events.rs",
-    "crates/engine/src/match_engine/execution.rs",
-    "crates/engine/src/match_engine/flow.rs",
-    "crates/engine/src/match_engine/projection.rs",
-    "crates/engine/src/match_engine/receiver.rs",
-    "crates/engine/src/match_engine/roster.rs",
-    "crates/engine/src/match_engine/runtime_phase.rs",
-    "crates/engine/src/match_engine/stream.rs",
-    "crates/engine/src/match_engine/state.rs",
-    "crates/engine/src/match_engine/tactics_phase.rs",
-    "crates/engine/src/match_engine/transitions.rs",
-    "crates/engine/src/match_engine/types.rs",
-    "crates/decision/src/tactics.rs",
-    "crates/decision/src/pipeline.rs",
-    "crates/decision/src/constraint.rs",
-    "crates/decision/src/defense.rs",
-    "crates/officiating/src/resolution.rs",
-    "crates/semantics/src/lib.rs",
-}
+#
+# 名单存在**预算文件**里（`core_behavior` 键），而不是在本脚本里再抄一份：
+# 曾经这里逐个写死路径，文件拆分/改名后名单静默失效（写着已删除的
+# `match_engine.rs` 与已成目录的 `ball_flight.rs`，没有任何机制发现）。
+# 现在由 `check_core_listing_is_live` 断言名单里每条都能命中一个存在的源文件。
+#
+# 该标签只影响失败信息的归类文本；两类文件用同一条预算棘轮。
+
+
+def is_core_behavior(rel_path: str, budget: dict) -> bool:
+    return rel_path in budget.get("core_behavior", [])
+
+
+def check_core_listing_is_live(budget: dict, files: list) -> list:
+    """断言核心行为名单里每条路径都命中存在的源文件。
+
+    没有这条断言，把某个条目写错（或它指向的文件被删除、改名、拆成目录）时，
+    守卫会静默地不再把该处当作核心行为文件，新增行为常数因此少一道拦截。
+    """
+    problems = []
+    listing = budget.get("core_behavior")
+    if not listing:
+        return ["budget declares no core_behavior listing"]
+    available = set(files)
+    for entry in listing:
+        if entry not in available and not any(rel.startswith(entry) for rel in available):
+            problems.append(f"core behaviour entry `{entry}` matches no source file")
+    return problems
 
 FLOAT_RE = re.compile(r"(?<![\w.])\d+\.\d+(?![\w])")
 # 整数阈值：赋值/比较右值中的裸整数，排除类型位宽、数组下标 0/1、位移等。
@@ -284,7 +279,12 @@ def main() -> int:
     measured_tests = measure_tests()
 
     if args.write_budget:
+        # `core_behavior` 是人工维护的名单，重写预算时必须**原样保留**：
+        # 它不由测量得出，丢掉它会让守卫的自我检查（名单必须命中真实文件）
+        # 在下次运行时直接失败，也会把「哪些文件是核心行为」这个判断静默清零。
+        previous = load_budget()
         budget = {
+            "core_behavior": previous.get("core_behavior", []),
             "files": {rel: allowed_score(v) for rel, v in measured.items() if allowed_score(v)},
             "budget_floats": {rel: v["floats"] for rel, v in measured.items() if v["floats"]},
             "test_files": {
@@ -296,6 +296,7 @@ def main() -> int:
         }
         BUDGET_PATH.write_text(json.dumps(budget, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"✅ Wrote ratchet baseline to {BUDGET_PATH.relative_to(ROOT)}")
+        print(f"   core_behavior              = {len(budget['core_behavior'])} 条（保留不自算）")
         print("   files/budget_floats         = 生产代码（排除 #[cfg(test)]）")
         print("   test_files/test_floats     = #[cfg(test)] 段，单独棘轮")
         return 0
@@ -303,6 +304,15 @@ def main() -> int:
     budget = load_budget()
     if not budget.get("files"):
         print("❌ Missing ratchet baseline. Run: python3 scripts/check_inline_constants.py --write-budget")
+        return 1
+
+    listing_problems = check_core_listing_is_live(budget, sorted(measured.keys()))
+    if listing_problems:
+        print("❌ Inline constant guard FAILED — core behaviour listing is stale:")
+        for problem in listing_problems:
+            print(f"   - {problem}")
+        print("   条目指向不存在的文件时，该处不再被当作核心行为文件，")
+        print("   新增行为常数会少一道拦截。请修正 budget 的 core_behavior。")
         return 1
 
     if args.report:
@@ -332,7 +342,7 @@ def main() -> int:
         measured_score = allowed_score(v)
         allowed = budget.get("files", {}).get(rel, 0)
         if measured_score > allowed:
-            kind = "CORE-BEHAVIOR" if rel in CORE_BEHAVIOR_FILES else "file"
+            kind = "CORE-BEHAVIOR" if is_core_behavior(rel, budget) else "file"
             failures.append(
                 f"{rel} ({kind}): {measured_score} > budget {allowed} "
                 f"[floats={v['floats']}, ints={v['int_thresholds']}, "
@@ -427,6 +437,25 @@ def self_test() -> int:
             print("❌ self-test: non-production exclusions are not verifiable:")
             for problem in problems:
                 print(f"   - {problem}")
+            return 1
+        # 核心行为名单必须每条都命中真实源文件；名单指向不存在的位置时必须变红。
+        budget_for_selftest = load_budget()
+        live = check_core_listing_is_live(budget_for_selftest, sorted(src_files()))
+        if live:
+            print("❌ self-test: core behaviour listing does not match real source files:")
+            for problem in live:
+                print(f"   - {problem}")
+            return 1
+        stale = dict(budget_for_selftest)
+        stale["core_behavior"] = ["crates/does-not-exist/src/lib.rs"]
+        stale_problems = check_core_listing_is_live(stale, sorted(src_files()))
+        if len(stale_problems) != 1:
+            print("❌ self-test: stale-entry negative control did not fire")
+            return 1
+        if not is_core_behavior(
+            "crates/engine/src/match_engine/ball_flight/write_entry.rs", budget_for_selftest
+        ):
+            print("❌ self-test: nested core path not recognised")
             return 1
         # 被排除的 crate 必须确实不在被扫描文件列表中。
         scanned = src_files()

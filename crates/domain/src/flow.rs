@@ -127,64 +127,6 @@ impl GameFlowState {
     }
 }
 
-/// 比赛时钟状态（architecture.md §4.3 时钟子结构契约）。
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct MatchClockState {
-    pub quarter: u8,
-    pub game_clock: f32,
-    pub shot_clock: f32,
-    pub current_time: f32,
-}
-
-impl MatchClockState {
-    pub fn new(quarter_seconds: f32, shot_clock_seconds: f32) -> Self {
-        Self {
-            quarter: 1,
-            game_clock: quarter_seconds,
-            shot_clock: shot_clock_seconds,
-            current_time: 0.0,
-        }
-    }
-
-    pub fn advance(&mut self, dt: f32, flow: GameFlowState) {
-        self.current_time += dt;
-        if flow.advances_game_clock() {
-            self.game_clock = (self.game_clock - dt).max(0.0);
-        }
-        if flow.advances_shot_clock() {
-            self.shot_clock = (self.shot_clock - dt).max(0.0);
-        }
-    }
-
-    pub fn reset_shot_clock(&mut self, seconds: f32) {
-        self.shot_clock = seconds;
-    }
-}
-
-/// 比赛比分与犯规状态（architecture.md §4.3 比分子结构契约）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct MatchScoreState {
-    pub home_score: u32,
-    pub away_score: u32,
-    pub home_fouls: u32,
-    pub away_fouls: u32,
-    pub home_timeouts_remaining: u8,
-    pub away_timeouts_remaining: u8,
-}
-
-impl MatchScoreState {
-    pub fn new(timeouts: u8) -> Self {
-        Self {
-            home_score: 0,
-            away_score: 0,
-            home_fouls: 0,
-            away_fouls: 0,
-            home_timeouts_remaining: timeouts,
-            away_timeouts_remaining: timeouts,
-        }
-    }
-}
-
 /// possession 内的阶段。阶段是约束激活和决策目标的边界。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PhaseType {

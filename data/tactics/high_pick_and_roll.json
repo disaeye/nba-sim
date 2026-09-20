@@ -4,49 +4,60 @@
   "spacing_style": "Spread",
   "slots": [
     {
-      "role": "Playmaker",
+      "id": "top",
       "name_zh": "持球发起人",
       "base_offset_x": 28.0,
       "base_offset_y": 25.0,
-      "is_screener": false,
-      "is_corner_spacer": false,
-      "is_wing_relocate": false
+      "requirements": [
+        { "attribute": "BallHandling", "weight": 1.0 },
+        { "attribute": "DecisionIq", "weight": 0.8 },
+        { "attribute": "Passing", "weight": 0.6 }
+      ],
+      "behaviour": "DribbleTop"
     },
     {
-      "role": "CornerSpacer",
+      "id": "strong_corner",
       "name_zh": "强侧底角射手",
       "base_offset_x": 4.0,
       "base_offset_y": 2.5,
-      "is_screener": false,
-      "is_corner_spacer": true,
-      "is_wing_relocate": false
+      "requirements": [
+        { "attribute": "ShootingThree", "weight": 1.0 },
+        { "attribute": "OffBallSense", "weight": 0.3 }
+      ],
+      "behaviour": "SpotUp"
     },
     {
-      "role": "WingCutter",
+      "id": "weak_corner",
       "name_zh": "弱侧翼位拉开",
       "base_offset_x": 4.0,
       "base_offset_y": 47.5,
-      "is_screener": false,
-      "is_corner_spacer": true,
-      "is_wing_relocate": false
+      "requirements": [
+        { "attribute": "ShootingThree", "weight": 1.0 },
+        { "attribute": "OffBallSense", "weight": 0.3 }
+      ],
+      "behaviour": "SpotUp"
     },
     {
-      "role": "CornerSpacer",
+      "id": "weak_wing",
       "name_zh": "弱侧底角拉开",
       "base_offset_x": 20.0,
       "base_offset_y": 6.0,
-      "is_screener": false,
-      "is_corner_spacer": false,
-      "is_wing_relocate": true
+      "requirements": [
+        { "attribute": "ShootingMid", "weight": 0.6 },
+        { "attribute": "OffBallSense", "weight": 0.8 }
+      ],
+      "behaviour": "PerimeterRelocate"
     },
     {
-      "role": "ScreenAndRoll",
+      "id": "screener",
       "name_zh": "高位掩护中锋",
       "base_offset_x": 18.0,
       "base_offset_y": 25.0,
-      "is_screener": true,
-      "is_corner_spacer": false,
-      "is_wing_relocate": false
+      "requirements": [
+        { "attribute": "Strength", "weight": 0.8 },
+        { "attribute": "Finishing", "weight": 0.6 }
+      ],
+      "behaviour": "HighScreenRoll"
     }
   ]
 }

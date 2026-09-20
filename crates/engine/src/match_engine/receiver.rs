@@ -106,7 +106,12 @@ impl MatchEngine {
         // 修正：用**物理所需的制动距离**取代固定裕量，并取两者较大值
         // （保留一个下限，避免低速时数值抖动）。
         let brake_dist = current_speed * current_speed / (2.0 * accel);
-        let stop_margin = self.config.rules.tactics.receive_stop_margin_ft.max(brake_dist);
+        let stop_margin = self
+            .config
+            .rules
+            .tactics
+            .receive_stop_margin_ft
+            .max(brake_dist);
 
         // 已进入制动距离内：站住等球（真实接球动作的语义）。
         if d <= stop_margin {
@@ -177,7 +182,8 @@ impl MatchEngine {
             return frozen_to_pos;
         };
         // 规则开关：噪声为 0 时退化为"精确知道落点"（旧行为，仅用于对照）。
-        let noise_cap = nba_domain::receive_estimate_noise(&self.config.rules, &receiver.attributes);
+        let noise_cap =
+            nba_domain::receive_estimate_noise(&self.config.rules, &receiver.attributes);
         if noise_cap <= f32::EPSILON {
             return frozen_to_pos;
         }
@@ -287,7 +293,11 @@ impl MatchEngine {
         h ^= self.clock.tick_index;
         h = h.wrapping_mul(0x100_0000_01b3);
         // 映射到 [-1, 1] 的二维单位向量（用两个 16 位切片）。
-        let q = self.config.rules.estimate_offset_quantization.max(f32::EPSILON);
+        let q = self
+            .config
+            .rules
+            .estimate_offset_quantization
+            .max(f32::EPSILON);
         let a = ((h & 0xFFFF) as f32 / q) - 1.0;
         let b = (((h >> 16) & 0xFFFF) as f32 / q) - 1.0;
         Vec2::new(a, b).normalize_or_zero()

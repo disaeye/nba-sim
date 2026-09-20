@@ -29,7 +29,52 @@ impl MatchEngine {
             loose_ball_out_of_bounds,
             drive_kickout_action,
             drive_pullup_action,
+            blocked_shot_event,
         } = outcome;
+        // 封盖事实：先把事件入队，后续平新的球态（松球）照常转移。
+        //
+        // 与发球次序无关：封盖本身不终结回合（球仍活，双方争夺松球），
+        // 因此它不进回合总结也不切球权——那由后续的松球掌控路径决定。
+        if let Some(event) = blocked_shot_event {
+            self.journal.current_event = Some("BLOCKED_SHOT".to_string());
+            if let nba_domain::GameEvent::BlockedShot {
+                blocker_id,
+                shooter_id,
+                is_three,
+                ..
+            } = &event
+            {
+                // ## 出手数在释放时刻已经发生，因此要在这里记账
+                //
+                // 出手数的自增点在“到达篮筐”分支；封盖把球打向别处，
+                // 那一分支永远不会执行。若不在此补记，被封的出手会同时
+                // 出现在事件流里（`SHOT_RELEASE`）而消失在箱体里，
+                // 使“箱体逐字段与事件流对平”的守卫失败。
+                //
+                // 口径真实：真实 NBA 统计中，被封的出手**计为**一次出手。
+                if *is_three {
+                    self.ledger.box_score.fg3_attempts += 1;
+                } else {
+                    self.ledger.box_score.fg2_attempts += 1;
+                }
+                let display = self
+                    .systems
+                    .physics
+                    .get_player(blocker_id)
+                    .map(|p| format!("{}号", p.jersey))
+                    .unwrap_or_else(|| blocker_id.clone());
+                self.journal.current_callout = Some(format!("{} 拍下圆柱体，直接封盖！", display));
+                self.journal.current_intensity = Some("Climax".to_string());
+                // 被盖的出手同样是一次出手结果：出手者的连中/连铁必须被记录。
+                // `record_shot` 是连中/连铁的唯一入口，`MoraleState::HotHand`
+                // 的可达性依赖它；若跳过被封的出手，那条路径就会在士气
+                // 状态机里凭空消失。
+                if let Some(state) = self.observations.modulation.get_mut(shooter_id) {
+                    state.record_shot(false);
+                }
+            }
+            self.journal.pending_events.push(event);
+        }
         // 松球出界：显式状态转移（球权交给对方并发球）。
         //
         // 注意：这里**不能**合成 `GameEvent::BoundaryCross`。该事件的语义是

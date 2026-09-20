@@ -112,7 +112,7 @@ pub(super) fn make_motion_proposals(
                 // 因此接球人**无条件**向目标收敛，跳过转身减速分支。
                 seek_target(distance)
             } else if player.turn_decel_timer > 0.0 {
-                current_vel * rules.turn_decel_retention
+                current_vel * nba_domain::effective_turn_decel_retention(rules, &player.attributes)
             } else {
                 seek_target(distance)
             };

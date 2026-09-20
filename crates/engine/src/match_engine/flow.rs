@@ -7,9 +7,9 @@
 //! `set_game_flow` 在进入活球前校验「场上恰好 10 人」的因果前置条件：人数不足
 //! 直接拒绝迁移并登记，避免出现「活球但没有合法阵容」的不可解释状态。
 
-use nba_domain::{GameEvent, GameFlowState, GameRules, Possession, SubPhase};
 use nba_decision::constraint::{ConstraintContext, PhaseType};
 use nba_decision::modulation::CoachStrategy;
+use nba_domain::{GameEvent, GameFlowState, GameRules, Possession, SubPhase};
 use nba_physics::ballistics::BallTrajectoryKind;
 
 use super::{MatchEngine, ScopeBoundary};
@@ -111,7 +111,23 @@ impl MatchEngine {
             Possession::Away => self.config.home_defensive_tactic,
         };
         match nba_domain::DefenseRules::for_scheme(defending_side.id()) {
-            Some(d) => self.config.rules.tactics.defense = d,
+            Some(d) => {
+                // ## 方案只覆写它自己声明的字段，不重置整组
+                //
+                // `schemes.json` 的档案只声明 `sag_multiplier` /
+                // `on_ball_gap_multiplier` / `help_priority` /
+                // `switch_aggressiveness` / `screen_defense` 四项。
+                // 直接 `= d` 会把 `potential_field` 一起重置为
+                // `PotentialFieldRules::default()`——而那组系数是 `--rules`
+                // 可覆盖的行为参数。实测后果：把 `k_threat_base` 与
+                // `low_man_threat_gain` 归零后，`ROTATE_RIM_HELP` 的帧数
+                // 逐位不变（1084/2149 完全相同），即校准通道被静默屏蔽。
+                let tuned = self.config.rules.tactics.defense.potential_field;
+                self.config.rules.tactics.defense = nba_domain::DefenseRules {
+                    potential_field: tuned,
+                    ..d
+                };
+            }
             None => self
                 .journal
                 .current_enforcements
@@ -122,13 +138,12 @@ impl MatchEngine {
     /// Re-evaluate coach strategy at every possession boundary.
     pub(crate) fn update_coach_strategy(&mut self) {
         let score_diff = self.ledger.home_score as i32 - self.ledger.away_score as i32;
-        self.systems.coach =
-            CoachStrategy::evaluate(
-                score_diff,
-                self.clock.period,
-                self.clock.game_clock,
-                &self.config.rules,
-            );
+        self.systems.coach = CoachStrategy::evaluate(
+            score_diff,
+            self.clock.period,
+            self.clock.game_clock,
+            &self.config.rules,
+        );
     }
     pub fn set_game_flow(&mut self, flow: GameFlowState) {
         if self.flow.game_flow == flow {
@@ -183,10 +198,12 @@ impl MatchEngine {
         }
         let next_phase = self.phase_type();
         if previous != next_phase {
-            self.journal.pending_events.push(GameEvent::PhaseTransition {
-                from: previous,
-                to: next_phase,
-            });
+            self.journal
+                .pending_events
+                .push(GameEvent::PhaseTransition {
+                    from: previous,
+                    to: next_phase,
+                });
         }
     }
 
@@ -202,9 +219,8 @@ impl MatchEngine {
     ) {
         let start_clock = self.possession_ctx.current_possession_start_clock;
         let end_clock = self.clock.game_clock;
-        let duration_seconds = (self.clock.current_time
-            - self.possession_ctx.current_possession_start_time)
-            .max(0.0);
+        let duration_seconds =
+            (self.clock.current_time - self.possession_ctx.current_possession_start_time).max(0.0);
         let offense_team = match self.flow.possession {
             Possession::Home => "home".to_string(),
             Possession::Away => "away".to_string(),
@@ -306,9 +322,7 @@ impl MatchEngine {
             _ => ScopeBoundary::Possessions,
         };
         self.flow.simulation_complete = match self.flow.scope_boundary {
-            ScopeBoundary::Possessions => {
-                self.flow.completed_possessions >= target_possessions
-            }
+            ScopeBoundary::Possessions => self.flow.completed_possessions >= target_possessions,
             ScopeBoundary::Period { .. } | ScopeBoundary::Game => false,
         };
         if self.flow.simulation_complete {
@@ -332,7 +346,12 @@ impl MatchEngine {
     /// 会使 `clutch_bias` 在此处与本分支各计一次。
     pub(crate) fn morale_bias_for(&self, player_id: &str) -> f32 {
         let policy = &self.config.rules.modulation;
-        let base_bias = match self.observations.modulation.get(player_id).map(|m| m.morale) {
+        let base_bias = match self
+            .observations
+            .modulation
+            .get(player_id)
+            .map(|m| m.morale)
+        {
             Some(nba_decision::modulation::MoraleState::HotHand) => policy.hot_hand_bias,
             Some(nba_decision::modulation::MoraleState::Normal) => 0.0,
             Some(nba_decision::modulation::MoraleState::Frustrated) => policy.frustrated_bias,

@@ -29,9 +29,11 @@ impl MatchEngine {
                 if self.flow.game_flow == GameFlowState::DeadBall {
                     // 发球阶段使用专用（更短）决策间隔：发球受 5 秒规则约束，
                     // 套用阵地节奏会与之竞速（实测 37% 发球被判五秒违例）。
-                    if matches!(self.ball.ball_state, BallTrajectoryKind::InboundReady { .. })
-                        && current_t - self.clock.last_decision_time
-                            >= self.config.rules.inbound_decision_interval_seconds
+                    if matches!(
+                        self.ball.ball_state,
+                        BallTrajectoryKind::InboundReady { .. }
+                    ) && current_t - self.clock.last_decision_time
+                        >= self.config.rules.inbound_decision_interval_seconds
                     {
                         let carrier = self.carrier_id();
                         let stamina = self
@@ -73,7 +75,8 @@ impl MatchEngine {
                         }
                     };
                     if in_backcourt
-                        || self.clock.sub_phase_timer >= self.config.rules.tactical_initiation_seconds
+                        || self.clock.sub_phase_timer
+                            >= self.config.rules.tactical_initiation_seconds
                     {
                         self.transition_phase(SubPhase::ActionExecution);
                         self.set_game_flow(GameFlowState::LiveBall);

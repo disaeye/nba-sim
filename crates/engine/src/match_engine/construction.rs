@@ -30,18 +30,18 @@ impl MatchEngine {
         // 初始处理球人由**能力**派生（round-11 Step4b），而不是 `starters[0]`。
         //
         // `starters[0]` 是数组位置，用它当身份即"顺序即身份"（P-2）。
-        // 选择口径与 `new_possession_pg` 一致：处理球三项能力加权，确定性排序。
+        // 选择口径与 `new_possession_pg` 一致：按**档案声明的持球槽位需求**打分，
+        // 确定性排序。
         let initial_handler = |team: &nba_domain::TeamData, lineup: &LineupConfig| -> String {
-            let policy = &rules.tactics;
+            let spec = nba_domain::TacticalSetSpec::builtin(&lineup.offense_tactic)
+                .expect("lineup offense tactic was validated by MatchSetup::validate");
             let mut ids: Vec<(f32, String)> = team
                 .players
                 .iter()
                 .filter(|p| lineup.starters.contains(&p.id))
                 .map(|p| {
-                    let score = p.attributes.ball_handling
-                        * policy.slot_handler_ball_handling_weight
-                        + p.attributes.passing * policy.slot_handler_passing_weight
-                        + p.attributes.decision_iq * policy.slot_handler_decision_iq_weight;
+                    let score =
+                        nba_decision::tactics::TacticalPlanner::handler_score(&spec, &p.attributes);
                     (score, p.id.clone())
                 })
                 .collect();
@@ -195,12 +195,8 @@ impl MatchEngine {
                 decision: DecisionSystem::with_weights(rules.decision.clone()),
                 coach: CoachStrategy::default(),
                 rng: ChaCha8Rng::seed_from_u64(seed),
-                world: crate::world::MatchWorld::new_initial(rules.clone()),
             },
-            observations: super::state::RuntimeObservations::new(
-                HashMap::new(),
-                modulation,
-            ),
+            observations: super::state::RuntimeObservations::new(HashMap::new(), modulation),
             journal: {
                 let mut journal = super::state::EventJournal::new();
                 if rules.tip_off_duration_seconds > 0.0 {
@@ -231,9 +227,8 @@ impl MatchEngine {
             },
             ledger: super::state::ScoreLedger::new(),
             possession_ctx: {
-                let mut ctx = super::state::PossessionContext::new(
-                    rules.league.period_duration_seconds,
-                );
+                let mut ctx =
+                    super::state::PossessionContext::new(rules.league.period_duration_seconds);
                 // 初始回合的失误责任人预先指向开局持球人（与改动前一致）。
                 ctx.current_possession_turnover_player = Some(initial_carrier_id);
                 ctx

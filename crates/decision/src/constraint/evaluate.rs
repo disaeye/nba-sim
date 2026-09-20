@@ -11,10 +11,7 @@
 use super::{CandidateAction, ConstraintContext, ConstraintResult};
 use nba_domain::flow::PhaseType;
 
-pub(super) fn pass_action(
-    _ctx: &ConstraintContext,
-    _action: &CandidateAction,
-) -> ConstraintResult {
+pub(super) fn pass_action(_ctx: &ConstraintContext, _action: &CandidateAction) -> ConstraintResult {
     ConstraintResult::pass()
 }
 pub(super) fn pass_world(_ctx: &ConstraintContext) -> ConstraintResult {

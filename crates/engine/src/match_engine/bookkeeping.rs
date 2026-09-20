@@ -34,8 +34,7 @@ impl MatchEngine {
         self.systems.physics.set_ball_holder(active_carrier);
 
         let player_ids: Vec<String> = {
-            let mut ids: Vec<String> =
-                self.systems.physics.get_players().keys().cloned().collect();
+            let mut ids: Vec<String> = self.systems.physics.get_players().keys().cloned().collect();
             ids.sort();
             ids
         };

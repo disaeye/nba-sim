@@ -28,9 +28,9 @@ use nba_physics::movement::PhysicsWorld;
 
 use super::types::MatchBoxScore;
 
-/// 内部子系统与外部依赖：物理后端、决策管线、教练策略、随机源与镜像世界。
+/// 内部子系统与外部依赖：物理后端、决策管线、教练策略与随机源。
 ///
-/// 这五个字段都是构造时确定、运行期不改绑定的对象；它们的方法会被调用，但字段
+/// 这四个字段都是构造时确定、运行期不改绑定的对象；它们的方法会被调用，但字段
 /// 本身不重新赋值（`rng` 与 `physics` 例外：前者在决策时换出再换回以避开借用
 /// 冲突，后者内部可变）。放在一起使「引擎依赖了哪些子系统」一眼可见。
 pub(crate) struct Systems {
@@ -38,10 +38,6 @@ pub(crate) struct Systems {
     pub(crate) decision: DecisionSystem,
     pub(crate) coach: CoachStrategy,
     pub(crate) rng: ChaCha8Rng,
-    /// 纯数据 ECS 世界实体核 (ADR-011)，收敛引擎核心物理、时钟与账本状态。
-    ///
-    /// 字段私有：外部只能经 `world()` 读取（D7 / gap.md §20.1 的零 `pub` 字段要求）。
-    pub(crate) world: crate::world::MatchWorld,
 }
 
 /// 运行期观测：本 tick 的动作窗口、决策追踪与空间/接触评估。

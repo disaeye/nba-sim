@@ -36,46 +36,6 @@ pub fn drive_finishing_delta(rules: &GameRules, attributes: &PlayerAttributes) -
     (attributes.finishing.max(rules.attribute_response_floor) - 0.5) * weight * 2.0
 }
 
-/// 防守干扰有效系数（attributes.md §4 / T5）：外线/内线防守属性加权调制干扰惩罚。
-pub fn effective_defense_factor(
-    rules: &GameRules,
-    attributes: &PlayerAttributes,
-    is_interior: bool,
-) -> f32 {
-    let raw = if is_interior {
-        attributes.defense_interior
-    } else {
-        attributes.defense_perimeter
-    };
-    raw.max(rules.attribute_response_floor)
-}
-
-/// 中距离投篮命中期望加成（D19）。
-pub fn effective_shooting_mid_factor(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
-    let raw = attributes.shooting_mid.max(rules.attribute_response_floor);
-    0.35 + raw * 0.25
-}
-
-/// 传球技能有效加成（D19）。
-pub fn effective_passing_skill_factor(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
-    let raw = attributes.passing.max(rules.attribute_response_floor);
-    0.5 + raw * 0.5
-}
-
-/// 掩护/卡位力量对抗有效值（D19）。
-pub fn effective_boxout_strength(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
-    let raw = attributes.strength.max(rules.attribute_response_floor);
-    0.6 + raw * 0.4
-}
-
-/// 决策感知与风险规避加成（attributes.md §4 / T5 / M9）：根据球员 basketball_iq / discipline
-/// 和规则通道内的技能权重计算软约束惩罚与风险过滤修正量。高智商球员更少做出高风险愚蠢动作。
-pub fn effective_decision_risk_tolerance(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
-    let mental = attributes.decision_iq.max(rules.attribute_response_floor);
-    // mental 越高（0.0 ~ 1.0），风险惩罚敏感度越高，更偏好稳妥路线
-    1.0 + (mental - 0.5) * 0.5
-}
-
 /// 决策风险容忍度有效值 (D27)。
 ///
 /// 曲线从 `rules.capability` 读取（charter C1）：`base - iq * gain`，
@@ -139,6 +99,33 @@ pub fn effective_transition_leakout_chance(
     let spd = attributes.speed.max(rules.attribute_response_floor);
     let curve = &rules.capability;
     curve.transition_leakout_base + spd * curve.transition_leakout_gain
+}
+
+/// 变向减速后保留的速度比例（`attributes.md` §2.2 的 `agility` 消费链）。
+///
+/// ## 曲线
+///
+/// ```text
+/// retention = clamp(turn_decel_retention + (agility - 0.5) × gain, 下限, 上限)
+/// ```
+///
+/// 以 `TacticalRules.turn_decel_retention` 为**中性锚点**：`agility = 0.5`
+/// （联盟中位）时返回值逐位等于全局基准，因此中位敏捷的球员行为不变；
+/// 高于中位者转向损失更少，低于中位者损失更多。
+///
+/// 物理层不再直读 `rules.turn_decel_retention`，而是经本函数（attributes.md §4
+/// 禁止子系统内散落属性乘法）。
+pub fn effective_turn_decel_retention(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
+    let agility = attributes
+        .agility
+        .max(rules.capability.turn_decel_retention_attribute_floor);
+    let anchor = 0.5;
+    let retention = rules.turn_decel_retention
+        + (agility - anchor) * rules.capability.turn_decel_retention_gain;
+    retention.clamp(
+        rules.turn_decel_retention_floor,
+        rules.turn_decel_retention_ceiling,
+    )
 }
 
 /// 接球半径（ft）：球到达时接球人能控制住的空间范围。
@@ -287,28 +274,15 @@ mod tests {
     }
 
     #[test]
-    fn defense_factor_differentiates_perimeter_and_interior() {
-        let rules = GameRules::default();
-        let mut a = attrs(0.5, 0.5);
-        a.defense_perimeter = 0.85;
-        a.defense_interior = 0.45;
-        assert!(
-            effective_defense_factor(&rules, &a, false)
-                > effective_defense_factor(&rules, &a, true)
-        );
-    }
-
-    #[test]
-    fn decision_risk_tolerance_is_monotonic_with_mental_attributes() {
+    fn risk_tolerance_is_monotonic_with_mental_attributes() {
+        // 高 `decision_iq` → 更低的风险容忍（曲线是 `base - iq × gain`）：
+        // 高智商球员更少做高风险选择，这是该维度的法定语义。
         let rules = GameRules::default();
         let mut low = attrs(0.5, 0.5);
         low.decision_iq = 0.2;
         let mut high = attrs(0.5, 0.5);
         high.decision_iq = 0.9;
-        assert!(
-            effective_decision_risk_tolerance(&rules, &high)
-                > effective_decision_risk_tolerance(&rules, &low)
-        );
+        assert!(effective_risk_tolerance(&rules, &high) < effective_risk_tolerance(&rules, &low));
     }
 
     #[test]
