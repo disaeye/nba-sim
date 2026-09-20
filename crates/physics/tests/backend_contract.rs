@@ -152,7 +152,7 @@ fn shot_samples_stay_within_configured_speed_envelope() {
         is_made: true,
         is_three: true,
         peak_z,
-        // 本契约测试只关心弹道采样，不涉及犯规事实。
+        // 本测试只关心弹道采样，不涉及犯规事实。
         fouled: false,
         fouler_id: None,
     };

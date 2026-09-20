@@ -169,17 +169,17 @@ impl MatchEngine {
                         //
                         // 本条之前无条件把子阶段设为 `Initiation`。当犯规发生时
                         // 球已在飞行（`ball_state` 为 `Shot`/`Pass`），则该重置会在
-                        // 球落地前把子阶段拉回 `Initiation`，之后弹道裁决再执行
+                        // 球触地前把子阶段拉回 `Initiation`，之后弹道裁决再执行
                         // `Initiation -> FlightAndRebound`——这是评判器认为非法的迁移
                         // （`nba.v2` 的合法表里 `Initiation` 只允许到
                         // `ActionExecution`/`DeadBallReset`/`ShotAttempt`）。
                         //
                         // 实测（seed 12）：tick 51056 出手 → 51060 非投篮犯规
                         // （子阶段被设为 `Initiation`，而 `ball_status` 仍为 `SHOT`）
-                        // → 51080 球落地发 `SHOT_MISS`，产生 1 条 Hard
+                        // → 51080 球触地发 `SHOT_MISS`，产生 1 条 Hard
                         // `PHASE_TRANSITION_LEGALITY`。
                         //
-                        // 飞行的球必须先按自己的裁决落地（续到 `ShotAttempt`/
+                        // 飞行的球必须先按自己的裁决触地（续到 `ShotAttempt`/
                         // `FlightAndRebound`），提前重置子阶段会伪造一个不存在的
                         // 阶段序列；因此仅在球不在飞行时重置子阶段，
                         // 否则保留原子阶段，只重置进攻时间。

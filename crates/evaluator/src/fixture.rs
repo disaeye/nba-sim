@@ -29,14 +29,14 @@ pub struct ReferenceDistributions {
     pub league: String,
     pub court_width_ft: f32,
     pub court_height_ft: f32,
-    /// 传球走廊半径（ft）——与 GameRules.pass_corridor_radius_ft 对齐。
+    /// 传球走廊半径（ft）——取自 GameRules.pass_corridor_radius_ft。
     pub pass_corridor_radius_ft: f32,
     /// 进攻篮板后的进攻时钟重置（秒）。回合时长上界的自变量：每次进攻篮板
     /// 重置时钟，因此 n 个进攻篮板的回合会多出 n-1 个窗口（gap.md §15.5
-    /// 数据契约字段，不得在评判代码里硬编码）。
+    /// 数据规格字段，不得在评判代码里硬编码）。
     pub offensive_rebound_shot_clock_seconds: f32,
     /// 回合时长上界的程序开销容忍量（秒）：死球、罚球、发球等非进攻时钟
-    /// 时间。属数据契约，随联赛标定。
+    /// 时间。属数据规格，随联赛标定。
     pub duration_tolerance_seconds: f32,
     /// 回合时长带（秒），按结果类。
     pub duration_bands: OutcomeBands,

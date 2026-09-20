@@ -486,16 +486,16 @@ impl MatchEngine {
     /// （真实 0.245），每次不中直接换手。
     ///
     /// 设计（用已有规则字段，不新增内联常数）：
-    /// - 每队取距落点最近的若干名在场上球员作为争抢者；
-    /// - 指派目标点 = 落点，但按 `min_player_separation_ft` 绕开同队
+    /// - 每队取距球的落点最近的若干名在场上球员作为争抢者；
+    /// - 指派目标点 = 球的落点，但按 `min_player_separation_ft` 绕开同队
     ///   已派球员，避免互相碰撞（分离约束在物理层仍会生效）；
     /// - 攻方按 `offensive_rebound` 属性加权决定谁去冲抢（属能力通道）；
     /// - 守方速度用其 `max_speed_ftps`，攻方用同一上限（不人为区分快慢，
     ///   因为“谁抢到”由 `resolve_rebound` 的概率决定，几何只负责让双方
-    ///   真的到达落点附近）。
+    ///   真的到达球的落点附近）。
     ///
     /// 该函数只指派运动目标，不裁定归属——归属仍由 `resolve_rebound`
-    /// 在落地时刻裁定（概率在事件时刻裁定、事实随后回放）。
+    /// 在球触地时裁定（概率在事件时刻裁定、事实随后回放）。
     pub(crate) fn assign_rebound_pursuit(&mut self, landing: Vec2, current_t: f32) {
         let offensive_team = match self.flow.possession {
             Possession::Home => "home",
@@ -505,7 +505,7 @@ impl MatchEngine {
             Possession::Home => "away",
             Possession::Away => "home",
         };
-        // 落点可站立化（与其它目标点同口径，避免边界 clamp 刷屏）。
+        // 落点可站立化（此处「落点」指球的触地点，篮球术语），
         let landing = self
             .config
             .rules
@@ -514,7 +514,7 @@ impl MatchEngine {
 
         for team in [offensive_team, defensive_team] {
             let is_offense = team == offensive_team;
-            // 候选：在场上球员，按（攻方：篮板属性降序 / 守方：距落点升序）
+            // 候选：在场上球员，按（攻方：篮板属性降序 / 守方：距球落点升序）
             // 排序后取前若干名。攻方用属性是为了让 `offensive_rebound` 真正
             // 决定“谁去冲抢”（能力→行为链），而非全员无差别跑动。
             let mut squad: Vec<(String, Vec2, f32, String, String, f32)> = self
@@ -552,7 +552,7 @@ impl MatchEngine {
                         .then_with(|| a.0.cmp(&b.0))
                 });
             }
-            // 派若干名争抢：真实篮球里不是全队都冲抢，且全员挤向落点
+            // 派若干名争抢：真实篮球里不是全队都冲抢，且全员挤向球的落点
             // 会立刻触发 `min_player_separation_ft` 碰撞消解（把所有人推离）。
             // 人数经 GameRules 通道（charter C1），不内联在引擎里。
             let quota = if is_offense {
@@ -564,7 +564,7 @@ impl MatchEngine {
             for (idx, (id, pos, speed, slot, morale, _attr)) in
                 squad.into_iter().take(quota).enumerate()
             {
-                // 同队错开：以落点为圆心，按序号横向排开一个分离距离，
+                // 同队错开：以球的落点为圆心，按序号横向排开一个分离距离，
                 // 避免两名同队球员被派到同一点后互推。
                 let dir = (pos - landing).normalize_or_zero();
                 let perp = if dir.length_squared().abs() > f32::EPSILON {

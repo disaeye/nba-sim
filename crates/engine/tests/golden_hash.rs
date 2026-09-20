@@ -126,7 +126,7 @@ fn golden_baseline_seed42() {
 /// 哈希保持绿色，而 CI 看不出它没在守卫。
 ///
 /// 这类缺陷的危险在于**失败方向是绿而不是红**：覆盖丢失不会报警。
-/// 所以修法不是把窗口调到「刚好覆盖」，而是让覆盖本身成为可断言属性：
+/// 所以修法：让覆盖本身成为可断言属性，把窗口调到「刚好覆盖」无济于事：
 /// 一旦窗口内缺少某类得分行为，本测试直接失败，提示需要扩大窗口。
 #[test]
 fn golden_window_covers_scoring_behaviour() {
@@ -214,11 +214,11 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //   v5 0xc2210e16619f2e96 — 2026-08-31 G3 阶段门推进
 //   v6 0x09f38b3b705ce31a — 2026-08-31 L2 PossessionSummary 全链路事件流因果语义与回合总结
 //   v7 0xcebe206e784ae273 — 2026-08-31 修复得分分支中重复 complete_possession 自增问题
-//   v8 0x248df313adaf4939 — 2026-08-31 G4 终态阶段门（全场总分 252 分，每场 202 回合，回合时长 16.0s，完美对齐 NBA 现实）
+//   v8 0x248df313adaf4939 — 2026-08-31 G4 终态阶段门（全场总分 252 分，每场 202 回合，回合时长 16.0s，接近 NBA 现实）
 //   v9 0x2f4b2fa3c9d81e57 — 2026-09-02 GAP 修复（M8/M9/M2，见 status §8.3）
 //   v10 0x1275cccf4a8f3f0e — 2026-09-02 GAP 复审补修：领域转换表补齐违例→发球
 //     程序边（Pass/LooseBall/ControlTransfer/RimRebound→InboundTransfer，
-//     修复 seed 2/4 死球楔死导致的比赛无法完赛）；替补席界外 body 不再
+//     修复 seed 2/4 死球停滞导致的比赛无法完赛）；替补席界外 body 不再
 //     产生伪造 BoundaryCross（每 tick 6 条 OUT_OF_BOUNDS 污染）；Flagged
 //     咨询性发现不再触发 RuleViolation 强制项。均为设计内行为修复。
 // v15 0x3316f6c9d9051602 - 2026-09-03 传球提前量外推校准与突破终结记录补齐（Realism Index >= 0.92）
@@ -226,14 +226,14 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 // v17 0x2568813419a51146 - 2026-09-03 第一性原理公理守卫（连续性、冲量溯源、因果门禁）、真实罚球物理与跳球争顶
 // v18 0x7bda4db4e5e3f239 - 2026-09-03 中圈真实跳球阵型落位(双方中锋中圈对峙、外围放射状卡位)与物理拍球弹道
 // v19 0x8d8c14e0961b783f - 2026-09-04 修复发球人未到界外即提前生成传球的空飘缺陷，建立真实就位与持球判定闭环
-// v20 0x76b89910652c44cf - 2026-09-04 统一边界容差与出界判罚语义闭环，消灭死球死锁回归
+// v20 0x76b89910652c44cf - 2026-09-04 统一边界容差与出界判罚语义闭环，消灭死球停滞回归
 // v21 0x91419840ef413b0c - 2026-09-04 发球落位持球因果闭环、被阻截转活球、失误类型精确溯源
 // v22 0x688f76c83ad7ead2 - 2026-09-04 真实篮板冲抢与卡位、触达有效范围物理拦截、传球手部锚定零跳变
 // v23 0x2370512ecdf7e6f4 - 2026-09-05 真实运球动力学与球体阴影视觉增强（Dribble Bounce Kinematics + Dynamic Shadow）
 // v24 0x58f092e69d840430 - 2026-09-05 跳球事件单次发射（消除持续 37 tick 的重复事件轰炸）与语义化事件流
 // v25 0xbea84d43c5695873 - 2026-09-05 APF人造势能场多体动力学转向、防守球人筐外心三角、空间拥挤效用惩罚
 // v26 0x7da066b2809fc440 - 2026-09-05 真实跳球LooseBall点拍飞行争夺、彻底消除必中假传球与回合总结描述残留
-// v27 0x4ae5950e326e7d86 - 2026-09-05 真实跳球规则落地：禁止跳球员落地前自抓球、外圈8人真实争夺地板球
+// v27 0x4ae5950e326e7d86 - 2026-09-05 真实跳球规则实施：禁止跳球员触地前自抓球、外圈8人真实争夺地板球
 // v28 0x1a9851edeeab4af8 - 2026-09-05 严格落实真实跳球红线：点拍后进入真实重力抛物线自由球，跳球员受滞空约束，由外围8人（H_1等）真实冲刺抢球
 // v29 0xfcb10465ef83e7e8 - 2026-09-05 彻底铲除 H_5/A_5 硬编码残留：跳球双方由场上真实摸高上限(height_cm + vertical)纯函数动态选拔
 // v35 0x6fa2f7fedc7ff542 - 2026-09-06 彻底铲除接球点 snap 瞬间位移，全量 24 动作原语闭环，全量种子 4000 ticks 零违规
@@ -242,7 +242,7 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 // v38 0x8ce38a9678a68ca9 - 2026-09-10 F1 授权状态与时钟修正：罚球期间球权威态收敛为 Dead（消除 BALL_WITH_HOLDER），后场计时在持球越中线时真实重置（消除 EIGHT_SECOND_BACKCOURT 误判）
 // v39 0x1dcdf8f03b2c0c4f - 2026-09-10 F1.3 发球显式 placement：发球员允许站界外发球点，消除 DeadBall 活锁（full scope 永不终场）与 PLAYER_SPEED/BALL_WITH_HOLDER 伪造违反；placement 由 sync_ball_holder 单一机制产生 PlacementApplied 事实
 // v40 0x4d43f93c9650517d - 2026-09-10 F1.3b/F6.2 消除剩余三类 DeadBall 活锁（分离投影推回发球员、发球员为替补、旧状态未改派），并引入有界流模式（facts/summary 默认、frames 显式）与磁盘/字节预算
-// v41 0x357c52254bed731d - 2026-09-10 F1.3c 发球赴界外改为显式离散 placement（消除被钉在边线的防守者造成的几何死锁），placement 回场选择无重叠落点；CLI 按 quality.md 契约区分 Hard（阻断）与 Soft（不阻断）
+// v41 0x357c52254bed731d - 2026-09-10 F1.3c 发球赴界外改为显式离散 placement（消除被固定在边线的防守者造成的几何僵局），placement 回场选择无重叠接球点；CLI 按 quality.md 规定区分 Hard（阻断）与 Soft（不阻断）
 // v42 0x74032b10dae43034 - 2026-09-11 dev 方案 D3.1 命中模型校准 + 边界事实边沿化：
 //   (a) spacing_bonus 三项权重和由 1.0 降至 0.16（空位时不再直接叠加近 +1.0 命中率）；
 //       shot_contest_sensitivity 0.22→0.32（干扰惩罚分化）。8 seed full 实测：
@@ -299,7 +299,7 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       字段声明 + 2 处赋值 + 2 处 `name_zh()`（生成展示字符串）。实测 6 种方案
 //       各跑一场全场模拟，逐字节相同（ticks=84029、score=96081、行为哈希全为
 //       `0x3ba37e7fa9e5ec7d`），包括 2-3 联防。违反 gap.md §21 第 2 条标准
-//       （「它会打篮球，而不是播放战术动画」）。
+//       （「它会打篮球，超出播放战术动画的水准」）。
 //   (b) 修复：新增 `DefenseRules`（sag_multiplier / on_ball_gap_multiplier /
 //       help_priority / switch_aggressiveness），按方案 id 在
 //       `DefenseRules::for_scheme` 实例化，经 GameRules 通道进入防守目标点生成
@@ -308,8 +308,8 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //   (c) **中性性证明**（本冻结的授权依据）：默认值 sag=1.0 / gap=1.0 /
 //       help_priority=0.5 时**逐位复原**历史行为——把双方防守方案都置为
 //       `def_man_conservative`（中性档案）后 seed42×2000 的哈希为
-//       `0x97c7de28a95cb3d5`，与 v48 完全相同。因此本次漂移**不是**
-//       RNG 错位或未授权行为变化，而是「默认阵容使用的 drop_coverage /
+//       `0x97c7de28a95cb3d5`，与 v48 完全相同。因此本次漂移的原因是
+//       「默认阵容使用的 drop_coverage /
 //       man_conservative 方案开始真实生效」。
 //   (d) 证据：seed=0..7 full 的 L1 violations 仍为 0；`defense_effect.rs`
 //       两条新门通过（防守几何 spread > 0.25ft；zone/drop 比 man 更收缩；
@@ -471,7 +471,7 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       FT 不中→地板球→防守收下→turnover_player_id=null）。修复：
 //       RimRebound→LooseBall 时登记 DefensiveRebound 源，防守方收下
 //       按防守篮板归因到收球人；进攻方收下则继续回合（前场篮板）。
-//   (c) 回合时长容差 2.0→6.0（fixture nba.v2 数据契约）：合法回合 =
+//   (c) 回合时长容差 2.0→6.0（fixture nba.v2 数据规格）：合法回合 =
 //       发球准备(~2.6s 死球) + 24s + 出手飞行 + 篮板 + ORB 14s + 终结飞行
 //       ≈ 43.6s；原容差 2.0 只覆盖飞行、不覆盖回合开始的死球准备，
 //       把 seed 7 的合法回合（5 传 2 突破 ORB 后得分，42.4s）误判为 Hard。
@@ -546,13 +546,13 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       （真实每场约 16 次：无球犯规/进攻犯规/卡位犯规），已登记为
 //       后续任务；本提交不调基准去凑带。
 // v63 0x4bcbbcf59acde717 - 2026-09-16 D15 carrier_idx 解耦与球态归一（ADR-010）
-// v64 0x01885463019631e7 - 2026-09-16 D17 防守方案责任链落地：
+// v64 0x01885463019631e7 - 2026-09-16 D17 防守方案责任链实施：
 //   (a) 扩展 data/defense/schemes.json 为 schema_version 2，补充 screen_defense 参数集
 //       （drop_depth_ft, hedge_distance_ft, switch_trigger_distance_ft）；
 //   (b) 在 decision/tactics.rs 中接通 DropCoverage、SwitchAssignment、HedgeAndRecover 责任链；
 //   (c) 主队默认方案 def_drop_coverage 沉退动作真实生效，统计保持在带（total_p50=212.0, 3P%=37.3）；
 //   (d) 跨种子不变量测试 possession_invariants_hold_across_seeds 零违规。
-// v65 0xe3f98ca371a1563f - 2026-09-17 核心引擎三大真落地手术：
+// v65 0xe3f98ca371a1563f - 2026-09-17 核心引擎三大深度手术：
 //   (a) 连续势能场动力学与弱侧协防涌现：在 potential_field.rs 中构建势能场梯度积分，
 //       弱侧 Low-man 护筐 (ROTATE_RIM_HELP) 与 High-man 补位 (X_OUT_CLOSEOUT) 自发涌现；
 //   (b) 规则与能力因果闭环：在 resolve_rebound 消费卡位加成与力量对抗，在 resolve_pass_interception

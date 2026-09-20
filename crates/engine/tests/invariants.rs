@@ -5,7 +5,7 @@
 //! - 连续的帧投影必须满足速度与间距底线（显式 placement 除外）；
 //! - 自定义几何下越界不得发生；
 //! - 子阶段迁移必须是 `nba.v2` 合法性表允许的边；
-//! - 曾触发楔死的种子必须完赛（不完赛的模拟连被检测的资格都没有）。
+//! - 曾触发停滞的种子必须完赛（不完赛的模拟连被检测的资格都没有）。
 //!
 //! 对应 `docs/quality.md` §1.1（L1 检测网）与 `docs/dev/gap.md` §8.2。
 
@@ -46,7 +46,7 @@ fn axiom_fuzzing_multi_seed_long_run() {
 ///
 /// 根因（2026-09-02 GAP 复审）：违例判罚在球处于 `Pass`/`LooseBall`/
 /// `ControlTransfer` 等非持球状态时触发 `start_inbound_transition`，而领域
-/// 转换表缺少这些状态到 `InboundTransfer` 的合法边；写入口拒绝后引擎楔死在
+/// 转换表缺少这些状态到 `InboundTransfer` 的合法边；写入口拒绝后引擎停滞在
 /// 「DeadBall + Held」无出口状态——比赛永远无法完赛（seed 2 的 CLI 流曾因此
 /// 膨胀至 6.8GB 直到磁盘耗尽）。
 #[test]
@@ -55,7 +55,7 @@ fn full_game_completes_on_formerly_wedged_seeds() {
         let mut engine = MatchEngine::new(seed);
         engine.set_scope("full").expect("full scope is valid");
         let mut ticks = 0usize;
-        // 全场正常 ~81k tick；上限防死循环，超限即楔死回归。
+        // 全场正常 ~81k tick；上限防无限循环，超限即停滞回归。
         while !engine.is_finished() && ticks < 300_000 {
             let _ = engine.step();
             ticks += 1;

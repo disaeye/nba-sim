@@ -378,12 +378,12 @@ struct RosterFile {
 /// 此前名册由 `builtin_attributes(index)` / `builtin_roles(index)` /
 /// `builtin_tendencies(index)` 按**数组下标**分派，且 `id = "{prefix}_{index+1}"`
 /// 让 id 本身编码了下标。后果：**顺序即身份**——球员"是什么"取决于他在数组里
-/// 排第几，而契约（`attributes.md §2.7/§2.9/T1`、`tactics.md TA3`）要求
+/// 排第几，而文档（`attributes.md §2.7/§2.9/T1`、`tactics.md TA3`）要求
 /// 「角色是槽位不是身份」，且 `roles` 字段应当移除。
 ///
 /// 现在球员作为 `data/roster/*.json` 数据资产声明：
 /// - **数组顺序不携带语义**（放哪都一样）；
-/// - **无 `roles` 字段**（契约要求）；
+/// - **无 `roles` 字段**（文档要求）；
 /// - `id` 不再承载身份序号。
 ///
 /// `initial_position_ft` 仍随档案声明（几何相关），因此载入后按当前
@@ -408,7 +408,7 @@ fn load_roster(json: &str, geometry: CourtGeometry) -> Vec<PlayerData> {
     file.players
 }
 
-/// D5.1b：slot fill 的能力画像（tactics.md §3 契约）。
+/// D5.1b：slot fill 的能力画像（tactics.md §3 规定）。
 ///
 /// 承载全部 21 个能力维度，因为档案槽位的 `requirements` 可以声明任意一维
 /// （`TacticalSlotSpec::requirements`），只暴露子集会让档案声明一维不在
@@ -462,7 +462,7 @@ impl PlayerSlotFitness {
 ///
 /// ## 为什么是纯函数而不是字段
 ///
-/// 契约要求 `roles` 从球员档案移除、降级为「上层派生视图」——因为
+/// 文档要求 `roles` 从球员档案移除、降级为「上层派生视图」——因为
 /// 「角色是槽位不是身份」（`tactics.md TA3`）。原先的
 /// `PlayerData.roles: Vec<PlayerRole>` 由 `builtin_roles(index)` 按**数组下标**
 /// 分派，使「顺序即身份」：球员"是什么"取决于他在名册里排第几。

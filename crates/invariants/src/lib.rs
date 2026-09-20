@@ -308,7 +308,7 @@ impl InvariantChecker {
                 let dx = ball_ft.0 - hx;
                 let dy = ball_ft.1 - hy;
                 let dist = (dx * dx + dy * dy).sqrt();
-                // 球在持球者偏移半径 + 容差之外 = 球人分离。
+                // 球在持球者牵制半径 + 容差之外 = 球人分离。
                 if dist > rules.holder_leash_ft {
                     out.push(Violation {
                         tick_index: self.tick_index,

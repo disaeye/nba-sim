@@ -1,6 +1,6 @@
 //! 比赛模拟编排层：阶段驱动 + 约束过滤 + 效用决策 + 事件化输出。
 //!
-//! 这是引擎的主循环（架构文档 §11），取代旧的散落 if 决策：
+//! 这是引擎的主循环（架构文档 §11），取代旧的分散 if 决策：
 //! - 阶段状态机推进（Inbound → Transition/SetPlay → Resolution → Rebound/DeadBallReset）
 //! - 世界级 Runtime 约束检查（24 秒等）
 //! - 决策系统按约束管线产出动作意图
@@ -106,7 +106,7 @@ impl MatchEngine {
     /// 按指定流模式导出一场比赛（gap.md §16.4 资源治理）。
     ///
     /// - [`StreamMode::Frames`]：逐 tick 完整帧（展示/回放，大）；
-    /// - [`StreamMode::FramesGzip`]：同一完整帧协议的 gzip 落盘格式；
+    /// - [`StreamMode::FramesGzip`]：同一完整帧协议的 gzip 存储格式；
     /// - [`StreamMode::Facts`]（默认）：只写因果事实、事件日志、阶段/生命周期
     ///   变化、回合总结与周期性检查点。引擎每 tick 自检 L1，流不必携带
     ///   每 tick 的球员投影，因此体积从数百 MB 降到个位数 MB；
@@ -171,7 +171,7 @@ impl MatchEngine {
         );
         self.sync_game_flow();
         self.journal.current_event_log.clear();
-        // D4.1：因果槽位跨 tick 存活（动作释放与落地结果常不同 tick：
+        // D4.1：因果槽位跨 tick 存活（动作释放与结果发生常不同 tick：
         // 实测 PASS@t24 → PASS_RECEIVED@t29、FOUL@t84 → FREE_THROW@t86），
         // 因此不在每 tick 清空；槽位在对应动作窗口关闭/被新触发覆盖时
         // 自然失效，保证父指向最近的同槽位触发事件。

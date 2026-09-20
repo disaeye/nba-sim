@@ -151,7 +151,7 @@ impl SlotBehaviour {
     /// 该行为在球场上对应的动作标签（进入物理层的 `action` 字段）。
     ///
     /// 参数是当前子阶段与进攻进度 `action_t`（0..1）；同一个行为在不同阶段
-    /// 给出不同标签，使播放/渲染与评判能分辨初始落位与后续移动。
+    /// 给出不同标签，使播放/渲染与评判能分辨初始站位与后续移动。
     pub fn action_label(self, initiating: bool) -> &'static str {
         match self {
             Self::DribbleTop => {
@@ -182,8 +182,8 @@ pub struct SlotRequirement {
     pub weight: f32,
 }
 
-/// slot fill 可引用的能力维度。用枚举而不是字符串：档案里写错维度名会
-/// 在反序列化时报错，而不是静默变成 0 分（`attributes.md` §4 「维度必须经
+/// slot fill 可引用的能力维度。用枚举，不直接用字符串：档案里写错维度名会
+/// 在反序列化时报错，不致静默变成 0 分（`attributes.md` §4 「维度必须经
 /// 映射层」的可核验形式）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlayerAttributeKey {
@@ -239,7 +239,7 @@ impl TacticalSetSpec {
     /// 校验档案自洽：槽位标识唯一、能力需求非空且权重为正。
     ///
     /// 档案是行为输入（charter C1），写错的档案必须在构造时被拒绝，
-    /// 而不是在场上静默退化为 0 分匹配。
+    /// 不致在场上静默退化为 0 分匹配。
     pub fn validate(&self) -> Result<(), String> {
         if self.slots.is_empty() {
             return Err(format!("tactical spec `{}` declares no slots", self.id));

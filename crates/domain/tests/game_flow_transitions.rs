@@ -1,8 +1,8 @@
 //! GameFlowState 转换表穷举守卫（③：第二批·守卫加固）。
 //!
 //! 表是"合法宏观生命周期的唯一权威"。任何非法边必须被拒绝——
-//! 历史 v10 死球楔死（seed 2/4 永久冻结）就是"拒绝路径缺出口"类缺陷，
-//! 本测试把每条非法边逐一钉死，新增 Phase 变体时编译器强制补全此表。
+//! 历史 v10 死球停滞（seed 2/4 永久冻结）就是"拒绝路径缺出口"类缺陷，
+//! 本测试把每条非法边逐一封堵，新增 Phase 变体时编译器强制补全此表。
 
 use nba_domain::GameFlowState;
 
@@ -118,7 +118,7 @@ fn tipoff_edges_are_minimal() {
     }
 }
 
-/// 双向可达性烟雾：从 Pregame 出发，合法路径必须能抵达 GameEnd（无死锁出口缺失）。
+/// 双向可达性烟雾：从 Pregame 出发，合法路径必须能抵达 GameEnd（无缺失出口）。
 /// 广度优先遍历合法边，断言 GameEnd 可达。
 #[test]
 fn game_end_reachable_from_every_mid_state() {

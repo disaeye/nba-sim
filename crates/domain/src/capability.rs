@@ -1,6 +1,6 @@
 //! 能力映射层（attributes.md §4 / T2）：归一属性与体格 → 物理量的
 //! 唯一换算通道。曲线形状参数全部来自规则，禁止子系统内联属性乘法
-//! 与 `.max(0.5)` 类死区。
+//! 与 `.max(0.5)` 类无效区间。
 
 use crate::data::PlayerAttributes;
 use crate::rules::GameRules;
@@ -113,8 +113,8 @@ pub fn effective_transition_leakout_chance(
 /// （联盟中位）时返回值逐位等于全局基准，因此中位敏捷的球员行为不变；
 /// 高于中位者转向损失更少，低于中位者损失更多。
 ///
-/// 物理层不再直读 `rules.turn_decel_retention`，而是经本函数（attributes.md §4
-/// 禁止子系统内散落属性乘法）。
+/// 物理层经本函数取值（attributes.md §4 禁止子系统内分散属性乘法），
+/// 只读 `rules.turn_decel_retention` 的原始值。
 pub fn effective_turn_decel_retention(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
     let agility = attributes
         .agility
@@ -144,7 +144,7 @@ pub fn effective_turn_decel_retention(rules: &GameRules, attributes: &PlayerAttr
 ///
 /// - `base` = `rules.catch_radius_base_ft`（无技能时的控制圈）；
 /// - `skill_gain` = `rules.catch_radius_skill_gain_ft`（`ball_handling` 0→1 的增量）；
-/// - `attribute_response_floor` 避免低属性死区（attributes.md §4）。
+/// - `attribute_response_floor` 避免低属性失效区（attributes.md §4）。
 ///
 /// 不消费 `off_ball_sense`：那是**预估精度**（决定跑向哪里），不是
 /// **接球能力**（决定能否接住）。两者分离是层 A/层 B 分工的体现。
@@ -153,18 +153,18 @@ pub fn effective_catch_radius(rules: &GameRules, attributes: &PlayerAttributes) 
     rules.catch_radius_base_ft + rules.catch_radius_skill_gain_ft * handling
 }
 
-/// 接球人预估落点的误差上限（ft）。
+/// 接球人预估接球点的误差上限（ft）。
 ///
 /// ## 用途（P-1）
 ///
 /// 传球人预估路线并传出；接球人**同样只能预估**。本函数给出他预估的
-/// 不确定度：`off_ball_sense` 越低，偏差越大。
+/// 不确定度：`off_ball_sense` 越低，误差越大。
 ///
 /// ```text
 /// noise = rules.receive_estimate_noise_ft × (1 − off_ball_sense)
 /// ```
 ///
-/// `receive_estimate_noise_ft == 0` 时退化为 0（接球人精确知道落点）——
+/// `receive_estimate_noise_ft == 0` 时退化为 0（接球人精确知道接球点）——
 /// 那是**旧的全知全能行为**，仅用于向后兼容与对照实验。
 pub fn receive_estimate_noise(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
     let sense = attributes.off_ball_sense.clamp(0.0, 1.0);

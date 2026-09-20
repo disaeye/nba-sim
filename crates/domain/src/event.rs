@@ -53,7 +53,7 @@ pub enum GameEvent {
         blocker_id: String,
         /// 封盖发生位置的球坐标。
         ball_pos: (f32, f32, f32),
-        /// 封盖者触及球的高度（决定后续松球下落起点）。
+        /// 封盖者触及球的高度（决定后续松球的下坠起点）。
         contact_height_ft: f32,
         /// 出手被终止时，出手者所处的动作阶段。
         phase: ActionPhase,
@@ -173,7 +173,7 @@ pub enum GameEvent {
         last_touch_team: String,
         responsible_player_id: Option<String>,
     },
-    /// 传球落点修正事实（层 A，P-1 有限信息）。
+    /// 传球接球点修正事实（层 A，P-1 有限信息）。
     ///
     /// ## 为什么需要这个事实
     ///
@@ -188,11 +188,11 @@ pub enum GameEvent {
     /// 而不是让下游去猜（gap.md §9.5：禁止三处各自解释同一传球）。
     PassLandingCorrected {
         receiver_id: String,
-        /// 传球人冻结的意图落点。
+        /// 传球人冻结的意图接球点。
         intended: (f32, f32),
         /// 接球人的实际到达位置。
         actual: (f32, f32),
-        /// 两者距离（ft）——即本回合的预估偏差量。
+        /// 两者距离（ft）——即本回合的预估误差量。
         divergence_ft: f32,
     },
     /// A normalized enforcement intent has been applied by the application layer.

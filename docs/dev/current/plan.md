@@ -1,6 +1,6 @@
 # 当前周期计划 · 从第一性原理构建连续博弈与空间动力学引擎
 
-> 文档类型：当前未完成工作的执行设计与落地计划。
+> 文档类型：当前未完成工作的执行设计与实施计划。
 > 规则：本文件不复述历史已归档 Round（D0–D21 见 `cycles/`）；任务关闭后将结论写入 `docs/dev/status.md`。
 > 依赖入口：稳定设计见 `docs/architecture.md`（§4 状态组与阶段管线）、`docs/tactics.md`；架构决策见 `docs/decisions.md`（ADR-011、ADR-012、ADR-013、ADR-014、ADR-015）；当前状态见 `docs/dev/status.md`。
 > 编号范围：本周期任务块使用 `D22–D29`。
@@ -243,7 +243,7 @@ $$\text{当 } \Delta \theta(\mathbf{v}, \mathbf{v}_{desired}) > 90^\circ \text{ 
 
 - 运动学要素补进现有模块：`crates/physics/src/movement/` 已实现
   `max_accel_ftps2`、`bounded_velocity`、`max_feasible_velocity_shift`、
-  `resolve_motion_collisions`（D29 已把该模块拆为 `mod.rs` 与 `kinematics.rs`，
+  `resolve_motion_collisions`（D29 已把该模块划分为 `mod.rs` 与 `kinematics.rs`，
   见 §10.4）；本任务仍需补齐制动距离与变向抓地力限制；
 - 消除任何坐标瞬移（瞬时位移速度超过物理最大极限即报警断言）；
 - 变向制动与急停产生减速滑行过程；
@@ -267,7 +267,7 @@ $$\text{当 } \Delta \theta(\mathbf{v}, \mathbf{v}_{desired}) > 90^\circ \text{ 
 1. **合球阶段（Gather, 0.15s - 0.25s）**：双脚起跳步法调整，此时防守人可尝试切球抢断（Poke/Strip），不计投篮犯规；
 2. **起跳升空（Elevation, 0.20s - 0.35s）**：重心向上积分，高度 $z(t)$ 抬升。此时身体接触判定为投篮犯规，盖帽判定窗口开启；
 3. **最高点出手（Release, 0.05s）**：篮球脱手赋予初始抛物线初速度 $\mathbf{v}_0$，确定投篮品质与干扰修正；
-4. **随摆与落地（Follow-through & Landing, 0.20s - 0.30s）**：球员下落恢复平衡，落地空间受规则保护（落地垫脚犯规判定）。
+4. **随摆与触地（Follow-through & Landing, 0.20s - 0.30s）**：球员下落恢复平衡，触地区域受规则保护（触地垫脚犯规判定）。
 
 ### 6.3 验收门
 
@@ -275,7 +275,7 @@ $$\text{当 } \Delta \theta(\mathbf{v}, \mathbf{v}_{desired}) > 90^\circ \text{ 
   （`ActionPhase` = Preparation/Execution/FollowThrough，
   `ActionType` 含 JumpShot/Layup/Dunk/PassRelease/ScreenSet/CloseoutContest/ReboundJump，
   窗口结构为 `ActionTimeWindow`）；本任务补齐阶段推进与判定窗口的门控关系；
-- 盖帽事件只能在 `ActionPhase::Execution` 触发（落地后封盖必报守卫错误）；
+- 盖帽事件只能在 `ActionPhase::Execution` 触发（触地后封盖必报守卫错误）；
 - 前端 render frame 暴露 `action_phase` 字段（当前 `crates/protocol/src/frame.rs`
   无此字段），支持动作姿态同步。
 
@@ -430,14 +430,14 @@ G-STATS 16-seed 矩阵曾出现 **1 条 Hard 缺陷**（seed 12：
 根因（实测定位到 tick）：seed 12 的 tick 51056 出手，子阶段为 `ShotAttempt`；
 tick 51060 发生一次**非投篮**犯规（未到奖励罚球），`crates/engine/src/match_engine/events.rs`
 里该分支无条件把子阶段置为 `Initiation`，而此时 `ball_status` 仍为 `SHOT`；
-tick 51080 球落地发 `SHOT_MISS`，弹道裁决执行 `Initiation -> FlightAndRebound`。
+tick 51080 球触地发 `SHOT_MISS`，弹道裁决执行 `Initiation -> FlightAndRebound`。
 `nba.v2` 的合法表里 `Initiation` 只允许到 `ActionExecution`/`DeadBallReset`/`ShotAttempt`，
 因此判硬失败。
 
 修法：非投篮犯规分支只在球**不在飞行**时才重置子阶段（飞行的定义与
 `ConstraintContext::is_ball_in_flight` 一致：控制转移/传球/投篮/松球/篮板）；
 球在飞行时保留原子阶段，只重置进攻时间到 14 秒。提前重置会伪造一个
-不存在的阶段序列（球还没落地，子阶段却已回到回合发起）。
+不存在的阶段序列（球还没触地，子阶段却已回到回合发起）。
 
 修后 G-STATS 16-seed 矩阵：`Realism Index=0.998`、**Hard 门通过**、
 Axiom 违规 0、Ledger 违规 0。
@@ -478,12 +478,12 @@ D27 改变了行为，但 `GOLDEN_SEED42_2000` 未变（仍为 `0xde010befa25c77
 1. **测试套件全绿**：`./scripts/run-tests.sh --no-fail-fast` 全部测试目标通过
    （工作区共 30 个集成测试文件加各 crate 的单元测试目标）；
    其中 `crates/engine/tests/phase_legality.rs` 是本轮新增：它把 `nba.v2`
-   的 `phase_transitions` 契约搬进测试套件（原先只由 G-STATS 16-seed
+   的 `phase_transitions` 合法表搬进测试套件（原先只由 G-STATS 16-seed
    矩阵检查，而那个矩阵不属于本脚本，日常回归看不到），
    并已用负面对照验证有效（重入缺陷时 4 seed 中 seed 12 的 tick 51080 变红）；
    **注**：该脚本**不包含** G-STATS 16-seed 矩阵，后者需单独跑
    `./target/release/nba-sim --seeds 1..16 --league nba full`，
-   其 Hard 门在**当前树**（含 D29 全部拆分与 D27 的 `PostUp` 改动）上
+   其 Hard 门在**当前树**（含 D29 全部划分与 D27 的 `PostUp` 改动）上
    重跑确认通过（`exit=0`、`Realism Index=0.998`、Axiom=0、Ledger=0、
    28409 judgments / 127 soft defects）；
    两项不可互相代替，出口判定必须同时引用；
@@ -517,7 +517,7 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
 
 五个文件均已完成（§10.4–§10.7），验收门见 §10.3。
 
-**范围说明**：上表是 D22 拆分完成时的快照，其中 `cli/src/main.rs`
+**范围说明**：上表是 D22 划分完成时的快照，其中 `cli/src/main.rs`
 1169 行、未达标题的 1200 行。另有一份超 1200 行的文件
 `crates/engine/src/match_engine/ball_flight.rs`（当时 1469 行）不在 D29
 的四个 crate 内，已作为 D29 的补充完成，见 §10.8。
@@ -532,12 +532,12 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
    `nba_physics::movement::{PhysicsWorld, PlayerPhysicsState, LocomotionState}`）
    不得因内部重排而变动；
 3. **每个文件搬完跑一次受影响的测试**，不攒到最后；
-4. **不为了拆而拆**：一份职责明确且无法划出独立边界的文件保持原样，
-   并在本节说明为何不拆。
+4. **不为了划分而划分**：一份职责明确且无法划出独立边界的文件保持原样，
+   并在本节说明为何不划分。
 
 ### 10.3 验收门（全部达成）
 
-- 参与搬移的文件均降到 1200 行以内（14 个新/拆后文件逐一实测，最大 1014 行）；
+- 参与搬移的文件均降到 1200 行以内（14 个新/划分后文件逐一实测，最大 1014 行）；
 - 外部引用面零变动：`crates/decision/src/lib.rs` 的 `pub use constraint::{...}`
   与 HEAD 逐字相同；`nba_physics::movement::` / `nba_decision::constraint::` /
   `nba_domain::rules::` 的跨 crate 引用全部是 crate 根重导出，未受影响；
@@ -549,13 +549,13 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
 五个文件全部完成：`physics/movement`（§10.4）、`decision/constraint`（§10.5）、
 `domain/rules`（§10.6）、`evaluator/lib` 与 `cli/main`（§10.7）。
 
-### 10.4 已完成：`physics::movement` 拆分
+### 10.4 已完成：`physics::movement` 划分
 
-`crates/physics/src/movement.rs`（1643 行）拆为同目录两文件：
+`crates/physics/src/movement.rs`（1643 行）划分为同目录两文件：
 
 | 文件 | 行数 | 职责 |
 | --- | --- | --- |
-| `movement/mod.rs` | 971 | 对外值类型、`SpatialPhysics` 契约、门面 `PhysicsWorld`、两个具体后端 |
+| `movement/mod.rs` | 971 | 对外值类型、`SpatialPhysics` 接口、门面 `PhysicsWorld`、两个具体后端 |
 | `movement/kinematics.rs` | 729 | 两个后端共用的规则化运动学 |
 
 边界依据是「能否被两个后端共用」：`make_motion_proposals` /
@@ -568,7 +568,7 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
 `kinematics.rs` 不依赖 Rapier，因此它只 `use super::{...}` 取上级的值类型。
 公共路径经 `crates/physics/src/lib.rs` 的 `pub use movement::{...}` 保持不变，
 外部引用面实测仍为 `EntityFilter` / `LocomotionState` / `PhysicsWorld` /
-`PlayerPhysicsState` 四个名字，与拆分前一致。
+`PlayerPhysicsState` 四个名字，与划分前一致。
 
 搬移纪律：先读全区域、原样写入新文件、用只读脚本逐函数与原件做逐行比对
 （14 个单函数与 `MotionProposal` 结构体全部逐字命中，唯一差异是新文件的
@@ -576,9 +576,9 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
 `scripts/inline_constant_budget.json` 的两处预算同步改为新路径
 （`kinematics.rs` 61 + `mod.rs` 29 = 原 `movement.rs` 的 90，总量不变）。
 
-### 10.5 已完成：`decision::constraint` 拆分
+### 10.5 已完成：`decision::constraint` 划分
 
-`crates/decision/src/constraint.rs`（1214 行）拆为同目录两文件：
+`crates/decision/src/constraint.rs`（1214 行）划分为同目录两文件：
 
 | 文件 | 行数 | 职责 |
 | --- | --- | --- |
@@ -587,7 +587,7 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
 
 边界依据：求值函数逐个需要单测逻辑，与声明式数据（“有哪些约束、
 何时激活、违规后果”）的关注点不同。静态表与注册表留在一起——注册表逐个
-引用它们，而宏与它产出的 `static` 项拆到子模块需要额外的宏重导出，
+引用它们，而宏与它产出的 `static` 项移到子模块需要额外的宏重导出，
 收益与复杂度不成比例。
 
 保真校验：用脚本按函数名提取 19 个函数，忽略空白与尾随逗号后**19/19 逐字一致**
@@ -595,10 +595,10 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
 `golden_hash` 6/6 且与搬移前相同；外部引用面实测仍为
 `CandidateAction` / `ConstraintContext` / `ConstraintFinding` / `ConstraintRegistry` /
 `ConstraintStatus` / `EnforcementAction` / `PhaseType` / `ScoredCandidate` /
-`ViolationKind`，与拆分前一致。
+`ViolationKind`，与划分前一致。
 预算同步：`evaluate.rs` 36 + `mod.rs` 15 = 原 `constraint.rs` 的 51，总量不变。
 
-### 10.6 已完成的 `domain::rules` 拆分
+### 10.6 已完成的 `domain::rules` 划分
 
 > **搬移纪律（五个文件共同适用）**：只创建**目标**文件，用只读脚本逐函数
 > 与原件比对，比对通过后才从原件里删除对应的连续区段；
@@ -655,9 +655,9 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
 边界成立的证据：226–1040 段内对 `GameRules` 的引用只有**两处注释**（第 337、771 行），
 无任何代码依赖；该段花括号净深度为 0，自洽。方向是 `GameRules` → policy（单向）。
 
-### 10.7 已完成的 `evaluator::lib` 与 `cli::main` 拆分
+### 10.7 已完成的 `evaluator::lib` 与 `cli::main` 划分
 
-**`crates/evaluator/src/lib.rs`** —— **已完成**。拆为四个模块：
+**`crates/evaluator/src/lib.rs`** —— **已完成**。划分为四个模块：
 
 | 文件 | 行数 | 内容 |
 | --- | --- | --- |
@@ -676,7 +676,7 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
 外部引用面不变：`nba_evaluator::{Verdict, Judgment, AttributionReport, CriterionRow,
 attribution_report, criterion_severity, parse_stream, ...}` 仍从 crate 根可用。
 
-**`crates/cli/src/main.rs`** —— **已完成**。拆出四个子命令模块：
+**`crates/cli/src/main.rs`** —— **已完成**。划出四个子命令模块：
 
 | 文件 | 行数 | 内容 |
 | --- | --- | --- |
@@ -707,10 +707,10 @@ attribution_report, criterion_severity, parse_stream, ...}` 仍从 crate 根可�
 四类工件，使新增工件类型不需再改守卫。
 修后实测：连续跑 batch 不再新增残留，`check_disk_budget.py` 报 passed。
 
-### 10.8 补充完成的 `engine::ball_flight` 拆分
+### 10.8 补充完成的 `engine::ball_flight` 划分
 
 `crates/engine/src/match_engine/ball_flight.rs` 当时 1469 行，是工作区最大的源文件，
-但不在 D29 起初的四个 crate 范围内。它与 D29 的其余五项一并拆完：
+但不在 D29 起初的四个 crate 范围内。它与 D29 的其余五项一并划分完成：
 
 | 文件 | 行数 | 内容 |
 | --- | --- | --- |
@@ -721,11 +721,11 @@ attribution_report, criterion_severity, parse_stream, ...}` 仍从 crate 根可�
 边界依据：写入口是 `ball_state` 的唯一写通道（`architecture.md` §3.2/§3.3），
 被裁决与消费两侧共用；结果消费需要按优先级短路本 tick，与裁决分离。
 
-**未继续拆 `resolve_ball_flight` 的理由**：它是一个 10 臂的单一 `match`，
+**未继续划分 `resolve_ball_flight` 的理由**：它是一个 10 臂的单一 `match`，
 各臂只写入 7 个累加器中的 0–3 个（`Held`/`InboundReady`/`Dead` 写 0 个，
 `ControlTransfer`/`InboundTransfer`/`Shot`/`RimRebound` 各写 1 个，
 `Pass`/`Drive`/`LooseBall` 各写 3 个），按球态分文件在结构上可行；
-但拆开需要把 7 个累加器改为跨文件的返回值传递，属于行为重写而非搬移，
+但划分需要把 7 个累加器改为跨文件的返回值传递，属于行为重写而非搬移，
 收益与风险不成比例。`mod.rs` 的 1142 行已满足 1200 行门限。
 
 **至此全工作区无任何源文件超过 1200 行**（`find crates -name '*.rs' -path '*/src/*' | xargs wc -l`

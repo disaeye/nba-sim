@@ -34,9 +34,9 @@ pub(crate) use report::{REGULATION_SECONDS_48MIN, RIM_OFFSET_FT, RIM_ZONE_RADIUS
 /// 单回合上下文：从上一 POSSESSION_SUMMARY 到本条之间的全部事件。
 /// 一次传球释放：`(sequence, passer, receiver, from, to, 是否已终结)`。
 ///
-/// `sequence` 用于**按事件顺序配对**，而不是按接球人 id 配对。
+/// `sequence` 用于**按事件顺序配对**，不按接球人 id 配对。
 /// 后者会产生误报：同一接球人在一个回合内可能多次接球，若其中一次传球
-/// 被点掉/掉落（不产生 `PASS_RECEIVED`），按 id 配对会把**更早的释放**与
+/// 被点掉/坠地（不产生 `PASS_RECEIVED`），按 id 配对会把**更早的释放**与
 /// **更晚的接球**凑成一对，算出数十英尺的虚假距离。
 /// 实测 seed 1 full：按 id 配对报 4 条走廊 Hard，其中 3 条是这种错配
 /// （释放到接球间隔 0.3–1.2s，却跨全场 52–55 ft）；按顺序配对后只剩 1 条。
@@ -47,7 +47,7 @@ struct PossessionWindow {
     pass_releases: Vec<PassRelease>,
     /// 接球事实：`(sequence, receiver, position)`。
     pass_received: Vec<(u64, String, (f32, f32))>,
-    /// 传球终结事实（点掉/掉落）的 sequence：用于把对应的 release 标记为
+    /// 传球终结事实（点掉/坠地）的 sequence：用于把对应的 release 标记为
     /// 「不会再有接球」，从而不参与走廊配对。
     pass_terminations: Vec<(u64, String)>,
     steals: Vec<(String, String, String, (f32, f32))>,
@@ -68,12 +68,12 @@ struct PossessionWindow {
     offensive_rebounds: usize,
     drops: usize,
     violations: usize,
-    /// 本回合是否发布了「传球落点修正」事实。
+    /// 本回合是否发布了「传球接球点修正」事实。
     ///
     /// 层 A（有限信息）下，接球人按自己的估计跑位，接球成功时球的位置
     /// 可能与传球人冻结的 `to_pos` 不同。引擎必须把这一修正显式发布为事实
     /// （`PASS_LANDING_CORRECTED`），否则评判器无法区分
-    /// 「设计内的估计偏差」与「事实自相矛盾」。
+    /// 「设计内的估计误差」与「事实自相矛盾」。
     saw_pass_position_fix: bool,
 }
 
@@ -323,7 +323,7 @@ fn evaluate_possession_window(
     let dur = summary.duration_seconds;
     if let Some(r) = rules_cache.as_ref() {
         // 进攻篮板重置量：NBA 为 14s。该值尚无 `FrameRules` 字段，
-        // 沿用 fixture 的数据契约（league 级别），不新增内联常数。
+        // 沿用 fixture 的数据规格（league 级别），不新增内联常数。
         let base = r.shot_clock_seconds;
         let reset = fixture.offensive_rebound_shot_clock_seconds;
         let tolerance = fixture.duration_tolerance_seconds;
@@ -357,7 +357,7 @@ fn evaluate_possession_window(
     //
     // ## 配对纪律（round-6 审计修复）
     //
-    // 按**事件顺序**配对，不按接球人 id 配对。按 id 配对会把「被点掉/掉落的
+    // 按**事件顺序**配对，不按接球人 id 配对。按 id 配对会把「被点掉/坠地的
     // 传球」与「同一接球人更晚的一次接球」凑成一对，算出数十英尺的虚假距离。
     // 实测 seed 1 full：按 id 配对报 4 条走廊 Hard，其中 3 条是这种错配
     // （释放到接球间隔 0.3–1.2s，却跨全场 52–55 ft）；按顺序配对后只剩 1 条。
@@ -375,7 +375,7 @@ fn evaluate_possession_window(
             if taken[i] || rel_seq >= rec_seq || rel_receiver != receiver {
                 continue;
             }
-            // 本次释放是否已被点掉/掉落终结？若是则不可配对。
+            // 本次释放是否已被点掉/坠地终结？若是则不可配对。
             let terminated = window
                 .pass_terminations
                 .iter()
@@ -402,7 +402,7 @@ fn evaluate_possession_window(
         //
         // 分离后：
         //   - (a) 超过走廊 → `RECEIVE_ESTIMATE_DIVERGENCE`（**soft/informational**），
-        //     用于观测预估偏差的分布，不阻断门；
+        //     用于观测预估误差的分布，不阻断门；
         //   - (b) 仍为 Hard，但判据收窄为“事实不一致”，见下方 `pass_fact_mismatch`。
         //
         // 注意：这不是“放宽门” —— 同时新增了更严的 (b)。
@@ -427,7 +427,7 @@ fn evaluate_possession_window(
         }
         // (b) 事实一致性（Hard）：`PassReceived.position` 必须与冻结终点
         // `to_pos` **一致**。层 A 修正后，引擎在接球成功时把球收到接球人身上，
-        // 位置会不同于 `to_pos` —— 那时引擎需发出“落点修正”事实（见引擎侧）。
+        // 位置会不同于 `to_pos` —— 那时引擎需发出“接球点修正”事实（见引擎侧）。
         // 这里只检测“事件声称的位置与它引用的冻结事实不可调和”的情形。
         if dist > corridor + 1.0 && !window.saw_pass_position_fix {
             out.push(Judgment::defect(
@@ -733,12 +733,12 @@ fn evaluate_game_level(ticks: &[StreamTick], fixture: &ReferenceDistributions) -
     let mut possessions = 0usize;
     let mut idx: Option<u64> = None;
 
-    // D2 构成准则采集（dev 方案 §5.1）：出手/命中按区域拆分。
+    // D2 构成准则采集（dev 方案 §5.1）：出手/命中按区域划分。
     let mut fga_three = 0usize;
     let mut fga_two = 0usize;
     let mut fgm_three = 0usize;
     let mut fgm_two = 0usize;
-    // 中距离/篮下拆分需要出手位置与篮筐距离（ft）。
+    // 中距离/篮下区分需要出手位置与篮筐距离（ft）。
     let mut fga_mid = 0usize;
     let mut fga_rim = 0usize;
     let mut fta = 0usize;
@@ -777,7 +777,7 @@ fn evaluate_game_level(ticks: &[StreamTick], fixture: &ReferenceDistributions) -
                             fga_three += 1;
                         } else {
                             fga_two += 1;
-                            // 区域拆分：出手点与进攻篮筐距离（ft）。
+                            // 区域区分：出手点与进攻篮筐距离（ft）。
                             let pos = s.get("pos").and_then(|v| v.as_array());
                             let hoop_x = if tick.frame.possession_team == "home" {
                                 fixture.court_width_ft - RIM_OFFSET_FT

@@ -1,6 +1,6 @@
 //! D14 MatchEngine 最小只读 snapshot 投影视图。
 //!
-//! 依据 docs/architecture.md §2 [12] EmitPhase 与 §4 无副作用快照契约：
+//! 依据 docs/architecture.md §2 [12] EmitPhase 与 §4 无副作用快照规定：
 //! 包含回合状态、时钟、比分、球态、阵容与只读物理世界视图，
 //! 供 CLI、评判器、测试、回放等统一获取只读视图，不产生任何副作用。
 

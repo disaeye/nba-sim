@@ -22,7 +22,7 @@ impl BallisticsEngine {
     ///
     /// 为什么不能直接线性缩放：`p·(1-p)` 的最大值在 `p=0.5`，但
     /// 叠加了线性项 `chest + (rim-chest)·p` 后，真实极值点
-    /// `p* = (A + rim - chest) / (2A)` 偏移到 `p > 0.5`。此前直接用
+    /// `p* = (A + rim - chest) / (2A)`，位于 `p > 0.5`。此前直接用
     /// `multiplier × (peak_z - mid)` 作为 `A`，使实际采样峰值高于请求值
     /// （本轮实测：请求 35.0 ft，采样到 35.08 ft，违反 BALL_HEIGHT_BOUNDS）。
     ///
@@ -116,7 +116,7 @@ impl BallisticsEngine {
             .clamp_playable(predicted, rules.player_radius_ft)
     }
 
-    /// 求解传球落点与飞行时长（不动点）。
+    /// 求解传球接球点与飞行时长（不动点）。
     ///
     /// ## 为什么不能用一个固定领传时长
     ///
@@ -153,7 +153,7 @@ impl BallisticsEngine {
     /// 从"以当前位置估计飞行时长"开始，交替更新 T 与 L。实测 2–4 次迭代即
     /// 收敛到 `|ΔT| < 1e-4`（见单测）；上限 30 次作为安全阀。
     ///
-    /// 返回 `(落点, 飞行时长)`：两者必须一起冻结，否则又回到"三个位置并存"
+    /// 返回 `(接球点, 飞行时长)`：两者必须一起冻结，否则又回到"三个位置并存"
     /// （gap.md §9.5 禁止）。
     pub fn solve_pass_landing(
         passer_pos: Vec2,
@@ -163,7 +163,7 @@ impl BallisticsEngine {
         let v0 = receiver.vel_ft.length();
         let direct = (receiver.pos_ft - passer_pos).length();
 
-        // 接球人静止：落点即自身位置，时长由距离直接给出。
+        // 接球人静止：接球点即自身位置，时长由距离直接给出。
         if v0 <= f32::EPSILON {
             let t = rules.pass_duration(direct, false);
             return (
@@ -504,7 +504,7 @@ mod landing_tests {
         nba_domain::PlayerTendencies::default()
     }
 
-    /// 不动点必须自洽：落点所处距离对应的飞行时长 == 解出的飞行时长。
+    /// 不动点必须自洽：接球点所处距离对应的飞行时长 == 解出的飞行时长。
     #[test]
     fn solve_landing_is_a_fixed_point() {
         let rules = GameRules::default();
@@ -524,7 +524,7 @@ mod landing_tests {
         }
     }
 
-    /// 领传量不得超过接球人 T 秒内的制动可达距离（否则落点不可达）。
+    /// 领传量不得超过接球人 T 秒内的制动可达距离（否则接球点不可达）。
     #[test]
     fn lead_never_exceeds_braking_reach() {
         let rules = GameRules::default();
@@ -548,7 +548,7 @@ mod landing_tests {
         assert!(led > 0.0, "a moving receiver must get a positive lead");
     }
 
-    /// 静止接球人不得被领（落点 = 自身位置）。
+    /// 静止接球人不得被领（接球点 = 自身位置）。
     #[test]
     fn stationary_receiver_gets_no_lead() {
         let rules = GameRules::default();

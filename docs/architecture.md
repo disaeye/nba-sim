@@ -1,7 +1,7 @@
 # NBA-Sim · 系统架构
 
-> 定位：系统组织与模块交互的**架构契约**——分层、数据流、状态机、管线、决策、语义/裁决和多联赛。
-> 上游文档：`docs/charter.md`；关联契约：`docs/quality.md`、`docs/attributes.md`、`docs/tactics.md`、`docs/protocol.md`。
+> 定位：系统组织与模块交互的**架构规格**——分层、数据流、状态机、管线、决策、语义/裁决和多联赛。
+> 上游文档：`docs/charter.md`；关联规格：`docs/quality.md`、`docs/attributes.md`、`docs/tactics.md`、`docs/protocol.md`。
 > 实现状态、迁移差距和验证范围统一见 `docs/dev/status.md` 与 `docs/dev/gap.md`；跨模块取舍见 `docs/decisions.md`。
 > 修订纪律：本文档只定义目标架构和稳定边界，不记录当前实现快照、周期结果或执行命令。
 
@@ -60,7 +60,7 @@
 ├─────────────────────────────────────────────────────────────┤
 │  协议层 (Protocol)             crates/protocol              │
 │  StreamTick / RenderFrame / FrameEvent / DecisionDebug      │
-│  - 引擎对外的唯一数据契约，UI/回放/审计共用                   │
+│  - 引擎对外的唯一数据接口，UI/回放/审计共用                   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -82,11 +82,11 @@
 | 条款 | 内容 | 机械守卫 |
 | ------ | ------ | --------- |
 | **C1 无硬编码** | 一切影响行为的数字必经规则/数据通道；一切行为是 `(能力, 规则, 状态)` 的纯函数，禁止剧本化战术与"让画面像"的经验常数 | 内联常数 grep 守卫（protocol.md §2.1 M7 阈值）+ 能力扰动测试（quality.md §6） |
-| **C2 评判落地** | 真实度判断逐回合、逐阶段产出裁决；禁止以"多场模拟原始结果统计"作为真实性评判；仅允许把"裁决结果"聚合为真实度指数 | 回合/阶段评判工件逐条落盘（quality.md §2.1–2.3） |
+| **C2 评判实施** | 真实度判断逐回合、逐阶段产出裁决；禁止以"多场模拟原始结果统计"作为真实性评判；仅允许把"裁决结果"聚合为真实度指数 | 回合/阶段评判工件逐条写入（quality.md §2.1–2.3） |
 | **C3 约束分轴** | 物理约束严格遵守且与联赛无关（可配置校准）；语义/规则约束按联赛档案 `LeagueProfile` 参数化（NBA/FIBA），灵活可配 | LeagueProfile 切换验收（§6.3、protocol.md §2.1 M10） |
 | **C4 确定性** | 相同种子 → 逐 tick 完全相同的世界；一切评判、归因、校准对比的前提 | 黄金哈希（quality.md §5）入库且必须常绿 |
 
-> 条款与原则的映射：P6 是 C1 的数值通道，P7 是 C1 的行为要求，P8 即 C2，C3 落地为 §6.3 的规则档案参数化，C4 是 P5 的宪章级强化。
+> 条款与原则的映射：P6 是 C1 的数值通道，P7 是 C1 的行为要求，P8 即 C2，C3 实施为 §6.3 的规则档案参数化，C4 是 P5 的宪章级强化。
 
 ---
 
@@ -111,7 +111,7 @@
                           │
                           ▼
                 [5] 执行重校验（关键 · P4）
-                   动作落地前再次过约束管线
+                   动作实施前再次过约束管线
                    若世界已变 → 降级/取消，不强行执行
                           │
                           ▼
@@ -349,11 +349,11 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 **设计**：
 
 1. 决策产出的是**意图（Intent）**而非**命令**，携带决策时刻的关键上下文摘要（接球人位置、防守距离、快照 tick）；
-2. `ExecutionPhase` 在意图落地时，将**当前** `ConstraintContext` 重新过一遍该动作的硬约束子集；
+2. `ExecutionPhase` 在意图实施时，将**当前** `ConstraintContext` 重新过一遍该动作的硬约束子集；
 3. 若重校验失败：
    - 传球：接球人已不在走廊 → 降级为 `Dwell`（持球观察），意图标记作废；"重新决策"指**下一决策 tick**（DecisionPhase，§2 [4]）重新生成候选，不在执行阶段就地决策——保持阶段分离；
    - 投篮：防守者已封盖到位 → 按 `contest_intensity` 重新计算，而非用决策时刻的值；
-4. 重校验结果记入 `DecisionTrace`，供 quality.md §2.1 评判器分析"多少动作在落地时被迫改变"。
+4. 重校验结果记入 `DecisionTrace`，供 quality.md §2.1 评判器分析"多少动作在实施时被迫改变"。
 
 ### 5.3 决策可解释性
 
@@ -374,7 +374,7 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 **单向数据流**：physics → semantics → officiating，禁止反向。
 
 **物理模块内部边界**（D29）：`crates/physics/src/movement/` 分为
-`mod.rs`（对外值类型、`SpatialPhysics` 契约、门面 `PhysicsWorld`、
+`mod.rs`（对外值类型、`SpatialPhysics` 接口、门面 `PhysicsWorld`、
 两个具体后端 `RapierSpatialPhysics` / `SimpleCirclePhysics`）与
 `kinematics.rs`（两个后端共用的规则化运动学：速度提案、碰撞求解、
 端点投影与边界事实发射）。边界依据是「能否被两个后端共用」——
@@ -421,7 +421,7 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 | `CourtGeometry` | 场地尺寸、篮筐位置、三分线、区域划分 | 构造时校验几何合法性（篮筐在界内等） |
 | `GameRules` | 全部可调参数（时钟、物理上限、权重、阈值） | `validate()` 在 setup 时强制执行 |
 | `DecisionRules` | 决策子系统参数（效用权重、约束阈值、采样个性化） | 独立 `validate()`，由 `decision` 消费；作为 `GameRules` 嵌套组注入 |
-| `PlayerData` 系（`data.rs`） | `PlayerAttributes` 能力向量 + `PlayerTendencies` + 球队级 `TeamTraits` | 能力是行为差异的唯一合法来源（P7）；被 decision/physics/officiating 消费；**本体契约（分类学/值语义/锚点/迁移路线）以 `docs/attributes.md` 为单一事实源**；涌现要求见 quality.md §6 |
+| `PlayerData` 系（`data.rs`） | `PlayerAttributes` 能力向量 + `PlayerTendencies` + 球队级 `TeamTraits` | 能力是行为差异的唯一合法来源（P7）；被 decision/physics/officiating 消费；**本体规格（分类学/值语义/锚点/迁移路线）以 `docs/attributes.md` 为单一事实源**；涌现要求见 quality.md §6 |
 | `LeagueProfile` | 联赛规则档案：计时结构、进攻时钟与重置、犯规政策与 bonus、几何、语义阈值 | 由规则档案提供，不进入引擎联赛分支 |
 | `GameFlowState` | 宏观生命周期（TipOff/LiveBall/DeadBall/FreeThrow/QuarterEnd/Halftime/Overtime/GameEnd） | 转换由 `engine` 驱动，此处仅定义 |
 | `SubPhase` | 回合内子阶段（Initiation/ActionExecution/ShotAttempt/FlightAndRebound/DeadBallReset） | 与 GameFlowState 正交 |
@@ -441,10 +441,10 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 
 ### 8.1 与其他文档的关系
 
-- `charter.md` 是**目标宪章**：要做出什么、什么算好、红线与成功判据。本文档是**系统组织契约**：模块如何分层、状态如何流转。映射：`charter` §4 宪章条款 → 本文档 §1.3；C1 → P6/P7；C3 → §6.3；C4 → P5；
+- `charter.md` 是**目标宪章**：要做出什么、什么算好、红线与成功判据。本文档是**系统组织规格**：模块如何分层、状态如何流转。映射：`charter` §4 宪章条款 → 本文档 §1.3；C1 → P6/P7；C3 → §6.3；C4 → P5；
 - `quality.md` 是**检测与评判体系**：不变量、真实度评判、工具链、性能预算——本文档的架构如何被观测与验证；
-- `attributes.md` / `tactics.md` 是**数据契约**：球员/阵容/战术的分类学与值语义——本文档的领域层消费它们；
-- `protocol.md` 是**过程契约**：校准协议、验收标准和证据要求；
+- `attributes.md` / `tactics.md` 是**数据规格**：球员/阵容/战术的分类学与值语义——本文档的领域层消费它们；
+- `protocol.md` 是**过程规格**：校准协议、验收标准和证据要求；
 - `docs/dev/status.md` 是**当前实现状态**；`docs/dev/gap.md` 是**迁移差距与依赖**。它们不改变本文档的目标架构。
 
 ### 8.2 术语表
@@ -453,7 +453,7 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 | ------ | ------ |
 | **事实源 (SoT)** | 某一信息的唯一权威存储，其余为派生 |
 | **意图 (Intent)** | 决策产出但尚未执行的动作，携带决策上下文 |
-| **执行重校验** | 意图落地时基于当前世界重新过约束 |
+| **执行重校验** | 意图实施时基于当前世界重新过约束 |
 | **ShortCircuit** | 阶段管线中本 tick 提前结束的显式信号 |
 | **LeagueProfile** | 联赛规则档案（计时/犯规/几何/语义阈值），多联赛配置的载体（§6.3） |
 

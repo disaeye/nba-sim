@@ -633,7 +633,7 @@ mod tests {
 mod c6_6_tests {
     use super::*;
 
-    /// C6.6 契约：`/api/simulate` 的响应是「tick 帧 + 流末 run_summary 记录」，
+    /// C6.6 规定：`/api/simulate` 的响应是「tick 帧 + 流末 run_summary 记录」，
     /// run_summary 必须携带引擎官方 violations 数组（gap.md §16.3：调试视图
     /// 是事件与快照的投影，前端不得自行重算不变量）。
     ///

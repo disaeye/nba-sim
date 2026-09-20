@@ -83,7 +83,7 @@ fn roster_array_order_does_not_change_behaviour() {
     }
 }
 
-/// `roles` 字段必须已从名册档案移除（契约要求）。
+/// `roles` 字段必须已从名册档案移除（文档要求）。
 #[test]
 fn roster_assets_carry_no_roles_field() {
     for (name, json) in [

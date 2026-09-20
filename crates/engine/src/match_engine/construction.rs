@@ -90,7 +90,7 @@ impl MatchEngine {
                     } else {
                         "Bench".to_string()
                     },
-                    // `roles` 字段已按契约移除（attributes.md §2.7/§2.9/T1）。
+                    // `roles` 字段已按文档移除（attributes.md §2.7/§2.9/T1）。
                     // 展示用槽位改为**能力与倾向的纯函数投影**：
                     // 不存字段、不按名册下标分派，因此名册数组顺序不携带语义。
                     slot: nba_domain::project_display_role(&player.attributes, &player.tendencies),

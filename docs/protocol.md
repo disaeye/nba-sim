@@ -1,7 +1,7 @@
 # NBA-Sim · 校准与验收协议
 
-> 定位：项目的过程契约。本文档规定如何修改影响行为的参数、如何组织证据、如何判定阶段出口。
-> 上游契约：`docs/charter.md`、`docs/architecture.md`、`docs/quality.md`、`docs/attributes.md`、`docs/tactics.md`。
+> 定位：项目的过程规格。本文档规定如何修改影响行为的参数、如何组织证据、如何判定阶段出口。
+> 上游文档：`docs/charter.md`、`docs/architecture.md`、`docs/quality.md`、`docs/attributes.md`、`docs/tactics.md`。
 > 关联工作面：`docs/dev/roadmap.md`、`docs/dev/status.md`、`docs/dev/current/plan.md`。
 > 修订纪律：只写可长期复用的流程和验收语义；当前实现、命令、实测结果和历史决策进入 `docs/dev/` 或 `docs/decisions.md`。
 
@@ -30,7 +30,7 @@
 3. **走正确通道**：实验参数使用规则/档案覆盖，确认后才改变默认配置；
 4. **提供三层证据**：机制响应、参考分布变化和适用的反事实场景；
 5. **记录缺陷变化**：报告逐条缺陷、证据覆盖、Hard gate 和 top attribution 的前后差异；
-6. **处理确定性**：行为有意变化时更新 replay/golden 记录，并说明变化属于哪一条契约；
+6. **处理确定性**：行为有意变化时更新 replay/golden 记录，并说明变化属于哪一条规格；
 7. **保持单一职责**：校准、结构重构、性能优化和展示变更不得混成无法归因的一次改动。
 
 禁止以下替代方案：
@@ -75,7 +75,7 @@
 
 **M5 · 执行重校验**
 
-- 意图落地前重新检查当前世界的硬约束；
+- 意图实施前重新检查当前世界的硬约束；
 - 世界变化时动作降级、取消或记录为改变，不强行执行旧意图；
 - trace 能统计重校验结果。
 
@@ -159,7 +159,7 @@ sanity net 的具体带宽属于带版本的评判 fixture 或周期门，不在
 - `docs/charter.md` 定义目标与红线；
 - `docs/architecture.md` 定义系统边界和状态/数据流；
 - `docs/quality.md` 定义检测、评判和工件语义；
-- `docs/attributes.md`、`docs/tactics.md` 定义输入契约；
+- `docs/attributes.md`、`docs/tactics.md` 定义输入规格；
 - `docs/dev/roadmap.md` 提供里程碑顺序；
 - `docs/dev/status.md` 记录当前实现状态；
 - `docs/dev/current/plan.md` 记录当前未完成任务；

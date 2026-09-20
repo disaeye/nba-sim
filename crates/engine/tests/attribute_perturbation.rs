@@ -46,7 +46,7 @@ fn perturbation_acceleration_response_is_monotonic() {
 ///
 /// 同时守住「不得复用 `attribute_response_floor`（默认 0.5）」——那个 floor
 /// 会把 0..0.5 整段压成同一个值（实测 0.05 与 0.5 行为逐位相同），
-/// 而 `attributes.md` §4 明令禁止内联 floor 造成死区。
+/// 而 `attributes.md` §4 明令禁止内联 floor 造成无效区间。
 #[test]
 fn perturbation_agility_lowers_turn_decel_cost() {
     let rules = GameRules::default();
@@ -64,7 +64,7 @@ fn perturbation_agility_lowers_turn_decel_cost() {
         anchor, rules.turn_decel_retention,
         "the neutral anchor must reproduce the global base exactly"
     );
-    // 无死区：属性下限必须真的允许低值生效。
+    // 无失效区间：属性下限必须真的允许低值生效。
     let floor = rules.capability.turn_decel_retention_attribute_floor;
     assert!(
         floor < 0.2,
@@ -182,7 +182,7 @@ fn behavioral_speed_perturbation_raises_kinematic_cap() {
 
 /// 接球半径：`ball_handling` 越高，可接球半径越大。
 ///
-/// 契约依据：`capability.rs` 明确「不消费 `off_ball_sense`」——那是预估
+/// 规格依据：`capability.rs` 明确「不消费 `off_ball_sense`」——那是预估
 /// 精度（决定跑向哪里），不是接球能力（决定能否接住）。本测试同时断言
 /// 这条分离（层 A / 层 B 分工）。
 #[test]
@@ -420,8 +420,8 @@ fn perturbation_off_ball_sense_raises_offensive_board_rate() {
 //
 // 要求（current/plan.md §6.2）：「断路后测试必红，恢复后必绿」。
 //
-// 关键区别：**不是**手写一个常数函数再断言它不响应（那只证明了常数是常数）。
-// 而是把单调性判定抽成**可复用的 harness**，然后用同一份 harness 同时验证：
+// 做法要求：不手写一个常数函数再断言它不响应（那只证明了常数是常数）。
+// 把单调性判定抽成**可复用的 harness**，然后用同一份 harness 同时验证：
 //   - 接线链路 → harness 通过（正向）；
 //   - 断开链路 → **harness 报错**（负向）。
 // 这才证明 harness 本身有区分力，而非"恰好通过"。

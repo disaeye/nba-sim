@@ -19,7 +19,7 @@ SEED="${1:-42}"
 if [ -n "${2:-}" ]; then
     OUT_FILE="$2"
 else
-    # 默认落临时目录并带时间戳，避免覆盖与累积。
+    # 默认写入临时目录并带时间戳，避免覆盖与累积。
     OUT_FILE="${NBA_TEMP_ROOT:-/home/ubuntu/basketball}/nba_sim_seed${SEED}_$(date +%s).ndjson"
 fi
 

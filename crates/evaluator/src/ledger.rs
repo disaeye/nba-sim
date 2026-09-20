@@ -5,12 +5,12 @@
 //! 即系统说谎。四式任何一式不平衡 = Hard `ledger_violation`。
 //!
 //! 输入为逐 tick 事件流（facts 模式足够），输出结构化违反记录，
-//! 由 CLI 落盘 `ledger_violations.ndjson`。
+//! 由 CLI 写入 `ledger_violations.ndjson`。
 
 use nba_protocol::StreamTick;
 use serde::{Deserialize, Serialize};
 
-/// 时间守恒式的端点对齐容差（秒）：回合时长求和允许超出墙钟的上界，
+/// 时间守恒式的端点容差（秒）：回合时长求和允许超出墙钟的上界，
 /// 覆盖逐 tick 端点取整误差。属账本判定口径常数，随检查器定义集中于此。
 const TIME_SUM_WALL_TOLERANCE_SECONDS: f32 = 2.0;
 
@@ -314,7 +314,7 @@ fn check_time_conservation(ticks: &[StreamTick], out: &mut Vec<LedgerViolation>)
     if let (Some(start), Some(end)) = (wall_start, wall_end) {
         let wall_elapsed = (end - start).abs();
         // 回合时长之和不应超过墙钟总时长（死球区间也占墙钟时间，故取 ≤）。
-        // 端点对齐容差：全程回合数 × 一个 tick 的对齐误差，取保守上界。
+        // 端点容差：全程回合数 × 一个 tick 的取整误差，取保守上界。
         let tolerance = TIME_SUM_WALL_TOLERANCE_SECONDS;
         if sum_duration > wall_elapsed + tolerance {
             out.push(LedgerViolation::new(

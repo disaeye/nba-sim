@@ -51,7 +51,7 @@ impl MatchEngine {
             if in_backcourt {
                 self.clock.backcourt_elapsed += dt;
             } else {
-                // 越过中线：推进义务完成，恢复常规战术落位。
+                // 越过中线：推进义务完成，恢复常规战术站位。
                 self.clock.backcourt_elapsed = 0.0;
                 self.observations.advancing_player = None;
             }

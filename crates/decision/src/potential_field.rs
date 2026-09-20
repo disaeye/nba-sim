@@ -1,8 +1,7 @@
 //! 连续受限势能场动力学与空间涌现系统 (Continuous Potential Field Dynamics)
 //!
-//! 防守战术跑位与轮转不由离散 if-else 规则指定硬编码目标，而是由全场球员与
-//! 空间拓扑构成的多体势能场求导，求解局部能量极小值平衡点（Equilibrium Point）
-//! 并由主导场力自然涌现出：
+//! 防守战术跑位与轮转由全场球员与空间拓扑构成的多体势能场求导，求解局部
+//! 能量极小值平衡点（Equilibrium Point）并由主导场力自然涌现出：
 //!
 //! 1. 弱侧 Low-man 威胁引力主导的下沉护筐 (ROTATE_RIM_HELP)
 //! 2. 弱侧 High-man 空间真空主导的轮转补位 (X_OUT_CLOSEOUT)

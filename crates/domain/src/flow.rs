@@ -159,7 +159,7 @@ impl PhaseType {
 
 /// 球的归属状态 · 单一事实源（architecture 统一规范）。
 ///
-/// 归属语义连同飞行/落点参数一起住在领域层；physics 只把该状态当作
+/// 归属语义连同飞行/接球点参数一起住在领域层；physics 只把该状态当作
 /// 采样参数载体（闭式采样位置是时间的纯函数），不再承载任何归属判断。
 /// `has_ball` 标志、持球人、球权队全部由此派生（P1）。
 ///
@@ -241,12 +241,12 @@ pub enum BallState {
         /// 犯规**，跳投在被干扰时没有任何造犯规可能（实测 seed42 全场
         /// 仅 12 次犯规，真实 NBA 约 40）。犯规与出手是否命中是**两个独立
         /// 事实**：真实篮球里 and-one（犯规且命中）与投篮犯规（犯规且不中）
-        /// 都存在，因此不能在落地时从一个布尔反推。
+        /// 都存在，因此不能在球触地时从一个布尔反推。
         fouled: bool,
         /// 犯规者（`fouled == true` 时存在）。
         fouler_id: Option<String>,
     },
-    /// 松球（传球掉落/篮板弹地）。`last_touch_team` 记录最后触球方
+    /// 松球（传球脱手/篮板弹地）。`last_touch_team` 记录最后触球方
     /// （architecture：InFlight/Loose→最后触球队），是飞行期
     /// possession 派生的唯一依据。
     LooseBall {
@@ -442,7 +442,7 @@ fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
             | (B::Drive { .. }, B::InboundTransfer { .. })
             | (B::Drive { .. }, B::LooseBall { .. })
             | (B::Drive { .. }, B::Dead { .. })
-        // 传球飞行：到达 / 被断（持球）/ 掉落（松球）/ 出界或持球违例
+        // 传球飞行：到达 / 被断（持球）/ 脱手（松球）/ 出界或持球违例
         // 判罚直接进入对方发球程序（出界即失球权，合并建模同上）。
             | (B::Pass { .. }, B::Pass { .. })
             | (B::Pass { .. }, B::ControlTransfer { .. })
@@ -472,7 +472,7 @@ fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
             | (B::LooseBall { .. }, B::Dead { .. })
             | (B::LooseBall { .. }, B::InboundTransfer { .. })
         // 交接短飞行：到达即持球；持球违例判罚时死球化与发球程序
-        // 合并为单步（否则拒绝写回会让引擎楔死在"死球+持球"无出口状态，
+        // 合并为单步（否则拒绝写回会让引擎停滞在"死球+持球"无出口状态，
         // 2026-09-02 GAP 复审 seed 2/4 实证）。
             | (B::ControlTransfer { .. }, B::Held { .. })
             | (B::ControlTransfer { .. }, B::Dead { .. })

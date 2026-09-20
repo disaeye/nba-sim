@@ -3,7 +3,7 @@
 //! 本模块按职责分为三层，边界以“能否被两个后端共用”为准：
 //!
 //! - `mod.rs`（本文件）：对外值类型（`PlayerPhysicsState` / `EntityFilter` /
-//!   `RawContact` 等）、后端契约 `SpatialPhysics`、引擎面向的门面 `PhysicsWorld`、
+//!   `RawContact` 等）、后端接口 `SpatialPhysics`、引擎面向的门面 `PhysicsWorld`、
 //!   以及两个具体后端（`RapierSpatialPhysics` / `SimpleCirclePhysics`）；
 //! - `kinematics.rs`：两个后端共用的规则化运动学（速度提案、碰撞求解、
 //!   端点投影与边界事实发射）。它不依赖任何具体后端，因此单独立文件。
@@ -273,8 +273,8 @@ impl PhysicsWorld {
         morale: &str,
     ) {
         // 几何自洽（dev 方案 D3.1 暴露的缺陷）：任何移动目标点必须是
-        // "可站立"的界内坐标。实测站位生成器会给出恰好落在 clamp 边界
-        // 线上的目标（如 y = height - player_radius），球员被钉在该点后
+        // "可站立"的界内坐标。实测站位生成器会给出恰好位于 clamp 边界
+        // 线上的目标（如 y = height - player_radius），球员被固定在该点后
         // 每 tick 都满足 `raw_pos != clamped`，边界事实刷屏且发球程序
         // 被长期阻塞（seed 21 单球员连续 675 tick）。
         //
@@ -576,7 +576,7 @@ impl RapierSpatialPhysics {
                 // 仅在刚体坐标比运动学结果更"靠内"时采纳，避免用刚体积分
                 // 产物覆盖 `apply_motion_proposals` 已 clamp 的权威位置——
                 // 否则每 tick 都会重新把位置推到边界外，下一 tick 又产生
-                // 新的上升沿（死循环刷屏）。
+                // 新的上升沿（无限循环刷屏）。
                 let body_inside = self.rules.court.clamp_playable(raw_pos, margin);
                 if (body_inside - raw_pos).length() <= f32::EPSILON {
                     player.pos_ft = raw_pos;

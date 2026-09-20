@@ -1,6 +1,6 @@
 //! 评判结果类型与归因账本聚合。
 //!
-//! 本模块定义评判对外的输出契约：`Verdict` 三态以上（含「不适用」与
+//! 本模块定义评判对外的输出格式：`Verdict` 三态以上（含「不适用」与
 //! 「证据不足」）、`Judgment` 单条裁决、`AttributionReport` 归因账本。
 //!
 //! 与 `lib.rs` 里六个 `evaluate_*` 准则函数的分工：那些函数**产出**
@@ -42,12 +42,12 @@ impl Verdict {
     }
 }
 
-/// 单条准则裁决（quality 评判输出契约）。
+/// 单条准则裁决（quality 评判输出格式）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Judgment {
     pub criterion: String,
     pub verdict: Verdict,
-    /// Hard = 结构因果断裂；Soft = 真实度偏差。
+    /// Hard = 结构因果断裂；Soft = 真实度误差。
     pub severity: String,
     pub detail: String,
     /// 责任子系统（quality 归因表）。
@@ -195,10 +195,10 @@ pub struct CriterionRow {
 const W_HARD: f32 = 1.0;
 const W_SOFT: f32 = 0.25;
 
-/// 篮下区域半径（ft）：与 GameRules 篮下/禁区几何口径对齐的判定阈值，
-/// 用于 SHOT_PROFILE_ZONE_MIX 的 rim/mid 拆分。属评判口径常数，集中于此。
+/// 篮下区域半径（ft）：取 GameRules 篮下/禁区几何同源的判定阈值，
+/// 用于 SHOT_PROFILE_ZONE_MIX 的 rim/mid 区分。属评判口径常数，集中于此。
 pub(crate) const RIM_ZONE_RADIUS_FT: f32 = 4.0;
-/// 篮筐距边线的偏移（ft）：NBA 篮筐距端线 5.25ft， hoop_x = court_width - offset。
+/// 篮筐距端线的距离（ft）：NBA 篮筐距端线 5.25ft， hoop_x = court_width - offset。
 pub(crate) const RIM_OFFSET_FT: f32 = 5.25;
 /// 48 分钟等效的标准比赛秒数（NBA 4×12min）。
 pub(crate) const REGULATION_SECONDS_48MIN: f32 = 2880.0;

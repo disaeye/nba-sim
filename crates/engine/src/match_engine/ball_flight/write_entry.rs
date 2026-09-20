@@ -6,7 +6,7 @@
 //! `out_of_bounds_placement`），这些标志必须与权威球态同一步更新，
 //! 否则物理会按上一 tick 的旧标志执行。
 //!
-//! 与 `resolve.rs` 的分工：这里**写**球态，那里**裁决**球态在飞行中的落点
+//! 与 `resolve.rs` 的分工：这里**写**球态，那里**裁决**球态在飞行中的接球点
 //! 与归属变化。写入口被两者共用，因此单独立文件。
 
 use glam::Vec2;
@@ -73,7 +73,7 @@ impl MatchEngine {
                 //
                 // 物理步进（`step` 内 `physics.step`）发生在战术规划**之前**，
                 // 因此若在战术规划里才标记接球人，第一个 tick 的物理仍按旧标志执行，
-                // 接球人会带着上一 tick 的速度滑离落点（实测 17.26 ft/s，
+                // 接球人会带着上一 tick 的速度滑离接球点（实测 17.26 ft/s，
                 // 一 tick 滑 1.73 ft > catch_radius）。
                 //
                 // 球态进入 `Pass` 时，接球人的身份已确定（`target_id`），
@@ -116,7 +116,7 @@ impl MatchEngine {
         }
     }
 
-    /// 将 physics 层的逐球员 `has_ball` 与 `ball_state` 的归属对齐。
+    /// 将 physics 层的逐球员 `has_ball` 与 `ball_state` 的归属保持一致。
     /// Held / Drive / ControlTransfer 视为"有明确持球人"，其余状态清空持球标志。
     pub(crate) fn sync_ball_holder(&mut self) {
         let holder: Option<&str> = match &self.ball.ball_state {
@@ -156,15 +156,15 @@ impl MatchEngine {
                     release_pos = Some(p.pos_ft);
                     clear_action = is_inbound_role_action(&p.action);
                 }
-                // 注：非发球球员在发球程序中被卡界外的几何死锁修复，已移至
+                // 注：非发球球员在发球程序中被卡界外的几何僵局修复，已移至
                 // 物理步进的 InboundReady 分支（每 tick 执行），不在此——本函数
-                // 只在球态转换时调用，覆盖不到恒为 InboundReady 的卡死段。
+                // 只在球态转换时调用，覆盖不到恒为 InboundReady 的停滞段。
             }
             // 豁免被取消且球员仍在界外时，必须做一次显式离散 placement
             // 把它放回界内，而不是让下一 tick 的物理 clamp 产生
             // PLAYER_SPEED 伪造超速（gap.md §4.3）。
             if let Some(from_pos) = release_pos {
-                // 选择界内且不与任何在场球员重叠的落点。若直接放在被
+                // 选择界内且不与任何在场球员重叠的接球点。若直接放在被
                 // 他人占据的边界点上，下一 tick 的分离投影会产生巨大
                 // 瞬时修正（本轮 seed 21 实测 PLAYER_SPEED 55–117 ft/s）。
                 let to = self.free_in_court_spot(from_pos, &exempt_inbounder);

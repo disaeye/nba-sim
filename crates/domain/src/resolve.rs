@@ -131,7 +131,7 @@ impl Default for BallSecurityPolicy {
         Self {
             poke_pressure_radius_ft: 4.5,
             // round-16 标定（A/B 证据 §17.7）：0.55 → 2.2。
-            // 失误构成对齐真实：丢球占比 24%(r1.5)/40%(r3.0) 的插值点，
+            // 失误率取真实值：丢球占比 24%(r1.5)/40%(r3.0) 的插值点，
             // 丢球率 0.078/回合 ≈ 真实 0.0776（82games 53.6% × 0.145）。
             poke_attempt_rate_per_sec: 2.2,
             poke_success_ceiling: 0.16,
@@ -311,9 +311,9 @@ pub struct BaseRates {
     pub shot_make_2pt: f32,
     /// 中距离（廊下之外、三分线内）投篮命中基准。
     ///
-    /// 契约依据：`docs/attributes.md` §4 / `docs/quality.md` §2.1 要求命中率
+    /// 规格依据：`docs/attributes.md` §4 / `docs/quality.md` §2.1 要求命中率
     /// 与出手区域匹配。真实篮球中距离命中（约 0.42）显著低于廊下（约 0.63）；
-    /// 二者共用一个基准会把中距离按廊下结算，形成结构性偏高。
+    /// 二者共用一个基准会把中距离按廊下结算，形成结构性高估。
     /// 分区而非硬编码在引擎里，以遵守 `charter` C1（行为参数走数据通道）。
     pub shot_make_mid: f32,
     pub shot_make_3pt: f32,
@@ -325,7 +325,7 @@ pub struct BaseRates {
     /// `shooting_foul` 原本只在 `DriveResolution` 产生，即**只有突破能被犯规**，
     /// 跳投在被干扰时没有任何造犯规可能。实测 seed42 全场仅 12 次犯规
     /// （真实 NBA 约 40），`free_throw_rate` 因此只有 0.110（带 [0.20,0.35]）。
-    /// 这是缺失的程序路径，不是参数偏差，所以新建字段而非调已有值。
+    /// 这是缺失的程序路径，属于路径缺失而非参数误差，所以新建字段而非调已有值。
     ///
     /// 已知未闭合：该路径使罚球率只到 0.118，仍越带；瓶颈在接触强度
     /// 分布而非本参数（evidence/problem.md §23.12），不得调大凑数。

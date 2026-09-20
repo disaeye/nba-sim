@@ -30,7 +30,7 @@ pub struct GameRules {
     pub decision_interval_seconds: f32,
     /// 发球阶段的决策间隔（秒）。发球受 5 秒规则约束，若沿用阵地进攻的
     /// `decision_interval_seconds`（2.4s），首次决策若被 Dwell 消耗，第二次
-    /// 要等到 4.8s，加帧对齐即越过 5.0s 阈值——实测 37% 的发球因此被判
+    /// 要等到 4.8s，加上取整余量即越过 5.0s 阈值——实测 37% 的发球因此被判
     /// 五秒违例。发球是「尽快把球发进场」的程序，不该套用阵地节奏。
     pub inbound_decision_interval_seconds: f32,
     pub free_throw_interval_seconds: f32,
@@ -127,10 +127,10 @@ pub struct GameRules {
     pub catch_radius_base_ft: f32,
     /// 接球技能对接球半径的调制幅度（ft）：`ball_handling` 从 0→1 的增量。
     pub catch_radius_skill_gain_ft: f32,
-    /// 预估误差幅度（ft）：`off_ball_sense` 从 1→0 时接球人预估落点的
-    /// 额外偏差上限。0 表示完全精确（当前行为）；>0 即实现 P-1「预估可能错」。
+    /// 预估误差幅度（ft）：`off_ball_sense` 从 1→0 时接球人预估接球点的
+    /// 额外误差上限。0 表示完全精确（当前行为）；>0 即实现 P-1「预估可能错」。
     pub receive_estimate_noise_ft: f32,
-    /// 确定性偏差向量的量化分母（用于把 16 位哈希切片映射到 [-1, 1]）。
+    /// 确定性误差向量的量化分母（用于把 16 位哈希切片映射到 [-1, 1]）。
     /// 是**数值工具参数**（不是行为常数）：放在规则通道以便审计与调整，
     /// 取值 32767.5 = (2^16 − 1) / 2，使 0..=65535 映射到 [-1, 1]。
     pub estimate_offset_quantization: f32,
@@ -179,7 +179,7 @@ pub struct GameRules {
     pub stream_max_ticks: usize,
     /// 投篮弧线峰值反解的二分迭代次数（仅影响数值精度，不影响行为）。
     pub shot_arc_solve_iterations: u32,
-    /// 交接落点相对 leash 的安全比例：接球人未能走到冻结点时，球落在
+    /// 交接接球点相对 leash 的安全比例：接球人未能走到冻结点时，球位于
     /// 「冻结点 → 接球人」方向上距接球人 `leash × 该比例` 处，保证
     /// `BALL_WITH_HOLDER` 成立且不悬置。
     pub transfer_landing_leash_ratio: f32,
@@ -205,8 +205,8 @@ pub struct GameRules {
     pub rebound_follow_seconds: f32,
     /// 进攻方冲抢篮板的人数（charter C1：行为参数走数据通道，不内联在引擎里）。
     ///
-    /// 真实篮球里不是全队都冲抢：全员扑向落点会立即触发
-    /// `min_player_separation_ft` 碰撞消解，反而把所有人推离落点。
+    /// 真实篮球里不是全队都冲抢：全员扑向球的落点会立即触发
+    /// `min_player_separation_ft` 碰撞消解，反而把所有人推离球的落点。
     /// evidence/problem.md §23.8 记录了指派前攻方几乎无人向球移动
     /// （0.0001 ft/tick，而守方 0.0042）。
     pub rebound_crash_offense_count: u32,
@@ -336,7 +336,7 @@ impl Default for GameRules {
             // 出手告终。真实进攻在 24→14s 区间就已开始组织。
             shot_clock_urgency_seconds: 12.0,
             // D3.1 校准：防守干扰惩罚从 0.22 提至 0.32，使空位/重压出手的
-            // 命中率分化接近真实。0.42 实测 2P 63.8% 超带且诱发贴边几何死锁
+            // 命中率分化接近真实。0.42 实测 2P 63.8% 超带且诱发贴边几何僵局
             // （seed11 streak 714>200）；0.32 为 8 seed full 实测双入带点：
             // 3P 39.7% ∈ [30,40]、2P 58.1% ∈ [48,58]，streak 121<200。
             shot_contest_sensitivity: 0.32,

@@ -124,7 +124,7 @@ impl DecisionSystem {
                     passer_id: carrier_id.to_string(),
                     receiver_id: p.id.clone(),
                     from_pos: carrier_pos,
-                    // 落点与飞行时长一起求解（不动点），不再用固定领传时长。
+                    // 球的落点与飞行时长一起求解（不动点），不采用固定领传时长。
                     to_pos: nba_physics::ballistics::BallisticsEngine::solve_pass_landing(
                         carrier_pos,
                         p,
@@ -209,7 +209,7 @@ impl DecisionSystem {
                 .collect();
             ordered_teammates.sort_by(|left, right| left.id.cmp(&right.id));
             for p in ordered_teammates {
-                // 落点与飞行时长一起求解（不动点），不再用固定领传时长。
+                // 球的落点与飞行时长一起求解（不动点），不采用固定领传时长。
                 let to_pos = nba_physics::ballistics::BallisticsEngine::solve_pass_landing(
                     carrier_pos,
                     p,
@@ -307,8 +307,8 @@ impl DecisionSystem {
         //
         // 曾尝试改为「分层 softmax」（先族后目标），假设是"传球族被队友数量
         // 稀释"。**该假设被实测否证**：分层后传球数反而从 1.61 降到 1.12，
-        // 且实测 PASS 族效用均值 0.389 < DWELL 0.496 —— 传球不是被稀释，
-        // 而是效用本身就低（见 `utility` 里 `(0.5 + openness)` 乘子的说明）。
+        // 且实测 PASS 族效用均值 0.389 < DWELL 0.496 —— 传球效用本身就低
+        // （见 `utility` 里 `(0.5 + openness)` 乘子的说明）。
         // 因此保留扁平 softmax，把修复放在效用结构上。
         let max_u = scored
             .iter()

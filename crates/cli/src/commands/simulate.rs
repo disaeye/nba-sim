@@ -75,7 +75,7 @@ pub(crate) fn run_single_simulation(
         summary.box_score.turnovers, summary.box_score.fouls
     );
 
-    // quality.md §1.1 严重级别契约：Hard 阻断（退出码 1），
+    // quality.md §1.1 严重级别规定：Hard 阻断（退出码 1），
     // Soft 计数上报但不阻断（退出码 0）。此前把两者一并当作失败，
     // 使合法的几何安全缓冲被当成硬错误。
     let hard_count = summary.taxonomy.hard_count;
@@ -117,7 +117,7 @@ pub(crate) fn run_single_simulation(
         );
     }
 
-    // M8 评判工件：judgments.ndjson + attribution_report.json 与流同落盘。
+    // M8 评判工件：judgments.ndjson + attribution_report.json 与流同批写入。
     if let Ok(stream) = read_stream_text(out_path) {
         // D1.3 严格解析：坏行 = 流不可信，跳过评判并告警（不产出假工件）。
         let ticks = match nba_evaluator::parse_stream(&stream) {
@@ -172,7 +172,7 @@ pub(crate) fn run_single_simulation(
         }
 
         // D0.2 账本平衡检查（含 §23.10 新增的失误归因式）：
-        // ledger_violations.ndjson 同落盘；账本不平衡 = Hard，
+        // ledger_violations.ndjson 同批写入；账本不平衡 = Hard，
         // 违反条数计入输出供批处理门禁消费。
         let ledger_violations = nba_evaluator::check_ledger(&ticks);
         let ledger_path = format!("{}.ledger_violations.ndjson", out_path);

@@ -338,7 +338,7 @@ pub(crate) struct BallRuntime {
     pub(crate) last_passer_id: Option<String>,
     /// Receiver awaiting physical convergence to a frozen pass endpoint.
     pub(crate) pending_pass_receiver: Option<String>,
-    /// 接球人**自己的**落点估计（层 A，P-1），跨 tick 保留。
+    /// 接球人**自己的**接球点估计（层 A，P-1），跨 tick 保留。
     ///
     /// ## 为什么必须跨 tick 保留（round-10 修正）
     ///

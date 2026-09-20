@@ -1,4 +1,4 @@
-//! 动作执行：把决策输出的候选动作落成权威状态与事件。
+//! 动作执行：把决策输出的候选动作写入权威状态与事件。
 //!
 //! 依据 `docs/architecture.md` §5.2 的执行重校验原则：本模块只负责**执行**，
 //! 候选已经过约束管线；执行点不再重新决策，只把动作写入球态、动作窗口与事件流。
@@ -105,7 +105,7 @@ impl MatchEngine {
         // （最近防守人 3.7 ft ≈ min_player_separation），碰撞消解每 tick
         // 清零速度——实测 0% 突破到达 ≤4.5ft，65% 停在离筐 18.6 ft。
         //
-        // 语义对齐（与拦截锚定球到抢断者同一原则——概率在事件时刻裁定，
+        // 语义一致性（与拦截锚定球到抢断者同一原则——概率在事件时刻裁定，
         // 事实随后回放）：`successful` 意味着**过掉了对位防守人**。把该
         // 防守人实际位移出突破走廊（侧向 + 分离余量），他随后由防守战术
         // 重新追防——这正是真实篮球「被过掉后回追」的几何。
@@ -280,7 +280,7 @@ impl MatchEngine {
                     // - `shooting_close` ↔ 非对抗近筐（挑篮/勾手）
                     // - `finishing`      ↔ 对抗近筐（顶人上篮 / and-1）
                     //
-                    // 两维解释同一出手族，若只用其一会使另一维成为死维度，
+                    // 两维解释同一出手族，若只用其一会使另一维成为无效维度，
                     // 且使「无对抗的近筐准度」与「对抗下的完成度」不可区分。
                     // 过渡权重取自 `contest_intensity`（距离 + 朝向 + 逼近速度），
                     // 不另立阈值。
@@ -312,7 +312,7 @@ impl MatchEngine {
         //   中距离    rim 以外、三分线以内             -> shot_make_mid
         //   三分      is_three                          -> shot_make_3pt
         // 此前中距离与廊下共用 shot_make_2pt，使 8ft–三分线的出手被按廊下
-        // 结算（真实 0.42 vs 0.63），形成结构性偏高：evidence/problem.md §21.3。
+        // 结算（真实 0.42 vs 0.63），形成结构性高估：evidence/problem.md §21.3。
         let base_fg = if dist_to_hoop < self.config.rules.rim_shot_distance_ft {
             self.config.rules.resolve.base_rates.shot_make_2pt
         } else if is_three {
@@ -348,7 +348,7 @@ impl MatchEngine {
         } else {
             None
         };
-        // 没有防守人在附近就不可能犯规（与概率为 0 一致，防御性对齐）。
+        // 没有防守人在附近就不可能犯规（与概率为 0 一致，防御性一致）。
         let fouled = fouled && fouler_id.is_some();
 
         // 峰值必须服从规则通道的高度上限：base + dist×factor 在超远距离
@@ -437,7 +437,7 @@ impl MatchEngine {
     ///
     /// 硬约束校验失败时拒绝执行该动作并保留 Dwell 保护，但 trace 仍必须
     /// 完整发布（architecture.md §5.3：禁止「决策了但没有 trace」的路径），
-    /// 供评判器统计「落地改变」率。
+    /// 供评判器统计「执行时改变」率。
     pub(crate) fn apply_decision_output(&mut self, out: DecisionOutput, current_t: f32) {
         let ctx = self.constraint_ctx();
         if let Err(blocked_reason) = self
@@ -812,7 +812,7 @@ impl MatchEngine {
             .unwrap_or(20.0);
         // 领传由**决策层**给出（`CandidateAction::Pass.to_pos` 已含提前量），
         // 此处**不得**再叠加一次——实测叠加后 `PASS_CORRIDOR_REACHABLE`
-        // 由 9 条恶化到 28 条（接收人因减速模型无法到达过远的落点）。
+        // 由 9 条恶化到 28 条（接收人因减速模型无法到达过远的接球点）。
         // outlet 一传走 `start_rebound_outlet`，那条路径没有决策层，故单独领传。
         let target_lead_pos = to_pos;
         self.observations.active_windows.insert(

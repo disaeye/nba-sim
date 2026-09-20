@@ -191,7 +191,7 @@ fn scenario_offensive_rebound_shot_clock_program() {
     let nba = GameRules::default();
     let fiba = GameRules::with_league(LeagueProfile::fiba());
 
-    // FIBA 与 NBA 均为 14 秒（近年的规则趋同），此用例固定该契约，
+    // FIBA 与 NBA 均为 14 秒（近年的规则趋同），此用例固定该约定，
     // 防止未来任一侧被误改而无人察觉。
     assert_eq!(nba.league.offensive_rebound_shot_clock_seconds, 14.0);
     assert_eq!(fiba.league.offensive_rebound_shot_clock_seconds, 14.0);
@@ -226,7 +226,7 @@ fn scenario_three_point_geometry_program_differs() {
     let nba = GameRules::default();
     let fiba = GameRules::with_league(LeagueProfile::fiba());
 
-    // 两档案的底角语义确实不同（这是在断言契约，不是断言常量本身）。
+    // 两档案的底角语义确实不同（这里断言的是行为差异，超出常量本身）。
     assert!(
         nba.league.corner_three_distance_ft > 0.0,
         "NBA must declare a corner three line"

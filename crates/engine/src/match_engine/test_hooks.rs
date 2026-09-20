@@ -84,7 +84,7 @@ impl MatchEngine {
     /// **自行维护派生副作用**。当前需要维护的是接球人标记
     /// （`is_receiving_pass`，round-10）——否则用本后门构造的传球场景里，
     /// 接球人不会获得 APF 豁免与「到位即停」，造成与生产路径不一致的行为
-    /// （实测：H_2 带 17.26 ft/s 初速滑离落点，层 A 误判）。
+    /// （实测：H_2 带 17.26 ft/s 初速滑离接球点，层 A 误判）。
     pub fn set_ball_state_for_test(&mut self, state: BallTrajectoryKind) {
         if let BallTrajectoryKind::Pass { target_id, .. } = &state {
             let rid = target_id.clone();

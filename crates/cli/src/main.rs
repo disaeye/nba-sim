@@ -50,7 +50,7 @@ fn load_rules(path_opt: Option<&str>) -> std::io::Result<GameRules> {
     }
 }
 
-/// 违规账本落盘：任何写入/序列化错误向上传播（gap.md §16.4）。
+/// 违规账本写入：任何写入/序列化错误向上传播（gap.md §16.4）。
 fn write_violation_ledger(path: &str, violations: &[Violation]) -> std::io::Result<()> {
     use std::io::Write;
     let file = File::create(path)?;
@@ -65,7 +65,7 @@ fn write_violation_ledger(path: &str, violations: &[Violation]) -> std::io::Resu
     writer.flush()
 }
 
-/// 评判工件落盘（M8：judgments.ndjson + attribution_report.json）。
+/// 评判工件写入（M8：judgments.ndjson + attribution_report.json）。
 /// 门禁判定：把「评判 Hard 门失败」变成进程退出码（gap.md §18.6 第 7 条）。
 ///
 /// ## 为什么需要这个函数
@@ -156,7 +156,7 @@ fn write_judgment_artifacts(
 /// CLI 自己的临时目录根（与 test-support 的约定一致）。
 ///
 /// 项目约定临时数据统一放 `/home/ubuntu/basketball`（可用 `NBA_TEMP_ROOT`
-/// 覆盖）；不再落 `/tmp`——那里与构建产物共享分区，且历史泄漏正是从
+/// 覆盖）；不用 `/tmp`——那里与构建产物共享分区，且历史泄漏正是从
 /// `/tmp/nba_batch_*.ndjson` 累积出来的（单次实测残留 4.2 GB）。
 pub(crate) fn cli_temp_root() -> std::path::PathBuf {
     std::env::var_os("NBA_TEMP_ROOT")
@@ -176,7 +176,7 @@ pub(crate) fn cli_temp_root() -> std::path::PathBuf {
 //   engine-only  : 14.5k–15.4k ticks/s
 //   engine+facts : 12.2k–15.0k ticks/s
 // 预算取实测下沿的约 75%，用于抓「性能显著退化」而不是噪声抖动。
-/// 纯引擎吞吐预算（无序列化、无落盘）。
+/// 纯引擎吞吐预算（无序列化、无文件写入）。
 const BUDGET_ENGINE_TICKS_PER_SEC: f64 = 11_000.0;
 /// 引擎 + 事实流序列化吞吐预算（有界默认输出模式）。
 const BUDGET_FACTS_TICKS_PER_SEC: f64 = 9_000.0;
@@ -193,7 +193,7 @@ fn run_benchmark(ticks: usize, mode: &str) -> std::io::Result<()> {
     let mut failures: Vec<String> = Vec::new();
     let want = |layer: &str| mode == "all" || mode == layer;
 
-    // ---- 1. engine-only：纯引擎 tick，无序列化、无落盘 ----
+    // ---- 1. engine-only：纯引擎 tick，无序列化、无文件写入 ----
     if want("engine") {
         let start = Instant::now();
         let mut engine = MatchEngine::with_setup(MatchSetup::builtin(GameRules::default()), 42);
@@ -436,7 +436,7 @@ fn run_audit_stream(file_path: &str) -> std::io::Result<()> {
 /// 比例 → 百分比的唯一换算点（展示层）。
 ///
 /// 调用方不得各自写 `* 100.0`：那会让同一个换算字面量以「行为常数」的身份
-/// 散落 8 处（charter C1 / docs/protocol.md §2.1 M7 的收编对象）。收编为单点后，
+/// 分散在 8 处（charter C1 / docs/protocol.md §2.1 M7 的收编对象）。收编为单点后，
 /// 该字面量只出现一次，且位置明确属于展示层。
 fn pct(ratio: f32) -> f32 {
     ratio * 100.0

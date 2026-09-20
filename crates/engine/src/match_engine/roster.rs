@@ -126,7 +126,7 @@ impl MatchEngine {
     /// ## 为什么不再取 `roster_order` 首位（round-11 Step4b / P-2）
     ///
     /// 旧实现是「取名册数组里第一个在场者」——**顺序即身份**：把名册数组
-    /// 轮转一下，处理球人就变了。契约（`tactics.md TA3`「角色是槽位不是身份」、
+    /// 轮转一下，处理球人就变了。文档（`tactics.md TA3`「角色是槽位不是身份」、
     /// `attributes.md §2.7`）要求身份由**能力适配**派生。
     ///
     /// 现在按能力排序：`ball_handling × w1 + passing × w2 + decision_iq × w3`，
@@ -134,7 +134,7 @@ impl MatchEngine {
     /// 名册数组顺序**完全不参与**。
     ///
     /// 约束：必须是**在场**球员。若把球交给替补（`on_court=false`），他永远
-    /// 不会被物理步进，`inbounder_arrived` 永不成立，比赛卡死在 DeadBall
+    /// 不会被物理步进，`inbounder_arrived` 永不成立，比赛停滞在 DeadBall
     /// （历史实测：发球员 `action=Bench`、位置停在替补席）。
     /// 权重取当前进攻档案的持球槽位需求（`TacticalPlanner::handler_score`，
     /// 与 `fill_slots` 同源）。

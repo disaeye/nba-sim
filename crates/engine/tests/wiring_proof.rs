@@ -217,7 +217,7 @@ fn capability_poke_check_reaches_behaviour() {
 /// `MoraleState::HotHand` 必须能被真实比赛达到。
 ///
 /// 此前 `PlayerModulationState::record_shot` 在生产代码与测试中零调用，
-/// `consecutive_makes` 恒为 0，`hot_hand_bias` 是死通道。
+/// `consecutive_makes` 恒为 0，`hot_hand_bias` 是无效通道。
 ///
 /// 窗口必须是**完整一场**：连中阈值虽只有 2，但单个球员在 9000 tick 内
 /// 只出手约 10 次，前两次连续命中的概率很低。实测（6 seed 全场）：

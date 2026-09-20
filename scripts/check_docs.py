@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""文档治理守卫：检查引用解析、契约面纪律和工作面结构。
+"""文档治理守卫：检查引用解析、规格面纪律和工作面结构。
 
 引用格式为 ``<文档路径>.md §N`` 或在目标唯一时使用 ``<basename>.md §N``。
 路径优先按仓库根解析；``dev/...`` 按 ``docs/dev/...`` 解析。短 basename
@@ -111,7 +111,7 @@ def check_contract_discipline(contract_files: list[Path]) -> list[str]:
             for pattern, description in CONTRACT_FORBIDDEN:
                 if pattern.search(line):
                     violations.append(
-                        f"{path.name}:{line_no}: 契约面禁止{description} — "
+                        f"{path.name}:{line_no}: 规格面禁止{description} — "
                         f"{line.strip()[:100]}"
                     )
     return violations
@@ -207,7 +207,7 @@ def main() -> int:
     dev_files = sorted(docs_dir.glob("dev/**/*.md"))
     files = sorted({*contract_files, *dev_files})
 
-    print(f"扫描 {len(contract_files)} 份契约文档 + {len(dev_files)} 份工作文档")
+    print(f"扫描 {len(contract_files)} 份规格文档 + {len(dev_files)} 份工作文档")
     ref_errors, total = check_refs(files)
     errors = (
         ref_errors

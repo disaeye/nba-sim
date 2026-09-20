@@ -263,7 +263,7 @@ impl PreconditionEvaluator {
                 Ok(())
             }
             LifecycleTransitionTarget::TipOffExecution => {
-                // 跳球时双方中锋必须在中圈落位
+                // 跳球时双方中锋必须在中圈就位
                 Ok(())
             }
         }

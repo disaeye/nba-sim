@@ -104,7 +104,7 @@ pub(super) fn make_motion_proposals(
                 // 接球人的速度由 `engine::receive_approach` 按制动距离给出，
                 // 后者已经保证「到位即停」。而 `turn_decel_timer` 分支会把它
                 // 覆盖为 `current_vel * 0.4`，使接球人带着上一 tick 的战术跑位
-                // 速度滑离落点。
+                // 速度滑离接球点。
                 //
                 // 实测（seed 1201）：H_2 初速 43.2 ft/s → 保留 40% = 17.26 ft/s，
                 // 一 tick 滑 1.73 ft > catch_radius 2.6 ft，层 A 误判「接不到」。
@@ -120,7 +120,7 @@ pub(super) fn make_motion_proposals(
             //
             // ## 接球人豁免（round-10）
             //
-            // 接球人向球收敛时不得被 APF 推开：实测 H_2 初始恰在冻结落点
+            // 接球人向球收敛时不得被 APF 推开：实测 H_2 初始恰在冻结接球点
             // (d=0, 目标速度 0)，仍被 12 ft 半径的队友排斥场以 ~16 ft/s 推离，
             // 2 tick 后距球 3.2 ft > catch_radius 2.6 → 层 A 误判「接不到」。
             //

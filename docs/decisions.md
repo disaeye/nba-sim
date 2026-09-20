@@ -1,6 +1,6 @@
 # NBA-Sim · 设计决策登记
 
-> 本文档登记影响多个契约、具有取舍关系、且需要保留理由的设计决策。
+> 本文档登记影响多份规格、具有取舍关系、且需要保留理由的设计决策。
 > 它不是当前状态报告，也不是实施计划；当前实现状态见 `docs/dev/status.md`，实施计划见 `docs/dev/current/plan.md`。
 
 ## 0. 决策治理
@@ -13,8 +13,8 @@
 
 决策状态：
 
-- **accepted**：已经成为设计约束；契约文档只保留结论；
-- **proposed**：正在评估，不能被实现当作稳定契约；
+- **accepted**：已经成为设计约束；规格文档只保留结论；
+- **proposed**：正在评估，不能被实现当作稳定规格；
 - **superseded**：被后续决策替代，只保留历史理由。
 
 决策编号稳定不复用。修改已接受决策时，新增决策或明确标记为 superseded，不直接改写历史理由。
@@ -66,7 +66,7 @@
 
 防守档案不能只改变展示字段或站位标签。防守方案必须通过责任分配、轮转、施压、协防或执行重校验改变可观测行为；中性档案必须能复原行为中性基线。
 
-最小执行范围由开发计划决定，完整责任图不是当前契约的隐含承诺。
+最小执行范围由开发计划决定，完整责任图超出当前规格的隐含承诺。
 
 规范落点：`tactics.md` §3–§5；验收引用 `quality.md` §6。
 
@@ -143,14 +143,14 @@ handler，读取方得到 `None` 并走自己的无持球人分支；不得用�
    `roster[possession][carrier_idx]` 违反 ADR-005（名册顺序不是身份）——它让行为
    取决于球员在同队名单中的位置序号。`docs/dev/evidence/problem.md` §25.4 实测
    "从不跨队"只是当前转移序列的巧合（球权翻转后总是立即 `Held`），不是可依赖的
-   契约。
+   可依赖的稳定约定。
 3. **唯一已知消费者是战术 planner 的进攻几何参考点**（`plan_possession_targets_with_rules`
    的 `carrier_idx` 实参）。无 handler 球态（`ControlTransfer` / `LooseBall` / `RimRebound`
    期间的阵地与攻防转换布置）下，planner 以 `ball_pos_3d`（球的实际位置）为参考，
    不假设存在持球人；这与 D9.1 已删除的"按持球人槽位硬编码几何"一致——几何参考
    应跟随球，不跟随一个虚构的持球人。
 4. 由此 `carrier_idx` 成为纯冗余：handler 永远可从 `BallState` 派生，下标投影不再是
-   任何读取方的输入。删除是上述语义落地后的机械结果，而非独立的取舍。
+   任何读取方的输入。删除是上述语义实施后的机械结果，而非独立的取舍。
 
 对既有判断的修正：`docs/dev/status.md` 与 `docs/dev/evidence/problem.md` §25 原结论
 "两个语义都不是显然正确的那一个，需先明确语义再重构"——本条即该语义裁定：采用
@@ -170,7 +170,7 @@ handler，读取方得到 `None` 并走自己的无持球人分支；不得用�
 但核心主循环依然依赖于庞大的全局 `&mut self` 集中突变，导致：
 
 1. 模块间隐式耦合深，单一字段修改难以做无副作用单元隔离测试；
-2. 架构设计中宣称的“13 阶段窄签名函数式管线”无法彻底落地；
+2. 架构设计中宣称的“13 阶段窄签名函数式管线”无法完整实施；
 3. 并行与向量化计算受阻。
 
 裁定：**将 MatchEngine 解构为纯数据世界（World）与无状态系统管线（Systems）**：
@@ -179,7 +179,7 @@ handler，读取方得到 `None` 并走自己的无持球人分支；不得用�
    `Kinematics`（加速度/抓地力/动量）、`PlayerState`（体能/犯规/士气）、`BallComponent`（三维弹道与归属）、
    `MatchClock`（游戏时钟与进攻时钟）和 `GameFlowLedger`（比分与账本）。
 2. **纯函数式系统（Stateless Systems Pipeline）**：主循环每个 tick 严格执行以下阶段，
-   阶段之间仅通过窄数据契约流动：
+   阶段之间仅通过窄数据接口流动：
    - `PerceptionSystem`：空间 Voronoi 拓扑与防守压迫密度计算；
    - `DecisionSystem`：基于意图评价的动作决策（纯函数，无状态突变）；
    - `PhysicsSystem`：刚体运动、动力学积分与弹道解算；
@@ -217,7 +217,7 @@ handler，读取方得到 `None` 并走自己的无持球人分支；不得用�
 
 规范落点：`docs/tactics.md`、`docs/architecture.md`；执行入口：`docs/dev/current/plan.md`。
 
-### ADR-013 · 编排层巨石按职责拆分模块
+### ADR-013 · 编排层巨石按职责划分模块
 
 **状态：accepted**
 
@@ -226,7 +226,7 @@ handler，读取方得到 `None` 并走自己的无持球人分支；不得用�
 一个文件与一个 `impl` 块内。ADR-011 已裁定向纯数据管线演进，但文件级边界缺失
 使“哪些代码属于哪个阶段”只能靠行号与注释判断，阶段划分无法单测也无法审阅。
 
-裁定：**按职责把编排层拆为同一模块下的多个文件，保持行为逐字节不变**：
+裁定：**按职责把编排层划分为同一模块下的多个文件，保持行为逐字节不变**：
 
 1. **模块边界以阶段与事实类型划分**，不以行数划分：
    - `mod.rs`：状态字段、构造、时钟与球态唯一写入口、`step()` 调度、只读访问器；
@@ -254,9 +254,9 @@ handler，读取方得到 `None` 并走自己的无持球人分支；不得用�
    - `bookkeeping.rs`：每 tick 收尾的持球人同步、体力推进、语义接触归集与事实抽取；
    - `runtime_phase.rs`：运行时约束求值、贴身切球、罚球结算、节末与终场短路；
    - `types.rs`：对外值类型（`MatchBoxScore` / `ExportSummary`）。
-2. **子模块直接访问父模块私有字段**（Rust 隐私规则），因此拆分不引入任何
+2. **子模块直接访问父模块私有字段**（Rust 隐私规则），因此划分不引入任何
    `pub` 字段或绕过不变量的新入口；`MatchEngine` 仍保持零 `pub` 字段。
-3. **行为不变的判据是黄金哈希**：拆分期间每一步都必须保持 `golden_hash` 通过，
+3. **行为不变的判据是黄金哈希**：划分期间每一步都必须保持 `golden_hash` 通过，
    模块移动不得伴随任何逻辑改写。
 
 规范落点：`docs/architecture.md` §4；执行入口：`docs/dev/current/plan.md`。
@@ -280,7 +280,7 @@ ADR-013 已完成文件级划分，但未改变字段共享：全部子模块仍
    `step_inner` 单函数跨 7 簇；
 4. 弹道裁决块（1,138 行）引用 25 个状态字段、调用 20 个引擎方法。
 
-因此按字段 `&mut` 解构的窄签名管线在保持行为不变的前提下无法落地：它需要重写上述跨组函数体，
+因此按字段 `&mut` 解构的窄签名管线在保持行为不变的前提下无法实施：它需要重写上述跨组函数体，
 而重写的等价性不能由 `golden_hash`（只观测输出帧，不观测字段归属）证明。
 
 裁定：
@@ -316,13 +316,13 @@ ADR-013 已完成文件级划分，但未改变字段共享：全部子模块仍
 | --- | --- | --- |
 | `physics/src/spatial.rs` `SpatialGeometry` | 对位人距离与朝向、传球走廊、队友密度 | 经 `SpatialPhysics::openness` / `pass_corridor` 被 decision 与 semantics 大量读取 |
 | `physics/src/perception.rs` `PerceptionSnapshot` | 球员级只读事实（到球/筐距离、最近对位人） | **零消费**（全仓无任何引用，只在 `lib.rs` 的 `pub mod` 出现） |
-| `engine/src/world.rs` `PerceptionSystem` | 全场压迫密度、局部 Voronoi 开阔度近似、弱侧空位 | 引擎逐 tick 调用但结果被丢弃；契约测试 `match_world.rs` 验证其单调性 |
+| `engine/src/world.rs` `PerceptionSystem` | 全场压迫密度、局部 Voronoi 开阔度近似、弱侧空位 | 引擎逐 tick 调用但结果被丢弃；行为测试 `match_world.rs` 验证其单调性 |
 | `decision/src/potential_field.rs` `DefensePotentialFieldSolver` | 多体均衡位置与涌现防守动作 | `decision/src/tactics.rs` 的防守目标生成 |
 
 裁定：
 
 1. **球员级空间事实的唯一实现是 `SpatialGeometry`**（`physics` crate）：
-   它已是 decision 与 semantics 的实际数据源，有自己的规则通道与契约测试。
+   它已是 decision 与 semantics 的实际数据源，有自己的规则通道与行为测试。
    新增的球员级空间量一律加在这里，不得另建平行的球员级抽象；
 2. **`physics/src/perception.rs` 删除**：它零消费，且其四个量中三个
    （到球距离、到筐距离、最近对位人）已由 `SpatialGeometry::get_openness` 与

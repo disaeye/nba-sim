@@ -49,7 +49,7 @@ fn pass_arrival_replays_release_outcome_and_emits_matching_fact() {
     engine.set_game_flow_for_test(nba_domain::GameFlowState::LiveBall);
     engine.set_sub_phase_for_test(nba_domain::SubPhase::ActionExecution);
     engine.set_current_time_for_test(1.0);
-    // 层 A（P-1）修正：接球人不再直读传球人的冻结落点，而是按**自己的感知**
+    // 层 A（P-1）修正：接球人不再直读传球人的冻结落点，按**自己的感知**
     // 预估并跑位，因此可能接不到。本测试验证的是「release 时裁定的接收结果被
     // 忠实回放」，与位置无关，故关闭预估噪声。
     setup_noise_off(&mut engine);
@@ -153,7 +153,7 @@ fn pass_release_policy_can_emit_drop_without_redeciding_at_arrival() {
     ));
 }
 
-/// 投篮必须使用配置的技能与空间输入（把命中区间钉在 1.0，则必然命中）。
+/// 投篮必须使用配置的技能与空间输入（把命中区间固定在 1.0，则必然命中）。
 #[test]
 fn shot_release_uses_configured_skill_and_spacing_inputs() {
     let mut rules = nba_domain::GameRules::default();

@@ -29,7 +29,7 @@ mod write_entry;
 
 /// 一次弹道裁决产出的待处理事实。
 ///
-/// 这些值在裁决过程中逐步累积（一个 tick 最多落定一项），因此以整体形式
+/// 这些值在裁决过程中逐步累积（一个 tick 最多确定一项），因此以整体形式
 /// 返回，由调度器按优先级消费：出界 → 突分 → 急停 → 抢断 → 松球掌控 → 新球态。
 pub(crate) struct BallFlightOutcome {
     /// 裁决后的新球态（无变更时为 `None`）。
@@ -178,7 +178,7 @@ impl MatchEngine {
                     if let Some(player) = self.systems.physics.get_player(&cid) {
                         let offset = player.pos_ft - *target_pos;
                         let leash = self.config.rules.invariant_holder_leash_ft;
-                        // 球落在冻结点与接球人之间，距接球人不超过 leash，
+                        // 球位于冻结点与接球人之间，距接球人不超过 leash，
                         // 保证 `Held` 状态下 BALL_WITH_HOLDER 成立。
                         let landing = if offset.length() > leash {
                             player.pos_ft
@@ -242,7 +242,7 @@ impl MatchEngine {
             } => {
                 // 防御性恢复：发球员必须是在场球员。若因换人/犯满/旧状态
                 // 使其离场，必须重新指派一名在场球员继续发球程序，否则
-                // `inbounder_arrived` 永不成立，比赛卡死在 DeadBall
+                // `inbounder_arrived` 永不成立，比赛停滞在 DeadBall
                 // （本轮 seed 3/15/26 实测：inbounder action=Bench）。
                 let inbounder_valid = self
                     .systems
@@ -386,7 +386,7 @@ impl MatchEngine {
                 // 旧实现只在 tau≥1 时裁决。实测（22 例层 A 失败）：接球人的
                 // 估计模型以自身为参照系（`initial = ball + dir×|ball−我|`），
                 // 他朝来球走 → 距离收缩 → 估计点随之后退（追赶曲线）→
-                // 接球人不断走向传球人一侧，球却在冻结终点落地。最终
+                // 接球人不断走向传球人一侧，球却在冻结终点触地。最终
                 // 估计误差 p50=3.37 ft、接球人正确到达自己的估计（距估计
                 // 1.34 ft）、球距 3.64 ft —— 「朝来球移动」这一正确篮球行为
                 // 反而必然导致终点 miss。
@@ -476,7 +476,7 @@ impl MatchEngine {
                         // 概率掷骰）放在**外层**，层 A 放内层：掷到 false 就直接
                         // 判掉球，层 A 连执行机会都没有。后果（实测）：接球人
                         // 站在球旁边（甚至 0 ft）也会"接不到"；233 次 drop 中
-                        // 球**全都精确到达冻结落点**（d=0.00），而接球人距球
+                        // 球**全都精确到达冻结接球点**（d=0.00），而接球人距球
                         // 中位 6.37 ft —— 但这是层 B 先否决后才产生的位移，不是原因。
                         //
                         // 正确的因果顺序（真实篮球）：
@@ -528,7 +528,7 @@ impl MatchEngine {
                                 .unwrap_or(*to_pos);
                             self.ball.ball_pos_3d =
                                 (catch_spot, self.config.rules.ball_holder_height_ft);
-                            // 发布落点修正事实（层 A，P-1）：当实际到达位置与
+                            // 发布接球点修正事实（层 A，P-1）：当实际到达位置与
                             // 传球人冻结的意图不同时，把差异登记为事实，使
                             // 事实账本自洽（不允许下游各自解释同一传球）。
                             let divergence = (catch_spot - *to_pos).length();
@@ -562,7 +562,7 @@ impl MatchEngine {
                             });
                             self.ball.last_passer_id = None;
                         } else {
-                            // 层 A/层 B 不通过：球落到它**实际到达的位置**。
+                            // 层 A/层 B 不通过：球到达它**实际到达的位置**。
                             // 层 A 不可达 → 球在人之外；层 B 未接稳 → 球在人身旁。
                             // 两者都是 loose ball（用户批准的设计点 1）：
                             // 「接不到就是接不到」，不是全知全能地送到手里。
@@ -626,7 +626,7 @@ impl MatchEngine {
                 // 「过人 → 攻框」的完整几何。
                 // 时间基重定向：被过防守人以极速让位，约一个加速窗口
                 // （0.35s）后通道即开，届时切回攻框目标。空间基判定
-                // （「越过防守人」）在碰撞边界处永不可达，实测卡死。
+                // （「越过防守人」）在碰撞边界处永不可达，实测停滞。
                 if self.ball.beaten_defender_id.is_some() && current_t - start_time >= 0.35 {
                     if let Some(dp) = self.systems.physics.get_player(driver_id) {
                         let drv_spd = dp.target_speed_ftps;
@@ -984,8 +984,8 @@ impl MatchEngine {
                     // `PlayerModulationState::record_shot` 先前在生产代码与测试中
                     // 零调用，因此 `consecutive_makes` 恒为 0，
                     // `update_stamina_with_rules` 的 `HotHand` 分支
-                    // （阈值 `hot_hand_makes`）永远不可达——`hot_hand_bias` 是死通道。
-                    // 每次出手落定（进或不进）都在此立即回写，使连中/连铁
+                    // （阈值 `hot_hand_makes`）永远不可达——`hot_hand_bias` 无效。
+                    // 每次出手结算（进或不进）都在此立即回写，使连中/连铁
                     // 真正累积。
                     if let Some(state) = self.observations.modulation.get_mut(&sid) {
                         state.record_shot(made);
@@ -1048,9 +1048,9 @@ impl MatchEngine {
                             // （0.0042 vs 0.0001 ft/tick），且两者绝对值都极小——
                             // 即双方都几乎没有抢篮板行为，攻方几乎为零。后果是
                             // ORB% 仅 0.07–0.13（真实 0.245），每次不中直接换手，
-                            // 回合被压成「一次性进攻」并与 pace 偏高同向。
+                            // 回合被压成「一次性进攻」并与节奏过快同向。
                             //
-                            // 此处显式指派：双方球员向落点邻域移动（守方优先，
+                            // 此处显式指派：双方球员向球的落点邻域移动（守方优先，
                             // 攻方按 offensive_rebound 属性加权），使篮板真的被争抢，
                             // 而不是靠判定公式凭空产生归属。
                             self.assign_rebound_pursuit(landing_spot.landing_pos, current_t);
@@ -1119,7 +1119,7 @@ impl MatchEngine {
                         }
                         self.start_rebound_outlet(reb_id, reb_pos, is_offensive);
                     } else {
-                        // 无人在有效范围内保护篮板，球弹落变地板球。
+                        // 无人在有效范围内保护篮板，球弹地变地板球。
                         //
                         // ## 篮板源归因（round-17 修复）
                         //

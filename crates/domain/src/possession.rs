@@ -41,7 +41,7 @@ pub enum BallOwnership {
     Held { carrier_id: String },
     /// 投篮或传球飞行中（无活球持球人，原出手/传球者在飞行完成前保持关联）。
     InFlight { origin_player_id: String },
-    /// 活球争抢/掉球/篮板下落状态（无明确持有人）。
+    /// 活球争抢/脱手/篮板下落状态（无明确持有人）。
     Loose,
     /// 死球状态（出界、进球后、违例、判罚停表）。
     Dead,
@@ -56,14 +56,14 @@ impl BallOwnership {
             // 相同状态允许自旋刷新（如更新持球人坐标）
             (a, b) if a == b => true,
 
-            // Held 可以转移到：传球/投篮飞行、掉球 Loose、死球 Dead
+            // Held 可以转移到：传球/投篮飞行、脱手 Loose、死球 Dead
             (BallOwnership::Held { .. }, BallOwnership::InFlight { .. }) => true,
             (BallOwnership::Held { .. }, BallOwnership::Loose) => true,
             (BallOwnership::Held { .. }, BallOwnership::Dead) => true,
             // 允许抢断或直接手递手传球到新的 Held
             (BallOwnership::Held { .. }, BallOwnership::Held { .. }) => true,
 
-            // InFlight 可以转移到：接球/抢断 Held、篮板下落 Loose、进球/出界 Dead
+            // InFlight 可以转移到：接球/抢断 Held、篮板弹地 Loose、进球/出界 Dead
             (BallOwnership::InFlight { .. }, BallOwnership::Held { .. }) => true,
             (BallOwnership::InFlight { .. }, BallOwnership::Loose) => true,
             (BallOwnership::InFlight { .. }, BallOwnership::Dead) => true,

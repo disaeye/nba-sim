@@ -150,7 +150,7 @@ impl MatchEngine {
             } => Some((inbounder_id.clone(), *baseline_pos)),
             _ => None,
         };
-        // 层 A（P-1 有限信息）：接球人**不得**直读传球人的冻结落点。
+        // 层 A（P-1 有限信息）：接球人**不得**直读传球人的冻结接球点。
         //
         // 旧实现把 `BallState::Pass.to_pos`（传球人的私有意图）直接注入接球人的
         // 运动目标，于是接球人必然到位——全知全能，违反真实性。实测：无论把
@@ -246,7 +246,7 @@ impl MatchEngine {
                 //
                 // `set_player_target` 每 tick 都执行；若持球人正在执行
                 // `Advance`（把球推过中线），战术槽位（弧顶 x=66 等）
-                // 会把目标改回半场落位，导致推进速度被反复打断
+                // 会把目标改回半场站位，导致推进速度被反复打断
                 // （实测仅 3.5–3.9 ft/s，而 8 秒规则需要 ≥4.5 ft/s）。
                 let is_carrier_advancing = self.observations.advancing_player.as_deref()
                     == Some(player_id.as_str())

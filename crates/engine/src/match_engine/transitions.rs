@@ -1,7 +1,7 @@
 //! 球权与生命周期状态转移：死球、失误、抢断、篮板发球、出界、界外发球、节末。
 //!
 //! 依据 `docs/architecture.md` §3 的球权状态机：一切球权变更集中在本模块，
-//! 并统一经 `transition_ball_state` 唯一写入口落地。
+//! 并统一经 `transition_ball_state` 唯一写入口实施。
 
 use glam::Vec2;
 use nba_decision::constraint::{PhaseType, ViolationKind};
@@ -440,7 +440,7 @@ impl MatchEngine {
     }
 
     /// 为一个即将从界外 placement 回场的球员选择一个界内且不与他人
-    /// 重叠的落点（gap.md §4.3：离散 placement 必须直接给出合法坐标）。
+    /// 重叠的接球点（gap.md §4.3：离散 placement 必须直接给出合法坐标）。
     ///
     /// 优先原地 clamp；若与在场球员距离不足，则沿向内方向逐步搜索。
     /// 搜索不出时退回合法 clamp 位置（至少保证在界内）。
@@ -572,12 +572,12 @@ impl MatchEngine {
             player.action = "InboundPositioning".to_string();
             // F1.3：发球程序期间发球员是显式 placement 角色，允许站到
             // 界外发球点（gap.md §4.3/§8.5），否则物理 clamp 会让
-            // `inbounder_arrived` 永不成立，比赛卡死在 DeadBall。
+            // `inbounder_arrived` 永不成立，比赛停滞在 DeadBall。
             player.out_of_bounds_placement = true;
         }
         // F1.3b：发球员赴界外发球点是**离散 placement**，不是普通运动
         // （gap.md §4.3：换人入场、节间站位、跳球布置同属此类）。
-        // 若要求发球员步行过去，一名被场地 clamp 钉在边线的防守者可永久
+        // 若要求发球员步行过去，一名被场地 clamp 固定在边线的防守者可永久
         // 堵住路径，`inbounder_arrived` 永不成立（本轮 seed 6/9/11 实测
         // 约 19 万 tick 的 OUT_OF_BOUNDS 活锁）。因此直接放置并发事实。
         self.place_player_out_of_bounds(&inbounder_id, release_pos);

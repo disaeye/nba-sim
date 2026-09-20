@@ -86,14 +86,14 @@ fn test_inbound_pass_arrival_releases_dead_ball() {
     assert!(saw_live);
 }
 
-/// F1.3c 红测试：被钉在边线的防守者不得阻塞发球程序。
+/// F1.3c 红测试：被固定在边线的防守者不得阻塞发球程序。
 ///
-/// 根因：发球员必须步行到界外发球点，而防守者被场地 clamp 钉在同一路径上，
-/// 形成几何死锁（seed 6/9/11 实测约 19 万 tick 的 `OUT_OF_BOUNDS` 活锁）。
+/// 根因：发球员必须步行到界外发球点，而防守者被场地 clamp 固定在同一路径上，
+/// 形成几何僵局（seed 6/9/11 实测约 19 万 tick 的 `OUT_OF_BOUNDS` 活锁）。
 ///
 /// 口径：计数从「任意球员越界的连续 tick」改为「**同一球员**连续越界的 tick 数」。
-/// 前者把多名球员接力越界累加成一个长 streak，与 `gap.md` §4.3 的死锁定义
-/// （单球员被永久钉在边界）不符，会产生假阳性。
+/// 前者把多名球员接力越界累加成一个长 streak，与 `gap.md` §4.3 的僵局定义
+/// （单球员被永久固定在边界）不符，会产生假阳性。
 #[test]
 fn test_wall_pinned_defender_does_not_block_inbound() {
     for seed in [6u64, 9, 11, 16, 21] {

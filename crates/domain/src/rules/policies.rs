@@ -84,9 +84,9 @@ pub struct CapabilityCurveRules {
     /// 该维度属性的独立下限。
     ///
     /// 不得复用 `attribute_response_floor`（默认 0.5）：那会把 0..0.5 整段
-    /// agility 压成同一个值，底部半程成为死区——实测 `agility = 0.05` 与
+    /// agility 压成同一个值，底部半程成为无效区间——实测 `agility = 0.05` 与
     /// `agility = 0.5` 行为逐位相同，而 `attributes.md` §4 明令禁止
-    /// 「内联 floor 把有效区间压缩成死区」。
+    /// 「内联 floor 把有效区间压缩成无效区间」。
     pub turn_decel_retention_attribute_floor: f32,
 }
 
@@ -147,7 +147,7 @@ pub struct ModulationRules {
     ///
     /// ## 为何需要权重（round-20 审计）
     ///
-    /// 士气偏离原先作为**加性常数**加在全部候选的效用上，而采样是
+    /// 士气修正原先作为**加性常数**加在全部候选的效用上，而采样是
     /// `exp((u - max_u) / temperature)` 的 softmax：同一持球人的全部候选共享
     /// 同一个加性项，比值不变，因此 `hot_hand_bias` / `clutch_bias` /
     /// `frustrated_bias` / `exhausted_bias` 对选择分布**零影响**
@@ -160,7 +160,7 @@ pub struct ModulationRules {
     /// ## 语义轴
     ///
     /// 标量承载的是**自信与主动性**（热手与关键时段的沉稳为正值，低迷与
-    /// 体力耗尽为负值），权重声明该主动性在各动作族上的落点：主动性高则
+    /// 体力耗尽为负值），权重声明该主动性在各动作族上的分配：主动性高则
     /// 终结与突破更多、组织观察更少。这是单一标量能诚实表达的唯一语义轴；
     /// 「热手」与「急躁」是两种心理，不共用此通道。
     pub morale_shoot_affinity: f32,
@@ -401,7 +401,7 @@ pub struct DefenseRules {
     /// 历史公式为 `to_hoop * 0.7 + to_carrier * 0.3`；把两个权重参数化，
     /// 使 `help_priority` 只需在基准上倾斜，且默认值逐位复原历史行为。
     pub help_hoop_weight_base: f32,
-    /// `help_priority` 偏离 0.5 时对人-筐权重的倾斜系数。
+    /// `help_priority` 高于或低于 0.5 时对人-筐权重的倾斜系数。
     pub help_priority_tilt_gain: f32,
     /// 人-筐权重下限（防止协防完全脱离篮筐方向）。
     pub help_hoop_weight_min: f32,

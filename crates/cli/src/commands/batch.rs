@@ -76,7 +76,7 @@ pub(crate) fn run_batch_simulation(
         let game_violations = summary.violations.len();
         total_violations += game_violations;
 
-        // 单场违规工件：仅在存在违反时落盘（与单场模式同名约定）。
+        // 单场违规工件：仅在存在违反时写入（与单场模式同名约定）。
         if game_violations > 0 {
             let violation_file = format!("{}.violations.ndjson", out_path);
             write_violation_ledger(&violation_file, &summary.violations)?;
@@ -115,7 +115,7 @@ pub(crate) fn run_batch_simulation(
         avg_dur_list.push(dur);
         fg3_pct_list.push(pct(summary.box_score.fg3_pct()));
 
-        // M8 评判：逐场评判并聚合（batch 与 violations 同落盘）。
+        // M8 评判：逐场评判并聚合（batch 与 violations 同批写入）。
         if let Ok(stream) = read_stream_text(&out_path) {
             let ticks = match nba_evaluator::parse_stream(&stream) {
                 Ok(t) => t,
@@ -205,7 +205,7 @@ pub(crate) fn run_batch_simulation(
             format!("{}.attribution_report.json", base),
             serde_json::to_string_pretty(&report).map_err(std::io::Error::other)?,
         )?;
-        // 逐场账本结果落盘：与单场模式的 ledger_violations.ndjson 同源同义。
+        // 逐场账本结果写入：与单场模式的 ledger_violations.ndjson 同源同义。
         fs::write(
             format!("{}.ledger_report.json", base),
             serde_json::to_string_pretty(&serde_json::json!({
@@ -261,7 +261,7 @@ pub(crate) fn run_batch_simulation(
         std::process::exit(1);
     }
     // 账本不平衡 = Hard（与单场模式同一判据）：金额式不对平意味着
-    // 事实流不能独立重建比赛，比任何分布偏差都更严重。
+    // 事实流不能独立重建比赛，比任何分布误差都更严重。
     if total_ledger_violations > 0 {
         eprintln!(
             "⛔ batch LEDGER gate FAILED: {} violation(s) across {} games",

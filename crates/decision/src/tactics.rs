@@ -293,7 +293,7 @@ impl TacticalPlanner {
         )
     }
 
-    /// D5.1b：能力适配的 slot fill（tactics.md §3 契约）。
+    /// D5.1b：能力适配的 slot fill（tactics.md §3 规定）。
     ///
     /// 输入：档案槽位 + 在场球员的能力画像；输出：`slots[i] -> player_id` 的
     /// 确定性匹配，或 `FitError`（无人可满足最低要求）。
@@ -371,7 +371,7 @@ impl TacticalPlanner {
 
     /// D5.1b：返回与槽位顺序一致的球员 id 列表（供 bind_targets 使用）。
     ///
-    /// 失败时回退到 roster 顺序，保证引擎不会因档案/人员不匹配而死锁；
+    /// 失败时回退到 roster 顺序，保证引擎不会因档案/人员不匹配而停摆；
     /// 回退是显式的，调用方可据 `Ok/Err` 记录缺口。
     pub fn fill_slots_or_roster_order(
         spec: &nba_domain::TacticalSetSpec,
@@ -427,7 +427,7 @@ impl TacticalPlanner {
         //
         // 那 6 个分支为每种旧战术枚举硬编码一套槽位几何，但引擎随后用
         // **档案路径**（`plan_offense_from_spec`，见 `match_engine.rs`）
-        // 覆盖进攻侧，使这些位置成为每 tick 计算、每 tick 丢弃的死计算。
+        // 覆盖进攻侧，使这些位置成为每 tick 计算、每 tick 丢弃的无效计算。
         //
         // 三组对照实验（8 seed full）证明删除是行为中性的：清空进攻输出、
         // 或把全部进攻位置中性化后，逐 seed 全字段比对差异均为 0。
@@ -611,9 +611,9 @@ impl TacticalPlanner {
         };
         // 第一性原理：槽位目标必须是**球员能真实站立**的位置。
         //
-        // 若目标落在球员半径之外（例如 y=2.5 而可站立下限是 1.8，
+        // 若目标在球员半径之外（例如 y=2.5 而可站立下限是 1.8，
         // 或 y=0 直接压在边线上），物理层会每 tick 把球员夹回边界——
-        // 球员被**永久钉在边界**，且反复产生 `BoundaryCross` 边界事实，
+        // 球员被**永久固定在边界**，且反复产生 `BoundaryCross` 边界事实，
         // 对持球人即被判成出界失误（实测每场 42 次虚假
         // `TURNOVER:OUT_OF_BOUNDS`）。
         //

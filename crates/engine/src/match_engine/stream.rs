@@ -20,7 +20,7 @@ use super::{ExportSummary, MatchEngine};
 pub enum StreamMode {
     /// 逐 tick 完整帧：展示/回放需要，体积最大。
     Frames,
-    /// gzip 压缩的逐 tick 完整帧：保留 Frames 语义，显著降低落盘体积。
+    /// gzip 压缩的逐 tick 完整帧：保留 Frames 语义，显著降低存储体积。
     FramesGzip,
     /// 因果事实流（默认）：事实、事件日志、阶段/生命周期变化、回合总结。
     /// 引擎每 tick 自检 L1，因此无需输出每 tick 球员投影。
@@ -237,7 +237,7 @@ impl StreamPipeline {
     /// 按指定流模式导出一场比赛（gap.md §16.4 资源治理）。
     ///
     /// - [`StreamMode::Frames`]：逐 tick 完整帧（展示/回放，大）；
-    /// - [`StreamMode::FramesGzip`]：同一完整帧协议的 gzip 落盘格式；
+    /// - [`StreamMode::FramesGzip`]：同一完整帧协议的 gzip 存储格式；
     /// - [`StreamMode::Facts`]（默认）：只写因果事实、事件日志、阶段/生命周期
     ///   变化、回合总结与周期性检查点。引擎每 tick 自检 L1，流不必携带
     ///   每 tick 的球员投影，因此体积从数百 MB 降到个位数 MB；

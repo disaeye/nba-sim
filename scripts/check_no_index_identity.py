@@ -15,12 +15,12 @@
 `attributes.md §2.7/§2.9/T1`（roles 必须移除）与 `tactics.md TA3`
 （角色是槽位不是身份）。
 
-契约条款存在了很久，但没有**机械守卫**，所以耦合一直存活。本守卫把它
+规格条款存在了很久，但没有**机械守卫**，所以耦合一直存活。本守卫把它
 变成可判定的。
 
 ## 检查项
 
-- **A. 名册档案不得携带 `roles` 字段**（契约要求移除）。
+- **A. 名册档案不得携带 `roles` 字段**（规格要求移除）。
 - **B. 不得按数组下标分派球员属性/倾向/角色**：禁止
   `fn builtin_*（index: usize)` 形式的球员数据生成器；
   禁止 `players[index]` / `.nth(index)` 直接取球员身份。
@@ -197,7 +197,7 @@ def main() -> int:
         for p in problems:
             print(f"   - {p}")
         print()
-        print("   charter/契约：attributes.md §2.7/§2.9/T1（roles 移除）、")
+        print("   charter/规格：attributes.md §2.7/§2.9/T1（roles 移除）、")
         print("   tactics.md TA3（角色是槽位不是身份）。")
         print("   身份必须来自球员档案 + 能力适配，不得来自数组位置。")
         return 1
