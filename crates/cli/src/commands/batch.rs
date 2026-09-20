@@ -9,9 +9,7 @@ use std::fs::{self, File};
 use std::time::Instant;
 
 use crate::commands::simulate::TempStreamGuard;
-use crate::{
-    cli_temp_root, enforce_hard_gate, pct, read_stream_text, write_violation_ledger,
-};
+use crate::{cli_temp_root, enforce_hard_gate, pct, read_stream_text, write_violation_ledger};
 
 pub(crate) fn run_batch_simulation(
     seeds: &[u64],

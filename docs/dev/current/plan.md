@@ -127,7 +127,7 @@ D22 状态组收敛与 mod.rs 瘦身 ──────────────�
 | 贴身切球、运行时约束、罚球结算、节末短路 | `runtime_phase.rs` |
 | 动作窗口推进 | `action_windows.rs` |
 | 决策阶段 | `decision.rs` |
-| 弹道裁决与结果消费 | `ball_flight.rs`（`resolve_ball_flight` / `apply_ball_flight_outcome`）|
+| 弹道裁决与结果消费 | `ball_flight.rs`（`resolve_ball_flight` / `apply_ball_flight_outcome`） |
 | 战术导航 | `tactics_phase.rs` |
 | 收尾簿记 | `bookkeeping.rs` |
 | 事件发布 | `events.rs` |
@@ -339,7 +339,7 @@ D17 仅打通了持球点 16 英尺内的挡拆对策（Drop/Switch/Hedge）。�
 
 已完成第 3 项：
 
-3. **加性调制项已改为按动作族加权**：`morale_bias`（及其携带的 `clutch_bias`）
+1. **加性调制项已改为按动作族加权**：`morale_bias`（及其携带的 `clutch_bias`）
    原先作为**全候选共享**的加性常数加入效用，而采样是
    `exp((u - max_u) / temperature)` 的 softmax（`crates/decision/src/pipeline.rs`），
    共享项在归一化中完全抵消，阶参数对选择分布零影响。
@@ -361,9 +361,9 @@ D17 仅打通了持球点 16 英尺内的挡拆对策（Drop/Switch/Hedge）。�
    （`1.0 - bonus * 0.25` / `1.0 - bias * 0.15`），该函数经由
    `resolve_rebounder` 与 `ball_flight.rs` 的篮板归属路径可达；
    `effective_risk_tolerance` 已在同一文件的贴身切球判定里消费；
-4. **未实现字段清单改为由真实字段推导**：清单要么从 `GameRules` 的字段清单与
+3. **未实现字段清单改为由真实字段推导**：清单要么从 `GameRules` 的字段清单与
    `effective_*` 消费点交叉生成，要么直接删除该常量，以消除"名字列表与字段集合无关联"的失效模式；
-5. **修复士气状态机的不可达分支**（本轮审计发现，已修复）：
+4. **修复士气状态机的不可达分支**（本轮审计发现，已修复）：
    `PlayerModulationState::record_shot`（`crates/decision/src/modulation.rs`）
    原先在生产代码与测试中**零调用**，因此 `consecutive_makes` 恒为 0，
    `update_stamina_with_rules` 里的 `HotHand` 分支（阈值 `hot_hand_makes = 2`）
@@ -441,6 +441,7 @@ tick 51080 球触地发 `SHOT_MISS`，弹道裁决执行 `Initiation -> FlightAn
 
 修后 G-STATS 16-seed 矩阵：`Realism Index=0.998`、**Hard 门通过**、
 Axiom 违规 0、Ledger 违规 0。
+
 - 无零消费的 `effective_*` 函数；
 - 全量 `./scripts/run-tests.sh --no-fail-fast` 全绿。
 
@@ -637,6 +638,7 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
 每次的 `oldText` 都来自紧接其前的 `read`，区块小到能逐字核对。
 
 **本次遇到的三个机械细节**（都不是理解问题，而是会重复踩的操作细节）：
+
 1. 新增文件必须同步登记到 `scripts/inline_constant_budget.json` 的**两个**
    分节（`budget_floats` 与 `files`）；常数随结构一起移动，两节合计不变
    （最终 `rules.rs` 346 + `policies.rs` 136 = 原 482）；
@@ -714,7 +716,7 @@ attribution_report, criterion_severity, parse_stream, ...}` 仍从 crate 根可�
 
 | 文件 | 行数 | 内容 |
 | --- | --- | --- |
-| `ball_flight/mod.rs` | 1469 → **1142** | `resolve_ball_flight`（约 1089 行，一个 10 臂的 `match self.ball.ball_state`）|
+| `ball_flight/mod.rs` | 1469 → **1142** | `resolve_ball_flight`（约 1089 行，一个 10 臂的 `match self.ball.ball_state`） |
 | `ball_flight/write_entry.rs` | **210** | `mark_receiver` / `transition_ball_state` / `sync_ball_holder` |
 | `ball_flight/outcome.rs` | **152** | `apply_ball_flight_outcome` |
 

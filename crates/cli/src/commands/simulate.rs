@@ -10,8 +10,9 @@ use nba_engine::{MatchEngine, MatchSetup, StreamMode};
 use std::fs::{self, File};
 use std::time::Instant;
 
-use crate::{enforce_hard_gate, pct, read_stream_text, write_judgment_artifacts,
-    write_violation_ledger};
+use crate::{
+    enforce_hard_gate, pct, read_stream_text, write_judgment_artifacts, write_violation_ledger,
+};
 
 pub(crate) fn run_single_simulation(
     seed: u64,

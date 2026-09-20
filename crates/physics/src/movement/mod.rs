@@ -14,9 +14,8 @@
 mod kinematics;
 
 use kinematics::{
-    apply_motion_proposals, cast_capsule_players, collect_contact_facts,
-    make_motion_proposals, query_nearby_players, raycast_players,
-    resolve_motion_collisions,
+    apply_motion_proposals, cast_capsule_players, collect_contact_facts, make_motion_proposals,
+    query_nearby_players, raycast_players, resolve_motion_collisions,
 };
 
 use glam::Vec2;
@@ -957,15 +956,3 @@ impl SpatialPhysics for SimpleCirclePhysics {
         &self.rules
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-

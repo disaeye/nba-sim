@@ -76,7 +76,7 @@ fn percentile(sorted: &[u32], p: f32) -> f32 {
 fn full_game_stats_within_baseline_band() {
     // 种子矩阵 ≥ 8（quality.md §2.5 判定口径）；分布回归靠跨种子聚合。
     let seeds: [u64; 8] = [42, 1, 7, 100, 999, 31337, 2024, 555];
-    
+
     // 多线程并行模拟（利用多核 CPU 并发执行各独立 seed，消除串行长耗时阻塞）
     let sim_results: Vec<(u64, GameStats)> = std::thread::scope(|s| {
         let handles: Vec<_> = seeds
