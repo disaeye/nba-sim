@@ -194,14 +194,27 @@ fn rebound_samples_start_at_configured_contact_point() {
         last_touch_team: nba_domain::Possession::Home,
     };
     let players = std::collections::HashMap::new();
+    // 抛体化（第一步）：起点在触筐高度，终点触地（z=0），
+    // 途中服从重力——不再是「线性插值到胸口高」。
     assert_eq!(
         nba_physics::BallisticsEngine::sample_ball_position(&state, 5.0, &players, &rules),
         (from, rules.rim_height_ft)
     );
     assert_eq!(
         nba_physics::BallisticsEngine::sample_ball_position(&state, 6.0, &players, &rules),
-        (landing, rules.chest_height_ft)
+        (landing, 0.0)
     );
+    // 中途采样服从重力：z(t) = z0 + vz0·t − g/2·t²，vz0 由两端反解。
+    let (mid_xy, mid_z) =
+        nba_physics::BallisticsEngine::sample_ball_position(&state, 5.5, &players, &rules);
+    let t = 0.5_f32;
+    let vz0 = (0.0 - rules.rim_height_ft
+        + 0.5 * rules.ball_gravity_ftps2 * 1.0)
+        / 1.0;
+    let expected_z = rules.rim_height_ft + vz0 * t
+        - 0.5 * rules.ball_gravity_ftps2 * t * t;
+    assert!((mid_z - expected_z).abs() < 1e-3, "mid z {mid_z} vs {expected_z}");
+    assert!(mid_xy.x < from.x, "xy still interpolating toward landing");
 }
 
 #[test]

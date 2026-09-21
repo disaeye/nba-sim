@@ -176,6 +176,11 @@ BallTrajectoryKind (运动学采样参数 · crates/physics · 私有于执行)
 
 - 每 tick 运动学**不写** `BallState`，`transition_ball_state` 只处理离散的归属/路由事件——"单一写入口"与物理步进不冲突；
 - `InFlight{flight}` 与 `Loose{params}` 中的参数在飞行期间不可变；需要改变落点（如被抢断、打铁改弹）即是一次状态转移，不是参数改写。
+- **垂直分量服从重力**（ADR-017，第一步飞行抛体化）：传球、投篮、篮板飞行的 z(t) 由
+  `crates/domain/src/projectile.rs` 的 `ProjectileArc` 产生（`z = z0 + vz0·t − g/2·t²`，
+  `g = ball_gravity_ftps2` 真实值 32.17）；出手/触筐时刻的 vz0 由两端高度与飞行时长
+  闭式反解，弧顶由抛物线自然产生。飞行时长由「请求弧顶 + 两端高度」解出，
+  受球速包络（`ball_max_speed_ftps`）与动作窗口区间双重约束。
 
 ### 3.2 派生视图（全部只读）
 
@@ -238,7 +243,7 @@ fn dead_flow_phase(&mut self, dt: f32, was_period_break: bool) -> PhaseOutcome;
 
 > 阶段必须保持窄写权限：实现可以采用静态分发或其他等价机制，但不能把整个可变世界交给任意阶段。若改变阶段编排机制，必须在 `docs/decisions.md` 登记其借用隔离取舍（当前编排机制见 ADR-014）。
 
-**写权限的可核验形式**：阶段签名列出它写入的状态组名，`&mut self` 的全部状态不出现在签名里。实测 59 个含写入的函数中 35 个（59%）只写单一状态组，其余 24 个跨 2–7 组；跨组函数的组名必须在签名中逐一列出，跨组写入因此从隐式变为显式。
+**写权限的可核验形式**：阶段签名列出它写入的状态组名，`&mut self` 的全部状态不出现在签名里。多数含写入的阶段函数只写单一状态组，跨组函数必须在签名中逐一列出所写的每个组名，跨组写入因此从隐式变为显式（当前分布的实测数据属决策面，见 ADR-014）。
 
 阶段序列（对应 §2 的 12 步；条件激活的分支未出现在 §2 主数据流图中）。以下为调度器顺序调用的阶段函数，与代码一一对应：
 
@@ -310,9 +315,9 @@ pub struct MatchEngine {
 字段归错组从「无代价」变为类型不匹配。组定义在 `crates/engine/src/match_engine/state.rs`，
 由 `scripts/check_engine_state_groups.py` 守卫（断言零裸字段、组字段不泄出 crate、`mod.rs` ≤ 400 行）。
 
-**空间量的单一事实源（ADR-015）**：球员级空间事实的唯一实现是 `crates/physics/src/spatial.rs` 的 `SpatialGeometry`（经 `SpatialPhysics::openness` / `pass_corridor` 被 decision 与 semantics 读取）；全场拓扑量（压迫密度、开阔度、弱侧空位）的唯一实现是 `crates/engine/src/world.rs` 的 `PerceptionSystem`；多体均衡与涌现防守目标归 `crates/decision/src/potential_field.rs` 的 `DefensePotentialFieldSolver`。三者分别对应球员级事实、全场聚合、决策目标，不重叠。
+**空间量的单一事实源（ADR-015）**：球员级空间事实的唯一实现是 `crates/physics/src/spatial.rs` 的 `SpatialGeometry`（经 `SpatialPhysics::openness` / `pass_corridor` 被 decision 与 semantics 读取）；全场弱侧拓扑（下沉护筐、空间真空、X-Out 轮转）不再是独立的持久对象，而是由 `crates/decision/src/potential_field.rs` 的 `DefensePotentialFieldSolver` 在求解时从在场进攻球员位置即时涌现。两者分别对应球员级事实与决策目标，不重叠。
 
-**未采用的形式**：不把 `MatchEngine` 换成纯数据 `World` 加无状态 System 管线。实测 47 个字段存在多写入点（其中 37 个被 2 个以上模块共同写入，最多 5 个模块），`step_inner` 单函数跨 7 个状态组，弹道裁决块引用 25 个状态字段、调用 20 个引擎方法；在该形态下把字段按 `&mut` 解构传给窄签名函数需要重写这些函数体，行为等价性无法由黄金哈希证明。代价与收益的比较见 ADR-014。
+**未采用的形式**：不把 `MatchEngine` 换成纯数据 `World` 加无状态 System 管线。大量字段存在多写入点、单个阶段函数跨多个状态组、弹道裁决块引用大量状态字段并调用多个引擎方法；在该形态下把字段按 `&mut` 解构传给窄签名函数需要重写这些函数体，行为等价性无法由黄金哈希证明。具体分布数据与代价收益比较见 ADR-014。
 
 ---
 

@@ -24,9 +24,23 @@ CONTRACT_FORBIDDEN = [
     (re.compile(r"20\d{6}"), "日期戳（如 20260911）"),
     (re.compile(r"20[2-9]\d-\d{2}-\d{2}"), "ISO 日期"),
     (re.compile(r"~\s*\d+(?:\.\d+)?%"), "实测/完成度百分比"),
+    # 规格面禁止把某轮次的实测计数写成设计前提（README §1）。“实测”后紧跟
+    # 数字是完成度快照的高信号标志；决策面 decisions.md 以实测作为取舍依据，
+    # 属 README §0 的独立面，连同 README.md 一并豁免。
+    (re.compile(r"实测\s*\d+"), "实测计数（应移入工作面/决策面）"),
     (re.compile(r"\bseed\s*=\s*\d+"), "实测 seed"),
     (re.compile(r"^\s*(?:cargo|python3|pytest|bash|sh|\./)\s", re.M), "可重跑命令"),
 ]
+
+# 仓库内代码/数据路径引用。守卫其**实在性**：文档（尤其规格面与当前工作面）
+# 不得把已删除或从未存在的代码路径当作现状证据。历史归档（cycles/、evidence/）
+# 允许保留当时结论（README §6），故排除。
+CODE_REF = re.compile(
+    r"(?<![\w./-])"
+    r"(?P<path>(?:crates|scripts|data|bin|\.github)/[A-Za-z0-9_.\-]+"
+    r"(?:/[A-Za-z0-9_.\-]+)*\.(?:rs|py|json|toml|sh|yml|yaml|js|html|css))"
+)
+HISTORICAL_PREFIXES = ("docs/dev/cycles/", "docs/dev/evidence/")
 
 
 def all_markdown(docs_dir: Path) -> list[Path]:
@@ -99,7 +113,9 @@ def check_refs(files: list[Path]) -> tuple[list[str], int]:
 def check_contract_discipline(contract_files: list[Path]) -> list[str]:
     violations: list[str] = []
     for path in contract_files:
-        if path.name == "README.md":
+        # README.md 是治理规则自身；decisions.md 是 README §0 定义的「决策面」，
+        # 以实测数据作为取舍依据是其职责，均不适用规格面纪律。
+        if path.name in {"README.md", "decisions.md"}:
             continue
         in_code = False
         for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -113,6 +129,39 @@ def check_contract_discipline(contract_files: list[Path]) -> list[str]:
                     violations.append(
                         f"{path.name}:{line_no}: 规格面禁止{description} — "
                         f"{line.strip()[:100]}"
+                    )
+    return violations
+
+
+def check_code_references(contract_files: list[Path]) -> list[str]:
+    """校验**规格面**文档引用的仓库代码/数据路径确实存在。
+
+    历史事故：shadow world 重构删除了 `crates/engine/src/world.rs`、
+    `PerceptionSystem`，防守候选评估从 `crates/decision/src/defense.rs` 迁入
+    `potential_field.rs`，但规格面仍把已删路径当作单一事实源。旧守卫只校验
+    doc↔doc 引用，无法发现。
+
+    范围限于规格面：规格必须时空无关、始终指向现行代码。工作面（`docs/dev/`）
+    与决策面 ADR（`decisions.md`）含大量时间点叙述（已完成重构的“before”路径、
+    周期闭合记录），引用已改名/删除的路径是其正当历史职责（README §6），
+    若强施本守卫会产生误报并迫使篡改历史，故不纳入。
+    """
+    violations: list[str] = []
+    for path in contract_files:
+        # README.md 是治理规则自身；decisions.md 是时间点决策记录，均不适用。
+        if path.name in {"README.md", "decisions.md"}:
+            continue
+        seen: set[str] = set()
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for match in CODE_REF.finditer(line):
+                code_path = match.group("path")
+                if code_path in seen:
+                    continue
+                seen.add(code_path)
+                if not (ROOT / code_path).exists():
+                    violations.append(
+                        f"{path.name}:{line_no}: "
+                        f"规格面引用了不存在的代码路径 `{code_path}`"
                     )
     return violations
 
@@ -212,6 +261,7 @@ def main() -> int:
     errors = (
         ref_errors
         + check_contract_discipline(contract_files)
+        + check_code_references(contract_files)
         + check_dev_structure(dev_files)
         + check_numbering_namespaces(files)
     )

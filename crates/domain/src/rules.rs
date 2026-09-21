@@ -1,4 +1,5 @@
 use crate::court::CourtGeometry;
+use crate::projectile::ProjectileArc;
 use crate::resolve::ResolveConfig;
 use serde::{Deserialize, Serialize};
 
@@ -34,9 +35,6 @@ pub struct GameRules {
     /// 五秒违例。发球是「尽快把球发进场」的程序，不该套用阵地节奏。
     pub inbound_decision_interval_seconds: f32,
     pub free_throw_interval_seconds: f32,
-    pub pass_speed_ftps: f32,
-    pub inbound_pass_speed_ftps: f32,
-    pub shot_speed_ftps: f32,
     pub ball_max_speed_ftps: f32,
     pub min_pass_duration_seconds: f32,
     pub max_pass_duration_seconds: f32,
@@ -47,7 +45,9 @@ pub struct GameRules {
     pub chest_height_ft: f32,
     pub rim_height_ft: f32,
     pub pass_peak_ft: f32,
-    pub ball_arc_multiplier: f32,
+    /// 传球抛体弧顶随距离的增长率（ft/ft）：胸口短传平快，
+    /// 长传弧顶抬高（第一步飞行抛体化）。
+    pub pass_peak_distance_factor: f32,
     pub rebound_short_min_ft: f32,
     pub rebound_short_max_ft: f32,
     pub rebound_long_min_ft: f32,
@@ -147,8 +147,6 @@ pub struct GameRules {
     /// Distance normalization reference for shot utility scoring.
     pub shot_distance_reference_ft: f32,
     pub rebound_outlet_fallback_distance_ft: f32,
-    /// Minimum rebound arc above the contact height.
-    pub rebound_min_arc_ft: f32,
     pub ball_holder_offset_ft: f32,
     pub ball_holder_height_ft: f32,
     /// 属性响应曲线下限（映射层 capability 的规则参数，attributes.md T2）。
@@ -177,8 +175,6 @@ pub struct GameRules {
     pub stream_frames_max_bytes: u64,
     /// 单次模拟的最大 tick 数（生命周期防护，非篮球规则）。
     pub stream_max_ticks: usize,
-    /// 投篮弧线峰值反解的二分迭代次数（仅影响数值精度，不影响行为）。
-    pub shot_arc_solve_iterations: u32,
     /// 交接接球点相对 leash 的安全比例：接球人未能走到冻结点时，球位于
     /// 「冻结点 → 接球人」方向上距接球人 `leash × 该比例` 处，保证
     /// `BALL_WITH_HOLDER` 成立且不悬置。
@@ -318,9 +314,6 @@ impl Default for GameRules {
             decision_interval_seconds: 2.4,
             inbound_decision_interval_seconds: 0.4,
             free_throw_interval_seconds: 2.2,
-            pass_speed_ftps: 32.0,
-            inbound_pass_speed_ftps: 30.0,
-            shot_speed_ftps: 26.0,
             ball_max_speed_ftps: 85.0,
             min_pass_duration_seconds: 0.45,
             max_pass_duration_seconds: 1.4,
@@ -332,7 +325,9 @@ impl Default for GameRules {
             chest_height_ft: 4.0,
             rim_height_ft: 10.0,
             pass_peak_ft: 4.0,
-            ball_arc_multiplier: 4.0,
+            // 传球弧顶随距离增长：30 ft 传球弧顶 7 ft（抛体解出 T ≈ 0.86 s，
+            // 球速 ≈ 38 ft/s，真实胸口传球量级）；50 ft 长传弧顶 9 ft。
+            pass_peak_distance_factor: 0.10,
             rebound_short_min_ft: 3.0,
             rebound_short_max_ft: 9.0,
             rebound_long_min_ft: 8.0,
@@ -397,7 +392,6 @@ impl Default for GameRules {
             open_shot_distance_ft: 4.5,
             shot_distance_reference_ft: 47.0,
             rebound_outlet_fallback_distance_ft: 10.0,
-            rebound_min_arc_ft: 0.5,
             ball_holder_offset_ft: 0.8,
             ball_holder_height_ft: 4.0,
             attribute_response_floor: 0.5,
@@ -409,7 +403,6 @@ impl Default for GameRules {
             stream_max_bytes: 64 * 1024 * 1024,
             stream_frames_max_bytes: 512 * 1024 * 1024,
             stream_max_ticks: 250_000,
-            shot_arc_solve_iterations: 48,
             transfer_landing_leash_ratio: 0.5,
             separation_correction_share: 0.5,
             stamina_sprint_speed_ftps: 15.0,
@@ -472,13 +465,29 @@ impl GameRules {
         }
     }
 
+    /// 传球飞行时长由抛体解出（第一步飞行抛体化）：
+    /// 弧顶 = `pass_peak_ft + dist × pass_peak_distance_factor`，
+    /// 时长 = 升段 + 降段闭式解，再夹在动作窗口区间。
+    /// 速度包络（`ball_max_speed_ftps`）作为校验上限：超限时削峰重解。
     pub fn pass_duration(&self, distance_ft: f32, inbound: bool) -> f32 {
-        let speed = if inbound {
-            self.inbound_pass_speed_ftps
+        let distance = distance_ft.max(0.0);
+        let g = self.ball_gravity_ftps2;
+        let chest = self.chest_height_ft;
+        // 速度包络下限：水平速度 = dist/T 不得超过球速包络。
+        // 这条下限优先于弧顶解（实测回归：95 ft 发球长传在平抛 T=0.45 s 下
+        // 水平速度 213 ft/s，是 BALL_SPEED Hard 的直接来源）；抬高弧顶只能
+        // 减垂直分量，唯一能压水平速度的是延长时长。
+        let t_envelope = distance / self.ball_max_speed_ftps.max(f32::EPSILON);
+        let peak_base = if inbound {
+            // 发球平快：弧顶贴胸口（入场传球不挑高弧），时长由包络下限抬。
+            chest
         } else {
-            self.pass_speed_ftps
+            (self.pass_peak_ft + distance * self.pass_peak_distance_factor).max(chest)
         };
-        (distance_ft / speed.max(f32::EPSILON)).clamp(
+        let peak = peak_base.max(chest + f32::EPSILON);
+        let t_projectile = ProjectileArc::time_for_peak(chest, chest, peak, g);
+        let t = t_projectile.max(t_envelope);
+        t.clamp(
             self.min_pass_duration_seconds,
             self.max_pass_duration_seconds,
         )
@@ -514,9 +523,6 @@ impl GameRules {
             self.tactical_initiation_seconds,
             self.decision_interval_seconds,
             self.free_throw_interval_seconds,
-            self.pass_speed_ftps,
-            self.inbound_pass_speed_ftps,
-            self.shot_speed_ftps,
             self.min_pass_duration_seconds,
             self.max_pass_duration_seconds,
             self.min_shot_duration_seconds,
@@ -526,7 +532,6 @@ impl GameRules {
             self.chest_height_ft,
             self.rim_height_ft,
             self.pass_peak_ft,
-            self.ball_arc_multiplier,
             self.rebound_short_min_ft,
             self.rebound_short_max_ft,
             self.rebound_long_min_ft,
@@ -570,7 +575,6 @@ impl GameRules {
             self.flight_intercept_radius_ft,
             self.intercept_lane_radius_ft,
             self.rebound_outlet_fallback_distance_ft,
-            self.rebound_min_arc_ft,
             self.teammate_density_radius_ft,
             self.teammate_density_capacity,
             self.court_side_margin_ratio,
@@ -651,12 +655,9 @@ impl GameRules {
             || self.max_pass_duration_seconds < self.min_pass_duration_seconds
             || self.min_shot_duration_seconds <= 0.0
             || self.max_shot_duration_seconds < self.min_shot_duration_seconds
-            || self.pass_speed_ftps <= 0.0
-            || self.inbound_pass_speed_ftps <= 0.0
-            || self.shot_speed_ftps <= 0.0
             || self.ball_max_speed_ftps <= 0.0
             || self.pass_peak_ft < 0.0
-            || self.ball_arc_multiplier < 0.0
+            || self.pass_peak_distance_factor < 0.0
             || self.chest_height_ft < 0.0
             || self.rim_height_ft <= self.chest_height_ft
         {
@@ -700,7 +701,6 @@ impl GameRules {
             || self.flight_intercept_radius_ft <= 0.0
             || self.intercept_lane_radius_ft < self.flight_intercept_radius_ft
             || self.rebound_outlet_fallback_distance_ft < 0.0
-            || self.rebound_min_arc_ft < 0.0
             || self.teammate_density_radius_ft <= 0.0
             || self.teammate_density_capacity <= 0.0
             || !(0.0..=0.5).contains(&self.court_side_margin_ratio)
@@ -766,9 +766,6 @@ impl GameRules {
             || self.separation_correction_share == 0.0
         {
             return Err("separation correction share must be in (0, 1]".to_string());
-        }
-        if self.shot_arc_solve_iterations == 0 {
-            return Err("shot arc solve iterations must be positive".to_string());
         }
         if !(0.0..=1.0).contains(&self.transfer_landing_leash_ratio)
             || self.transfer_landing_leash_ratio == 0.0
@@ -908,12 +905,6 @@ mod tests {
     fn rejects_invalid_ball_and_rebound_policies() {
         let rules = GameRules {
             ball_velocity_retention: 1.1,
-            ..GameRules::default()
-        };
-        assert!(rules.validate().is_err());
-
-        let rules = GameRules {
-            rebound_min_arc_ft: -0.1,
             ..GameRules::default()
         };
         assert!(rules.validate().is_err());

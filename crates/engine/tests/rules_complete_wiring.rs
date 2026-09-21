@@ -12,7 +12,7 @@
 //! 默认判据：只改该维度的规则系数（其余字段保持默认），跑 4 个 seed 各
 //! 20000 tick，要求至少 3/4 的模拟指纹发生变化。
 //!
-//! 扩展判据（ADR-016，仅限三个小杠杆系数）：6 个 seed × 20000 tick，
+//! 扩展判据（ADR-016，仅限四个小杠杆/低频系数）：6 个 seed × 20000 tick，
 //! 要求至少 3/6 的指纹改变。背景与测量记录见 `docs/decisions.md` ADR-016：
 //! 授权行为变化（体力重校准、G6 换人）重排了轨迹抽样，把这三个处在
 //! 2-3/4 边缘可见区的系数推到 2/4。样本扩到 6 后实测可见率为 50%
@@ -108,14 +108,17 @@ fn assert_wiring_changed(
     );
 }
 
-/// 扩展判据（ADR-016）：`risk_tolerance_gain` 是拦截概率乘数上的小杠杆
-/// （risk_factor 整体只从 1.1 变到 1.0），处在 2-3/4 边缘可见区；
-/// 授权行为变化重排轨迹后落入 2/4。seed 扩到 6、判据 ≥3/6。
+/// 扩展判据（ADR-016）：`risk_tolerance_gain` 是拦截概率乘数上的小杠杆，
+/// 处在 2-3/4 边缘可见区；授权行为变化重排轨迹后退到 2/4。
+/// 扰动取向（文件先例：放大优于归零）：饱和扰动 base=0.95/gain=0
+/// 把全员风险容忍推到 clamp 上限 0.95，risk_factor 1.04→1.36（+31%），
+/// 比旧扰动（1.0/1.0，杠杆集中低 iq 球员，整体仅 −10%）强约 3 倍；
+/// v68 抛体化重排后旧扰动只剩 2/6，饱和扰动可观测。
 #[test]
 fn capability_risk_tolerance_gain_reaches_behaviour() {
     assert_rule_coefficient_reaches_behaviour_extended("capability.risk_tolerance_gain", |r| {
-        r.capability.risk_tolerance_base = 1.0;
-        r.capability.risk_tolerance_gain = 1.0;
+        r.capability.risk_tolerance_base = 0.95;
+        r.capability.risk_tolerance_gain = 0.0;
     });
 }
 
@@ -205,11 +208,17 @@ fn post_up_base_reaches_behaviour() {
     });
 }
 
+/// 扩展判据（ADR-016）：`morale_shoot_affinity` 归零只移除情绪对出手
+/// 倾向的加权（情绪状态变化慢，属低频通道）；抛体化（v68）重排轨迹
+/// 抽样后退到 2/4 边缘可见区，与 ADR-016 三系数同情形。
 #[test]
 fn morale_affinity_reaches_behaviour() {
-    assert_rule_coefficient_reaches_behaviour("modulation.morale_shoot_affinity", |r| {
-        r.modulation.morale_shoot_affinity = 0.0;
-    });
+    assert_rule_coefficient_reaches_behaviour_extended(
+        "modulation.morale_shoot_affinity",
+        |r| {
+            r.modulation.morale_shoot_affinity = 0.0;
+        },
+    );
 }
 
 /// 突破结算的系数（从内联常量收编进 `DrivePolicy`）。

@@ -381,7 +381,8 @@ fn no_unattributed_end_full_scope() {
         .par_iter()
         .map(|&seed| {
             let mut engine = MatchEngine::new(seed);
-            let guard = nba_test_support::TempArtifact::new(&format!("possession_attr_full_{seed}"));
+            let guard =
+                nba_test_support::TempArtifact::new(&format!("possession_attr_full_{seed}"));
             engine
                 .simulate_scope_and_export_with_mode("full", &guard.path_str(), StreamMode::Facts)
                 .expect("run full");
@@ -393,7 +394,9 @@ fn no_unattributed_end_full_scope() {
             if unattributed == 0 {
                 None
             } else {
-                Some(format!("seed {seed} full scope 存在兜底终结 × {unattributed}"))
+                Some(format!(
+                    "seed {seed} full scope 存在兜底终结 × {unattributed}"
+                ))
             }
         })
         .flatten()
@@ -439,7 +442,8 @@ fn violation_turnover_summary_carries_player_id() {
                         continue;
                     }
                     checked += 1;
-                    let turnover_player = summary.get("turnover_player_id").and_then(|v| v.as_str());
+                    let turnover_player =
+                        summary.get("turnover_player_id").and_then(|v| v.as_str());
                     if turnover_player.is_none() {
                         violation = Some(format!(
                             "seed {seed} 的 TURNOVER_VIOLATION 总结缺 turnover_player_id: {summary}"

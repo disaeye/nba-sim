@@ -76,7 +76,12 @@ fn full_game_completes_on_formerly_wedged_seeds() {
             let _ = engine.step();
             ticks += 1;
         }
-        (seed, engine.is_finished(), ticks, engine.completed_possessions())
+        (
+            seed,
+            engine.is_finished(),
+            ticks,
+            engine.completed_possessions(),
+        )
     });
     for (seed, finished, ticks, possessions) in results {
         assert!(

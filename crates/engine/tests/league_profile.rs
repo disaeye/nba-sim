@@ -383,7 +383,10 @@ fn scenario_period_end_program() {
         failures.is_empty(),
         "1q scope must terminate naturally: {failures:?}"
     );
-    for rules in [GameRules::default(), GameRules::with_league(LeagueProfile::fiba())] {
+    for rules in [
+        GameRules::default(),
+        GameRules::with_league(LeagueProfile::fiba()),
+    ] {
         assert_eq!(
             rules.league.regulation_periods, 4,
             "both profiles use four regulation periods"

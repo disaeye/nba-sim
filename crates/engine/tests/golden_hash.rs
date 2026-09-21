@@ -183,11 +183,11 @@ fn golden_window_covers_scoring_behaviour() {
 #[test]
 fn golden_window_long_covers_fouls_and_free_throws() {
     let mut engine = MatchEngine::new(42);
-    // 必须同时覆盖首个犯规（3413）与首次罚球（9918）；
-    // 取 10200 留约 3% 余量，避免边界抖动使断言脆弱。
-    // 必须同时覆盖首个犯规（9213）与首次罚球（14792）；
-    // 取 15200 留约 3% 余量，避免边界抖动使断言脆弱。
-    let ticks = 15200usize;
+    // 抛体化（v68）后节奏实测：首犯规 6783、首罚球 21813
+    // （传球弧顶随距离抬高 → 长传变慢 → 攻防节奏整体后移）；
+    // 取 22500 留约 3% 余量，避免边界抖动使断言脆弱。
+    // 必须同时覆盖首个犯规（3413/9213/6783）与首次罚球（9918/14792/21813）。
+    let ticks = 22500usize;
     for _ in 0..ticks {
         engine.step();
     }
@@ -196,13 +196,13 @@ fn golden_window_long_covers_fouls_and_free_throws() {
     assert!(
         b.fouls > 0,
         "long window ({ticks} ticks, seed 42) contains no foul \
-         (measured first foul at tick 9213) — foul behaviour unobservable \
+         (measured first foul at tick 6783) — foul behaviour unobservable \
          (evidence/problem.md §32.29)"
     );
     assert!(
         b.ft_attempts > 0,
         "long window ({ticks} ticks, seed 42) contains no free-throw attempt \
-         (measured first attempt at tick 14792)"
+         (measured first attempt at tick 21813)"
     );
 }
 
@@ -579,7 +579,16 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       换人永不触发，`SubstitutionReason` 四个变体为零消费；
 //   (d) 实测：每场 24–28 次换人（真实 NBA 每队 30–40 的同数量级），
 //       低体力登场 0 次；8-seed 统计仍在带（total_p50=166.5）。
-const GOLDEN_SEED42_2000: u64 = 0xd738e70efe150535;
+// v68 0x820c9b27412c65cc - 2026-09-20 第一步飞行抛体化：
+//   传球/投篮/篮板飞行的 z 分量从「线性插值 + 正弦弧」改为真实重力抛体
+//   （g=32.17 ft/s²，ProjectileArc 住在 domain/projectile.rs）；
+//   投篮/传球飞行时长由「请求弧顶 + 两端高度」闭式解出（升段+降段），
+//   篮板落点 z 改为触地；正弦弧时代的 5 个零消费字段
+//   （pass_speed/inbound_pass_speed/shot_speed/ball_arc_multiplier/
+//   shot_arc_solve_iterations/rebound_min_arc_ft）删除，新增
+//   pass_peak_distance_factor=0.10。出手速度自然达到真实量级
+//   （25ft 三分 ≈ 37 ft/s）。
+const GOLDEN_SEED42_2000: u64 = 0x820c9b27412c65cc;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

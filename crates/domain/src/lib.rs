@@ -13,6 +13,7 @@ pub mod event;
 pub mod flow;
 pub mod league;
 pub mod possession;
+pub mod projectile;
 pub mod resolve;
 pub mod rules;
 pub mod tactics;

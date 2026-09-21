@@ -296,7 +296,7 @@ D17 仅打通了持球点 16 英尺内的挡拆对策（Drop/Switch/Hedge）。�
 
 ### 7.3 验收门
 
-- 已建立：`crates/decision/src/defense.rs` 的 `evaluate_weak_side_rotation`、
+- 已建立：`crates/decision/src/potential_field.rs` 的 `evaluate_weak_side_rotation`（旧 `crates/decision/src/defense.rs` 已删，职责并入）、
   `crates/decision/src/potential_field.rs` 的目标求解，
   单元测试 `crates/decision/tests/defense_responsibility_chain.rs`
   （Low-man → `RotateRimHelp`、High-man → `XOutCloseout`）；
@@ -368,7 +368,7 @@ D17 仅打通了持球点 16 英尺内的挡拆对策（Drop/Switch/Hedge）。�
    原先在生产代码与测试中**零调用**，因此 `consecutive_makes` 恒为 0，
    `update_stamina_with_rules` 里的 `HotHand` 分支（阈值 `hot_hand_makes = 2`）
    永远不可达；`MoraleState::Clutch` 变体**没有任何赋值点**。
-   修法：在 `crates/engine/src/match_engine/ball_flight.rs` 的 `HoopArrival`
+   修法：在 `crates/engine/src/match_engine/ball_flight/mod.rs` 的 `HoopArrival`
    处理里每次出手落定呼叫 `record_shot(made)`，使连中/连铁真正累积；
    `MoraleState::Clutch` 已删除——关键时刻的偏置已由 `morale_bias_for` 里的
    `is_clutch_situation()` 分支单独叠加，保留该变体会使 `clutch_bias` 被计两次。
@@ -478,7 +478,7 @@ D27 改变了行为，但 `GOLDEN_SEED42_2000` 未变（仍为 `0xde010befa25c77
 
 1. **测试套件全绿**：`./scripts/run-tests.sh --no-fail-fast` 全部测试目标通过
    （工作区共 30 个集成测试文件加各 crate 的单元测试目标）；
-   其中 `crates/engine/tests/phase_legality.rs` 是本轮新增：它把 `nba.v2`
+   其中 `crates/engine/tests/invariants.rs::phase_transitions_are_legal_across_seeds` 是本轮新增：它把 `nba.v2`
    的 `phase_transitions` 合法表搬进测试套件（原先只由 G-STATS 16-seed
    矩阵检查，而那个矩阵不属于本脚本，日常回归看不到），
    并已用负面对照验证有效（重入缺陷时 4 seed 中 seed 12 的 tick 51080 变红）；
@@ -511,9 +511,9 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
 | 文件 | 行数 | 主要职责 | 完成位置 |
 | --- | --- | --- | --- |
 | `crates/domain/src/rules.rs` | 1709 | 七个策略结构各自带 `impl Default` / `validate` + `GameRules` 的聚合与校验 | §10.6 |
-| `crates/physics/src/movement.rs` | 1643 | 3 个物理后端共处一文件 | §10.4 |
+| `crates/physics/src/movement/` 模块（含 `mod.rs`/`kinematics.rs` 等，拆分前为单文件 1643 行） | — | 3 个物理后端共处一文件 | §10.4 |
 | `crates/evaluator/src/lib.rs` | 1543 | `Verdict`/`Judgment`/`AttributionReport` + 六个 `evaluate_*` | §10.7 |
-| `crates/decision/src/constraint.rs` | 1214 | 19 个 `eval_*` 求值函数 + 15 条 `constraint!` 静态表 + 注册表 | §10.5 |
+| `crates/decision/src/constraint/` 模块（拆分前为单文件 1214 行） | — | 19 个 `eval_*` 求值函数 + 15 条 `constraint!` 静态表 + 注册表 | §10.5 |
 | `crates/cli/src/main.rs` | 1169 | 子命令各自独立，仅经 `main` 分派 | §10.7 |
 
 五个文件均已完成（§10.4–§10.7），验收门见 §10.3。
@@ -552,7 +552,7 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
 
 ### 10.4 已完成：`physics::movement` 划分
 
-`crates/physics/src/movement.rs`（1643 行）划分为同目录两文件：
+`crates/physics/src/movement.rs`（拆分前 1643 行，现为 `movement/` 模块）划分为同目录两文件：
 
 | 文件 | 行数 | 职责 |
 | --- | --- | --- |
@@ -579,7 +579,7 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
 
 ### 10.5 已完成：`decision::constraint` 划分
 
-`crates/decision/src/constraint.rs`（1214 行）划分为同目录两文件：
+`crates/decision/src/constraint.rs`（拆分前 1214 行，现为 `constraint/` 模块）划分为同目录两文件：
 
 | 文件 | 行数 | 职责 |
 | --- | --- | --- |

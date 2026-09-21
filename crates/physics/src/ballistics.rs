@@ -14,91 +14,40 @@ pub struct ReboundLandingSpot {
     pub rebounder_id: Option<String>,
 }
 
+// 重力抛体纯数学住在 domain（projectile.rs），physics 直接复用同一实现：
+// `GameRules::pass_duration` 与 `BallisticsEngine::shot_duration` 必须同源，
+// 两处各写一份必然漂移。
+pub use nba_domain::projectile::ProjectileArc;
+
 pub struct BallisticsEngine;
 impl BallisticsEngine {
-    /// Returns the arc coefficient `A` such that the sampled curve
-    /// `z(p) = chest + (rim - chest)·p + A·p·(1-p)` actually reaches
-    /// `peak_z` at its true maximum.
+    /// Computes a shot flight duration from the projectile physics.
     ///
-    /// 为什么不能直接线性缩放：`p·(1-p)` 的最大值在 `p=0.5`，但
-    /// 叠加了线性项 `chest + (rim-chest)·p` 后，真实极值点
-    /// `p* = (A + rim - chest) / (2A)`，位于 `p > 0.5`。此前直接用
-    /// `multiplier × (peak_z - mid)` 作为 `A`，使实际采样峰值高于请求值
-    /// （本轮实测：请求 35.0 ft，采样到 35.08 ft，违反 BALL_HEIGHT_BOUNDS）。
+    /// 第一步飞行抛体化：时长由「请求弧顶 + 两端高度」闭式解出
+    /// （升段 + 降段），再夹在动作窗口区间内。出手速度由
+    /// `hypot(水平速度, vz0)` 交叉校验：超过球速包络时削峰重解，
+    /// 保证任何采样点的瞬时速度不超过 `ball_max_speed_ftps`。
     ///
-    /// 本函数用二分反解 `A`，保证 `max z(p) == peak_z`（在数值精度内），
-    /// 从而让「请求峰值」成为真正的上界。
-    fn shot_arc_amplitude(peak_z: f32, rules: &GameRules) -> f32 {
-        let chest = rules.chest_height_ft;
-        let rim = rules.rim_height_ft;
-        let half = f32::from(2u8);
-        let base = rim;
-        // 峰值不可能低于线性项终点（否则无解，取最小弧）。
-        if peak_z <= base || !peak_z.is_finite() {
-            return f32::from(0u8);
-        }
-        // 在固定迭代次数内二分求解，避免运行时长依赖数据。
-        let mut lo = f32::from(0u8);
-        let mut hi = (peak_z - chest).abs().max(f32::from(1u8))
-            * rules.ball_arc_multiplier.max(f32::from(1u8))
-            + f32::from(1u8);
-        for _ in 0..rules.shot_arc_solve_iterations {
-            let mid = (lo + hi) * f32::from(2u8).recip();
-            if mid <= f32::EPSILON {
-                lo = mid;
-                continue;
-            }
-            let p = ((mid + (rim - chest)) / (half * mid)).clamp(f32::from(0u8), f32::from(1u8));
-            let z = chest + (rim - chest) * p + mid * p * (f32::from(1u8) - p);
-            if z < peak_z {
-                lo = mid;
-            } else {
-                hi = mid;
-            }
-        }
-        (lo + hi) * f32::from(2u8).recip()
-    }
-
-    /// Computes a shot flight duration that fits the configured ball-speed envelope.
-    ///
-    /// The shot curve has constant horizontal velocity and a linear vertical
-    /// derivative plus the parabolic arc derivative. The sum of the absolute
-    /// endpoint derivatives is a conservative bound for its vertical travel,
-    /// so this duration prevents a high-arcing long shot from exceeding the
-    /// same speed limit used by the stream audit.
+    /// 实测量级（默认规则）：25 ft 三分、弧顶 15 ft → T ≈ 1.19 s，
+    /// 出手速度 ≈ 37 ft/s（真实 NBA 三分出手 36-40 ft/s）。
     pub fn shot_duration(distance_ft: f32, peak_z: f32, rules: &GameRules) -> f32 {
         let distance = distance_ft.max(0.0);
-        let nominal = (distance / rules.shot_speed_ftps.max(f32::EPSILON)).clamp(
-            rules.min_shot_duration_seconds,
-            rules.max_shot_duration_seconds,
-        );
-        let arc = Self::shot_arc_amplitude(peak_z, rules);
-        let vertical_travel_bound = (rules.rim_height_ft - rules.chest_height_ft).abs() + arc;
-        let path_bound = distance.hypot(vertical_travel_bound);
-        nominal.max(path_bound / rules.ball_max_speed_ftps.max(f32::EPSILON))
-    }
-
-    /// Reduces only the requested arc when a caller supplies a duration whose
-    /// horizontal component is valid but whose full arc would exceed the
-    /// configured three-dimensional speed envelope.
-    fn shot_arc_for_duration(
-        distance_ft: f32,
-        duration: f32,
-        requested_arc: f32,
-        rules: &GameRules,
-    ) -> f32 {
-        let distance = distance_ft.max(0.0);
-        let duration = duration.max(f32::EPSILON);
-        let max_travel = rules.ball_max_speed_ftps.max(0.0) * duration;
-        let horizontal_travel = distance;
-        if max_travel <= horizontal_travel {
-            return 0.0;
-        }
-        let vertical_travel_budget =
-            (max_travel * max_travel - horizontal_travel * horizontal_travel).sqrt();
-        (vertical_travel_budget - (rules.rim_height_ft - rules.chest_height_ft).abs())
-            .max(0.0)
-            .min(requested_arc)
+        let g = rules.ball_gravity_ftps2;
+        let chest = rules.chest_height_ft;
+        let rim = rules.rim_height_ft;
+        let higher_end = chest.max(rim);
+        // 请求弧顶必须高于两端，否则用两端较高者加最小裕量（近平抛）。
+        let peak = peak_z.max(higher_end + f32::EPSILON);
+        let t_projectile = ProjectileArc::time_for_peak(chest, rim, peak, g);
+        // 速度包络下限（与 pass_duration 同源）：水平速度不得超过球速包络，
+        // 唯一手段是延长时长（实测回归：远距离出手在 clamp 上限内也可能超速）。
+        let t_envelope = distance / rules.ball_max_speed_ftps.max(f32::EPSILON);
+        t_projectile
+            .max(t_envelope)
+            .clamp(
+                rules.min_shot_duration_seconds,
+                rules.max_shot_duration_seconds,
+            )
     }
 
     /// Extrapolates a receiver within the configured playable court.
@@ -355,40 +304,45 @@ impl BallisticsEngine {
                 to_pos,
                 start_time,
                 duration,
-                peak_z,
                 ..
             } => {
-                let progress =
-                    ((current_time - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
+                let t_flight = duration.max(f32::EPSILON);
+                let elapsed = (current_time - start_time).clamp(0.0, t_flight);
+                let progress = elapsed / t_flight;
                 let xy = from_pos.lerp(*to_pos, progress);
-                let linear_z = *peak_z + (rules.chest_height_ft - *peak_z) * progress;
-                let requested_arc =
-                    rules.ball_arc_multiplier * (*peak_z - rules.chest_height_ft).max(0.0);
-                let distance = (*to_pos - *from_pos).length();
-                let arc_amplitude =
-                    Self::shot_arc_for_duration(distance, *duration, requested_arc, rules);
-                let arc = arc_amplitude * progress * (1.0 - progress);
-                (xy, (linear_z + arc).max(0.0))
+                // 重力抛体：z(0)=出手胸口高，z(T)=接球胸口高，vz0 闭式反解。
+                // 弧顶不再由载荷 peak_z 直接采样，而由抛物线自然产生；
+                // peak_z 只在时长推导侧参与（solve_pass_landing 链路）。
+                let arc = ProjectileArc::solve(
+                    rules.chest_height_ft,
+                    rules.chest_height_ft,
+                    t_flight,
+                    rules.ball_gravity_ftps2,
+                );
+                let z = arc.z_at(elapsed, rules.chest_height_ft, rules.ball_gravity_ftps2);
+                (xy, z.max(0.0))
             }
             BallTrajectoryKind::Shot {
                 from_pos,
                 hoop_pos,
                 start_time,
                 duration,
-                peak_z,
                 ..
             } => {
-                let progress =
-                    ((current_time - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
+                let t_flight = duration.max(f32::EPSILON);
+                let elapsed = (current_time - start_time).clamp(0.0, t_flight);
+                let progress = elapsed / t_flight;
                 let xy = from_pos.lerp(*hoop_pos, progress);
-                let linear_z = rules.chest_height_ft
-                    + (rules.rim_height_ft - rules.chest_height_ft) * progress;
-                let requested_arc = Self::shot_arc_amplitude(*peak_z, rules);
-                let distance = (*hoop_pos - *from_pos).length();
-                let arc_amplitude =
-                    Self::shot_arc_for_duration(distance, *duration, requested_arc, rules);
-                let arc = arc_amplitude * progress * (1.0 - progress);
-                (xy, (linear_z + arc).max(0.0))
+                // 重力抛体：z(0)=出手胸口高，z(T)=筐高；vz0 闭式反解。
+                // 采样弧顶由抛物线自然产生，服从 g。
+                let arc = ProjectileArc::solve(
+                    rules.chest_height_ft,
+                    rules.rim_height_ft,
+                    t_flight,
+                    rules.ball_gravity_ftps2,
+                );
+                let z = arc.z_at(elapsed, rules.chest_height_ft, rules.ball_gravity_ftps2);
+                (xy, z.max(0.0))
             }
             BallTrajectoryKind::LooseBall { pos, z, .. } => {
                 (*pos, (*z).clamp(0.0, rules.ball_max_speed_ftps))
@@ -399,22 +353,25 @@ impl BallisticsEngine {
                 target_landing,
                 start_time,
                 duration,
-                peak_z,
                 ..
             } => {
-                let progress =
-                    ((current_time - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
+                let t_flight = duration.max(f32::EPSILON);
+                let elapsed = (current_time - start_time).clamp(0.0, t_flight);
+                let progress = elapsed / t_flight;
                 // The explicit contact point keeps the trajectory continuous;
                 // hoop_pos remains metadata for semantic consumers.
                 let xy = from_pos.lerp(*target_landing, progress);
-                let linear_z = *from_z + (rules.chest_height_ft - *from_z) * progress;
-                let requested_arc = rules.ball_arc_multiplier
-                    * (*peak_z - (*from_z).max(rules.rim_height_ft)).max(rules.rebound_min_arc_ft);
-                let distance = (*target_landing - *from_pos).length();
-                let arc_amplitude =
-                    Self::shot_arc_for_duration(distance, *duration, requested_arc, rules);
-                let arc = arc_amplitude * progress * (1.0 - progress);
-                (xy, (linear_z + arc).max(0.0))
+                // 重力抛体：z(0)=触筐高度，z(T)=地面 0（球的触地点）。
+                // 触点反弹初速推导在第二步（触筐物理）；本步先服从重力。
+                let landing_z = 0.0f32;
+                let arc = ProjectileArc::solve(
+                    *from_z,
+                    landing_z,
+                    t_flight,
+                    rules.ball_gravity_ftps2,
+                );
+                let z = arc.z_at(elapsed, *from_z, rules.ball_gravity_ftps2);
+                (xy, z.max(0.0))
             }
             BallTrajectoryKind::Dead { pos, z, .. } => (*pos, *z),
         }

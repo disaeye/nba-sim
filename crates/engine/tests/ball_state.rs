@@ -140,12 +140,7 @@ fn test_wall_pinned_defender_does_not_block_inbound() {
             ticks += 1;
         }
         let violations = engine.last_tick_violations().to_vec();
-        (
-            seed,
-            engine.is_finished(),
-            max_oob_streak,
-            violations,
-        )
+        (seed, engine.is_finished(), max_oob_streak, violations)
     });
     for (seed, finished, max_oob_streak, violations) in results {
         assert!(finished, "seed {} livelocked", seed);
