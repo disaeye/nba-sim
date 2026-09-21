@@ -220,6 +220,7 @@ pub fn poke_pressure_factor(rules: &GameRules, defender_to_ball_distance_ft: f32
 }
 
 /// 单次切球成功概率，结合球位、球速、相对靠近速度与防守朝向。
+#[allow(clippy::too_many_arguments)]
 pub fn poke_check_success_with_context(
     rules: &GameRules,
     defender: &PlayerAttributes,

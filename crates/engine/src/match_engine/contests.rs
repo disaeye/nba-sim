@@ -14,6 +14,7 @@ use rand::Rng;
 
 use super::MatchEngine;
 
+#[allow(clippy::too_many_arguments)]
 fn pass_contact_event_probability(
     dt: f32,
     clearance: f32,
@@ -41,6 +42,7 @@ fn pass_contact_event_probability(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod pass_contact_tests {
     use super::pass_contact_event_probability;
 
@@ -291,9 +293,7 @@ impl MatchEngine {
             .get_player(carrier_id)
             .map(|p| p.tendencies.risk_tolerance)
             .unwrap_or(0.5);
-        let Some(handler) = self.systems.physics.get_player(carrier_id) else {
-            return None;
-        };
+        let handler = self.systems.physics.get_player(carrier_id)?;
         let carrier_pos = handler.pos_ft;
         let ball_pos = BallisticsEngine::sample_ball_position(
             &self.ball.ball_state,
