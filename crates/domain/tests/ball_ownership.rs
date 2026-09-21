@@ -545,6 +545,7 @@ const DECLARED_LEGAL: &[(&str, &str)] = &[
     ("RimRebound", "Held"),
     ("RimRebound", "ControlTransfer"),
     ("RimRebound", "Pass"),
+    ("RimRebound", "RimRebound"),
     ("RimRebound", "LooseBall"),
     ("RimRebound", "Dead"),
     ("RimRebound", "InboundTransfer"),
@@ -610,14 +611,14 @@ fn every_state_edge_matches_the_declared_table() {
         mismatches.join("\n  ")
     );
 
-    // 完整性自检：100 种组合必须被分类为 49 合法 + 51 非法。
+    // 完整性自检：100 种组合必须被分类为 50 合法 + 50 非法。
     // 数字变化说明声明表被改动——此时应显式更新本测试与 DECLARED_LEGAL，
     // 而不是让它静默通过。
     let total = variants.len() * variants.len();
-    assert_eq!(legal.len(), 49, "declared legal edge count changed");
+    assert_eq!(legal.len(), 50, "declared legal edge count changed");
     assert_eq!(
         total - legal.len(),
-        51,
+        50,
         "declared illegal edge count changed"
     );
 }
