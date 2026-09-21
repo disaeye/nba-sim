@@ -1,4 +1,4 @@
-// 触筐反弹分布校准门（ADR-017 第二步）：
+// 触筐/触板反弹分布校准门（ADR-017 第二步/第三步）：
 // 打铁后的落点距离不再均匀采样，而由「入射镜像反射 × 恢复系数 + 受控散射」
 // 的抛体自然产生。本文件守住真实篮板的两个结构特征：
 //
@@ -8,6 +8,9 @@
 // 3. 方向偏置：落点偏向出手点一侧（回弹）多于前穿侧。
 //
 // 出手距离混合近似比赛出手结构（近筐密集、三分次之、中距离最少）。
+// 第三步加入板通道后，分层门与方向门仍单测近筐沿反射（第二步物理）
+// 的专属特征；混合门复刻生产双通道路由（探针命中 → 打板，否则近筐
+// 沿），守住两通道并存后的总体分布。
 use glam::Vec2;
 use nba_domain::GameRules;
 use nba_physics::BallisticsEngine;
@@ -28,6 +31,33 @@ fn sample(dist: f32, n: usize, rng: &mut StdRng, rules: &GameRules, hoop: Vec2) 
     out
 }
 
+/// 双通道采样（与生产路由同源）：探针判「力度过大越过筐」→ 打板路径，
+/// 否则近筐沿反射。混合门用它守住两通道并存后的总体分布。
+fn sample_dual(
+    dist: f32,
+    n: usize,
+    rng: &mut StdRng,
+    rules: &GameRules,
+    hoop: Vec2,
+) -> (Vec<f32>, usize) {
+    let mut out = Vec::with_capacity(n);
+    let mut bank = 0usize;
+    for _ in 0..n {
+        let origin = hoop - Vec2::new(dist, 0.0);
+        let peak = (rules.shot_peak_base_ft + dist * rules.shot_peak_distance_factor)
+            .min(rules.ball_z_max_ft);
+        let flight = BallisticsEngine::shot_duration(dist, peak, rules);
+        let spot = if BallisticsEngine::compute_backboard_contact_probe(origin, hoop, rules) {
+            bank += 1;
+            BallisticsEngine::compute_rebound_landing_bank(origin, hoop, flight, rng, rules)
+        } else {
+            BallisticsEngine::compute_rebound_landing(origin, hoop, flight, rng, rules)
+        };
+        out.push((spot.landing_pos - hoop).length());
+    }
+    (out, bank)
+}
+
 fn median(v: &mut [f32]) -> f32 {
     v.sort_by(|a, b| a.partial_cmp(b).unwrap());
     v[v.len() / 2]
@@ -41,7 +71,7 @@ fn rim_rebound_distance_stratifies_with_shot_distance() {
     let close = median(&mut sample(3.0, 200, &mut rng, &rules, hoop));
     let mid = median(&mut sample(14.0, 200, &mut rng, &rules, hoop));
     let three = median(&mut sample(25.0, 200, &mut rng, &rules, hoop));
-    // 单调分层：上篮打铁基本落在筐边，三分打铁明显更远。
+    // 单调分层：上篮打铁基本在筐边触地，三分打铁明显更远。
     assert!(close < mid, "close {close} must be shorter than mid {mid}");
     assert!(mid < three, "mid {mid} must be shorter than three {three}");
     // 量级带（实测 p50：上篮 ≈1.3、中距 ≈5.9、三分 ≈9.4）。
@@ -59,27 +89,36 @@ fn rim_rebound_mixed_distribution_matches_rebound_structure() {
     let mut rng = StdRng::seed_from_u64(42);
     let mix: [(f32, usize); 5] = [(3.0, 300), (8.0, 150), (14.0, 150), (22.0, 100), (25.0, 300)];
     let mut all: Vec<f32> = Vec::new();
+    let mut bank_total = 0usize;
     for (dist, n) in mix {
-        all.extend(sample(dist, n, &mut rng, &rules, hoop));
+        let (part, bank) = sample_dual(dist, n, &mut rng, &rules, hoop);
+        all.extend(part);
+        bank_total += bank;
     }
     let total = all.len() as f32;
+    let bank_share = bank_total as f32 / total;
     let within6 = all.iter().filter(|d| **d <= 6.0).count() as f32 / total;
     let within12 = all.iter().filter(|d| **d <= 12.0).count() as f32 / total;
     let beyond12 = 1.0 - within12;
-    // 实测：within6 ≈ 0.63、within12 ≈ 0.999、beyond12 ≈ 0.001。
-    // 真实篮板大多数在筐附近（0-6 ft）收走。单次触筐反弹的物理上限：
-    // 有界恢复系数（≤0.7）下三分打铁首触地约 11-12 ft；15+ ft 的真实
-    // 长篮板来自篮板接触与触地后的二次弹跳（第三步碰撞几何范畴），
-    // 在引擎侧经 LooseBall 延续，不在此门的单一抛体内。
+    // 双通道实测（seed 42，本 mix）：本门出手全部沿 x 轴正对筐，距筐
+    // ≥ 2.5 ft 的探针全命中（弦外推 z ∈ [9.5,13]），板通道份额 1.000，
+    // 近筐沿通道在本门内份额为 0（其分布特征由分层门与方向门单测）。
+    // 打板反弹物理：竖直保持入射下落、水平 x 镜像 × 0.55，球直落板前，
+    // 实测 within6=1.000、within12=1.000、beyond12=0.000、p50≈0.92——
+    // 与真实打板打铁的篮板位置（Restricted Area 内被收走）一致。
     assert!(
-        (0.50..=0.72).contains(&within6),
+        (0.97..=1.0).contains(&bank_share),
+        "bank share {bank_share} outside measured band"
+    );
+    assert!(
+        (0.97..=1.0).contains(&within6),
         "within-6ft share {within6} outside band"
     );
     assert!(
-        (0.97..=1.0).contains(&within12),
+        (0.999..=1.0).contains(&within12),
         "within-12ft share {within12} outside band"
     );
-    assert!(beyond12 < 0.03, "beyond-12ft share {beyond12} too fat");
+    assert!(beyond12 < 0.01, "beyond-12ft share {beyond12} too fat");
 }
 
 #[test]

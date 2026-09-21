@@ -3,6 +3,7 @@ use nba_domain::GameRules;
 use nba_physics::{
     EntityFilter, LocomotionState, PhysicsBackend, PhysicsWorld, PlayerPhysicsState,
 };
+use rand::SeedableRng;
 
 fn player(id: &str, team: &str, pos: Vec2) -> PlayerPhysicsState {
     PlayerPhysicsState {
@@ -215,6 +216,77 @@ fn rebound_samples_start_at_configured_contact_point() {
         "mid z {mid_z} vs {expected_z}"
     );
     assert!(mid_xy.x < from.x, "xy still interpolating toward landing");
+}
+
+#[test]
+fn bank_shot_contact_lies_on_board_plane_and_lands_in_front() {
+    let rules = GameRules::default();
+    let court = rules.court;
+    let hoop = court.hoop_pos(true);
+    let board_x = court.width_ft - rules.backboard_offset_from_baseline_ft;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+    for dist in [6.0f32, 14.0, 25.0] {
+        let origin = Vec2::new(hoop.x - dist, hoop.y + 3.0);
+        // 探针：出手 → 筐延长线穿过板面且弦外推 z 处于板高内。
+        assert!(
+            nba_physics::BallisticsEngine::compute_backboard_contact_probe(
+                origin,
+                hoop,
+                &rules
+            ),
+            "overpowered shot from {dist} ft must probe as a bank attempt"
+        );
+        let peak = (rules.shot_peak_base_ft + dist * rules.shot_peak_distance_factor)
+            .min(rules.ball_z_max_ft);
+        let flight = nba_physics::BallisticsEngine::shot_duration(dist, peak, &rules);
+        let spot = nba_physics::BallisticsEngine::compute_rebound_landing_bank(
+            origin,
+            hoop,
+            flight,
+            &mut rng,
+            &rules,
+        );
+        // 触点在板平面上，高度与横向都在板范围内。
+        assert!(
+            (spot.contact_pos.x - board_x).abs() < 1e-3,
+            "contact x {} not on board plane {board_x}",
+            spot.contact_pos.x
+        );
+        assert!(
+            spot.contact_z >= rules.backboard_bottom_height_ft
+                && spot.contact_z <= rules.backboard_top_height_ft,
+            "contact z {} outside board span",
+            spot.contact_z
+        );
+        assert!(
+            (spot.contact_pos.y - court.hoop_y_ft).abs()
+                <= rules.backboard_width_ft / 2.0,
+            "contact y {} outside board width",
+            spot.contact_pos.y
+        );
+        // 落点在板前（场内侧），且球到地时仍在场内。
+        assert!(
+            spot.landing_pos.x < board_x,
+            "landing {} must be in front of the board",
+            spot.landing_pos.x
+        );
+        assert!(
+            court.contains(spot.landing_pos, 0.0),
+            "landing {:?} left the court",
+            spot.landing_pos
+        );
+    }
+
+    // 探针负例：短距离上篮（弦外推 z 低于板底）不走板通道。
+    let close = Vec2::new(hoop.x - 2.0, hoop.y);
+    assert!(
+        !nba_physics::BallisticsEngine::compute_backboard_contact_probe(
+            close,
+            hoop,
+            &rules
+        ),
+        "close shot must stay on the rim-channel path"
+    );
 }
 
 #[test]

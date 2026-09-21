@@ -1026,15 +1026,36 @@ impl MatchEngine {
                                 Some(format!("砸框而出！{} 投篮不中，争抢篮板！", shooter_name));
                             let shot_flight_seconds = *duration;
                             self.transition_phase(SubPhase::FlightAndRebound);
-                            let landing_spot = BallisticsEngine::compute_rebound_landing(
+                            // 双通道路由（ADR-017 第三步）：探针判「力度过大
+                            // 越过筐」——出手 → 筐延长线穿过板面且弦外推 z
+                            // 处于板高内 → 走打板路径（瞄准点为筐心，散射
+                            // 由弦几何承载）；不足量仍是近筐沿反射。
+                            let landing_spot = if BallisticsEngine::compute_backboard_contact_probe(
                                 s_pos,
                                 h_pos,
-                                shot_flight_seconds,
-                                &mut self.systems.rng,
                                 &self.config.rules,
+                            ) {
+                                BallisticsEngine::compute_rebound_landing_bank(
+                                    s_pos,
+                                    h_pos,
+                                    shot_flight_seconds,
+                                    &mut self.systems.rng,
+                                    &self.config.rules,
+                                )
+                            } else {
+                                BallisticsEngine::compute_rebound_landing(
+                                    s_pos,
+                                    h_pos,
+                                    shot_flight_seconds,
+                                    &mut self.systems.rng,
+                                    &self.config.rules,
+                                )
+                            };
+                            // 反弹起点 = 触点（近筐沿或板面，第三步双通道）。
+                            let rebound_from = (
+                                landing_spot.contact_pos,
+                                landing_spot.contact_z,
                             );
-                            // 反弹起点 = 筐环上的接触点（第二步触筐物理）。
-                            let rebound_from = (landing_spot.contact_pos, self.config.rules.rim_height_ft);
                             new_ball_state = Some(BallTrajectoryKind::RimRebound {
                                 from_pos: rebound_from.0,
                                 from_z: rebound_from.1,

@@ -58,6 +58,17 @@ pub struct GameRules {
     pub rim_contact_vertical_restitution: f32,
     /// 镜像反射方向的受控散射（rad，绕竖直轴对称均匀采样）。
     pub rim_contact_scatter_radians: f32,
+    /// 篮板几何（ADR-017 第三步）：板面距底线的水平距离（ft）。
+    /// 篮板平面垂直于底线方向，左筐板面 x = 该值，右筐板面 x = 场宽 − 该值。
+    pub backboard_offset_from_baseline_ft: f32,
+    /// 篮板宽度（ft，NBA 标准 6 ft）：触板判定的 |y − hoop_y| 上限。
+    pub backboard_width_ft: f32,
+    /// 篮板底沿高度（ft，NBA 标准 9.5 ft）：触板 z 的下限。
+    pub backboard_bottom_height_ft: f32,
+    /// 篮板顶沿高度（ft，NBA 标准 13 ft）：触板 z 的上限。
+    pub backboard_top_height_ft: f32,
+    /// 触板后水平速度法向分量的恢复系数：镜像反射后整体乘该值。
+    pub backboard_restitution: f32,
     pub pass_peak_ft: f32,
     /// 传球抛体弧顶随距离的增长率（ft/ft）：胸口短传平快，
     /// 长传弧顶抬高（第一步飞行抛体化）。
@@ -346,6 +357,14 @@ impl Default for GameRules {
             rim_contact_restitution_graze: 0.35,
             rim_contact_vertical_restitution: 0.35,
             rim_contact_scatter_radians: 0.35,
+            // 篮板几何（ADR-017 第三步）：真实 NBA 篮板底沿 9.5 ft、顶沿
+            // 13 ft、宽 6 ft、板面距底线 4 ft；触板水平恢复系数 0.55
+            // （板比筐沿耗散更少，打板回弹更平直）。
+            backboard_offset_from_baseline_ft: 4.0,
+            backboard_width_ft: 6.0,
+            backboard_bottom_height_ft: 9.5,
+            backboard_top_height_ft: 13.0,
+            backboard_restitution: 0.55,
             pass_peak_ft: 4.0,
             // 传球弧顶随距离增长：30 ft 传球弧顶 7 ft（抛体解出 T ≈ 0.86 s，
             // 球速 ≈ 38 ft/s，真实胸口传球量级）；50 ft 长传弧顶 9 ft。
@@ -550,6 +569,11 @@ impl GameRules {
             self.rim_contact_restitution_graze,
             self.rim_contact_vertical_restitution,
             self.rim_contact_scatter_radians,
+            self.backboard_offset_from_baseline_ft,
+            self.backboard_width_ft,
+            self.backboard_bottom_height_ft,
+            self.backboard_top_height_ft,
+            self.backboard_restitution,
             self.pass_peak_ft,
             self.shot_clock_urgency_seconds,
             self.shot_contest_sensitivity,
@@ -830,6 +854,12 @@ impl GameRules {
             || self.rim_contact_vertical_restitution > 1.0
             || self.rim_contact_scatter_radians < 0.0
             || self.rim_contact_scatter_radians > std::f32::consts::PI
+            || self.backboard_width_ft <= 0.0
+            || self.backboard_bottom_height_ft >= self.backboard_top_height_ft
+            || self.backboard_offset_from_baseline_ft <= 0.0
+            || self.backboard_offset_from_baseline_ft
+                >= self.court.width_ft - self.backboard_offset_from_baseline_ft
+            || !(0.0..=1.0).contains(&self.backboard_restitution)
             || self.inbound_boundary_tolerance_ft < self.player_radius_ft
             || self.inbound_release_depth_ft <= 0.0
             || self.stamina_floor < 0.0

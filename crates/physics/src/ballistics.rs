@@ -9,8 +9,10 @@ use std::collections::HashMap;
 pub use nba_domain::BallState as BallTrajectoryKind;
 
 pub struct ReboundLandingSpot {
-    /// 筐环上的接触点（触筐反弹的起点）。
+    /// 筐环上的接触点（触筐反弹的起点）；打板路径为板面上的触点。
     pub contact_pos: Vec2,
+    /// 接触点高度：近筐沿路径 = 筐高，打板路径 = 板面触点高度。
+    pub contact_z: f32,
     pub landing_pos: Vec2,
     pub flight_duration: f32,
     /// 反弹抛体的自然弧顶（仅作载荷元数据，采样由 ProjectileArc 产生）。
@@ -458,6 +460,120 @@ impl BallisticsEngine {
         };
         ReboundLandingSpot {
             contact_pos,
+            contact_z: rules.rim_height_ft,
+            landing_pos,
+            flight_duration: t_land,
+            peak_z,
+            rebounder_id: None,
+        }
+    }
+
+    /// 板平面 x 坐标（ADR-017 第三步）：锚点在左半场取板面 = 底线偏移，
+    /// 右半场取场宽 − 底线偏移。
+    fn backboard_plane_x(anchor_x: f32, rules: &GameRules) -> f32 {
+        if anchor_x <= rules.court.width_ft / 2.0 {
+            rules.backboard_offset_from_baseline_ft
+        } else {
+            rules.court.width_ft - rules.backboard_offset_from_baseline_ft
+        }
+    }
+
+    /// 触板探针（ADR-017 第三步）：出手是否「力度过大越过筐」。
+    ///
+    /// 判据：出手 → 筐的延长线与板平面相交（交点在筐之后，t > 1），
+    /// 且出手弦外推 z（chest→rim 斜率线性延伸到交点）处于板高范围内。
+    /// 生产调用方在跳投 Miss 分支用它在打板与近筐沿两条反弹通道之间
+    /// 路由。
+    pub fn compute_backboard_contact_probe(
+        shot_origin: Vec2,
+        hoop_pos: Vec2,
+        rules: &GameRules,
+    ) -> bool {
+        let to_hoop = hoop_pos - shot_origin;
+        if to_hoop.x.abs() <= f32::EPSILON {
+            return false;
+        }
+        let board_x = Self::backboard_plane_x(hoop_pos.x, rules);
+        let t = (board_x - shot_origin.x) / to_hoop.x;
+        // 板必须在筐之后，延长线才会穿过板面。
+        if t <= 1.0 {
+            return false;
+        }
+        let z_contact =
+            rules.chest_height_ft + (rules.rim_height_ft - rules.chest_height_ft) * t;
+        z_contact >= rules.backboard_bottom_height_ft
+            && z_contact <= rules.backboard_top_height_ft
+    }
+
+    /// 打板反弹（ADR-017 第三步）：打铁的板通道，入射由瞄准几何推导。
+    ///
+    /// 打板在真实篮球里是瞄准行为：出手者瞄准板上的点或筐心，瞄准点
+    /// 的散射决定命中筐还是打板。本函数把 `aim_point`（筐心或板面上
+    /// 的点）沿出手弦延长到板平面：交点在瞄准点之后（t > 1）、弦外推
+    /// z 处于板高范围、交点横向处于板宽范围三者同时成立才算触板；
+    /// 触板后水平速度 x 分量镜像 × `backboard_restitution`（y 切向
+    /// 保持），竖直保持入射下落速度，落点从触板点抛体解出。几何不
+    /// 成立时退回近筐沿反射（[`Self::compute_rebound_landing`]），
+    /// 两条通道在同一点汇合。
+    pub fn compute_rebound_landing_bank(
+        shot_origin: Vec2,
+        aim_point: Vec2,
+        shot_flight_seconds: f32,
+        rng: &mut impl Rng,
+        rules: &GameRules,
+    ) -> ReboundLandingSpot {
+        let g = rules.ball_gravity_ftps2.max(f32::EPSILON);
+        let aim_vec = aim_point - shot_origin;
+        let board_x = Self::backboard_plane_x(aim_point.x, rules);
+        let t = if aim_vec.x.abs() <= f32::EPSILON {
+            0.0
+        } else {
+            (board_x - shot_origin.x) / aim_vec.x
+        };
+        let y_contact = shot_origin.y + aim_vec.y * t;
+        // z 沿出手弦线性外推：chest→rim 斜率 × t。
+        let z_contact =
+            rules.chest_height_ft + (rules.rim_height_ft - rules.chest_height_ft) * t;
+        let touches_board = t > 1.0
+            && z_contact >= rules.backboard_bottom_height_ft
+            && z_contact <= rules.backboard_top_height_ft
+            && (y_contact - rules.court.hoop_y_ft).abs() <= rules.backboard_width_ft / 2.0;
+        if !touches_board {
+            return Self::compute_rebound_landing(
+                shot_origin,
+                aim_point,
+                shot_flight_seconds,
+                rng,
+                rules,
+            );
+        }
+        let t_flight = shot_flight_seconds.max(f32::EPSILON);
+        let aim_dist = aim_vec.length();
+        let aim_dir = aim_vec / aim_dist.max(f32::EPSILON);
+        // 入射水平速度：沿瞄准方向匀速逼近板面。
+        let v_in_h = aim_dir * (aim_dist / t_flight);
+        // 入射竖直速度：出手抛体（chest → 筐高）在到达时刻的速度，下落为负。
+        let shot_arc =
+            ProjectileArc::solve(rules.chest_height_ft, rules.rim_height_ft, t_flight, g);
+        let vz_in = shot_arc.vz0 - g * t_flight;
+        // 镜像反射：法向（x）翻转 × 恢复系数，切向（y）保持。
+        let v_out = Vec2::new(-v_in_h.x * rules.backboard_restitution, v_in_h.y);
+        let contact_pos = Vec2::new(board_x, y_contact);
+        // 落点：从 (触板点, 触板高度) 以 (v_out, vz_in) 的抛体触地时刻解。
+        let discriminant = (vz_in * vz_in + 2.0 * g * z_contact).max(0.0);
+        let t_land = (vz_in + discriminant.sqrt()) / g;
+        let raw_landing = contact_pos + v_out * t_land;
+        let margin = rules.player_radius_ft.max(0.0);
+        let landing_pos = rules.court.clamp_playable(raw_landing, margin);
+        let peak_z = if vz_in > 0.0 {
+            z_contact + vz_in * vz_in / (2.0 * g)
+        } else {
+            // 竖直保持下落：反弹后不再升起，弧顶即触板高度。
+            z_contact
+        };
+        ReboundLandingSpot {
+            contact_pos,
+            contact_z: z_contact,
             landing_pos,
             flight_duration: t_land,
             peak_z,
