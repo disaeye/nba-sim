@@ -389,6 +389,13 @@ pub(crate) struct BallRuntime {
     /// 放在这里使账目随球运行态生存；进入新的自由球飞行前清空
     /// （调用方负责），同一飞行内逐 tick 查重。
     pub(crate) loose_contact_resolved: Vec<String>,
+    /// 本次传球飞行中已结算过接触的防守者 id（边沿锁存）。
+    ///
+    /// 逐 tick 接触检测下，同一防守者会在多个 tick 持续处于可及范围内；
+    /// 若每个 tick 都掷骰，接触概率会随时长累积成几乎必然。因此每次
+    /// 掷骰只在「首次进入可及范围」的那个 tick 发生一次，之后该防守者
+    /// 被记入本表，不再重复参与分类。每次传球出手时清空。
+    pub(crate) pass_contact_resolved: Vec<String>,
 }
 
 impl BallRuntime {
@@ -404,6 +411,7 @@ impl BallRuntime {
             prev_observed_ball_pos: None,
             beaten_defender_id: None,
             loose_contact_resolved: Vec::new(),
+            pass_contact_resolved: Vec::new(),
         }
     }
 }

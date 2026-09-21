@@ -29,9 +29,11 @@
 //! 同时让传球人按满速传提前量。若实现是"接球人直读冻结落点"，则无论
 //! `off_ball_sense` 如何都不会出现空间分离 ⇒ 测试红。
 
+use glam::Vec2;
 use nba_domain::GameRules;
 use nba_engine::MatchEngine;
 use nba_engine::MatchSetup;
+use nba_physics::BallTrajectoryKind;
 use rayon::prelude::*;
 
 fn mean(v: &[f32]) -> f32 {
@@ -168,4 +170,142 @@ fn landing_divergences(seed: u64) -> Vec<f32> {
         ticks += 1;
     }
     out
+}
+
+// ============================================================================
+// 逐 tick 接触检测（防守者可及性）机械守卫
+// ============================================================================
+//
+// 守卫对象：传球飞行中的接触分类必须在「球真的在防守者可及范围内」
+// 才发生。可及性有两维：水平距离（球道正中）与高度（采样 z ≤ 摸高）。
+// 高吊传的 z 在防守者位置处高于摸高，不应产生接触事实。
+//
+// 场景用 `set_ball_state_for_test` 直接构造飞行中的传球（与
+// decision_wiring.rs 同一构造方式），把全部球员静止并排开，隔离
+// 战术跑位对几何的污染。掷骰概率由 `intercept_steal_slope` /
+// `intercept_tip_slope` 决定（默认 0.06/0.10，夹取下限 0.01/0.02），
+// 单次接触未抽中的概率有限，因此用多次独立传球累计：只要接触通道
+// 真实接线，多次传球必然产生至少一次 PASS_TIPPED / STEAL 事实。
+
+/// 静止化全部球员：速度归零、目标冻结在当前位置（隔离战术跑位污染）。
+fn freeze_all_players(engine: &mut MatchEngine) {
+    let ids: Vec<String> = engine.physics().get_players().keys().cloned().collect();
+    for id in ids {
+        if let Some(p) = engine.physics_mut_for_test().get_player_mut(&id) {
+            p.vel_ft = Vec2::ZERO;
+            p.target_speed_ftps = 0.0;
+            p.target_pos_ft = p.pos_ft;
+        }
+    }
+}
+
+/// 构造「H_01 → H_02 平传、A_05 站在球道正中」的场景并跑完飞行。
+///
+/// 返回飞行期间观察到的事件种类集合。
+fn run_pass_with_lane_defender(seed: u64, duration: f32) -> Vec<String> {
+    let rules = nba_domain::GameRules {
+        tick_seconds: 0.1,
+        tactical_initiation_seconds: 0.0,
+        decision_interval_seconds: 0.1,
+        ..nba_domain::GameRules::default()
+    };
+    let mut setup = MatchSetup::builtin(rules);
+    // 接球链路固定成功，隔离层 A/层 B 对结果的干扰；接触结果分类固定为
+    // 必抢断：概率下限抬到 1.0（规则通道，与 decision_wiring 固定
+    // pass_success 同一手法），使「接触几何成立」与「STEAL 事实出现」
+    // 一一对应，消除掷骰采样噪声。
+    setup.rules.resolve.base_rates.pass_success = 1.0;
+    setup.rules.resolve.base_rates.intercept_steal_floor = 1.0;
+    setup.rules.resolve.base_rates.intercept_steal_ceiling = 1.0;
+    setup.rules.resolve.pass.openness_weight = 0.0;
+    setup.rules.resolve.pass.passer_skill_weight = 0.0;
+    setup.rules.resolve.pass.receiver_control_weight = 0.0;
+    setup.rules.resolve.pass.catch_equilibrium_weight = 0.0;
+    let mut engine = MatchEngine::with_setup(setup, seed);
+    engine.force_possession_for_test(nba_domain::Possession::Home);
+    // 平传时长 0.5s：弧顶 ≈5.0 ft、防守者位置处 z ≈ 4.6–5.0 ft，
+    // 低于任一名册球员的摸高（190cm + 默认弹跳 ≈ 6.6 ft）→ 可及。
+    // 高吊传时长 1.2s：弧顶 ≈9.8 ft，防守者位置处 z ≈ 9.6–9.8 ft，
+    // 高于最高在场球员的摸高（211cm ≈ 7.0 ft）→ 不可及。
+    engine.set_ball_state_for_test(BallTrajectoryKind::Pass {
+        from_pos: Vec2::new(35.0, 25.0),
+        to_pos: Vec2::new(55.0, 25.0),
+        target_id: "H_02".to_string(),
+        start_time: 1.0,
+        duration,
+        peak_z: engine.rules().pass_peak_ft,
+        inbound: false,
+        receive_success: true,
+    });
+    engine.set_last_passer_for_test(Some("H_01".to_string()));
+    engine.set_game_flow_for_test(nba_domain::GameFlowState::LiveBall);
+    engine.set_sub_phase_for_test(nba_domain::SubPhase::ActionExecution);
+    engine.set_current_time_for_test(1.0);
+    freeze_all_players(&mut engine);
+    // 接球人冻结在传球终点；防守者 A_05（最高在场球员）冻结在球道正中。
+    if let Some(p) = engine.physics_mut_for_test().get_player_mut("H_02") {
+        p.pos_ft = Vec2::new(55.0, 25.0);
+        p.target_pos_ft = p.pos_ft;
+    }
+    if let Some(p) = engine.physics_mut_for_test().get_player_mut("A_05") {
+        p.pos_ft = Vec2::new(45.0, 25.0);
+        p.target_pos_ft = p.pos_ft;
+    }
+    let mut kinds: Vec<String> = Vec::new();
+    for _ in 0..20 {
+        let tick = engine.step();
+        for ev in &tick.frame.event_log {
+            kinds.push(ev.kind.clone());
+        }
+        if matches!(
+            engine.ball_state(),
+            BallTrajectoryKind::Held { .. } | BallTrajectoryKind::LooseBall { .. }
+        ) {
+            break;
+        }
+    }
+    kinds
+}
+
+/// 球道正中的防守者（z 可及）必须产生接触事实（抢断或拨掉）。
+///
+/// 多次独立传球累计：单次接触的未抽中概率有限（steal/tip 合计
+/// 抽中概率 ≥ floor 0.01+0.02），但只要接线真实，多次传球必有一次
+/// 抽中。若接触通道完全未接线（几何永远不成立），任何一次都不会有
+/// 事实 —— 断言因此区分「通道活着」与「通道已断」。
+#[test]
+fn lane_defender_at_reachable_height_must_contest_the_pass() {
+    // 16 次独立传球：每次都是完整的一次飞行（接触锁存在出手时清空，
+    // 每次 pass 都重新参与检测）。机会放大后仍无事实才能判红。
+    let contests = (0..16)
+        .map(|i| run_pass_with_lane_defender(900 + i, 0.5))
+        .collect::<Vec<_>>();
+    let contested = contests
+        .iter()
+        .any(|kinds| kinds.iter().any(|k| k == "STEAL" || k == "PASS_TIPPED"));
+    assert!(
+        contested,
+        "a defender standing in the lane at reachable height must produce \
+         STEAL or PASS_TIPPED; with 16 independent passes and zero contest \
+         facts the per-tick contact classification is not wired"
+    );
+}
+
+/// 高吊传（弧顶高于全部防守者的摸高）必须干净到达：无接触事实。
+///
+/// 同一几何、只拉长飞行时长（弧顶随之抬高）：防守者位置处的采样 z
+/// 全程高于在场最高球员（A_05，211cm）的摸高。若接触事实仍然出现，
+/// 说明可及性判定没有消费采样高度 —— 几何失真。
+#[test]
+fn lob_pass_above_reach_must_arrive_untouched() {
+    let untouched = (0..16).all(|i| {
+        let kinds = run_pass_with_lane_defender(900 + i, 1.2);
+        !kinds.iter().any(|k| k == "STEAL" || k == "PASS_TIPPED")
+    });
+    assert!(
+        untouched,
+        "a lob whose sampled z at the defender's spot exceeds every \
+         defender's reach height must arrive without STEAL/PASS_TIPPED; \
+         a contact fact here means reachability ignores the sampled ball height"
+    );
 }

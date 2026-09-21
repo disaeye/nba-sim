@@ -1,7 +1,8 @@
-//! 对抗裁定：传球拦截、贴身切球、传球成败、篮板归属。
+//! 对抗裁定：接触检测与结果分类、贴身切球、传球成败、篮板归属。
 //!
-//! 依据 `docs/architecture.md` §5 与 `docs/quality.md`：概率在**事件发生的那一刻**
-//! 裁定一次，结果作为事实传播（球变为松球/被断/被接住），不存在逐 tick 概率累积。
+//! 依据 `docs/architecture.md` §5 与 `docs/quality.md`：几何可达性（接触检测）
+//! 与结果分类（概率掷骰）按各自事实发生的时机执行；结果作为事实传播
+//! （球变为松球/被断/被接住），不存在逐 tick 概率累积。
 
 use glam::Vec2;
 use nba_domain::action_window::ActionTimeWindow;
@@ -14,88 +15,115 @@ use rand::Rng;
 use super::MatchEngine;
 
 impl MatchEngine {
-    pub(crate) fn resolve_pass_interception(
+    /// 传球飞行中的逐 tick 接触检测与结果分类。
+    ///
+    /// ## 几何（接触检测）
+    ///
+    /// 对全部在场防守者（除接球人）：球的当前采样位置与防守者的水平
+    /// 距离 ≤ `player_radius_ft + defender_reach_ft`，且球高不超过其
+    /// 摸高，才构成接触。摸高 = 身高英尺 × 一半权重 + 弹跳属性 ×
+    /// 一半权重 × 参考臂展（英尺换算）；身高是量纲事实（cm），只在
+    /// 档案里，从两队名册按 id 查（与 `block.rs` 同一来源）。z 下限 0：
+    /// 低弧平传全程可及，高吊传的弧顶在防守者位置处高于摸高、不可及。
+    ///
+    /// ## 掷骰（结果分类）
+    ///
+    /// 多人同时接触取 clearance 最小者（数值相同时按 id 排序，确定性）。
+    /// 每对（防守者 × 传球）只掷一次：首次接触的 tick 结算后锁存于
+    /// `pass_contact_resolved`，之后该防守者不再参与本次传球的分类。
+    /// 概率形状沿用释放裁定版的参数（字段名不变，语义为接触结果
+    /// 分类参数）：clearance 衰减 × 技能因子 × 传球人风险乘数，
+    /// steal/tip 各自夹取在 floor/ceiling 区间；同一次掷骰先判 steal
+    /// 再判 tip，未抽中即轻擦（不改轨迹，无事件）。
+    ///
+    /// 返回 `Some((防守者, true=抢断 / false=拨掉))`。
+    pub(crate) fn resolve_pass_contact(
         &mut self,
-        passer_id: &str,
         receiver_id: &str,
-        from_pos: Vec2,
-        to_pos: Vec2,
+        is_home: bool,
     ) -> Option<(String, bool)> {
-        let def_team = match self
-            .systems
-            .physics
-            .get_player(passer_id)
-            .map(|p| p.team.as_str())
-        {
-            Some("home") => "away",
-            Some("away") => "home",
-            _ => return None,
-        };
-        let segment = to_pos - from_pos;
-        let segment_length_sq = segment.length_squared();
-        if segment_length_sq <= f32::EPSILON {
-            return None;
-        }
+        let def_team = if is_home { "away" } else { "home" };
+        let ball_pos = self.ball.ball_pos_3d.0;
+        let ball_z = self.ball.ball_pos_3d.1.max(f32::from(0u8));
+        let reach = self.config.rules.player_radius_ft + self.config.rules.defender_reach_ft;
         let policy = &self.config.rules.resolve.base_rates;
         let zero = f32::from(0u8);
         let one = f32::from(1u8);
         let half = one / f32::from(2u8);
         let scale = policy.intercept_clearance_scale_ft.max(f32::EPSILON);
-        let reach = self.config.rules.player_radius_ft + self.config.rules.defender_reach_ft;
 
-        let mut defenders: Vec<(String, f32, f32)> = self
+        let mut candidates: Vec<(String, f32, f32)> = self
             .systems
             .physics
             .get_players()
             .values()
             .filter(|p| p.on_court && p.team == def_team && p.id != receiver_id)
+            .filter(|p| !self.ball.pass_contact_resolved.iter().any(|id| id == &p.id))
             .filter_map(|p| {
-                let projection_t =
-                    ((p.pos_ft - from_pos).dot(segment) / segment_length_sq).clamp(0.0, 1.0);
-                let closest = from_pos + segment * projection_t;
-                let clearance = (p.pos_ft - closest).length();
-                // 只有在球道可达范围内才算「有机会碰到球」。
+                let clearance = (p.pos_ft - ball_pos).length();
                 if clearance > reach {
+                    return None;
+                }
+                // 身高是量纲事实（cm），只在档案里；从两队名册按 id 查。
+                let height_cm = self
+                    .config
+                    .home_team
+                    .players
+                    .iter()
+                    .chain(self.config.away_team.players.iter())
+                    .find(|roster| roster.id == p.id)
+                    .map(|roster| roster.height_cm)
+                    .unwrap_or(200);
+                const CM_PER_FOOT: f64 = 30.48;
+                const REACH_REFERENCE_FT: f32 = 7.0;
+                let height_ft = (f64::from(height_cm) / CM_PER_FOOT) as f32;
+                // 摸高（英尺）：身高与弹跳各占一半权重，弹跳属性（0..1）
+                // 经参考臂展换算回英尺。可及性由飞行中的实际采样高度
+                // 对比该值决定。
+                let reach_ft = height_ft * half
+                    + p.attributes.vertical.clamp(zero, one) * half * REACH_REFERENCE_FT;
+                if ball_z > reach_ft {
                     return None;
                 }
                 Some((p.id.clone(), clearance, p.attributes.steal))
             })
             .collect();
-        // 确定性顺序：风险最高者优先评估（数值相同时按 id 排序）。
-        defenders.sort_by(|a, b| {
+        // 确定性顺序：接触最近者优先（数值相同时按 id 排序）。
+        candidates.sort_by(|a, b| {
             a.1.partial_cmp(&b.1)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(a.0.cmp(&b.0))
         });
 
+        // 传球人风险容忍度的乘数（与释放裁定版同推导）：风险容忍度越高，
+        // 传球越容易被接触转化为抢断/拨掉。传球人已不在场时取中位。
         let passer_risk = self
-            .systems
-            .physics
-            .get_player(passer_id)
-            .map(|p| {
-                nba_domain::capability::effective_risk_tolerance(&self.config.rules, &p.attributes)
-            })
-            .unwrap_or(0.5);
+            .ball
+            .last_passer_id
+            .as_deref()
+            .and_then(|pid| self.systems.physics.get_player(pid))
+            .map(|p| nba_domain::capability::effective_risk_tolerance(&self.config.rules, &p.attributes));
+        let risk_factor = policy.intercept_risk_factor_floor
+            + passer_risk.unwrap_or(half) * policy.intercept_risk_factor_gain;
 
-        for (defender_id, clearance, steal_skill) in defenders {
+        for (defender_id, clearance, steal_skill) in candidates {
             let base_contest = (one - (clearance / scale)).clamp(zero, one);
             let skill_factor = half + steal_skill.clamp(zero, one);
-            // 风险容忍度的乘数区间走规则通道（D27）：默认 0.6..1.4，
-            // 使 `effective_risk_tolerance` 的差异真正体现在丢球倾向上。
-            let risk_factor = policy.intercept_risk_factor_floor
-                + passer_risk * policy.intercept_risk_factor_gain;
             let steal_prob =
                 (base_contest * policy.intercept_steal_slope * skill_factor * risk_factor)
                     .clamp(policy.intercept_steal_floor, policy.intercept_steal_ceiling);
             let tip_prob = (base_contest * policy.intercept_tip_slope * skill_factor * risk_factor)
                 .clamp(policy.intercept_tip_floor, policy.intercept_tip_ceiling);
             let roll = self.systems.rng.gen::<f32>();
+            // 接触边沿锁存：无论掷骰结果如何，本防守者对本次传球只结算一次。
+            self.ball.pass_contact_resolved.push(defender_id.clone());
             if roll < steal_prob {
                 return Some((defender_id, true));
             }
             if roll < steal_prob + tip_prob {
                 return Some((defender_id, false));
             }
+            // 未抽中：轻擦，不改轨迹、无事件。
         }
         None
     }
@@ -147,9 +175,9 @@ impl MatchEngine {
     ///
     /// ## 语义
     ///
-    /// 回答「**这次持球暴露**是否被防守者切掉」，而不是「这个 tick 是否被切」。
-    /// 与 `resolve_pass_interception` 同形：**在事件发生的那一刻裁定一次**，
-    /// 结果作为事实（loose ball）传播。因此不存在逐 tick 概率累积。
+    /// 回答「**这次持球暴露**是否被防守者切掉」。与逐 tick 接触分类同形：
+    /// **在事件发生的那一刻裁定一次**，结果作为事实（loose ball）传播。
+    /// 因此不存在逐 tick 概率累积。
     ///
     /// ## 为什么需要它（round-13 结构发现）
     ///

@@ -835,18 +835,6 @@ impl MatchEngine {
         self.ball.pending_pass_inbound = inbound;
         let receive_success =
             self.resolve_pass_success(passer_id, receiver_id, from_pos, target_lead_pos);
-        // 第一性原理修复（本轮）：拦截必须在**传球释放时裁定一次**。
-        //
-        // 原实现把拦截放在逐 tick 的弹道循环里：每个 tick 遍历所有防守者、
-        // 每人独立掷骰。于是失败概率随时长累积 —— 一次 0.45–1.4s（11–35 tick）
-        // 的传球，若 1–2 名防守者处于判定范围内，至少失败一次的概率接近 1
-        // （实测每次传球失败 35.8%，真实 NBA 约 8–10%）。
-        //
-        // 概率的语义是「这次传球是否被拦截」，不是「这个 tick 是否被拦截」，
-        // 因此必须一次性裁定，并把结果作为事实随弹道携带（与
-        // `receive_success` 同一模式）。
-        let intercept =
-            self.resolve_pass_interception(passer_id, receiver_id, from_pos, target_lead_pos);
         self.transition_ball_state(BallTrajectoryKind::Pass {
             from_pos,
             to_pos: target_lead_pos,
@@ -856,7 +844,6 @@ impl MatchEngine {
             peak_z: self.config.rules.pass_peak_ft,
             inbound,
             receive_success,
-            intercept,
         });
         self.ball.last_passer_id = Some(passer_id.to_string());
         self.possession_ctx.current_possession_turnover_player = Some(passer_id.to_string());

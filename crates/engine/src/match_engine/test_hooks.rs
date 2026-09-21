@@ -89,6 +89,9 @@ impl MatchEngine {
         if let BallTrajectoryKind::Pass { target_id, .. } = &state {
             let rid = target_id.clone();
             self.mark_receiver(Some(&rid));
+            // 与唯一写入口同源：构造新的传球飞行即视为新的一次出手，
+            // 清空接触锁存，让本次飞行重新逐 tick 检测防守者接触。
+            self.ball.pass_contact_resolved.clear();
         } else {
             self.mark_receiver(None);
         }

@@ -291,9 +291,6 @@ impl MatchEngine {
         let pass_dist = (target_pos - catch_pos).length();
         let receive_success =
             self.resolve_pass_success(&rebounder_id, &target_id, catch_pos, target_pos);
-        // 一传（outlet pass）同样在释放时一次性裁定拦截。
-        let intercept =
-            self.resolve_pass_interception(&rebounder_id, &target_id, catch_pos, target_pos);
         self.transition_ball_state(BallTrajectoryKind::Pass {
             from_pos: catch_pos,
             to_pos: target_pos,
@@ -303,7 +300,6 @@ impl MatchEngine {
             peak_z: self.config.rules.pass_peak_ft,
             inbound: false,
             receive_success,
-            intercept,
         });
         self.possession_ctx.current_possession_passes += 1;
         self.journal.pending_events.push(GameEvent::PassRelease {
