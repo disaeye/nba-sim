@@ -16,7 +16,8 @@ permissions:
   contents: read
 
 jobs:
-  lint-commit:
+  lint_commit:
+    name: lint-commit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,8 +34,8 @@ jobs:
             exit 1
           fi
 
-  change-detection:
-    needs: lint-commit
+  change_detection:
+    name: change-detection
     runs-on: ubuntu-latest
     outputs:
       rust_changed: ${{ steps.filter.outputs.rust_changed }}
@@ -70,7 +71,30 @@ jobs:
           fi
 
   guards:
-    needs: lint-commit
+    name: Guard (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      max-parallel: 256
+      matrix:
+        include:
+          - name: inline-constants
+            script: scripts/check_inline_constants.py
+            self_test: true
+          - name: no-index-identity
+            script: scripts/check_no_index_identity.py
+            self_test: true
+          - name: threshold-integrity
+            script: scripts/check_threshold_integrity.py
+            self_test: true
+          - name: world-privacy
+            script: scripts/check_world_privacy.py
+            self_test: true
+          - name: engine-state-groups
+            script: scripts/check_engine_state_groups.py
+            self_test: true
+          - name: disk-budget
+            script: scripts/check_disk_budget.py
+            self_test: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,25 +105,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Behaviour, identity, threshold, boundary and resource guards
+      - name: Run guard
         run: |
-          python3 scripts/check_inline_constants.py
-          python3 scripts/check_no_index_identity.py
-          python3 scripts/check_threshold_integrity.py
-          python3 scripts/check_world_privacy.py
-          python3 scripts/check_engine_state_groups.py
-          python3 scripts/check_disk_budget.py --report
-      - name: Negative controls (each guard must be able to turn red)
-        run: |
-          python3 scripts/check_inline_constants.py --self-test
-          python3 scripts/check_no_index_identity.py --self-test
-          python3 scripts/check_threshold_integrity.py --self-test
-          python3 scripts/check_world_privacy.py --self-test
-          python3 scripts/check_engine_state_groups.py --self-test
+          python3 "${{ matrix.script }}" ${{ matrix.name == 'disk-budget' && '--report' || '' }}
+          if [[ "${{ matrix.self_test }}" == "true" ]]; then
+            python3 "${{ matrix.script }}" --self-test
+          fi
 
-  fast-test:
-    needs: change-detection
-    if: needs.change-detection.outputs.rust_changed == 'true'
+  clippy:
+    needs: change_detection
+    if: needs.change_detection.outputs.rust_changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -107,56 +122,154 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      - name: Configure runner parallelism
+        run: |
+          CPUS="$(nproc)"
+          echo "Runner CPUs: ${CPUS}"
+          echo "CARGO_BUILD_JOBS=${CPUS}" >> "$GITHUB_ENV"
       - name: Cargo Check & Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Tier 1 Fast Invariant & Isolation Tests
-        run: |
-          cargo test -p nba-domain
-          cargo test -p nba-invariants
-          cargo test -p nba-engine --test world_state_equivalence
-          cargo test -p nba-engine --test engine_snapshot
-          cargo test -p nba-engine --test projection
-          cargo test -p nba-engine --test golden_hash
 
-  full-gate:
-    needs: [change-detection, fast-test]
-    if: |
-      needs.change-detection.outputs.is_full == 'true' ||
-      needs.change-detection.outputs.core_changed == 'true'
+  fast_test:
+    needs: change_detection
+    if: needs.change_detection.outputs.rust_changed == 'true'
+    name: Tier 1 (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      max-parallel: 256
+      matrix:
+        include:
+          - name: nba-domain
+            command: cargo test -p nba-domain
+          - name: nba-invariants
+            command: cargo test -p nba-invariants
+          - name: world-state-equivalence
+            command: cargo test -p nba-engine --test world_state_equivalence
+          - name: engine-snapshot
+            command: cargo test -p nba-engine --test engine_snapshot
+          - name: projection
+            command: cargo test -p nba-engine --test projection
+          - name: golden-hash
+            command: cargo test -p nba-engine --test golden_hash
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Tier 2 Mechanism & Causal Tests
+      - name: Configure runner parallelism
         run: |
-          cargo test -p nba-decision --test defense_responsibility_chain
-          cargo test -p nba-engine --test attribute_perturbation
-          cargo test -p nba-engine --test block
-          cargo test -p nba-engine --test decision_wiring
-          cargo test -p nba-engine --test defense
-          cargo test -p nba-engine --test rules_complete_wiring
-          cargo test -p nba-engine --test wiring_proof
-          cargo test -p nba-engine --test defense_effect
-          cargo test -p nba-engine --test fiba_scenarios
-      - name: Tier 3 Macro Sanity Net (8-seed full game)
-        run: |
-          cargo test -p nba-engine --test stats_baseline -- --nocapture
+          CPUS="$(nproc)"
+          echo "Runner CPUs: ${CPUS}"
+          echo "CARGO_BUILD_JOBS=${CPUS}" >> "$GITHUB_ENV"
+      - name: Run Tier 1 target
+        run: ${{ matrix.command }} -- --test-threads "$(nproc)"
 
-  deploy:
-    needs: [change-detection, guards, fast-test, full-gate]
+  tier2_tests:
+    needs: change_detection
+    if: |
+      needs.change_detection.outputs.is_full == 'true' ||
+      needs.change_detection.outputs.core_changed == 'true'
+    name: Tier 2 (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      max-parallel: 256
+      matrix:
+        include:
+          - name: defense-responsibility-chain
+            command: cargo test -p nba-decision --test defense_responsibility_chain
+          - name: attribute-perturbation
+            command: cargo test -p nba-engine --test attribute_perturbation
+          - name: block
+            command: cargo test -p nba-engine --test block
+          - name: decision-wiring
+            command: cargo test -p nba-engine --test decision_wiring
+          - name: defense
+            command: cargo test -p nba-engine --test defense
+          - name: rules-complete-wiring
+            command: cargo test -p nba-engine --test rules_complete_wiring
+          - name: wiring-proof
+            command: cargo test -p nba-engine --test wiring_proof
+          - name: defense-effect
+            command: cargo test -p nba-engine --test defense_effect
+          - name: fiba-scenarios
+            command: cargo test -p nba-engine --test fiba_scenarios
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Configure runner parallelism
+        run: |
+          CPUS="$(nproc)"
+          echo "Runner CPUs: ${CPUS}"
+          echo "CARGO_BUILD_JOBS=${CPUS}" >> "$GITHUB_ENV"
+      - name: Run Tier 2 target
+        run: ${{ matrix.command }} -- --test-threads "$(nproc)"
+
+  tier3_tests:
+    needs: change_detection
+    if: |
+      needs.change_detection.outputs.is_full == 'true' ||
+      needs.change_detection.outputs.core_changed == 'true'
+    name: Tier 3 (stats baseline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Configure runner parallelism
+        run: |
+          CPUS="$(nproc)"
+          echo "Runner CPUs: ${CPUS}"
+          echo "CARGO_BUILD_JOBS=${CPUS}" >> "$GITHUB_ENV"
+      - name: Run Tier 3 macro sanity net
+        run: cargo test -p nba-engine --test stats_baseline -- --nocapture --test-threads "$(nproc)"
+
+  full_gate:
+    name: full-gate
+    needs: [lint_commit, change_detection, clippy, fast_test, tier2_tests, tier3_tests]
     if: |
       always() &&
-      (needs.change-detection.result == 'success') &&
+      (needs.change_detection.outputs.is_full == 'true' ||
+       needs.change_detection.outputs.core_changed == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify parallel test jobs
+        env:
+          LINT_RESULT: ${{ needs.lint_commit.result }}
+          CLIPPY_RESULT: ${{ needs.clippy.result }}
+          FAST_TEST_RESULT: ${{ needs.fast_test.result }}
+          TIER2_RESULT: ${{ needs.tier2_tests.result }}
+          TIER3_RESULT: ${{ needs.tier3_tests.result }}
+        run: |
+          for result in "$LINT_RESULT" "$CLIPPY_RESULT" "$FAST_TEST_RESULT"; do
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "Required prerequisite failed: $result"
+              exit 1
+            fi
+          done
+          if [[ "$TIER2_RESULT" != "success" || "$TIER3_RESULT" != "success" ]]; then
+            echo "Parallel full-gate jobs did not all pass: Tier 2=$TIER2_RESULT, Tier 3=$TIER3_RESULT"
+            exit 1
+          fi
+          echo "All parallel full-gate jobs passed."
+
+  deploy:
+    needs: [lint_commit, change_detection, guards, clippy, fast_test, full_gate]
+    if: |
+      always() &&
+      (needs.lint_commit.result == 'success') &&
+      (needs.change_detection.result == 'success') &&
       (needs.guards.result == 'success') &&
-      (needs.fast-test.result == 'success' || needs.fast-test.result == 'skipped') &&
-      (needs.full-gate.result == 'success' || needs.full-gate.result == 'skipped') &&
+      (needs.clippy.result == 'success' || needs.clippy.result == 'skipped') &&
+      (needs.fast_test.result == 'success' || needs.fast_test.result == 'skipped') &&
+      (needs.full_gate.result == 'success' || needs.full_gate.result == 'skipped') &&
       (github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Build WASM (if Rust changed)
-        if: needs.change-detection.outputs.rust_changed == 'true'
+        if: needs.change_detection.outputs.rust_changed == 'true'
         run: |
           rustup target add wasm32-unknown-unknown
           cd crates/bball-wasm
