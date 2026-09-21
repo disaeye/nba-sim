@@ -190,7 +190,7 @@ fn rebound_samples_start_at_configured_contact_point() {
         target_landing: landing,
         start_time: 5.0,
         duration: 1.0,
-        peak_z: rules.rebound_peak_ft,
+        peak_z: rules.rim_height_ft + 1.5,
         last_touch_team: nba_domain::Possession::Home,
     };
     let players = std::collections::HashMap::new();
@@ -208,12 +208,12 @@ fn rebound_samples_start_at_configured_contact_point() {
     let (mid_xy, mid_z) =
         nba_physics::BallisticsEngine::sample_ball_position(&state, 5.5, &players, &rules);
     let t = 0.5_f32;
-    let vz0 = (0.0 - rules.rim_height_ft
-        + 0.5 * rules.ball_gravity_ftps2 * 1.0)
-        / 1.0;
-    let expected_z = rules.rim_height_ft + vz0 * t
-        - 0.5 * rules.ball_gravity_ftps2 * t * t;
-    assert!((mid_z - expected_z).abs() < 1e-3, "mid z {mid_z} vs {expected_z}");
+    let vz0 = (0.0 - rules.rim_height_ft + 0.5 * rules.ball_gravity_ftps2 * 1.0) / 1.0;
+    let expected_z = rules.rim_height_ft + vz0 * t - 0.5 * rules.ball_gravity_ftps2 * t * t;
+    assert!(
+        (mid_z - expected_z).abs() < 1e-3,
+        "mid z {mid_z} vs {expected_z}"
+    );
     assert!(mid_xy.x < from.x, "xy still interpolating toward landing");
 }
 

@@ -1024,14 +1024,17 @@ impl MatchEngine {
                             self.journal.current_event = Some("SHOT_MISSED".to_string());
                             self.journal.current_callout =
                                 Some(format!("砸框而出！{} 投篮不中，争抢篮板！", shooter_name));
-                            let rebound_from = (h_pos, self.config.rules.rim_height_ft);
+                            let shot_flight_seconds = *duration;
                             self.transition_phase(SubPhase::FlightAndRebound);
                             let landing_spot = BallisticsEngine::compute_rebound_landing(
                                 s_pos,
                                 h_pos,
+                                shot_flight_seconds,
                                 &mut self.systems.rng,
                                 &self.config.rules,
                             );
+                            // 反弹起点 = 筐环上的接触点（第二步触筐物理）。
+                            let rebound_from = (landing_spot.contact_pos, self.config.rules.rim_height_ft);
                             new_ball_state = Some(BallTrajectoryKind::RimRebound {
                                 from_pos: rebound_from.0,
                                 from_z: rebound_from.1,
@@ -1039,7 +1042,7 @@ impl MatchEngine {
                                 target_landing: landing_spot.landing_pos,
                                 start_time: current_t,
                                 duration: landing_spot.flight_duration,
-                                peak_z: self.config.rules.rebound_peak_ft,
+                                peak_z: landing_spot.peak_z,
                                 last_touch_team: self.flow.possession,
                             });
                             // ## 篮板冲抢指派（evidence/problem.md §23.8）

@@ -208,17 +208,16 @@ fn post_up_base_reaches_behaviour() {
     });
 }
 
-/// 扩展判据（ADR-016）：`morale_shoot_affinity` 归零只移除情绪对出手
-/// 倾向的加权（情绪状态变化慢，属低频通道）；抛体化（v68）重排轨迹
-/// 抽样后退到 2/4 边缘可见区，与 ADR-016 三系数同情形。
+/// 扩展判据（ADR-016）：`morale_shoot_affinity` 对效用的杠杆 =
+/// morale_bias（±0.05–0.12）× affinity（0.35）≈ ±0.04，远小于候选间
+/// 效用差，指纹窗口内偶发可见；抛体化（v68）与触筐物理（v69）两次
+/// 重排后归零扰动只剩 1/6、×4 放大 2/6。改用饱和量级扰动（文件先例：
+/// 放大优于归零）：3.0 把杠杆抬到 ±0.15–0.36，与效用差同量级。
 #[test]
 fn morale_affinity_reaches_behaviour() {
-    assert_rule_coefficient_reaches_behaviour_extended(
-        "modulation.morale_shoot_affinity",
-        |r| {
-            r.modulation.morale_shoot_affinity = 0.0;
-        },
-    );
+    assert_rule_coefficient_reaches_behaviour_extended("modulation.morale_shoot_affinity", |r| {
+        r.modulation.morale_shoot_affinity = 3.0;
+    });
 }
 
 /// 突破结算的系数（从内联常量收编进 `DrivePolicy`）。

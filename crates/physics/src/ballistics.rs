@@ -9,8 +9,12 @@ use std::collections::HashMap;
 pub use nba_domain::BallState as BallTrajectoryKind;
 
 pub struct ReboundLandingSpot {
+    /// 筐环上的接触点（触筐反弹的起点）。
+    pub contact_pos: Vec2,
     pub landing_pos: Vec2,
     pub flight_duration: f32,
+    /// 反弹抛体的自然弧顶（仅作载荷元数据，采样由 ProjectileArc 产生）。
+    pub peak_z: f32,
     pub rebounder_id: Option<String>,
 }
 
@@ -42,12 +46,10 @@ impl BallisticsEngine {
         // 速度包络下限（与 pass_duration 同源）：水平速度不得超过球速包络，
         // 唯一手段是延长时长（实测回归：远距离出手在 clamp 上限内也可能超速）。
         let t_envelope = distance / rules.ball_max_speed_ftps.max(f32::EPSILON);
-        t_projectile
-            .max(t_envelope)
-            .clamp(
-                rules.min_shot_duration_seconds,
-                rules.max_shot_duration_seconds,
-            )
+        t_projectile.max(t_envelope).clamp(
+            rules.min_shot_duration_seconds,
+            rules.max_shot_duration_seconds,
+        )
     }
 
     /// Extrapolates a receiver within the configured playable court.
@@ -364,12 +366,8 @@ impl BallisticsEngine {
                 // 重力抛体：z(0)=触筐高度，z(T)=地面 0（球的触地点）。
                 // 触点反弹初速推导在第二步（触筐物理）；本步先服从重力。
                 let landing_z = 0.0f32;
-                let arc = ProjectileArc::solve(
-                    *from_z,
-                    landing_z,
-                    t_flight,
-                    rules.ball_gravity_ftps2,
-                );
+                let arc =
+                    ProjectileArc::solve(*from_z, landing_z, t_flight, rules.ball_gravity_ftps2);
                 let z = arc.z_at(elapsed, *from_z, rules.ball_gravity_ftps2);
                 (xy, z.max(0.0))
             }
@@ -377,35 +375,92 @@ impl BallisticsEngine {
         }
     }
 
-    /// Computes rebound landing spot from the configured shot geometry policy.
+    /// 触筐反弹（ADR-017 第二步）：接触点、反弹初速、落点全部由入射物理
+    /// 推导。命中/打铁的统计裁定仍在出手时刻（校准架构不动），本函数只
+    /// 负责「打铁之后球怎么弹」：
+    ///
+    /// 1. 入射速度：水平 = (筐-出手点)/飞行时长；竖直 = 出手抛体在筐高的
+    ///    到达速度 vz0 − g·T（下落，负值）。跳投与上篮的飞行时长不同，
+    ///    调用方传入实际值；
+    /// 2. 接触点在筐环上以「从筐指向出手点」方向为中心的受控扇形内采样；
+    /// 3. 反弹初速 = 水平镜像反射 × 恢复系数，方向叠加受控散射；竖直
+    ///    弹起 = 入射下落速度 × 竖直弹起系数；
+    /// 4. 落点 = 从 (接触点, 筐高) 以反弹初速作抛体，触地时刻的水平位移，
+    ///    距离分布从物理中自然产生，不再均匀采样。
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_rebound_landing(
         shot_origin: Vec2,
         hoop_pos: Vec2,
+        shot_flight_seconds: f32,
         rng: &mut impl Rng,
         rules: &GameRules,
     ) -> ReboundLandingSpot {
-        let shot_vector = hoop_pos - shot_origin;
-        let shot_dist = shot_vector.length();
-        let shot_dir = shot_vector.normalize_or_zero();
-        let (min_dist, max_dist) = if shot_dist > rules.league.three_point_distance_ft {
-            (rules.rebound_long_min_ft, rules.rebound_long_max_ft)
-        } else {
-            (rules.rebound_short_min_ft, rules.rebound_short_max_ft)
-        };
-        let bounce_dist = rng.gen_range(min_dist..max_dist);
-        let angle_offset =
-            rng.gen_range(-rules.rebound_angle_range_radians..rules.rebound_angle_range_radians);
-        let perp = Vec2::new(-shot_dir.y, shot_dir.x);
-        let rebound_dir = (-shot_dir * 0.7 + perp * angle_offset).normalize_or_zero();
-        let raw_landing = hoop_pos + rebound_dir * bounce_dist;
+        let g = rules.ball_gravity_ftps2.max(f32::EPSILON);
+        let shot_vec = hoop_pos - shot_origin;
+        let shot_dist = shot_vec.length();
+        let shot_dir = shot_vec.normalize_or_zero();
+        let t_flight = shot_flight_seconds.max(f32::EPSILON);
+        // 入射水平速度（矢量）：沿出手方向匀速逼近筐。
+        let v_in_h = shot_dir * (shot_dist / t_flight);
+        // 入射竖直速度：出手抛体在到达时刻的速度，负值（下落）。
+        let shot_arc = ProjectileArc::solve(
+            rules.chest_height_ft,
+            rules.rim_height_ft,
+            t_flight,
+            g,
+        );
+        let vz_in = shot_arc.vz0 - g * t_flight;
+        // 接触点：筐环上以「从筐指向出手点」为中心的受控扇形。
+        let to_shooter = -shot_dir;
+        let contact_angle =
+            rng.gen_range(-rules.rim_contact_angle_spread_radians..rules.rim_contact_angle_spread_radians);
+        let contact_dir = Vec2::new(
+            to_shooter.x * contact_angle.cos() - to_shooter.y * contact_angle.sin(),
+            to_shooter.x * contact_angle.sin() + to_shooter.y * contact_angle.cos(),
+        );
+        let contact_pos = hoop_pos + contact_dir * rules.rim_radius_ft;
+        // 法线：从接触点指向筐心（水平）。镜像反射只翻转法向分量，
+        // 入射速度大小不变、方向按接触角重定向。
+        let normal = -contact_dir;
+        let vn = v_in_h.dot(normal);
+        let v_reflected = v_in_h - normal * (vn + vn);
+        // 恢复系数随接触角渐变：正面硬碰筐沿保持更多能量（长回弹），
+        // 擦筐耗散更多（短回弹）。
+        let spread = rules
+            .rim_contact_angle_spread_radians
+            .max(f32::EPSILON);
+        let flushness = 1.0 - (contact_angle.abs() / spread).min(1.0);
+        let restitution = rules.rim_contact_restitution_graze
+            + (rules.rim_contact_restitution_flush - rules.rim_contact_restitution_graze)
+                * flushness;
+        let v_horizontal = v_reflected * restitution;
+        // 受控散射：绕竖直轴对称采样小角度旋转。
+        let scatter =
+            rng.gen_range(-rules.rim_contact_scatter_radians..rules.rim_contact_scatter_radians);
+        let scatter_cos = scatter.cos();
+        let scatter_sin = scatter.sin();
+        let v_out = Vec2::new(
+            v_horizontal.x * scatter_cos - v_horizontal.y * scatter_sin,
+            v_horizontal.x * scatter_sin + v_horizontal.y * scatter_cos,
+        );
+        // 竖直弹起：入射下落速度的恢复系数倍。
+        let vz_out = -vz_in * rules.rim_contact_vertical_restitution;
+        // 落点：从 (接触点, 筐高) 以 (v_out, vz_out) 的抛体触地时刻解。
+        let discriminant = (vz_out * vz_out + 2.0 * g * rules.rim_height_ft).max(0.0);
+        let t_land = (vz_out + discriminant.sqrt()) / g;
+        let raw_landing = contact_pos + v_out * t_land;
         let margin = rules.player_radius_ft.max(0.0);
         let landing_pos = rules.court.clamp_playable(raw_landing, margin);
-        let flight_duration = rules.rebound_flight_base_seconds
-            + (bounce_dist / rules.rebound_distance_scale_ft.max(f32::EPSILON))
-                * rules.rebound_flight_distance_factor;
+        let peak_z = if vz_out > 0.0 {
+            rules.rim_height_ft + vz_out * vz_out / (2.0 * g)
+        } else {
+            rules.rim_height_ft
+        };
         ReboundLandingSpot {
+            contact_pos,
             landing_pos,
-            flight_duration,
+            flight_duration: t_land,
+            peak_z,
             rebounder_id: None,
         }
     }
@@ -413,9 +468,16 @@ impl BallisticsEngine {
     pub fn compute_rebound_landing_default(
         shot_origin: Vec2,
         hoop_pos: Vec2,
+        shot_flight_seconds: f32,
         rng: &mut impl Rng,
     ) -> ReboundLandingSpot {
-        Self::compute_rebound_landing(shot_origin, hoop_pos, rng, &GameRules::default())
+        Self::compute_rebound_landing(
+            shot_origin,
+            hoop_pos,
+            shot_flight_seconds,
+            rng,
+            &GameRules::default(),
+        )
     }
 }
 

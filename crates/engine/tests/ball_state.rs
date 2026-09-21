@@ -27,7 +27,7 @@ fn test_offensive_rebound_does_not_switch_possession() {
         target_landing: Vec2::new(70.0, 25.0),
         start_time: engine.current_time(),
         duration: 10.0,
-        peak_z: engine.rules().rebound_peak_ft,
+        peak_z: engine.rules().rim_height_ft + 1.5,
     };
     engine.set_ball_state_for_test(rebound);
     assert_eq!(engine.possession(), before);

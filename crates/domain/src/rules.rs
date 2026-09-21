@@ -44,18 +44,24 @@ pub struct GameRules {
     pub shot_peak_distance_factor: f32,
     pub chest_height_ft: f32,
     pub rim_height_ft: f32,
+    /// 筐环半径（ft，NBA 标准 9" = 0.75）：触筐点在环上的几何。
+    pub rim_radius_ft: f32,
+    /// 触筐点方位角扇形半径（rad）：以「从筐指向出手点」方向为中心在筐环上
+    /// 采样接触点，0 表示永远正对出手点的近筐沿。
+    pub rim_contact_angle_spread_radians: f32,
+    /// 触筐后水平速度的恢复系数上限：正面硬碰筐沿（接触角≈0）保持
+    /// 更多能量，产生长回弹尾部。
+    pub rim_contact_restitution_flush: f32,
+    /// 恢复系数下限：擦筐（接触角达到扇形半径）耗散更多能量。
+    pub rim_contact_restitution_graze: f32,
+    /// 触筐后竖直方向的弹起系数：入射下落速度 × 此系数为弹起初速。
+    pub rim_contact_vertical_restitution: f32,
+    /// 镜像反射方向的受控散射（rad，绕竖直轴对称均匀采样）。
+    pub rim_contact_scatter_radians: f32,
     pub pass_peak_ft: f32,
     /// 传球抛体弧顶随距离的增长率（ft/ft）：胸口短传平快，
     /// 长传弧顶抬高（第一步飞行抛体化）。
     pub pass_peak_distance_factor: f32,
-    pub rebound_short_min_ft: f32,
-    pub rebound_short_max_ft: f32,
-    pub rebound_long_min_ft: f32,
-    pub rebound_long_max_ft: f32,
-    pub rebound_angle_range_radians: f32,
-    pub rebound_flight_base_seconds: f32,
-    pub rebound_flight_distance_factor: f32,
-    pub rebound_distance_scale_ft: f32,
     pub shot_clock_urgency_seconds: f32,
     /// Contest intensity to field-goal percentage conversion slope.
     pub shot_contest_sensitivity: f32,
@@ -221,7 +227,6 @@ pub struct GameRules {
     pub contest_prep_seconds: f32,
     pub contest_exec_seconds: f32,
     pub contest_follow_seconds: f32,
-    pub rebound_peak_ft: f32,
     /// Tactical movement policy shared by every built-in scheme.
     #[serde(default)]
     pub tactics: TacticalRules,
@@ -321,21 +326,30 @@ impl Default for GameRules {
             max_shot_duration_seconds: 1.45,
             decision: DecisionRules::default(),
             shot_peak_base_ft: 14.0,
+            // 弧顶随距离的增长率（ft/ft）：ADR-017 曾计划校准为 0.04，
+            // 实测后暂缓：0.04 使全部投篮提前约 0.065 s 到筐，8-seed
+            // 三分封盖率 3.7%→7.3%（真实 NBA 约 2–3%）、3P% 中位数
+            // 34.0→27.0 越出 [30,40] 带；出手时平均 make_probability
+            // 三种配置完全一致（0.307/0.308），封盖概率的高度惩罚归零
+            // 实验也不改变封盖数——机制未明，禁止盲目调参补救，
+            // 保持 0.25 待封盖裁决与飞行时长的耦合查清后再动。
             shot_peak_distance_factor: 0.25,
             chest_height_ft: 4.0,
             rim_height_ft: 10.0,
+            rim_radius_ft: 0.75,
+            // 触筐物理（ADR-017 第二步）：接触点在近筐沿受控扇形上采样，
+            // 反弹初速 = 入射镜像反射 × 恢复系数 + 受控散射，落点由抛体
+            // 自然产生。恢复系数量级：真实篮球碰筐后水平余速约 0.4-0.6，
+            // 竖直弹起约入射下落速度的 0.3-0.4。
+            rim_contact_angle_spread_radians: 1.1,
+            rim_contact_restitution_flush: 0.62,
+            rim_contact_restitution_graze: 0.35,
+            rim_contact_vertical_restitution: 0.35,
+            rim_contact_scatter_radians: 0.35,
             pass_peak_ft: 4.0,
             // 传球弧顶随距离增长：30 ft 传球弧顶 7 ft（抛体解出 T ≈ 0.86 s，
             // 球速 ≈ 38 ft/s，真实胸口传球量级）；50 ft 长传弧顶 9 ft。
             pass_peak_distance_factor: 0.10,
-            rebound_short_min_ft: 3.0,
-            rebound_short_max_ft: 9.0,
-            rebound_long_min_ft: 8.0,
-            rebound_long_max_ft: 18.0,
-            rebound_angle_range_radians: 1.0,
-            rebound_flight_base_seconds: 0.8,
-            rebound_flight_distance_factor: 0.4,
-            rebound_distance_scale_ft: 15.0,
             // D3.4 校准（dev 方案 §6.2）：紧逼窗口从最后 5s 扩到 12s。
             // 实测：5s 窗口下进攻方长期 Dwell 到 24s 违例（单场 53 次
             // SHOT_CLOCK_VIOLATION，真实 NBA ≈ 0–2 次），回合以违例而非
@@ -427,7 +441,6 @@ impl Default for GameRules {
             rebound_follow_seconds: 0.30,
             rebound_crash_offense_count: 2,
             rebound_boxout_defense_count: 3,
-            rebound_peak_ft: 11.5,
             layup_prep_seconds: 0.20,
             layup_exec_seconds: 0.25,
             layup_follow_seconds: 0.25,
@@ -531,15 +544,13 @@ impl GameRules {
             self.shot_peak_distance_factor,
             self.chest_height_ft,
             self.rim_height_ft,
+            self.rim_radius_ft,
+            self.rim_contact_angle_spread_radians,
+            self.rim_contact_restitution_flush,
+            self.rim_contact_restitution_graze,
+            self.rim_contact_vertical_restitution,
+            self.rim_contact_scatter_radians,
             self.pass_peak_ft,
-            self.rebound_short_min_ft,
-            self.rebound_short_max_ft,
-            self.rebound_long_min_ft,
-            self.rebound_long_max_ft,
-            self.rebound_angle_range_radians,
-            self.rebound_flight_base_seconds,
-            self.rebound_flight_distance_factor,
-            self.rebound_distance_scale_ft,
             self.shot_clock_urgency_seconds,
             self.shot_contest_sensitivity,
             self.open_shot_distance_ft,
@@ -596,7 +607,6 @@ impl GameRules {
             self.rebound_prep_seconds,
             self.rebound_exec_seconds,
             self.rebound_follow_seconds,
-            self.rebound_peak_ft,
             self.semantics.contact_minor_speed_ratio,
             self.semantics.contact_positional_speed_ratio,
             self.semantics.contact_foul_candidate_speed_ratio,
@@ -809,14 +819,17 @@ impl GameRules {
         {
             return Err("tactical movement policy contains an invalid value".to_string());
         }
-        if self.rebound_short_min_ft < 0.0
-            || self.rebound_short_max_ft < self.rebound_short_min_ft
-            || self.rebound_long_min_ft < 0.0
-            || self.rebound_long_max_ft < self.rebound_long_min_ft
-            || self.rebound_angle_range_radians < 0.0
-            || self.rebound_flight_base_seconds <= 0.0
-            || self.rebound_flight_distance_factor < 0.0
-            || self.rebound_distance_scale_ft <= 0.0
+        if self.rim_radius_ft <= 0.0
+            || self.rim_contact_angle_spread_radians < 0.0
+            || self.rim_contact_angle_spread_radians > std::f32::consts::PI
+            || self.rim_contact_restitution_flush < 0.0
+            || self.rim_contact_restitution_flush > 1.0
+            || self.rim_contact_restitution_graze < 0.0
+            || self.rim_contact_restitution_graze > self.rim_contact_restitution_flush
+            || self.rim_contact_vertical_restitution < 0.0
+            || self.rim_contact_vertical_restitution > 1.0
+            || self.rim_contact_scatter_radians < 0.0
+            || self.rim_contact_scatter_radians > std::f32::consts::PI
             || self.inbound_boundary_tolerance_ft < self.player_radius_ft
             || self.inbound_release_depth_ft <= 0.0
             || self.stamina_floor < 0.0
@@ -843,7 +856,6 @@ impl GameRules {
             || self.rebound_follow_seconds < 0.0
             || self.rebound_crash_offense_count == 0
             || self.rebound_boxout_defense_count == 0
-            || self.rebound_peak_ft < self.chest_height_ft
         {
             return Err(
                 "stamina, rebound, and action policy contains an invalid value".to_string(),

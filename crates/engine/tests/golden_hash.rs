@@ -588,7 +588,20 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //   shot_arc_solve_iterations/rebound_min_arc_ft）删除，新增
 //   pass_peak_distance_factor=0.10。出手速度自然达到真实量级
 //   （25ft 三分 ≈ 37 ft/s）。
-const GOLDEN_SEED42_2000: u64 = 0x820c9b27412c65cc;
+// v69 0x7888d577ac33b69b - 2026-09-21 第二步触筐物理（ADR-017）：
+//   打铁反弹从「均匀距离采样」改为入射驱动：接触点在近筐沿受控扇形上
+//   采样，反弹初速 = 水平镜像反射 × 恢复系数（随接触角从硬碰 0.62
+//   渐变到擦筐 0.35）+ 受控散射，竖直弹起 = 入射下落速度 × 0.35，
+//   落点由抛体自然产生；投篮弧顶校准 shot_peak_distance_factor
+//   0.25→0.04（25ft 三分时长回到包络内）；距离采样时代的 9 个字段
+//   （rebound_short/long/angle_range/flight_base/flight_distance/
+//   distance_scale/rebound_peak）删除，新增 rim_radius 与 4 个
+//   rim_contact 参数；罚球打铁与跳投打铁同一条反射链路。
+//   注：出手弧顶校准（0.25→0.04）实测后暂缓——8-seed 三分封盖率
+//   3.7%→7.3%、3P% 中位 34.0→27.0 越带且机制未明（出手时平均
+//   make_probability 三配置完全一致），证据在 rules.rs 的
+//   shot_peak_distance_factor 注释里。
+const GOLDEN_SEED42_2000: u64 = 0xf966e57a20ba68dd;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

@@ -689,13 +689,21 @@ impl MatchEngine {
 
     pub(crate) fn start_free_throw_rebound(&mut self, shooter_is_home: bool, ft_pos: Vec2) {
         let hoop = self.config.rules.court.hoop_pos(shooter_is_home);
-        let rebound_from = (hoop, self.config.rules.rim_height_ft);
+        // 罚球出手弧与跳投同源（弧顶 = base + dist×factor，受 z 上限约束），
+        // 反弹入射速度从同一抛体导出。
+        let ft_dist = (hoop - ft_pos).length();
+        let ft_peak = (self.config.rules.shot_peak_base_ft
+            + ft_dist * self.config.rules.shot_peak_distance_factor)
+            .min(self.config.rules.ball_z_max_ft);
+        let ft_flight = BallisticsEngine::shot_duration(ft_dist, ft_peak, &self.config.rules);
         let landing_spot = BallisticsEngine::compute_rebound_landing(
             ft_pos,
             hoop,
+            ft_flight,
             &mut self.systems.rng,
             &self.config.rules,
         );
+        let rebound_from = (landing_spot.contact_pos, self.config.rules.rim_height_ft);
         self.ball.ball_pos_3d = (rebound_from.0, rebound_from.1);
         self.clock.shot_clock = self
             .config
@@ -715,7 +723,7 @@ impl MatchEngine {
             target_landing: landing_spot.landing_pos,
             start_time: self.clock.current_time,
             duration: landing_spot.flight_duration,
-            peak_z: self.config.rules.rebound_peak_ft,
+            peak_z: landing_spot.peak_z,
             last_touch_team: self.flow.possession,
         };
         if matches!(

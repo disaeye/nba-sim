@@ -394,6 +394,19 @@ putback ≥4/6、boxout 3/6（boxout 的最大可能杠杆受 boxout_bonus ≈ 0
 2. 第二步：触筐物理。命中/打铁的统计裁定保留在出手时刻（校准架构不动），
    但打铁时按入射方向采样触筐位置，反弹初速 = 入射 × 衰减、方向 =
    镜像反射 + 受控散射，落点由物理自然产生，加距离分布校准门。
+   实施记录（2026-09-21，v69）：接触点在近筐沿受控扇形上采样（新增
+   rim_radius_ft 与 4 个 rim_contact 参数），水平恢复系数随接触角从硬碰
+   0.62 渐变到擦筐 0.35，竖直弹起 = 入射下落速度 × 0.35；距离采样时代
+   的 9 个字段（rebound_short/long_min-max、angle_range、flight_base、
+   flight_distance、distance_scale、rebound_peak）删除；罚球打铁与跳投
+   打铁同一条反射链路；分布门（crates/physics/tests/rim_contact.rs）
+   实测：近筐打铁 p50≈1.3 ft、中距≈5.9、三分≈9.4，混合出手 6 ft 内
+   ≈0.63，方向回弹份额 ≈0.85；ORB% 从 0.538 向真实 0.245 靠拢到 0.433。
+   出手弧顶校准（shot_peak_distance_factor 0.25→0.04）实测后暂缓：
+   三分封盖率 3.7%→7.3%、3P% 中位 34.0→27.0 越带，出手时平均
+   make_probability 三配置完全一致（0.307/0.308），封盖概率高度惩罚
+   归零实验不改变封盖数——机制未明前不发布该行为变化，证据在
+   rules.rs 的 shot_peak_distance_factor 注释。
 3. 第三步：球-篮板/球-人碰撞几何（篮板作为矩形碰撞面、球穿人改为弹开）。
 4. 第四步：分布校准门进评判器 + 盲区登记。
 
@@ -402,3 +415,8 @@ putback ≥4/6、boxout 3/6（boxout 的最大可能杠杆受 boxout_bonus ≈ 0
 （total_p50=172.5、3P% 中位 34.0）；接线判据的两处连锁按 ADR-016 既有
 裁定处理（morale_shoot_affinity 并入扩展判据；risk_tolerance_gain 改用
 饱和扰动 base=0.95/gain=0，杠杆比旧扰动强约 3 倍）。
+第二步行为影响：黄金哈希重冻结 v69（0xf966e57a20ba68dd）；8-seed 统计
+在带（total_p50=165.0、3P% 中位 30.2）；morale_shoot_affinity 的指纹
+可见度在触筐重排后降到 1/6（杠杆 = morale_bias ±0.05–0.12 × 0.35 ≈
+±0.04，远小于候选间效用差），改用饱和量级扰动 3.0（±0.15–0.36）恢复
+可观测。
