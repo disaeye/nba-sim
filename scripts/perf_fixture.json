@@ -7,11 +7,11 @@
     "band_min": 4400.0,
     "band_max": 6800.0,
     "measured": {
-      "seed_42": 5521.0,
+      "seed_42": 7018.0,
       "seed_1": 5634.0
     },
-    "measured_at_commit": "e742128",
-    "band_rationale": "实测中位 5577 的 ±20%：容纳机器负载抖动；越带 = 性能回归或未声明的行为改动"
+    "measured_at_commit": "working-tree-adr017-contact-v72",
+    "band_rationale": "ADR-017 统一接触模型后的工作区复测 seed42=7018、seed1=5634；当前 band 仍沿用原批准范围，后续在空闲环境完成多次复测后再决定是否调整"
   },
   "quarter_wall_seconds": {
     "band_min": 3.0,

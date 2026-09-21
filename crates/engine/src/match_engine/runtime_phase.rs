@@ -104,7 +104,7 @@ impl MatchEngine {
     /// 是占比最大的一类；此前引擎只有传球失败一条失误路径。
     ///
     /// 只在活球且球确实被持有时评估；`resolve_on_ball_poke` 内部按
-    /// `rate × dt` 做时间积分，单 tick 概率不随时长累加。
+    /// 连续时间 hazard 使用当前球速、球位与防守压力计算风险。
     pub(crate) fn on_ball_poke_phase(&mut self, dt: f32) {
         if self.flow.game_flow.allows_live_ball_actions() {
             let carrier = self.carrier_id();

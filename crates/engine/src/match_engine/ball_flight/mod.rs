@@ -132,7 +132,11 @@ impl MatchEngine {
         // 位置积分**之后**判定，因此把采样点与当前球态传给检测函数，
         // 由它自行按球态种类区分这两条路径。
         let free_ball_contact = match &self.ball.ball_state {
-            BallTrajectoryKind::RimRebound { start_time, duration, .. } => {
+            BallTrajectoryKind::RimRebound {
+                start_time,
+                duration,
+                ..
+            } => {
                 let tau = if *duration <= f32::EPSILON {
                     1.0
                 } else {
@@ -379,11 +383,20 @@ impl MatchEngine {
                 let will_receive = *receive_success;
                 let tau = ((current_t - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
                 let segment = *to_pos - *from_pos;
+                let horizontal_speed_ftps = self
+                    .ball
+                    .prev_observed_ball_pos
+                    .map(|previous| {
+                        (self.ball.ball_pos_3d.0 - previous).length()
+                            / self.config.rules.tick_seconds.max(f32::EPSILON)
+                    })
+                    .unwrap_or_else(|| segment.length() / duration.max(f32::EPSILON));
                 // match 持有 `&self.ball.ball_state` 的不可变借用，而接触检测
-                // 需要 `&mut self`（锁存表与掷骰）：先取出所需字段再调用。
+                // 需要 `&mut self`（连续接触状态与掷骰）：先取出所需字段再调用。
                 let receiver_id = target_id.clone();
                 let frozen_to_pos = *to_pos;
-                let contact = self.resolve_pass_contact(&receiver_id, is_home);
+                let contact =
+                    self.resolve_pass_contact(&receiver_id, is_home, dt, horizontal_speed_ftps);
                 let passer_id = self.ball.last_passer_id.clone().unwrap_or_default();
                 // Fix（round-15 第一性原理）：接球是「首次触球」事件，不是
                 // 「飞行终点」事件。
@@ -1053,10 +1066,7 @@ impl MatchEngine {
                                 )
                             };
                             // 反弹起点 = 触点（近筐沿或板面，第三步双通道）。
-                            let rebound_from = (
-                                landing_spot.contact_pos,
-                                landing_spot.contact_z,
-                            );
+                            let rebound_from = (landing_spot.contact_pos, landing_spot.contact_z);
                             new_ball_state = Some(BallTrajectoryKind::RimRebound {
                                 from_pos: rebound_from.0,
                                 from_z: rebound_from.1,
@@ -1228,10 +1238,24 @@ impl MatchEngine {
                 // 松球态已在函数顶部写入 `new_ball_state`，此处跳过
                 // 本 tick 的掌控判定与位置积分（弹开球态就是本 tick 的
                 // 权威下一态）。
-                let bounce_active = matches!(new_ball_state, Some(BallTrajectoryKind::LooseBall { .. }));
+                //
+                // 速度门（同一步）：手臂可及半径（5.8 ft）是「慢球可以
+                // 伸手拿到」的口径；超过 `loose_ball_control_speed_ftps`
+                // 的快球拿不住，继续按物理飞行，直到撞到身体弹开或被
+                // 摩擦减速后重新可收。否则快球会在几英尺外被凭空收下
+                // （审计标记过的「瞬移收球」）。
+                let bounce_active =
+                    matches!(new_ball_state, Some(BallTrajectoryKind::LooseBall { .. }));
+                let next_speed_3d = (next_vel.length_squared() + next_vel_z * next_vel_z).sqrt();
+                let controllable = next_speed_3d <= self.config.rules.loose_ball_control_speed_ftps;
+                let secure_candidate = if bounce_active || !controllable {
+                    None
+                } else {
+                    candidates.into_iter().next()
+                };
                 if bounce_active {
                     // 弹开路径：不再覆盖 new_ball_state。
-                } else if let Some(player_id) = candidates.into_iter().next() {
+                } else if let Some(player_id) = secure_candidate {
                     self.journal
                         .pending_events
                         .push(GameEvent::LooseBallSecured {

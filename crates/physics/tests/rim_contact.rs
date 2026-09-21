@@ -24,8 +24,7 @@ fn sample(dist: f32, n: usize, rng: &mut StdRng, rules: &GameRules, hoop: Vec2) 
         let peak = (rules.shot_peak_base_ft + dist * rules.shot_peak_distance_factor)
             .min(rules.ball_z_max_ft);
         let flight = BallisticsEngine::shot_duration(dist, peak, rules);
-        let spot =
-            BallisticsEngine::compute_rebound_landing(origin, hoop, flight, rng, rules);
+        let spot = BallisticsEngine::compute_rebound_landing(origin, hoop, flight, rng, rules);
         out.push((spot.landing_pos - hoop).length());
     }
     out
@@ -87,7 +86,13 @@ fn rim_rebound_mixed_distribution_matches_rebound_structure() {
     let rules = GameRules::default();
     let hoop = Vec2::new(88.75, 25.0);
     let mut rng = StdRng::seed_from_u64(42);
-    let mix: [(f32, usize); 5] = [(3.0, 300), (8.0, 150), (14.0, 150), (22.0, 100), (25.0, 300)];
+    let mix: [(f32, usize); 5] = [
+        (3.0, 300),
+        (8.0, 150),
+        (14.0, 150),
+        (22.0, 100),
+        (25.0, 300),
+    ];
     let mut all: Vec<f32> = Vec::new();
     let mut bank_total = 0usize;
     for (dist, n) in mix {

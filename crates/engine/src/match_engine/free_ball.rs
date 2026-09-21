@@ -70,15 +70,33 @@ impl MatchEngine {
     ) -> Option<(BallTrajectoryKind, String)> {
         let (ball_pos, ball_z) = ball_3d;
         let candidates = self.free_ball_contact_candidates();
+        // 记录当前接触区间，而不是永久屏蔽某名球员。球离开身体范围后，
+        // 再次进入时应当允许新的身体碰撞。
+        self.ball.loose_contact_resolved.retain(|resolved_id| {
+            candidates.iter().any(|candidate| {
+                candidate.0 == *resolved_id
+                    && BallisticsEngine::free_ball_player_contact_active(
+                        ball_pos,
+                        ball_z,
+                        candidate,
+                        &self.config.rules,
+                    )
+            })
+        });
         let (player_id, player_pos) = BallisticsEngine::free_ball_player_contact(
             ball_pos,
             ball_z,
             &candidates,
             &self.config.rules,
         )?;
-        // 同一飞行对同一球员只结算一次：弹开后的球仍可能贴着同一人，
-        // 逐 tick 重检会以每 tick 一次的频率连续改写弹道。
-        if self.ball.loose_contact_resolved.iter().any(|id| id == &player_id) {
+        // 同一接触区间只结算一次：弹开后的球仍可能贴着同一人，
+        // 逐 tick 重检会连续改写弹道。球离开后，前面的 retain 会清除记录。
+        if self
+            .ball
+            .loose_contact_resolved
+            .iter()
+            .any(|id| id == &player_id)
+        {
             return None;
         }
 
@@ -100,6 +118,10 @@ impl MatchEngine {
         // 镜像反射：法线 = 从球员指向球（水平），翻转法向分量，切向保留。
         let normal = (ball_pos - player_pos).normalize_or_zero();
         let vn = v_horizontal.dot(normal);
+        // 球已经离开人体时不应再次反射。
+        if vn >= 0.0 {
+            return None;
+        }
         let restitution = self.config.rules.loose_ball_player_restitution;
         let reflected = (v_horizontal - normal * (vn + vn)) * restitution;
 
@@ -121,21 +143,27 @@ impl MatchEngine {
             _ => return None,
         };
 
-        // 内联抛体触地解：从 (球位, 球高) 以 (reflected, vz_current) 抛出，
-        // 触地时刻的水平位移即新落点（与 compute_rebound_landing 同式）。
-        let disc = (vz_current * vz_current + 2.0 * g * ball_z.max(0.0)).max(0.0);
-        let t_land = (vz_current + disc.sqrt()) / g;
-        let margin = self.config.rules.player_radius_ft.max(0.0);
-        let raw_landing = ball_pos + reflected * t_land;
-        let landing = self.config.rules.court.clamp_playable(raw_landing, margin);
-
-        // 速度包络：弹开速度按方向分量 clamp 到包络内（含安全余量），
-        // 保 BALL_SPEED 不变量。
+        // 速度包络作用于完整三维速度，避免分别限制水平和竖直分量后
+        // 合速度仍然超过 BALL_SPEED。
         let cap = (self.config.rules.ball_max_speed_ftps
             - self.config.rules.invariant_speed_tolerance_ftps)
             .max(self.config.rules.invariant_speed_tolerance_ftps);
-        let v_out = reflected.clamp_length_max(cap);
-        let vz_out = vz_current.clamp(-cap, cap);
+        let outgoing_speed = (reflected.length_squared() + vz_current * vz_current).sqrt();
+        let speed_scale = if outgoing_speed > cap {
+            cap / outgoing_speed
+        } else {
+            1.0
+        };
+        let v_out = reflected * speed_scale;
+        let vz_out = vz_current * speed_scale;
+
+        // 内联抛体触地解：从 (球位, 球高) 以最终弹后速度抛出，
+        // 触地时刻的水平位移即新落点（与 compute_rebound_landing 同式）。
+        let disc = (vz_out * vz_out + 2.0 * g * ball_z.max(0.0)).max(0.0);
+        let t_land = (vz_out + disc.sqrt()) / g;
+        let margin = self.config.rules.player_radius_ft.max(0.0);
+        let raw_landing = ball_pos + v_out * t_land;
+        let landing = self.config.rules.court.clamp_playable(raw_landing, margin);
 
         let next_state = match &self.ball.ball_state {
             BallTrajectoryKind::RimRebound {

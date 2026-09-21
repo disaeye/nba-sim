@@ -606,10 +606,19 @@ impl DecisionSystem {
                     * (1.0 + ctx.rules.decision.post_up_mismatch_weight * body_mismatch)
             }
         };
+        let risk_aversion = match &s.action {
+            CandidateAction::Pass { .. } | CandidateAction::InboundPass { .. } => {
+                let tolerance = attributes
+                    .map(|a| nba_domain::capability::effective_risk_tolerance(ctx.rules, a))
+                    .unwrap_or(ctx.rules.capability.neutral_attribute);
+                self.weights.risk_aversion * (1.0 - 0.5 * tolerance.clamp(0.0, 1.0))
+            }
+            _ => self.weights.risk_aversion,
+        };
         base * s.feasibility_score * stamina_mult
             + morale_bias * morale_affinity
             + s.constraint_penalty
-            - s.risk * self.weights.risk_aversion
+            - s.risk * risk_aversion
     }
 
     /// 根据防守人分布采样中路与两侧突破走廊，避免无脑直冲篮下中心

@@ -229,22 +229,14 @@ fn bank_shot_contact_lies_on_board_plane_and_lands_in_front() {
         let origin = Vec2::new(hoop.x - dist, hoop.y + 3.0);
         // 探针：出手 → 筐延长线穿过板面且弦外推 z 处于板高内。
         assert!(
-            nba_physics::BallisticsEngine::compute_backboard_contact_probe(
-                origin,
-                hoop,
-                &rules
-            ),
+            nba_physics::BallisticsEngine::compute_backboard_contact_probe(origin, hoop, &rules),
             "overpowered shot from {dist} ft must probe as a bank attempt"
         );
         let peak = (rules.shot_peak_base_ft + dist * rules.shot_peak_distance_factor)
             .min(rules.ball_z_max_ft);
         let flight = nba_physics::BallisticsEngine::shot_duration(dist, peak, &rules);
         let spot = nba_physics::BallisticsEngine::compute_rebound_landing_bank(
-            origin,
-            hoop,
-            flight,
-            &mut rng,
-            &rules,
+            origin, hoop, flight, &mut rng, &rules,
         );
         // 触点在板平面上，高度与横向都在板范围内。
         assert!(
@@ -259,8 +251,7 @@ fn bank_shot_contact_lies_on_board_plane_and_lands_in_front() {
             spot.contact_z
         );
         assert!(
-            (spot.contact_pos.y - court.hoop_y_ft).abs()
-                <= rules.backboard_width_ft / 2.0,
+            (spot.contact_pos.y - court.hoop_y_ft).abs() <= rules.backboard_width_ft / 2.0,
             "contact y {} outside board width",
             spot.contact_pos.y
         );
@@ -280,11 +271,7 @@ fn bank_shot_contact_lies_on_board_plane_and_lands_in_front() {
     // 探针负例：短距离上篮（弦外推 z 低于板底）不走板通道。
     let close = Vec2::new(hoop.x - 2.0, hoop.y);
     assert!(
-        !nba_physics::BallisticsEngine::compute_backboard_contact_probe(
-            close,
-            hoop,
-            &rules
-        ),
+        !nba_physics::BallisticsEngine::compute_backboard_contact_probe(close, hoop, &rules),
         "close shot must stay on the rim-channel path"
     );
 }

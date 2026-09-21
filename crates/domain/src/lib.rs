@@ -22,7 +22,8 @@ pub use capability::{
     effective_help_awareness, effective_max_accel, effective_max_speed,
     effective_post_defense_physicality, effective_putback_bias, effective_risk_tolerance,
     effective_transition_leakout_chance, effective_turn_decel_retention, free_throw_probability,
-    poke_check_success, receive_estimate_noise,
+    poke_ball_exposure, poke_check_success, poke_check_success_with_context, poke_pressure_factor,
+    receive_estimate_noise,
 };
 pub use court::CourtGeometry;
 pub use data::{
@@ -34,8 +35,8 @@ pub use flow::{transition_ball_state, BallPhase, BallState, GameFlowState, Phase
 pub use league::{LeagueId, LeagueProfile};
 pub use possession::{BallOwnership, Possession, SubPhase};
 pub use resolve::{
-    BaseRates, BlockPolicy, ContactPolicy, DrivePolicy, PassPolicy, ReboundPolicy, ResolveConfig,
-    ShotTypeBlockBias, ShotTypeRates,
+    BallSecurityPolicy, BaseRates, BlockPolicy, ContactPolicy, DrivePolicy, PassPolicy,
+    ReboundPolicy, ResolveConfig, ShotTypeBlockBias, ShotTypeRates,
 };
 pub use rules::{
     DecisionRules, DefenseRules, GameRules, ModulationRules, PotentialFieldRules, SemanticRules,

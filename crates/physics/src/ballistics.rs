@@ -167,6 +167,66 @@ impl BallisticsEngine {
         Self::extrapolate_receiver_pos(receiver, lead_time_sec, &GameRules::default())
     }
 
+    /// Samples the instantaneous velocity of the held or dribbled ball.
+    ///
+    /// The carrier velocity and the derivative of the configured dribble offset
+    /// are combined so contact adjudication can use the ball's current motion.
+    pub fn sample_ball_velocity(
+        state: &BallTrajectoryKind,
+        current_time: f32,
+        players: &HashMap<String, PlayerPhysicsState>,
+        rules: &GameRules,
+    ) -> glam::Vec3 {
+        let (carrier_id, lateral_multiplier, height_multiplier) = match state {
+            BallTrajectoryKind::Held { carrier_id } => (carrier_id, 0.45, 1.0),
+            BallTrajectoryKind::Drive {
+                driver_id,
+                move_kind,
+                ..
+            } => {
+                let lateral_multiplier = match move_kind {
+                    Some(nba_domain::action_window::DribbleMoveKind::Crossover) => 1.2,
+                    Some(nba_domain::action_window::DribbleMoveKind::BehindTheBack) => 0.8,
+                    Some(nba_domain::action_window::DribbleMoveKind::SpinMove) => 1.5,
+                    _ => 0.6,
+                };
+                (driver_id, lateral_multiplier, 0.95)
+            }
+            _ => return glam::Vec3::ZERO,
+        };
+        let Some(carrier) = players.get(carrier_id) else {
+            return glam::Vec3::ZERO;
+        };
+        let speed = carrier.vel_ft.length();
+        let forward = if speed > 0.5 {
+            carrier.vel_ft / speed
+        } else {
+            Vec2::X
+        };
+        let lateral = Vec2::new(-forward.y, forward.x);
+        let frequency = rules.ball_bounce_frequency_hz
+            * (1.0 + (speed / rules.max_player_speed_ftps.max(f32::EPSILON)).min(0.6));
+        let phase = current_time * frequency * std::f32::consts::TAU;
+        let lateral_velocity = lateral
+            * (rules.ball_holder_offset_ft
+                * lateral_multiplier
+                * phase.cos()
+                * frequency
+                * std::f32::consts::TAU);
+        let vertical_phase = current_time * frequency * std::f32::consts::PI;
+        let vertical_velocity = vertical_phase.cos()
+            * (rules.ball_holder_height_ft
+                * (1.0 - 0.65 * height_multiplier)
+                * frequency
+                * std::f32::consts::PI);
+        let horizontal_velocity = carrier.vel_ft + lateral_velocity;
+        glam::Vec3::new(
+            horizontal_velocity.x,
+            horizontal_velocity.y,
+            vertical_velocity,
+        )
+    }
+
     pub fn sample_ball_position(
         state: &BallTrajectoryKind,
         current_time: f32,
@@ -378,44 +438,24 @@ impl BallisticsEngine {
     }
 
     /// 自由球-人接触检测（ADR-017 第三步）：自由球（篮板飞行、地板球）
-    /// 对在场球员是可触碰实体。在候选摘要里找第一个满足以下全部条件的
-    /// 球员：
+    /// 对在场球员是可触碰实体。身体半径和篮球半径决定水平接触范围，
+    /// 球高还必须低于该球员的摸高。
     ///
-    /// 1. `on_court == true`（板凳上的球员不参与身体碰撞）；
-    /// 2. 水平距离 ≤ `player_radius_ft + defender_reach_ft`（球心-人中心的
-    ///    可及半径，与拦截/抢板判定同一半径口径）；
-    /// 3. 球 z ≤ 该球员的摸高（英尺）：
-    ///    `摸高 = (height_cm / 30.48) × 0.5 + vertical × 0.5`，下限 0。
-    ///    该式与 `roster.rs` 跳球选拔、`select_jumper_id` 的摸高口径同源。
-    ///
-    /// 返回**最近**的命中者（水平距离相同按 id 字典序取小，保证确定性）。
-    /// physics 层不依赖名册类型：身高与弹跳由调用方以摘要切片传入，
-    /// 元组依次为 `(id, height_cm, vertical, pos, on_court)`。
+    /// 返回最近的命中者（距离相同时按 id 排序），保证候选顺序不会影响结果。
+    /// 身高与弹跳由调用方以 `(id, height_cm, vertical, pos, on_court)` 传入。
     pub fn free_ball_player_contact(
         ball_pos: Vec2,
         ball_z: f32,
         candidates: &[(String, u16, f32, Vec2, bool)],
         rules: &GameRules,
     ) -> Option<(String, Vec2)> {
-        const CM_PER_FOOT: f32 = 30.48;
-        // 被动身体碰球：半径 = 人体半径 + 篮球半径。伸手可及
-        // （`defender_reach_ft`）是主动触碰（抢断/封盖）的口径，不参与
-        // 被动碰撞；`player_radius_ft`（人-人分离半径）含臂展，对
-        // 被动碰撞也过大，用 `body_contact_radius_ft`。
-        let radius = rules.body_contact_radius_ft + rules.ball_radius_ft;
         let mut best: Option<(String, Vec2, f32)> = None;
-        for (id, height_cm, vertical, pos, on_court) in candidates {
-            if !on_court {
+        for candidate in candidates {
+            if !Self::free_ball_player_contact_active(ball_pos, ball_z, candidate, rules) {
                 continue;
             }
+            let (id, _, _, pos, _) = candidate;
             let dist = (*pos - ball_pos).length();
-            if dist > radius {
-                continue;
-            }
-            let reach_ft = (*height_cm as f32 / CM_PER_FOOT) * 0.5 + vertical * 0.5;
-            if ball_z > reach_ft.max(0.0) {
-                continue;
-            }
             let better = match &best {
                 Some((best_id, _, best_dist)) => {
                     dist < *best_dist || (dist == *best_dist && id < best_id)
@@ -427,6 +467,27 @@ impl BallisticsEngine {
             }
         }
         best.map(|(id, pos, _)| (id, pos))
+    }
+
+    /// 判断自由球是否仍在指定球员的身体接触区内。
+    ///
+    /// 引擎用这个结果区分“持续接触”和“离开后再次进入”。它只描述几何事实，
+    /// 不负责判断抢断、收球或球权归属。
+    pub fn free_ball_player_contact_active(
+        ball_pos: Vec2,
+        ball_z: f32,
+        candidate: &(String, u16, f32, Vec2, bool),
+        rules: &GameRules,
+    ) -> bool {
+        const CM_PER_FOOT: f32 = 30.48;
+        let (_, height_cm, vertical, player_pos, on_court) = candidate;
+        if !on_court {
+            return false;
+        }
+        let radius = rules.body_contact_radius_ft + rules.ball_radius_ft;
+        let reach_ft = (*height_cm as f32 / CM_PER_FOOT) * 0.5 + *vertical * 0.5;
+        let ball_bottom_z = ball_z - rules.ball_radius_ft;
+        (*player_pos - ball_pos).length() <= radius && ball_bottom_z <= reach_ft.max(0.0)
     }
 
     /// 触筐反弹（ADR-017 第二步）：接触点、反弹初速、落点全部由入射物理
@@ -457,17 +518,14 @@ impl BallisticsEngine {
         // 入射水平速度（矢量）：沿出手方向匀速逼近筐。
         let v_in_h = shot_dir * (shot_dist / t_flight);
         // 入射竖直速度：出手抛体在到达时刻的速度，负值（下落）。
-        let shot_arc = ProjectileArc::solve(
-            rules.chest_height_ft,
-            rules.rim_height_ft,
-            t_flight,
-            g,
-        );
+        let shot_arc =
+            ProjectileArc::solve(rules.chest_height_ft, rules.rim_height_ft, t_flight, g);
         let vz_in = shot_arc.vz0 - g * t_flight;
         // 接触点：筐环上以「从筐指向出手点」为中心的受控扇形。
         let to_shooter = -shot_dir;
-        let contact_angle =
-            rng.gen_range(-rules.rim_contact_angle_spread_radians..rules.rim_contact_angle_spread_radians);
+        let contact_angle = rng.gen_range(
+            -rules.rim_contact_angle_spread_radians..rules.rim_contact_angle_spread_radians,
+        );
         let contact_dir = Vec2::new(
             to_shooter.x * contact_angle.cos() - to_shooter.y * contact_angle.sin(),
             to_shooter.x * contact_angle.sin() + to_shooter.y * contact_angle.cos(),
@@ -480,14 +538,21 @@ impl BallisticsEngine {
         let v_reflected = v_in_h - normal * (vn + vn);
         // 恢复系数随接触角渐变：正面硬碰筐沿保持更多能量（长回弹），
         // 擦筐耗散更多（短回弹）。
-        let spread = rules
-            .rim_contact_angle_spread_radians
-            .max(f32::EPSILON);
+        let spread = rules.rim_contact_angle_spread_radians.max(f32::EPSILON);
         let flushness = 1.0 - (contact_angle.abs() / spread).min(1.0);
         let restitution = rules.rim_contact_restitution_graze
             + (rules.rim_contact_restitution_flush - rules.rim_contact_restitution_graze)
                 * flushness;
         let v_horizontal = v_reflected * restitution;
+        let speed_cap = (rules.ball_max_speed_ftps - rules.invariant_speed_tolerance_ftps)
+            .max(rules.invariant_speed_tolerance_ftps);
+        let outgoing_horizontal_speed = v_horizontal.length();
+        let horizontal_scale = if outgoing_horizontal_speed > speed_cap {
+            speed_cap / outgoing_horizontal_speed
+        } else {
+            1.0
+        };
+        let v_horizontal = v_horizontal * horizontal_scale;
         // 受控散射：绕竖直轴对称采样小角度旋转。
         let scatter =
             rng.gen_range(-rules.rim_contact_scatter_radians..rules.rim_contact_scatter_radians);
@@ -551,10 +616,8 @@ impl BallisticsEngine {
         if t <= 1.0 {
             return false;
         }
-        let z_contact =
-            rules.chest_height_ft + (rules.rim_height_ft - rules.chest_height_ft) * t;
-        z_contact >= rules.backboard_bottom_height_ft
-            && z_contact <= rules.backboard_top_height_ft
+        let z_contact = rules.chest_height_ft + (rules.rim_height_ft - rules.chest_height_ft) * t;
+        z_contact >= rules.backboard_bottom_height_ft && z_contact <= rules.backboard_top_height_ft
     }
 
     /// 打板反弹（ADR-017 第三步）：打铁的板通道，入射由瞄准几何推导。
@@ -584,8 +647,7 @@ impl BallisticsEngine {
         };
         let y_contact = shot_origin.y + aim_vec.y * t;
         // z 沿出手弦线性外推：chest→rim 斜率 × t。
-        let z_contact =
-            rules.chest_height_ft + (rules.rim_height_ft - rules.chest_height_ft) * t;
+        let z_contact = rules.chest_height_ft + (rules.rim_height_ft - rules.chest_height_ft) * t;
         let touches_board = t > 1.0
             && z_contact >= rules.backboard_bottom_height_ft
             && z_contact <= rules.backboard_top_height_ft
@@ -776,70 +838,59 @@ mod landing_tests {
         let at = |id: &str, cm: u16, vertical: f32, pos: Vec2, on_court: bool| {
             (id.to_string(), cm, vertical, pos, on_court)
         };
-        // 默认规则：接触半径 = 1.8 + 0.4 = 2.2 ft；200cm/0.5 摸高
+        // 默认规则：人体半径 1.0 ft 加篮球半径 0.4 ft；200cm/0.5 摸高
         // = (200/30.48)*0.5 + 0.25 ≈ 3.53 ft。
-        let nearby = vec![at("H_01", 200, 0.5, Vec2::new(95.0 + 2.0, 25.0), true)];
-        let hit = BallisticsEngine::free_ball_player_contact(
-            Vec2::new(95.0, 25.0),
-            3.0,
-            &nearby,
-            &rules,
-        );
+        let nearby = vec![at("H_01", 200, 0.5, Vec2::new(95.0 + 1.2, 25.0), true)];
+        let hit =
+            BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 3.0, &nearby, &rules);
         assert!(hit.is_some(), "ball inside radius and below reach must hit");
 
         // 摸高门：球高于摸高时不命中。
-        let hit_high = BallisticsEngine::free_ball_player_contact(
-            Vec2::new(95.0, 25.0),
-            4.0,
-            &nearby,
-            &rules,
+        let hit_high =
+            BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 4.0, &nearby, &rules);
+        assert!(
+            hit_high.is_none(),
+            "ball above the reach ceiling must pass over"
         );
-        assert!(hit_high.is_none(), "ball above the reach ceiling must pass over");
 
         // 半径门：球在接触半径之外不命中。
         let hit_far = BallisticsEngine::free_ball_player_contact(
             Vec2::new(95.0, 25.0),
             3.0,
-            &[at("H_01", 200, 0.5, Vec2::new(95.0 + 6.0, 25.0), true)],
+            &[at("H_01", 200, 0.5, Vec2::new(95.0 + 2.0, 25.0), true)],
             &rules,
         );
-        assert!(hit_far.is_none(), "ball outside the horizontal radius must miss");
+        assert!(
+            hit_far.is_none(),
+            "ball outside the horizontal radius must miss"
+        );
 
         // 最近者胜；距离相同按 id 字典序取小（确定性）。
         let two = vec![
-            at("H_02", 200, 0.5, Vec2::new(95.0 + 1.0, 25.0), true),
-            at("H_01", 200, 0.5, Vec2::new(95.0 + 2.0, 25.0), true),
+            at("H_02", 200, 0.5, Vec2::new(95.0 + 0.8, 25.0), true),
+            at("H_01", 200, 0.5, Vec2::new(95.0 + 1.2, 25.0), true),
         ];
-        let (nearest, _) = BallisticsEngine::free_ball_player_contact(
-            Vec2::new(95.0, 25.0),
-            3.0,
-            &two,
-            &rules,
-        )
-        .expect("two candidates must hit");
+        let (nearest, _) =
+            BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 3.0, &two, &rules)
+                .expect("two candidates must hit");
         assert_eq!(nearest, "H_02", "closer candidate must win");
 
         let tied = vec![
-            at("H_02", 200, 0.5, Vec2::new(95.0 - 2.0, 25.0), true),
-            at("H_01", 200, 0.5, Vec2::new(95.0 + 2.0, 25.0), true),
+            at("H_02", 200, 0.5, Vec2::new(95.0 - 1.2, 25.0), true),
+            at("H_01", 200, 0.5, Vec2::new(95.0 + 1.2, 25.0), true),
         ];
-        let (tied_id, _) = BallisticsEngine::free_ball_player_contact(
-            Vec2::new(95.0, 25.0),
-            3.0,
-            &tied,
-            &rules,
-        )
-        .expect("tied candidates must hit");
+        let (tied_id, _) =
+            BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 3.0, &tied, &rules)
+                .expect("tied candidates must hit");
         assert_eq!(tied_id, "H_01", "equal distance must tie-break by id order");
 
         // 板凳球员不参与身体碰撞。
         let bench = vec![at("H_01", 200, 0.5, Vec2::new(95.0, 25.0), false)];
-        let hit_bench = BallisticsEngine::free_ball_player_contact(
-            Vec2::new(95.0, 25.0),
-            3.0,
-            &bench,
-            &rules,
+        let hit_bench =
+            BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 3.0, &bench, &rules);
+        assert!(
+            hit_bench.is_none(),
+            "bench players must not collide with the ball"
         );
-        assert!(hit_bench.is_none(), "bench players must not collide with the ball");
     }
 }

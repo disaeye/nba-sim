@@ -80,8 +80,13 @@ impl MatchEngine {
         );
         let same_kind = matches!(
             (&self.ball.ball_state, &next),
-            (BallTrajectoryKind::RimRebound { .. }, BallTrajectoryKind::RimRebound { .. })
-                | (BallTrajectoryKind::LooseBall { .. }, BallTrajectoryKind::LooseBall { .. })
+            (
+                BallTrajectoryKind::RimRebound { .. },
+                BallTrajectoryKind::RimRebound { .. }
+            ) | (
+                BallTrajectoryKind::LooseBall { .. },
+                BallTrajectoryKind::LooseBall { .. }
+            )
         );
         if entering_free_flight && !same_kind {
             self.ball.loose_contact_resolved.clear();
@@ -100,9 +105,8 @@ impl MatchEngine {
                 if let BallTrajectoryKind::Pass { target_id, .. } = &next {
                     let rid = target_id.clone();
                     self.mark_receiver(Some(&rid));
-                    // 新的一次传球出手：清空接触锁存，让本次飞行重新逐
-                    // tick 检测防守者接触（每个防守者对每对传球只掷一次）。
-                    self.ball.pass_contact_resolved.clear();
+                    // 新的一次传球出手：清空上一段传球的连续接触状态。
+                    self.ball.pass_contact_states.clear();
                 }
                 self.ball.ball_state = next;
                 self.sync_ball_holder();

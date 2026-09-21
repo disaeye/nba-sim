@@ -462,8 +462,8 @@ fn free_rebound_flight_bounces_off_a_standing_player() {
             }
         }
     }
-    let (new_from, target_landing) = bounced_state
-        .expect("expected a rewritten RimRebound after contact");
+    let (new_from, target_landing) =
+        bounced_state.expect("expected a rewritten RimRebound after contact");
     let flipped = target_landing.x > new_from.x;
     assert!(
         flipped,
@@ -497,7 +497,7 @@ fn free_rebound_flight_bounces_off_a_standing_player() {
 /// 弹开而非被收下，弹开后速度反向（远离球员）。
 ///
 /// 场景：球在 (70, 25) 高 0.2 ft 以 (-15, 0) ft/s 滚动，防守人 A_05
-/// 站在 (66, 25)：下一 tick 球到 (69.4, 25)，水平距离 3.4 ft ≤ 5.8 ft，
+/// 站在 (68.2, 25)：下一 tick 球到 (69.4, 25)，水平距离 1.2 ft ≤ 1.4 ft，
 /// 高度低于摸高 → 命中。反射后水平速度变 +x（远离球员），量级
 /// ≈ 15 × 0.5 = 7.5 ft/s。
 #[test]
@@ -509,7 +509,7 @@ fn rolling_loose_ball_bounces_off_a_standing_player() {
     let mut engine = MatchEngine::with_rules(704, rules);
     engine.force_possession_for_test(Possession::Home);
     engine.set_game_flow(nba_domain::GameFlowState::LiveBall);
-    let defender_pos = Vec2::new(66.0, 25.0);
+    let defender_pos = Vec2::new(68.2, 25.0);
     {
         let physics = engine.physics_mut_for_test();
         if let Some(p) = physics.get_player_mut("A_05") {
@@ -528,27 +528,28 @@ fn rolling_loose_ball_bounces_off_a_standing_player() {
         last_touch_team: Possession::Home,
     });
     engine.set_ball_pos_for_test(pos, z);
-    let tick = engine.step();
-    // 弹开事实：本 tick 不得有 LOOSE_BALL_SECURED（球没有被撞它的人收下），
-    // 球态仍是松球且速度反向。
-    assert!(
-        !tick.frame.events.iter().any(|e| e == "LOOSE_BALL_SECURED"),
-        "the ball must bounce off the player instead of being secured, events={:?}",
-        tick.frame.events
-    );
-    match engine.ball_state() {
-        nba_physics::BallTrajectoryKind::LooseBall { vel, .. } => {
-            assert!(
-                vel.x > 0.0,
-                "reflection must reverse the ball away from the player, vel={vel:?}"
-            );
-            let speed = vel.length();
-            let expected = 15.0 * engine.rules().loose_ball_player_restitution;
-            assert!(
-                (speed - expected).abs() < 2.0,
-                "bounced speed {speed:.2} must track incident × restitution ({expected:.2})"
-            );
+    // 步进到弹开发生：球速 15 ft/s 超过可控上限（12 ft/s），松球不可
+    // 被半途收下，继续飞行直到进入身体接触半径（1.4 ft）弹开。
+    let mut bounced_vel = None;
+    for _ in 0..4 {
+        let tick = engine.step();
+        assert!(
+            !tick.frame.events.iter().any(|e| e == "LOOSE_BALL_SECURED"),
+            "a fast loose ball must not be secured mid-flight, events={:?}",
+            tick.frame.events
+        );
+        if let nba_physics::BallTrajectoryKind::LooseBall { vel, .. } = engine.ball_state() {
+            if vel.x > 0.0 {
+                bounced_vel = Some(*vel);
+                break;
+            }
         }
-        other => panic!("expected the loose ball to continue bouncing, got {other:?}"),
     }
+    let vel = bounced_vel.expect("the ball must eventually bounce off the defender");
+    let speed = vel.length();
+    let expected = 15.0 * engine.rules().loose_ball_player_restitution;
+    assert!(
+        (speed - expected).abs() < 2.0,
+        "bounced speed {speed:.2} must track incident x restitution ({expected:.2})"
+    );
 }

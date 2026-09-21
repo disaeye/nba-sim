@@ -8,11 +8,70 @@ use glam::Vec2;
 use nba_domain::action_window::ActionTimeWindow;
 use nba_domain::Possession;
 use nba_officiating::resolution::{ResolutionLayer, ResolutionOutcome};
-use nba_physics::ballistics::BallTrajectoryKind;
+use nba_physics::ballistics::{BallTrajectoryKind, BallisticsEngine};
 use nba_semantics::SemanticEvaluator;
 use rand::Rng;
 
 use super::MatchEngine;
+
+fn pass_contact_event_probability(
+    dt: f32,
+    clearance: f32,
+    speed_ftps: f32,
+    steal_skill: f32,
+    scale: f32,
+    max_speed: f32,
+    steal_slope: f32,
+    tip_slope: f32,
+    steal_floor: f32,
+    tip_floor: f32,
+) -> (f32, f32) {
+    let distance_factor = (1.0 - clearance / scale.max(f32::EPSILON)).clamp(0.0, 1.0);
+    let skill_factor = 0.5 + steal_skill.clamp(0.0, 1.0);
+    let speed_reference = max_speed.max(1.0) * 0.5;
+    let speed_ratio = (speed_ftps.max(0.0) / speed_reference).clamp(0.0, 2.0);
+    let transit_factor = (1.0 / (1.0 + speed_ftps.max(0.0) / speed_reference)).clamp(0.15, 1.0);
+    let steal_hazard =
+        (distance_factor * steal_slope * skill_factor * (1.0 - 0.3 * speed_ratio).clamp(0.25, 1.0))
+            .max(steal_floor);
+    let tip_hazard =
+        (distance_factor * tip_slope * skill_factor * (1.0 + 0.8 * speed_ratio)).max(tip_floor);
+    let probability = 1.0 - (-(steal_hazard + tip_hazard) * transit_factor * dt.max(0.0)).exp();
+    (probability, steal_hazard / (steal_hazard + tip_hazard))
+}
+
+#[cfg(test)]
+mod pass_contact_tests {
+    use super::pass_contact_event_probability;
+
+    fn probability(dt: f32, clearance: f32, speed: f32) -> f32 {
+        pass_contact_event_probability(dt, clearance, speed, 0.7, 2.5, 85.0, 0.06, 0.10, 0.01, 0.02)
+            .0
+    }
+
+    #[test]
+    fn contact_probability_increases_with_dwell_time_and_closeness() {
+        assert!(probability(0.4, 0.2, 20.0) > probability(0.1, 0.2, 20.0));
+        assert!(probability(0.2, 0.2, 20.0) > probability(0.2, 1.8, 20.0));
+    }
+
+    #[test]
+    fn fixed_time_hazard_is_stable_across_tick_sizes() {
+        let one_step = probability(0.4, 0.8, 30.0);
+        let four_steps = 1.0 - (1.0 - probability(0.1, 0.8, 30.0)).powi(4);
+        assert!((one_step - four_steps).abs() < 1e-5);
+    }
+
+    #[test]
+    fn faster_ball_spends_less_exposure_and_has_more_tip_share() {
+        let slow =
+            pass_contact_event_probability(0.2, 0.8, 10.0, 0.7, 2.5, 85.0, 0.06, 0.10, 0.01, 0.02);
+        let fast =
+            pass_contact_event_probability(0.2, 0.8, 70.0, 0.7, 2.5, 85.0, 0.06, 0.10, 0.01, 0.02);
+        assert!(slow.0 > fast.0);
+        assert!(fast.1 < slow.1);
+    }
+}
 
 impl MatchEngine {
     /// 传球飞行中的逐 tick 接触检测与结果分类。
@@ -29,42 +88,35 @@ impl MatchEngine {
     /// ## 掷骰（结果分类）
     ///
     /// 多人同时接触取 clearance 最小者（数值相同时按 id 排序，确定性）。
-    /// 每对（防守者 × 传球）只掷一次：首次接触的 tick 结算后锁存于
-    /// `pass_contact_resolved`，之后该防守者不再参与本次传球的分类。
-    /// 概率形状沿用释放裁定版的参数（字段名不变，语义为接触结果
-    /// 分类参数）：clearance 衰减 × 技能因子 × 传球人风险乘数，
-    /// steal/tip 各自夹取在 floor/ceiling 区间；同一次掷骰先判 steal
-    /// 再判 tip，未抽中即轻擦（不改轨迹，无事件）。
+    /// 接触段累计时间，事件概率使用连续时间 hazard；防守者离开范围后
+    /// 其接触状态清除，再次进入时建立新的接触段。
     ///
     /// 返回 `Some((防守者, true=抢断 / false=拨掉))`。
     pub(crate) fn resolve_pass_contact(
         &mut self,
         receiver_id: &str,
         is_home: bool,
+        dt: f32,
+        horizontal_speed_ftps: f32,
     ) -> Option<(String, bool)> {
         let def_team = if is_home { "away" } else { "home" };
         let ball_pos = self.ball.ball_pos_3d.0;
-        let ball_z = self.ball.ball_pos_3d.1.max(f32::from(0u8));
+        let ball_z = self.ball.ball_pos_3d.1.max(0.0);
         let reach = self.config.rules.player_radius_ft + self.config.rules.defender_reach_ft;
         let policy = &self.config.rules.resolve.base_rates;
-        let zero = f32::from(0u8);
-        let one = f32::from(1u8);
-        let half = one / f32::from(2u8);
         let scale = policy.intercept_clearance_scale_ft.max(f32::EPSILON);
 
-        let mut candidates: Vec<(String, f32, f32)> = self
+        let mut candidates: Vec<(String, f32, f32, f32)> = self
             .systems
             .physics
             .get_players()
             .values()
             .filter(|p| p.on_court && p.team == def_team && p.id != receiver_id)
-            .filter(|p| !self.ball.pass_contact_resolved.iter().any(|id| id == &p.id))
             .filter_map(|p| {
                 let clearance = (p.pos_ft - ball_pos).length();
                 if clearance > reach {
                     return None;
                 }
-                // 身高是量纲事实（cm），只在档案里；从两队名册按 id 查。
                 let height_cm = self
                     .config
                     .home_team
@@ -77,15 +129,12 @@ impl MatchEngine {
                 const CM_PER_FOOT: f64 = 30.48;
                 const REACH_REFERENCE_FT: f32 = 7.0;
                 let height_ft = (f64::from(height_cm) / CM_PER_FOOT) as f32;
-                // 摸高（英尺）：身高与弹跳各占一半权重，弹跳属性（0..1）
-                // 经参考臂展换算回英尺。可及性由飞行中的实际采样高度
-                // 对比该值决定。
-                let reach_ft = height_ft * half
-                    + p.attributes.vertical.clamp(zero, one) * half * REACH_REFERENCE_FT;
+                let reach_ft = height_ft * 0.5
+                    + p.attributes.vertical.clamp(0.0, 1.0) * 0.5 * REACH_REFERENCE_FT;
                 if ball_z > reach_ft {
                     return None;
                 }
-                Some((p.id.clone(), clearance, p.attributes.steal))
+                Some((p.id.clone(), clearance, p.attributes.steal, reach_ft))
             })
             .collect();
         // 确定性顺序：接触最近者优先（数值相同时按 id 排序）。
@@ -95,35 +144,44 @@ impl MatchEngine {
                 .then(a.0.cmp(&b.0))
         });
 
-        // 传球人风险容忍度的乘数（与释放裁定版同推导）：风险容忍度越高，
-        // 传球越容易被接触转化为抢断/拨掉。传球人已不在场时取中位。
-        let passer_risk = self
-            .ball
-            .last_passer_id
-            .as_deref()
-            .and_then(|pid| self.systems.physics.get_player(pid))
-            .map(|p| nba_domain::capability::effective_risk_tolerance(&self.config.rules, &p.attributes));
-        let risk_factor = policy.intercept_risk_factor_floor
-            + passer_risk.unwrap_or(half) * policy.intercept_risk_factor_gain;
-
-        for (defender_id, clearance, steal_skill) in candidates {
-            let base_contest = (one - (clearance / scale)).clamp(zero, one);
-            let skill_factor = half + steal_skill.clamp(zero, one);
-            let steal_prob =
-                (base_contest * policy.intercept_steal_slope * skill_factor * risk_factor)
-                    .clamp(policy.intercept_steal_floor, policy.intercept_steal_ceiling);
-            let tip_prob = (base_contest * policy.intercept_tip_slope * skill_factor * risk_factor)
-                .clamp(policy.intercept_tip_floor, policy.intercept_tip_ceiling);
-            let roll = self.systems.rng.gen::<f32>();
-            // 接触边沿锁存：无论掷骰结果如何，本防守者对本次传球只结算一次。
-            self.ball.pass_contact_resolved.push(defender_id.clone());
-            if roll < steal_prob {
-                return Some((defender_id, true));
+        let current_ids: std::collections::HashSet<String> = candidates
+            .iter()
+            .map(|candidate| candidate.0.clone())
+            .collect();
+        self.ball
+            .pass_contact_states
+            .retain(|id, _| current_ids.contains(id));
+        let speed = horizontal_speed_ftps.max(0.0);
+        let policy_factor =
+            (policy.intercept_risk_factor_floor + policy.intercept_risk_factor_gain * 0.5).max(0.0);
+        let risk_probability_scale = policy_factor;
+        for (defender_id, clearance, steal_skill, _) in candidates {
+            let contact = self
+                .ball
+                .pass_contact_states
+                .entry(defender_id.clone())
+                .or_insert(super::state::PassContactState {
+                    duration_seconds: 0.0,
+                });
+            contact.duration_seconds += dt.max(0.0);
+            let (base_probability, steal_share) = pass_contact_event_probability(
+                dt,
+                clearance,
+                speed,
+                steal_skill,
+                scale,
+                self.config.rules.ball_max_speed_ftps,
+                policy.intercept_steal_slope,
+                policy.intercept_tip_slope,
+                policy.intercept_steal_floor,
+                policy.intercept_tip_floor,
+            );
+            let event_probability = (base_probability * risk_probability_scale).clamp(0.0, 1.0);
+            if self.systems.rng.gen::<f32>() >= event_probability {
+                continue;
             }
-            if roll < steal_prob + tip_prob {
-                return Some((defender_id, false));
-            }
-            // 未抽中：轻擦，不改轨迹、无事件。
+            let is_steal = self.systems.rng.gen::<f32>() < steal_share;
+            return Some((defender_id, is_steal));
         }
         None
     }
@@ -206,7 +264,10 @@ impl MatchEngine {
         if lock_kinematics {
             return None;
         }
-        if !matches!(self.ball.ball_state, BallTrajectoryKind::Held { .. }) {
+        if !matches!(
+            self.ball.ball_state,
+            BallTrajectoryKind::Held { .. } | BallTrajectoryKind::Drive { .. }
+        ) {
             return None;
         }
         let policy = self.config.rules.resolve.ball_security.clone();
@@ -230,43 +291,57 @@ impl MatchEngine {
             .get_player(carrier_id)
             .map(|p| p.tendencies.risk_tolerance)
             .unwrap_or(0.5);
-        let carrier_pos = self
-            .systems
-            .physics
-            .get_player(carrier_id)
-            .map(|p| p.pos_ft)
-            .unwrap_or(self.ball.ball_pos_3d.0);
-
-        // 只有贴身到压力半径内的防守者才构成切球威胁。
-        let mut threats: Vec<(String, f32)> = self
+        let Some(handler) = self.systems.physics.get_player(carrier_id) else {
+            return None;
+        };
+        let carrier_pos = handler.pos_ft;
+        let ball_pos = BallisticsEngine::sample_ball_position(
+            &self.ball.ball_state,
+            self.clock.current_time,
+            self.systems.physics.get_players(),
+            &self.config.rules,
+        );
+        let ball_velocity = BallisticsEngine::sample_ball_velocity(
+            &self.ball.ball_state,
+            self.clock.current_time,
+            self.systems.physics.get_players(),
+            &self.config.rules,
+        );
+        let exposure = nba_domain::capability::poke_ball_exposure(
+            &self.config.rules,
+            (ball_pos.0 - carrier_pos).length(),
+        );
+        let mut threats: Vec<(String, f32, f32, f32)> = self
             .systems
             .physics
             .get_players()
             .values()
             .filter(|p| p.on_court && p.team == def_team)
             .filter_map(|p| {
-                let distance = (p.pos_ft - carrier_pos).length();
+                let to_ball = ball_pos.0 - p.pos_ft;
+                let distance = to_ball.length();
                 if distance > policy.poke_pressure_radius_ft {
                     return None;
                 }
-                Some((p.id.clone(), distance))
+                let direction = to_ball.normalize_or_zero();
+                let closing_speed = (p.vel_ft - ball_velocity.truncate())
+                    .dot(direction)
+                    .max(0.0);
+                let facing_pressure = p.facing_dir.dot(direction).clamp(0.0, 1.0);
+                Some((p.id.clone(), distance, closing_speed, facing_pressure))
             })
             .collect();
-        // 确定性顺序：距离最近者优先（数值相同时按 id 排序）。
         threats.sort_by(|a, b| {
             a.1.partial_cmp(&b.1)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(a.0.cmp(&b.0))
         });
-
-        // 时间积分：贴身持续 dt 秒相当于 rate × dt 次尝试机会。
-        // 单次尝试概率 p，至少成功一次的概率 = 1 − (1−p)^trials。
-        // 这样「贴得更久」以幂律逼近 1，但单 tick 概率不随时长累积。
-        let trials = (policy.poke_attempt_rate_per_sec * dt.max(0.0)).max(0.0);
-        if trials <= f32::EPSILON {
+        let dt = dt.max(0.0);
+        if dt <= f32::EPSILON {
             return None;
         }
-        for (defender_id, distance) in threats {
+        let ball_speed = ball_velocity.length();
+        for (defender_id, distance, closing_speed, facing_pressure) in threats {
             let Some(defender_attrs) = self
                 .systems
                 .physics
@@ -275,17 +350,20 @@ impl MatchEngine {
             else {
                 continue;
             };
-            let per_try = nba_domain::capability::poke_check_success(
+            let per_try = nba_domain::capability::poke_check_success_with_context(
                 &self.config.rules,
                 &defender_attrs,
                 &handler_attrs,
                 handler_risk,
+                exposure,
+                ball_speed,
+                closing_speed,
+                facing_pressure,
             );
-            // 距离越远越难切到：压力半径边缘处线性衰减至 0。
-            let proximity = (1.0 - distance / policy.poke_pressure_radius_ft).clamp(0.0, 1.0);
-            let p = (per_try * proximity).clamp(0.0, 1.0);
-            let miss_all = (1.0 - p).powf(trials);
-            let hit_chance = 1.0 - miss_all;
+            let proximity =
+                nba_domain::capability::poke_pressure_factor(&self.config.rules, distance);
+            let hazard = policy.poke_attempt_rate_per_sec * proximity * per_try;
+            let hit_chance = 1.0 - (-hazard * dt).exp();
             if self.systems.rng.gen::<f32>() < hit_chance {
                 return Some(defender_id);
             }

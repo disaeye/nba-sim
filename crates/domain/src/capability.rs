@@ -195,27 +195,69 @@ pub fn poke_check_success(
     handler: &PlayerAttributes,
     handler_risk_tolerance: f32,
 ) -> f32 {
+    poke_check_success_with_context(
+        rules,
+        defender,
+        handler,
+        handler_risk_tolerance,
+        0.5,
+        0.0,
+        0.0,
+        0.5,
+    )
+}
+
+/// 球离持球人身体越远，暴露程度越高。
+pub fn poke_ball_exposure(rules: &GameRules, ball_to_body_distance_ft: f32) -> f32 {
+    (ball_to_body_distance_ft / rules.resolve.ball_security.poke_exposure_distance_ft)
+        .clamp(0.0, 1.0)
+}
+
+/// 防守人离球越近，能够出手的机会越多。
+pub fn poke_pressure_factor(rules: &GameRules, defender_to_ball_distance_ft: f32) -> f32 {
+    (1.0 - defender_to_ball_distance_ft / rules.resolve.ball_security.poke_pressure_radius_ft)
+        .clamp(0.0, 1.0)
+}
+
+/// 单次切球成功概率，结合球位、球速、相对靠近速度与防守朝向。
+pub fn poke_check_success_with_context(
+    rules: &GameRules,
+    defender: &PlayerAttributes,
+    handler: &PlayerAttributes,
+    handler_risk_tolerance: f32,
+    exposure: f32,
+    ball_speed: f32,
+    closing_speed: f32,
+    facing_pressure: f32,
+) -> f32 {
     let policy = &rules.resolve.ball_security;
     let floor = policy.poke_success_floor;
     let ceiling = policy.poke_success_ceiling;
     let floor_attr = rules.attribute_response_floor;
     let one = 1.0_f32;
-
-    let defender_skill = defender.steal.max(floor_attr).clamp(0.0_f32, one);
-    let handler_skill = handler.ball_handling.max(floor_attr).clamp(0.0_f32, one);
-    // `risk_tolerance` 高 = 更愿意冒险暴露球（倾向通道，非能力通道）。
-    let exposure = handler_risk_tolerance.clamp(0.0_f32, one);
-
-    // 护球强度：能力为主、倾向为辅；两者都高才真正难以被切。
+    let defender_skill = defender.steal.max(floor_attr).clamp(0.0, one);
+    let perimeter_skill = defender.defense_perimeter.max(floor_attr).clamp(0.0, one);
+    let handler_skill = handler.ball_handling.max(floor_attr).clamp(0.0, one);
+    let agility = handler.agility.max(floor_attr).clamp(0.0, one);
+    let risk = handler_risk_tolerance.clamp(0.0, one);
+    let exposure = exposure.clamp(0.0, one);
+    let speed_factor = (ball_speed / policy.poke_ball_speed_reference_ftps).clamp(0.0, one);
+    let closing_factor = (closing_speed / policy.poke_closing_speed_reference_ftps).clamp(0.0, one);
+    let facing_pressure = facing_pressure.clamp(0.0, one);
     let protection = (policy.poke_handler_skill_weight * handler_skill
-        + policy.poke_handler_tendency_weight * (one - exposure))
-        .clamp(0.0_f32, one);
-
-    // 防守人技能抬升成功概率（0.5 为中性）。
-    let defender_lift = policy.poke_defender_skill_weight * (defender_skill - 0.5);
-
+        + policy.poke_handler_tendency_weight * (one - risk)
+        + policy.poke_handler_agility_weight * agility)
+        .clamp(0.0, one);
+    let pressure = (policy.poke_defender_skill_weight * defender_skill
+        + policy.poke_perimeter_defense_weight * perimeter_skill
+        + policy.poke_facing_weight * facing_pressure
+        + policy.poke_closing_speed_weight * closing_factor)
+        .clamp(0.0, one);
+    let opportunity = (one + policy.poke_exposure_weight * exposure
+        - policy.poke_ball_speed_weight * speed_factor)
+        .max(0.0);
     let span = (ceiling - floor).max(0.0);
-    (ceiling - span * protection + defender_lift * span)
+    (ceiling - span * protection + span * pressure * opportunity * 0.5)
         .clamp(floor.min(ceiling), ceiling.max(floor))
 }
 
@@ -230,6 +272,32 @@ mod tests {
             free_throw: ft,
             ..PlayerAttributes::default()
         }
+    }
+
+    #[test]
+    fn poke_context_is_monotonic_in_exposure_pressure_and_protection() {
+        let rules = GameRules::default();
+        assert!(poke_ball_exposure(&rules, 1.5) > poke_ball_exposure(&rules, 0.5));
+        assert!(poke_pressure_factor(&rules, 1.0) > poke_pressure_factor(&rules, 3.0));
+        let defender = attrs(0.5, 0.5);
+        let handler = attrs(0.5, 0.5);
+        let low_exposure =
+            poke_check_success_with_context(&rules, &defender, &handler, 0.5, 0.1, 12.0, 1.0, 0.5);
+        let high_exposure =
+            poke_check_success_with_context(&rules, &defender, &handler, 0.5, 0.9, 12.0, 1.0, 0.5);
+        assert!(high_exposure > low_exposure);
+        let low_pressure =
+            poke_check_success_with_context(&rules, &defender, &handler, 0.5, 0.5, 12.0, 0.0, 0.0);
+        let high_pressure =
+            poke_check_success_with_context(&rules, &defender, &handler, 0.5, 0.5, 12.0, 10.0, 1.0);
+        assert!(high_pressure > low_pressure);
+        let mut protected = handler.clone();
+        protected.ball_handling = 0.95;
+        protected.agility = 0.95;
+        let protected_risk = poke_check_success_with_context(
+            &rules, &defender, &protected, 0.5, 0.5, 12.0, 1.0, 0.5,
+        );
+        assert!(protected_risk < low_exposure);
     }
 
     #[test]

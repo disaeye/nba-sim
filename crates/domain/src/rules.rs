@@ -72,6 +72,11 @@ pub struct GameRules {
     /// 用单一人体半径，不区分腿/躯干（真实篮球里球碰腿与碰躯干都弹开，
     /// 半径差异是二阶量）。
     pub body_contact_radius_ft: f32,
+    /// 地板球的「可控制速度上限」（ft/s）：球速超过该值时，5.8 ft
+    /// 可及半径内的球员无法立即收下球（快球会从手上弹开），球继续
+    /// 按物理飞行，直到撞到身体弹开或被减速后重新可收。真实篮球里
+    /// 快速地板球几乎都会被拍/被碰弹开，只有慢球能被稳稳收下。
+    pub loose_ball_control_speed_ftps: f32,
     /// 篮板几何（ADR-017 第三步）：板面距底线的水平距离（ft）。
     /// 篮板平面垂直于底线方向，左筐板面 x = 该值，右筐板面 x = 场宽 − 该值。
     pub backboard_offset_from_baseline_ft: f32,
@@ -376,6 +381,7 @@ impl Default for GameRules {
             loose_ball_player_restitution: 0.5,
             ball_radius_ft: 0.4,
             body_contact_radius_ft: 1.0,
+            loose_ball_control_speed_ftps: 12.0,
             // 篮板几何（ADR-017 第三步）：真实 NBA 篮板底沿 9.5 ft、顶沿
             // 13 ft、宽 6 ft、板面距底线 4 ft；触板水平恢复系数 0.55
             // （板比筐沿耗散更少，打板回弹更平直）。
@@ -591,6 +597,7 @@ impl GameRules {
             self.loose_ball_player_restitution,
             self.ball_radius_ft,
             self.body_contact_radius_ft,
+            self.loose_ball_control_speed_ftps,
             self.backboard_offset_from_baseline_ft,
             self.backboard_width_ft,
             self.backboard_bottom_height_ft,
@@ -878,6 +885,8 @@ impl GameRules {
             || self.rim_contact_scatter_radians > std::f32::consts::PI
             || self.loose_ball_player_restitution < 0.0
             || self.loose_ball_player_restitution > 1.0
+            || self.loose_ball_control_speed_ftps <= 0.0
+            || !self.loose_ball_control_speed_ftps.is_finite()
             || self.backboard_width_ft <= 0.0
             || self.backboard_bottom_height_ft >= self.backboard_top_height_ft
             || self.backboard_offset_from_baseline_ft <= 0.0
@@ -974,6 +983,23 @@ mod tests {
             ..GameRules::default()
         };
         assert!(rules.validate().is_err());
+    }
+
+    #[test]
+    fn loose_ball_control_speed_is_validated_and_serialized() {
+        let rules = GameRules::default();
+        assert_eq!(rules.loose_ball_control_speed_ftps, 12.0);
+        let value = serde_json::to_value(&rules).expect("rules serialize");
+        let decoded: GameRules = serde_json::from_value(value).expect("rules deserialize");
+        assert_eq!(
+            decoded.loose_ball_control_speed_ftps,
+            rules.loose_ball_control_speed_ftps
+        );
+        let invalid = GameRules {
+            loose_ball_control_speed_ftps: 0.0,
+            ..rules
+        };
+        assert!(invalid.validate().is_err());
     }
 
     #[test]

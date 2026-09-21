@@ -103,10 +103,7 @@ fn fatigue_substitutions_occur_and_entries_are_fit() {
 #[test]
 fn raising_the_fatigue_threshold_damps_substitutions() {
     let seeds = [42u64, 1, 7];
-    let baseline: u32 = shared_sub_stats()
-        .iter()
-        .map(|s| s.total)
-        .sum();
+    let baseline: u32 = shared_sub_stats().iter().map(|s| s.total).sum();
 
     let mut no_fatigue = GameRules::default();
     no_fatigue.rotation.fatigue_substitution_threshold = 0.0;

@@ -350,6 +350,11 @@ impl PossessionContext {
 /// 位置（`ball_pos_3d`）是它的派生量；其余字段描述「球在人与人间传递时的中间状态」
 /// （上一传球人、待定的接球人与其自己的预判、松球终结原因）。放在一起使
 /// 「球的归属与传递」成为一个内聚状态，而非散在八个字段上。
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PassContactState {
+    pub(crate) duration_seconds: f32,
+}
+
 pub(crate) struct BallRuntime {
     /// 球的三维位置（ft）。位置的唯一写入点是弹道采样与状态转移。
     pub(crate) ball_pos_3d: (glam::Vec2, f32),
@@ -379,23 +384,17 @@ pub(crate) struct BallRuntime {
     pub(crate) prev_observed_ball_pos: Option<glam::Vec2>,
     /// 最近一次被过掉（drive successful）的对位防守人（round-18）。
     pub(crate) beaten_defender_id: Option<String>,
-    /// 本段飞行已结算过弹开的球员 id（ADR-017 第三步）。
+    /// 当前自由球身体接触区间内已经处理过的球员 id（ADR-017 第三步）。
     ///
-    /// ## 为什么放在 `BallRuntime` 而非球态载荷
-    ///
-    /// 球态（`BallTrajectoryKind`）是球权真相的唯一载体，由领域层转换表
-    /// 穷举合法边；「同一飞行对同一人只弹一次」是引擎的结算账目，
-    /// 与归属语义不同层，放载荷里会让领域状态携带引擎内部的记账痕迹。
-    /// 放在这里使账目随球运行态生存；进入新的自由球飞行前清空
-    /// （调用方负责），同一飞行内逐 tick 查重。
+    /// 球离开该球员的身体接触范围后，调用方清除此记录；重新进入时可以
+    /// 发生新的身体碰撞。这里保存的是引擎内部的接触状态，不属于领域球态。
     pub(crate) loose_contact_resolved: Vec<String>,
-    /// 本次传球飞行中已结算过接触的防守者 id（边沿锁存）。
+    /// 当前传球飞行中每名防守者的连续接触段状态。
     ///
-    /// 逐 tick 接触检测下，同一防守者会在多个 tick 持续处于可及范围内；
-    /// 若每个 tick 都掷骰，接触概率会随时长累积成几乎必然。因此每次
-    /// 掷骰只在「首次进入可及范围」的那个 tick 发生一次，之后该防守者
-    /// 被记入本表，不再重复参与分类。每次传球出手时清空。
-    pub(crate) pass_contact_resolved: Vec<String>,
+    /// 接触状态在球进入可及范围时建立，在球离开范围时移除。状态保存
+    /// 接触段累计时间，概率裁定使用 `hazard × dt`，结果不会因提高 tick
+    /// 频率而重复放大。
+    pub(crate) pass_contact_states: HashMap<String, PassContactState>,
 }
 
 impl BallRuntime {
@@ -411,7 +410,7 @@ impl BallRuntime {
             prev_observed_ball_pos: None,
             beaten_defender_id: None,
             loose_contact_resolved: Vec::new(),
-            pass_contact_resolved: Vec::new(),
+            pass_contact_states: HashMap::new(),
         }
     }
 }

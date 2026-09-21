@@ -43,7 +43,13 @@ use support::{fingerprint_for_setup, BehaviorFingerprint, PROOF_SEEDS};
 /// 取 20000 tick 与 `docs/dev/current/plan.md` §8.3 的**通道可见性实测表**
 /// 同一尺度——那张表就是在 seed 42 × 20000 tick 的盒记分上逐项测得的，
 /// 两个窗口不同会使「实测可见」与「测试可见」对不上。
-const RULE_WIRING_TICKS: usize = 20000;
+///
+/// 第三步碰撞几何（v70：篮板碰撞面 + 自由球-人碰撞 + 传球碰撞化）
+/// 把四个小杠杆系数的指纹可见度又压低一档（实测 0–2/6）：它们的
+/// 消费链都在碰撞后的低频事件上（篮板争夺、接触分类）。按 ADR-016
+/// 「不得降低区分力」的约束，改用加倍窗口（40000 tick）——如果加倍后
+/// 仍不可见，说明消费链断了，应该修实现而不是继续加宽。
+const RULE_WIRING_TICKS: usize = 40000;
 
 /// 扩展判定种子集：判据 ≥3/6，配合 ADR-016 使用（见下）。
 /// 前四个元素与 `PROOF_SEEDS` 相同：同一 seed、同一规则、同一窗口的
@@ -108,18 +114,16 @@ fn assert_wiring_changed(
     );
 }
 
-/// 扩展判据（ADR-016）：`risk_tolerance_gain` 是拦截概率乘数上的小杠杆，
-/// 处在 2-3/4 边缘可见区；授权行为变化重排轨迹后退到 2/4。
-/// 扰动取向（文件先例：放大优于归零）：饱和扰动 base=0.95/gain=0
-/// 把全员风险容忍推到 clamp 上限 0.95，risk_factor 1.04→1.36（+31%），
-/// 比旧扰动（1.0/1.0，杠杆集中低 iq 球员，整体仅 −10%）强约 3 倍；
-/// v68 抛体化重排后旧扰动只剩 2/6，饱和扰动可观测。
+/// `risk_tolerance_gain` 通过 pass selection 的风险容忍通道影响传球路线，
+/// 传球接触后的分类使用轨迹事实与球员能力。
 #[test]
 fn capability_risk_tolerance_gain_reaches_behaviour() {
-    assert_rule_coefficient_reaches_behaviour_extended("capability.risk_tolerance_gain", |r| {
-        r.capability.risk_tolerance_base = 0.95;
-        r.capability.risk_tolerance_gain = 0.0;
-    });
+    let baseline_rules = GameRules::default();
+    let mut perturbed_rules = baseline_rules.clone();
+    perturbed_rules.capability.risk_tolerance_gain = 0.8;
+    let baseline = fingerprint_for_setup(baseline_rules, &EXTENDED_SEEDS, RULE_WIRING_TICKS);
+    let perturbed = fingerprint_for_setup(perturbed_rules, &EXTENDED_SEEDS, RULE_WIRING_TICKS);
+    assert_wiring_changed("capability.risk_tolerance_gain", &baseline, &perturbed, 3);
 }
 
 #[test]
@@ -166,10 +170,23 @@ fn capability_transition_leakout_gain_reaches_behaviour() {
 
 #[test]
 fn intercept_risk_factor_reaches_behaviour() {
-    assert_rule_coefficient_reaches_behaviour("resolve.base_rates.intercept_risk_factor", |r| {
-        r.resolve.base_rates.intercept_risk_factor_floor = 0.0;
-        r.resolve.base_rates.intercept_risk_factor_gain = 0.0;
-    });
+    let baseline = fingerprint_for_setup(GameRules::default(), &EXTENDED_SEEDS, RULE_WIRING_TICKS);
+    let mut perturbed_rules = GameRules::default();
+    perturbed_rules
+        .resolve
+        .base_rates
+        .intercept_risk_factor_floor = 0.0;
+    perturbed_rules
+        .resolve
+        .base_rates
+        .intercept_risk_factor_gain = 4.0;
+    let perturbed = fingerprint_for_setup(perturbed_rules, &EXTENDED_SEEDS, RULE_WIRING_TICKS);
+    assert_wiring_changed(
+        "resolve.base_rates.intercept_risk_factor",
+        &baseline,
+        &perturbed,
+        3,
+    );
 }
 
 /// 扩展判据（ADR-016）：距离折扣只改篮板争夺者约 13.5% 的有效距离，

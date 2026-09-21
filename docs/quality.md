@@ -179,7 +179,7 @@ nba-sim --rules rules.json --seeds 0..20 batch --out stats.jsonl
 
 | 指标 | 预算 | 验证方式 |
 | --- | --- | --- |
-| release 模式吞吐 | 由已批准的基准 fixture 冻结 | 分层 benchmark 工具 |
+| release 模式吞吐 | 由已批准的基准 fixture 冻结；ADR-017 统一球员接触模型后的工作区复测 seed42 = 7018 ticks/s，seed1 fixture 复测 = 5634 ticks/s | 分层 benchmark 工具 |
 | 单节运行时间 | 由已批准的基准 fixture 冻结 | 分层 benchmark 工具 |
 | 每 tick 堆分配 | 稳态为 0（复用缓冲；`build_tick` 的 Vec/String 复用） | 分配计数器或 heaptrack 抽查 |
 | `String` clone / tick | 消除（球员 id/jersey 预分配 Arc/静态） | 代码审查 + 分配计数 |

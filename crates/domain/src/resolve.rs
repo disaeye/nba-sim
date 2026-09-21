@@ -63,6 +63,24 @@ pub struct BallSecurityPolicy {
     pub poke_handler_skill_weight: f32,
     /// 持球人护球倾向对成功概率的抑制权重。
     pub poke_handler_tendency_weight: f32,
+    /// 球到人体的距离参考值（ft），用于归一化球的暴露程度。
+    pub poke_exposure_distance_ft: f32,
+    /// 运球球速参考值（ft/s）。
+    pub poke_ball_speed_reference_ftps: f32,
+    /// 防守人与球的相对靠近速度参考值（ft/s）。
+    pub poke_closing_speed_reference_ftps: f32,
+    /// 防守人朝向球的施压权重。
+    pub poke_facing_weight: f32,
+    /// 防守人外线防守属性的施压权重。
+    pub poke_perimeter_defense_weight: f32,
+    /// 持球人敏捷属性的护球权重。
+    pub poke_handler_agility_weight: f32,
+    /// 球暴露程度的切球风险权重。
+    pub poke_exposure_weight: f32,
+    /// 球速对切球风险的抑制权重。
+    pub poke_ball_speed_weight: f32,
+    /// 防守人靠近速度的切球风险权重。
+    pub poke_closing_speed_weight: f32,
     /// 切球成功时球的弹出方向相对防守人→球方向的随机偏转上限（弧度）。
     pub poke_deflection_spread_rad: f32,
     /// 切球弹出速度上限（ft/s）。
@@ -142,6 +160,15 @@ impl Default for BallSecurityPolicy {
             poke_defender_skill_weight: 0.55,
             poke_handler_skill_weight: 0.70,
             poke_handler_tendency_weight: 0.25,
+            poke_exposure_distance_ft: 2.0,
+            poke_ball_speed_reference_ftps: 12.0,
+            poke_closing_speed_reference_ftps: 10.0,
+            poke_facing_weight: 0.30,
+            poke_perimeter_defense_weight: 0.45,
+            poke_handler_agility_weight: 0.30,
+            poke_exposure_weight: 0.75,
+            poke_ball_speed_weight: 0.45,
+            poke_closing_speed_weight: 0.55,
             poke_deflection_spread_rad: 0.9,
             poke_ball_speed_ftps: 14.0,
             poke_ball_speed_ratio: 0.18,
@@ -364,7 +391,12 @@ impl Default for BaseRates {
             // 中距离基准：公开赛季口径约 0.42。此前与廊下共用 0.565，
             // 使 8ft–三分线的出手被按廊下结算（evidence/problem.md §21.3）。
             shot_make_mid: 0.40,
-            shot_make_3pt: 0.34,
+            // 三分基准 0.34→0.36（ADR-017 第三步校准）：身体碰撞与传球
+            // 接触进入后，乱战出手增多，三分出手时平均 make_probability
+            // 0.308→0.294（实测 8 seed、n=463）；降低干扰灵敏度
+            // （contest 0.32→0.28）反而更差（非单调，与 G6a 记录一致），
+            // 因此基准上调回带（3P% 中位 31.0，total_p50 161）。
+            shot_make_3pt: 0.36,
             ft_make: 0.77,
             foul_on_drive_rate: 0.12,
             // 跳投犯规基准：真实 NBA 每场约 40 次犯规，其中相当部分来自
@@ -493,6 +525,18 @@ impl ResolveConfig {
         if self.ball_security.poke_success_floor > self.ball_security.poke_success_ceiling
             || self.ball_security.poke_pressure_radius_ft <= 0.0
             || !self.ball_security.poke_pressure_radius_ft.is_finite()
+            || self.ball_security.poke_exposure_distance_ft <= 0.0
+            || !self.ball_security.poke_exposure_distance_ft.is_finite()
+            || self.ball_security.poke_ball_speed_reference_ftps <= 0.0
+            || !self
+                .ball_security
+                .poke_ball_speed_reference_ftps
+                .is_finite()
+            || self.ball_security.poke_closing_speed_reference_ftps <= 0.0
+            || !self
+                .ball_security
+                .poke_closing_speed_reference_ftps
+                .is_finite()
             || !(0.0..=1.0).contains(&self.ball_security.poke_ball_speed_ratio)
         {
             return Err("ball-security policy bounds are invalid".to_string());
@@ -520,6 +564,15 @@ impl ResolveConfig {
             self.ball_security.poke_defender_skill_weight,
             self.ball_security.poke_handler_skill_weight,
             self.ball_security.poke_handler_tendency_weight,
+            self.ball_security.poke_exposure_distance_ft,
+            self.ball_security.poke_ball_speed_reference_ftps,
+            self.ball_security.poke_closing_speed_reference_ftps,
+            self.ball_security.poke_facing_weight,
+            self.ball_security.poke_perimeter_defense_weight,
+            self.ball_security.poke_handler_agility_weight,
+            self.ball_security.poke_exposure_weight,
+            self.ball_security.poke_ball_speed_weight,
+            self.ball_security.poke_closing_speed_weight,
             self.ball_security.poke_deflection_spread_rad,
             self.ball_security.poke_ball_speed_ftps,
             self.ball_security.poke_ball_speed_ratio,

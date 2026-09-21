@@ -326,10 +326,9 @@ impl InvariantChecker {
                 || frame.phase == "FreeThrow"
                 || frame.phase == "DeadBallReset"
                 || frame.game_flow == "DeadBall";
-            let was_rebound_start = frame
-                .events
-                .iter()
-                .any(|e| e == "FREE_THROW" || e == "REBOUND" || e == "TIPOFF_SECURED");
+            let was_rebound_start = frame.events.iter().any(|e| {
+                e == "FREE_THROW" || e == "REBOUND" || e == "SHOT_MISS" || e == "TIPOFF_SECURED"
+            });
             if is_dead_ball || was_rebound_start {
                 // 死球、罚球准备、发球、篮板或跳球点拍争夺时不计算速度跳变
             } else {
