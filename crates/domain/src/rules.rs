@@ -58,6 +58,20 @@ pub struct GameRules {
     pub rim_contact_vertical_restitution: f32,
     /// 镜像反射方向的受控散射（rad，绕竖直轴对称均匀采样）。
     pub rim_contact_scatter_radians: f32,
+    /// 自由球-人接触（ADR-017 第三步）：球撞到在场球员身体后，反射
+    /// 水平速度的恢复系数。篮板飞行与地板球共用同一系数（真实篮球里
+    /// 球触人后的余速量级与触板相近，约入射的一半）。
+    pub loose_ball_player_restitution: f32,
+    /// 篮球半径（ft，真实 9.4-9.5 英寸直径 ≈ 0.4 ft）：自由球与球员
+    /// 身体碰撞的水平接触半径 = `player_radius_ft + 本值`。伸手接球的
+    /// 判定半径（`defender_reach_ft`）是主动触碰（抢断/封盖）的口径，
+    /// 不属于被动身体碰撞。
+    pub ball_radius_ft: f32,
+    /// 人体对球的被动碰撞半径（ft，真实躯干半宽约 1 ft）：区别于
+    /// `player_radius_ft`（人-人分离半径 1.8 ft，含臂展）。被动碰撞
+    /// 用单一人体半径，不区分腿/躯干（真实篮球里球碰腿与碰躯干都弹开，
+    /// 半径差异是二阶量）。
+    pub body_contact_radius_ft: f32,
     /// 篮板几何（ADR-017 第三步）：板面距底线的水平距离（ft）。
     /// 篮板平面垂直于底线方向，左筐板面 x = 该值，右筐板面 x = 场宽 − 该值。
     pub backboard_offset_from_baseline_ft: f32,
@@ -357,6 +371,11 @@ impl Default for GameRules {
             rim_contact_restitution_graze: 0.35,
             rim_contact_vertical_restitution: 0.35,
             rim_contact_scatter_radians: 0.35,
+            // 自由球-人接触（ADR-017 第三步）：球触人后的余速约入射一半，
+            // 与触筐/触板恢复系数量级一致（0.35-0.62 的中点附近）。
+            loose_ball_player_restitution: 0.5,
+            ball_radius_ft: 0.4,
+            body_contact_radius_ft: 1.0,
             // 篮板几何（ADR-017 第三步）：真实 NBA 篮板底沿 9.5 ft、顶沿
             // 13 ft、宽 6 ft、板面距底线 4 ft；触板水平恢复系数 0.55
             // （板比筐沿耗散更少，打板回弹更平直）。
@@ -569,6 +588,9 @@ impl GameRules {
             self.rim_contact_restitution_graze,
             self.rim_contact_vertical_restitution,
             self.rim_contact_scatter_radians,
+            self.loose_ball_player_restitution,
+            self.ball_radius_ft,
+            self.body_contact_radius_ft,
             self.backboard_offset_from_baseline_ft,
             self.backboard_width_ft,
             self.backboard_bottom_height_ft,
@@ -854,6 +876,8 @@ impl GameRules {
             || self.rim_contact_vertical_restitution > 1.0
             || self.rim_contact_scatter_radians < 0.0
             || self.rim_contact_scatter_radians > std::f32::consts::PI
+            || self.loose_ball_player_restitution < 0.0
+            || self.loose_ball_player_restitution > 1.0
             || self.backboard_width_ft <= 0.0
             || self.backboard_bottom_height_ft >= self.backboard_top_height_ft
             || self.backboard_offset_from_baseline_ft <= 0.0

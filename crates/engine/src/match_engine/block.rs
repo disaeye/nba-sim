@@ -38,6 +38,25 @@ pub(crate) struct BlockOutcome {
 }
 
 impl MatchEngine {
+    /// 封盖入射速度：当前 Shot 球态的投篮飞行水平速度（出手点到筐距离
+    /// / 飞行时长）。与弹道采样同一对冻结参数（`from_pos`/`hoop_pos`/
+    /// `duration`），非当前球位差分（那是采样点，随时长变化）。无 Shot
+    /// 上下文时退回零速度（调用方 clamp 后取保底 1.0 ft/s）。
+    fn shot_flight_horizontal_speed(&self, shooter_id: &str) -> f32 {
+        match &self.ball.ball_state {
+            BallTrajectoryKind::Shot {
+                from_pos,
+                hoop_pos,
+                duration,
+                shooter_id: state_shooter,
+                ..
+            } if state_shooter == shooter_id => {
+                (*hoop_pos - *from_pos).length() / duration.max(f32::EPSILON)
+            }
+            _ => 0.0,
+        }
+    }
+
     /// 尝试裁定一次封盖。返回 `None` 表示本次飞行中没有防守方触及球。
     ///
     /// 调用方（`resolve_ball_flight` 的 `Shot` 分支）已确认本次出手尚未被封盖，
@@ -156,8 +175,15 @@ impl MatchEngine {
         } else {
             Vec2::new(-1.0, 0.0)
         };
-        let speed =
-            (self.config.rules.ball_max_speed_ftps * policy.deflection_speed_ratio).max(1.0);
+        // 封盖初速从接触推导（ADR-017 第三步）：入射 = 投篮飞行的水平
+        // 速度（出手点到筐的距离 / 飞行时长，与 Shot 采样同一对参数），
+        // 弹出 = 入射 × block_restitution。能量从入射中来：远投被封后
+        // 扇得远，近投被封后弹得近。速度 clamp 球速包络（保 BALL_SPEED）。
+        let shot_horizontal_speed = self.shot_flight_horizontal_speed(shooter_id);
+        let cap = (self.config.rules.ball_max_speed_ftps
+            - self.config.rules.invariant_speed_tolerance_ftps)
+            .max(self.config.rules.invariant_speed_tolerance_ftps);
+        let speed = (shot_horizontal_speed * policy.block_restitution).clamp(1.0, cap);
         let last_touch_team = match self.flow.possession {
             Possession::Home => Possession::Away,
             Possession::Away => Possession::Home,

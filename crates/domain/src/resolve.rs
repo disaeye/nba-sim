@@ -98,11 +98,11 @@ pub struct BlockPolicy {
     pub probability_ceiling: f32,
     /// 「触及高度」中身高因子的权重（与 `vertical` 权重互补，两者和应为 1）。
     pub reach_height_weight: f32,
-    /// 封盖后球的弹出速度占 `ball_max_speed_ftps` 的比例。
-    ///
-    /// 封盖是把出手拍向侧后方，不是全力发射；比例过大时球会“瞬移”并
-    /// 可能撞上 `BALL_SPEED` 不变量。
-    pub deflection_speed_ratio: f32,
+    /// 盖帽松球初速的恢复系数：封盖松球初速 = 投篮飞行的水平入射速度
+    /// （出手距离 / 飞行时长）× 本值。封盖是把出手拍向侧后方，能量
+    /// 从入射中来：远投飞行快则扇得远，近投飞行慢则弹得近，与接触
+    /// 几何同源。
+    pub block_restitution: f32,
 }
 
 impl Default for BlockPolicy {
@@ -121,7 +121,10 @@ impl Default for BlockPolicy {
             // 触及高度是「身高因子」与「弹跳」的对半混合：跳不高但个子高的
             // 与跳得高但个子矮的都能护筐。
             reach_height_weight: 0.5,
-            deflection_speed_ratio: 0.35,
+            // 封盖弹开量级：投篮飞行水平速度（远投 ≈20 ft/s、近投 ≈8 ft/s）
+            // × 0.45 ≈ 4–9 ft/s 的松球初速，与真实封盖后球的余速同量级，
+            // 远低于球速包络。
+            block_restitution: 0.45,
         }
     }
 }

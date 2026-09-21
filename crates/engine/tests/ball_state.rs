@@ -4,16 +4,12 @@
 //! 程序、发球员的界外豁免与改派、交接与投篮弧线的物理边界。
 //!
 //! 对应 `docs/architecture.md` §3（球权状态机）与 ADR-016（球权是球态的派生量）。
-
 #![allow(clippy::field_reassign_with_default)]
-
 mod support;
-
 use glam::Vec2;
 use nba_domain::Possession;
 use nba_engine::MatchEngine;
 use rayon::prelude::*;
-
 #[test]
 fn test_offensive_rebound_does_not_switch_possession() {
     let mut engine = MatchEngine::new(19);
@@ -33,7 +29,6 @@ fn test_offensive_rebound_does_not_switch_possession() {
     assert_eq!(engine.possession(), before);
     assert_eq!(engine.possession(), Possession::Home);
 }
-
 #[test]
 fn test_shot_clock_violation_starts_continuous_inbound_transfer() {
     let mut rules = nba_domain::GameRules::default();
@@ -65,7 +60,6 @@ fn test_shot_clock_violation_starts_continuous_inbound_transfer() {
     }
     assert!(saw_ready);
 }
-
 #[test]
 fn test_inbound_pass_arrival_releases_dead_ball() {
     let mut rules = nba_domain::GameRules::default();
@@ -86,7 +80,6 @@ fn test_inbound_pass_arrival_releases_dead_ball() {
     }
     assert!(saw_live);
 }
-
 /// F1.3c 红测试：被固定在边线的防守者不得阻塞发球程序。
 ///
 /// 根因：发球员必须步行到界外发球点，而防守者被场地 clamp 固定在同一路径上，
@@ -100,7 +93,6 @@ fn test_inbound_pass_arrival_releases_dead_ball() {
 fn for_each_full_seed<T: Send>(seeds: &[u64], f: impl Fn(u64) -> T + Send + Sync) -> Vec<T> {
     seeds.par_iter().copied().map(f).collect()
 }
-
 #[test]
 fn test_wall_pinned_defender_does_not_block_inbound() {
     let results = for_each_full_seed(&[6, 9, 11, 16, 21], |seed| {
@@ -158,7 +150,6 @@ fn test_wall_pinned_defender_does_not_block_inbound() {
         );
     }
 }
-
 /// F1.3：发球员被换下/犯满离场后，发球程序必须自动改派在场球员并最终完成。
 ///
 /// 根因：`new_possession_pg` 曾按 roster 顺序取发球员，可能返回替补；
@@ -203,7 +194,6 @@ fn test_inbounder_reassigned_when_leaving_court() {
         );
     }
 }
-
 /// F1.3：发球员站界外不得被判违例，且发球程序必须真实完成推进到 `InboundReady`。
 ///
 /// 非持球人的 `BOUNDARY_CROSSING` 是咨询性信号（flagged），不属于本节范围。
@@ -252,7 +242,6 @@ fn test_inbounder_out_of_bounds_does_not_emit_boundary_turnover() {
         "inbound program must reach InboundReady instead of livelocking"
     );
 }
-
 /// D5.1 红测试：交接（`ControlTransfer`）不得永久悬置。
 ///
 /// 根因：接球人被动作窗口锁定（`lock_kinematics`）时无法走到冻结点，
@@ -295,7 +284,6 @@ fn test_control_transfer_never_hangs_forever() {
         );
     }
 }
-
 /// D5.1：投篮弧线峰值必须服从规则高度上限（`BALL_HEIGHT_BOUNDS`）。
 ///
 /// 根因：`arc = A·p·(1-p)` 的真实极值点在 p>0.5，线性缩放的 A 使实际峰值
@@ -330,7 +318,6 @@ fn test_shot_arc_respects_height_ceiling() {
         );
     }
 }
-
 /// F1.2 红测试：进攻方越过中线进入前场后，后场计时必须重置。
 ///
 /// 根因：`backcourt_elapsed` 仅在进入 `Initiation` 阶段清零，跨场后继续累加，
@@ -368,7 +355,6 @@ fn test_backcourt_clock_resets_on_halfcourt_cross() {
         engine.backcourt_elapsed()
     );
 }
-
 /// F1.2 负面对照：若球队仍滞留后场，计时必须继续累加并最终判违例。
 #[test]
 fn test_eight_second_violation_requires_continuous_backcourt() {
@@ -415,4 +401,154 @@ fn test_eight_second_violation_requires_continuous_backcourt() {
         saw_violation,
         "continuous backcourt possession must eventually trigger the 8-second violation"
     );
+}
+/// 自由球-人碰撞（ADR-017 第三步）：篮板飞行中的球撞到站立球员时必须
+/// 弹开，且同一飞行对同一球员只弹开一次。
+///
+/// 场景（主队攻击右侧）：罚球不中后的短反弹，从 (84, 25) 高 3.0 ft
+/// 飞向 (70, 25)，时长 0.5 s（入射水平速度 -28 ft/s）。防守人 H_05
+/// 站在 (80, 25)：球每 tick 前进 1.12 ft，约 1-2 tick 后水平距离进入
+/// 接触半径（1.8 + 0.4 = 2.2 ft）且高度低于 H_05 摸高（211 cm + 0.5
+/// 弹跳 ≈ 3.71 ft）→ 命中。反射后水平速度变向 +x（从球员指向球），
+/// 量级 ≈ 28 × 0.5 = 14 ft/s；弹开后落点解回球员另一侧。
+#[test]
+fn free_rebound_flight_bounces_off_a_standing_player() {
+    let mut rules = nba_domain::GameRules::default();
+    rules.tip_off_duration_seconds = 0.0;
+    rules.tick_seconds = 0.04;
+    rules.decision_interval_seconds = 100.0;
+    let mut engine = MatchEngine::with_rules(703, rules);
+    engine.force_possession_for_test(Possession::Home);
+    engine.set_game_flow(nba_domain::GameFlowState::LiveBall);
+    engine.set_sub_phase_for_test(nba_domain::SubPhase::FlightAndRebound);
+    // 防守人 H_05 站死在弹道中段；其余球员保持初始位置（距弹道远）。
+    // Rapier 后端从刚体回写坐标，直接改 pos_ft 会被覆盖，必须 teleport。
+    let defender_pos = Vec2::new(80.0, 25.0);
+    {
+        let physics = engine.physics_mut_for_test();
+        if let Some(p) = physics.get_player_mut("H_05") {
+            p.target_pos_ft = defender_pos;
+            p.target_speed_ftps = 0.0;
+            p.vel_ft = Vec2::ZERO;
+        }
+        physics.teleport_player("H_05", defender_pos);
+    }
+    let (from_pos, from_z) = (Vec2::new(84.0, 25.0), 3.0_f32);
+    engine.set_ball_state_for_test(nba_physics::BallTrajectoryKind::RimRebound {
+        from_pos,
+        from_z,
+        last_touch_team: Possession::Home,
+        hoop_pos: engine.rules().court.hoop_pos(true),
+        target_landing: Vec2::new(70.0, 25.0),
+        start_time: engine.current_time(),
+        duration: 0.5,
+        peak_z: 10.0,
+    });
+    engine.set_ball_pos_for_test(from_pos, from_z);
+    // 接触半径从 5.8 ft 收窄到 2.2 ft（球体碰撞的真实尺寸）后，
+    // 球需 1-2 tick 才能进入接触距离；步进到球态被改写为止。
+    let mut bounced_state = None;
+    for _ in 0..4 {
+        engine.step();
+        if let nba_physics::BallTrajectoryKind::RimRebound {
+            from_pos: new_from,
+            target_landing,
+            ..
+        } = engine.ball_state()
+        {
+            if (*new_from - from_pos).length() > 0.5 {
+                bounced_state = Some((*new_from, *target_landing));
+                break;
+            }
+        }
+    }
+    let (new_from, target_landing) = bounced_state
+        .expect("expected a rewritten RimRebound after contact");
+    let flipped = target_landing.x > new_from.x;
+    assert!(
+        flipped,
+        "reflection must send the ball back toward +x \
+         (from {new_from:?} to {target_landing:?})"
+    );
+    // 同一飞行对同一球员只弹一次：再走数 tick，弹道保持新飞行的采样
+    // （起点与落点不变），不再被重写。
+    let (frozen_from, frozen_landing) = match engine.ball_state() {
+        nba_physics::BallTrajectoryKind::RimRebound {
+            from_pos,
+            target_landing,
+            ..
+        } => (*from_pos, *target_landing),
+        _ => unreachable!(),
+    };
+    for _ in 0..5 {
+        engine.step();
+        if let nba_physics::BallTrajectoryKind::RimRebound {
+            from_pos,
+            target_landing,
+            ..
+        } = engine.ball_state()
+        {
+            assert_eq!(from_pos, &frozen_from, "one bounce per flight per player");
+            assert_eq!(target_landing, &frozen_landing);
+        }
+    }
+}
+/// 自由球-人碰撞（ADR-017 第三步）：滚动中的地板球撞到站立球员时
+/// 弹开而非被收下，弹开后速度反向（远离球员）。
+///
+/// 场景：球在 (70, 25) 高 0.2 ft 以 (-15, 0) ft/s 滚动，防守人 A_05
+/// 站在 (66, 25)：下一 tick 球到 (69.4, 25)，水平距离 3.4 ft ≤ 5.8 ft，
+/// 高度低于摸高 → 命中。反射后水平速度变 +x（远离球员），量级
+/// ≈ 15 × 0.5 = 7.5 ft/s。
+#[test]
+fn rolling_loose_ball_bounces_off_a_standing_player() {
+    let mut rules = nba_domain::GameRules::default();
+    rules.tip_off_duration_seconds = 0.0;
+    rules.tick_seconds = 0.04;
+    rules.decision_interval_seconds = 100.0;
+    let mut engine = MatchEngine::with_rules(704, rules);
+    engine.force_possession_for_test(Possession::Home);
+    engine.set_game_flow(nba_domain::GameFlowState::LiveBall);
+    let defender_pos = Vec2::new(66.0, 25.0);
+    {
+        let physics = engine.physics_mut_for_test();
+        if let Some(p) = physics.get_player_mut("A_05") {
+            p.target_pos_ft = defender_pos;
+            p.target_speed_ftps = 0.0;
+            p.vel_ft = Vec2::ZERO;
+        }
+        physics.teleport_player("A_05", defender_pos);
+    }
+    let (pos, z) = (Vec2::new(70.0, 25.0), 0.2_f32);
+    engine.set_ball_state_for_test(nba_physics::BallTrajectoryKind::LooseBall {
+        pos,
+        vel: Vec2::new(-15.0, 0.0),
+        z,
+        vel_z: 0.0,
+        last_touch_team: Possession::Home,
+    });
+    engine.set_ball_pos_for_test(pos, z);
+    let tick = engine.step();
+    // 弹开事实：本 tick 不得有 LOOSE_BALL_SECURED（球没有被撞它的人收下），
+    // 球态仍是松球且速度反向。
+    assert!(
+        !tick.frame.events.iter().any(|e| e == "LOOSE_BALL_SECURED"),
+        "the ball must bounce off the player instead of being secured, events={:?}",
+        tick.frame.events
+    );
+    match engine.ball_state() {
+        nba_physics::BallTrajectoryKind::LooseBall { vel, .. } => {
+            assert!(
+                vel.x > 0.0,
+                "reflection must reverse the ball away from the player, vel={vel:?}"
+            );
+            let speed = vel.length();
+            let expected = 15.0 * engine.rules().loose_ball_player_restitution;
+            assert!(
+                (speed - expected).abs() < 2.0,
+                "bounced speed {speed:.2} must track incident × restitution ({expected:.2})"
+            );
+        }
+        other => panic!("expected the loose ball to continue bouncing, got {other:?}"),
+    }
 }

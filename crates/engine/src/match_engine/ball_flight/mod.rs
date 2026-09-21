@@ -125,6 +125,47 @@ impl MatchEngine {
                 blocked_shot_event = Some(outcome.event);
             }
         }
+        // 自由球-人接触（ADR-017 第三步）：与封盖判定同一借用纪律——
+        // 接触裁定需要 `&mut self`（读物理世界、写结算账目），先在
+        // 主 match 之前完成，RimRebound/LooseBall 分支内消费结果。
+        // RimRebound 只在飞行中（tau<1）结算；LooseBall 在本 tick 末
+        // 位置积分**之后**判定，因此把采样点与当前球态传给检测函数，
+        // 由它自行按球态种类区分这两条路径。
+        let free_ball_contact = match &self.ball.ball_state {
+            BallTrajectoryKind::RimRebound { start_time, duration, .. } => {
+                let tau = if *duration <= f32::EPSILON {
+                    1.0
+                } else {
+                    ((current_t - start_time) / duration).clamp(0.0, 1.0)
+                };
+                // 飞行中球-人接触：球在飞向落点的途中撞到在场球员身体时，
+                // 做几何弹开并重解落点；归属裁定（try_resolve_rebounder）
+                // 仍只发生在 tau>=1 的落点。
+                (tau < 1.0).then_some(self.ball.ball_pos_3d)
+            }
+            BallTrajectoryKind::LooseBall { pos, vel, z, .. } => {
+                // 地板球：先按本 tick 末位置积分（与下方分支同式），
+                // 接触判定用积分后的位置——球到达哪里就在哪里撞人。
+                let next = *pos + *vel * dt;
+                let margin = self.config.rules.player_radius_ft;
+                let oob = next.x < margin
+                    || next.x > self.config.rules.court.width_ft - margin
+                    || next.y < margin
+                    || next.y > self.config.rules.court.height_ft - margin;
+                // 出界球不参与身体接触（下一分支将按出界事实转移）。
+                if oob {
+                    None
+                } else {
+                    Some((next, *z))
+                }
+            }
+            _ => None,
+        }
+        .and_then(|spot| self.resolve_free_ball_player_contact(spot, current_t));
+        if let Some((contact_state, contact_id)) = free_ball_contact {
+            self.ball.loose_contact_resolved.push(contact_id);
+            new_ball_state = Some(contact_state);
+        }
         match &self.ball.ball_state {
             BallTrajectoryKind::Held { carrier_id } => {
                 let cid = carrier_id.clone();
@@ -1222,7 +1263,15 @@ impl MatchEngine {
                     candidates.retain(|id| *id != home_jumper && *id != away_jumper);
                 }
                 candidates.sort();
-                if let Some(player_id) = candidates.into_iter().next() {
+                // 球-人身体接触（ADR-017 第三步）：本 tick 预检已命中时，
+                // 弹开优先于捡起——球被弹开而不是被收下，弹开后的
+                // 松球态已在函数顶部写入 `new_ball_state`，此处跳过
+                // 本 tick 的掌控判定与位置积分（弹开球态就是本 tick 的
+                // 权威下一态）。
+                let bounce_active = matches!(new_ball_state, Some(BallTrajectoryKind::LooseBall { .. }));
+                if bounce_active {
+                    // 弹开路径：不再覆盖 new_ball_state。
+                } else if let Some(player_id) = candidates.into_iter().next() {
                     self.journal
                         .pending_events
                         .push(GameEvent::LooseBallSecured {

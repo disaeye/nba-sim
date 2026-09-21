@@ -67,6 +67,25 @@ impl MatchEngine {
             }
             _ => None,
         };
+        // 球-人弹开账目（ADR-017 第三步）：进入**新的**自由球阶段时清空。
+        //
+        // 「同一飞行对同一球员只弹一次」的作用域是单段飞行：弹开后的
+        // 自环（RimRebound → RimRebound / LooseBall → LooseBall）必须
+        // 保留账目，否则球还在同一人身边时会逐 tick 重复弹开；而换段
+        // （传球被拨掉、打铁后球触地变松球、封盖拍出等）是新飞行，同一
+        // 球员应重新参与碰撞。
+        let entering_free_flight = matches!(
+            next,
+            BallTrajectoryKind::RimRebound { .. } | BallTrajectoryKind::LooseBall { .. }
+        );
+        let same_kind = matches!(
+            (&self.ball.ball_state, &next),
+            (BallTrajectoryKind::RimRebound { .. }, BallTrajectoryKind::RimRebound { .. })
+                | (BallTrajectoryKind::LooseBall { .. }, BallTrajectoryKind::LooseBall { .. })
+        );
+        if entering_free_flight && !same_kind {
+            self.ball.loose_contact_resolved.clear();
+        }
         match nba_domain::transition_ball_state(&self.ball.ball_state, next) {
             Ok(next) => {
                 // ## 接球人标记必须在**写入口**设置（round-10）

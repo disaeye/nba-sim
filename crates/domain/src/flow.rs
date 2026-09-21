@@ -462,6 +462,9 @@ fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
             | (B::RimRebound { .. }, B::Held { .. })
             | (B::RimRebound { .. }, B::ControlTransfer { .. })
             | (B::RimRebound { .. }, B::Pass { .. })
+            // 篮板飞行途中撞到球员身体：弹开并重解飞行（ADR-017 第三步）。
+            // 自由球阶段不变，仍是篮板飞行——只是起点与落点被接触几何改写。
+            | (B::RimRebound { .. }, B::RimRebound { .. })
             | (B::RimRebound { .. }, B::LooseBall { .. })
             | (B::RimRebound { .. }, B::Dead { .. })
             | (B::RimRebound { .. }, B::InboundTransfer { .. })

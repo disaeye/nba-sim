@@ -379,6 +379,16 @@ pub(crate) struct BallRuntime {
     pub(crate) prev_observed_ball_pos: Option<glam::Vec2>,
     /// 最近一次被过掉（drive successful）的对位防守人（round-18）。
     pub(crate) beaten_defender_id: Option<String>,
+    /// 本段飞行已结算过弹开的球员 id（ADR-017 第三步）。
+    ///
+    /// ## 为什么放在 `BallRuntime` 而非球态载荷
+    ///
+    /// 球态（`BallTrajectoryKind`）是球权真相的唯一载体，由领域层转换表
+    /// 穷举合法边；「同一飞行对同一人只弹一次」是引擎的结算账目，
+    /// 与归属语义不同层，放载荷里会让领域状态携带引擎内部的记账痕迹。
+    /// 放在这里使账目随球运行态生存；进入新的自由球飞行前清空
+    /// （调用方负责），同一飞行内逐 tick 查重。
+    pub(crate) loose_contact_resolved: Vec<String>,
 }
 
 impl BallRuntime {
@@ -393,6 +403,7 @@ impl BallRuntime {
             pending_pass_inbound: false,
             prev_observed_ball_pos: None,
             beaten_defender_id: None,
+            loose_contact_resolved: Vec::new(),
         }
     }
 }
