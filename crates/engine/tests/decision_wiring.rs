@@ -43,7 +43,6 @@ fn pass_arrival_replays_release_outcome_and_emits_matching_fact() {
         peak_z: engine.rules().pass_peak_ft,
         inbound: false,
         receive_success: true,
-        intercept: None,
     });
     engine.set_last_passer_for_test(Some("H_01".to_string()));
     engine.set_game_flow_for_test(nba_domain::GameFlowState::LiveBall);
@@ -135,7 +134,6 @@ fn pass_release_policy_can_emit_drop_without_redeciding_at_arrival() {
         peak_z: engine.rules().pass_peak_ft,
         inbound: false,
         receive_success: false,
-        intercept: None,
     });
     engine.set_last_passer_for_test(Some("H_01".to_string()));
     engine.set_current_time_for_test(0.0);

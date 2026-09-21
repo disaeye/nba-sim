@@ -379,6 +379,13 @@ pub(crate) struct BallRuntime {
     pub(crate) prev_observed_ball_pos: Option<glam::Vec2>,
     /// 最近一次被过掉（drive successful）的对位防守人（round-18）。
     pub(crate) beaten_defender_id: Option<String>,
+    /// 本次传球飞行中已结算过接触的防守者 id（边沿锁存）。
+    ///
+    /// 逐 tick 接触检测下，同一防守者会在多个 tick 持续处于可及范围内；
+    /// 若每个 tick 都掷骰，接触概率会随时长累积成几乎必然。因此每次
+    /// 掷骰只在「首次进入可及范围」的那个 tick 发生一次，之后该防守者
+    /// 被记入本表，不再重复参与分类。每次传球出手时清空。
+    pub(crate) pass_contact_resolved: Vec<String>,
 }
 
 impl BallRuntime {
@@ -393,6 +400,7 @@ impl BallRuntime {
             pending_pass_inbound: false,
             prev_observed_ball_pos: None,
             beaten_defender_id: None,
+            pass_contact_resolved: Vec::new(),
         }
     }
 }

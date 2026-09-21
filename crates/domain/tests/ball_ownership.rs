@@ -21,7 +21,6 @@ fn legal_edges_are_accepted() {
                 peak_z: 6.0,
                 inbound: false,
                 receive_success: true,
-                intercept: None,
             },
         ),
         (
@@ -95,7 +94,6 @@ fn legal_edges_are_accepted() {
                 peak_z: 6.0,
                 inbound: false,
                 receive_success: true,
-                intercept: None,
             },
             held(),
         ),
@@ -109,7 +107,6 @@ fn legal_edges_are_accepted() {
                 peak_z: 6.0,
                 inbound: false,
                 receive_success: false,
-                intercept: None,
             },
             BallState::LooseBall {
                 pos: Vec2::ZERO,
@@ -238,7 +235,6 @@ fn legal_edges_are_accepted() {
                 peak_z: 8.0,
                 inbound: true,
                 receive_success: true,
-                intercept: None,
             },
         ),
         (
@@ -301,8 +297,7 @@ fn illegal_edges_are_rejected() {
             duration: 0.5,
             peak_z: 6.0,
             inbound: false,
-            receive_success: true,
-            intercept: None
+            receive_success: true
         }
     )
     .is_err());
@@ -359,7 +354,6 @@ fn illegal_edges_are_rejected() {
         peak_z: 6.0,
         inbound: false,
         receive_success: true,
-        intercept: None,
     };
     assert!(transition_ball_state(
         &pass,
@@ -430,7 +424,6 @@ fn all_variants() -> Vec<(&'static str, BallState)> {
                 peak_z: 8.0,
                 inbound: false,
                 receive_success: true,
-                intercept: None,
             },
         ),
         (

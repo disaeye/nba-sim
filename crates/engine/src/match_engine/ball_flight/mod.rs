@@ -331,54 +331,18 @@ impl MatchEngine {
                 to_pos,
                 inbound,
                 receive_success,
-                intercept: intercept_fact,
                 ..
             } => {
                 let _duration_val = *duration;
                 let is_inbound_pass = *inbound;
                 let will_receive = *receive_success;
                 let tau = ((current_t - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
-                let def_team = if is_home { "away" } else { "home" };
                 let segment = *to_pos - *from_pos;
-                let _ = def_team;
-                // 第一性原理修复（本轮）：概率语义与发生时机分离。
-                //
-                // - **概率**在释放时刻裁定一次（`resolve_pass_interception`），
-                //   回答「这次传球是否被拦截、由谁」；
-                // - **时机**仍由逐 tick 几何决定：只有当球在空间上真正飞到
-                //   该防守者的可及范围时才结算。
-                //
-                // 这样既消除了「逐 tick 独立掷骰导致概率随时长累积」的错误
-                // （实测每次传球失败 35.8%，真实约 8–10%），又保证拦截发生
-                // 在物理上合理的位置（否则抢断会在传球起点触发，球权瞬间
-                // 转给远处防守者，造成 BALL_WITH_HOLDER 分离 23.83 ft）。
-                let mut intercept: Option<(String, bool)> = None;
-                if let Some((defender_id, is_steal)) = intercept_fact.clone() {
-                    if let Some(defender) = self.systems.physics.get_player(&defender_id) {
-                        let reach = self.config.rules.player_radius_ft
-                            + self.config.rules.defender_reach_ft;
-                        let dist_to_ball = (defender.pos_ft - self.ball.ball_pos_3d.0).length();
-                        // 球在可及范围内，或已飞过该防守者所在位置（投影已过），
-                        // 则视为拦截成立；否则继续飞行。
-                        // 拦截只在「球已飞到防守者的拦截点」时结算：
-                        // 否则抢断会在释放当 tick 触发，而球仍在传球人手中，
-                        // 球权却已转给防守者（实测 BALL_WITH_HOLDER 3.74 ft）。
-                        let projection_t = ((defender.pos_ft - *from_pos).dot(segment)
-                            / segment.length_squared().max(f32::EPSILON))
-                        .clamp(0.0, 1.0);
-                        let _intercept_point = *from_pos + segment * projection_t;
-                        let travelled = (self.ball.ball_pos_3d.0 - *from_pos).dot(segment)
-                            / segment.length_squared().max(f32::EPSILON);
-                        // 球必须已到达（或越过）该防守者的拦截点。
-                        let reached = travelled >= projection_t - f32::EPSILON;
-                        if reached && dist_to_ball <= reach {
-                            intercept = Some((defender_id, is_steal));
-                        }
-                    } else {
-                        // 防守者已离场：不结算拦截，让传球正常完成。
-                    }
-                }
-
+                // match 持有 `&self.ball.ball_state` 的不可变借用，而接触检测
+                // 需要 `&mut self`（锁存表与掷骰）：先取出所需字段再调用。
+                let receiver_id = target_id.clone();
+                let frozen_to_pos = *to_pos;
+                let contact = self.resolve_pass_contact(&receiver_id, is_home);
                 let passer_id = self.ball.last_passer_id.clone().unwrap_or_default();
                 // Fix（round-15 第一性原理）：接球是「首次触球」事件，不是
                 // 「飞行终点」事件。
@@ -396,28 +360,25 @@ impl MatchEngine {
                 // 裁决逻辑本身（层 A 距离 + 层 B 概率 + 状态转移）完全复用，
                 // 不新增路径。
                 //
-                // 高度安全性：传球全程为胸高平飞（`ballistics.rs` Pass 分支，
-                // `pass_peak_ft == chest_height_ft == 4.0`，弧项为 0），
-                // 不存在“空中高处被接住”的物理问题。
-                // 拦截优先级不变：本 tick 若有拦截事实，仍先走拦截分支。
+                // 接触优先于接球：防守者先碰到球，球就到不了接球人手里。
                 let receiver_touch = self
                     .systems
                     .physics
-                    .get_player(target_id)
+                    .get_player(&receiver_id)
                     .map(|r| {
                         let radius =
                             nba_domain::effective_catch_radius(&self.config.rules, &r.attributes);
                         (r.pos_ft - self.ball.ball_pos_3d.0).length() <= radius
                     })
                     .unwrap_or(false);
-                if let Some((defender_id, secured)) = intercept {
+                if let Some((defender_id, secured)) = contact {
                     let position = self.ball.ball_pos_3d.0;
                     if secured {
                         self.journal
                             .pending_events
                             .push(GameEvent::PassIntercepted {
                                 passer_id,
-                                receiver_id: target_id.clone(),
+                                receiver_id: receiver_id.clone(),
                                 defender_id: defender_id.clone(),
                                 position: (position.x, position.y),
                             });
@@ -433,7 +394,7 @@ impl MatchEngine {
                     } else {
                         self.journal.pending_events.push(GameEvent::PassTipped {
                             passer_id,
-                            receiver_id: target_id.clone(),
+                            receiver_id,
                             defender_id,
                             position: (position.x, position.y),
                         });
@@ -458,7 +419,6 @@ impl MatchEngine {
                         });
                     }
                 } else if tau >= 1.0 || receiver_touch {
-                    let receiver_id = target_id.clone();
                     {
                         // 层 A（P-1）：球到达时判定**实际空间接近度**。
                         //
@@ -525,19 +485,19 @@ impl MatchEngine {
                                 .physics
                                 .get_player(&receiver_id)
                                 .map(|r| r.pos_ft)
-                                .unwrap_or(*to_pos);
+                                .unwrap_or(frozen_to_pos);
                             self.ball.ball_pos_3d =
                                 (catch_spot, self.config.rules.ball_holder_height_ft);
                             // 发布接球点修正事实（层 A，P-1）：当实际到达位置与
                             // 传球人冻结的意图不同时，把差异登记为事实，使
                             // 事实账本自洽（不允许下游各自解释同一传球）。
-                            let divergence = (catch_spot - *to_pos).length();
+                            let divergence = (catch_spot - frozen_to_pos).length();
                             if divergence > f32::EPSILON {
                                 self.journal
                                     .pending_events
                                     .push(GameEvent::PassLandingCorrected {
                                         receiver_id: receiver_id.clone(),
-                                        intended: (to_pos.x, to_pos.y),
+                                        intended: (frozen_to_pos.x, frozen_to_pos.y),
                                         actual: (catch_spot.x, catch_spot.y),
                                         divergence_ft: divergence,
                                     });
