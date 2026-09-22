@@ -426,6 +426,72 @@ body {
  object-fit: contain;
 }
 
+.court-overlay-controls {
+ position: absolute;
+ left: 14px;
+ top: 12px;
+ z-index: 40;
+ display: flex;
+ align-items: center;
+ gap: 8px;
+ pointer-events: none;
+}
+
+.court-overlay-toggle {
+ pointer-events: auto;
+ display: inline-flex;
+ align-items: center;
+ gap: 7px;
+ min-height: 32px;
+ padding: 6px 10px;
+ border: 1px solid rgba(0, 210, 255, 0.42);
+ border-radius: var(--radius-full);
+ background: rgba(8, 13, 20, 0.94);
+ color: var(--text-secondary);
+ font: 700 10px var(--font-mono);
+ cursor: pointer;
+ touch-action: manipulation;
+ -webkit-tap-highlight-color: transparent;
+ backdrop-filter: blur(14px);
+ -webkit-backdrop-filter: blur(14px);
+ transition: all 0.2s ease;
+}
+.court-overlay-toggle.active {
+ color: #e8fbff;
+ border-color: rgba(0, 210, 255, 0.8);
+ box-shadow: 0 0 18px rgba(0, 210, 255, 0.2);
+}
+.court-overlay-dot {
+ width: 7px;
+ height: 7px;
+ border-radius: 50%;
+ background: var(--color-cyan);
+ box-shadow: 0 0 8px rgba(0, 210, 255, 0.8);
+}
+.court-overlay-hint {
+ padding: 5px 8px;
+ border-radius: var(--radius-full);
+ background: rgba(8, 13, 20, 0.7);
+ color: rgba(255, 255, 255, 0.66);
+ font: 600 9px var(--font-mono);
+}
+
+@media (max-width: 640px) {
+ .court-overlay-controls {
+  left: 8px;
+  top: 8px;
+  z-index: 40;
+ }
+ .court-overlay-toggle {
+  min-height: 36px;
+  padding: 7px 11px;
+  font-size: 11px;
+ }
+ .court-overlay-hint {
+  display: none;
+ }
+}
+
 /* 浮动动态岛事件徽章 */
 .floating-event-pill {
  position: absolute;

@@ -34,7 +34,32 @@ pub struct RenderPlayer {
     pub facing_x: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub facing_y: Option<f32>,
+    /// Continuous potential-field target produced by the defensive solver.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub potential_target_x: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub potential_target_y: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub potential_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub potential_threat_ratio: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub potential_void_ratio: Option<f32>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PotentialFieldSample {
+    pub x: f32,
+    pub y: f32,
+    pub target_x: f32,
+    pub target_y: f32,
+    pub pressure: f32,
+    pub drive_x: f32,
+    pub drive_y: f32,
+    pub action: String,
+    pub team: String,
+    pub player_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RenderBall {
     pub x: f32,
@@ -167,6 +192,9 @@ pub struct RenderFrame {
     /// 避免把有界流误判成 L1 违规。
     #[serde(default = "default_stream_projection")]
     pub stream_projection: String,
+    /// Sparse samples of the authoritative defensive potential field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub potential_field: Vec<PotentialFieldSample>,
 }
 
 fn default_stream_projection() -> String {

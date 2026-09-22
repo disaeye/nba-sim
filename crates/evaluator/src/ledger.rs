@@ -396,6 +396,7 @@ mod tests {
             debug: None,
             rules: Default::default(),
             stream_projection: Default::default(),
+            potential_field: vec![],
         };
         StreamTick {
             frame,

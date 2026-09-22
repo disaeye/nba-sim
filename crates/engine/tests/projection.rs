@@ -14,6 +14,35 @@ use glam::Vec2;
 use nba_engine::MatchEngine;
 
 #[test]
+fn test_render_frame_contains_potential_field_projection() {
+    let mut engine = MatchEngine::new(42);
+    let mut observed = false;
+    for _ in 0..200 {
+        let tick = engine.step();
+        if !tick.frame.potential_field.is_empty() {
+            observed = true;
+            assert!(tick
+                .frame
+                .potential_field
+                .iter()
+                .all(|sample| sample.x.is_finite()
+                    && sample.y.is_finite()
+                    && sample.target_x.is_finite()
+                    && sample.target_y.is_finite()
+                    && sample.pressure >= 0.0
+                    && sample.pressure <= 1.0
+                    && sample.drive_x.is_finite()
+                    && sample.drive_y.is_finite()));
+            break;
+        }
+    }
+    assert!(
+        observed,
+        "potential field samples should reach the render frame"
+    );
+}
+
+#[test]
 fn test_simulation_decision_trace_present_in_stream() {
     let mut engine = MatchEngine::new(7);
     let mut traces = 0;

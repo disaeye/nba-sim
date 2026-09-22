@@ -1,5 +1,7 @@
 use glam::Vec2;
 use nba_domain::{GameRules, Possession, SubPhase};
+
+use crate::potential_field::EmergentDefenseTarget;
 use rand::Rng;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,6 +170,8 @@ pub struct TargetAssignment {
     pub action: String,
     pub slot: String,
     pub morale: String,
+    /// Solver output exists only when this target came from the potential-field branch.
+    pub potential_field: Option<EmergentDefenseTarget>,
 }
 impl TargetAssignment {
     pub fn off_ball_kind(&self) -> Option<nba_domain::action_window::OffBallActionKind> {
@@ -453,6 +457,7 @@ impl TacticalPlanner {
                 action: "Spot".to_string(),
                 slot: slot.to_string(),
                 morale: "Normal".to_string(),
+                potential_field: None,
             });
         }
         let carrier_pos = live_off_positions
@@ -511,7 +516,7 @@ impl TacticalPlanner {
             } else {
                 Vec2::X
             };
-            let (def_pos, action, slot) =
+            let (def_pos, action, slot, potential_field) =
                 if should_switch && (is_guarding_carrier || is_guarding_screener) {
                     if is_guarding_carrier {
                         let to_screener_hoop = (hoop - screener_pos).normalize_or_zero();
@@ -519,6 +524,7 @@ impl TacticalPlanner {
                             screener_pos + to_screener_hoop * field_rules.switch_anchor_gap_ft,
                             "SWITCH_ASSIGNMENT",
                             "SwitchAnchor",
+                            None,
                         )
                     } else {
                         let to_carrier_hoop = (hoop - carrier_pos).normalize_or_zero();
@@ -526,6 +532,7 @@ impl TacticalPlanner {
                             carrier_pos + to_carrier_hoop * field_rules.switch_screener_gap_ft,
                             "SWITCH_ASSIGNMENT",
                             "SwitchDefender",
+                            None,
                         )
                     }
                 } else if is_guarding_screener
@@ -537,6 +544,7 @@ impl TacticalPlanner {
                         screener_pos + to_hoop_from_screen * screen_rules.drop_depth_ft,
                         "DROP_CONTAIN",
                         "DropAnchor",
+                        None,
                     )
                 } else if is_guarding_screener
                     && is_screening_action
@@ -547,6 +555,7 @@ impl TacticalPlanner {
                         screener_pos + to_carrier_from_screen * screen_rules.hedge_distance_ft,
                         "HEDGE_AND_RECOVER",
                         "HedgeDefender",
+                        None,
                     )
                 } else if is_guarding_carrier {
                     // 领防人：建立紧逼与滑步阻截线 (Pursuit Contest)。
@@ -558,6 +567,7 @@ impl TacticalPlanner {
                         off_pos + to_hoop_dir * gap,
                         "ON_BALL_CONTEST",
                         "PointDefender",
+                        None,
                     )
                 } else {
                     // 弱侧协防人与轮转体系：完全由连续多体势能场梯度与能量极小值求解驱动
@@ -570,7 +580,12 @@ impl TacticalPlanner {
                         carrier_idx,
                         rules,
                     );
-                    (emergent.target_pos, emergent.action, emergent.slot)
+                    (
+                        emergent.target_pos,
+                        emergent.action,
+                        emergent.slot,
+                        Some(emergent),
+                    )
                 };
             def_targets.push(TargetAssignment {
                 player_id: None,
@@ -579,6 +594,7 @@ impl TacticalPlanner {
                 action: action.to_string(),
                 slot: slot.to_string(),
                 morale: "Normal".to_string(),
+                potential_field,
             });
         }
         if is_home {
@@ -698,6 +714,7 @@ impl TacticalPlanner {
                     action: action.to_string(),
                     slot: slot.id.clone(),
                     morale: "Normal".to_string(),
+                    potential_field: None,
                 }
             })
             .collect()

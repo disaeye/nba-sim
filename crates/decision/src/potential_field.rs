@@ -20,6 +20,13 @@ use nba_domain::PotentialFieldRules;
 
 /// 势能场平衡点求解结果与涌现动作
 #[derive(Debug, Clone)]
+pub struct PotentialFieldVector {
+    pub position: Vec2,
+    pub drive: Vec2,
+    pub pressure: f32,
+}
+
+#[derive(Debug, Clone)]
 pub struct EmergentDefenseTarget {
     /// 势能极小值平衡位置
     pub target_pos: Vec2,
@@ -31,6 +38,8 @@ pub struct EmergentDefenseTarget {
     pub threat_ratio: f32,
     /// 空间真空势能占比 (0.0 ~ 1.0)
     pub void_ratio: f32,
+    /// 平衡点上的合力方向，用于解释防守人正在被哪一个势能源牵引。
+    pub drive: Vec2,
 }
 
 /// 连续势能场求解器。
@@ -45,6 +54,10 @@ impl DefensePotentialFieldSolver {
         Self { config }
     }
 
+    /// 在指定位置求出连续势能场的合力方向与归一化压力。
+    ///
+    /// 这个采样接口复用与 `solve_equilibrium` 相同的规则参数和几何输入，
+    /// 前端显示的箭头因此来自引擎的实际势能模型。
     /// 求解场上指定防守人在连续势能场中的平衡位置与涌现动作
     ///
     /// # 参数
@@ -202,6 +215,7 @@ impl DefensePotentialFieldSolver {
             slot,
             threat_ratio,
             void_ratio,
+            drive: equilibrium_pos - assigned_pos,
         }
     }
 }

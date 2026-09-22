@@ -118,6 +118,7 @@
     accumulator: 0,
     currentTab: "timeline",
     courtMode: "half",
+    potentialFieldVisible: true,
     lastFrameJson: -1,
   };
 
@@ -1121,6 +1122,8 @@
     drawHoop(ctx, 30 + rules.leftHoopX * 10, 280, false);
     drawHoop(ctx, 30 + rules.rightHoopX * 10, 280, true);
 
+    if (state.potentialFieldVisible) drawPotentialField(ctx, tick, point, rules);
+
     // 轨迹绘制
     drawTrails(ctx, point);
 
@@ -1135,6 +1138,29 @@
         finite(player.y) * rules.courtHeight,
       );
       state.hitPlayers.push({ player, x: playerPoint.x, y: playerPoint.y });
+
+      // 战术路线 (Play-art route)
+      if (state.potentialFieldVisible && player.potential_target_x !== undefined && player.potential_target_y !== undefined) {
+        const fieldTargetPt = point(
+          finite(player.potential_target_x) * rules.courtWidth,
+          finite(player.potential_target_y) * rules.courtHeight,
+        );
+        ctx.save();
+        ctx.setLineDash([2, 5]);
+        ctx.strokeStyle = player.team === "home"
+          ? "rgba(0, 210, 255, 0.6)"
+          : "rgba(255, 109, 171, 0.62)";
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        ctx.moveTo(playerPoint.x, playerPoint.y);
+        ctx.lineTo(fieldTargetPt.x, fieldTargetPt.y);
+        ctx.stroke();
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.beginPath();
+        ctx.arc(fieldTargetPt.x, fieldTargetPt.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
 
       // 战术路线 (Play-art route)
       if (player.target_x !== undefined && player.target_y !== undefined) {
@@ -1280,6 +1306,78 @@
         ctx.stroke();
       }
     }
+  }
+
+  function drawPotentialField(ctx, tick, point, rules) {
+    const samples = Array.isArray(tick.potential_field) ? tick.potential_field : [];
+    if (!samples.length) return;
+    ctx.save();
+    ctx.globalCompositeOperation = "multiply";
+    for (const sample of samples) {
+      const x = finite(sample.x) * rules.courtWidth;
+      const y = finite(sample.y) * rules.courtHeight;
+      const pressure = clamp(finite(sample.pressure), 0, 1);
+      const radius = 30 + pressure * 34;
+      const gradient = ctx.createRadialGradient(
+        point(x, y).x,
+        point(x, y).y,
+        0,
+        point(x, y).x,
+        point(x, y).y,
+        radius,
+      );
+      const hue = sample.team === "home" ? "0, 210, 255" : "255, 80, 146";
+      gradient.addColorStop(0, `rgba(${hue}, ${0.18 + pressure * 0.22})`);
+      gradient.addColorStop(1, `rgba(${hue}, 0)`);
+      ctx.fillStyle = gradient;
+      const center = point(x, y);
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.setLineDash([]);
+    for (const sample of samples) {
+      const start = point(
+        finite(sample.x) * rules.courtWidth,
+        finite(sample.y) * rules.courtHeight,
+      );
+      const driveX = (finite(sample.target_x) - finite(sample.x)) * rules.courtWidth;
+      const driveY = (finite(sample.target_y) - finite(sample.y)) * rules.courtHeight;
+      const magnitude = Math.hypot(driveX, driveY);
+      if (magnitude < 1) continue;
+      const length = clamp(14 + magnitude * 0.55, 14, 55);
+      const end = {
+        x: start.x + (driveX / magnitude) * length,
+        y: start.y + (driveY / magnitude) * length,
+      };
+      const color = sample.team === "home" ? "#00d2ff" : "#ff6dab";
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.45 + clamp(finite(sample.pressure), 0, 1) * 0.5;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+      const angle = Math.atan2(end.y - start.y, end.x - start.x);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(end.x, end.y);
+      ctx.lineTo(
+        end.x - Math.cos(angle - 0.5) * 6,
+        end.y - Math.sin(angle - 0.5) * 6,
+      );
+      ctx.lineTo(
+        end.x - Math.cos(angle + 0.5) * 6,
+        end.y - Math.sin(angle + 0.5) * 6,
+      );
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   function drawHoop(ctx, hoopX, hoopY, right) {
@@ -1791,6 +1889,16 @@
         setRunStatus("浏览器拒绝访问剪贴板", true);
       }
     });
+
+    const potentialToggle = $("potentialFieldToggle");
+    if (potentialToggle) {
+      potentialToggle.addEventListener("click", () => {
+        state.potentialFieldVisible = !state.potentialFieldVisible;
+        potentialToggle.classList.toggle("active", state.potentialFieldVisible);
+        potentialToggle.setAttribute("aria-pressed", String(state.potentialFieldVisible));
+        if (state.ticks[state.idx]) drawCourt(state.ticks[state.idx]);
+      });
+    }
 
     const courtViewBtn = $("courtViewBtn");
     if (courtViewBtn) {

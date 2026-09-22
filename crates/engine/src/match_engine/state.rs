@@ -13,6 +13,7 @@
 
 use nba_invariants::{InvariantChecker, Violation};
 
+use glam::Vec2;
 use nba_decision::modulation::{CoachStrategy, PlayerModulationState};
 use nba_decision::pipeline::DecisionSystem;
 use nba_decision::tactics::{DefensiveTactic, TacticalSet};
@@ -49,6 +50,7 @@ pub(crate) struct RuntimeObservations {
     pub(crate) active_windows: HashMap<String, ActionTimeWindow>,
     pub(crate) last_decision_trace: Option<Box<DecisionDebug>>,
     pub(crate) latest_spacing: Option<SpacingEvaluation>,
+    pub(crate) potential_field: Vec<PotentialFieldObservation>,
     pub(crate) latest_contacts: Vec<SemanticContact>,
     /// 被过防守人的恢复窗口截止时刻（round-19）：窗口内战术层不得重派。
     pub(crate) beaten_recovery_until: HashMap<String, f32>,
@@ -73,6 +75,18 @@ pub(crate) struct RotationClock {
     pub(crate) on_court: bool,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PotentialFieldObservation {
+    pub(crate) player_id: String,
+    pub(crate) team: String,
+    pub(crate) position: Vec2,
+    pub(crate) target: Vec2,
+    pub(crate) drive: Vec2,
+    pub(crate) action: String,
+    pub(crate) threat_ratio: f32,
+    pub(crate) void_ratio: f32,
+}
+
 impl RuntimeObservations {
     pub(crate) fn new(
         active_windows: HashMap<String, ActionTimeWindow>,
@@ -82,6 +96,7 @@ impl RuntimeObservations {
             active_windows,
             last_decision_trace: None,
             latest_spacing: None,
+            potential_field: Vec::new(),
             latest_contacts: Vec::new(),
             beaten_recovery_until: HashMap::new(),
             advancing_player: None,

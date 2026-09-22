@@ -8,8 +8,8 @@ use nba_domain::court::Court;
 use nba_domain::{GameEvent, Possession};
 use nba_physics::ballistics::BallTrajectoryKind;
 use nba_protocol::{
-    DebugFlag, DebugProb, DebugUtility, DecisionDebug, RenderBall, RenderFrame, RenderPlayer,
-    RenderScore, RenderTeam, StreamTick,
+    DebugFlag, DebugProb, DebugUtility, DecisionDebug, PotentialFieldSample, RenderBall,
+    RenderFrame, RenderPlayer, RenderScore, RenderTeam, StreamTick,
 };
 use nba_semantics::SemanticContact;
 
@@ -77,6 +77,12 @@ impl MatchEngine {
             } => Some(carrier_id.clone()),
             _ => None,
         };
+        let potential_for = |player_id: &str| {
+            self.observations
+                .potential_field
+                .iter()
+                .find(|observation| observation.player_id == player_id)
+        };
         let mut render_players = self
             .systems
             .physics
@@ -84,6 +90,10 @@ impl MatchEngine {
             .values()
             .map(|p| {
                 let norm = Court::ft_to_norm_with_geometry(p.pos_ft, self.config.rules.court);
+                let potential = potential_for(&p.id);
+                let potential_target_norm = potential.map(|observation| {
+                    Court::ft_to_norm_with_geometry(observation.target, self.config.rules.court)
+                });
                 let target_norm = if p.on_court {
                     Some(Court::ft_to_norm_with_geometry(
                         p.target_pos_ft,
@@ -126,6 +136,11 @@ impl MatchEngine {
                     } else {
                         None
                     },
+                    potential_target_x: potential_target_norm.map(|target| target.x),
+                    potential_target_y: potential_target_norm.map(|target| target.y),
+                    potential_action: potential.map(|observation| observation.action.clone()),
+                    potential_threat_ratio: potential.map(|observation| observation.threat_ratio),
+                    potential_void_ratio: potential.map(|observation| observation.void_ratio),
                 }
             })
             .collect::<Vec<_>>();
@@ -159,6 +174,29 @@ impl MatchEngine {
             Possession::Home => "home",
             Possession::Away => "away",
         };
+        let potential_field = self
+            .observations
+            .potential_field
+            .iter()
+            .map(|observation| {
+                let position =
+                    Court::ft_to_norm_with_geometry(observation.position, self.config.rules.court);
+                let target =
+                    Court::ft_to_norm_with_geometry(observation.target, self.config.rules.court);
+                PotentialFieldSample {
+                    x: position.x,
+                    y: position.y,
+                    target_x: target.x,
+                    target_y: target.y,
+                    pressure: (observation.threat_ratio + observation.void_ratio).clamp(0.0, 1.0),
+                    drive_x: observation.drive.x / self.config.rules.court.width_ft,
+                    drive_y: observation.drive.y / self.config.rules.court.height_ft,
+                    action: observation.action.clone(),
+                    team: observation.team.clone(),
+                    player_id: observation.player_id.clone(),
+                }
+            })
+            .collect();
         let frame = RenderFrame {
             t: (self.clock.current_time * 100.0).round() / 100.0,
             t_game: (self.clock.game_clock * 10.0).round() / 10.0,
@@ -197,6 +235,7 @@ impl MatchEngine {
             intensity: self.journal.current_intensity.clone(),
             rules: frame_rules_from_game_rules(&self.config.rules),
             stream_projection: "full".to_string(),
+            potential_field,
             debug: self.observations.last_decision_trace.clone(),
         };
 

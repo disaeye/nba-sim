@@ -21,6 +21,11 @@ fn base_player(id: &str, team: &str, x: f32, y: f32, on_court: bool) -> RenderPl
         target_y: None,
         facing_x: None,
         facing_y: None,
+        potential_target_x: None,
+        potential_target_y: None,
+        potential_action: None,
+        potential_threat_ratio: None,
+        potential_void_ratio: None,
     }
 }
 
@@ -73,6 +78,7 @@ fn base_tick(players: Vec<RenderPlayer>, ball: RenderBall) -> StreamTick {
             debug: None,
             rules: nba_protocol::FrameRules::default(),
             stream_projection: "full".to_string(),
+            potential_field: vec![],
         },
         tactical_set: "Test".to_string(),
         game_clock: 720.0,

@@ -132,6 +132,12 @@ impl MatchEngine {
             away_targets = off_targets;
             TacticalPlanner::bind_targets(&mut home_targets, &home_roster);
         }
+        let defending_targets = if self.flow.possession == Possession::Home {
+            &away_targets
+        } else {
+            &home_targets
+        };
+        self.capture_potential_field_observations(defending_targets);
         // 取为 owned String，避免与后续 `&mut self` 调用（接球人估计）冲突。
         let active_driver_id = match &self.ball.ball_state {
             BallTrajectoryKind::Drive { driver_id, .. } => Some(driver_id.clone()),
@@ -335,6 +341,39 @@ impl MatchEngine {
                     &target.morale,
                 );
             }
+        }
+    }
+
+    fn capture_potential_field_observations(
+        &mut self,
+        defending_targets: &[nba_decision::tactics::TargetAssignment],
+    ) {
+        self.observations.potential_field.clear();
+        for assignment in defending_targets {
+            let Some(potential) = assignment.potential_field.as_ref() else {
+                continue;
+            };
+            let Some(player_id) = assignment.player_id.as_deref() else {
+                continue;
+            };
+            let Some(player) = self.systems.physics.get_player(player_id) else {
+                continue;
+            };
+            if !player.on_court {
+                continue;
+            }
+            self.observations
+                .potential_field
+                .push(super::state::PotentialFieldObservation {
+                    player_id: player.id.clone(),
+                    team: player.team.clone(),
+                    position: player.pos_ft,
+                    target: potential.target_pos,
+                    drive: potential.drive,
+                    action: potential.action.to_string(),
+                    threat_ratio: potential.threat_ratio,
+                    void_ratio: potential.void_ratio,
+                });
         }
     }
 }
