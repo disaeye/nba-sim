@@ -188,7 +188,7 @@ impl MatchEngine {
                     y: position.y,
                     target_x: target.x,
                     target_y: target.y,
-                    pressure: (observation.threat_ratio + observation.void_ratio).clamp(0.0, 1.0),
+                    pressure: observation.threat_ratio + observation.void_ratio,
                     drive_x: observation.drive.x / self.config.rules.court.width_ft,
                     drive_y: observation.drive.y / self.config.rules.court.height_ft,
                     action: observation.action.clone(),
