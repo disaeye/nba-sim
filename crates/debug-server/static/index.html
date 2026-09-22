@@ -74,7 +74,7 @@
             <span class="court-overlay-dot"></span>
             势能场
           </button>
-          <span class="court-overlay-hint">色带：防守压力 · 箭头：平衡方向</span>
+          <span class="court-overlay-hint">全场空间势能控制图层 · 箭头：平衡方向</span>
         </div>
 
         <!-- 浮动动态岛标签 (Floating Event Pill) -->
@@ -170,14 +170,14 @@
       </div>
       <div class="sheet-body">
         <div class="setting-item">
-          <label for="seedInput">随机数种子 (Seed)</label>
+          <label for="seedInput">随机数种子</label>
           <div class="input-with-actions">
             <input id="seedInput" type="number" value="42">
             <button id="randomSeedBtn" class="btn-secondary-sm">🎲 随机</button>
           </div>
         </div>
         <div class="setting-item">
-          <label>比赛尺度 (Scope)</label>
+          <label>模拟范围</label>
           <div class="scope-chip-selector">
             <button class="scope-chip active" data-scope="5p">5 回合</button>
             <button class="scope-chip" data-scope="1p">单回合</button>
@@ -188,7 +188,7 @@
         <div class="setting-item">
           <label>导入本地模拟数据</label>
           <input id="fileInput" type="file" accept=".ndjson" style="display:none">
-          <button id="uploadTriggerBtn" class="btn-outline-block">📂 选择 .ndjson 轨迹文件</button>
+          <button id="uploadTriggerBtn" class="btn-outline-block">📂 选择轨迹数据文件 (.ndjson)</button>
         </div>
       </div>
       <div class="sheet-footer">
@@ -236,6 +236,6 @@
     <button id="copyFrameButton"></button>
   </div>
 
-  <script type="module" src="/app.js?v=20260922_potential_field_v3"></script>
+  <script type="module" src="/app.js?v=20260922_potential_field_v4"></script>
 </body>
 </html>

@@ -613,7 +613,7 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       沿用 intercept_* 参数），高吊传受摸高门控；
 //   校准：乱战出手增多使三分 make_probability 0.308→0.294，基准
 //   0.34→0.36 回调（3P% 中位 31.0）；ORB% 0.474→0.294（真实 0.245）。
-const GOLDEN_SEED42_2000: u64 = 0xb3685f078e05bfc9;
+const GOLDEN_SEED42_2000: u64 = 0xee0429df2bfdde79;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

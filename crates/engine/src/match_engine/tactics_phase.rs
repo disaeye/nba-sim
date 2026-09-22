@@ -238,9 +238,15 @@ impl MatchEngine {
                     continue;
                 }
 
-                // If tactical assignment is setting a high screen, initialize a ScreenSet action window
+                // If tactical assignment is setting a high screen, initialize a ScreenSet action window.
+                // 仅在已确立持球人时进入定点掩护，避免在争球或者无持球人阶段产生原地停摆。
+                let has_carrier = matches!(
+                    &self.ball.ball_state,
+                    BallTrajectoryKind::Held { .. } | BallTrajectoryKind::InboundReady { .. }
+                );
                 if target.action == "SET_HIGH_SCREEN"
                     && !self.observations.active_windows.contains_key(&player_id)
+                    && has_carrier
                 {
                     self.observations.active_windows.insert(
                         player_id.clone(),
@@ -291,22 +297,46 @@ impl MatchEngine {
                         .unwrap_or(99.0);
                     let is_tipoff_jumper = matches!(&self.ball.ball_state, BallTrajectoryKind::LooseBall { z, .. } if *z > 0.5)
                         && (player_id == home_jumper || player_id == away_jumper);
-                    // ## 地板球追逐不受距离限制（round-17 活锁修复）
-                    //
-                    // 原实现的 `cur_dist <= 25.0` 硬半径在球停于空档区时失效：
-                    // 实测 seed 6，罚球后松球停在 (85.6, 29.0)，最近球员
-                    // 59.1 ft——无人满足 25 ft 条件 → 全场站桩 247 秒直到节末
-                    // （POSSESSION_DURATION_BOUNDS Hard: 258.4s > 40s）。
-                    //
-                    // 第一性原理：活球是场上**唯一完全可观测**的对象（不是
-                    // 任何人的私有信息），地板上躺着一颗活球时，「去抢球」
-                    // 压倒一切战术站位——真实篮球里所有近处球员都会扑向球。
-                    // 篮板追逐（RimRebound 的落点预判）保留 25 ft 半径；
-                    // 松球（LooseBall）无条件追逐。
                     let is_live_loose_ball =
                         matches!(self.ball.ball_state, BallTrajectoryKind::LooseBall { .. });
-                    if (is_live_loose_ball || cur_dist <= 25.0) && !is_tipoff_jumper {
-                        (reb_spot, 16.0, "REBOUND_CRASH".to_string())
+
+                    // 规则与空间驱动的分工机制：
+                    // 1. 若为松球，主客双方各由离球最近的争抢代表奔赴球点，
+                    //    处于近身拦截半径内的球员也可参与争抢；
+                    // 2. 其余非争抢球员保持战术空间展开或者防守回退站位；
+                    // 3. 速度由规则上限与战术系数计算，不使用内置固定常量。
+                    let is_primary_chaser = if is_live_loose_ball && !is_tipoff_jumper {
+                        let player_team = self
+                            .systems
+                            .physics
+                            .get_player(&player_id)
+                            .map(|p| p.team.clone())
+                            .unwrap_or_default();
+                        let is_closest_on_team = self
+                            .systems
+                            .physics
+                            .get_players()
+                            .values()
+                            .filter(|p| p.on_court && p.team == player_team)
+                            .min_by(|a, b| {
+                                (a.pos_ft - reb_spot)
+                                    .length()
+                                    .partial_cmp(&(b.pos_ft - reb_spot).length())
+                                    .unwrap_or(std::cmp::Ordering::Equal)
+                            })
+                            .map(|p| p.id == player_id)
+                            .unwrap_or(false);
+                        is_closest_on_team || cur_dist <= self.config.rules.intercept_lane_radius_ft
+                    } else {
+                        cur_dist <= 25.0
+                    };
+
+                    if is_primary_chaser && !is_tipoff_jumper {
+                        let chase_speed = target.speed.max(
+                            self.config.rules.max_player_speed_ftps
+                                * self.config.rules.tactics.carrier_speed_ratio,
+                        );
+                        (reb_spot, chase_speed, "REBOUND_CRASH".to_string())
                     } else {
                         (target.target_pos, target.speed, target.action)
                     }

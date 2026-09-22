@@ -175,8 +175,15 @@
     PHASE_TRANSITION: "战术流转",
     PASS: "传球配合",
     PASS_RECEIVED: "接球就绪",
+    PASS_DROPPED: "传球脱手",
+    BALL_POKED_LOOSE: "防守破坏球权",
+    LOOSE_BALL_SECURED: "控制活球",
     SHOT_RELEASE: "投篮出手",
     SCORE: "进球得分",
+    DRIVE_SCORE: "突破上篮得分",
+    DRIVE_MISS: "突破终结未中",
+    DRIVE_STOPPED: "突破被阻截",
+    SHOT_MADE: "投篮命中",
     SHOT_MISS: "投篮打铁",
     REBOUND: "争抢篮板",
     STEAL: "防守抢断",
@@ -187,9 +194,125 @@
     POSSESSION_SUMMARY: "回合总结",
     TURNOVER: "进攻失误",
     BLOCK: "盖帽封盖",
+    FREE_THROW_MADE: "罚球命中",
+    FREE_THROW_MISSED: "罚球未中",
+    INBOUND_PASS: "发球入界",
+    CONTROL_TRANSFER: "球权争夺",
   };
   function getEventNameZh(name) {
     return EVENT_NAME_ZH[name] || name;
+  }
+
+  const ACTION_ZH = {
+    SPOT_UP_3PT: "定点三分",
+    HighScreenRoll: "高位挡拆顺下",
+    DRIVE_OFF_SCREEN: "借掩护突破",
+    PERIMETER_CUT: "外线空切",
+    SET_HIGH_SCREEN: "设立高位掩护",
+    ROLL_TO_RIM: "顺下攻筐",
+    ROTATE_RIM_HELP: "轮转护筐",
+    X_OUT_CLOSEOUT: "交叉扑防",
+    HELP_SIDE_SHELL: "弱侧协防",
+    ON_BALL_CONTEST: "持球紧逼",
+    DROP_CONTAIN: "沉退遏制",
+    HEDGE_AND_RECOVER: "延误返位",
+    SWITCH_ASSIGNMENT: "对位换防",
+    LOOSE_BALL_RECOVERY: "拼抢活球",
+    REBOUND_CRASH: "冲抢篮板",
+    BOXOUT: "卡位保护",
+    SetPosition: "站位就绪",
+    TripleThreat: "三威胁准备",
+    PostUp: "低位背打",
+    JumpShot: "跳投出手",
+    HookShot: "勾手投篮",
+    Layup: "突破上篮",
+    Dunk: "大力扣篮",
+    Floater: "骑马射箭抛投",
+    Bench: "替补席待命",
+    CatchAndShoot: "接球就投",
+    DriveAndKick: "突破分球",
+    Inbounder: "发球球员",
+  };
+  function getActionZh(action) {
+    return ACTION_ZH[action] || action || "—";
+  }
+
+  const SLOT_ZH = {
+    top: "弧顶持球位",
+    screener: "高位掩护位",
+    weak_wing: "弱侧侧翼",
+    strong_corner: "强侧底角",
+    weak_corner: "弱侧底角",
+    strong_wing: "强侧侧翼",
+    paint: "禁区油漆区",
+    rim: "篮下护筐位",
+    on_ball: "领防对位",
+    drop: "沉退防守位",
+    weak_low: "弱侧低位",
+    weak_high: "弱侧高位",
+  };
+  function getSlotZh(slot) {
+    return SLOT_ZH[slot] || slot || "自由战术位";
+  }
+
+  const PHASE_ZH = {
+    OpeningTip: "开场跳球",
+    HalfCourtOffense: "半场阵地战",
+    TransitionOffense: "快速转换进攻",
+    DeadBall: "停表阶段",
+    FreeThrow: "执行罚球",
+    Inbound: "边底线发球",
+    PeriodBreak: "节间休息",
+    GameOver: "比赛结束",
+  };
+  function getPhaseZh(phase) {
+    return PHASE_ZH[phase] || String(phase || "—").replaceAll("_", " ");
+  }
+
+  const TACTICS_ZH = {
+    HighScreenRoll: "高位挡拆体系",
+    DriveKick: "突破分球体系",
+    FiveOutMotion: "五外动态进攻体系",
+    HornsSet: "牛角战术体系",
+    TriangleOffense: "三角进攻体系",
+    DropCoverage: "沉退护筐防守体系",
+    SwitchAll: "无限换防体系",
+    HedgeAndRecover: "延误返位防守体系",
+  };
+  function getTacticsZh(tactics) {
+    return TACTICS_ZH[tactics] || tactics || "半场战术体系";
+  }
+
+  const MORALE_ZH = {
+    Neutral: "平稳",
+    Confident: "高昂",
+    Frustrated: "受挫",
+    Hot: "手感火热",
+    Cold: "手感低迷",
+  };
+  function getMoraleZh(morale) {
+    return MORALE_ZH[morale] || morale || "平稳";
+  }
+
+  const TEAM_ZH = {
+    north_city_hawks: "老鹰",
+    south_coast_celtics: "凯尔特人",
+    hawks: "老鹰",
+    celtics: "凯尔特人",
+    Hawks: "老鹰",
+    Celtics: "凯尔特人",
+    lakers: "湖人",
+    LAL: "湖人",
+    BOS: "凯尔特人",
+    home: "主队",
+    away: "客队",
+    HOME: "主队",
+    AWAY: "客队",
+  };
+  function getTeamNameZh(team) {
+    if (!team) return "—";
+    const name = typeof team === "string" ? team : (team.short_name || team.name || "");
+    return TEAM_ZH[name] || TEAM_ZH[team.id] || name || "—";
   }
 
   // 动态岛核心高光事件白名单（过滤 CONTACT_BUMP 等底层物理微小碰擦杂音）
@@ -736,7 +859,7 @@
       case "ACTION_WINDOW_SHIFT":
         return "动作窗口时钟推进";
       case "PHASE_TRANSITION":
-        return `阶段流转 ➔ ${tick.phase || ""}`;
+        return `阶段流转 ➔ ${getPhaseZh(tick.phase)}`;
       case "PASS":
         return "持球人传球转移出球";
       case "PASS_RECEIVED":
@@ -764,7 +887,7 @@
       case "POSSESSION_SUMMARY":
         return `回合结束总结 · #${tick.possession_id}`;
       default:
-        return tick.callout || tick.phase || "";
+        return tick.callout || getPhaseZh(tick.phase) || "";
     }
   }
 
@@ -928,15 +1051,11 @@
   function updateHud(tick) {
     const homeTeam = tick.home_team || {};
     const awayTeam = tick.away_team || {};
-    if ($("frameLabel")) $("frameLabel").textContent = `frame ${state.idx}`;
-    $("homeTeamName").textContent =
-      homeTeam.short_name || homeTeam.name || "HOME";
-    $("awayTeamName").textContent =
-      awayTeam.short_name || awayTeam.name || "AWAY";
-    $("tacticalSet").textContent = tick.tactical_set || "—";
-    $("phaseLabel").textContent = String(tick.phase || "—")
-      .replaceAll("_", " ")
-      .toUpperCase();
+    if ($("frameLabel")) $("frameLabel").textContent = `第 ${state.idx} 帧`;
+    $("homeTeamName").textContent = getTeamNameZh(homeTeam);
+    $("awayTeamName").textContent = getTeamNameZh(awayTeam);
+    $("tacticalSet").textContent = getTacticsZh(tick.tactical_set);
+    $("phaseLabel").textContent = getPhaseZh(tick.phase);
     const allNames = eventNames(tick);
     const highlightNames = allNames.filter((name) =>
       HIGHLIGHT_EVENTS.has(name),
@@ -985,9 +1104,10 @@
     const sc = finite(tick.shotClock);
     $("shotClock").textContent = one(tick.shotClock);
     $("shotClock").classList.toggle("urgent-shot-clock", sc <= 5 && sc > 0);
-    $("flowLabel").textContent = String(tick.game_flow || "LIVE")
-      .replaceAll("Ball", "")
-      .toUpperCase();
+    const flowText = String(tick.game_flow || "LIVE");
+    $("flowLabel").textContent = /Dead|Free|Quarter|Half|GameEnd/.test(flowText)
+      ? "鸣哨停表"
+      : "活球推进";
     $("foulsReadout").textContent =
       `${tick.team_fouls_home ?? 0} / ${tick.team_fouls_away ?? 0}`;
     $("freeThrows").textContent = String(tick.free_throws_remaining ?? 0);
@@ -1310,75 +1430,139 @@
 
   function drawPotentialField(ctx, tick, point, rules) {
     const samples = Array.isArray(tick.potential_field) ? tick.potential_field : [];
-    if (!samples.length) return;
+    const players = (tick.players || []).filter((p) => p.onCourt !== false);
+    if (!samples.length && !players.length) return;
+
     ctx.save();
     ctx.globalCompositeOperation = "source-over";
-    for (const sample of samples) {
-      const x = finite(sample.x) * rules.courtWidth;
-      const y = finite(sample.y) * rules.courtHeight;
-      const pressure = clamp(finite(sample.pressure), 0, 1);
-      const radius = 45 + pressure * 45;
-      const gradient = ctx.createRadialGradient(
-        point(x, y).x,
-        point(x, y).y,
-        0,
-        point(x, y).x,
-        point(x, y).y,
-        radius,
-      );
-      const hue = sample.team === "home" ? "0, 210, 255" : "255, 80, 146";
-      gradient.addColorStop(0, `rgba(${hue}, ${0.45 + pressure * 0.4})`);
-      gradient.addColorStop(0.6, `rgba(${hue}, ${0.2 + pressure * 0.25})`);
-      gradient.addColorStop(1, `rgba(${hue}, 0)`);
-      ctx.fillStyle = gradient;
-      const center = point(x, y);
-      ctx.beginPath();
-      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-      ctx.fill();
+
+    // 1. 全场网格连续势能曲面 (SkillCorner 全场场地控制与多体势能场)
+    // 物理球场尺寸: rules.courtWidth x rules.courtHeight (94 x 50 呎)
+    // 采用 2 呎 x 2 呎均匀网格平铺整个赛场
+    const stepFt = 2.0;
+    const nx = Math.ceil(rules.courtWidth / stepFt);
+    const ny = Math.ceil(rules.courtHeight / stepFt);
+    const sigma2 = 2 * 8.5 * 8.5; // 空间影响核方差
+
+    const homePlayers = [];
+    const awayPlayers = [];
+    for (const p of players) {
+      const px = finite(p.x) * rules.courtWidth;
+      const py = finite(p.y) * rules.courtHeight;
+      if (p.team === "home") homePlayers.push({ x: px, y: py });
+      else if (p.team === "away") awayPlayers.push({ x: px, y: py });
+    }
+
+    const solverSamples = samples.map((s) => ({
+      x: finite(s.x) * rules.courtWidth,
+      y: finite(s.y) * rules.courtHeight,
+      targetX: finite(s.target_x) * rules.courtWidth,
+      targetY: finite(s.target_y) * rules.courtHeight,
+      pressure: clamp(finite(s.pressure), 0, 1),
+      team: s.team,
+    }));
+
+    for (let ix = 0; ix < nx; ix++) {
+      const gx = ix * stepFt;
+      for (let iy = 0; iy < ny; iy++) {
+        const gy = iy * stepFt;
+
+        let uHome = 0;
+        for (const hp of homePlayers) {
+          const d2 = (gx - hp.x) * (gx - hp.x) + (gy - hp.y) * (gy - hp.y);
+          uHome += Math.exp(-d2 / sigma2);
+        }
+
+        let uAway = 0;
+        for (const ap of awayPlayers) {
+          const d2 = (gx - ap.x) * (gx - ap.x) + (gy - ap.y) * (gy - ap.y);
+          uAway += Math.exp(-d2 / sigma2);
+        }
+
+        for (const ss of solverSamples) {
+          const d2 = (gx - ss.x) * (gx - ss.x) + (gy - ss.y) * (gy - ss.y);
+          const weight = Math.exp(-d2 / (2 * 11 * 11)) * ss.pressure * 1.5;
+          if (ss.team === "home") uHome += weight;
+          else if (ss.team === "away") uAway += weight;
+        }
+
+        const total = uHome + uAway + 0.08;
+        const dominance = (uHome - uAway) / total;
+        const totalDensity = Math.min(1.0, uHome + uAway);
+
+        if (Math.abs(dominance) > 0.06) {
+          const cellPt = point(gx, gy);
+          const cellNext = point(gx + stepFt, gy + stepFt);
+          const w = cellNext.x - cellPt.x;
+          const h = cellNext.y - cellPt.y;
+
+          const alpha = Math.min(
+            0.32,
+            Math.abs(dominance) * 0.3 * (0.35 + totalDensity * 0.65),
+          );
+          if (dominance > 0) {
+            ctx.fillStyle = `rgba(0, 210, 255, ${alpha.toFixed(3)})`;
+          } else {
+            ctx.fillStyle = `rgba(255, 80, 146, ${alpha.toFixed(3)})`;
+          }
+          ctx.fillRect(cellPt.x, cellPt.y, w + 0.5, h + 0.5);
+        }
+      }
     }
     ctx.restore();
 
-    ctx.save();
-    ctx.lineCap = "round";
-    ctx.setLineDash([]);
-    for (const sample of samples) {
-      const start = point(
-        finite(sample.x) * rules.courtWidth,
-        finite(sample.y) * rules.courtHeight,
-      );
-      const driveX = (finite(sample.target_x) - finite(sample.x)) * rules.courtWidth;
-      const driveY = (finite(sample.target_y) - finite(sample.y)) * rules.courtHeight;
-      const magnitude = Math.hypot(driveX, driveY);
-      if (magnitude < 1) continue;
-      const length = clamp(14 + magnitude * 0.55, 14, 55);
-      const end = {
-        x: start.x + (driveX / magnitude) * length,
-        y: start.y + (driveY / magnitude) * length,
-      };
-      const color = sample.team === "home" ? "#00d2ff" : "#ff6dab";
-      ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.45 + clamp(finite(sample.pressure), 0, 1) * 0.5;
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.moveTo(start.x, start.y);
-      ctx.lineTo(end.x, end.y);
-      ctx.stroke();
-      const angle = Math.atan2(end.y - start.y, end.x - start.x);
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(end.x, end.y);
-      ctx.lineTo(
-        end.x - Math.cos(angle - 0.5) * 6,
-        end.y - Math.sin(angle - 0.5) * 6,
-      );
-      ctx.lineTo(
-        end.x - Math.cos(angle + 0.5) * 6,
-        end.y - Math.sin(angle + 0.5) * 6,
-      );
-      ctx.closePath();
-      ctx.fill();
+    // 2. 弱侧防守平衡驱动向量与目标锚点
+    if (solverSamples.length) {
+      ctx.save();
+      ctx.lineCap = "round";
+      ctx.setLineDash([]);
+      for (const sample of solverSamples) {
+        const start = point(sample.x, sample.y);
+        const driveX = sample.targetX - sample.x;
+        const driveY = sample.targetY - sample.y;
+        const magnitude = Math.hypot(driveX, driveY);
+        if (magnitude < 1) continue;
+        const length = clamp(14 + magnitude * 0.55, 14, 55);
+        const end = {
+          x: start.x + (driveX / magnitude) * length,
+          y: start.y + (driveY / magnitude) * length,
+        };
+        const color = sample.team === "home" ? "#00d2ff" : "#ff6dab";
+
+        // 驱动箭头主体
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.55 + sample.pressure * 0.45;
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+
+        // 箭头尖端
+        const angle = Math.atan2(end.y - start.y, end.x - start.x);
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(end.x, end.y);
+        ctx.lineTo(
+          end.x - Math.cos(angle - 0.5) * 6,
+          end.y - Math.sin(angle - 0.5) * 6,
+        );
+        ctx.lineTo(
+          end.x - Math.cos(angle + 0.5) * 6,
+          end.y - Math.sin(angle + 0.5) * 6,
+        );
+        ctx.closePath();
+        ctx.fill();
+
+        // 平衡目标锚点
+        const targetPt = point(sample.targetX, sample.targetY);
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(targetPt.x, targetPt.y, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
     }
-    ctx.restore();
   }
 
   function drawHoop(ctx, hoopX, hoopY, right) {
@@ -1993,12 +2177,12 @@
         tooltip.style.top = `${Math.max(4, (y / canvas.height) * rect.height - 35)}px`;
       }
       tooltip.replaceChildren(
-        el("strong", null, `${player.id} · #${player.jersey}`),
-        el("span", null, `${player.action} · ${player.slot}`),
+        el("strong", null, `${getTeamNameZh(player.team)} · ${player.id} · #${player.jersey}`),
+        el("span", null, `${getActionZh(player.action)} · ${getSlotZh(player.slot)}`),
         el(
           "span",
           null,
-          `stamina ${one(player.stm)}/${one(player.stmMax)} · ${player.morale}`,
+          `体力 ${one(player.stm)}/${one(player.stmMax)} · 士气 ${getMoraleZh(player.morale)}`,
         ),
       );
     }
