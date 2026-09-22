@@ -1312,12 +1312,12 @@
     const samples = Array.isArray(tick.potential_field) ? tick.potential_field : [];
     if (!samples.length) return;
     ctx.save();
-    ctx.globalCompositeOperation = "multiply";
+    ctx.globalCompositeOperation = "source-over";
     for (const sample of samples) {
       const x = finite(sample.x) * rules.courtWidth;
       const y = finite(sample.y) * rules.courtHeight;
       const pressure = clamp(finite(sample.pressure), 0, 1);
-      const radius = 30 + pressure * 34;
+      const radius = 45 + pressure * 45;
       const gradient = ctx.createRadialGradient(
         point(x, y).x,
         point(x, y).y,
@@ -1327,7 +1327,8 @@
         radius,
       );
       const hue = sample.team === "home" ? "0, 210, 255" : "255, 80, 146";
-      gradient.addColorStop(0, `rgba(${hue}, ${0.18 + pressure * 0.22})`);
+      gradient.addColorStop(0, `rgba(${hue}, ${0.45 + pressure * 0.4})`);
+      gradient.addColorStop(0.6, `rgba(${hue}, ${0.2 + pressure * 0.25})`);
       gradient.addColorStop(1, `rgba(${hue}, 0)`);
       ctx.fillStyle = gradient;
       const center = point(x, y);
