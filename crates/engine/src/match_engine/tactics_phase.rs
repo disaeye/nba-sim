@@ -332,10 +332,13 @@ impl MatchEngine {
                     };
 
                     if is_primary_chaser && !is_tipoff_jumper {
-                        let chase_speed = target.speed.max(
-                            self.config.rules.max_player_speed_ftps
-                                * self.config.rules.tactics.carrier_speed_ratio,
-                        );
+                        let chase_base = self.config.rules.max_player_speed_ftps
+                            * self.config.rules.tactics.rebound_chase_speed_ratio;
+                        let chase_speed = if is_live_loose_ball {
+                            target.speed.max(chase_base)
+                        } else {
+                            chase_base
+                        };
                         (reb_spot, chase_speed, "REBOUND_CRASH".to_string())
                     } else {
                         (target.target_pos, target.speed, target.action)

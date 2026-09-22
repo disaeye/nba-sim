@@ -313,6 +313,7 @@ impl Default for TacticalRules {
             screener_speed_ratio: 0.64,
             support_speed_ratio: 0.45,
             defender_speed_ratio: 0.73,
+            rebound_chase_speed_ratio: 0.73,
             receive_approach_speed_ratio: 0.9,
             receive_stop_margin_ft: 2.5,
             receive_min_approach_speed_ratio: 0.25,
@@ -864,6 +865,7 @@ impl GameRules {
             || !(0.0..=1.0).contains(&self.tactics.screener_speed_ratio)
             || !(0.0..=1.0).contains(&self.tactics.support_speed_ratio)
             || !(0.0..=1.0).contains(&self.tactics.defender_speed_ratio)
+            || !(0.0..=1.0).contains(&self.tactics.rebound_chase_speed_ratio)
             || !(0.0..=1.0).contains(&self.tactics.transition_defense_threshold_ratio)
             || !(0.0..=1.0).contains(&self.tactics.transition_sprint_ratio)
             || self.tactics.screen_hold_separation_ft <= 0.0

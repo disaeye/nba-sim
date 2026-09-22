@@ -191,12 +191,18 @@ fn intercept_risk_factor_reaches_behaviour() {
 
 /// 扩展判据（ADR-016）：距离折扣只改篮板争夺者约 13.5% 的有效距离，
 /// 处在边缘可见区；seed 扩到 6、判据 ≥3/6。
+///
+/// 饥和量级扰动（本文件 morale 先例：放大优于归零）：归零只改争夺者
+/// 约 13.5%–24% 的有效距离，其可见性随轨迹扰动翻转（实测同一接线下
+/// 冲抢速度 16.0 与 16.06 分别得到通过与失败），测的是采样运气。
+/// 4.0 把有效距离杠杆抬到 90%–160%（高额卡位若直接压到 0），
+/// 使本测试测的是消费链本身。
 #[test]
 fn rebound_boxout_distance_discount_reaches_behaviour() {
     assert_rule_coefficient_reaches_behaviour_extended(
         "resolve.rebound.boxout_distance_discount",
         |r| {
-            r.resolve.rebound.boxout_distance_discount = 0.0;
+            r.resolve.rebound.boxout_distance_discount = 4.0;
         },
     );
 }
@@ -208,12 +214,14 @@ fn rebound_boxout_distance_discount_reaches_behaviour() {
 /// 补篮倾向又拉近进攻方距离）。合并扰动会让两个都已接线的系数显得没接线。
 ///
 /// 扩展判据（ADR-016）：处在边缘可见区，seed 扩到 6、判据 ≥3/6。
+/// 归零扰动的可见性随轨迹扰动翻转（同 boxout 条注释），改用饱和量级 4.0
+/// （本文件 morale 先例：放大优于归零）。
 #[test]
 fn rebound_putback_distance_discount_reaches_behaviour() {
     assert_rule_coefficient_reaches_behaviour_extended(
         "resolve.rebound.putback_distance_discount",
         |r| {
-            r.resolve.rebound.putback_distance_discount = 0.0;
+            r.resolve.rebound.putback_distance_discount = 4.0;
         },
     );
 }

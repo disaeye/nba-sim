@@ -650,6 +650,11 @@ pub struct TacticalRules {
     pub screener_speed_ratio: f32,
     pub support_speed_ratio: f32,
     pub defender_speed_ratio: f32,
+    /// 冲抢篮板与拼抢活球时的冲刺速度占球员速度上限的比例。
+    ///
+    /// 历史上引擎在战术层内联固定数值，现在收编进规则通道（charter C1），
+    /// 可经规则档案覆盖与校准。
+    pub rebound_chase_speed_ratio: f32,
     /// 接球人向冻结点收敛的速度上限倍率（round-6 审计修复）。
     ///
     /// ## 为什么需要它
