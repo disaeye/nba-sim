@@ -106,15 +106,13 @@ fn resolve_drive_geometry(
         if along <= 0.0 || along >= drive_dist || lateral > lane_width + minimum_separation {
             continue;
         }
-        let is_primary = primary_defender
-            .as_ref()
-            .is_none_or(|(current, distance)| {
-                (along, lateral, candidate.id.as_str()).partial_cmp(&(
-                    distance.0,
-                    distance.1,
-                    current.id.as_str(),
-                )) == Some(std::cmp::Ordering::Less)
-            });
+        let is_primary = primary_defender.as_ref().is_none_or(|(current, distance)| {
+            (along, lateral, candidate.id.as_str()).partial_cmp(&(
+                distance.0,
+                distance.1,
+                current.id.as_str(),
+            )) == Some(std::cmp::Ordering::Less)
+        });
         if is_primary {
             primary_defender = Some((candidate, (along, lateral)));
         }
@@ -288,8 +286,7 @@ fn drive_path_margin(check: &DrivePathCheck<'_>) -> Option<f32> {
         }) {
             let initial_fraction =
                 clamp_unit((defender.pos_ft - start).dot(vector) / length_squared);
-            let arrival_time = (elapsed
-                + length * initial_fraction / check.drive_speed)
+            let arrival_time = (elapsed + length * initial_fraction / check.drive_speed)
                 .clamp(f32::from(0u8), check.duration);
             let max_speed = non_negative(defender.max_speed_ftps);
             let velocity_speed = defender.vel_ft.length();
@@ -303,9 +300,7 @@ fn drive_path_margin(check: &DrivePathCheck<'_>) -> Option<f32> {
             let closest = start + vector * fraction;
             let defender_can_close = fraction > f32::from(0u8) && fraction < f32::from(1u8);
             let distance = (predicted_pos - closest).length();
-            let stamina = clamp_unit(
-                defender.stamina / defender.max_stamina.max(f32::EPSILON),
-            );
+            let stamina = clamp_unit(defender.stamina / defender.max_stamina.max(f32::EPSILON));
             let defensive_skill = drive_contact_skill(
                 defender.attributes.defense_perimeter,
                 defender.attributes.agility,
@@ -313,20 +308,16 @@ fn drive_path_margin(check: &DrivePathCheck<'_>) -> Option<f32> {
                 check.policy,
             );
             // 防守人改变移动方向需要启动时间；只计算启动后的加速度可达距离。
-            let response_time = non_negative(
-                arrival_time - check.policy.defender_response_delay_seconds,
-            );
-            let acceleration_reach = (0.5
-                * non_negative(defender.max_accel_ftps2)
-                * response_time
-                * response_time)
-                .min(non_negative(defender.max_speed_ftps) * response_time)
-                * (check.policy.reach_base_factor + defensive_skill * check.policy.reach_skill_gain)
-                * stamina;
+            let response_time =
+                non_negative(arrival_time - check.policy.defender_response_delay_seconds);
+            let acceleration_reach =
+                (0.5 * non_negative(defender.max_accel_ftps2) * response_time * response_time)
+                    .min(non_negative(defender.max_speed_ftps) * response_time)
+                    * (check.policy.reach_base_factor
+                        + defensive_skill * check.policy.reach_skill_gain)
+                    * stamina;
             let contact_margin = if defender_can_close {
-                distance
-                    - check.minimum_separation
-                    - acceleration_reach
+                distance - check.minimum_separation - acceleration_reach
                     + (check.contact_skill - defensive_skill) * check.policy.contact_skill_scale
             } else {
                 f32::INFINITY

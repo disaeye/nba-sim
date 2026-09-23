@@ -1,5 +1,6 @@
 use crate::action_window::{ActionPhase, ActionType};
 use crate::flow::PhaseType;
+use crate::Possession;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -224,6 +225,13 @@ pub enum GameEvent {
         reason: String,
         phase: String,
     },
+    /// 选板器激活一个 Play（tactics.md §2.2.4）：`possession` 标注激活方。
+    /// 这是可观测性事实：决策 trace 与帧投影的 `active_play_id` 与本事件
+    /// 同 tick 对应，消费方（UI/评判器）据此重建 Play 的激活/冷却时间线。
+    PlayActivated {
+        play_id: String,
+        possession: Possession,
+    },
 }
 
 /// 回合终结的显式归因（dev 方案 §3.2 D0.1）。
@@ -357,6 +365,7 @@ impl GameEvent {
             GameEvent::Substitution { .. } => "SUBSTITUTION",
             GameEvent::JumpBallTriggered { .. } => "JUMP_BALL_TRIGGERED",
             GameEvent::PlacementApplied { .. } => "PLACEMENT_APPLIED",
+            GameEvent::PlayActivated { .. } => "PLAY_ACTIVATED",
         }
     }
 }

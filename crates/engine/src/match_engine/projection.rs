@@ -305,6 +305,20 @@ pub(crate) fn convert_trace(trace: &nba_decision::pipeline::DecisionTrace) -> De
     DecisionDebug {
         player: trace.player_id.clone(),
         chosen: trace.chosen_label.clone(),
+        active_play_id: trace.active_play_id.clone(),
+        play_adjustments: trace
+            .play_adjustments
+            .iter()
+            .map(|adjustment| nba_protocol::DebugPlayAdjustment {
+                label: adjustment.label.clone(),
+                action_family: adjustment.action_family.as_str().to_string(),
+                constraint_feasible: adjustment.constraint_feasible,
+                bonus: adjustment.bonus,
+                soft_penalty: adjustment.soft_penalty,
+                hard_inhibited: adjustment.hard_inhibited,
+                adjusted_utility: adjustment.adjusted_utility,
+            })
+            .collect(),
         utilities: trace
             .utilities
             .iter()

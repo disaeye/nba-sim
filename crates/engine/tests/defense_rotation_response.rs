@@ -247,7 +247,9 @@ fn observe_corner_space(drive: &DriveWindow, frame: &RenderFrame) -> Option<f32>
     frame
         .players
         .iter()
-        .filter(|player| player.on_court && player.team != drive.driver_team && !player.team.is_empty())
+        .filter(|player| {
+            player.on_court && player.team != drive.driver_team && !player.team.is_empty()
+        })
         .map(|player| (player_position(player, frame) - corner_pos).length())
         .min_by(f32::total_cmp)
 }

@@ -203,4 +203,38 @@ impl MatchEngine {
         let baseline = Court::nearest_boundary_with_geometry(pos.0, self.config.rules.court);
         self.start_inbound_transition(baseline, pos);
     }
+
+    /// 当前激活的进攻 Play（只读，仅测试）：集成测试用它断言 Play 生命周期。
+    #[doc(hidden)]
+    pub fn active_play_id_for_test(&self, possession: nba_domain::Possession) -> Option<String> {
+        let active = match possession {
+            nba_domain::Possession::Home => &self.observations.home_active_play,
+            nba_domain::Possession::Away => &self.observations.away_active_play,
+        };
+        active.as_ref().map(|play| play.spec.id.clone())
+    }
+
+    /// 主队激活簿记条目（只读，仅测试）：冷却/激活阶段的断言入口。
+    #[doc(hidden)]
+    pub fn home_play_book_entries_for_test(&self) -> Vec<nba_decision::PlayBookEntry> {
+        self.observations.home_play_activation_book.entries()
+    }
+
+    /// 最近一次决策调试投影（只读，仅测试）：同 tick Play 效用断言入口。
+    #[doc(hidden)]
+    pub fn last_decision_trace_for_test(&self) -> Option<&nba_protocol::DecisionDebug> {
+        self.observations.last_decision_trace.as_deref()
+    }
+
+    /// 当前球权（只读，仅测试）：集成测试驱动回合翻转断言。
+    #[doc(hidden)]
+    pub fn possession_for_test(&self) -> nba_domain::Possession {
+        self.possession()
+    }
+
+    /// 当前持球人（只读，仅测试）：测试用它把球态装配为 Held。
+    #[doc(hidden)]
+    pub fn carrier_id_for_test(&self) -> String {
+        self.carrier_id()
+    }
 }

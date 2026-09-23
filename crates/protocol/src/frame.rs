@@ -102,6 +102,28 @@ pub struct DecisionDebug {
     /// 硬约束/阶段约束产生的执行意图。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enforcement: Vec<String>,
+    /// 本决策同 tick 激活的 Play 档案标识（选板语义：每队至多一个激活）。
+    /// 无激活 Play 时省略，保持既有流的向后兼容。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_play_id: Option<String>,
+    /// 激活 Play 对各候选动作施加的偏好/抑制效果（含效用重算值）。
+    /// 无 Play 调整时省略，保持既有流的向后兼容。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub play_adjustments: Vec<DebugPlayAdjustment>,
+}
+
+/// 单个候选动作经 Play 调整后的协议投影。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DebugPlayAdjustment {
+    pub label: String,
+    pub action_family: String,
+    pub constraint_feasible: bool,
+    pub bonus: f32,
+    pub soft_penalty: f32,
+    pub hard_inhibited: bool,
+    /// 应用 Play 调整后的效用；硬抑制或硬约束剔除的候选无效用。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adjusted_utility: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

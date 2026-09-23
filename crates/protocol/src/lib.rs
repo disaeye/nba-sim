@@ -7,7 +7,7 @@
 pub mod frame;
 
 pub use frame::{
-    DebugFlag, DebugProb, DebugUtility, DecisionDebug, FrameEvent, FrameRules,
+    DebugFlag, DebugPlayAdjustment, DebugProb, DebugUtility, DecisionDebug, FrameEvent, FrameRules,
     PotentialFieldSample, RenderBall, RenderFrame, RenderPlayer, RenderScore, RenderTeam,
     StreamTick,
 };
