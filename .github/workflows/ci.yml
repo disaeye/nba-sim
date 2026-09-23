@@ -221,6 +221,8 @@ jobs:
             command: cargo test -p nba-decision --test play_selector
           - name: play-actions
             command: cargo test -p nba-decision --test play_actions
+          - name: play-decision
+            command: cargo test -p nba-decision --test play_decision
           - name: playbook-setup
             command: cargo test -p nba-engine --test playbook_setup
           - name: action-phase-projection

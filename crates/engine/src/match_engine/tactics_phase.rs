@@ -434,13 +434,15 @@ impl MatchEngine {
                 .systems
                 .physics
                 .get_player(player_id)
-                .unwrap_or_else(|| panic!("play slot `{}` player `{player_id}` is absent", action.slot));
+                .unwrap_or_else(|| {
+                    panic!("play slot `{}` player `{player_id}` is absent", action.slot)
+                });
             let carrier_id = self.active_carrier_or_focus_id();
-                let carrier = self
-                    .systems
-                    .physics
-                    .get_player(&carrier_id)
-                    .unwrap_or_else(|| panic!("play carrier `{carrier_id}` is absent"));
+            let carrier = self
+                .systems
+                .physics
+                .get_player(&carrier_id)
+                .unwrap_or_else(|| panic!("play carrier `{carrier_id}` is absent"));
             let opponent = self
                 .systems
                 .physics
@@ -450,7 +452,9 @@ impl MatchEngine {
                 .min_by(|left, right| {
                     let left_dist = (left.pos_ft - actor.pos_ft).length();
                     let right_dist = (right.pos_ft - actor.pos_ft).length();
-                    left_dist.total_cmp(&right_dist).then(left.id.cmp(&right.id))
+                    left_dist
+                        .total_cmp(&right_dist)
+                        .then(left.id.cmp(&right.id))
                 });
             let is_home = actor.team == "home";
             let context = nba_decision::play_actions::VerbContext {
@@ -463,11 +467,13 @@ impl MatchEngine {
                 three_point_distance_ft: self.config.rules.league.three_point_distance_ft,
             };
             let resolution = nba_decision::play_actions::resolve_verb(action.verb, &context);
-            let next_target = nba_decision::play_actions::resolve_verb_target(action.verb, &context);
-            let verb_progress =
-                (self.observations.possession_ticks as f32 * self.config.rules.tick_seconds)
-                    .min(self.config.rules.tactics.action_duration_seconds);
-            let should_start_window = verb_progress >= self.config.rules.tactics.action_duration_seconds
+            let next_target =
+                nba_decision::play_actions::resolve_verb_target(action.verb, &context);
+            let verb_progress = (self.observations.possession_ticks as f32
+                * self.config.rules.tick_seconds)
+                .min(self.config.rules.tactics.action_duration_seconds);
+            let should_start_window = verb_progress
+                >= self.config.rules.tactics.action_duration_seconds
                 && !self.observations.active_windows.contains_key(player_id);
             let target_speed = target.speed;
             let target_slot = target.slot.clone();
@@ -484,41 +490,42 @@ impl MatchEngine {
             );
             if should_start_window {
                 if let Some(action_type) = resolution.window_action {
-                let window = match action_type {
-                    nba_domain::action_window::ActionType::JumpShot => {
-                        Some(nba_domain::action_window::ActionTimeWindow::new_jump_shot(
-                            player_id,
-                            current_t,
-                            &self.config.rules,
-                        ))
-                    }
-                    nba_domain::action_window::ActionType::PassRelease => {
-                        Some(nba_domain::action_window::ActionTimeWindow::new_pass(
-                            player_id,
-                            current_t,
-                            &self.config.rules,
-                        ))
-                    }
-                    nba_domain::action_window::ActionType::ScreenSet => {
-                        Some(nba_domain::action_window::ActionTimeWindow::new_screen_set(
-                            player_id,
-                            current_t,
-                            &self.config.rules,
-                        ))
-                    }
-                    nba_domain::action_window::ActionType::Layup
-                    | nba_domain::action_window::ActionType::Dunk
-                    | nba_domain::action_window::ActionType::CloseoutContest
-                    | nba_domain::action_window::ActionType::ReboundJump => {
-                        panic!(
-                            "Play verb `{}` resolved unsupported action window {action_type:?}",
-                            action.verb.as_str()
-                        )
-                    }
-                };
-                self.observations
-                    .active_windows
-                    .insert(player_id.to_string(), window.expect("play verb resolved a window"));
+                    let window = match action_type {
+                        nba_domain::action_window::ActionType::JumpShot => {
+                            Some(nba_domain::action_window::ActionTimeWindow::new_jump_shot(
+                                player_id,
+                                current_t,
+                                &self.config.rules,
+                            ))
+                        }
+                        nba_domain::action_window::ActionType::PassRelease => {
+                            Some(nba_domain::action_window::ActionTimeWindow::new_pass(
+                                player_id,
+                                current_t,
+                                &self.config.rules,
+                            ))
+                        }
+                        nba_domain::action_window::ActionType::ScreenSet => {
+                            Some(nba_domain::action_window::ActionTimeWindow::new_screen_set(
+                                player_id,
+                                current_t,
+                                &self.config.rules,
+                            ))
+                        }
+                        nba_domain::action_window::ActionType::Layup
+                        | nba_domain::action_window::ActionType::Dunk
+                        | nba_domain::action_window::ActionType::CloseoutContest
+                        | nba_domain::action_window::ActionType::ReboundJump => {
+                            panic!(
+                                "Play verb `{}` resolved unsupported action window {action_type:?}",
+                                action.verb.as_str()
+                            )
+                        }
+                    };
+                    self.observations.active_windows.insert(
+                        player_id.to_string(),
+                        window.expect("play verb resolved a window"),
+                    );
                 }
             }
         }

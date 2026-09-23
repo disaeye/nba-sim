@@ -126,6 +126,18 @@ fi
 
 python3 scripts/check_disk_budget.py --report || true
 
+# 3.5 静态守卫门（与 CI guards matrix 同源）：文档引用、源文件行数、
+# 内联行为常数棘轮。任何一项失败使本次运行变红。
+if [ "$STATUS" -eq 0 ]; then
+    python3 scripts/check_docs.py || STATUS=$?
+fi
+if [ "$STATUS" -eq 0 ]; then
+    python3 scripts/check_max_source_lines.py || STATUS=$?
+fi
+if [ "$STATUS" -eq 0 ]; then
+    python3 scripts/check_inline_constants.py || STATUS=$?
+fi
+
 # 4. 性能基准带（quality.md §4.1）：fixture 冻结的吞吐带由守卫比对。
 # 计入退出码：接在测试后面但 `|| true` 会让它等于没接——性能退化与
 # 行为退化同属回归，失败必须使本次运行变红。测量基于本机 release 构建，

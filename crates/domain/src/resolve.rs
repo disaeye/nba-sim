@@ -286,7 +286,10 @@ impl DriveGeometryPolicy {
             self.contact_skill_agility_weight,
             self.contact_skill_strength_weight,
         ];
-        if weights.iter().any(|weight| !weight.is_finite() || *weight < 0.0) {
+        if weights
+            .iter()
+            .any(|weight| !weight.is_finite() || *weight < 0.0)
+        {
             return Err(
                 "resolve.drive_geometry contact skill weights must be finite and non-negative"
                     .to_string(),
