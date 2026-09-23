@@ -97,47 +97,48 @@ impl MatchEngine {
             })
         } else {
             match &self.ball.ball_state {
-            BallTrajectoryKind::Shot {
-                shooter_id,
-                from_pos,
-                start_time,
-                duration,
-                is_made,
-                is_three,
-                ..
-            } => {
-                let tau = ((current_t - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
-                let _ = tau;
-                // 只在**刚进入 `Execution` 阶段**的那一个 tick 上掷一次。
-                //
-                // 掷骰是“这一发会不会被封”的一次判定，不是逐 tick 重复的抽样：
-                // 若每个飞行 tick 都掷，0.95s 的飞行有 24 次机会，单次概率会被
-                // 放大成几乎必然（实测逐 tick 掷得到 36.6% 的出手被封）。
-                //
-                // 触发点是**阶段刚变为 `Execution`**，而不是窗口起点：
-                // 后者的 `interference_start` 位于合球阶段（`Preparation`），
-                // 那个窗口属于切球（Strip），与封盖是两个不同的判定口径。
-                let window = self.observations.active_windows.get(shooter_id);
-                let just_entered_execution = window
-                    .map(|w| {
-                        let elapsed = current_t - w.start_time;
-                        let prev = elapsed - self.config.rules.tick_seconds;
-                        elapsed >= w.prep_duration && prev < w.prep_duration
+                BallTrajectoryKind::Shot {
+                    shooter_id,
+                    from_pos,
+                    start_time,
+                    duration,
+                    is_made,
+                    is_three,
+                    ..
+                } => {
+                    let tau =
+                        ((current_t - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
+                    let _ = tau;
+                    // 只在**刚进入 `Execution` 阶段**的那一个 tick 上掷一次。
+                    //
+                    // 掷骰是“这一发会不会被封”的一次判定，不是逐 tick 重复的抽样：
+                    // 若每个飞行 tick 都掷，0.95s 的飞行有 24 次机会，单次概率会被
+                    // 放大成几乎必然（实测逐 tick 掷得到 36.6% 的出手被封）。
+                    //
+                    // 触发点是**阶段刚变为 `Execution`**，而不是窗口起点：
+                    // 后者的 `interference_start` 位于合球阶段（`Preparation`），
+                    // 那个窗口属于切球（Strip），与封盖是两个不同的判定口径。
+                    let window = self.observations.active_windows.get(shooter_id);
+                    let just_entered_execution = window
+                        .map(|w| {
+                            let elapsed = current_t - w.start_time;
+                            let prev = elapsed - self.config.rules.tick_seconds;
+                            elapsed >= w.prep_duration && prev < w.prep_duration
+                        })
+                        .unwrap_or(false);
+                    just_entered_execution.then(|| {
+                        (
+                            shooter_id.clone(),
+                            *from_pos,
+                            *start_time,
+                            *duration,
+                            *is_made,
+                            *is_three,
+                        )
                     })
-                    .unwrap_or(false);
-                just_entered_execution.then(|| {
-                    (
-                        shooter_id.clone(),
-                        *from_pos,
-                        *start_time,
-                        *duration,
-                        *is_made,
-                        *is_three,
-                    )
-                })
+                }
+                _ => None,
             }
-            _ => None,
-        }
         };
         if let Some((shooter_id, from_pos, _start_time, _duration, is_made, is_three)) =
             block_candidate

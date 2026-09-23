@@ -41,7 +41,8 @@ impl MatchEngine {
                     // plan.md §6.2：JumpShot 窗口跨过 Execution→FollowThrough
                     // 边界即真正的 Release（合球起跳完成、球脱手）。此刻
                     // 消费挂起的冻结裁定，把球态转为 Shot 并发布事件。
-                    let release_ready = previous == nba_domain::action_window::ActionPhase::Execution
+                    let release_ready = previous
+                        == nba_domain::action_window::ActionPhase::Execution
                         && current == nba_domain::action_window::ActionPhase::FollowThrough
                         && window.action_type == nba_domain::action_window::ActionType::JumpShot;
                     if release_ready {

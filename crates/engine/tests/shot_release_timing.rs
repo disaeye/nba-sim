@@ -27,10 +27,7 @@ fn engine_with_carrier(seed: u64, rules: GameRules) -> (MatchEngine, String) {
     let carrier = loop {
         let _ = engine.step();
         let carrier = engine.carrier_id_for_test();
-        if matches!(
-            engine.ball_state(),
-            BallTrajectoryKind::Held { .. }
-        ) {
+        if matches!(engine.ball_state(), BallTrajectoryKind::Held { .. }) {
             break carrier;
         }
         if engine.is_finished() {
@@ -114,7 +111,10 @@ fn pending_release_blocks_new_on_ball_decisions() {
     for _ in 0..6u64 {
         let stream = engine.step();
         assert!(
-            matches!(engine.ball_state(), BallTrajectoryKind::Held { .. } | BallTrajectoryKind::Shot { .. }),
+            matches!(
+                engine.ball_state(),
+                BallTrajectoryKind::Held { .. } | BallTrajectoryKind::Shot { .. }
+            ),
             "pending window must keep the ball with the shooter, got {:?}",
             stream.frame.ball.status
         );
