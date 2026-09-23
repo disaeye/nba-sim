@@ -9,9 +9,18 @@
       "base_offset_x": 29.0,
       "base_offset_y": 25.0,
       "requirements": [
-        { "attribute": "BallHandling", "weight": 1.0 },
-        { "attribute": "DecisionIq", "weight": 0.8 },
-        { "attribute": "Passing", "weight": 0.6 }
+        {
+          "attribute": "BallHandling",
+          "weight": 1.0
+        },
+        {
+          "attribute": "DecisionIq",
+          "weight": 0.8
+        },
+        {
+          "attribute": "Passing",
+          "weight": 0.6
+        }
       ],
       "behaviour": "DribbleTop"
     },
@@ -21,8 +30,14 @@
       "base_offset_x": 24.0,
       "base_offset_y": 11.0,
       "requirements": [
-        { "attribute": "ShootingMid", "weight": 0.6 },
-        { "attribute": "OffBallSense", "weight": 0.8 }
+        {
+          "attribute": "ShootingMid",
+          "weight": 0.6
+        },
+        {
+          "attribute": "OffBallSense",
+          "weight": 0.8
+        }
       ],
       "behaviour": "PerimeterRelocate"
     },
@@ -32,10 +47,16 @@
       "base_offset_x": 24.0,
       "base_offset_y": 39.0,
       "requirements": [
-        { "attribute": "ShootingMid", "weight": 0.6 },
-        { "attribute": "OffBallSense", "weight": 0.8 }
+        {
+          "attribute": "ShootingMid",
+          "weight": 0.6
+        },
+        {
+          "attribute": "OffBallSense",
+          "weight": 0.8
+        }
       ],
-      "behaviour": "PerimeterRelocate"
+      "behaviour": "BackdoorCut"
     },
     {
       "id": "left_corner",
@@ -43,8 +64,14 @@
       "base_offset_x": 4.0,
       "base_offset_y": 2.5,
       "requirements": [
-        { "attribute": "ShootingThree", "weight": 1.0 },
-        { "attribute": "OffBallSense", "weight": 0.3 }
+        {
+          "attribute": "ShootingThree",
+          "weight": 1.0
+        },
+        {
+          "attribute": "OffBallSense",
+          "weight": 0.3
+        }
       ],
       "behaviour": "SpotUp"
     },
@@ -54,10 +81,16 @@
       "base_offset_x": 4.0,
       "base_offset_y": 47.5,
       "requirements": [
-        { "attribute": "ShootingThree", "weight": 1.0 },
-        { "attribute": "OffBallSense", "weight": 0.3 }
+        {
+          "attribute": "ShootingThree",
+          "weight": 1.0
+        },
+        {
+          "attribute": "OffBallSense",
+          "weight": 0.3
+        }
       ],
-      "behaviour": "SpotUp"
+      "behaviour": "DipToRim"
     }
   ]
 }

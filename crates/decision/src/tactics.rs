@@ -707,6 +707,28 @@ impl TacticalPlanner {
                             slot.behaviour.action_label(initiating),
                         )
                     }
+                    nba_domain::SlotBehaviour::BackdoorCut => {
+                        // G6a 链 1：弱侧背切。执行期从翼位沿「篮筐方向」切入，
+                        // 切入深度随进攻进度推进（action_t 0..1），目标是篮下
+                        // 接球攻框位置；发起期保持原翼位站位（与 SpotUp 同）。
+                        let cut = (hoop - base) * action_t * policy.backdoor_cut_depth_ratio;
+                        (
+                            base + cut,
+                            policy.carrier_speed_ratio,
+                            slot.behaviour.action_label(initiating),
+                        )
+                    }
+                    nba_domain::SlotBehaviour::DipToRim => {
+                        // G6a 链 4：下沉禁区。底角/翼位球员沿「篮筐方向」下沉
+                        // 到篮下边缘争抢内线落位，为持球突破提供传球终点与
+                        // 篮板位置；发起期保持原站位拉开空间。
+                        let dip = (hoop - base) * action_t * policy.dip_to_rim_depth_ratio;
+                        (
+                            base + dip,
+                            policy.support_speed_ratio,
+                            slot.behaviour.action_label(initiating),
+                        )
+                    }
                 };
                 let _ = is_carrier;
                 TargetAssignment {

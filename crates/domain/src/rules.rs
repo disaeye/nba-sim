@@ -336,6 +336,8 @@ impl Default for TacticalRules {
             transition_finish_bonus: 0.35,
             screen_hold_separation_ft: 6.0,
             screen_roll_separation_ft: 8.0,
+            backdoor_cut_depth_ratio: 0.85,
+            dip_to_rim_depth_ratio: 0.7,
             drop_coverage_depth_ft: 14.0,
             defense: DefenseRules::default(),
         }

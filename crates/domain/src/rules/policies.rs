@@ -780,6 +780,12 @@ pub struct TacticalRules {
     pub screen_hold_separation_ft: f32,
     /// 掩护人顺下触发的持球人纵向摆脱距离（ft）：持球人越过掩护人此距离后触发顺下
     pub screen_roll_separation_ft: f32,
+    /// 弱侧背切的切入深度比例（G6a 链 1）：翼位到篮筐向量按此比例乘以
+    /// 进攻进度，决定无球切入的终点深度。
+    pub backdoor_cut_depth_ratio: f32,
+    /// 下沉禁区的深度比例（G6a 链 4）：底角/翼位沿篮筐方向按此比例
+    /// 乘以进攻进度，决定外线人下沉到篮下区域的落位深度。
+    pub dip_to_rim_depth_ratio: f32,
     /// 沉退防守中锋纵深距筐距离（ft）
     pub drop_coverage_depth_ft: f32,
     /// 防守方案对比赛的影响系数（round-6 审计修复）。

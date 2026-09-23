@@ -145,6 +145,12 @@ pub enum SlotBehaviour {
     PerimeterRelocate,
     /// 设立掩护后向篮筐滚动。
     HighScreenRoll,
+    /// 弱侧背切：沿底线方向向篮筐空切（G6a 链 1，无球切入接球攻框的
+    /// 前提——人不到篮下，接球后也没有攻框位置）。
+    BackdoorCut,
+    /// 下沉禁区：外线球员沿边线下沉到篮下区域争抢内线落位
+    /// （G6a 链 4，五外站位不再把全部无球人固定在外线）。
+    DipToRim,
 }
 
 impl SlotBehaviour {
@@ -168,6 +174,20 @@ impl SlotBehaviour {
                     "SET_HIGH_SCREEN"
                 } else {
                     "ROLL_TO_RIM"
+                }
+            }
+            Self::BackdoorCut => {
+                if initiating {
+                    "SPOT_UP_3PT"
+                } else {
+                    "BACKDOOR_CUT"
+                }
+            }
+            Self::DipToRim => {
+                if initiating {
+                    "SPOT_UP_3PT"
+                } else {
+                    "DIP_TO_RIM"
                 }
             }
         }
