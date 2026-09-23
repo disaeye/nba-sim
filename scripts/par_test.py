@@ -43,6 +43,7 @@ TIER_SELECTORS = {
         ("target", "nba-decision::play_decision"),
         ("target", "nba-engine::playbook_setup"),
         ("target", "nba-engine::action_phase_projection"),
+        ("target", "nba-engine::shot_release_timing"),
         ("target", "nba-engine::defense_rotation_response"),
     ),
     "tier3": (
@@ -67,6 +68,7 @@ TIER_REQUIRED_TARGETS = {
         "nba-decision::play_decision",
         "nba-engine::playbook_setup",
         "nba-engine::action_phase_projection",
+        "nba-engine::shot_release_timing",
         "nba-engine::nba_engine",
         "nba-engine::defense_rotation_response",
     },
