@@ -247,4 +247,3 @@ impl MatchEngine {
             .map(|pending| pending.shooter_id.clone())
     }
 }
-}
