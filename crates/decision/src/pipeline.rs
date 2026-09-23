@@ -579,6 +579,23 @@ impl DecisionSystem {
                     })
                     .unwrap_or(0.5);
                 let shoot_preference = tendency.map(|t| t.shoot_frequency).unwrap_or(0.5);
+                // G6a 链 2：前场篮板后的近筐二次攻框（putback）。判定条件是
+                // 「本回合已有出手 && 持球人在篮下」——这正是抢到前场板的
+                // 空间事实。效用加成由 `effective_putback_bias`（属性曲线，
+                // finishing 驱动）提供，使高 finishing 内线更倾向直接补篮
+                // 而非运出重新组织。规则字段 `rebound.putback_distance_discount`
+                // 同时把有效距离折扣用于距离因子，保持同一语义通道。
+                let putback_bonus =
+                    if ctx.possession_had_shot && dist_to_hoop <= ctx.rules.rim_shot_distance_ft {
+                        attributes
+                            .map(|a| {
+                                nba_domain::effective_putback_bias(ctx.rules, a)
+                                    * ctx.rules.resolve.rebound.putback_distance_discount
+                            })
+                            .unwrap_or(0.0)
+                    } else {
+                        0.0
+                    };
                 let range_bias = if *is_three {
                     centered(style.three_point_emphasis) * coach.three_point_bias
                 } else if dist_to_hoop <= ctx.rules.rim_shot_distance_ft {
@@ -616,6 +633,7 @@ impl DecisionSystem {
                     * (1.0 + (shooting_skill - 0.5) * self.weights.tendency_weight)
                     + (shoot_preference - 0.5) * self.weights.tendency_weight
                     + range_bias * self.weights.team_style_weight
+                    + putback_bonus
                     - early_shot_cost
             }
             CandidateAction::Drive {

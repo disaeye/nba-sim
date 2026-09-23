@@ -226,6 +226,9 @@ pub struct ConstraintContext<'a> {
     pub rules: &'a GameRules,
     /// Team-level style traits supplied by the match setup.
     pub team_traits: &'a HashMap<String, nba_domain::TeamTraits>,
+    /// 本回合内已发生过出手（前场篮板语境的判据，G6a 链 2）：
+    /// 持球人抢到前场板后近筐的二次攻框（putback）效用由此开启。
+    pub possession_had_shot: bool,
 }
 
 impl<'a> ConstraintContext<'a> {

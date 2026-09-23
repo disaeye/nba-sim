@@ -123,6 +123,7 @@ fn decision_probabilities(
         backcourt_elapsed: f32::from(0u8),
         rules: &rules,
         team_traits: &team_traits,
+        possession_had_shot: false,
     };
     let play = evaluate_active_play(spec, play_context);
     let decision = OnBallDecisionContext {

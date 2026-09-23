@@ -213,8 +213,8 @@ fn rebound_boxout_distance_discount_reaches_behaviour() {
 /// 而两者同时归零只改变 2/4——两个效应部分相互抵消（卡位让防守方更快到球，
 /// 补篮倾向又拉近进攻方距离）。合并扰动会让两个都已接线的系数显得没接线。
 ///
-/// 扩展判据（ADR-016）：处在边缘可见区，seed 扩到 6、判据 ≥3/6。
-/// 归零扰动的可见性随轨迹扰动翻转（同 boxout 条注释），改用饱和量级 4.0
+/// G6a 链 2 接线后（decide 效用消费 putback_distance_discount）可见性恢复：
+/// 扩展判据（ADR-016）保持 6 seed、判据 ≥3/6；饱和量级 4.0
 /// （本文件 morale 先例：放大优于归零）。
 #[test]
 fn rebound_putback_distance_discount_reaches_behaviour() {

@@ -89,6 +89,7 @@ pub fn base_ctx<'a>(physics: &'a nba_physics::PhysicsWorld) -> ConstraintContext
         backcourt_elapsed: 0.0,
         rules,
         team_traits: &TEAM_TRAITS,
+        possession_had_shot: false,
     }
 }
 
