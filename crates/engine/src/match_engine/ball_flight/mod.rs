@@ -148,6 +148,13 @@ impl MatchEngine {
             {
                 outcome.new_ball_state = Some(block.next_state);
                 outcome.blocked_shot_event = Some(block.event);
+                // 封盖松球的回合终端语义（G6a 排障补记）：封盖把球打成
+                // 松球，之后被收下或弹出界都是「投篮被剥夺后球权丢失」，
+                // 回合终端为 TurnoverLooseBall。不显式设置时，出界路径的
+                // 缺省 TurnoverViolation 会在无 VIOLATION 事实的窗口里
+                // 产生 TURNOVER_ATTRIBUTION Hard（seed43 possession 132 实测）。
+                self.ball.pending_loose_ball_terminal =
+                    Some(nba_domain::PossessionEndCause::TurnoverLooseBall);
                 // 被封盖的出手永远不再 Release：球已转松球，窗口照旧推进
                 // 到 FollowThrough（封盖是身体接触，出手者动作不中断），
                 // 但冻结的裁定载荷必须同步作废，否则 Exec→Follow 边界会

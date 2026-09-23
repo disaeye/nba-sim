@@ -61,6 +61,12 @@ struct PossessionWindow {
     /// 收下、或弹出界。此时没有 `LOOSE_BALL_SECURED`，却仍是一次合法的
     /// 带球丢球——原判据把两者混为一谈，导致真事实被判 Hard defect。
     poked_loose: usize,
+    /// 封盖事实数（`BLOCKED_SHOT`，G6a 排障补记）：封盖把球打成松球，
+    /// 之后球被收下或弹出界都是「投篮被剥夺」的结果事实。回合以
+    /// `TurnoverLooseBall` 终止时窗口内存在封盖同样是合法原因——
+    /// 原判据只认 poke/secure，封盖后直接出界的回合被误报 Hard
+    /// （seed 43 possession 132 实测）。
+    blocked_shots: usize,
     shot_releases: Vec<(String, bool, f32)>,
     made_arrivals: usize,
     ft_made: usize,
@@ -266,6 +272,12 @@ fn evaluate_possessions(ticks: &[StreamTick], fixture: &ReferenceDistributions) 
                 "BALL_POKED_LOOSE" => {
                     // 持球被切掉：带球丢球的**原因事实**（round-14）。
                     window.poked_loose += 1;
+                }
+                "BLOCKED_SHOT" => {
+                    // 封盖事实（G6a 排障补记）：封盖是「投篮被剥夺」的原因事实，
+                    // 封盖后的松球被收下或出界都以 TurnoverLooseBall 结算时，
+                    // 本事实就是窗口内的合法原因。
+                    window.blocked_shots += 1;
                 }
                 "REBOUND" => {
                     // 进攻篮板会延长同一回合（重置进攻时钟），因此它是回合时长
@@ -502,9 +514,12 @@ fn evaluate_possession_window(
             nba_domain::PossessionEndCause::TurnoverPassDropped => window.drops > 0,
             nba_domain::PossessionEndCause::TurnoverViolation => window.violations > 0,
             nba_domain::PossessionEndCause::TurnoverLooseBall => {
-                // 原因事实：带球被切掉（`BALL_POKED_LOOSE`），或松球被某方
-                // 收下后球权易主。两者都是合法归因，缺一才算 Hard defect。
-                window.poked_loose > 0 || !window.loose_ball_secures.is_empty()
+                // 原因事实：带球被切掉（`BALL_POKED_LOOSE`）、封盖打落
+                // （`BLOCKED_SHOT`，G6a 排障补记），或松球被某方收下后
+                // 球权易主。三者任一都是合法归因，缺一才算 Hard defect。
+                window.poked_loose > 0
+                    || window.blocked_shots > 0
+                    || !window.loose_ball_secures.is_empty()
             }
             _ => {
                 !window.steals.is_empty()
