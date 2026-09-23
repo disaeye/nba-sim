@@ -173,6 +173,25 @@ fn shot_release_uses_configured_skill_and_spacing_inputs() {
         .expect("shooter")
         .pos_ft = Vec2::new(40.0, 25.0);
     engine.execute_shot_for_test("H_01", Vec2::new(40.0, 25.0), false);
+    // D25 出手时序：裁定冻结在入口，球态仍 Held；窗口跨过 prep+exec
+    // 边界（Release）才转 Shot。推进到 Release 后断言冻结的命中结果。
+    let mut released = false;
+    for _ in 0..40 {
+        let tick = engine.step();
+        if tick
+            .frame
+            .event_log
+            .iter()
+            .any(|event| event.kind == "SHOT_RELEASE")
+        {
+            released = true;
+            break;
+        }
+    }
+    assert!(
+        released,
+        "frozen shot must release within 40 ticks (prep+exec = 0.5s)"
+    );
     assert!(matches!(
         engine.ball_state(),
         nba_physics::BallTrajectoryKind::Shot { is_made: true, .. }
