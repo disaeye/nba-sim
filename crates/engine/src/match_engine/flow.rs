@@ -183,6 +183,10 @@ impl MatchEngine {
             self.clock.period_break_elapsed = 0.0;
             self.set_game_flow(GameFlowState::LiveBall);
             self.transition_phase(SubPhase::Initiation);
+            // 节间开场必须显式重建球的可取性（architecture §3 球态规范）：
+            // 节末结算可能把在飞的球留成停球状态，若直接以活球流程运行，
+            // 会出现「流程活球、球不可取」的停滞（seed 14 第 4 节开场实测）。
+            self.start_period_ball_program();
             self.clock.last_decision_time = -self.config.rules.decision_interval_seconds;
             self.journal.current_event = Some("PERIOD_START".to_string());
             self.journal.current_callout = Some(format!("第{}节开始", self.clock.period));
@@ -272,6 +276,8 @@ impl MatchEngine {
         // 重置下一个回合的上下文
         self.possession_ctx
             .begin(self.clock.game_clock, self.clock.current_time);
+        self.observations.possession_ticks = 0;
+        self.end_active_play(self.flow.possession);
         self.journal.current_callout = None;
     }
 

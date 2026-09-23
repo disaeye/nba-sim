@@ -613,7 +613,60 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       沿用 intercept_* 参数），高吊传受摸高门控；
 //   校准：乱战出手增多使三分 make_probability 0.308→0.294，基准
 //   0.34→0.36 回调（3P% 中位 31.0）；ORB% 0.474→0.294（真实 0.245）。
-const GOLDEN_SEED42_2000: u64 = 0xee0429df2bfdde79;
+// v73 0xee0429df2bfdde79 - 2026-09-22 节间开场球权程序与后场计时控球谓词：
+//   （seed 14 实测缺陷的结构性修复。两处行为变更都不在黄金窗口内，
+//   哈希实测不变；统计与账本影响由 16-seed 矩阵与 stats_baseline 承担。）
+//   (a) 节间开场（sync_game_flow）新增 start_period_ball_program：
+//       球已由在场球员持有时原样保留；节末结算出的停球/松球态
+//       改为按保留的进攻方进入显式发球程序。修复「停球状态与活球
+//       流程并存」：此前 seed 14 第 4 节开场 201 tick 球不可取，
+//       后场计时照走，第 8 秒判出无责任人的伪后场违例
+//       （TURNOVER_ACTOR_CONSISTENCY Hard + TURNOVER_CONSERVATION）。
+//   (b) 后场计时（phases.rs）与决策约束（eval_backcourt_clock_world）
+//       同步增加控球谓词：松球/篮板/停球/投篮飞行不累加、不判违例。
+//   (c) LooseBall/RimRebound 增加 last_touch_player 载荷（P1：状态是
+//       唯一事实源），Dead 的载荷经松球链路继承；current_turnover_player_id
+//       对松球态优先读载荷，旁路字段 last_passer_id 仅作旧态回退。新增
+//       L1 不变量 LIVE_FLOW_DEAD_BALL 与 TURNOVER_ACTOR_MISSING。
+//   补登说明：该常量由 fe5e233（松球争抢者限制 + SET_HIGH_SCREEN 持球门）
+//   重冻结但当时未登记条目，本条补登并覆盖当前值。
+// v74 0xa8604ed4e3f389e5 - 2026-09-23 help_blend 接入势能场锚点权重（plan_play.md #22）：
+//   (a) 变更通道：`GameRules.tactics.defense` 的 help_blend 四字段
+//       （`help_hoop_weight_base` / `help_priority_tilt_gain` /
+//       `help_hoop_weight_min` / `help_hoop_weight_max`，数据源
+//       `data/defense/schemes.json` 顶层 help_blend 块）。此前该组参数
+//       已解析但零消费（「声明了但无效」的隐形参数）。
+//   (b) 行为变化：`solve_equilibrium` 下沉锚点方向「朝篮筐」权重由固定
+//       0.75 改为随防守方案变化的合成权重 `clamp(base + tilt_gain ×
+//       help_priority, min, max)`（`help_anchor_hoop_weight`），朝持球人
+//       权重取互补，和恒为 1。六个方案生效权重 0.82-0.95，默认方案
+//       （def_man_conservative，help_priority=0.5）为 0.90。协防优先级
+//       高的方案锚点重心向篮筐偏移，低的向外线持球人偏移；与
+//       `help_priority` 的协防语义同向协同，与 ADR-019 裁定第 2 条的
+//       行为通道原则一致（规则数据经效用/目标通道生效，无代码分支）。
+//   (c) `PotentialFieldRules.sag_anchor_hoop_weight`（固定 0.75）按 charter
+//       C1 收编进同组 help_blend 字段，默认值从 schemes.json 数据通道派生，
+//       锚点权重从此完全由方案数据决定。字段名与数值的变化属结构性接线，
+//       与 #24 体能衰减通道（stamina_multiplier）在同一窗口内共同生效。
+//   (d) 本条按 plan_play.md 链 B 约定登记：#22 完成时追加；#21 滞回
+//       （无行为变更）与 #24 体能衰减（满体能路径中性）如触发行为变更
+//       由各自完成时另行登记。统计与账本影响由 #19 全局校准
+//       （stats_baseline + 16-seed 矩阵）承担。
+// v75 0xd4b502481b803de9 - 2026-09-23 D24 几何突破裁定 + Play 引擎接线（plan_play.md #18 / plan.md D24）：
+//   (a) 突破裁定从 `DriveResolution::resolve` 概率抽签改为几何接触评估：
+//       直线路径/绕行路径的可达性（`DriveGeometryPolicy`，规则通道
+//       `resolve.drive_geometry`）、防守人预计接触位置与攻防能力差异
+//       决定成败；终结命中与投篮犯规仍单独随机裁定。绕行时防守人
+//       进入恢复窗口，突破者目标改为绕行点，越过后切回攻框。
+//   (b) `DriveInitiated` 事件的 `target_pos` 与 Drive 球态的 `target_pos`
+//       携带实际运动目标（绕行时为绕行点），公共观察口径一致。
+//   (c) 制动/牵引后端：分离投影后的报告速度按包线截断，防止推挤
+//       位移跨 tick 自我累积；提案终点包线断言改为针对碰撞求解前的
+//       运动学终点。期望速度按规则制动力在停止距离内封顶。
+//   (d) Play 引擎接线：MatchSetup 主客 Playbook、决策相前的 Play 选择
+//       与同 tick 效用效果（`decide_on_ball_with_play`）、战术层的
+//       槽位动词目标与动作窗口、每回合结束的冷却/激活清理。
+const GOLDEN_SEED42_2000: u64 = 0xd4b502481b803de9;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

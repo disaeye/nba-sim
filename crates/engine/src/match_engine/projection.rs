@@ -121,6 +121,12 @@ impl MatchEngine {
                     action: p.action.clone(),
                     slot: p.slot.clone(),
                     morale: p.morale.clone(),
+                    action_phase: self
+                        .observations
+                        .active_windows
+                        .get(&p.id)
+                        .filter(|window| !window.is_finished(self.clock.current_time))
+                        .map(|window| format!("{:?}", window.phase)),
                     stm: (p.stamina * 10.0).round() / 10.0,
                     stm_max: p.max_stamina,
                     foul_count: p.foul_count,

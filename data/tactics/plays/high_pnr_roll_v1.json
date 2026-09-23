@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "high_pnr_roll_v1",
+  "name_zh": "高位挡拆顺下与传球",
+  "kind": "play",
+  "rules": [
+    {
+      "id": "roll_when_help_shades_off",
+      "when": [
+        { "predicate": "carrier_possed" },
+        { "predicate": "screen_established" },
+        { "predicate": "help_shading_off" }
+      ],
+      "then": { "verb": "ScreenRoll", "slot": "screener" },
+      "carrier_preferences": [
+        { "action_family": "Pass", "bonus": 0.3 }
+      ]
+    }
+  ],
+  "triggers": [
+    {
+      "when": [
+        { "predicate": "carrier_possed" },
+        { "predicate": "screen_established" },
+        { "predicate": "help_shading_off" }
+      ],
+      "window_seconds": 5.0,
+      "cooldown_seconds": 10.0
+    }
+  ]
+}

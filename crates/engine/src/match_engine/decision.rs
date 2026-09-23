@@ -12,6 +12,12 @@
 //! 其余字段借给决策系统时产生借用冲突；种子重放保证同种子逐 tick 一致（C4）。
 
 use nba_decision::pipeline::DecisionOutput;
+use nba_decision::play_actions::{build_selection_context, EngineWorldInputs};
+use nba_decision::{
+    evaluate_active_play, select, OnBallDecisionContext, PlayExecution, PlaySelectionContext,
+    StableFieldOutput,
+};
+use nba_domain::play::PlaySpec;
 use nba_domain::{GameFlowState, Possession, SubPhase};
 use nba_physics::ballistics::BallTrajectoryKind;
 use rand::SeedableRng;
@@ -20,6 +26,198 @@ use rand_chacha::ChaCha8Rng;
 use super::MatchEngine;
 
 impl MatchEngine {
+    fn active_play_specs(&self, possession: Possession) -> &[PlaySpec] {
+        match possession {
+            Possession::Home => &self.config.home_playbook,
+            Possession::Away => &self.config.away_playbook,
+        }
+    }
+
+    fn active_play_book_mut(
+        &mut self,
+        possession: Possession,
+    ) -> &mut nba_decision::PlayActivationBook {
+        match possession {
+            Possession::Home => &mut self.observations.home_play_activation_book,
+            Possession::Away => &mut self.observations.away_play_activation_book,
+        }
+    }
+
+    fn active_play_cooldowns_mut(
+        &mut self,
+        possession: Possession,
+    ) -> &mut std::collections::BTreeMap<String, u32> {
+        match possession {
+            Possession::Home => &mut self.observations.home_play_cooldowns,
+            Possession::Away => &mut self.observations.away_play_cooldowns,
+        }
+    }
+
+    fn active_play_mut(&mut self, possession: Possession) -> &mut Option<super::state::ActivePlay> {
+        match possession {
+            Possession::Home => &mut self.observations.home_active_play,
+            Possession::Away => &mut self.observations.away_active_play,
+        }
+    }
+
+    pub(crate) fn advance_active_play(&mut self) {
+        let home_cooldowns = self.observations.home_play_cooldowns.clone();
+        let away_cooldowns = self.observations.away_play_cooldowns.clone();
+        self.observations
+            .home_play_activation_book
+            .tick(&home_cooldowns);
+        self.observations
+            .away_play_activation_book
+            .tick(&away_cooldowns);
+        for (possession, active) in [
+            (Possession::Home, &mut self.observations.home_active_play),
+            (Possession::Away, &mut self.observations.away_active_play),
+        ] {
+            let entries = match possession {
+                Possession::Home => self.observations.home_play_activation_book.entries(),
+                Possession::Away => self.observations.away_play_activation_book.entries(),
+            };
+            let book_active = entries.iter().any(|entry| {
+                entry.phase == nba_decision::PlayBookPhase::Active
+                    && active
+                        .as_ref()
+                        .is_some_and(|play| play.spec.id == entry.play_id)
+            });
+            if !book_active {
+                *active = None;
+            }
+        }
+    }
+
+    pub(crate) fn end_active_play(&mut self, possession: Possession) {
+        let cooldowns = self.active_play_cooldowns_mut(possession).clone();
+        self.active_play_book_mut(possession)
+            .note_possession_end(&cooldowns);
+        *self.active_play_mut(possession) = None;
+        self.observations.possession_ticks = 0;
+    }
+
+    pub(crate) fn build_play_selection_context(
+        &self,
+        carrier_id: &str,
+    ) -> Option<PlaySelectionContext> {
+        let possession = self.flow.possession;
+        let carrier = self.systems.physics.get_player(carrier_id)?;
+        let hoop = self
+            .config
+            .rules
+            .court
+            .hoop_pos(possession == Possession::Home);
+        let roster = match possession {
+            Possession::Home => &self.config.home_roster_order,
+            Possession::Away => &self.config.away_roster_order,
+        };
+        let teammates: Vec<_> = roster
+            .iter()
+            .filter_map(|id| self.systems.physics.get_player(id))
+            .filter(|player| player.on_court && player.team == carrier.team)
+            .collect();
+        let off_positions: Vec<_> = teammates.iter().map(|player| player.pos_ft).collect();
+        let off_velocities: Vec<_> = teammates.iter().map(|player| player.vel_ft).collect();
+        // 换人边界：旧持球人可能刚被换下（on_court=false）而球权尚未转移，
+        // 他不在在场队友列表内。本 tick 跳过 Play 评估，待球权转移后恢复。
+        let carrier_idx = teammates
+            .iter()
+            .position(|player| player.id == carrier_id)?;
+        let stable_field = self
+            .observations
+            .field_hysteresis
+            .iter()
+            .filter(|(player_id, _)| {
+                self.systems
+                    .physics
+                    .get_player(player_id)
+                    .is_some_and(|player| player.team != carrier.team)
+            })
+            .fold(
+                StableFieldOutput {
+                    help_pulled_off: false,
+                    weak_side_vacant: false,
+                },
+                |mut output, (_, state)| {
+                    let stable = state.snapshot();
+                    output.help_pulled_off |= stable.help_pulled_off;
+                    output.weak_side_vacant |= stable.weak_side_vacant;
+                    output
+                },
+            );
+        let inputs = EngineWorldInputs {
+            carrier_idx,
+            off_positions,
+            off_velocities,
+            hoop_pos: hoop,
+            court: self.config.rules.court,
+            shot_clock_seconds: self.clock.shot_clock,
+            carrier_possed: matches!(
+                &self.ball.ball_state,
+                BallTrajectoryKind::Held { carrier_id: holder } if holder == carrier_id
+            ),
+            halfcourt: self.clock.sub_phase == SubPhase::ActionExecution
+                && self.flow.game_flow == GameFlowState::LiveBall,
+            possession_ticks: self.observations.possession_ticks,
+            stable_field,
+        };
+        Some(build_selection_context(&inputs, &self.config.rules))
+    }
+
+    fn choose_active_play(&mut self, carrier_id: &str) -> Option<PlayExecution> {
+        if self.flow.game_flow != GameFlowState::LiveBall
+            || self.clock.sub_phase != SubPhase::ActionExecution
+        {
+            return None;
+        }
+        let possession = self.flow.possession;
+        let selection_context = self.build_play_selection_context(carrier_id)?;
+        if self.active_play_mut(possession).is_none() {
+            let playbook = self.active_play_specs(possession).to_vec();
+            let mut rng = std::mem::replace(&mut self.systems.rng, ChaCha8Rng::seed_from_u64(0));
+            let activation = {
+                let book = self.active_play_book_mut(possession);
+                select(&playbook, &selection_context, book, &mut rng)
+            };
+            self.systems.rng = rng;
+            if let Some(activation) = activation {
+                self.active_play_cooldowns_mut(possession)
+                    .insert(activation.play_id.clone(), activation.cooldown_ticks);
+                *self.active_play_mut(possession) = Some(super::state::ActivePlay {
+                    spec: activation.spec,
+                });
+            }
+        }
+        self.active_play_mut(possession)
+            .as_ref()
+            .map(|play| evaluate_active_play(&play.spec, &selection_context))
+    }
+
+    fn decide_with_active_play(
+        &mut self,
+        carrier_id: &str,
+        stamina: f32,
+        morale_bias: f32,
+        rng: &mut ChaCha8Rng,
+    ) -> Option<DecisionOutput> {
+        // 先完成需要 &mut self 的 Play 选择，再构建只读决策上下文，
+        // 避免不可变借用与可变借用交叠。
+        let play = self.choose_active_play(carrier_id);
+        let ctx = self.constraint_ctx();
+        let decision = OnBallDecisionContext {
+            constraint_context: &ctx,
+            carrier_id,
+            stamina,
+            morale_bias,
+            coach: &self.systems.coach,
+            active_play: play.as_ref(),
+        };
+        self.systems
+            .decision
+            .decide_on_ball_with_play(&decision, rng)
+    }
+
     pub(crate) fn decision_phase(&mut self, current_t: f32) -> Option<DecisionOutput> {
         // Phase state machine: inbound decisions are evaluated only during the
         // inbound phase; live-ball decisions use the same registry pipeline.
@@ -45,15 +243,9 @@ impl MatchEngine {
                         let morale_bias = self.morale_bias_for(&carrier);
                         let mut rng =
                             std::mem::replace(&mut self.systems.rng, ChaCha8Rng::seed_from_u64(0));
-                        let ctx = self.constraint_ctx();
-                        decision_output = self.systems.decision.decide_on_ball(
-                            &ctx,
-                            &carrier,
-                            stamina,
-                            morale_bias,
-                            &self.systems.coach,
-                            &mut rng,
-                        );
+                        let outcome =
+                            self.decide_with_active_play(&carrier, stamina, morale_bias, &mut rng);
+                        decision_output = outcome;
                         self.systems.rng = rng;
                     }
                 } else {
@@ -100,15 +292,9 @@ impl MatchEngine {
                     let morale_bias = self.morale_bias_for(&carrier);
                     let mut rng =
                         std::mem::replace(&mut self.systems.rng, ChaCha8Rng::seed_from_u64(0));
-                    let ctx = self.constraint_ctx();
-                    decision_output = self.systems.decision.decide_on_ball(
-                        &ctx,
-                        &carrier,
-                        stamina,
-                        morale_bias,
-                        &self.systems.coach,
-                        &mut rng,
-                    );
+                    let outcome =
+                        self.decide_with_active_play(&carrier, stamina, morale_bias, &mut rng);
+                    decision_output = outcome;
                     self.systems.rng = rng;
                 }
             }

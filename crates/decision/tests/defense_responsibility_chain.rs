@@ -159,7 +159,8 @@ fn test_potential_field_continuity_and_threat_monotonicity() {
 
     for &dist in &distances {
         let carrier_pos = hoop - Vec2::new(dist, 0.0);
-        let low_man = solver.solve_equilibrium(carrier_pos, hoop, &off_positions, 1, 0, &rules);
+        let low_man =
+            solver.solve_equilibrium(carrier_pos, hoop, &off_positions, 1, 0, &rules, 1.0);
 
         // 威胁占比必须随着突破深入严格单调递增！
         assert!(

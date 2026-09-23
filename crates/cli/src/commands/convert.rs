@@ -8,11 +8,16 @@ use std::fs;
 use crate::{enforce_hard_gate, read_stream_text, write_judgment_artifacts};
 
 /// 离线评判（quality 评判规范）：对既有 ndjson 流产出评判工件。
-pub(crate) fn run_evaluate(stream_path: &str) -> std::io::Result<()> {
+///
+/// 参考分布由联赛入口选择（与模拟路径同一映射 `for_league`）：
+/// 此前硬编码 `nba_v1()`，而 v1 无构成带，七条构成准则全部
+/// `NotApplicable`——同一条流在模拟内评 v2、离线复评 v1，两处结论
+/// 无法互相对照。NBA 缺省即 v2，与模拟路径一致；FIBA 经 `--league fiba`。
+pub(crate) fn run_evaluate(stream_path: &str, league: &str) -> std::io::Result<()> {
     let stream = read_stream_text(stream_path)?;
     let ticks = nba_evaluator::parse_stream(&stream)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    let fixture = nba_evaluator::ReferenceDistributions::nba_v1();
+    let fixture = nba_evaluator::ReferenceDistributions::for_league(league);
     let judgments = nba_evaluator::evaluate_stream(&ticks, &fixture);
     let report = write_judgment_artifacts(stream_path, &judgments, &fixture)?;
     println!(

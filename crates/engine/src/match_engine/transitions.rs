@@ -59,7 +59,17 @@ impl MatchEngine {
                 ..
             } => Some(carrier_id.clone()),
             BallTrajectoryKind::Pass { .. } | BallTrajectoryKind::LooseBall { .. } => {
-                self.ball.last_passer_id.clone()
+                // 松球：优先读球态自带的最后触球人载荷（P1：状态是唯一
+                // 事实源）；旧流/拨球场景里该载荷是防守人，但作为「最后
+                // 触球人」语义它是准确的。回退到 `last_passer_id` 兼容
+                // 早期构造点未写载荷的球态。注意 `last_passer_id` 会在
+                // 下一回合开场被清空（seed 14：拨掉的松球跨节后归因断链），
+                // 因此载荷缺失时此处正确地返回 None，由不变量门报错。
+                self.ball
+                    .ball_state
+                    .associated_player()
+                    .map(|s| s.to_string())
+                    .or_else(|| self.ball.last_passer_id.clone())
             }
             // 死球：优先用载荷里的最后触球人（round-9）；
             // 旧流/未携带时回退到旁路字段，保证向后兼容。
@@ -551,6 +561,18 @@ impl MatchEngine {
         }
         self.flow.possession = opposite(self.flow.possession);
         self.flow.possession_id += 1;
+        self.begin_inbound(baseline_pos, current_ball_3d);
+    }
+
+    /// 发球程序的公共主体：选发球员、界外就位、把球转入发球准备。
+    ///
+    /// 调用方负责各自的前置差异：出界/违例路径在调用前完成回合结算、
+    /// 翻转球权并自增回合号；节间开场（[`MatchEngine::start_period_ball_program`]）
+    /// 球权按节末归属延续、回合已在节末结算，两者都不在本函数内发生。
+    /// 抽出公共部分的原因：节间开场若不带发球程序，节末结算出的停球
+    /// 会以「流程活球、球不可取」的状态带入下一节（seed 14 实测：
+    /// 第 4 节开场 201 tick 无人能触球，8 秒后被伪判后场违例）。
+    pub(crate) fn begin_inbound(&mut self, baseline_pos: Vec2, current_ball_3d: (Vec2, f32)) {
         self.update_coach_strategy();
         self.clock.shot_clock = self.config.rules.league.shot_clock_seconds;
         self.sync_team_tactics();
@@ -601,6 +623,40 @@ impl MatchEngine {
             "界外发球准备，呼叫战术：{}",
             self.config.tactical_set.name_zh()
         ));
+    }
+
+    /// 节间开场的球权程序（seed 14 缺陷的结构性修复）。
+    ///
+    /// 第一性原理：节末结算（`settle_ball_for_period_break`）把在飞的球
+    /// 置为停球状态，是「比赛时钟停表期间球也应是停球」的正确推论；但
+    /// 下一节开场若只把流程置回活球而不重建球的可取性，比赛会以
+    /// 「流程活球、球不可取」运行——后场计时按球位累加，8 秒后判出一次
+    /// 没有球队控球的伪违例，且责任人派生为空（seed 14 possession 185）。
+    /// 因此节间开场必须显式回答「球现在谁能拿」：
+    ///
+    /// - 球已由在场球员持有/发球中 → 原样保留（常规节间路径，行为不变）；
+    /// - 其余状态（停球/松球/飞行残留）→ 按节末保留的进攻方进入发球
+    ///   程序：不翻转球权、不重复回合结算（节末的 `PeriodEnd` 总结已
+    ///   完成结算），基线取停球位置就近的边线。
+    pub(crate) fn start_period_ball_program(&mut self) {
+        let ball_is_possessed = matches!(
+            self.ball.ball_state,
+            BallTrajectoryKind::Held { .. }
+                | BallTrajectoryKind::Drive { .. }
+                | BallTrajectoryKind::InboundReady { .. }
+                | BallTrajectoryKind::InboundTransfer { .. }
+        );
+        if ball_is_possessed {
+            return;
+        }
+        let ball_3d = self.ball.ball_pos_3d;
+        let baseline = Court::nearest_boundary_with_geometry(ball_3d.0, self.config.rules.court);
+        self.ball.last_passer_id = None;
+        self.ball.pending_pass_receiver = None;
+        self.ball.receiver_estimate = None;
+        self.ball.pending_pass_inbound = false;
+        self.ball.pending_loose_ball_terminal = None;
+        self.begin_inbound(baseline, ball_3d);
     }
 
     pub(crate) fn settle_ball_for_period_break(&mut self) {

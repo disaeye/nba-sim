@@ -339,6 +339,7 @@ dependencies = [
  "glam",
  "nba-decision",
  "nba-domain",
+ "nba-evaluator",
  "nba-invariants",
  "nba-officiating",
  "nba-physics",

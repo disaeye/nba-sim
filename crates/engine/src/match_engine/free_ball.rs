@@ -170,6 +170,7 @@ impl MatchEngine {
                 hoop_pos,
                 peak_z,
                 last_touch_team,
+                last_touch_player,
                 ..
             } => {
                 // 弹后抛体的自然弧顶（仅元数据）。
@@ -187,16 +188,22 @@ impl MatchEngine {
                     duration: t_land,
                     peak_z: peak.max(peak_z.min(self.config.rules.ball_z_max_ft)),
                     last_touch_team: *last_touch_team,
+                    // 身体弹开不是触球：最后触球人沿当前载荷延续。
+                    last_touch_player: last_touch_player.clone(),
                 }
             }
             BallTrajectoryKind::LooseBall {
-                last_touch_team, ..
+                last_touch_team,
+                last_touch_player,
+                ..
             } => BallTrajectoryKind::LooseBall {
                 pos: ball_pos,
                 vel: v_out,
                 z: ball_z,
                 vel_z: vz_out,
                 last_touch_team: *last_touch_team,
+                // 身体弹开不是触球：最后触球人沿当前载荷延续。
+                last_touch_player: last_touch_player.clone(),
             },
             _ => return None,
         };

@@ -193,6 +193,7 @@ fn rebound_samples_start_at_configured_contact_point() {
         duration: 1.0,
         peak_z: rules.rim_height_ft + 1.5,
         last_touch_team: nba_domain::Possession::Home,
+        last_touch_player: None,
     };
     let players = std::collections::HashMap::new();
     // 抛体化（第一步）：起点在触筐高度，终点触地（z=0），
@@ -327,6 +328,150 @@ fn collision_braking_respects_acceleration_envelope() {
             .iter()
             .map(|(id, player)| (id.clone(), player.vel_ft))
             .collect();
+    }
+}
+
+#[test]
+fn braking_and_traction_are_continuous_and_use_both_backends() {
+    let baseline_rules = GameRules {
+        tick_seconds: 0.04,
+        max_player_speed_ftps: 12.0,
+        max_player_accel_ftps2: 30.0,
+        max_player_braking_accel_ftps2: 18.0,
+        max_player_lateral_accel_ftps2: 16.0,
+        min_player_separation_ft: 3.6,
+        ..GameRules::default()
+    };
+    let mut slippery_rules = baseline_rules.clone();
+    slippery_rules.max_player_braking_accel_ftps2 = 5.0;
+    slippery_rules.max_player_lateral_accel_ftps2 = 4.0;
+
+    for backend in [PhysicsBackend::Rapier, PhysicsBackend::SimpleCircle] {
+        let stopping_distance = |rules: &GameRules| {
+            let mut world = PhysicsWorld::with_backend(rules, backend);
+            let mut runner = player("H_01", "home", Vec2::new(30.0, 25.0));
+            runner.vel_ft = Vec2::new(8.0, 0.0);
+            runner.target_pos_ft = runner.pos_ft;
+            runner.attributes.acceleration = 1.0;
+            runner.attributes.agility = 1.0;
+            world.register_player(runner);
+            for _ in 0..100 {
+                world.step(nba_domain::FixedDt(rules.tick_seconds));
+                if world.get_player("H_01").unwrap().vel_ft.length() <= 1e-4 {
+                    break;
+                }
+            }
+            world.get_player("H_01").unwrap().pos_ft.x - 30.0
+        };
+        let firm_stop = stopping_distance(&baseline_rules);
+        let low_grip_stop = stopping_distance(&slippery_rules);
+        assert!(
+            low_grip_stop > firm_stop,
+            "{backend:?}: lower braking must increase stopping distance: {low_grip_stop} vs {firm_stop}"
+        );
+
+        let mut world = PhysicsWorld::with_backend(&slippery_rules, backend);
+        let mut runner = player("H_01", "home", Vec2::new(30.0, 25.0));
+        runner.vel_ft = Vec2::new(8.0, 0.0);
+        runner.attributes.acceleration = 1.0;
+        runner.attributes.agility = 1.0;
+        world.register_player(runner);
+        world.set_player_target(
+            "H_01",
+            Vec2::new(30.0, 55.0),
+            12.0,
+            "SPRINT",
+            "Wing",
+            "Normal",
+        );
+        let mut previous_velocity = Vec2::new(8.0, 0.0);
+        let mut previous_projection = previous_velocity.dot(Vec2::Y);
+        let mut observed_lateral_velocity = false;
+        for _ in 0..30 {
+            world.step(nba_domain::FixedDt(slippery_rules.tick_seconds));
+            let current = world.get_player("H_01").unwrap();
+            let delta_velocity = current.vel_ft - previous_velocity;
+            let acceleration = delta_velocity.length() / slippery_rules.tick_seconds;
+            assert!(
+                acceleration <= slippery_rules.max_player_accel_ftps2 + 1e-3,
+                "{backend:?}: acceleration {acceleration} exceeded configured limit"
+            );
+            assert!(
+                current.vel_ft.length() <= slippery_rules.max_player_speed_ftps + 1e-4,
+                "{backend:?}: speed exceeded configured limit"
+            );
+            let projection = current.vel_ft.dot(Vec2::Y);
+            assert!(
+                projection + 1e-4 >= previous_projection,
+                "{backend:?}: lateral velocity reversed direction: {projection} < {previous_projection}"
+            );
+            observed_lateral_velocity |= projection > 1e-3;
+            previous_projection = projection;
+            previous_velocity = current.vel_ft;
+        }
+        assert!(
+            observed_lateral_velocity,
+            "{backend:?}: turn produced no lateral slip"
+        );
+
+        let lateral_velocity_after = |rules: &GameRules| {
+            let mut world = PhysicsWorld::with_backend(rules, backend);
+            let mut runner = player("H_01", "home", Vec2::new(30.0, 25.0));
+            runner.vel_ft = Vec2::new(8.0, 0.0);
+            runner.attributes.acceleration = 1.0;
+            runner.attributes.agility = 1.0;
+            world.register_player(runner);
+            world.set_player_target(
+                "H_01",
+                Vec2::new(30.0, 55.0),
+                12.0,
+                "SPRINT",
+                "Wing",
+                "Normal",
+            );
+            for _ in 0..10 {
+                world.step(nba_domain::FixedDt(rules.tick_seconds));
+            }
+            world.get_player("H_01").unwrap().vel_ft.dot(Vec2::Y)
+        };
+        assert!(
+            lateral_velocity_after(&slippery_rules) < lateral_velocity_after(&baseline_rules),
+            "{backend:?}: lower lateral traction must increase turning slip"
+        );
+
+        let mut world = PhysicsWorld::with_backend(&baseline_rules, backend);
+        let mut runner = player("H_01", "home", Vec2::new(30.0, 25.0));
+        runner.vel_ft = Vec2::new(8.0, 0.0);
+        runner.attributes.acceleration = 1.0;
+        runner.attributes.agility = 1.0;
+        world.register_player(runner);
+        world.set_player_target(
+            "H_01",
+            Vec2::new(1.8, 25.0),
+            12.0,
+            "SPRINT",
+            "Wing",
+            "Normal",
+        );
+        let mut previous_x_velocity = 8.0;
+        for _ in 0..45 {
+            world.step(nba_domain::FixedDt(baseline_rules.tick_seconds));
+            let current = world.get_player("H_01").unwrap();
+            assert!(
+                current.vel_ft.x <= previous_x_velocity + 1e-4,
+                "{backend:?}: reverse direction did not decelerate monotonically"
+            );
+            assert!(
+                (current.vel_ft.x - previous_x_velocity).abs()
+                    <= baseline_rules.max_player_accel_ftps2 * baseline_rules.tick_seconds + 1e-3,
+                "{backend:?}: reverse direction changed velocity beyond the acceleration envelope"
+            );
+            previous_x_velocity = current.vel_ft.x;
+        }
+        assert!(
+            previous_x_velocity < 0.0,
+            "{backend:?}: runner never reversed direction"
+        );
     }
 }
 

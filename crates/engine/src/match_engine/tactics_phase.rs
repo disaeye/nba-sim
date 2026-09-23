@@ -189,6 +189,7 @@ impl MatchEngine {
                 _ => None,
             }
         };
+        self.apply_active_play_actions(&mut home_targets, &mut away_targets, current_t);
         let rebound_chase_target = match &self.ball.ball_state {
             BallTrajectoryKind::RimRebound { target_landing, .. } => Some(*target_landing),
             BallTrajectoryKind::LooseBall { pos, .. } => Some(*pos),
@@ -377,6 +378,152 @@ impl MatchEngine {
         }
     }
 
+    fn apply_active_play_actions(
+        &mut self,
+        home_targets: &mut [nba_decision::tactics::TargetAssignment],
+        away_targets: &mut [nba_decision::tactics::TargetAssignment],
+        current_t: f32,
+    ) {
+        let possession = self.flow.possession;
+        if self.clock.sub_phase != SubPhase::ActionExecution
+            || self.flow.game_flow != nba_domain::GameFlowState::LiveBall
+        {
+            return;
+        }
+        let carrier_id = match &self.ball.ball_state {
+            BallTrajectoryKind::Held { carrier_id } => Some(carrier_id.as_str()),
+            BallTrajectoryKind::Drive { driver_id, .. } => Some(driver_id.as_str()),
+            BallTrajectoryKind::ControlTransfer { carrier_id, .. } => Some(carrier_id.as_str()),
+            _ => None,
+        };
+        let Some(carrier_id) = carrier_id else {
+            return;
+        };
+        let Some(selection_context) = self.build_play_selection_context(carrier_id) else {
+            return;
+        };
+        let active = match possession {
+            Possession::Home => self.observations.home_active_play.as_ref(),
+            Possession::Away => self.observations.away_active_play.as_ref(),
+        };
+        let Some(active) = active else {
+            return;
+        };
+        let actions = nba_decision::evaluate_active_play(&active.spec, &selection_context)
+            .matched_rule_actions()
+            .to_vec();
+        let offense_targets = match possession {
+            Possession::Home => home_targets,
+            Possession::Away => away_targets,
+        };
+        for action in actions {
+            let target = offense_targets
+                .iter_mut()
+                .find(|target| target.slot == action.slot)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "play `{}` rule `{}` references missing slot `{}` in active System",
+                        active.spec.id, action.rule_id, action.slot
+                    )
+                });
+            let player_id = target
+                .player_id
+                .as_deref()
+                .unwrap_or_else(|| panic!("play slot `{}` has no filled player", action.slot));
+            let actor = self
+                .systems
+                .physics
+                .get_player(player_id)
+                .unwrap_or_else(|| panic!("play slot `{}` player `{player_id}` is absent", action.slot));
+            let carrier_id = self.active_carrier_or_focus_id();
+                let carrier = self
+                    .systems
+                    .physics
+                    .get_player(&carrier_id)
+                    .unwrap_or_else(|| panic!("play carrier `{carrier_id}` is absent"));
+            let opponent = self
+                .systems
+                .physics
+                .get_players()
+                .values()
+                .filter(|player| player.on_court && player.team != actor.team)
+                .min_by(|left, right| {
+                    let left_dist = (left.pos_ft - actor.pos_ft).length();
+                    let right_dist = (right.pos_ft - actor.pos_ft).length();
+                    left_dist.total_cmp(&right_dist).then(left.id.cmp(&right.id))
+                });
+            let is_home = actor.team == "home";
+            let context = nba_decision::play_actions::VerbContext {
+                actor_pos: actor.pos_ft,
+                hoop_pos: self.config.rules.court.hoop_pos(is_home),
+                carrier_pos: carrier.pos_ft,
+                defender_pos: opponent.map(|defender| defender.pos_ft),
+                court: self.config.rules.court,
+                clamp_margin_ft: self.config.rules.player_radius_ft,
+                three_point_distance_ft: self.config.rules.league.three_point_distance_ft,
+            };
+            let resolution = nba_decision::play_actions::resolve_verb(action.verb, &context);
+            let next_target = nba_decision::play_actions::resolve_verb_target(action.verb, &context);
+            let verb_progress =
+                (self.observations.possession_ticks as f32 * self.config.rules.tick_seconds)
+                    .min(self.config.rules.tactics.action_duration_seconds);
+            let should_start_window = verb_progress >= self.config.rules.tactics.action_duration_seconds
+                && !self.observations.active_windows.contains_key(player_id);
+            let target_speed = target.speed;
+            let target_slot = target.slot.clone();
+            let target_morale = target.morale.clone();
+            target.target_pos = next_target;
+            target.action = format!("PLAY_{}", action.verb.as_str());
+            self.systems.physics.set_player_target(
+                player_id,
+                next_target,
+                target_speed,
+                &target.action,
+                &target_slot,
+                &target_morale,
+            );
+            if should_start_window {
+                if let Some(action_type) = resolution.window_action {
+                let window = match action_type {
+                    nba_domain::action_window::ActionType::JumpShot => {
+                        Some(nba_domain::action_window::ActionTimeWindow::new_jump_shot(
+                            player_id,
+                            current_t,
+                            &self.config.rules,
+                        ))
+                    }
+                    nba_domain::action_window::ActionType::PassRelease => {
+                        Some(nba_domain::action_window::ActionTimeWindow::new_pass(
+                            player_id,
+                            current_t,
+                            &self.config.rules,
+                        ))
+                    }
+                    nba_domain::action_window::ActionType::ScreenSet => {
+                        Some(nba_domain::action_window::ActionTimeWindow::new_screen_set(
+                            player_id,
+                            current_t,
+                            &self.config.rules,
+                        ))
+                    }
+                    nba_domain::action_window::ActionType::Layup
+                    | nba_domain::action_window::ActionType::Dunk
+                    | nba_domain::action_window::ActionType::CloseoutContest
+                    | nba_domain::action_window::ActionType::ReboundJump => {
+                        panic!(
+                            "Play verb `{}` resolved unsupported action window {action_type:?}",
+                            action.verb.as_str()
+                        )
+                    }
+                };
+                self.observations
+                    .active_windows
+                    .insert(player_id.to_string(), window.expect("play verb resolved a window"));
+                }
+            }
+        }
+    }
+
     fn capture_potential_field_observations(
         &mut self,
         defending_targets: &[nba_decision::tactics::TargetAssignment],
@@ -395,6 +542,16 @@ impl MatchEngine {
             if !player.on_court {
                 continue;
             }
+            let solver = nba_decision::DefensePotentialFieldSolver::new(
+                self.config.rules.tactics.defense.potential_field,
+            );
+            solver.observe_field(
+                potential,
+                self.observations
+                    .field_hysteresis
+                    .entry(player.id.clone())
+                    .or_default(),
+            );
             self.observations
                 .potential_field
                 .push(super::state::PotentialFieldObservation {

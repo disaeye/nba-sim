@@ -418,6 +418,64 @@ impl InvariantChecker {
         }
 
         // --------------------------------------------------------------
+        // 7b. 球的可取性：活球流程下球必须可被取得（seed 14 缺陷）。
+        //
+        // 节末结算（settle_ball_for_period_break）把在飞的球置为停球是
+        // 正确的（停表期间球也停）；但节间开场若只恢复活球流程而不重建
+        // 球权程序，会出现「流程活球、球态停球、holder 为空」的状态——
+        // 无人能触球，后场计时照走，第 8 秒判出没有责任人的伪违例。
+        // 该不变量把这一状态组合变成即时 Hard 缺陷，而不是等到账本。
+        if frame.game_flow == "LiveBall" && frame.ball.status == "DEAD" {
+            out.push(Violation {
+                tick_index: self.tick_index,
+                rule: "LIVE_FLOW_DEAD_BALL",
+                severity: ViolationSeverity::Hard,
+                detail: format!(
+                    "live-ball flow with unplayable ball (status=DEAD, holder={:?})",
+                    frame.ball.holder_id
+                ),
+            });
+        }
+
+        // --------------------------------------------------------------
+        // 7c. 失误终结的责任可追溯（evidence §23.10/§32.14 同类缺陷）。
+        //
+        // 任何以 TURNOVER* 终结的回合总结必须带 turnover_player_id，
+        // 否则归因链断裂（evaluator 侧同名 Hard 准则的引擎侧前置门）。
+        for event in &frame.event_log {
+            let Some(payload) = &event.data else { continue };
+            let Some(summary) = payload.get("PossessionSummary") else {
+                continue;
+            };
+            let terminal = summary
+                .get("terminal_event")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if !terminal.starts_with("TURNOVER") {
+                continue;
+            }
+            let has_player = summary
+                .get("turnover_player_id")
+                .map(|v| !v.is_null())
+                .unwrap_or(false);
+            if !has_player {
+                out.push(Violation {
+                    tick_index: self.tick_index,
+                    rule: "TURNOVER_ACTOR_MISSING",
+                    severity: ViolationSeverity::Hard,
+                    detail: format!(
+                        "turnover terminal `{}` at possession {} lacks responsible player",
+                        terminal,
+                        summary
+                            .get("possession_index")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(u64::MAX)
+                    ),
+                });
+            }
+        }
+
+        // --------------------------------------------------------------
         // 8. L2 事件流因果语义与回合自洽性公理。
         for event in &frame.events {
             if event.as_str() == "SCORE" && frame.score.home == 0 && frame.score.away == 0 {

@@ -28,20 +28,35 @@ def main() -> None:
     parser.add_argument("--write-budget", action="store_true",
                         help="把当前实测写入 fixture（附证据后的人工批次）")
     args = parser.parse_args()
+    # pi-lens-ignore: unchecked-throwing-call-python
     fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
     band = fixture["throughput_ticks_per_second"]
-    seed42 = measure(20000, 42)
-    print(f"seed_42 throughput = {seed42:.0f} ticks/s "
-          f"(fixture band [{band['band_min']:.0f}, {band['band_max']:.0f}])")
+    measured = dict(band.get("measured", {}))
+    # fixture 里登记了几个种子就测几个（当前 seed_42 / seed_1），
+    # 任何一个越带都判失败，而不是只看第一个。
+    failures = []
+    for seed_key in sorted(measured):
+        # pi-lens-ignore: unchecked-throwing-call-python
+        seed = int(seed_key.removeprefix("seed_"))
+        throughput = measure(20000, seed)
+        print(f"{seed_key} throughput = {throughput:.0f} ticks/s "
+              f"(fixture band [{band['band_min']:.0f}, {band['band_max']:.0f}])")
+        if args.write_budget:
+            measured[seed_key] = round(throughput, 1)
+        elif not band["band_min"] <= throughput <= band["band_max"]:
+            failures.append(
+                f"{seed_key} 吞吐 {throughput:.0f} 越出基准带 "
+                f"[{band['band_min']:.0f}, {band['band_max']:.0f}]"
+            )
     if args.write_budget:
-        band["measured"]["seed_42"] = round(seed42, 1)
+        band["measured"] = measured
         FIXTURE.write_text(json.dumps(fixture, ensure_ascii=False, indent=2) + "\n",
                            encoding="utf-8")
         print("fixture 已更新（须附重测证据提交）")
         return
-    if not band["band_min"] <= seed42 <= band["band_max"]:
+    if failures:
         sys.exit(
-            f"❌ 吞吐 {seed42:.0f} 越出基准带 [{band['band_min']:.0f}, {band['band_max']:.0f}]。\n"
+            "❌ " + "；".join(failures) + "。\n"
             "   碰撞/行为类改动改变每 tick 成本属正常演化：重测全部种子后用 --write-budget\n"
             "   重冻结，并在提交信息附前后对比证据（quality.md §4.1）。"
         )

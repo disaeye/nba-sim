@@ -408,15 +408,23 @@ fn no_unattributed_end_full_scope() {
 }
 
 /// 违例回合必须带责任球员（problem.md §13.2：`turnover_player_id` 缺失）。
+///
+/// 与 16-seed 矩阵同口径（`--seeds 1..16`、full scope）：缺陷历史上在
+/// 第 4 节开场才暴露（seed 14，节末拨球松球跨节后归因断链），单节
+/// 窗口覆盖不到；种子集与 `stats_baseline` 的账本门一致。
 #[test]
 fn violation_turnover_summary_carries_player_id() {
-    // 与矩阵测试同口径：8 种子。
-    let per_seed: Vec<(u32, Option<String>)> = (0..8u64)
+    let per_seed: Vec<(u32, Option<String>)> = (1..=16u64)
         .into_par_iter()
         .map(|seed| {
             let mut checked = 0u32;
             let mut violation = None;
-            let (_unattributed, content) = run_1q_and_count_unattributed("attr_violation", seed);
+            let mut engine = MatchEngine::new(seed);
+            let guard = nba_test_support::TempArtifact::new(&format!("attr_violation_full_{seed}"));
+            engine
+                .simulate_scope_and_export_with_mode("full", &guard.path_str(), StreamMode::Facts)
+                .expect("run full");
+            let content = std::fs::read_to_string(guard.path()).unwrap_or_default();
             for line in content.lines() {
                 if !line.contains("TURNOVER_VIOLATION") {
                     continue;

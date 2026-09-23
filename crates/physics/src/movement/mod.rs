@@ -632,6 +632,10 @@ impl SpatialPhysics for RapierSpatialPhysics {
         slot: &str,
         morale: &str,
     ) {
+        assert!(
+            target_pos_ft.is_finite() && speed_ftps.is_finite(),
+            "movement target and speed must be finite"
+        );
         if let Some(player) = self.players.get_mut(id) {
             player.target_pos_ft = target_pos_ft;
             player.target_speed_ftps = speed_ftps
@@ -831,6 +835,10 @@ impl SpatialPhysics for SimpleCirclePhysics {
         slot: &str,
         morale: &str,
     ) {
+        assert!(
+            target_pos_ft.is_finite() && speed_ftps.is_finite(),
+            "movement target and speed must be finite"
+        );
         if let Some(player) = self.players.get_mut(id) {
             player.target_pos_ft = target_pos_ft;
             player.target_speed_ftps = speed_ftps

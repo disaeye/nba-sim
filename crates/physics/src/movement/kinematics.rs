@@ -19,6 +19,14 @@ use super::{
     ShapeCastHit,
 };
 
+#[derive(Clone, Copy)]
+struct VelocityLimits {
+    max_speed_ftps: f32,
+    max_accel_ftps2: f32,
+    max_braking_accel_ftps2: f32,
+    max_lateral_accel_ftps2: f32,
+}
+
 /// 单步速度提案：`make_motion_proposals` 的产物、碰撞求解的输入。
 pub(super) struct MotionProposal {
     pub(super) id: String,
@@ -28,6 +36,8 @@ pub(super) struct MotionProposal {
     pub(super) next_vel: Vec2,
     pub(super) max_speed_ftps: f32,
     pub(super) max_accel_ftps2: f32,
+    pub(super) max_braking_accel_ftps2: f32,
+    pub(super) max_lateral_accel_ftps2: f32,
 }
 
 pub(super) fn make_motion_proposals(
@@ -35,7 +45,19 @@ pub(super) fn make_motion_proposals(
     rules: &GameRules,
     dt: FixedDt,
 ) -> Vec<MotionProposal> {
-    let dt = dt.0.max(f32::EPSILON);
+    let dt = dt.0;
+    assert!(
+        dt.is_finite() && dt > 0.0,
+        "movement timestep must be finite and positive"
+    );
+    assert!(
+        rules.max_player_speed_ftps.is_finite()
+            && rules.max_player_accel_ftps2.is_finite()
+            && rules.max_player_braking_accel_ftps2.is_finite()
+            && rules.max_player_lateral_accel_ftps2.is_finite()
+            && rules.attribute_response_floor.is_finite(),
+        "movement rules must contain finite kinematic limits"
+    );
     let mut ids: Vec<String> = players.keys().cloned().collect();
     ids.sort();
 
@@ -60,17 +82,51 @@ pub(super) fn make_motion_proposals(
                 player.accel_ft = Vec2::ZERO;
                 return None;
             }
+            assert!(
+                player.pos_ft.is_finite()
+                    && player.vel_ft.is_finite()
+                    && player.target_pos_ft.is_finite()
+                    && player.target_speed_ftps.is_finite()
+                    && player.max_speed_ftps.is_finite()
+                    && player.max_accel_ftps2.is_finite()
+                    && player.turn_decel_timer.is_finite()
+                    && player.attributes.acceleration.is_finite()
+                    && player.attributes.agility.is_finite(),
+                "player movement state must be finite"
+            );
+            assert!(
+                player.max_speed_ftps >= 0.0 && player.max_accel_ftps2 >= 0.0,
+                "player movement limits must be nonnegative"
+            );
             let current_pos = player.pos_ft;
             let current_vel = player.vel_ft;
             let current_speed = current_vel.length();
-            let max_speed = player
-                .max_speed_ftps
-                .min(rules.max_player_speed_ftps)
-                .max(0.0);
-            let max_accel = player
-                .max_accel_ftps2
-                .min(rules.max_player_accel_ftps2)
-                .max(0.0);
+            let max_speed = player.max_speed_ftps.min(rules.max_player_speed_ftps);
+            let max_accel =
+                player
+                    .max_accel_ftps2
+                    .min(nba_domain::capability::effective_max_accel(
+                        rules,
+                        &player.attributes,
+                    ));
+            let max_braking_accel =
+                nba_domain::capability::effective_max_braking_accel(rules, &player.attributes)
+                    .min(max_accel);
+            let max_lateral_accel =
+                nba_domain::capability::effective_max_lateral_accel(rules, &player.attributes)
+                    .min(max_accel);
+            assert!(
+                max_speed.is_finite()
+                    && max_accel.is_finite()
+                    && max_braking_accel.is_finite()
+                    && max_lateral_accel.is_finite()
+                    && current_speed.is_finite(),
+                "derived movement limits must be finite"
+            );
+            assert!(
+                current_speed <= max_speed + max_speed * 1e-5,
+                "player speed {current_speed} exceeds its configured movement limit {max_speed}"
+            );
             let to_target = player.target_pos_ft - current_pos;
             let distance = to_target.length();
 
@@ -83,14 +139,31 @@ pub(super) fn make_motion_proposals(
             }
             player.turn_decel_timer = (player.turn_decel_timer - dt).max(0.0);
 
-            // 朝目标的期望速度（单一表达式，避免在分支间重复常数）。
+            assert!(
+                rules.arrival_epsilon_ft.is_finite()
+                    && rules.arrival_speed_scale.is_finite()
+                    && rules.arrival_speed_floor.is_finite()
+                    && rules.turnaround_min_decel_seconds.is_finite()
+                    && rules.player_linear_damping.is_finite()
+                    && rules.turn_decel_retention.is_finite()
+                    && rules.turn_decel_retention_floor.is_finite()
+                    && rules.turn_decel_retention_ceiling.is_finite()
+                    && rules.tactics.apf_repulsion_radius_ft.is_finite()
+                    && rules.tactics.apf_teammate_repulsion_accel.is_finite()
+                    && rules.tactics.apf_opponent_repulsion_accel.is_finite(),
+                "movement steering rules must be finite"
+            );
+            // 期望速度按剩余距离限制，确保能够在目标点前用规则制动力停下。
             let seek_target = |distance: f32| -> Vec2 {
                 if distance > rules.arrival_epsilon_ft && player.target_speed_ftps > 0.0 {
-                    let target_speed = (player.target_speed_ftps
+                    let speed_by_distance = (player.target_speed_ftps
                         * (distance / (max_speed * rules.arrival_speed_scale + 1.0))
                             .clamp(rules.arrival_speed_floor, 1.0))
                     .min(max_speed);
-                    to_target.normalize_or_zero() * target_speed
+                    let stopping_speed =
+                        (2.0 * max_braking_accel * (distance - rules.arrival_epsilon_ft).max(0.0))
+                            .sqrt();
+                    to_target.normalize_or_zero() * speed_by_distance.min(stopping_speed)
                 } else {
                     Vec2::ZERO
                 }
@@ -160,17 +233,17 @@ pub(super) fn make_motion_proposals(
                 }
             }
 
-            // 将 APF 斥力加速度叠加进速度积分
+            // 将 APF 斥力加速度叠加进速度积分，再按纵向制动与横向抓地限制更新。
             let apf_steered_vel = next_vel + apf_repulsion_accel * dt;
-
-            let velocity_delta = apf_steered_vel - current_vel;
-            let max_delta = max_accel * dt;
-            if velocity_delta.length() > max_delta {
-                next_vel = current_vel + velocity_delta.normalize() * max_delta;
-            } else {
-                next_vel = apf_steered_vel;
-            }
-            next_vel = next_vel.clamp_length_max(max_speed);
+            next_vel = traction_limited_velocity(
+                current_vel,
+                apf_steered_vel,
+                max_speed,
+                max_accel,
+                max_braking_accel,
+                max_lateral_accel,
+                dt,
+            );
             let speed = next_vel.length();
             player.locomotion = if player.is_locked_kinematics {
                 LocomotionState::Airborne
@@ -209,6 +282,8 @@ pub(super) fn make_motion_proposals(
                 next_vel,
                 max_speed_ftps: max_speed,
                 max_accel_ftps2: max_accel,
+                max_braking_accel_ftps2: max_braking_accel,
+                max_lateral_accel_ftps2: max_lateral_accel,
             })
         })
         .collect()
@@ -248,8 +323,8 @@ pub(super) fn resolve_motion_collisions(
                     - proposals[left_index].next_vel)
                     .dot(current_normal);
                 if proposed_relative < 0.0 {
-                    let relative_accel = (proposals[left_index].max_accel_ftps2
-                        + proposals[right_index].max_accel_ftps2)
+                    let relative_accel = (proposals[left_index].max_braking_accel_ftps2
+                        + proposals[right_index].max_braking_accel_ftps2)
                         .max(f32::EPSILON);
                     let safe_closing = (-relative_accel * dt
                         + (relative_accel * relative_accel * dt * dt + 2.0 * relative_accel * gap)
@@ -273,8 +348,8 @@ pub(super) fn resolve_motion_collisions(
                 let right_next_pos = right_current_pos + proposals[right_index].next_vel * dt;
                 let predicted_delta = right_next_pos - left_next_pos;
                 let predicted_distance = predicted_delta.length();
-                let relative_accel = (proposals[left_index].max_accel_ftps2
-                    + proposals[right_index].max_accel_ftps2)
+                let relative_accel = (proposals[left_index].max_braking_accel_ftps2
+                    + proposals[right_index].max_braking_accel_ftps2)
                     .max(f32::EPSILON);
                 let closing_speed = ((current_distance - predicted_distance) / dt).max(0.0);
                 let stopping_gap = closing_speed * closing_speed / (2.0 * relative_accel);
@@ -295,6 +370,8 @@ pub(super) fn resolve_motion_collisions(
                         left_target,
                         proposals[left_index].max_speed_ftps,
                         proposals[left_index].max_accel_ftps2,
+                        proposals[left_index].max_braking_accel_ftps2,
+                        proposals[left_index].max_lateral_accel_ftps2,
                         dt,
                     );
                     let right_result = bounded_velocity(
@@ -302,6 +379,8 @@ pub(super) fn resolve_motion_collisions(
                         right_target,
                         proposals[right_index].max_speed_ftps,
                         proposals[right_index].max_accel_ftps2,
+                        proposals[right_index].max_braking_accel_ftps2,
+                        proposals[right_index].max_lateral_accel_ftps2,
                         dt,
                     );
                     changed |= left_result != left_velocity || right_result != right_velocity;
@@ -332,37 +411,40 @@ fn shift_relative_velocity(
         return false;
     }
     let normal = normal.normalize_or_zero();
-    let (
-        left_current,
-        left_next,
-        left_speed,
-        left_accel,
-        right_current,
-        right_next,
-        right_speed,
-        right_accel,
-    ) = {
+    let (left_current, left_next, right_current, right_next) = {
         let left = &proposals[left_index];
         let right = &proposals[right_index];
         (
             left.current_vel,
             left.next_vel,
-            left.max_speed_ftps,
-            left.max_accel_ftps2,
             right.current_vel,
             right.next_vel,
-            right.max_speed_ftps,
-            right.max_accel_ftps2,
         )
     };
-    let left_capacity =
-        max_feasible_velocity_shift(left_current, left_next, -normal, left_speed, left_accel, dt);
+    let left = &proposals[left_index];
+    let left_capacity = max_feasible_velocity_shift(
+        left_current,
+        left_next,
+        -normal,
+        VelocityLimits {
+            max_speed_ftps: left.max_speed_ftps,
+            max_accel_ftps2: left.max_accel_ftps2,
+            max_braking_accel_ftps2: left.max_braking_accel_ftps2,
+            max_lateral_accel_ftps2: left.max_lateral_accel_ftps2,
+        },
+        dt,
+    );
+    let right = &proposals[right_index];
     let right_capacity = max_feasible_velocity_shift(
         right_current,
         right_next,
         normal,
-        right_speed,
-        right_accel,
+        VelocityLimits {
+            max_speed_ftps: right.max_speed_ftps,
+            max_accel_ftps2: right.max_accel_ftps2,
+            max_braking_accel_ftps2: right.max_braking_accel_ftps2,
+            max_lateral_accel_ftps2: right.max_lateral_accel_ftps2,
+        },
         dt,
     );
     let total_capacity = left_capacity + right_capacity;
@@ -384,25 +466,34 @@ fn max_feasible_velocity_shift(
     current: Vec2,
     candidate: Vec2,
     direction: Vec2,
-    max_speed: f32,
-    max_accel: f32,
+    limits: VelocityLimits,
     dt: f32,
 ) -> f32 {
     let direction = direction.normalize_or_zero();
     if direction.length_squared() <= f32::EPSILON
-        || !velocity_is_feasible(candidate, current, max_speed, max_accel, dt)
+        || !velocity_is_feasible(
+            candidate,
+            current,
+            limits.max_speed_ftps,
+            limits.max_accel_ftps2,
+            limits.max_braking_accel_ftps2,
+            limits.max_lateral_accel_ftps2,
+            dt,
+        )
     {
         return 0.0;
     }
     let mut low = 0.0;
-    let mut high = candidate.length() + max_speed.max(0.0) + max_accel.max(0.0) * dt + 1.0;
+    let mut high = candidate.length() + limits.max_speed_ftps + limits.max_accel_ftps2 * dt + 1.0;
     for _ in 0..32 {
         let middle = (low + high) * 0.5;
         if velocity_is_feasible(
             candidate + direction * middle,
             current,
-            max_speed,
-            max_accel,
+            limits.max_speed_ftps,
+            limits.max_accel_ftps2,
+            limits.max_braking_accel_ftps2,
+            limits.max_lateral_accel_ftps2,
             dt,
         ) {
             low = middle;
@@ -418,11 +509,25 @@ fn velocity_is_feasible(
     current: Vec2,
     max_speed: f32,
     max_accel: f32,
+    max_braking_accel: f32,
+    max_lateral_accel: f32,
     dt: f32,
 ) -> bool {
+    let delta = velocity - current;
+    let longitudinal_axis = if current.length_squared() > f32::EPSILON {
+        current.normalize_or_zero()
+    } else {
+        velocity.normalize_or_zero()
+    };
+    let longitudinal = delta.dot(longitudinal_axis);
+    let lateral = delta - longitudinal_axis * longitudinal;
     let tolerance = 1e-5;
-    velocity.length_squared() <= max_speed.max(0.0).powi(2) + tolerance
-        && (velocity - current).length_squared() <= (max_accel.max(0.0) * dt).powi(2) + tolerance
+    velocity.length_squared() <= max_speed.powi(2) + tolerance
+        && delta.length_squared() <= (max_accel * dt).powi(2) + tolerance
+        && longitudinal.max(0.0) <= max_accel * dt + tolerance
+        && (-longitudinal).max(0.0) <= max_braking_accel * dt + tolerance
+        && longitudinal >= -current.length() - tolerance
+        && lateral.length_squared() <= (max_lateral_accel * dt).powi(2) + tolerance
 }
 pub(super) fn apply_motion_proposals(
     players: &mut HashMap<String, PlayerPhysicsState>,
@@ -431,7 +536,11 @@ pub(super) fn apply_motion_proposals(
     dt: FixedDt,
     pending_facts: &mut Vec<PhysicsFact>,
 ) {
-    let dt = dt.0.max(f32::EPSILON);
+    let dt = dt.0;
+    assert!(
+        dt.is_finite() && dt > 0.0,
+        "movement timestep must be finite and positive"
+    );
     let margin = rules
         .player_radius_ft
         .min(rules.court.width_ft.min(rules.court.height_ft) / 2.0);
@@ -542,20 +651,74 @@ pub(super) fn apply_motion_proposals(
         if !player.on_court {
             continue;
         }
+        // 包线断言针对运动学提案终点（碰撞/边界/分离投影之前）：它们只
+        // 修正空间合法性，不改写运动学承诺的位移上界。分离投影可能把
+        // 球员额外推开，那份位移由空间契约负责，速度报告按实际终点重算。
+        let proposal_speed = (proposal.next_pos - proposal.current_pos).length() / dt;
+        assert!(
+            proposal_speed.is_finite() && proposal_speed <= proposal.max_speed_ftps + 1e-3,
+            "projected movement endpoint violates speed envelope"
+        );
         let final_vel = (player.pos_ft - proposal.current_pos) / dt;
-        player.vel_ft = final_vel;
+        assert!(
+            final_vel.is_finite(),
+            "projected movement endpoint is not finite"
+        );
+        // 分离投影的额外位移不计入运动学速度上界：报告速度按包线截断，
+        // 下一 tick 的提案从合法速度出发（否则投影推挤会自我累积）。
+        player.vel_ft = final_vel.clamp_length_max(proposal.max_speed_ftps);
         player.accel_ft = (final_vel - proposal.current_vel) / dt;
     }
 }
-fn bounded_velocity(current: Vec2, desired: Vec2, max_speed: f32, max_accel: f32, dt: f32) -> Vec2 {
+fn traction_limited_velocity(
+    current: Vec2,
+    desired: Vec2,
+    max_speed: f32,
+    max_accel: f32,
+    max_braking_accel: f32,
+    max_lateral_accel: f32,
+    dt: f32,
+) -> Vec2 {
     let delta = desired - current;
-    let max_delta = max_accel.max(0.0) * dt;
-    let stepped = if delta.length() > max_delta {
-        current + delta.normalize() * max_delta
+    let longitudinal_axis = if current.length_squared() > f32::EPSILON {
+        current.normalize_or_zero()
     } else {
-        desired
+        desired.normalize_or_zero()
     };
-    stepped.clamp_length_max(max_speed.max(0.0))
+    let longitudinal_amount = delta.dot(longitudinal_axis);
+    let lateral_delta = delta - longitudinal_axis * longitudinal_amount;
+    let braking_limit = (max_braking_accel * dt).min(current.length());
+    let mut longitudinal =
+        longitudinal_axis * longitudinal_amount.clamp(-braking_limit, max_accel * dt);
+    let mut lateral = lateral_delta.clamp_length_max(max_lateral_accel * dt);
+    let total_delta = (longitudinal + lateral).length();
+    let total_limit = max_accel * dt;
+    if total_delta > total_limit {
+        let scale = total_limit / total_delta;
+        longitudinal *= scale;
+        lateral *= scale;
+    }
+    (current + longitudinal + lateral).clamp_length_max(max_speed)
+}
+
+fn bounded_velocity(
+    current: Vec2,
+    desired: Vec2,
+    max_speed: f32,
+    max_accel: f32,
+    max_braking_accel: f32,
+    max_lateral_accel: f32,
+    dt: f32,
+) -> Vec2 {
+    traction_limited_velocity(
+        current,
+        desired,
+        max_speed,
+        max_accel,
+        max_braking_accel,
+        max_lateral_accel,
+        dt,
+    )
 }
 
 fn is_defensive_action(action: &str) -> bool {

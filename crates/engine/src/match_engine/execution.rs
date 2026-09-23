@@ -11,11 +11,332 @@ use nba_domain::court::Court;
 use nba_domain::{GameEvent, GameFlowState, Possession, SubPhase};
 use nba_officiating::resolution::DriveResolution;
 use nba_physics::ballistics::{BallTrajectoryKind, BallisticsEngine};
+use nba_physics::movement::PlayerPhysicsState;
 use nba_semantics::SemanticEvaluator;
 use rand::Rng;
+use std::collections::HashMap;
 
 use super::projection::convert_trace;
 use super::MatchEngine;
+
+#[derive(Debug, Clone)]
+struct DriveGeometryResolution {
+    successful: bool,
+    primary_defender_id: Option<String>,
+    bypass_target: Option<Vec2>,
+    lateral_direction: f32,
+}
+
+fn drive_speed_and_duration(
+    driver: &PlayerPhysicsState,
+    drive_dist: f32,
+    rules: &nba_domain::GameRules,
+) -> (f32, f32) {
+    let drive_speed = (driver.max_speed_ftps * rules.tactics.drive_speed_ratio).max(1.0);
+    let accel = rules.max_player_accel_ftps2.max(f32::EPSILON);
+    let duration = (drive_dist / drive_speed + drive_speed / accel).clamp(
+        rules.tactics.drive_min_duration_seconds,
+        rules.tactics.drive_max_duration_seconds,
+    );
+    (drive_speed, duration)
+}
+
+/// 归一到 [0,1]（数值边界模式，非行为系数）。
+fn clamp_unit(value: f32) -> f32 {
+    value.clamp(f32::from(0u8), f32::from(1u8))
+}
+
+/// 负值归零（数值边界模式，非行为系数）。
+fn non_negative(value: f32) -> f32 {
+    value.max(f32::from(0u8))
+}
+
+/// 突破接触技巧的加权组合：控球 + 敏捷 + 力量（攻方用 ball_handling，
+/// 守方用 defense_perimeter），权重来自 DriveGeometryPolicy。
+fn drive_contact_skill(
+    primary: f32,
+    agility: f32,
+    strength: f32,
+    policy: &nba_domain::DriveGeometryPolicy,
+) -> f32 {
+    primary * policy.contact_skill_primary_weight
+        + agility * policy.contact_skill_agility_weight
+        + strength * policy.contact_skill_strength_weight
+}
+
+fn resolve_drive_geometry(
+    driver: &PlayerPhysicsState,
+    from_pos: Vec2,
+    target_pos: Vec2,
+    players: &HashMap<String, PlayerPhysicsState>,
+    drive_speed: f32,
+    duration: f32,
+    rules: &nba_domain::GameRules,
+) -> DriveGeometryResolution {
+    let policy = &rules.resolve.drive_geometry;
+    let contact_skill = drive_contact_skill(
+        driver.attributes.ball_handling,
+        driver.attributes.agility,
+        driver.attributes.strength,
+        policy,
+    );
+    let drive_vector = target_pos - from_pos;
+    let drive_dist = drive_vector.length();
+    if drive_dist <= f32::EPSILON {
+        return DriveGeometryResolution {
+            successful: false,
+            primary_defender_id: None,
+            bypass_target: None,
+            lateral_direction: 0.0,
+        };
+    }
+    let drive_dir = drive_vector / drive_dist;
+    let perp = Vec2::new(-drive_dir.y, drive_dir.x);
+    let minimum_separation = rules.min_player_separation_ft;
+    let max_path_distance = drive_speed * duration;
+    let lane_width = rules.tactics.drive_lane_offset_ft.max(minimum_separation);
+    let mut primary_defender: Option<(&PlayerPhysicsState, (f32, f32))> = None;
+    for candidate in players
+        .values()
+        .filter(|player| player.on_court && player.team != driver.team && player.id != driver.id)
+    {
+        let relative = candidate.pos_ft - from_pos;
+        let along = relative.dot(drive_dir);
+        let lateral = (relative - drive_dir * along).length();
+        if along <= 0.0 || along >= drive_dist || lateral > lane_width + minimum_separation {
+            continue;
+        }
+        let is_primary = primary_defender
+            .as_ref()
+            .is_none_or(|(current, distance)| {
+                (along, lateral, candidate.id.as_str()).partial_cmp(&(
+                    distance.0,
+                    distance.1,
+                    current.id.as_str(),
+                )) == Some(std::cmp::Ordering::Less)
+            });
+        if is_primary {
+            primary_defender = Some((candidate, (along, lateral)));
+        }
+    }
+    let direct_path = [from_pos, target_pos];
+    let direct_check = DrivePathCheck {
+        points: &direct_path,
+        offense_team: driver.team.as_str(),
+        contact_skill,
+        players,
+        drive_speed,
+        duration,
+        minimum_separation,
+        beaten_defender: None,
+        policy,
+    };
+    if let Some(margin) = drive_path_margin(&direct_check) {
+        if margin > 0.0 {
+            if let Some((defender, _)) = primary_defender {
+                let defender_side = (defender.pos_ft - from_pos).dot(perp);
+                return DriveGeometryResolution {
+                    successful: true,
+                    primary_defender_id: Some(defender.id.clone()),
+                    bypass_target: None,
+                    lateral_direction: if defender_side >= 0.0 { -1.0 } else { 1.0 },
+                };
+            }
+            return DriveGeometryResolution {
+                successful: true,
+                primary_defender_id: None,
+                bypass_target: None,
+                lateral_direction: 0.0,
+            };
+        }
+    }
+
+    let mut best_route: Option<(f32, f32, String, Vec2, f32)> = None;
+    for defender in players
+        .values()
+        .filter(|player| player.on_court && player.team != driver.team && player.id != driver.id)
+    {
+        let relative = defender.pos_ft - from_pos;
+        let along = relative.dot(drive_dir);
+        let lateral = (relative - drive_dir * along).length();
+        if along <= 0.0 || along >= drive_dist || lateral > lane_width + minimum_separation {
+            continue;
+        }
+        let projected = from_pos + drive_dir * along;
+        let clearance = minimum_separation * 2.0 + rules.player_radius_ft;
+        for lateral_direction in [-1.0, 1.0] {
+            let bypass_target = rules.court.clamp_playable(
+                projected + perp * lateral_direction * clearance,
+                rules.player_radius_ft,
+            );
+            let route = [from_pos, bypass_target, target_pos];
+            let route_check = DrivePathCheck {
+                points: &route,
+                offense_team: driver.team.as_str(),
+                contact_skill,
+                players,
+                drive_speed,
+                duration,
+                minimum_separation,
+                beaten_defender: Some((&defender.id, 1)),
+                policy,
+            };
+            let Some(margin) = drive_path_margin(&route_check) else {
+                continue;
+            };
+            let path_distance: f32 = route.windows(2).map(|pair| pair[0].distance(pair[1])).sum();
+            if margin <= 0.0 || path_distance > max_path_distance {
+                continue;
+            }
+            let candidate = (
+                path_distance,
+                -margin,
+                defender.id.clone(),
+                bypass_target,
+                lateral_direction,
+            );
+            let replace = best_route.as_ref().is_none_or(|best| {
+                candidate
+                    .0
+                    .partial_cmp(&best.0)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| {
+                        candidate
+                            .1
+                            .partial_cmp(&best.1)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .then_with(|| candidate.2.cmp(&best.2))
+                    .then_with(|| {
+                        candidate
+                            .4
+                            .partial_cmp(&best.4)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .is_lt()
+            });
+            if replace {
+                best_route = Some(candidate);
+            }
+        }
+    }
+
+    if let Some((_, _, defender_id, bypass_target, lateral_direction)) = best_route {
+        DriveGeometryResolution {
+            successful: true,
+            primary_defender_id: Some(defender_id),
+            bypass_target: Some(bypass_target),
+            lateral_direction,
+        }
+    } else if let Some((defender, _)) = primary_defender {
+        DriveGeometryResolution {
+            successful: false,
+            primary_defender_id: Some(defender.id.clone()),
+            bypass_target: None,
+            lateral_direction: 0.0,
+        }
+    } else {
+        DriveGeometryResolution {
+            successful: false,
+            primary_defender_id: None,
+            bypass_target: None,
+            lateral_direction: 0.0,
+        }
+    }
+}
+
+/// 突破路径接触余量评估的共享输入：路径折线、双方技巧与规则参数。
+struct DrivePathCheck<'a> {
+    points: &'a [Vec2],
+    offense_team: &'a str,
+    contact_skill: f32,
+    players: &'a HashMap<String, PlayerPhysicsState>,
+    drive_speed: f32,
+    duration: f32,
+    minimum_separation: f32,
+    /// 已被绕过的防守人从指定段起不再参与接触评估。
+    beaten_defender: Option<(&'a str, usize)>,
+    policy: &'a nba_domain::DriveGeometryPolicy,
+}
+
+fn drive_path_margin(check: &DrivePathCheck<'_>) -> Option<f32> {
+    let points = check.points;
+    let path_distance: f32 = points
+        .windows(2)
+        .map(|pair| pair[0].distance(pair[1]))
+        .sum();
+    if path_distance > check.drive_speed * check.duration {
+        return None;
+    }
+
+    let mut minimum_margin = f32::INFINITY;
+    let mut elapsed = 0.0;
+    for (segment_index, segment) in points.windows(2).enumerate() {
+        let start = segment[0];
+        let vector = segment[1] - start;
+        let length_squared = vector.length_squared();
+        if length_squared <= f32::EPSILON {
+            continue;
+        }
+        let length = length_squared.sqrt();
+        for defender in check.players.values().filter(|player| {
+            player.on_court
+                && player.team != check.offense_team
+                && !check.beaten_defender.is_some_and(|(id, after_segment)| {
+                    player.id == id && segment_index >= after_segment
+                })
+        }) {
+            let initial_fraction =
+                clamp_unit((defender.pos_ft - start).dot(vector) / length_squared);
+            let arrival_time = (elapsed
+                + length * initial_fraction / check.drive_speed)
+                .clamp(f32::from(0u8), check.duration);
+            let max_speed = non_negative(defender.max_speed_ftps);
+            let velocity_speed = defender.vel_ft.length();
+            let velocity = if velocity_speed > max_speed && velocity_speed > f32::EPSILON {
+                defender.vel_ft * (max_speed / velocity_speed)
+            } else {
+                defender.vel_ft
+            };
+            let predicted_pos = defender.pos_ft + velocity * arrival_time;
+            let fraction = clamp_unit((predicted_pos - start).dot(vector) / length_squared);
+            let closest = start + vector * fraction;
+            let defender_can_close = fraction > f32::from(0u8) && fraction < f32::from(1u8);
+            let distance = (predicted_pos - closest).length();
+            let stamina = clamp_unit(
+                defender.stamina / defender.max_stamina.max(f32::EPSILON),
+            );
+            let defensive_skill = drive_contact_skill(
+                defender.attributes.defense_perimeter,
+                defender.attributes.agility,
+                defender.attributes.strength,
+                check.policy,
+            );
+            // 防守人改变移动方向需要启动时间；只计算启动后的加速度可达距离。
+            let response_time = non_negative(
+                arrival_time - check.policy.defender_response_delay_seconds,
+            );
+            let acceleration_reach = (0.5
+                * non_negative(defender.max_accel_ftps2)
+                * response_time
+                * response_time)
+                .min(non_negative(defender.max_speed_ftps) * response_time)
+                * (check.policy.reach_base_factor + defensive_skill * check.policy.reach_skill_gain)
+                * stamina;
+            let contact_margin = if defender_can_close {
+                distance
+                    - check.minimum_separation
+                    - acceleration_reach
+                    + (check.contact_skill - defensive_skill) * check.policy.contact_skill_scale
+            } else {
+                f32::INFINITY
+            };
+            minimum_margin = minimum_margin.min(contact_margin);
+        }
+        elapsed += length / check.drive_speed;
+    }
+    Some(minimum_margin)
+}
 
 impl MatchEngine {
     pub(crate) fn execute_drive(
@@ -29,6 +350,11 @@ impl MatchEngine {
         let Some(driver) = self.systems.physics.get_player(driver_id).cloned() else {
             return;
         };
+        let target_pos = self
+            .config
+            .rules
+            .court
+            .clamp_playable(target_pos, self.config.rules.player_radius_ft);
         let defender = self.systems.physics.openness(driver_id);
         let lane_density = SemanticEvaluator::spacing(
             self.flow.possession,
@@ -37,46 +363,54 @@ impl MatchEngine {
             &self.config.rules,
         )
         .paint_crowding;
-        let stamina = (driver.stamina / driver.max_stamina.max(f32::EPSILON)).clamp(0.0, 1.0);
+        let stamina = clamp_unit(driver.stamina / driver.max_stamina.max(f32::EPSILON));
         let defender_id = defender.closest_defender_id.clone();
         let foul_rate = defender_id
             .as_ref()
             .map(|_| self.config.rules.resolve.base_rates.foul_on_drive_rate)
             .unwrap_or(0.0);
-        let resolution = DriveResolution::resolve(
-            self.config.rules.resolve.base_rates.drive_success,
-            self.config.rules.resolve.shot_type_rates.drive_finish_2pt,
-            foul_rate,
-            driver.attributes.finishing,
-            stamina,
-            lane_density,
-            defender.contest_intensity,
-            self.config.rules.resolve.shot_type_block_bias.drive_finish,
-            self.config.rules.resolve.player_skill.finishing_weight,
-            &self.config.rules.resolve.drive,
-            &mut self.systems.rng,
-        );
-        let fouler_id = resolution.shooting_foul.then_some(defender_id).flatten();
-        let target_pos = self
-            .config
-            .rules
-            .court
-            .clamp_playable(target_pos, self.config.rules.player_radius_ft);
         let drive_dist = (target_pos - from_pos).length();
-        let drive_speed =
-            (driver.max_speed_ftps * self.config.rules.tactics.drive_speed_ratio).max(1.0);
-        // ## 时长必须包含加速坡（round-18）
-        //
-        // 原公式 `dist/speed` 假设瞬时达到极速。实测从静止加速
-        // （max_player_accel 35 ft/s²）到 ~25 ft/s 需 ~0.7s、损失 ~9 ft
-        // 里程——tau=1 时持球人仍距目标 5-10 ft，只能在 7-16 ft 抛投
-        // （篮下≤4ft 出手占比 2.4%，真实 25-50%）。加入 `speed/accel`
-        // 的加速坡项，使时长覆盖真实到达时间。
-        let accel = self.config.rules.max_player_accel_ftps2.max(f32::EPSILON);
-        let drive_duration = (drive_dist / drive_speed + drive_speed / accel).clamp(
-            self.config.rules.tactics.drive_min_duration_seconds,
-            self.config.rules.tactics.drive_max_duration_seconds,
+        let (drive_speed, drive_duration) =
+            drive_speed_and_duration(&driver, drive_dist, &self.config.rules);
+        let geometry = resolve_drive_geometry(
+            &driver,
+            from_pos,
+            target_pos,
+            self.systems.physics.get_players(),
+            drive_speed,
+            drive_duration,
+            &self.config.rules,
         );
+        let policy = &self.config.rules.resolve.drive;
+        let skill_delta = (driver.attributes.finishing - 0.5)
+            * self.config.rules.resolve.player_skill.finishing_weight
+            * policy.skill_delta_scale;
+        let fatigue_delta =
+            (stamina - 1.0) * self.config.rules.resolve.player_skill.finishing_weight;
+        let foul_probability = (foul_rate
+            * (policy.foul_base_share
+                + defender.contest_intensity
+                    * policy.foul_contest_weight
+                    * policy.foul_contest_scale))
+            .clamp(f32::from(0u8), f32::from(1u8));
+        let shooting_foul = self.systems.rng.gen_bool(foul_probability as f64);
+        let finish_probability = (self.config.rules.resolve.shot_type_rates.drive_finish_2pt
+            + skill_delta
+            + fatigue_delta
+            - defender.contest_intensity
+                * policy.finish_contest_penalty
+                * self.config.rules.resolve.shot_type_block_bias.drive_finish
+            - lane_density * policy.lane_density_penalty * policy.finish_lane_density_scale)
+            .clamp(0.0, 1.0);
+        let finish_made = geometry.successful
+            && !shooting_foul
+            && self.systems.rng.gen_bool(finish_probability as f64);
+        let resolution = DriveResolution {
+            successful: geometry.successful,
+            finish_made,
+            shooting_foul,
+        };
+        let fouler_id = resolution.shooting_foul.then_some(defender_id).flatten();
         let action_str = match move_kind {
             Some(nba_domain::action_window::DribbleMoveKind::Crossover) => "Crossover",
             Some(nba_domain::action_window::DribbleMoveKind::BetweenTheLegs) => "BetweenTheLegs",
@@ -99,114 +433,34 @@ impl MatchEngine {
             }
             _ => format!("{} 持球强突，冲击篮筐！", driver.jersey),
         };
-        // ## 被过掉的防守人必须真的被过掉（round-18）
-        //
-        // 根因链：突破预掷 `successful=true`，但物理层持球人直撞贴身防守人
-        // （最近防守人 3.7 ft ≈ min_player_separation），碰撞消解每 tick
-        // 清零速度——实测 0% 突破到达 ≤4.5ft，65% 停在离筐 18.6 ft。
-        //
-        // 语义一致性（与拦截锚定球到抢断者同一原则——概率在事件时刻裁定，
-        // 事实随后回放）：`successful` 意味着**过掉了对位防守人**。把该
-        // 防守人实际位移出突破走廊（侧向 + 分离余量），他随后由防守战术
-        // 重新追防——这正是真实篮球「被过掉后回追」的几何。
-        let mut target_pos_override: Option<Vec2> = None;
+        // 只有几何路径可达且通过接触抗衡时才标记突破成功；被绕过的主防守人
+        // 按既有恢复窗口追防，其他协防球员保持原有目标。
+        let mut target_pos_override = None;
         if resolution.successful {
-            // ## 过人变向（round-18 修订版：绕行而非瞬移）
-            //
-            // 初版把被过的防守人瞬移出通道——触发 PLAYER_TELEPORT 不变量
-            // （实测 70-94 Hard/seed）。不变量是对的：位置跳变是伪造事实。
-            //
-            // 物理一致的过人语义：**持球人变向绕过**防守人（真实的 crossover
-            // 几何）。突破目标点侧移一个分离余量，路径绕开贴身防守人；
-            // 防守人随后由战术层追防（真实「被过掉后回追」）。
-            let drive_dir = (target_pos - from_pos).normalize_or_zero();
-            let perp = Vec2::new(-drive_dir.y, drive_dir.x);
-            // ## 让位整条通道（round-19：从单人到全体）
-            //
-            // round-18 只让位**最近的一名**通道内防守人——过掉第一人对
-            // 后，护框者（第二道防线）仍在篮下挡住最后几米，实测篮下
-            // ≤4ft 出手仅 3.8%（真实 25-50%）。
-            //
-            // 语义：`successful` 预掷的是「这次突破**整体**打成了」——
-            // 包括过掉对位人与顶开/绕过护框。因此通道内**所有**防守人
-            // 都应让位（各自向远离突破方向的侧向清空点极速移动）；
-            // 对抗强度已由 successful 的掷骰（防守能力加权）承担，
-            // 几何层只负责让事实成立。
-            let clear = self.config.rules.min_player_separation_ft * 2.0
-                + self.config.rules.player_radius_ft;
-            let mut beaten_ids: Vec<String> = Vec::new();
-            let mut beat_spots: Vec<(String, Vec2, f32, String, String)> = Vec::new();
-            for q in self.systems.physics.get_players().values() {
-                if !q.on_court || q.team == driver.team {
-                    continue;
-                }
-                let rel = q.pos_ft - from_pos;
-                let along = rel.dot(drive_dir);
-                let lateral = (rel - drive_dir * along).length();
-                if along > 0.0
-                    && along < drive_dist
-                    && lateral < self.config.rules.tactics.drive_lane_offset_ft.max(4.0)
-                {
-                    let side = if perp.dot(rel) >= 0.0 { -1.0 } else { 1.0 };
-                    let spot = self.config.rules.court.clamp_playable(
-                        q.pos_ft + perp * side * clear,
+            if let Some(defender_id) = geometry.primary_defender_id.as_ref() {
+                if let Some(defender) = self.systems.physics.get_player(defender_id).cloned() {
+                    let drive_dir = (target_pos - from_pos).normalize_or_zero();
+                    let perp = Vec2::new(-drive_dir.y, drive_dir.x);
+                    let clear = self.config.rules.min_player_separation_ft;
+                    let recovery_target = self.config.rules.court.clamp_playable(
+                        defender.pos_ft - perp * geometry.lateral_direction * clear,
                         self.config.rules.player_radius_ft,
                     );
-                    beat_spots.push((
-                        q.id.clone(),
-                        spot,
-                        q.max_speed_ftps,
-                        q.slot.clone(),
-                        q.morale.clone(),
-                    ));
-                    beaten_ids.push(q.id.clone());
-                }
-            }
-            // 主对位人（离持球人最近者）驱动两段式过人几何；其余
-            // （护框者等）只让位，不参与重定向判定。
-            let primary = self
-                .systems
-                .physics
-                .get_players()
-                .values()
-                .filter(|q| beaten_ids.contains(&q.id))
-                .min_by(|a, b| {
-                    (a.pos_ft - from_pos)
-                        .length_squared()
-                        .partial_cmp(&(b.pos_ft - from_pos).length_squared())
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .map(|q| q.id.clone());
-            for (bid, spot, sp, slot, morale) in beat_spots {
-                self.systems.physics.set_player_target(
-                    &bid,
-                    spot,
-                    sp,
-                    "BeatenRecovery",
-                    &slot,
-                    &morale,
-                );
-                self.observations.beaten_recovery_until.insert(
-                    bid,
-                    self.clock.current_time
-                        + self.config.rules.tactics.drive_beaten_recovery_seconds,
-                );
-            }
-            if let Some(pid) = primary {
-                if let Some(q) = self.systems.physics.get_player(&pid) {
-                    let side = if perp.dot(q.pos_ft - from_pos) >= 0.0 {
-                        -1.0
-                    } else {
-                        1.0
-                    };
-                    let beat_spot = self.config.rules.court.clamp_playable(
-                        q.pos_ft + perp * side * clear,
-                        self.config.rules.player_radius_ft,
+                    self.systems.physics.set_player_target(
+                        defender_id,
+                        recovery_target,
+                        defender.max_speed_ftps,
+                        "BeatenRecovery",
+                        &defender.slot,
+                        &defender.morale,
                     );
-                    // 两段式过人几何（真实 crossover）：
-                    //   第一段：持球人目标 = 过人点；第二段：重定向攻框。
-                    target_pos_override = Some(beat_spot);
-                    self.ball.beaten_defender_id = Some(pid);
+                    self.observations.beaten_recovery_until.insert(
+                        defender_id.clone(),
+                        self.clock.current_time
+                            + self.config.rules.tactics.drive_beaten_recovery_seconds,
+                    );
+                    target_pos_override = geometry.bypass_target;
+                    self.ball.beaten_defender_id = Some(defender_id.clone());
                 }
             }
         }
@@ -222,7 +476,7 @@ impl MatchEngine {
         self.transition_ball_state(BallTrajectoryKind::Drive {
             driver_id: driver_id.to_string(),
             from_pos,
-            target_pos,
+            target_pos: initial_target,
             move_kind,
             start_time: current_t,
             duration: drive_duration,
@@ -235,7 +489,7 @@ impl MatchEngine {
         self.journal.pending_events.push(GameEvent::DriveInitiated {
             driver_id: driver_id.to_string(),
             from_pos: (from_pos.x, from_pos.y),
-            target_pos: (target_pos.x, target_pos.y),
+            target_pos: (initial_target.x, initial_target.y),
         });
         self.journal.current_event = Some("DRIVE_INITIATED".to_string());
         self.journal.current_callout = Some(callout_text);
@@ -682,12 +936,17 @@ impl MatchEngine {
                 self.set_game_flow(GameFlowState::DeadBall);
                 self.start_inbound_transition(hoop, self.ball.ball_pos_3d);
             } else {
-                self.start_free_throw_rebound(shooter_is_home, ft_pos);
+                self.start_free_throw_rebound(&shooter_id, shooter_is_home, ft_pos);
             }
         }
     }
 
-    pub(crate) fn start_free_throw_rebound(&mut self, shooter_is_home: bool, ft_pos: Vec2) {
+    pub(crate) fn start_free_throw_rebound(
+        &mut self,
+        shooter_id: &str,
+        shooter_is_home: bool,
+        ft_pos: Vec2,
+    ) {
         let hoop = self.config.rules.court.hoop_pos(shooter_is_home);
         // 罚球出手弧与跳投同源（弧顶 = base + dist×factor，受 z 上限约束），
         // 反弹入射速度从同一抛体导出。
@@ -725,6 +984,8 @@ impl MatchEngine {
             duration: landing_spot.flight_duration,
             peak_z: landing_spot.peak_z,
             last_touch_team: self.flow.possession,
+            // 物理最后触球人是罚球出手人。
+            last_touch_player: Some(shooter_id.to_string()),
         };
         if matches!(
             self.ball.ball_state,
@@ -794,6 +1055,7 @@ impl MatchEngine {
                 let hoop = self.config.rules.court.hoop_pos(shooter_is_home);
                 self.ball.ball_pos_3d = (hoop, self.config.rules.rim_height_ft);
                 self.start_free_throw_rebound(
+                    &shooter_id,
                     shooter_is_home,
                     Court::free_throw_pos(shooter_is_home, &self.config.rules),
                 );

@@ -165,17 +165,18 @@ pub(crate) fn run_single_simulation(
             }
             Err(e) => eprintln!("⚠️ judgment artifacts failed: {}", e),
         }
-        // gap.md §18.6：Hard 门失败必须以失败退出，不得只打印。
-        if let Some(report) = judgments_report.as_ref() {
-            if enforce_hard_gate(report, "single") {
-                std::process::exit(1);
-            }
-        }
 
         // D0.2 账本平衡检查（含 §23.10 新增的失误归因式）：
         // ledger_violations.ndjson 同批写入；账本不平衡 = Hard，
         // 违反条数计入输出供批处理门禁消费。
+        //
+        // 顺序约束：账本判定必须在 Hard 门退出**之前**完成并写入工件。
+        // 此前 Hard 门失败先 `process::exit(1)`，账本检查被跳过——同一场
+        // 比赛在批量模式报账本违规、在单场模式下账本结论完全不可见
+        // （seed 14 实测：单场运行无 ledger_violations.ndjson 产生）。
+        // 两个门是两类独立失败，结论都必须产出后统一判定退出码。
         let ledger_violations = nba_evaluator::check_ledger(&ticks);
+        let mut ledger_failed = false;
         let ledger_path = format!("{}.ledger_violations.ndjson", out_path);
         match File::create(&ledger_path) {
             Ok(f) => {
@@ -206,9 +207,20 @@ pub(crate) fn run_single_simulation(
                         ledger_violations.len(),
                         ledger_path
                     );
+                    ledger_failed = true;
                 }
             }
             Err(e) => eprintln!("⚠️ ledger violations artifact failed: {}", e),
+        }
+
+        // 两门判定：Hard 缺陷与账本不平衡各自独立阻断；两边结论都
+        // 已打印/写入，退出码取两者的或。
+        let hard_gate_failed = judgments_report
+            .as_ref()
+            .map(|report| enforce_hard_gate(report, "single"))
+            .unwrap_or(false);
+        if hard_gate_failed || ledger_failed {
+            std::process::exit(1);
         }
     }
 

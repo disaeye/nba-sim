@@ -48,9 +48,14 @@ pub(super) fn eval_inbound_clock_world(ctx: &ConstraintContext) -> ConstraintRes
 }
 
 pub(super) fn eval_backcourt_clock_world(ctx: &ConstraintContext) -> ConstraintResult {
+    // 规则语义：8 秒违例的主体是「控球队」，球无主（松球/篮板/停球）或
+    // 已出手（投篮飞行）时不存在控球队，计时不得产生违例（seed 14 实测：
+    // 停球在第 4 节开场被伪判 8 秒且无责任人）。计时器本身仍在时钟层按
+    // 同一口径累加（phases.rs），两层用同一谓词，不另立第二口径。
     if ctx.backcourt_elapsed >= ctx.rules.backcourt_seconds
         && !ctx.is_in_frontcourt()
         && ctx.is_live_ball()
+        && ctx.offense_has_possession()
     {
         ConstraintResult::violate("EIGHT_SECOND_BACKCOURT")
     } else {

@@ -164,6 +164,8 @@ impl MatchEngine {
         }
         self.clock.tick_index = self.clock.tick_index.saturating_add(1);
         self.observations.potential_field.clear();
+        self.observations.possession_ticks = self.observations.possession_ticks.saturating_add(1);
+        self.advance_active_play();
 
         let dt = self.config.rules.tick_seconds;
         let was_tip_off = self.flow.game_flow == GameFlowState::TipOff;

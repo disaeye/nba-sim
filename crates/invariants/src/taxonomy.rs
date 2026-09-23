@@ -83,9 +83,11 @@ pub fn categorize_rule(rule: &str) -> ViolationCategory {
         "PLAYER_SPEED" | "BALL_SPEED" | "BALL_HEIGHT_BOUNDS" | "BALL_TELEPORT" => {
             ViolationCategory::Kinematics
         }
-        "BALL_SINGLE_HOLDER" | "BALL_WITH_HOLDER" | "BALL_HOLDER_MISMATCH" => {
-            ViolationCategory::PossessionMutex
-        }
+        "BALL_SINGLE_HOLDER"
+        | "BALL_WITH_HOLDER"
+        | "BALL_HOLDER_MISMATCH"
+        | "LIVE_FLOW_DEAD_BALL"
+        | "TURNOVER_ACTOR_MISSING" => ViolationCategory::PossessionMutex,
         "CLOCK_MONOTONIC"
         | "SHOT_CLOCK_BOUNDS"
         | "TEAM_FOULS_MONOTONIC"

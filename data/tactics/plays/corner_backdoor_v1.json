@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "corner_backdoor_v1",
+  "name_zh": "底角背切",
+  "kind": "play",
+  "rules": [
+    {
+      "id": "backdoor_from_occupied_corner",
+      "when": [
+        { "predicate": "corner_occupied", "side": "left" },
+        { "predicate": "halfcourt_possession" }
+      ],
+      "then": { "verb": "CutBackdoor", "slot": "left_corner" }
+    }
+  ],
+  "triggers": [
+    {
+      "when": [
+        { "predicate": "corner_occupied", "side": "left" },
+        { "predicate": "halfcourt_possession" }
+      ],
+      "window_seconds": 4.0,
+      "cooldown_seconds": 7.0
+    }
+  ]
+}

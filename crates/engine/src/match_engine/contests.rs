@@ -467,6 +467,9 @@ impl MatchEngine {
             z: self.ball.ball_pos_3d.1,
             vel_z: 0.0,
             last_touch_team: self.flow.possession,
+            // 物理最后触球人是拨球的防守人；进攻方丢球人
+            // （handler）已写入 `pending_loose_ball_terminal` 归因链。
+            last_touch_player: Some(defender_id.to_string()),
         });
     }
 

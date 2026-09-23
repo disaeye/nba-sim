@@ -32,8 +32,10 @@
 ## 1. 执行纪律与红线守卫
 
 1. **零功能回退原则**：任何步骤都不得引入新的测试失败。
-   D27 与 D23 完成后，全量 `./scripts/run-tests.sh --no-fail-fast`
-   已**完全转绿**：退出码 0、54 个测试目标全部通过，
+   D27 与 D23 完成后，全量 workspace 套件（当时入口等价于现在的
+   `./scripts/run-tests.sh --`；现行脚本经 e58aea3 改为分层入口，
+   接受 `tier1 | tier2 | tier3 | tier2+3 | --`）
+   已**完全转绿**：退出码 0、当时 54 个测试目标全部通过，
    含此前长期红灯的 `wiring_proof.rs`（当时 6/6，后又增加一项可达性回归）与全部其他目标。
 2. **统计健康带守卫**。本项涉及两个不同的验证入口，实测如下：
 
@@ -109,8 +111,7 @@ D22 状态组收敛与 mod.rs 瘦身 ──────────────�
    任何一行真行为改动都会使黄金哈希失效；
 4. **组内字段保持原字段名**：调用点只增加路径前缀，不做重命名。
 
-`System` 组的 `world` 字段是 `crate::world::MatchWorld` 的镜像，仍是写入端；
-真实感知消费由 D23（§4）闭合，验收门是 `crates/engine/tests/wiring_proof.rs`。
+`System` 组曾持有的 `world` 字段（`crate::world::MatchWorld` 镜像）已随 shadow world 移除删除，`Systems` 现为 physics/decision/coach/rng 四字段；原「真实感知消费由 D23 闭合」的路径已超越（见 §4 横幅），接线验收门仍是 `crates/engine/tests/wiring_proof.rs`。
 
 ### 3.3 阶段签名收窄
 
@@ -176,11 +177,13 @@ D22 状态组收敛与 mod.rs 瘦身 ──────────────�
 - 新增守卫 `scripts/check_engine_state_groups.py`：断言 `MatchEngine` 零裸字段、
   断言状态组字段均为 `pub(crate)` 不泄出 crate、断言 `mod.rs` 行数上限；
   守卫带 `--self-test`（三个负面对照：裸字段 / `pub` 组字段 / `mod.rs` 超限）；
-- 全量 `./scripts/run-tests.sh --no-fail-fast` 除 `wiring_proof.rs` 外全绿（D22 为纯搬移，不负责闭合 wiring_proof）。
+- 全量 workspace 套件（现行入口 `./scripts/run-tests.sh --`）除 `wiring_proof.rs` 外全绿（D22 为纯搬移，不负责闭合 wiring_proof）。
 
 ---
 
 ## 4. D23 · 空间 Voronoi 拓扑与防守压迫感知系统 (PerceptionSystem)
+
+> **⚠️ 已超越（2026-09-21，shadow world 移除）**：本节设计的 `PerceptionSystem` / `MatchWorld` / `crates/engine/src/world.rs` / `sync_to_world` 及行为测试 `match_world.rs` 已整体删除，`Systems` 不再持有 `world` 字段。全场防守拓扑（压迫密度、空间真空、弱侧空位、X-Out 轮转）不再是独立持久对象，而由 `crates/decision/src/potential_field.rs` 的 `DefensePotentialFieldSolver` 在求解时从在场进攻球员位置即时涌现（见 ADR-012、ADR-015 文末修订注记）。因此本节 §4.3 的“待做”项（进攻侧 Voronoi 接入决策、空位检测测试、`PerceptionSystem` 常数走规则通道）**不再适用**——其目标已由势能场求解器路径吸收。以下内容保留为设计历史。
 
 ### 4.1 核心问题与设计目标
 
@@ -443,7 +446,7 @@ tick 51080 球触地发 `SHOT_MISS`，弹道裁决执行 `Initiation -> FlightAn
 Axiom 违规 0、Ledger 违规 0。
 
 - 无零消费的 `effective_*` 函数；
-- 全量 `./scripts/run-tests.sh --no-fail-fast` 全绿。
+- 全量 workspace 套件（现行入口 `./scripts/run-tests.sh --`）全绿。
 
 #### 与 `golden_hash` 的关系（实测，避免误读）
 
@@ -476,8 +479,10 @@ D27 改变了行为，但 `GOLDEN_SEED42_2000` 未变（仍为 `0xde010befa25c77
 
 ### 9.1 出口条件
 
-1. **测试套件全绿**：`./scripts/run-tests.sh --no-fail-fast` 全部测试目标通过
-   （工作区共 30 个集成测试文件加各 crate 的单元测试目标）；
+1. **测试套件全绿**：`./scripts/run-tests.sh --`（传统全量入口）全部测试目标通过
+   （工作区共 30 个集成测试文件加各 crate 的单元测试目标；
+   G-STATS 16-seed 验收已内化为其中的 `stats_baseline`——
+   16 seed 全场的统计带 + 账本五式 + Hard 门断言）；
    其中 `crates/engine/tests/invariants.rs::phase_transitions_are_legal_across_seeds` 是本轮新增：它把 `nba.v2`
    的 `phase_transitions` 合法表搬进测试套件（原先只由 G-STATS 16-seed
    矩阵检查，而那个矩阵不属于本脚本，日常回归看不到），
@@ -543,7 +548,7 @@ D22 解决了 `match_engine` 内部的编排层与状态耦合，但其余 crate
   与 HEAD 逐字相同；`nba_physics::movement::` / `nba_decision::constraint::` /
   `nba_domain::rules::` 的跨 crate 引用全部是 crate 根重导出，未受影响；
 - `cargo clippy --workspace --all-targets -- -D warnings` 零告警；
-- 全量 `./scripts/run-tests.sh --no-fail-fast` **54/54**（`exit=0`）；
+- 全量 workspace 套件（现行入口 `./scripts/run-tests.sh --`）当时 **54/54**（`exit=0`；目标数随测试文件增减，现行计数以 `par_test.py` 输出为准）；
 - `golden_hash` 与搬移前逐字节相同（每一次搬移后均验证，未变）；
 - 四个 CLI 子命令用真实参数逐一实跑验证（详见 §10.7）。
 

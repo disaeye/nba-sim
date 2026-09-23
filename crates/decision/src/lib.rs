@@ -6,6 +6,9 @@
 pub mod constraint;
 pub mod modulation;
 pub mod pipeline;
+pub mod play_actions;
+pub mod play_executor;
+pub mod play_selector;
 pub mod potential_field;
 pub mod tactics;
 
@@ -15,8 +18,17 @@ pub use constraint::{
     EnforcementAction, PhaseType, ScoredCandidate, Severity, ViolationKind,
 };
 pub use modulation::{CoachStrategy, MoraleState, PlayerModulationState};
-pub use pipeline::{DecisionOutput, DecisionSystem, DecisionTrace, DecisionWeights};
-pub use potential_field::{DefensePotentialFieldSolver, EmergentDefenseTarget};
+pub use pipeline::{
+    DecisionOutput, DecisionSystem, DecisionTrace, DecisionWeights, OnBallDecisionContext,
+};
+pub use play_executor::{evaluate_active_play, PlayExecution, PlayFamilyEffect, PlayRuleAction};
+pub use play_selector::{
+    eval_predicate, select, PlayActivation, PlayActivationBook, PlayBookEntry, PlayBookPhase,
+    PlaySelectionContext,
+};
+pub use potential_field::{
+    DefenseHysteresisState, DefensePotentialFieldSolver, EmergentDefenseTarget, StableFieldOutput,
+};
 pub use tactics::{
     DefensiveRole, DefensiveScheme, DefensiveTactic, OffensiveRole, TacticalPlanner, TacticalSet,
     TeamIntent,

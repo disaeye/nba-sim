@@ -16,13 +16,14 @@ use nba_invariants::{InvariantChecker, Violation};
 use glam::Vec2;
 use nba_decision::modulation::{CoachStrategy, PlayerModulationState};
 use nba_decision::pipeline::DecisionSystem;
+use nba_decision::potential_field::DefenseHysteresisState;
 use nba_decision::tactics::{DefensiveTactic, TacticalSet};
 use nba_domain::action_window::ActionTimeWindow;
 use nba_domain::{GameFlowState, Possession, SubPhase};
 use nba_protocol::DecisionDebug;
 use nba_semantics::{SemanticContact, SpacingEvaluation};
 use rand_chacha::ChaCha8Rng;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use nba_physics::ballistics::BallTrajectoryKind;
 use nba_physics::movement::PhysicsWorld;
@@ -48,9 +49,21 @@ pub(crate) struct Systems {
 /// （`active_windows` 与 `beaten_recovery_until` 跨 tick，其余逐 tick 重算）。
 pub(crate) struct RuntimeObservations {
     pub(crate) active_windows: HashMap<String, ActionTimeWindow>,
+    /// 主客队各自的激活 Play；比赛选板规则要求每队至多一个。
+    pub(crate) home_active_play: Option<ActivePlay>,
+    pub(crate) away_active_play: Option<ActivePlay>,
+    /// 主客两队分别维护 Play 激活与冷却簿记。
+    pub(crate) home_play_activation_book: nba_decision::play_selector::PlayActivationBook,
+    pub(crate) away_play_activation_book: nba_decision::play_selector::PlayActivationBook,
+    pub(crate) home_play_cooldowns: BTreeMap<String, u32>,
+    pub(crate) away_play_cooldowns: BTreeMap<String, u32>,
+    /// 当前回合已推进的仿真 tick 数。
+    pub(crate) possession_ticks: u32,
     pub(crate) last_decision_trace: Option<Box<DecisionDebug>>,
     pub(crate) latest_spacing: Option<SpacingEvaluation>,
     pub(crate) potential_field: Vec<PotentialFieldObservation>,
+    /// 逐防守人维护的场输出滞回状态，供下一决策 tick 的 Play 谓词读取。
+    pub(crate) field_hysteresis: HashMap<String, DefenseHysteresisState>,
     pub(crate) latest_contacts: Vec<SemanticContact>,
     /// 被过防守人的恢复窗口截止时刻（round-19）：窗口内战术层不得重派。
     pub(crate) beaten_recovery_until: HashMap<String, f32>,
@@ -87,6 +100,10 @@ pub(crate) struct PotentialFieldObservation {
     pub(crate) void_ratio: f32,
 }
 
+pub(crate) struct ActivePlay {
+    pub(crate) spec: nba_domain::PlaySpec,
+}
+
 impl RuntimeObservations {
     pub(crate) fn new(
         active_windows: HashMap<String, ActionTimeWindow>,
@@ -94,9 +111,17 @@ impl RuntimeObservations {
     ) -> Self {
         Self {
             active_windows,
+            home_active_play: None,
+            away_active_play: None,
+            home_play_activation_book: nba_decision::play_selector::PlayActivationBook::new(),
+            away_play_activation_book: nba_decision::play_selector::PlayActivationBook::new(),
+            home_play_cooldowns: BTreeMap::new(),
+            away_play_cooldowns: BTreeMap::new(),
+            possession_ticks: 0,
             last_decision_trace: None,
             latest_spacing: None,
             potential_field: Vec::new(),
+            field_hysteresis: HashMap::new(),
             latest_contacts: Vec::new(),
             beaten_recovery_until: HashMap::new(),
             advancing_player: None,
@@ -257,6 +282,8 @@ pub(crate) struct TeamConfig {
     /// 全队挤在弧顶三分线外。
     pub(crate) home_offense_spec: nba_domain::TacticalSetSpec,
     pub(crate) away_offense_spec: nba_domain::TacticalSetSpec,
+    pub(crate) home_playbook: Vec<nba_domain::PlaySpec>,
+    pub(crate) away_playbook: Vec<nba_domain::PlaySpec>,
     pub(crate) home_defensive_tactic: DefensiveTactic,
     pub(crate) away_defensive_tactic: DefensiveTactic,
 }

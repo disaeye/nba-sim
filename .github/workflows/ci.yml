@@ -28,7 +28,8 @@ jobs:
           if [[ "$MSG" =~ ^(Merge|Revert|fixup!|squash!) ]]; then
             exit 0
           fi
-          PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci)(\([a-zA-Z0-9_\.\/-]+\))?: .+"
+          PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci)"
+          PATTERN+="(\([a-zA-Z0-9_./-]+\))?: .+"
           if ! [[ "$MSG" =~ $PATTERN ]]; then
             echo "❌ Commit message does not follow Conventional Commits format."
             exit 1
@@ -47,9 +48,12 @@ jobs:
           fetch-depth: 2
       - name: Check for [full] flag
         id: detect_full
+        env:
+          FORCE_FULL: ${{ inputs.force_full }}
         run: |
           MSG=$(git log -1 --pretty=%B)
-          if [[ "$MSG" =~ \[full\] ]] || [[ "${{ inputs.force_full }}" == "true" ]]; then
+          if [[ "$MSG" =~ \[full\] ]] || \
+             [[ "$FORCE_FULL" == "true" ]]; then
             echo "is_full=true" >> $GITHUB_OUTPUT
           else
             echo "is_full=false" >> $GITHUB_OUTPUT
@@ -64,7 +68,8 @@ jobs:
           else
             echo "rust_changed=false" >> $GITHUB_OUTPUT
           fi
-          if echo "$DIFF" | grep -qE '^crates/(engine|physics|decision|officiating|domain)/'; then
+          CORE_PATTERN='^crates/(engine|physics|decision|officiating|domain)/'
+          if echo "$DIFF" | grep -qE "$CORE_PATTERN"; then
             echo "core_changed=true" >> $GITHUB_OUTPUT
           else
             echo "core_changed=false" >> $GITHUB_OUTPUT
@@ -92,6 +97,12 @@ jobs:
           - name: engine-state-groups
             script: scripts/check_engine_state_groups.py
             self_test: true
+          - name: docs
+            script: scripts/check_docs.py
+            self_test: false
+          - name: max-source-lines
+            script: scripts/check_max_source_lines.py
+            self_test: true
           - name: disk-budget
             script: scripts/check_disk_budget.py
             self_test: false
@@ -106,8 +117,15 @@ jobs:
         with:
           python-version: "3.12"
       - name: Run guard
+        env:
+          SCRIPT: ${{ matrix.script }}
+          REPORT_ARG: ${{ matrix.name == 'disk-budget' && '--report' || '' }}
+          RUN_SELF_TEST: ${{ matrix.self_test }}
         run: |
-          python3 "${{ matrix.script }}" ${{ matrix.name == 'disk-budget' && '--report' || '' }}
+          python3 "$SCRIPT" $REPORT_ARG
+          if [[ "$RUN_SELF_TEST" == "true" ]]; then
+            python3 "$SCRIPT" --self-test
+          fi
           if [[ "${{ matrix.self_test }}" == "true" ]]; then
             python3 "${{ matrix.script }}" --self-test
           fi
@@ -143,6 +161,10 @@ jobs:
             command: cargo test -p nba-domain
           - name: nba-invariants
             command: cargo test -p nba-invariants
+          - name: play-schema
+            command: cargo test -p nba-domain --test play_spec
+          - name: playbook-data
+            command: cargo test -p nba-domain --test playbook_data
           - name: world-state-equivalence
             command: cargo test -p nba-engine --test world_state_equivalence
           - name: engine-snapshot
@@ -176,7 +198,9 @@ jobs:
       matrix:
         include:
           - name: defense-responsibility-chain
-            command: cargo test -p nba-decision --test defense_responsibility_chain
+            command: >-
+              cargo test -p nba-decision --test
+              defense_responsibility_chain
           - name: attribute-perturbation
             command: cargo test -p nba-engine --test attribute_perturbation
           - name: block
@@ -193,6 +217,14 @@ jobs:
             command: cargo test -p nba-engine --test defense_effect
           - name: fiba-scenarios
             command: cargo test -p nba-engine --test fiba_scenarios
+          - name: play-selector
+            command: cargo test -p nba-decision --test play_selector
+          - name: play-actions
+            command: cargo test -p nba-decision --test play_actions
+          - name: playbook-setup
+            command: cargo test -p nba-engine --test playbook_setup
+          - name: action-phase-projection
+            command: cargo test -p nba-engine --test action_phase_projection
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -206,8 +238,31 @@ jobs:
       - name: Run Tier 2 target
         run: ${{ matrix.command }} -- --test-threads "$(nproc)"
 
+  d26_test:
+    needs: [change_detection, tier2_tests]
+    if: |
+      needs.change_detection.outputs.is_full == 'true' ||
+      needs.change_detection.outputs.core_changed == 'true'
+    name: D26 full-game response
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Configure runner parallelism
+        run: |
+          CPUS="$(nproc)"
+          echo "Runner CPUs: ${CPUS}"
+          echo "CARGO_BUILD_JOBS=${CPUS}" >> "$GITHUB_ENV"
+      - name: Run D26 full-game response target exclusively
+        run: >-
+          python3 scripts/par_test.py --include
+          '^nba-engine::defense_rotation_response$' --serial
+          '^nba-engine::defense_rotation_response$' --jobs 1
+          --threads-per-bin 1
+
   tier3_tests:
-    needs: change_detection
+    needs: [change_detection, d26_test]
     if: |
       needs.change_detection.outputs.is_full == 'true' ||
       needs.change_detection.outputs.core_changed == 'true'
@@ -223,11 +278,20 @@ jobs:
           echo "Runner CPUs: ${CPUS}"
           echo "CARGO_BUILD_JOBS=${CPUS}" >> "$GITHUB_ENV"
       - name: Run Tier 3 macro sanity net
-        run: cargo test -p nba-engine --test stats_baseline -- --nocapture --test-threads "$(nproc)"
+        run: >-
+          cargo test -p nba-engine --test stats_baseline -- --nocapture
+          --test-threads "$(nproc)"
 
   full_gate:
     name: full-gate
-    needs: [lint_commit, change_detection, clippy, fast_test, tier2_tests, tier3_tests]
+    needs:
+      - lint_commit
+      - change_detection
+      - clippy
+      - fast_test
+      - tier2_tests
+      - d26_test
+      - tier3_tests
     if: |
       always() &&
       (needs.change_detection.outputs.is_full == 'true' ||
@@ -240,6 +304,7 @@ jobs:
           CLIPPY_RESULT: ${{ needs.clippy.result }}
           FAST_TEST_RESULT: ${{ needs.fast_test.result }}
           TIER2_RESULT: ${{ needs.tier2_tests.result }}
+          D26_RESULT: ${{ needs.d26_test.result }}
           TIER3_RESULT: ${{ needs.tier3_tests.result }}
         run: |
           for result in "$LINT_RESULT" "$CLIPPY_RESULT" "$FAST_TEST_RESULT"; do
@@ -248,23 +313,38 @@ jobs:
               exit 1
             fi
           done
-          if [[ "$TIER2_RESULT" != "success" || "$TIER3_RESULT" != "success" ]]; then
-            echo "Parallel full-gate jobs did not all pass: Tier 2=$TIER2_RESULT, Tier 3=$TIER3_RESULT"
+          if [[ "$TIER2_RESULT" != "success" ]] ||
+             [[ "$D26_RESULT" != "success" ]] ||
+             [[ "$TIER3_RESULT" != "success" ]]; then
+            printf 'Full-gate jobs did not all pass:\n'
+            printf 'Tier 2=%s, D26=%s, Tier 3=%s\n' \
+              "$TIER2_RESULT" "$D26_RESULT" "$TIER3_RESULT"
             exit 1
           fi
           echo "All parallel full-gate jobs passed."
 
   deploy:
-    needs: [lint_commit, change_detection, guards, clippy, fast_test, full_gate]
-    if: |
+    needs:
+      - lint_commit
+      - change_detection
+      - guards
+      - clippy
+      - fast_test
+      - full_gate
+      - d26_test
+    if: >-
       always() &&
-      (needs.lint_commit.result == 'success') &&
-      (needs.change_detection.result == 'success') &&
-      (needs.guards.result == 'success') &&
+      needs.lint_commit.result == 'success' &&
+      needs.change_detection.result == 'success' &&
+      needs.guards.result == 'success' &&
       (needs.clippy.result == 'success' || needs.clippy.result == 'skipped') &&
-      (needs.fast_test.result == 'success' || needs.fast_test.result == 'skipped') &&
-      (needs.full_gate.result == 'success' || needs.full_gate.result == 'skipped') &&
-      (github.ref == 'refs/heads/main')
+      (needs.fast_test.result == 'success' ||
+       needs.fast_test.result == 'skipped') &&
+      (needs.full_gate.result == 'success' ||
+       needs.full_gate.result == 'skipped') &&
+      (needs.d26_test.result == 'success' ||
+       needs.d26_test.result == 'skipped') &&
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -273,10 +353,13 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           cd crates/bball-wasm
-          npx --yes wasm-pack build --target web --out-dir ../debug-server/static/wasm --release
+          npx --yes wasm-pack build --target web \
+            --out-dir ../debug-server/static/wasm --release
       - name: Deploy to Vercel
         run: |
-          npx --yes vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
+          npx --yes vercel deploy --prod --yes \
+            --token="$VERCEL_TOKEN"
         env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}

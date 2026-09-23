@@ -13,6 +13,13 @@
 //! 缓冲带与三个引力倍率、两个涌现阈值全部从 `PotentialFieldRules` 读取。
 //! 这些量过去以字段默认值与函数内字面量两种形式散在这里，既无法用 `--rules`
 //! 覆盖，也逃过常数守卫（该文件当时不在预算名单内）。
+//!
+//! ## 场输出的滞回稳定通道（tactics.md §2.5，plan_play.md #21）
+//!
+//! `threat_ratio` / `void_ratio` 逐 tick 抖动，直接作开关型判定会引发谓词与
+//! 选板震荡。`DefenseHysteresisState` 维护逐防守人的双阈值滞回 + 最小保持时间，
+//! 输出「上一稳定态」；阈值参数同样全部从 `PotentialFieldRules` 读取。
+//! 未经滞回的场量不得进入任何开关型判定（ADR-019 裁定第 4 条）。
 
 use glam::Vec2;
 use nba_domain::rules::GameRules;
@@ -24,6 +31,48 @@ pub struct PotentialFieldVector {
     pub position: Vec2,
     pub drive: Vec2,
     pub pressure: f32,
+}
+
+/// 主动跑动场分量（护筐引力、真空吸力）的体能衰减系数。
+///
+/// ## 裁定：`w_man` 不衰减的理由
+///
+/// `w_man` 是对位牵引弹簧：目标点由对位人当前位置派生，防守人跟随的是
+/// 对位人的移动，不是自发跑动；而护筐引力与真空吸力要求防守人主动离位
+/// 冲向威胁/真空区域，跑动距离才受体能约束。因此衰减只作用于后两者。
+/// 系数恒在 `[stamina_floor, 1]` 内：stamina 越低越小，stamina = 1 时为 1
+/// （行为与无衰减逐位一致），stamina = 0 时为 `stamina_floor`。
+///
+/// 输入 `stamina` 为归一化体能（0..1，1 = 满体能），越界值就地 panic
+/// （fast-fail：体能口径错误必须在源头暴露，不允许静默钳制）。
+pub fn stamina_multiplier(stamina: f32, config: &PotentialFieldRules) -> f32 {
+    assert!(
+        (0.0..=1.0).contains(&stamina),
+        "stamina must be normalized in [0, 1], got {stamina}"
+    );
+    let floor = config.stamina_floor;
+    let gain = config.stamina_gain;
+    floor + (1.0 - floor) * stamina.powf(gain)
+}
+
+/// 下沉锚点方向「朝篮筐」的权重合成（help_blend，plan_play.md #22）。
+///
+/// `hoop_weight = clamp(base + tilt_gain × help_priority, min, max)`：
+/// base/min/max 来自方案无关的合成配方（`PotentialFieldRules`，数据源
+/// schemes.json 顶层 help_blend 块），`help_priority` 是该防守人所在
+/// 防守方案的同名字段。协防优先级高的方案锚点重心向篮筐偏移，低的
+/// 向外线持球人偏移；clamp 保证协防不完全脱离篮筐方向，也不退化为
+/// 纯护框。`carrier_weight = 1 - hoop_weight`，权重和恒为 1。
+///
+/// 输入 `help_priority` 必须在归一化区间 [0, 1] 内，越界就地 panic
+/// （fast-fail：方案档案口径错误必须在源头暴露，不允许静默钳制）。
+pub fn help_anchor_hoop_weight(help_priority: f32, config: &PotentialFieldRules) -> f32 {
+    assert!(
+        (0.0..=1.0).contains(&help_priority),
+        "help_priority must be normalized in [0, 1], got {help_priority}"
+    );
+    (config.help_hoop_weight_base + config.help_priority_tilt_gain * help_priority)
+        .clamp(config.help_hoop_weight_min, config.help_hoop_weight_max)
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +116,14 @@ impl DefensePotentialFieldSolver {
     /// - `assigned_off_idx`: 该防守人对位的进攻球员索引
     /// - `carrier_idx`: 持球人索引
     /// - `rules`: 比赛规则配置（提供本模块系数的唯一来源）
+    /// - `stamina`: 该防守人的归一化体能（0..1，1 = 满体能）；
+    ///   仅衰减护筐引力与真空吸力两个主动跑动分量（对位牵引不衰，
+    ///   见 `stamina_multiplier` 的裁定）。满体能时衰减系数恒为 1，
+    ///   输出与无衰减通道逐位一致。
+    ///
+    /// 几何 + 规则 + 体能的物理求解参数列表（`&self` 之外 7 个），
+    /// 各参数彼此独立，无需引入参数结构体。
+    #[allow(clippy::too_many_arguments)]
     pub fn solve_equilibrium(
         &self,
         carrier_pos: Vec2,
@@ -75,6 +132,7 @@ impl DefensePotentialFieldSolver {
         assigned_off_idx: usize,
         carrier_idx: usize,
         rules: &GameRules,
+        stamina: f32,
     ) -> EmergentDefenseTarget {
         // 系数从规则档案读取（`DefenseRules` 经防守方案实例化，`potential_field`
         // 随方案一起进入规则通道）。
@@ -138,33 +196,43 @@ impl DefensePotentialFieldSolver {
         let sag_distance = base_sag * sag_mult;
         let to_hoop = (hoop_pos - assigned_pos).normalize_or_zero();
         let to_carrier = (carrier_pos - assigned_pos).normalize_or_zero();
-        let hoop_weight = config.sag_anchor_hoop_weight;
+        // 下沉锚点方向经防守方案的协防权重混合（help_blend）调制，
+        // 合成配方与 clamp 语义见 `help_anchor_hoop_weight`。
+        let hoop_weight = help_anchor_hoop_weight(rules.tactics.defense.help_priority, config);
         let carrier_weight = 1.0 - hoop_weight;
         let shell_anchor = assigned_pos
             + (to_hoop * hoop_weight + to_carrier * carrier_weight).normalize_or_zero()
                 * sag_distance;
         let w_man = config.k_man_base;
 
+        // 体能衰减（#24）：护筐引力与真空吸力要求防守人主动跑动，随体能衰减；
+        // 对位牵引是被动跟随，不衰。衰减系数在满体能时恒为 1（行为中性）。
+        let stamina_mult = stamina_multiplier(stamina, config);
+
         // 5. 势能分量二：禁区威胁引力势能 (Rim Protection Attraction)
         // 威胁中心点位于持球人与篮筐之间的禁区缓冲带；受 sag_multiplier 协同下沉
         let rim_target =
             hoop_pos + (carrier_pos - hoop_pos).normalize_or_zero() * config.rim_buffer_ft;
         // 只有弱侧低位人拥有高耦合的护筐引力；高位人需保留在外线，防备三分
-        let w_threat = if is_low_man {
-            config.k_threat_base
-                * global_threat
-                * local_rim_proximity
-                * config.low_man_threat_gain
-                * sag_mult
-        } else if is_high_man {
-            config.k_threat_base * global_threat * local_rim_proximity * config.high_man_threat_gain
-        } else {
-            config.k_threat_base
-                * global_threat
-                * local_rim_proximity
-                * config.default_threat_gain
-                * sag_mult
-        };
+        let w_threat = stamina_mult
+            * if is_low_man {
+                config.k_threat_base
+                    * global_threat
+                    * local_rim_proximity
+                    * config.low_man_threat_gain
+                    * sag_mult
+            } else if is_high_man {
+                config.k_threat_base
+                    * global_threat
+                    * local_rim_proximity
+                    * config.high_man_threat_gain
+            } else {
+                config.k_threat_base
+                    * global_threat
+                    * local_rim_proximity
+                    * config.default_threat_gain
+                    * sag_mult
+            };
 
         // 6. 势能分量三：弱侧外线空间真空吸力 (Voronoi Space Deficit Pull)
         // 物理因果律：只有当持球人突破深入且弱侧低位人 (Low-man) 产生显著下沉护筐时，
@@ -186,7 +254,7 @@ impl DefensePotentialFieldSolver {
             // 空间真空目标点为弱侧两名射手连线的几何重心
             void_target = (corner_pos + wing_pos) * 0.5;
             // 真空吸力强度严格由 Low-man 的下沉激发度调制，外线无威胁时真空吸力自然归零
-            w_void = config.k_void_base * low_man_excitation * config.void_gain;
+            w_void = stamina_mult * config.k_void_base * low_man_excitation * config.void_gain;
         }
 
         // 7. 多体势能场平衡点闭式求解 (Analytical Force Equilibrium)
@@ -217,5 +285,161 @@ impl DefensePotentialFieldSolver {
             void_ratio,
             drive: equilibrium_pos - assigned_pos,
         }
+    }
+}
+
+/// 单 tick 的场量原始观测（未经滞回）。
+///
+/// 全部字段从 [`DefensePotentialFieldSolver::solve_equilibrium`] 的既有输出派生，
+/// 不重算几何。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FieldObservation {
+    /// 护筐威胁势能占比（对应 `EmergentDefenseTarget::threat_ratio`）。
+    pub threat_ratio: f32,
+    /// 空间真空势能占比（对应 `EmergentDefenseTarget::void_ratio`）。
+    pub void_ratio: f32,
+}
+
+/// 单个布尔稳定量的滞回状态机（双阈值 + 最小保持时间）。
+///
+/// - `value`：上一稳定态，下游读到的永远是它，从不当 tick 原始值；
+/// - `pending_ticks`：连续满足翻转条件的 tick 计数；
+/// - `hold_ticks`：距离上次翻转已过的 tick 数（保持期内拒绝反翻）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BooleanHysteresis {
+    value: bool,
+    pending_ticks: u32,
+    hold_ticks: u32,
+}
+
+impl BooleanHysteresis {
+    fn new(value: bool) -> Self {
+        Self {
+            value,
+            pending_ticks: 0,
+            hold_ticks: 0,
+        }
+    }
+
+    /// 推进一帧：`enter` = 观测值越过进入阈值，`exit` = 观测值低于退出阈值，
+    /// 其间为保持区（维持上一稳定值）。
+    ///
+    /// 翻转同时要求「连续越过阈值满 `min_hold_ticks`」与「自上次翻转起
+    /// 已保持满 `min_hold_ticks`」：前者防止在阈值附近的高频震荡，后者
+    /// 保证翻转后的状态至少存续 `min_hold_ticks` 帧。保持区内连续观测
+    /// 计数清零；任一条件不满足都不改变 `value`。
+    fn update(&mut self, enter: bool, exit: bool, min_hold_ticks: u32) {
+        self.hold_ticks = self.hold_ticks.saturating_add(1);
+        let target = if enter {
+            true
+        } else if exit {
+            false
+        } else {
+            // 保持区：稳定值维持，连续观测计数清零。
+            self.pending_ticks = 0;
+            return;
+        };
+        if target == self.value {
+            self.pending_ticks = 0;
+            return;
+        }
+        self.pending_ticks = self.pending_ticks.saturating_add(1);
+        if self.pending_ticks >= min_hold_ticks && self.hold_ticks >= min_hold_ticks {
+            self.value = target;
+            self.pending_ticks = 0;
+            self.hold_ticks = 0;
+        }
+    }
+}
+
+/// 逐防守人维护的场输出稳定态（solve_equilibrium 的伴生状态）。
+///
+/// 由调用方持有（战术规划层），不是世界对象（ADR-015 边界）：
+/// 每个防守人一份，按索引存入调用方的 `HashMap` 或向量。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DefenseHysteresisState {
+    help_pulled_off: BooleanHysteresis,
+    weak_side_vacant: BooleanHysteresis,
+}
+
+impl Default for DefenseHysteresisState {
+    /// 初始稳定态为「未拉离、未真空」：比赛开局无突破威胁，与
+    /// `solve_equilibrium` 在无威胁时的输出一致。
+    fn default() -> Self {
+        Self {
+            help_pulled_off: BooleanHysteresis::new(false),
+            weak_side_vacant: BooleanHysteresis::new(false),
+        }
+    }
+}
+
+/// 滞回后的稳定态快照，供场输出谓词与选板触发消费（#22/#24 及后续）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StableFieldOutput {
+    /// 协防人被拉离持球人走廊（由 `threat_ratio` 双阈值稳定）。
+    pub help_pulled_off: bool,
+    /// 弱侧出现真空（由 `void_ratio` 双阈值稳定）。
+    pub weak_side_vacant: bool,
+}
+
+impl DefenseHysteresisState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 输入当 tick 的原始观测量，输出稳定态快照。
+    ///
+    /// 「拉离走廊」由 `threat_ratio` 进入/退出阈值判定，「弱侧真空」由
+    /// `void_ratio` 进入/退出阈值判定；保持时间用 tick 计数，阈值与保持
+    /// 参数全部从 `PotentialFieldRules` 读取（charter C1）。
+    pub fn update(
+        &mut self,
+        observation: FieldObservation,
+        config: &PotentialFieldRules,
+    ) -> StableFieldOutput {
+        self.help_pulled_off.update(
+            observation.threat_ratio > config.help_off_enter_threat_ratio,
+            observation.threat_ratio < config.help_off_exit_threat_ratio,
+            config.min_hold_ticks,
+        );
+        self.weak_side_vacant.update(
+            observation.void_ratio > config.weak_vacant_enter_void_ratio,
+            observation.void_ratio < config.weak_vacant_exit_void_ratio,
+            config.min_hold_ticks,
+        );
+        StableFieldOutput {
+            help_pulled_off: self.help_pulled_off.value,
+            weak_side_vacant: self.weak_side_vacant.value,
+        }
+    }
+
+    /// 当前稳定态快照（不推进状态机）。
+    pub fn snapshot(&self) -> StableFieldOutput {
+        StableFieldOutput {
+            help_pulled_off: self.help_pulled_off.value,
+            weak_side_vacant: self.weak_side_vacant.value,
+        }
+    }
+}
+
+impl DefensePotentialFieldSolver {
+    /// 对当 tick 的势能场求解输出做滞回观测，返回该防守人的稳定态快照。
+    ///
+    /// 观测量直接取 `emergent.threat_ratio` / `emergent.void_ratio`，
+    /// 不重算几何；调用方为每个防守人持有一份 `DefenseHysteresisState`
+    /// 并逐 tick 调用本方法。
+    pub fn observe_field(
+        &self,
+        emergent: &EmergentDefenseTarget,
+        state: &mut DefenseHysteresisState,
+    ) -> StableFieldOutput {
+        let config = &self.config;
+        state.update(
+            FieldObservation {
+                threat_ratio: emergent.threat_ratio,
+                void_ratio: emergent.void_ratio,
+            },
+            config,
+        )
     }
 }

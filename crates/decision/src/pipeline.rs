@@ -10,6 +10,8 @@ use glam::Vec2;
 use rand::Rng;
 
 use crate::constraint::{CandidateAction, ConstraintContext, ConstraintRegistry, ScoredCandidate};
+use crate::play_executor::PlayExecution;
+use nba_domain::play::DecisionActionFamily;
 
 /// 决策效用权重（由比赛规则统一提供）。
 pub type DecisionWeights = nba_domain::DecisionRules;
@@ -22,6 +24,8 @@ pub struct DecisionTrace {
     /// 选中候选的稳定标签（如 PASS→H_3）。
     pub chosen_label: String,
     pub utilities: Vec<(String, f32)>,
+    pub active_play_id: Option<String>,
+    pub play_adjustments: Vec<PlayCandidateAdjustment>,
     pub constraint_flags: Vec<(&'static str, String)>,
     pub flags_full: Vec<(&'static str, String, f32)>,
     pub blocked: Vec<(String, String)>,
@@ -31,11 +35,48 @@ pub struct DecisionTrace {
     pub enforcement: Vec<String>,
 }
 
+/// 单个候选动作经过约束与 Play 调整后的稳定追踪记录。
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayCandidateAdjustment {
+    pub label: String,
+    pub action_family: DecisionActionFamily,
+    pub constraint_feasible: bool,
+    pub bonus: f32,
+    pub soft_penalty: f32,
+    pub hard_inhibited: bool,
+    pub adjusted_utility: Option<f32>,
+}
+
 /// 一次已裁决的决策输出。
 #[derive(Debug, Clone)]
 pub struct DecisionOutput {
     pub action: CandidateAction,
     pub trace: DecisionTrace,
+}
+
+/// 持球人决策所需的只读场景输入。
+pub struct OnBallDecisionContext<'ctx, 'world> {
+    pub constraint_context: &'ctx ConstraintContext<'world>,
+    pub carrier_id: &'ctx str,
+    pub stamina: f32,
+    pub morale_bias: f32,
+    pub coach: &'ctx crate::modulation::CoachStrategy,
+    pub active_play: Option<&'ctx PlayExecution>,
+}
+
+fn action_family(action: &CandidateAction) -> DecisionActionFamily {
+    match action {
+        CandidateAction::Shoot { .. } => DecisionActionFamily::Shoot,
+        CandidateAction::Drive { .. } => DecisionActionFamily::Drive,
+        CandidateAction::PostUp { .. } => DecisionActionFamily::PostUp,
+        CandidateAction::Pass { .. } | CandidateAction::InboundPass { .. } => {
+            DecisionActionFamily::Pass
+        }
+        CandidateAction::TripleThreatJab { .. } => DecisionActionFamily::TripleThreatJab,
+        CandidateAction::Dwell { .. } | CandidateAction::Advance { .. } => {
+            DecisionActionFamily::Dwell
+        }
+    }
 }
 
 /// 决策系统：候选生成 → 约束管线 → 效用评分 → softmax 采样。
@@ -79,6 +120,29 @@ impl DecisionSystem {
         coach: &crate::modulation::CoachStrategy,
         rng: &mut impl Rng,
     ) -> Option<DecisionOutput> {
+        let decision = OnBallDecisionContext {
+            constraint_context: ctx,
+            carrier_id,
+            stamina,
+            morale_bias,
+            coach,
+            active_play: None,
+        };
+        self.decide_on_ball_with_play(&decision, rng)
+    }
+
+    /// 持球人决策并应用激活 Play 的动作族偏好与抑制。
+    pub fn decide_on_ball_with_play(
+        &self,
+        decision: &OnBallDecisionContext<'_, '_>,
+        rng: &mut impl Rng,
+    ) -> Option<DecisionOutput> {
+        let ctx = decision.constraint_context;
+        let carrier_id = decision.carrier_id;
+        let stamina = decision.stamina;
+        let morale_bias = decision.morale_bias;
+        let coach = decision.coach;
+        let active_play = decision.active_play;
         let carrier = ctx.physics.get_player(carrier_id)?;
         let carrier_pos = carrier.pos_ft;
         let offense_team = carrier.team.clone();
@@ -273,21 +337,102 @@ impl DecisionSystem {
         };
 
         // --- 约束管线 + 效用评分 ---
+        // 零值是候选没有 Play 偏好或抑制时的加法单位元。
+        let zero = f32::from(0u8);
+        if let Some(play) = active_play {
+            for effect in play.family_effects() {
+                assert!(
+                    effect.bonus.is_finite() && effect.bonus >= zero,
+                    "play `{}` family {} bonus must be finite and non-negative",
+                    play.play_id(),
+                    effect.action_family.as_str()
+                );
+                assert!(
+                    effect.soft_penalty.is_finite() && effect.soft_penalty >= zero,
+                    "play `{}` family {} soft penalty must be finite and non-negative",
+                    play.play_id(),
+                    effect.action_family.as_str()
+                );
+            }
+        }
         let active_constraints: Vec<&'static str> =
             self.registry.active_set(ctx).iter().map(|c| c.id).collect();
         let mut scored: Vec<(ScoredCandidate, f32)> = Vec::with_capacity(candidates.len());
         let mut flags_union: Vec<(&'static str, String)> = Vec::new();
         let mut flags_full: Vec<(&'static str, String, f32)> = Vec::new();
         let mut blocked: Vec<(String, String)> = Vec::new();
+        let mut play_adjustments = Vec::with_capacity(candidates.len());
+        let mut first_hard_inhibited_family = None;
         for cand in &candidates {
+            let action_family = action_family(cand);
+            let label = label_of(cand);
             let s = self.registry.evaluate_candidate(ctx, cand);
             if !s.feasible {
                 if let Some(id) = s.blocked_by {
-                    blocked.push((label_of(cand), id.to_string()));
+                    blocked.push((label.clone(), id.to_string()));
                 }
+                play_adjustments.push(PlayCandidateAdjustment {
+                    label,
+                    action_family,
+                    constraint_feasible: false,
+                    bonus: zero,
+                    soft_penalty: zero,
+                    hard_inhibited: false,
+                    adjusted_utility: None,
+                });
                 continue; // 硬约束剔除（文档 §6.3）
             }
+
+            let (bonus, soft_penalty, hard_inhibited) = active_play
+                .map(|play| {
+                    let effect = play.family_effect(action_family);
+                    assert!(
+                        effect.bonus.is_finite() && effect.bonus >= zero,
+                        "play `{}` family {} bonus must be finite and non-negative",
+                        play.play_id(),
+                        action_family.as_str()
+                    );
+                    assert!(
+                        effect.soft_penalty.is_finite() && effect.soft_penalty >= zero,
+                        "play `{}` family {} soft penalty must be finite and non-negative",
+                        play.play_id(),
+                        action_family.as_str()
+                    );
+                    (effect.bonus, effect.soft_penalty, effect.hard_inhibited)
+                })
+                .unwrap_or((zero, zero, false));
+            if hard_inhibited {
+                first_hard_inhibited_family.get_or_insert(action_family);
+                play_adjustments.push(PlayCandidateAdjustment {
+                    label,
+                    action_family,
+                    constraint_feasible: true,
+                    bonus,
+                    soft_penalty,
+                    hard_inhibited: true,
+                    adjusted_utility: None,
+                });
+                continue;
+            }
+
             let utility = self.utility(&s, ctx, dist_to_hoop, stamina_mult, morale_bias, coach);
+            let effect_weight = self.weights.play_effect_weight;
+            let adjusted_utility = utility + effect_weight * bonus - effect_weight * soft_penalty;
+            assert!(
+                adjusted_utility.is_finite(),
+                "play `{}` produced a non-finite utility for family {}",
+                active_play.map_or("<none>", PlayExecution::play_id),
+                action_family.as_str()
+            );
+            play_adjustments.push(PlayCandidateAdjustment {
+                label,
+                action_family,
+                constraint_feasible: true,
+                bonus,
+                soft_penalty,
+                hard_inhibited: false,
+                adjusted_utility: Some(adjusted_utility),
+            });
             let new_flags: Vec<(&'static str, String)> = s
                 .flags
                 .iter()
@@ -296,10 +441,17 @@ impl DecisionSystem {
                 .collect();
             flags_union.extend(new_flags);
             flags_full.extend(s.flags.iter().map(|(id, r, p)| (*id, r.clone(), *p)));
-            scored.push((s, utility));
+            scored.push((s, adjusted_utility));
         }
 
         if scored.is_empty() {
+            if let (Some(play), Some(action_family)) = (active_play, first_hard_inhibited_family) {
+                panic!(
+                    "play `{}` hard-inhibits every feasible candidate; action family {}",
+                    play.play_id(),
+                    action_family.as_str()
+                );
+            }
             return None;
         }
 
@@ -337,6 +489,8 @@ impl DecisionSystem {
             action: s.action.clone(),
             trace: DecisionTrace {
                 player_id: carrier_id.to_string(),
+                active_play_id: active_play.map(|play| play.play_id().to_owned()),
+                play_adjustments,
                 chosen_kind: s.action.kind_str(),
                 chosen_label: label_of(&s.action),
                 utilities: scored

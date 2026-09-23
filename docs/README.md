@@ -30,6 +30,7 @@ docs/
 ├── quality.md         ← 不变量、评判、确定性与质量工件
 ├── attributes.md      ← 球员/球队输入的分类学和值语义
 ├── tactics.md         ← 阵容、战术、适配与教练输入规格
+├── blind_spots.md     ← 物理与接触模型盲区登记（数据缺口选题池）
 └── protocol.md        ← 校准、证据包和验收过程规格
 ```
 
@@ -40,6 +41,7 @@ docs/
 - `charter.md` 只决定目标、范围和不可放宽的红线；
 - `architecture.md` 只决定系统如何分层、事实如何流动和状态如何转移；
 - `quality.md` 只决定如何观测、发现违反并表达证据缺口；
+- `blind_spots.md` 只登记物理与接触模型的数据缺口（ADR-017 第四步的盲区登记；评判器侧的准则盲区另见 `crates/evaluator/fixtures/blind_spots.md`，随评判准则扩展逐轮收缩）；
 - `attributes.md` 只决定输入维度和值的语义；
 - `tactics.md` 只决定球队组织与战术档案如何向决策层提供机会；
 - `protocol.md` 只决定如何校准、如何验收和如何形成证据包；

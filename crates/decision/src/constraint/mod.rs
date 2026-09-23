@@ -248,6 +248,21 @@ impl<'a> ConstraintContext<'a> {
         self.game_flow.allows_live_ball_actions()
     }
 
+    /// 进攻方是否实际控制球。
+    ///
+    /// 规则语义声明点（后场 8 秒、逼抢类约束的前置条件）：持球族
+    /// （Held/Drive）、交接飞行（ControlTransfer）与传球飞行（PassFlight）
+    /// 属于控球延续——球虽离手但球权未易主；发球族尚未入场建立控制；
+    /// 投篮飞行出手即失去控制；松球/篮板/停球无球队控制。
+    /// seed 14 实测：对一颗无主球累加后场计时，会在第 8 秒判出
+    /// 一次没有责任人的伪违例，因此约束侧必须显式要求本谓词。
+    pub fn offense_has_possession(&self) -> bool {
+        matches!(
+            self.ball_phase,
+            BallPhase::Held | BallPhase::Drive | BallPhase::ControlTransfer | BallPhase::PassFlight
+        )
+    }
+
     pub fn ball_available_for_action(&self) -> bool {
         matches!(self.ball_phase, BallPhase::Held) && self.is_live_ball()
     }

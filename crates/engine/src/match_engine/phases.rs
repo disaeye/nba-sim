@@ -43,18 +43,31 @@ impl MatchEngine {
         }
         if self.flow.game_flow.allows_live_ball_actions() {
             let attacking_right = self.flow.possession == Possession::Home;
+            // 控球谓词与决策侧 ConstraintContext::offense_has_possession 同一口径：
+            // 球无主（松球/篮板/停球）或已出手时不累加——否则会对无主球计时，
+            // 第 8 秒判出没有控球方的伪违例（seed 14 第 4 节开场实测：
+            // 201 tick 内球不可取，计时照走）。
+            let offense_in_control = matches!(
+                self.ball_phase(),
+                nba_domain::BallPhase::Held
+                    | nba_domain::BallPhase::Drive
+                    | nba_domain::BallPhase::ControlTransfer
+                    | nba_domain::BallPhase::PassFlight
+            );
             let in_backcourt = self
                 .config
                 .rules
                 .court
                 .is_backcourt(self.ball.ball_pos_3d.0, attacking_right);
-            if in_backcourt {
+            if in_backcourt && offense_in_control {
                 self.clock.backcourt_elapsed += dt;
-            } else {
+            } else if !in_backcourt {
                 // 越过中线：推进义务完成，恢复常规战术站位。
                 self.clock.backcourt_elapsed = 0.0;
                 self.observations.advancing_player = None;
             }
+            // 球在后场但无控球方：计时保持原值（规则语义：控球中断暂停计数，
+            // 重新建立控制后继续），不清零也不累加。
             if self.clock.game_clock > 0.0 {
                 self.clock.game_clock = (self.clock.game_clock - dt).max(0.0);
             }
@@ -138,6 +151,8 @@ impl MatchEngine {
                 } else {
                     Possession::Away
                 },
+                // 物理最后触球人是点拍赢球方的跳球员。
+                last_touch_player: Some(tapping_player.clone()),
             });
             self.journal.current_event_types = vec!["TIPOFF_SECURED".to_string()];
             self.journal.current_callout = Some(format!(

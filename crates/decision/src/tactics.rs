@@ -572,6 +572,7 @@ impl TacticalPlanner {
                 } else {
                     // 弱侧协防人与轮转体系：完全由连续多体势能场梯度与能量极小值求解驱动
                     // 绝不依赖硬编码 if-else 判定，自然涌现出 ROTATE_RIM_HELP、X_OUT_CLOSEOUT 或 HELP_SIDE_SHELL
+                    // 体能入口暂传满体能（行为中性）；引擎接线（消费真实体能）在 #18 落地。
                     let emergent = potential_solver.solve_equilibrium(
                         carrier_pos,
                         hoop,
@@ -579,6 +580,7 @@ impl TacticalPlanner {
                         i,
                         carrier_idx,
                         rules,
+                        1.0,
                     );
                     (
                         emergent.target_pos,

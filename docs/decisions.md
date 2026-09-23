@@ -307,7 +307,7 @@ ADR-013 已完成文件级划分，但未改变字段共享：全部子模块仍
 
 ### ADR-015 · 空间量的单一事实源
 
-**状态：accepted**
+**状态：accepted（第 2、3 条已被后续 shadow world 移除超越，见文末修订注记）**
 
 背景：空间计算在四个位置各自实现，`plan.md` §4.3 要求先裁定单一事实源再补进攻侧。
 对四处实测后的职责与消费面：
@@ -339,6 +339,8 @@ ADR-013 已完成文件级划分，但未改变字段共享：全部子模块仍
 取舍代价：`PerceptionSystem` 仍是 `engine` 内的全场实现，而 `SpatialGeometry`
 在 `physics`；两层不能共用一个球员级缓存。这是依赖方向的结果——`physics` 不能
 依赖 `engine`，而全场聚合需要十人的完整视图。
+
+> **修订注记（2026-09-21，shadow world 移除）**：第 2 条已执行（`physics/src/perception.rs` 删除）。第 3 条裁定的全场实现 `engine/src/world.rs::PerceptionSystem` 及其输入 `MatchWorld`/`sync_to_world`、行为测试 `match_world.rs` 已在 shadow world 移除中整体删除；全场防守拓扑（下沉护筐、空间真空、X-Out 轮转）不再是独立持久对象，而由第 4 条的 `decision/src/potential_field.rs::DefensePotentialFieldSolver` 在求解时从在场进攻球员位置即时涌现。因此第 3 条的「唯一实现」已由第 4 条吸收，`PerceptionSystem` 不再存在；第 1 条（`SpatialGeometry` 为球员级空间事实唯一实现）与第 4 条不受影响，仍然有效。
 
 ### ADR-016 · 接线扰动测试改用逐测试窗口，替代统一的 20000 tick 判据
 
@@ -373,7 +375,7 @@ putback ≥4/6、boxout 3/6（boxout 的最大可能杠杆受 boxout_bonus ≈ 0
 4. 禁止借本裁定放宽任何阈值或删除任何测试；若未来这三个系数的消费链
    被改动，须重新测量并回归 3/4 判据。
 
-### ADR-017 · 球的全场物理约束以真实重力为基线（四步路线的第一步）
+### ADR-017 · 球的全场物理约束以真实重力为基线（四步路线，第 1–3 步已实施）
 
 状态：accepted
 
@@ -382,9 +384,9 @@ putback ≥4/6、boxout 3/6（boxout 的最大可能杠杆受 boxout_bonus ≈ 0
 插值 + 正弦弧」的动画函数，重力（32.17 ft/s²）只在松球路径生效；球在场上的
 大部分时间不服从任何物理。
 
-裁定（四步路线，本 ADR 只实施第一步）：
+裁定（四步路线；第 1–3 步已实施，第 4 步待办）：
 
-1. 第一步（本 ADR）：飞行抛体化。传球/投篮/篮板飞行的 z(t) 全部由
+1. 第一步：飞行抛体化。传球/投篮/篮板飞行的 z(t) 全部由
    `ProjectileArc`（domain/projectile.rs）产生；飞行时长由「请求弧顶 +
    两端高度」闭式解出，受球速包络与动作窗口双重约束。正弦弧时代的六个
    零消费字段（pass_speed/inbound_pass_speed/shot_speed/ball_arc_multiplier/
@@ -408,6 +410,19 @@ putback ≥4/6、boxout 3/6（boxout 的最大可能杠杆受 boxout_bonus ≈ 0
    归零实验不改变封盖数——机制未明前不发布该行为变化，证据在
    rules.rs 的 shot_peak_distance_factor 注释。
 3. 第三步：球-篮板/球-人碰撞几何（篮板作为矩形碰撞面、球穿人改为弹开）。
+   实施记录（2026-09-21，v72「统一球员接触模型」）：(a) 篮板碰撞面——
+   打铁按瞄准几何双通道路由（越过筐→触板镜像反弹、落点由抛体解出；
+   否则维持近筐沿反射），板几何（距底线 4.0 ft、宽 6.0 ft、下沿 9.5 ft、
+   上沿 13.0 ft、恢复系数 0.55）进规则通道；(b) 自由球-人碰撞——篮板飞行
+   与地板球对球员身体（接触半径 = 人体 1.0 + 球 0.4 ft）弹开，摸高门控、
+   同飞行同人只弹一次，快球（> 12 ft/s）不可半途收下，盖帽初速改为入射
+   水平速度 × 0.45；(c) 传球碰撞化——删除出手时刻一次性拦截裁定与
+   `Pass.intercept` 载荷，改为逐 tick 全防守者接触检测 + 结果分类（抢断/
+   拨掉/轻擦，沿用 `intercept_*` 参数），高吊传受摸高门控。黄金哈希重冻结
+   v72（0xb3685f078e05bfc9）；校准：乱战出手增多使三分 make_probability
+   0.308→0.294、基准 0.34→0.36 回调（3P% 中位 31.0），ORB% 0.474→0.294
+   （真实 0.245）。物理实现见 `crates/physics/src/ballistics.rs`、
+   `crates/engine/src/match_engine/free_ball.rs`、`contests.rs`。
 4. 第四步：分布校准门进评判器 + 盲区登记。
 
 行为影响：黄金哈希重冻结 v68（0x820c9b27412c65cc）；比赛节奏整体后移
@@ -415,8 +430,117 @@ putback ≥4/6、boxout 3/6（boxout 的最大可能杠杆受 boxout_bonus ≈ 0
 （total_p50=172.5、3P% 中位 34.0）；接线判据的两处连锁按 ADR-016 既有
 裁定处理（morale_shoot_affinity 并入扩展判据；risk_tolerance_gain 改用
 饱和扰动 base=0.95/gain=0，杠杆比旧扰动强约 3 倍）。
-第二步行为影响：黄金哈希重冻结 v69（0xf966e57a20ba68dd）；8-seed 统计
+第二步行为影响：黄金哈希重冻结 v69（0x7888d577ac33b69b）；8-seed 统计
 在带（total_p50=165.0、3P% 中位 30.2）；morale_shoot_affinity 的指纹
 可见度在触筐重排后降到 1/6（杠杆 = morale_bias ±0.05–0.12 × 0.35 ≈
 ±0.04，远小于候选间效用差），改用饱和量级扰动 3.0（±0.15–0.36）恢复
 可观测。
+
+### ADR-018 · 节间开场必须显式重建球的可取性；计时与违例要求控球
+
+状态：accepted（2026-09-22）
+
+背景：seed 14 全场在第 4 节开场出现「活球流程 + 停球状态」并存 201 tick，
+无人能触球，后场计时按球位累加到 8 秒判出 `EIGHT_SECOND_BACKCOURT`，
+责任人派生全空，产生 `turnover_player_id=null` 的失误终结——账本
+`TURNOVER_CONSERVATION` 违规 + 评判 `TURNOVER_ACTOR_CONSISTENCY` Hard，
+16-seed 矩阵以账本门失败退出。因果链（全部有帧级证据）：第 3 节末 0.3 秒
+持球被拨掉（`BALL_POKED_LOOSE`，`last_passer_id` 已清）→ 节末
+`settle_ball_for_period_break` 把在飞松球结算为停球（停表期间球也应是
+停的，该步本身正确）→ 下一节开场只恢复流程、不重建球权程序。两个结构
+缺陷叠加：(a) 节间开场没有球权程序，球态直接跨节携带；(b) 后场计时只看
+「活球流程 + 球在后场」，不要求任何一方控制球。同类缺陷在 evidence
+§32.14 有前科（当时成因未查）。
+
+裁定：
+
+1. 节间开场（`sync_game_flow`）必须显式回答「球现在谁能拿」：球已由在场
+   球员持有（Held/Drive/InboundReady/InboundTransfer）时原样保留（常规
+   路径行为不变）；其余状态按节末保留的进攻方进入显式发球程序
+   （`begin_inbound`，从 `start_inbound_transition` 抽出的公共主体；
+   不翻转球权、不重复回合结算）。`settle_ball_for_period_break` 保持
+   不变——节末结算停球是对的，错在开场不重建。
+2. 后场 8 秒的计时与违例都要求进攻方实际控球：松球、篮板、停球、投篮
+   飞行不累加、不判违例；时钟层（`phases.rs`）与决策约束层
+   （`ConstraintContext::offense_has_possession` +
+   `eval_backcourt_clock_world`）用同一谓词，不另立第二口径。球在后场但
+   无控制方时计时保持原值（控球中断暂停计数，重新建立控制后继续）。
+3. 归因链以状态为唯一事实源：`LooseBall`/`RimRebound` 携带
+   `last_touch_player` 载荷（构造点写入物理最后触球人），`Dead` 经停球
+   结算继承；`current_turnover_player_id` 对松球态优先读载荷，旁路字段
+   `last_passer_id` 仅作旧态回退。失误终结缺责任人不再可能静默产出：
+   新增 L1 不变量 `LIVE_FLOW_DEAD_BALL`（活球流程下球必须可取）与
+   `TURNOVER_ACTOR_MISSING`（失误终结必须带责任人），违反即该 tick
+   Hard 缺陷。
+4. 监控同步：账本五式与 Hard 门进入套件（`stats_baseline` 的 16-seed
+   全场断言、`attribution` 的违例归因 16-seed 全场回归），不再只能靠
+   人工跑矩阵发现此类缺陷。
+
+行为影响：黄金哈希不变（v73 = `0xee0429df2bfdde79`，两处行为变更均在
+节间/松球路径，不在开局窗口内；该常量由 fe5e233 重冻结但当时未登记，
+v73 条目补登）。16-seed 矩阵修复前后对比：Ledger 1→0、Hard 缺陷 1→0、
+Realism Index 0.000→0.998、中位总分 163→176、3P% 中位 30.3→32.3；
+seed 14 全场帧流「活球流程 + 停球」201 tick → 0。吞吐无退化
+（seed42 6530 / seed1 6365 ticks/s，带内）。实现见
+`crates/engine/src/match_engine/{flow,transitions,phases}.rs`、
+`crates/decision/src/constraint/{mod,evaluate}.rs`、
+`crates/domain/src/flow.rs`、`crates/invariants/src/{lib,taxonomy}.rs`；
+证据过程存档于 `output/review16/`（诊断帧流与逐 seed 归因报告）。
+
+### ADR-019 · Play 规则模型：回合级规则化行为覆盖，与 System 分级
+
+状态：accepted（2026-09-22）
+
+背景：tactics.md §2.2 已裁定 System 级档案不设动作序列与触发条件（TA1），
+回合级行为只剩体系语境与球员自主决策两层，缺一层可配置的「有组织回合行为」：
+高位挡拆后的顺下、清空一侧后的单打、底角落位后的转移，这些是真实篮球里
+教练组准备的行为面，目前只能散在效用管线的通用权重里，无法按回合语境启用。
+直接引入动作序列会退回剧本（宪章 C1 禁止），需要一层新的形式化。
+
+裁定（语义登记于 `docs/tactics.md` §2.2.4、§2.5）：
+
+1. **两级 kind**：战术档案分 `System | Play` 两级。System 维持既有语义
+   （阵型、槽位、能力需求，全场语境）；Play 是回合级规则化行为覆盖，
+   由选板器在回合内按触发谓词启用，窗口化生效。两库经 kind 分流，互不混用。
+2. **Play 的三个行为通道**：`carrier_preferences`（候选族效用加项）、
+   `inhibitions`（soft 效用惩罚 / hard 候选移除）、`rules[].then.verb`
+   （目标生成偏置与动作窗口类型）。三通道全部经效用管线与约束层生效，
+   Play 不直接执行动作、不写坐标、不声明顺序；hard 抑制必须保留合法出路
+   （抑制后候选集非空），由校验器拒绝违反者。
+3. **谓词与动词封闭枚举**：触发谓词（球态/几何/场输出三类）、规则谓词、
+   动作词表都是封闭枚举，档案字符串必须命中枚举，否则校验拒绝。
+   几何谓词全部由 `SpatialGeometry`（ADR-015 单一事实源）派生。
+4. **场输出谓词以滞回为前提**：消费势能场输出（`threat_ratio` /
+   `void_ratio` / 涌现标签）的谓词与选板触发必须先过滞回稳定通道
+   （双阈值 + 最小保持时间，`tactics.md` §2.5）；稳定态逐防守人维护，
+   不新建持久世界对象（ADR-015 边界不变）。未经滞回的场量不得进入
+   开关型判定，否则逐 tick 抖动会引发选板震荡。
+5. **选板器是纯函数**（TA4）：`(playbook, context) -> Option<PlayActivation>`，
+   每 tick 评估触发谓词，至多一个 Play 激活；窗口结束或回合终结后进入
+   冷却。互斥关系不在首轮引入（OQ-6），校准显示需要时另行登记。
+
+追加裁定（schema 与 selector/executor 对照后补足）：
+
+6. **所有 `when` 非空并按 AND 求值**：trigger 和 rule 均拒绝空 `when`；触发项
+   与规则条件每个决策 tick 重新求值，只有全部谓词为真才匹配。空列表的数学
+   恒真语义不得成为档案的隐式无条件触发或规则。
+7. **同一 Play 的多触发选择**：先在单个 Play 内选取命中项中谓词数最多者，
+   同分取声明顺序首项；所选项决定 `window_seconds` 和 `cooldown_seconds`。
+   不同 Play 仍按各自最高匹配谓词数排序，最高分同分时由注入随机数等概率
+   选择一个 Play。
+8. **偏好跨层累加**：Play 顶层偏好在窗口内持续生效，命中规则的偏好在当 tick
+   条件成立时生效；相同 `DecisionActionFamily` 的生效 bonus 相加。各列表内部
+   同族重复仍为 schema 错误。
+9. **规则槽位冲突**：一个 Play 中多条规则若引用相同 `then.slot`，即使其 `when`
+   当前看似互斥，也由 schema 校验拒绝。这样引擎每 tick 不会对同一目标槽位接收
+   多个规则动作；不同槽位的规则可以同 tick 同时生效，按声明顺序返回结果。
+10. **硬抑制检查边界**：schema 校验确认 hard 抑制未覆盖封闭动作族全集；该静态
+    检查不保证未抑制族会在当前状态生成，也不保证其通过运行期约束。若实际候选
+    集在 hard 抑制与约束筛选后为空，决策管线必须显式失败。引擎装配还负责检查
+    `then.slot` 对当前 System 的引用存在性。
+11. **JSON 表示**：示例遵循 `PlaySpec::from_json` 的 tagged enum 格式：`kind` 为
+    小写 `play`；谓词使用 `{"predicate": "..."}` 对象，参数如 `r`、`side` 平铺在
+    同一对象中。动作族与动词保持 Rust schema 的 PascalCase 字符串形式。
+
+以上补充只裁定已批准 Play schema 与 #12 集成接口所必需的运行语义；PlayVerb 与
+PlayPredicate 词汇表保持封闭，不增加动作能力。

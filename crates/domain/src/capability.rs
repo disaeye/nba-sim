@@ -18,6 +18,17 @@ pub fn effective_max_accel(rules: &GameRules, attributes: &PlayerAttributes) -> 
     rules.max_player_accel_ftps2 * attributes.acceleration.max(rules.attribute_response_floor)
 }
 
+/// 纵向制动加速度上限（ft/s²）。
+pub fn effective_max_braking_accel(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
+    rules.max_player_braking_accel_ftps2
+        * attributes.acceleration.max(rules.attribute_response_floor)
+}
+
+/// 横向抓地加速度上限（ft/s²）。
+pub fn effective_max_lateral_accel(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
+    rules.max_player_lateral_accel_ftps2 * attributes.agility.max(rules.attribute_response_floor)
+}
+
 /// 罚球命中概率（attributes.md T4）：全局基率 + 技能调制，夹在
 /// 规则通道的上下限内。奥尼尔与库里从此不同命中率。
 pub fn free_throw_probability(rules: &GameRules, attributes: &PlayerAttributes) -> f32 {
@@ -318,6 +329,35 @@ mod tests {
         };
         let zero = effective_max_speed(&rules, &attrs(0.0, 0.5));
         assert_eq!(zero, 0.0, "floor 0 must not flatten low attributes");
+    }
+
+    #[test]
+    fn braking_and_lateral_limits_follow_attributes_and_rules() {
+        let rules = GameRules::default();
+        let low = PlayerAttributes {
+            acceleration: 0.5,
+            agility: 0.5,
+            ..PlayerAttributes::default()
+        };
+        let high = PlayerAttributes {
+            acceleration: 0.9,
+            agility: 0.9,
+            ..low.clone()
+        };
+        assert!(
+            effective_max_braking_accel(&rules, &low) < effective_max_braking_accel(&rules, &high)
+        );
+        assert!(
+            effective_max_lateral_accel(&rules, &low) < effective_max_lateral_accel(&rules, &high)
+        );
+
+        let rules = GameRules {
+            max_player_braking_accel_ftps2: 12.0,
+            max_player_lateral_accel_ftps2: 8.0,
+            ..rules
+        };
+        assert!((effective_max_braking_accel(&rules, &high) - 10.8).abs() < 1e-5);
+        assert!((effective_max_lateral_accel(&rules, &high) - 7.2).abs() < 1e-5);
     }
 
     #[test]

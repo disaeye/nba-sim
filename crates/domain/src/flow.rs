@@ -243,15 +243,22 @@ pub enum BallState {
     },
     /// 松球（传球脱手/篮板弹地）。`last_touch_team` 记录最后触球方
     /// （architecture：InFlight/Loose→最后触球队），是飞行期
-    /// possession 派生的唯一依据。
+    /// possession 派生的唯一依据。`last_touch_player` 是物理上的
+    /// 最后触球人（可空）：与 `Dead` 的同名载荷同源，使「谁最后触球」
+    /// 能从权威球态直接读出（P1）；由松球派生的停球继承该载荷后，
+    /// 违例归因不再依赖旁路字段（`last_passer_id`）的存活期
+    /// （seed 14 实测：拨掉的松球在节末转为停球后，旁路字段已清空，
+    /// 归因链断在 None）。
     LooseBall {
         pos: Vec2,
         vel: Vec2,
         z: f32,
         vel_z: f32,
         last_touch_team: Possession,
+        last_touch_player: Option<String>,
     },
     /// 打铁触筐后的篮板飞行。`last_touch_team` 为出手方（触筐不改 Team control）。
+    /// `last_touch_player` 为出手人，与 `LooseBall` 同一归因用途。
     RimRebound {
         from_pos: Vec2,
         from_z: f32,
@@ -261,6 +268,7 @@ pub enum BallState {
         duration: f32,
         peak_z: f32,
         last_touch_team: Possession,
+        last_touch_player: Option<String>,
     },
     /// 终局冻结的死球位置。死球期 possession 由上一个回合的归属决定，
     /// `last_touch_team` 在进入死球时快照。
@@ -331,7 +339,12 @@ impl BallState {
             BallState::Shot { shooter_id, .. } => Some(shooter_id.as_str()),
             BallState::InboundTransfer { inbounder_id, .. }
             | BallState::InboundReady { inbounder_id, .. } => Some(inbounder_id.as_str()),
-            BallState::LooseBall { .. } | BallState::RimRebound { .. } => None,
+            BallState::LooseBall {
+                last_touch_player, ..
+            }
+            | BallState::RimRebound {
+                last_touch_player, ..
+            } => last_touch_player.as_deref(),
             // 死球：回放进入死球时快照的最后触球人（可空）。
             BallState::Dead {
                 last_touch_player, ..

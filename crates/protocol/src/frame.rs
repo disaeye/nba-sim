@@ -15,6 +15,9 @@ pub struct RenderPlayer {
     #[serde(rename = "onCourt")]
     pub on_court: bool,
     pub action: String,
+    /// 当前动作窗口阶段；没有活动窗口时省略。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_phase: Option<String>,
     pub slot: String,
     pub morale: String,
     pub stm: f32,

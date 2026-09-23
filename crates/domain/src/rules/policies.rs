@@ -439,8 +439,17 @@ pub struct PotentialFieldRules {
     pub sag_distance_perimeter_ft: f32,
     /// 中距离/内线对位的下沉距离（ft）。
     pub sag_distance_interior_ft: f32,
-    /// 下沉锚点方向中「朝篮筐」的权重（与朝持球人权重互补，两者和应为 1）。
-    pub sag_anchor_hoop_weight: f32,
+    /// 下沉锚点方向「朝篮筐」权重的合成配方（`help_blend`，与朝持球人权重互补，两者和应为 1）。
+    ///
+    /// 实际锚点权重 = `clamp(base + tilt_gain × help_priority, min, max)`，
+    /// 在 `solve_equilibrium` 的下沉锚点混合处求解（help_blend 接入，plan_play.md #22）。
+    pub help_hoop_weight_base: f32,
+    /// `help_priority` 对锚点权重的倾斜系数：每单位协防优先级向篮筐方向的增量。
+    pub help_priority_tilt_gain: f32,
+    /// 锚点权重的方案无关下限：防止协防完全脱离篮筐方向。
+    pub help_hoop_weight_min: f32,
+    /// 锚点权重的方案无关上限：防止协防退化为纯护框而放弃外线。
+    pub help_hoop_weight_max: f32,
     /// 护筐目标点距篮筐的缓冲带（ft）：威胁中心位于持球人与篮筐连线上此距离处。
     pub rim_buffer_ft: f32,
     /// 弱侧低位人（Low-man）的护筐引力倍率。
@@ -484,6 +493,25 @@ pub struct PotentialFieldRules {
     pub sag_multiplier_max: f32,
     /// 势能权重的极小正数下限（避免三分量同时为零时除以零）。
     pub total_weight_floor: f32,
+    /// 体能衰减通道（plan_play.md #24）的保底倍率：防守人体能归零时，
+    /// 护筐引力与真空吸力这两个主动跑动分量仍保留此比例（0.6 = 保留 60%）。
+    pub stamina_floor: f32,
+    /// 体能衰减幂指数：衰减系数 = `stamina_floor + (1 - stamina_floor) ×
+    /// stamina^stamina_gain`。指数越大，中等体能区间的衰减越平缓、
+    /// 低体能区间越陡；满体能（1.0）时系数恒为 1，行为与无衰减一致。
+    pub stamina_gain: f32,
+    /// 「协防人被拉离走廊」（`help_pulled_off`）进入态的 `threat_ratio` 高阈值：
+    /// 当 tick 观测值超过它才开始计进入（tactics.md §2.5 滞回双阈值）。
+    pub help_off_enter_threat_ratio: f32,
+    /// 「协防人被拉离走廊」退出态的 `threat_ratio` 低阈值：观测值低于它才计退出；
+    /// 介于两阈值之间为保持区，维持上一稳定值。
+    pub help_off_exit_threat_ratio: f32,
+    /// 「弱侧真空」（`weak_side_vacant`）进入态的 `void_ratio` 高阈值。
+    pub weak_vacant_enter_void_ratio: f32,
+    /// 「弱侧真空」退出态的 `void_ratio` 低阈值。
+    pub weak_vacant_exit_void_ratio: f32,
+    /// 布尔稳定量翻转后的最小保持时间（tick）：保持计数不足时拒绝再次翻转。
+    pub min_hold_ticks: u32,
 }
 
 impl Default for DefenseRules {
@@ -499,6 +527,36 @@ impl Default for DefenseRules {
 }
 
 impl DefenseRules {
+    /// 方案无关的 `help_blend` 参数（schemes.json 顶层同名块）。
+    ///
+    /// 与 `all()` 共用同一数据源，保证「方案档案」与「锚点权重合成配方」
+    /// 单一事实源。base 为合成基线，min/max 是方案无关的权重边界。
+    fn help_blend() -> (f32, f32, f32, f32) {
+        static HELP_BLEND: std::sync::OnceLock<(f32, f32, f32, f32)> = std::sync::OnceLock::new();
+        *HELP_BLEND.get_or_init(|| {
+            #[derive(serde::Deserialize)]
+            struct Blend {
+                hoop_weight_base: f32,
+                priority_tilt_gain: f32,
+                hoop_weight_min: f32,
+                hoop_weight_max: f32,
+            }
+            #[derive(serde::Deserialize)]
+            struct File {
+                help_blend: Blend,
+            }
+            const RAW: &str = include_str!("../../../../data/defense/schemes.json");
+            let parsed: File = serde_json::from_str(RAW)
+                .expect("data/defense/schemes.json must be valid (charter C1 data channel)");
+            (
+                parsed.help_blend.hoop_weight_base,
+                parsed.help_blend.priority_tilt_gain,
+                parsed.help_blend.hoop_weight_min,
+                parsed.help_blend.hoop_weight_max,
+            )
+        })
+    }
+
     /// 按防守方案 id 返回参数档案（tactics.md §2.2 防守覆盖模型）。
     ///
     /// ## 数据来源（charter C1）
@@ -572,6 +630,16 @@ impl DefenseRules {
 
 impl Default for PotentialFieldRules {
     fn default() -> Self {
+        // help_blend 参数从 schemes.json 数据通道读取（charter C1）：
+        // 这些量是 `solve_equilibrium` 下沉锚点权重的唯一来源，必须与
+        // 方案档案同源。base/min/max 各有明确角色：base 为合成基线，
+        // min/max 是方案无关的权重边界。
+        let (
+            help_hoop_weight_base,
+            help_priority_tilt_gain,
+            help_hoop_weight_min,
+            help_hoop_weight_max,
+        ) = DefenseRules::help_blend();
         Self {
             threat_radius_ft: 15.0,
             rim_response_radius_ft: 18.0,
@@ -580,7 +648,10 @@ impl Default for PotentialFieldRules {
             k_void_base: 1.2,
             sag_distance_perimeter_ft: 2.0,
             sag_distance_interior_ft: 5.5,
-            sag_anchor_hoop_weight: 0.75,
+            help_hoop_weight_base,
+            help_priority_tilt_gain,
+            help_hoop_weight_min,
+            help_hoop_weight_max,
             rim_buffer_ft: 3.0,
             low_man_threat_gain: 2.8,
             high_man_threat_gain: 0.15,
@@ -601,6 +672,13 @@ impl Default for PotentialFieldRules {
             sag_multiplier_min: 0.5,
             sag_multiplier_max: 2.5,
             total_weight_floor: 0.001,
+            stamina_floor: 0.6,
+            stamina_gain: 1.5,
+            help_off_enter_threat_ratio: 0.45,
+            help_off_exit_threat_ratio: 0.30,
+            weak_vacant_enter_void_ratio: 0.38,
+            weak_vacant_exit_void_ratio: 0.25,
+            min_hold_ticks: 4,
         }
     }
 }
@@ -778,6 +856,11 @@ pub struct DecisionRules {
     /// 这是低位背身的战术意义所在（大打小、错位惩罚），
     /// 也是它与 `Drive` 的结构差异：Drive 看的是道路空旷，PostUp 看的是对位强弱。
     pub post_up_mismatch_weight: f32,
+    /// Play 候选偏好与软抑制的效用缩放系数。
+    ///
+    /// 偏好加到动作效用上，软抑制从动作效用中扣除；零值关闭两种调整。默认单位倍率
+    /// 保留 Play 档案里声明的效用增量。
+    pub play_effect_weight: f32,
     /// 最大持球组织衰减比例（随着进攻时间消耗，Dwell 价值衰减的最大幅度）。
     pub dwell_decay_max: f32,
     /// 进攻迫近时受干扰惩罚的保底系数。
@@ -840,6 +923,7 @@ impl Default for DecisionRules {
             // 低位背身的量级：与 Drive 同阶，使两者在距篮较近时真正竞争。
             post_up_base: 2.2,
             post_up_mismatch_weight: 0.9,
+            play_effect_weight: f32::from(1u8),
             dwell_decay_max: 0.85,
             contested_patience_floor: 0.25,
             // D3.4 校准：紧逼加成原值（shoot 0.25 / drive 0.10 / dwell -0.20）
@@ -866,6 +950,8 @@ impl Default for DecisionRules {
 
 impl DecisionRules {
     pub fn validate(&self) -> Result<(), String> {
+        // 零是非负效用权重的结构性下界。
+        let zero = f32::from(0u8);
         let values = [
             self.shoot_base,
             self.early_shot_penalty,
@@ -881,6 +967,9 @@ impl DecisionRules {
             self.team_style_weight,
             self.three_point_utility_multiplier,
             self.drive_base,
+            self.post_up_base,
+            self.post_up_mismatch_weight,
+            self.play_effect_weight,
             self.dwell_decay_max,
             self.contested_patience_floor,
             self.urgency_shoot_boost,
@@ -899,25 +988,28 @@ impl DecisionRules {
             self.def_switch_base,
         ];
         if values.iter().any(|value| !value.is_finite())
-            || self.shoot_base < 0.0
-            || self.pass_base < 0.0
-            || self.dwell_base < 0.0
+            || self.shoot_base < zero
+            || self.pass_base < zero
+            || self.dwell_base < zero
+            || self.play_effect_weight < zero
             || !(0.0..=1.0).contains(&self.stamina_sensitivity)
             || self.temperature <= 0.0
             || self.pass_lead_time_seconds < 0.0
-            || self.risk_aversion < 0.0
-            || self.tendency_weight < 0.0
-            || self.team_style_weight < 0.0
-            || self.pass_distance_free_ft < 0.0
+            || self.risk_aversion < zero
+            || self.tendency_weight < zero
+            || self.team_style_weight < zero
+            || self.post_up_base < zero
+            || self.post_up_mismatch_weight < zero
+            || self.pass_distance_free_ft < zero
             || self.pass_distance_decay_reference_ft <= self.pass_distance_free_ft
             || !(0.0..=1.0).contains(&self.pass_distance_max_decay)
-            || self.def_steal_gamble_base < 0.0
-            || self.def_steal_risk_penalty < 0.0
-            || self.def_rim_help_base < 0.0
-            || self.def_corner_threat_weight < 0.0
-            || self.def_drop_contain_base < 0.0
-            || self.def_hedge_contain_base < 0.0
-            || self.def_switch_base < 0.0
+            || self.def_steal_gamble_base < zero
+            || self.def_steal_risk_penalty < zero
+            || self.def_rim_help_base < zero
+            || self.def_corner_threat_weight < zero
+            || self.def_drop_contain_base < zero
+            || self.def_hedge_contain_base < zero
+            || self.def_switch_base < zero
         {
             return Err("decision policy contains an invalid value".to_string());
         }

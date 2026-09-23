@@ -114,6 +114,7 @@ fn legal_edges_are_accepted() {
                 z: 4.0,
                 vel_z: 0.0,
                 last_touch_team: Possession::Home,
+                last_touch_player: None,
             },
         ),
         (
@@ -138,6 +139,7 @@ fn legal_edges_are_accepted() {
                 duration: 1.0,
                 peak_z: 12.0,
                 last_touch_team: Possession::Home,
+                last_touch_player: Some("H_01".into()),
             },
         ),
         (
@@ -150,6 +152,7 @@ fn legal_edges_are_accepted() {
                 duration: 1.0,
                 peak_z: 12.0,
                 last_touch_team: Possession::Home,
+                last_touch_player: Some("H_01".into()),
             },
             held(),
         ),
@@ -160,6 +163,7 @@ fn legal_edges_are_accepted() {
                 z: 4.0,
                 vel_z: 0.0,
                 last_touch_team: Possession::Home,
+                last_touch_player: None,
             },
             held(),
         ),
@@ -170,6 +174,7 @@ fn legal_edges_are_accepted() {
                 z: 4.0,
                 vel_z: 0.0,
                 last_touch_team: Possession::Home,
+                last_touch_player: None,
             },
             BallState::LooseBall {
                 pos: Vec2::ONE,
@@ -177,6 +182,7 @@ fn legal_edges_are_accepted() {
                 z: 2.0,
                 vel_z: 0.0,
                 last_touch_team: Possession::Home,
+                last_touch_player: None,
             },
         ),
         (
@@ -327,6 +333,7 @@ fn illegal_edges_are_rejected() {
         duration: 1.0,
         peak_z: 12.0,
         last_touch_team: Possession::Home,
+        last_touch_player: Some("H_01".into()),
     };
     assert!(transition_ball_state(
         &reb,
@@ -452,6 +459,7 @@ fn all_variants() -> Vec<(&'static str, BallState)> {
                 duration: 0.8,
                 peak_z: 11.0,
                 last_touch_team: Possession::Home,
+                last_touch_player: Some("H_01".into()),
             },
         ),
         (
@@ -462,6 +470,7 @@ fn all_variants() -> Vec<(&'static str, BallState)> {
                 z: 2.0,
                 vel_z: 0.0,
                 last_touch_team: Possession::Home,
+                last_touch_player: Some("H_01".into()),
             },
         ),
         (

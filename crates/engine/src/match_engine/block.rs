@@ -29,6 +29,10 @@ use rand::Rng;
 
 use super::MatchEngine;
 
+fn is_block_phase(phase: ActionPhase) -> bool {
+    matches!(phase, ActionPhase::Execution)
+}
+
 /// 一次封盖的裁定结果。
 pub(crate) struct BlockOutcome {
     /// 封盖后球的新状态（松球，由双方争夺）。
@@ -80,7 +84,7 @@ impl MatchEngine {
         // 窗口，并已由 `on_ball_poke_phase` 的实现链负责（`Held → LooseBall`）。
         // 把它也算作封盖会产生两个口径重叠的事实。
         let phase = self.observations.active_windows.get(shooter_id)?.phase;
-        if !matches!(phase, ActionPhase::Execution) {
+        if !is_block_phase(phase) {
             return None;
         }
         // `Preparation` 末段（合球完成、起跳前）与 `Execution` 全过程都属于
@@ -195,6 +199,8 @@ impl MatchEngine {
                 z: contact_height_ft,
                 vel_z: 0.0,
                 last_touch_team,
+                // 物理最后触球人是封盖者。
+                last_touch_player: Some(blocker_id.clone()),
             },
             event: GameEvent::BlockedShot {
                 shooter_id: shooter_id.to_string(),
@@ -206,5 +212,22 @@ impl MatchEngine {
                 is_three,
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_block_phase;
+    use nba_domain::action_window::ActionPhase;
+
+    #[test]
+    fn block_gate_rejects_preparation_and_follow_through() {
+        assert!(!is_block_phase(ActionPhase::Preparation));
+        assert!(!is_block_phase(ActionPhase::FollowThrough));
+    }
+
+    #[test]
+    fn block_gate_accepts_execution() {
+        assert!(is_block_phase(ActionPhase::Execution));
     }
 }

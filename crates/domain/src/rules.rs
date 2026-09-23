@@ -126,6 +126,10 @@ pub struct GameRules {
     pub separation_safety_margin_ft: f32,
     pub max_player_speed_ftps: f32,
     pub max_player_accel_ftps2: f32,
+    /// 球员纵向制动加速度上限（ft/s²），由 `acceleration` 能力调制。
+    pub max_player_braking_accel_ftps2: f32,
+    /// 球员横向抓地加速度上限（ft/s²），由 `agility` 能力调制。
+    pub max_player_lateral_accel_ftps2: f32,
     pub turnaround_min_decel_seconds: f32,
     pub player_linear_damping: f32,
     /// 「到达」判定阈值（ft）：目标距离小于该值即视为到位，速度归零。
@@ -423,6 +427,8 @@ impl Default for GameRules {
             separation_safety_margin_ft: default_separation_safety_margin_ft(),
             max_player_speed_ftps: 22.0,
             max_player_accel_ftps2: 35.0,
+            max_player_braking_accel_ftps2: 24.0,
+            max_player_lateral_accel_ftps2: 20.0,
             turnaround_min_decel_seconds: 0.12,
             player_linear_damping: 4.0,
             arrival_epsilon_ft: 0.15,
@@ -630,6 +636,8 @@ impl GameRules {
             self.separation_safety_margin_ft,
             self.max_player_speed_ftps,
             self.max_player_accel_ftps2,
+            self.max_player_braking_accel_ftps2,
+            self.max_player_lateral_accel_ftps2,
             self.turnaround_min_decel_seconds,
             self.player_linear_damping,
             self.ball_gravity_ftps2,
@@ -754,6 +762,8 @@ impl GameRules {
             || self.separation_safety_margin_ft < 0.0
             || self.max_player_speed_ftps <= 0.0
             || self.max_player_accel_ftps2 <= 0.0
+            || self.max_player_braking_accel_ftps2 <= 0.0
+            || self.max_player_lateral_accel_ftps2 <= 0.0
             || self.player_linear_damping < 0.0
             || !(0.0..=1.0).contains(&self.ball_velocity_retention)
             || self.defender_reach_ft < 0.0
@@ -950,20 +960,44 @@ mod tests {
         rules.decision.temperature = 0.2;
         rules.decision.pass_lead_time_seconds = -0.1;
         assert!(rules.validate().is_err());
+        rules.decision.pass_lead_time_seconds = f32::EPSILON;
+        rules.decision.play_effect_weight = -f32::EPSILON;
+        assert!(rules.validate().is_err());
     }
 
     #[test]
     fn decision_policy_round_trips_through_json_defaults() {
         let rules = GameRules::default();
-        let value = serde_json::to_value(&rules).expect("rules serialize");
-        let decoded: GameRules = serde_json::from_value(value).expect("rules deserialize");
+        let mut value = serde_json::to_value(&rules).expect("rules serialize");
+        let decision = value
+            .get_mut("decision")
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("decision rules serialize as an object");
+        decision.remove("play_effect_weight");
+        let decoded: GameRules = serde_json::from_value(value).expect("legacy rules deserialize");
         assert_eq!(decoded.decision.temperature, rules.decision.temperature);
+        assert_eq!(
+            decoded.decision.play_effect_weight,
+            rules.decision.play_effect_weight
+        );
     }
 
     #[test]
     fn rejects_invalid_numeric_envelopes() {
         let rules = GameRules {
             ball_max_speed_ftps: 0.0,
+            ..GameRules::default()
+        };
+        assert!(rules.validate().is_err());
+
+        let rules = GameRules {
+            max_player_braking_accel_ftps2: 0.0,
+            ..GameRules::default()
+        };
+        assert!(rules.validate().is_err());
+
+        let rules = GameRules {
+            max_player_lateral_accel_ftps2: f32::NAN,
             ..GameRules::default()
         };
         assert!(rules.validate().is_err());

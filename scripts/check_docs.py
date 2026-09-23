@@ -42,6 +42,18 @@ CODE_REF = re.compile(
 )
 HISTORICAL_PREFIXES = ("docs/dev/cycles/", "docs/dev/evidence/")
 
+# 已删除的 shadow world 符号：曾在 engine 内实现全场感知（MatchWorld 逐 tick
+# 双向同步驱动 PerceptionSystem），后整体移除，全场防守拓扑改由
+# decision/potential_field.rs 的 DefensePotentialFieldSolver 涌现（ADR-015
+# 修订注记）。status.md 自称「只写当前工作区可由代码/测试/守卫复核的结论」，
+# 故不得再把这些符号当作现存机制陈述。
+REMOVED_SYMBOLS = re.compile(
+    r"sync_to_world|sync_world_players|PerceptionSystem|PerceptionSnapshot|"
+    r"MatchWorld|match_world\.rs|Systems\.world|crate::world"
+)
+# 行内含这些标记 = 正在陈述「已移除/已超越」，属合法说明（含 supersede 注记），豁免。
+REMOVAL_MARKERS = re.compile(r"移除|删除|已超越|超越|supersede|不再|已随|曾用|曾持有")
+
 
 def all_markdown(docs_dir: Path) -> list[Path]:
     return sorted({*docs_dir.glob("*.md"), *docs_dir.glob("dev/**/*.md")})
@@ -166,6 +178,35 @@ def check_code_references(contract_files: list[Path]) -> list[str]:
     return violations
 
 
+def check_current_face_symbols(dev_files: list[Path]) -> list[str]:
+    """status.md（当前快照面）不得把已删除的 shadow world 符号当作现存机制。
+
+    历史事故：shadow world（MatchWorld/PerceptionSystem/sync_to_world）已整体
+    移除，但 status.md 的门矩阵与闭环记录仍描述其「逐 tick 双向同步」，并引用
+    已不存在的 tests/match_world.rs。status.md 开头自称「只写当前工作区可由
+    代码/测试/守卫复核的结论」，此类陈述违反其自身契约，而路径实在性守卫
+    （check_code_references）只查 crates/... 路径、且豁免工作面，无法发现。
+
+    仅约束 status.md：plan.md/decisions.md 是设计历史与时间点裁定，允许叙述
+    已删符号。带移除/超越标记的行（即在说明其已删，含 supersede 注记）豁免。
+    """
+    violations: list[str] = []
+    for path in dev_files:
+        if path.name != "status.md":
+            continue
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if REMOVAL_MARKERS.search(line):
+                continue
+            match = REMOVED_SYMBOLS.search(line)
+            if match:
+                violations.append(
+                    f"{path.name}:{line_no}: 当前快照面把已删除符号 "
+                    f"`{match.group(0)}` 当作现存机制陈述（shadow world 已移除，"
+                    f"见 ADR-015 修订注记）；如需保留历史请在该行加移除/超越标记"
+                )
+    return violations
+
+
 def check_dev_structure(dev_files: list[Path]) -> list[str]:
     violations: list[str] = []
     for path in dev_files:
@@ -262,6 +303,7 @@ def main() -> int:
         ref_errors
         + check_contract_discipline(contract_files)
         + check_code_references(contract_files)
+        + check_current_face_symbols(dev_files)
         + check_dev_structure(dev_files)
         + check_numbering_namespaces(files)
     )

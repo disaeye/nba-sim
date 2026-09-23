@@ -47,66 +47,18 @@ fail() {
     exit 1
 }
 
-# ── 分层定义：与 .github/workflows/ci.yml 的三层保持一致 ──
-# tier1：fast-test 层（不变量、快照、投影、golden hash）
-TIER1=(
-    "-p nba-domain"
-    "-p nba-invariants"
-    "-p nba-engine --test world_state_equivalence"
-    "-p nba-engine --test engine_snapshot"
-    "-p nba-engine --test projection"
-    "-p nba-engine --test golden_hash"
-)
-# tier2：full-gate 层（机制、因果、接线证明）
-TIER2=(
-    "-p nba-decision --test defense_responsibility_chain"
-    "-p nba-engine --test attribute_perturbation"
-    "-p nba-engine --test block"
-    "-p nba-engine --test decision_wiring"
-    "-p nba-engine --test defense"
-    "-p nba-engine --test rules_complete_wiring"
-    "-p nba-engine --test wiring_proof"
-    "-p nba-engine --test defense_effect"
-    "-p nba-engine --test fiba_scenarios"
-)
-# tier3：宏观统计网（8 种子完整比赛，最重的一层）
-TIER3=(
-    "-p nba-engine --test stats_baseline"
-)
-
-tier_args() {
-    case "$1" in
-    tier1) echo "${TIER1[@]}" ;;
-    tier2) echo "${TIER2[@]}" ;;
-    tier3) echo "${TIER3[@]}" ;;
-    tier2+3) echo "${TIER2[@]}" "${TIER3[@]}" ;;
-    *) fail "unknown tier: $1 (expected tier1 | tier2 | tier3 | tier2+3)" ;;
-    esac
-}
-
-# 把 tier 的 cargo 目标列表转成 par_test.py 的 --include 正则
-# （匹配测试二进制名：crate 名或集成测试文件名）。
-tier_regex() {
-    local names=()
-    for arg in $(tier_args "$1"); do
-        case "$arg" in
-            -p | --test) : ;;
-            *) names+=("$arg") ;;
-        esac
-    done
-    local IFS="|"
-    echo "${names[*]}"
-}
-
-MODE="$1"
+# ── 分层选择由 par_test.py 根据 Cargo metadata 执行并核对 ──
+# tier1：nba-domain、nba-invariants、快照、投影与 golden hash。
+# tier2：机制与因果目标，加上 Play、D25 action_phase 与 D26 整场测试。
+# tier3：stats_baseline 整场测试。D26 与 stats_baseline 均由 --serial 独占运行。
+MODE="${1:-}"
 shift || true
 if [ "$MODE" = "--" ]; then
-    # 传统全量：其余参数原样传给 cargo test
-    CARGO_ARGS=("$@")
     MODE_LABEL="full workspace"
-else
-    mapfile -t CARGO_ARGS < <(tier_args "$MODE")
+elif [[ "$MODE" =~ ^(tier1|tier2|tier3|tier2\+3)$ ]]; then
     MODE_LABEL="$MODE"
+else
+    fail "unknown mode: $MODE (expected tier1 | tier2 | tier3 | tier2+3 | --)"
 fi
 
 echo "🧪 NBA-Sim constrained test runner"
@@ -131,24 +83,28 @@ export CARGO_INCREMENTAL=0
 export TMPDIR="$RUN_TMP"
 export NBA_TEST_TMP="$RUN_TMP"
 
-echo "   cargo args : ${CARGO_ARGS[*]}"
 echo
 
-# 先构建全部测试二进制（并行执行的调度单元是二进制，必须先全部就位）。
+# 先按当前 Cargo metadata 校验 tier 选择器、预期名称与命中集合。
+python3 scripts/par_test.py --self-test
+SELECTION_STATUS=$?
+if [ "$SELECTION_STATUS" -ne 0 ]; then
+    exit "$SELECTION_STATUS"
+fi
+
+# 先构建全部测试二进制；par_test.py 随后核对 Cargo metadata 与产物目标集合。
 cargo test --release --workspace --no-run
 BUILD_STATUS=$?
 if [ "$BUILD_STATUS" -ne 0 ]; then
     exit "$BUILD_STATUS"
 fi
 
-# 按目标并行执行。tier 模式用 --filter 只跑该层的目标；
-# "--" 全量模式不过滤。
-FILTER_ARGS=()
-if [ "$MODE" != "--" ]; then
-    # tier 列表里的 crate/test 目标转成 par_test 的 --include 正则。
-    FILTER_ARGS=(--include "$(tier_regex "$MODE")")
+# tier 选择由 par_test.py 使用 package::target 精确筛选；全量模式不筛选。
+if [ "$MODE" = "--" ]; then
+    python3 scripts/par_test.py --jobs 2 --threads-per-bin 2
+else
+    python3 scripts/par_test.py --jobs 2 --threads-per-bin 2 --tier "$MODE"
 fi
-python3 scripts/par_test.py --jobs 2 --threads-per-bin 2 "${FILTER_ARGS[@]}"
 STATUS=$?
 
 # 3. 后置检查与清理
@@ -169,5 +125,13 @@ else
 fi
 
 python3 scripts/check_disk_budget.py --report || true
+
+# 4. 性能基准带（quality.md §4.1）：fixture 冻结的吞吐带由守卫比对。
+# 计入退出码：接在测试后面但 `|| true` 会让它等于没接——性能退化与
+# 行为退化同属回归，失败必须使本次运行变红。测量基于本机 release 构建，
+# 此处 target/ 刚被全套件热过，CPU 状态与提交前验证一致。
+if [ "$STATUS" -eq 0 ]; then
+    python3 scripts/check_perf_fixture.py || STATUS=$?
+fi
 
 exit "$STATUS"

@@ -442,23 +442,83 @@ fn pct(ratio: f32) -> f32 {
     ratio * 100.0
 }
 
+/// 取选项值并拒绝「以 `--` 开头的值」。
+///
+/// 此前 `--out --help` 会把 `--help` 当作输出路径消费，在仓库根留下
+/// `--help.judgments.ndjson` 等误产工件。缺失值与「下一个 token 是选项」
+/// 都按用法错误退出（exit 2），而不是静默吞掉。
+fn parse_option_value<'a>(
+    args: &'a [String],
+    index: usize,
+    usage: &str,
+) -> std::io::Result<&'a str> {
+    match args.get(index).map(|s| s.as_str()) {
+        Some(value) if !value.starts_with("--") => Ok(value),
+        Some(value) => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "❌ option value cannot look like a flag: got `{value}`\n   usage: nba-sim {usage}"
+            ),
+        )),
+        None => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("❌ missing value after option\n   usage: nba-sim {usage}"),
+        )),
+    }
+}
+
+/// 用法说明（`--help` / `-h`）。选项值语义见各参数行内注释。
+fn print_usage() {
+    println!(
+        "NBA-Sim · 篮球比赛模拟引擎\n\
+         \n\
+         用法：nba-sim [选项] [batch] [SEED] [OUT] [SCOPE]\n\
+         \n\
+         子命令：\n\
+           audit <stream>                    对既有事件流做 L1 不变量审计\n\
+           evaluate <stream> [--league L]    对既有事件流产出评判工件（默认 NBA v2 参考分布）\n\
+           pbp-convert <input> [--out Y] [--league L] [--version V]\n\
+           benchmark [--ticks N] [--mode M]  吞吐基准\n\
+         \n\
+         选项：\n\
+           --rules <file>        规则覆盖 JSON\n\
+           --league <nba|fiba>   联赛档案\n\
+           --seeds A..B          批量模式种子范围（进入批量模式）\n\
+           --batch N             等价于 --seeds 1..=N\n\
+           --out <file>          输出流路径\n\
+           --stream-mode <mode>  facts（默认）| frames | frames-gzip | summary\n\
+           -h, --help            本说明\n\
+         \n\
+         默认单场：seed=42，输出 output/game.ticks.ndjson，范围 1q。"
+    );
+}
+
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
 
+    if args.len() > 1 && (args[1] == "--help" || args[1] == "-h") {
+        print_usage();
+        return Ok(());
+    }
+
     if args.len() > 1 && args[1] == "audit" {
-        let path = args
-            .get(2)
-            .map(|s| s.as_str())
-            .unwrap_or("output/game.ticks.ndjson");
+        let path = parse_option_value(&args, 2, "audit <stream>")?;
         return run_audit_stream(path);
     }
 
     if args.len() > 1 && args[1] == "evaluate" {
-        let path = args
-            .get(2)
-            .map(|s| s.as_str())
-            .unwrap_or("output/game.ticks.ndjson");
-        return run_evaluate(path);
+        let path = parse_option_value(&args, 2, "evaluate <stream>")?;
+        let mut league = "nba";
+        let mut i = 3;
+        while i < args.len() {
+            if args[i] == "--league" {
+                league = parse_option_value(&args, i + 1, "--league <nba|fiba>")?;
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+        return run_evaluate(path, league);
     }
 
     if args.len() > 1 && args[1] == "pbp-convert" {
@@ -532,61 +592,46 @@ fn main() -> std::io::Result<()> {
     while i < args.len() {
         match args[i].as_str() {
             "--rules" => {
-                if i + 1 < args.len() {
-                    rules_path = Some(&args[i + 1]);
-                    i += 2;
-                } else {
-                    i += 1;
-                }
+                let v = parse_option_value(&args, i + 1, "--rules <file>")?;
+                rules_path = Some(v);
+                i += 2;
             }
             "--league" => {
-                if i + 1 < args.len() {
-                    league = Some(args[i + 1].to_string());
-                    i += 2;
-                } else {
-                    i += 1;
-                }
+                let v = parse_option_value(&args, i + 1, "--league <nba|fiba>")?;
+                league = Some(v.to_string());
+                i += 2;
             }
             "--seeds" => {
-                if i + 1 < args.len() {
-                    seeds = Some(parse_seed_range(&args[i + 1]).unwrap_or_else(|e| {
-                        eprintln!("❌ {}", e);
-                        std::process::exit(2);
-                    }));
-                    i += 2;
-                } else {
-                    i += 1;
-                }
+                let v = parse_option_value(&args, i + 1, "--seeds A..B")?;
+                seeds = Some(parse_seed_range(v).unwrap_or_else(|e| {
+                    eprintln!("❌ {}", e);
+                    std::process::exit(2);
+                }));
+                i += 2;
             }
             "--out" => {
-                if i + 1 < args.len() {
-                    out_path = Some(&args[i + 1]);
-                    i += 2;
-                } else {
-                    i += 1;
-                }
+                let v = parse_option_value(&args, i + 1, "--out <file>")?;
+                out_path = Some(v);
+                i += 2;
             }
             "--stream-mode" => {
-                if i + 1 < args.len() {
-                    stream_mode = Some(StreamMode::parse(&args[i + 1]).unwrap_or_else(|e| {
-                        eprintln!("❌ {}", e);
-                        std::process::exit(2);
-                    }));
-                    i += 2;
-                } else {
-                    i += 1;
-                }
+                let v = parse_option_value(
+                    &args,
+                    i + 1,
+                    "--stream-mode <facts|frames|frames-gzip|summary>",
+                )?;
+                stream_mode = Some(StreamMode::parse(v).unwrap_or_else(|e| {
+                    eprintln!("❌ {}", e);
+                    std::process::exit(2);
+                }));
+                i += 2;
             }
             // 兼容旧形态：--batch N = 种子 1..=N（docs/quality.md §3.1 的批处理口径）。
             "--batch" => {
-                if i + 1 < args.len() {
-                    let n: usize = args[i + 1].parse().unwrap_or(10);
-                    seeds = Some((1..=n as u64).collect());
-                    i += 2;
-                } else {
-                    seeds = Some((1..=10).collect());
-                    i += 1;
-                }
+                let v = parse_option_value(&args, i + 1, "--batch N")?;
+                let n: usize = v.parse().unwrap_or(10);
+                seeds = Some((1..=n as u64).collect());
+                i += 2;
             }
             _ => {
                 positional.push(args[i].as_str());

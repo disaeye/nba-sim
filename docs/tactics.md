@@ -28,6 +28,7 @@
 | **TA5** | 教练是策略不是脚本 | 教练决策（换人、暂停、战术切换）由**策略档案**驱动（何时换、换谁、换什么战术），不是预编排的比赛脚本 | CoachStrategy 消费 TeamTraits + 比赛状态；禁止硬编码时间/比分触发 |
 | **TA6** | 战术与倾向共存不覆盖 | TeamTraits（球队意志）定基线，PlayerTendencies（个体偏好）在其上调制；两者是同层独立输入，各自生效、互不覆盖 | 效用管线中 TeamTraits 与 tendencies 作为独立加法项进入 BaseValue（各自权重归 DecisionRules），禁止合并字段或互相覆盖（architecture.md §5.1） |
 | **TA7** | 无死档案字段 | 战术档案每个字段必须有 ≥1 条消费链（引擎行为响应）+ ≥1 条可观测的扰动响应链；死字段要么接线、要么删除 | 战术扰动测试（quality.md §6 / protocol.md §2.1 M9 扩展） |
+| **TA8** | Play 是窗口化覆盖，不是剧本 | Play 在触发窗口内注入行为规则、候选偏好与抑制；它改变候选生成语境与效用输入，从不声明动作顺序，从不绕过效用管线 | 谓词与动词封闭枚举；场输出谓词强制走滞回稳定通道；hard 抑制必须保留合法出路（§2.2.4） |
 
 ---
 
@@ -44,7 +45,8 @@
 ├── 战术（Tactics · 打什么体系）
 │   ├── 进攻体系    offensive_system: OffensiveSystem（阵型 + 动作序列）
 │   ├── 防守体系    defensive_system: DefensiveSystem（对位 + 协防 + 挡拆策略）
-│   └── 特殊情境    situational: SituationalTactics（关键时刻、最后两攻、领先/落后）
+│   ├── 特殊情境    situational: SituationalTactics（关键时刻、最后两攻、领先/落后）
+│   └── Play 库     playbook: Vec<PlaySpec>（规则化战术，回合级行为覆盖，§2.2.4）
 ├── 适配（Fit · 体系如何调用球员）
 │   ├── 槽位填充    slot_fill: (slot_requirements, roster) → assignment
 │   ├── 对位指派    matchup: (offensive_set, defensive_roster) → defensive_assignment
@@ -82,7 +84,7 @@
 
 **目标 schema**：战术档案 = **阵型（Formation）+ 槽位能力需求（Requirements）+ 槽位允许行为（Behaviour）** 的数据声明。
 
-> **为何不设动作序列（`sequence`）与触发条件（`triggers`）**：声明「先掩护再决策」的固定顺序与「比分在 0.4–0.8 时切换」的触发条件在形式上与剧本不可区分（违反 TA1 与宪章 C1）。决策层的实时选择权由 `architecture.md` §5 的效用管线承担；战术档案只回答「需要什么样的球员、允许他做什么、站在哪里」。
+> **为何不设动作序列（`sequence`）与触发条件（`triggers`）**（本条款限定 System 级档案）：声明「先掩护再决策」的固定顺序与「比分在 0.4–0.8 时切换体系」的切换条件在形式上与剧本不可区分（违反 TA1 与宪章 C1）。决策层的实时选择权由 `architecture.md` §5 的效用管线承担；System 档案只回答「需要什么样的球员、允许他做什么、站在哪里」。回合级、窗口化的行为覆盖由 Play 规则模型承担（§2.2.4）：Play 的 `triggers` 是**选板触发**（何时把哪套行为面注入候选语境），由选板器纯函数评估；它同样不声明动作顺序，行为面全部经效用管线与约束层生效。
 
 #### 2.2.1 进攻体系（TacticalSetSpec）
 
@@ -157,6 +159,86 @@
 | 领先/落后 | 分差 > 10 + 时间 < 5min | 领先：压节奏、磨时间；落后：抢三分、犯规战术 |
 
 **纪律**：特殊情境是**战术覆盖**（override），不是独立体系——触发时临时替换 offensive/defensive_system 的特定字段，不替换整个档案。
+
+#### 2.2.4 Play 规则模型（PlaySpec）
+
+**定位**：Play 是回合级的**规则化行为覆盖**，独立于 System（体系）。System 定义整场的空间与槽位语境；Play 在触发后的窗口内，对持球人与相关槽位注入行为规则、候选偏好与候选抑制。Play 与 System 的对应形式关系：
+
+| 维度 | System（体系） | Play（规则化战术） |
+| --- | --- | --- |
+| 时间尺度 | 全场恒定语境 | 回合内触发窗口 |
+| 声明内容 | 阵型、槽位、能力需求 | 行为规则、偏好、抑制、触发 |
+| 声明动作顺序 | 禁止（TA1） | 禁止（TA8）；规则只改变效用与候选语境 |
+| 生效方式 | 槽位坐标与适配分派 | 规则通道：效用加项 / 约束注入 / 目标偏置 |
+
+```json
+{
+  "schema_version": 1,
+  "id": "pnr_drop_lob_v1",
+  "name_zh": "高位挡拆吊传",
+  "kind": "play",
+  "carrier_preferences": [
+    {"action_family": "Drive", "bonus": 0.30},
+    {"action_family": "Pass", "bonus": 0.15}
+  ],
+  "inhibitions": [
+    {"action_family": "Shoot", "mode": "soft", "penalty": 0.40},
+    {"action_family": "Dwell", "mode": "hard"}
+  ],
+  "rules": [
+    {
+      "id": "screener_roll_pull",
+      "when": [
+        {"predicate": "carrier_possed"},
+        {"predicate": "screen_established"},
+        {"predicate": "help_shading_off"}
+      ],
+      "then": {"verb": "ScreenRoll", "slot": "screener"},
+      "carrier_preferences": [{"action_family": "TripleThreatJab", "bonus": 0.20}]
+    }
+  ],
+  "triggers": [
+    {
+      "when": [
+        {"predicate": "halfcourt_possession"},
+        {"predicate": "carrier_possed"},
+        {"predicate": "beyond_circle_ft", "r": 20.0}
+      ],
+      "window_seconds": 6.0,
+      "cooldown_seconds": 10.0
+    }
+  ]
+}
+```
+
+**字段语义**：
+
+- `kind`：`system` / `play` 两级 kind 的 JSON 表示。选板器与守卫按 kind 分流：System 档案进槽位适配，Play 档案进选板候选库；两库互不混用，任何一边引用另一边的字段都是 schema 错误；
+- `triggers[].when` 与 `rules[].when`：都必须是非空 `PlayPredicate` 对象数组，数组元素按 AND 求值，全部为真才匹配；空列表由 schema 校验拒绝。选板每个决策 tick 评估在场 Play 的所有触发项。一个 Play 有多项命中时，取谓词数最多的一项；同分取声明顺序首项。该项提供激活窗口与冷却秒数。再比较不同 Play 的最高匹配谓词数，分数最高者优先，不同 Play 同分由注入的随机数均匀选择，至多一个 Play 激活。激活持续所选触发项的 `window_seconds`，结束或回合终结后按同项 `cooldown_seconds` 冷却；冷却期内不得重新激活同一 Play。选板器是纯函数 `(playbook, context) -> Option<PlayActivation>`（TA4）；
+- `rules[].when`：激活窗口内每 tick 重新求值；全部谓词为真时 `then` 生效。规则声明顺序只决定输出顺序，不构成动作顺序。一个 Play 内每个目标 `slot` 只能被一条规则引用；即使其条件看似互斥，重复槽位也由 schema 校验拒绝，避免同一槽位同 tick 收到多个规则动作。`then.verb` 必须取自动作词表（见下），`then.slot` 必须引用当前 System 档案已声明的槽位 id；引擎装配时校验槽位确实存在，缺失即明确失败；
+- 顶层 `carrier_preferences`：Play 激活窗口内始终生效。`rules[].carrier_preferences`：仅随其所属规则条件命中而生效。同一动作族的顶层偏好与本 tick 任意命中规则的偏好按加法累积，再进入效用管线（`architecture.md` §5.1 的加性修正项），经 `DecisionRules` 通道的权重系数缩放；每个偏好列表内部，同一动作族不得重复。数值语义是效用增量，由校准确定量级；
+- `inhibitions`：候选抑制。`soft` 模式施加效用惩罚（同上走加性项）；`hard` 模式把该候选族从候选集中移除。schema 校验确保 hard 抑制没有覆盖全部 `DecisionActionFamily`，即至少保留一个未抑制的动作族；此项静态检查无法保证该族在当前状态下生成且通过硬约束。实际决策时若 hard 抑制移除了全部可行候选，决策管线显式失败；
+- `rules` 的执行由每 tick 规则评估层消费，评估输出进入目标生成与效用输入；规则不直接写坐标、不直接执行动作。
+
+**谓词词汇表**（封闭枚举，新增谓词需扩展枚举并声明消费点）——
+
+球态谓词：`carrier_possed`（本队持球且评估对象是持球人）、`halfcourt_possession`（前场阵地战，非快攻）、`shot_clock_urgent(threshold_s)`（进攻时钟低于阈值）。
+
+几何谓词：`beyond_circle_ft(r)`（持球人距篮超过 r 英尺）、`screen_established`（持球人与掩护人距离小于 `screen_detection_radius_ft` 且掩护人处于站定状态）、`corner_occupied(side)`（指定侧底角有本队球员）。几何谓词全部由 `SpatialGeometry`（ADR-015 单一事实源）派生，禁止在谓词实现里另算几何。
+
+场输出谓词（消费 `DefensePotentialFieldSolver` 的输出，**必须走场侧滞回稳定通道**）：`help_shading_off`（对位协防人被护筐引力拉离持球人走廊，依据 `threat_ratio` 超阈值且目标点位移稳定超过滞回带宽）、`weak_side_vacated`（弱侧出现真空，依据 `void_ratio` 超阈值且稳定）。场量逐 tick 抖动，直接作谓词会引发选板震荡：谓词消费的场量必须先过滞回（低通带宽 + 进入/退出双阈值，见 §2.5），未稳定前保持上一稳定值；这是场输出谓词生效的前提条款。
+
+**动作词表（verbs）**（封闭枚举）：`ScreenRoll`（掩护人顺下）、`ScreenPop`（掩护人外弹）、`SpotUp`（定点落位）、`Relocate`（弱侧转移）、`CutBackdoor`（背切）、`Lift`（上提接应）。动词映射到目标生成偏置与动作窗口类型（`domain::action_window` 的 `ActionType`）；动词不直接执行动作，只改变目标与候选语境。
+
+**纪律**：
+
+1. Play 不含任何球员 id、不含坐标字面量、不含动作顺序（C1/TA8）；
+2. 谓词与动词都是封闭枚举：档案里的字符串必须命中枚举，否则校验器拒绝（不得静默忽略）；各 `when` 数组非空且按 AND 求值；
+3. 同一 Play 的不同规则不得声明相同 `then.slot`；存在相同槽位的规则输入无效，不采用声明顺序覆盖或依赖运行时先后；
+4. 顶层与条件规则偏好可对同一动作族分别声明，所有当前生效项相加；触发项和规则条件均按每个决策 tick 求值；
+5. hard 抑制 schema 检查只证明枚举层面至少保留一个动作族。当前上下文下是否有可行候选由决策运行期约束判定；抑制导致全部可行候选消失时必须显式失败；
+6. 消费链要求（TA7）对 Play 逐字段成立：每个谓词、动词、偏好权重、抑制必须有引擎行为响应与扰动测试；
+7. Play 激活不改变物理：速度、碰撞、运动学上限全部照旧；Play 只能经效用、约束与目标偏置三个通道影响行为。
 
 ### 2.3 适配层（Fit）
 
@@ -272,6 +354,17 @@ pub fn decide_substitution(
 - 换人：`rotation_decision` 的触发条件 × `substitution_tendency` 调制；
 - 暂停：对方得分高潮（连续得分 ≥ 8）× `timeout_tendency` 调制；
 - 战术切换：对方防守体系变化 × `tactic_adjustment_tendency` 调制 + `preferred_tactics` 查表。
+
+---
+
+## 2.5 场输出的滞回稳定（场输出谓词的前提通道）
+
+势能场输出量（`threat_ratio` / `void_ratio` / 涌现动作标签）逐 tick 抖动，任何直接消费它们的开关型逻辑（谓词、选板触发、可观测性标签）都必须先过滞回稳定：
+
+- **双阈值**：进入态需超过高阈值、退出态需低于低阈值，两阈值间为保持区（维持上一稳定值）；阈值参数走 `PotentialFieldRules` 通道；
+- **最小保持时间**：状态翻转后至少保持数 tick，防止在阈值附近高频震荡；具体量级经校准确定，入 `DecisionRules`；
+- **稳定值语义**：下游读到的永远是「上一稳定态」，不是当 tick 原始值；场侧滞回是场输出谓词（§2.2.4）与选板触发生效的前提条款，未经滞回的场量不得进入任何开关型判定；
+- 稳定态由每防守人逐帧维护（防守目标求解的伴生状态），不新建持久世界对象（ADR-015 的边界不变）。
 
 ---
 
@@ -397,5 +490,6 @@ FinalUtility = (base_value + preference_bonus) × feasibility × stamina_modulat
 | OQ-3 | 对位指派的动态性 | 由防守档案声明是否允许回合内换防，并由责任链验证 |
 | OQ-4 | 教练 AI 的复杂度：规则 vs 效用 | 先保持可解释的规则/档案接口；需要效用选择时另行决策 |
 | OQ-5 | 战术档案的版本化 | schema 版本变更必须声明兼容策略；兼容层不是隐式要求 |
+| OQ-6 | Play 激活冲突：同一 tick 多个 Play 触发 | 选板器打分取至多一个激活（§2.2.4 选板触发语义）；互斥关系不在 v1 引入跨 Play 声明，若校准显示需要，再登记新决策 |
 
 ---

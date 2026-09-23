@@ -1,6 +1,6 @@
 use glam::Vec2;
 use nba_decision::tactics::DefensiveTactic;
-use nba_domain::{GameRules, TacticalSetSpec, TeamData};
+use nba_domain::{GameRules, PlaySpec, TacticalSetSpec, TeamData};
 use nba_physics::PhysicsBackend;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -29,12 +29,23 @@ pub struct MatchSetup {
     pub rules: GameRules,
     #[serde(default)]
     pub physics_backend: PhysicsBackend,
+    #[serde(default)]
+    pub home_playbook: Vec<PlaySpec>,
+    #[serde(default)]
+    pub away_playbook: Vec<PlaySpec>,
 }
 impl MatchSetup {
     pub fn builtin(rules: GameRules) -> Self {
         let [home_team, away_team] = TeamData::builtin_pair_with_geometry(rules.court);
         let home_lineup = default_lineup(&home_team);
         let away_lineup = default_lineup(&away_team);
+        let home_spec = TacticalSetSpec::builtin(&home_lineup.offense_tactic)
+            .expect("内建主队进攻战术必须存在");
+        let away_spec = TacticalSetSpec::builtin(&away_lineup.offense_tactic)
+            .expect("内建客队进攻战术必须存在");
+        let plays = builtin_play_specs();
+        let home_playbook = select_compatible_plays(&plays, &home_spec);
+        let away_playbook = select_compatible_plays(&plays, &away_spec);
         Self {
             home_team,
             away_team,
@@ -42,6 +53,8 @@ impl MatchSetup {
             away_lineup,
             rules,
             physics_backend: PhysicsBackend::Rapier,
+            home_playbook,
+            away_playbook,
         }
     }
 
@@ -58,18 +71,22 @@ impl MatchSetup {
         validate_team(&self.away_team, self.rules.court)?;
         validate_lineup(&self.home_team, &self.home_lineup, "home")?;
         validate_lineup(&self.away_team, &self.away_lineup, "away")?;
-        TacticalSetSpec::builtin(&self.home_lineup.offense_tactic).ok_or_else(|| {
-            format!(
-                "home lineup has unknown offense tactic profile: {}",
-                self.home_lineup.offense_tactic
-            )
-        })?;
-        TacticalSetSpec::builtin(&self.away_lineup.offense_tactic).ok_or_else(|| {
-            format!(
-                "away lineup has unknown offense tactic profile: {}",
-                self.away_lineup.offense_tactic
-            )
-        })?;
+        let home_spec =
+            TacticalSetSpec::builtin(&self.home_lineup.offense_tactic).ok_or_else(|| {
+                format!(
+                    "home lineup has unknown offense tactic profile: {}",
+                    self.home_lineup.offense_tactic
+                )
+            })?;
+        let away_spec =
+            TacticalSetSpec::builtin(&self.away_lineup.offense_tactic).ok_or_else(|| {
+                format!(
+                    "away lineup has unknown offense tactic profile: {}",
+                    self.away_lineup.offense_tactic
+                )
+            })?;
+        validate_playbook(&self.home_playbook, &home_spec, "home")?;
+        validate_playbook(&self.away_playbook, &away_spec, "away")?;
         DefensiveTactic::from_id(&self.home_lineup.defense_tactic).ok_or_else(|| {
             format!(
                 "home lineup has unknown defense tactic: {}",
@@ -84,6 +101,59 @@ impl MatchSetup {
         })?;
         Ok(())
     }
+}
+
+fn builtin_play_specs() -> Vec<PlaySpec> {
+    const PLAY_JSON: [&str; 3] = [
+        include_str!("../../../data/tactics/plays/weak_side_lift_v1.json"),
+        include_str!("../../../data/tactics/plays/high_pnr_roll_v1.json"),
+        include_str!("../../../data/tactics/plays/corner_backdoor_v1.json"),
+    ];
+    PLAY_JSON
+        .into_iter()
+        .map(|json| PlaySpec::from_json(json).expect("内建 PlaySpec 必须合法"))
+        .collect()
+}
+
+fn select_compatible_plays(plays: &[PlaySpec], tactic: &TacticalSetSpec) -> Vec<PlaySpec> {
+    let slots: HashSet<&str> = tactic.slots.iter().map(|slot| slot.id.as_str()).collect();
+    plays
+        .iter()
+        .filter(|play| {
+            play.rules
+                .iter()
+                .all(|rule| slots.contains(rule.then.slot.as_str()))
+        })
+        .cloned()
+        .collect()
+}
+
+fn validate_playbook(
+    plays: &[PlaySpec],
+    tactic: &TacticalSetSpec,
+    side: &str,
+) -> Result<(), String> {
+    let slots: HashSet<&str> = tactic.slots.iter().map(|slot| slot.id.as_str()).collect();
+    let mut play_ids = HashSet::new();
+    for play in plays {
+        play.validate()
+            .map_err(|error| format!("{side} play `{}` is invalid: {error}", play.id))?;
+        if !play_ids.insert(play.id.as_str()) {
+            return Err(format!(
+                "{side} playbook has duplicate play id `{}`",
+                play.id
+            ));
+        }
+        for rule in &play.rules {
+            if !slots.contains(rule.then.slot.as_str()) {
+                return Err(format!(
+                    "{side} play `{}` rule `{}` references unknown slot `{}`",
+                    play.id, rule.id, rule.then.slot
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn default_lineup(team: &TeamData) -> LineupConfig {

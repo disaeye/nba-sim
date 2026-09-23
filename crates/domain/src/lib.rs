@@ -12,6 +12,7 @@ pub mod data;
 pub mod event;
 pub mod flow;
 pub mod league;
+pub mod play;
 pub mod possession;
 pub mod projectile;
 pub mod resolve;
@@ -33,10 +34,15 @@ pub use data::{
 pub use event::{GameEvent, PossessionEndCause, PossessionSummary, TimedGameEvent};
 pub use flow::{transition_ball_state, BallPhase, BallState, GameFlowState, PhaseType};
 pub use league::{LeagueId, LeagueProfile};
+pub use play::{
+    DecisionActionFamily, PlayAction, PlayCarrierPreference, PlayCourtSide, PlayInhibition,
+    PlayInhibitionMode, PlayKind, PlayPredicate, PlayRule, PlaySpec, PlaySpecError, PlayTrigger,
+    PlayVerb,
+};
 pub use possession::{BallOwnership, Possession, SubPhase};
 pub use resolve::{
-    BallSecurityPolicy, BaseRates, BlockPolicy, ContactPolicy, DrivePolicy, PassPolicy,
-    ReboundPolicy, ResolveConfig, ShotTypeBlockBias, ShotTypeRates,
+    BallSecurityPolicy, BaseRates, BlockPolicy, ContactPolicy, DriveGeometryPolicy, DrivePolicy,
+    PassPolicy, ReboundPolicy, ResolveConfig, ShotTypeBlockBias, ShotTypeRates,
 };
 pub use rules::{
     DecisionRules, DefenseRules, GameRules, ModulationRules, PotentialFieldRules, SemanticRules,

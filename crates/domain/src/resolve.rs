@@ -23,6 +23,8 @@ pub struct ResolveConfig {
     pub player_skill: PlayerSkillPolicy,
     /// Attribute, spacing, and contact policy used by drive adjudication.
     pub drive: DrivePolicy,
+    /// 突破几何裁定：路径可达、防守人预计接触与技巧抗衡的参数（D24）。
+    pub drive_geometry: DriveGeometryPolicy,
     /// Physical distance and player capability policy used for rebounds.
     pub rebound: ReboundPolicy,
     /// Physical lane and player capability policy used for passes.
@@ -237,6 +239,85 @@ impl Default for DrivePolicy {
             foul_contest_scale: 0.65,
             finish_lane_density_scale: 0.8,
         }
+    }
+}
+
+/// 突破几何裁定参数：接触技巧权重、防守人反应延迟、加速度触达
+/// 曲线与技巧抗衡尺度。原实现内联于 engine `execution.rs`，D24 收
+/// 录入规则通道。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DriveGeometryPolicy {
+    /// 攻/守接触技巧中首要属性（攻方 ball_handling，守方 defense_perimeter）权重。
+    pub contact_skill_primary_weight: f32,
+    /// 接触技巧中敏捷权重。
+    pub contact_skill_agility_weight: f32,
+    /// 接触技巧中力量权重。
+    pub contact_skill_strength_weight: f32,
+    /// 防守人变向启动延迟（秒）；此前的预计接触位置不含该反应时间。
+    pub defender_response_delay_seconds: f32,
+    /// 加速度触达距离的基础系数（曲线 `base + skill × gain`）。
+    pub reach_base_factor: f32,
+    /// 加速度触达距离的技巧增益。
+    pub reach_skill_gain: f32,
+    /// 攻守技巧差对接触余量的尺度（英尺/技巧点）。
+    pub contact_skill_scale: f32,
+}
+
+impl Default for DriveGeometryPolicy {
+    fn default() -> Self {
+        Self {
+            contact_skill_primary_weight: 0.45,
+            contact_skill_agility_weight: 0.25,
+            contact_skill_strength_weight: 0.30,
+            defender_response_delay_seconds: 0.25,
+            reach_base_factor: 0.75,
+            reach_skill_gain: 0.25,
+            contact_skill_scale: 1.2,
+        }
+    }
+}
+
+impl DriveGeometryPolicy {
+    /// Rejects non-finite or negative shape parameters before simulation.
+    pub fn validate(&self) -> Result<(), String> {
+        let weights = [
+            self.contact_skill_primary_weight,
+            self.contact_skill_agility_weight,
+            self.contact_skill_strength_weight,
+        ];
+        if weights.iter().any(|weight| !weight.is_finite() || *weight < 0.0) {
+            return Err(
+                "resolve.drive_geometry contact skill weights must be finite and non-negative"
+                    .to_string(),
+            );
+        }
+        let weight_sum: f32 = weights.iter().sum();
+        if !weight_sum.is_finite() || (weight_sum - 1.0).abs() > 0.05 {
+            return Err(
+                "resolve.drive_geometry contact skill weights must sum to about 1".to_string(),
+            );
+        }
+        if !self.defender_response_delay_seconds.is_finite()
+            || self.defender_response_delay_seconds < 0.0
+        {
+            return Err(
+                "resolve.drive_geometry.defender_response_delay_seconds must be finite and non-negative"
+                    .to_string(),
+            );
+        }
+        for (name, value) in [
+            ("reach_base_factor", self.reach_base_factor),
+            ("reach_skill_gain", self.reach_skill_gain),
+            ("contact_skill_scale", self.contact_skill_scale),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(format!(
+                    "resolve.drive_geometry.{name} must be finite and non-negative"
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -473,6 +554,7 @@ impl Default for ResolveConfig {
             contact: ContactPolicy::default(),
             player_skill: PlayerSkillPolicy::default(),
             drive: DrivePolicy::default(),
+            drive_geometry: DriveGeometryPolicy::default(),
             rebound: ReboundPolicy::default(),
             pass: PassPolicy::default(),
             ball_security: BallSecurityPolicy::default(),
@@ -599,6 +681,7 @@ impl ResolveConfig {
         {
             return Err("shot block biases must be non-negative".to_string());
         }
+        self.drive_geometry.validate()?;
         Ok(())
     }
 }

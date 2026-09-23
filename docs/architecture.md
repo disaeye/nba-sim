@@ -218,6 +218,11 @@ BallTrajectoryKind (运动学采样参数 · crates/physics · 私有于执行)
 | InboundSetup | 发球传出 | InFlight{InboundPass} | InboundPass |
 | （比赛开始） | 裁判抛球 | Loose (跳球) | TipOff |
 | Loose (跳球) | 拨球控制 | Held(p) | Possession 确立 |
+| Dead / Loose（节间遗留） | 节间结束（PERIOD_START） | InboundSetup（球权按节末归属延续） | InboundSetup |
+
+节间开场规则（ADR-018）：球已由在场球员持有时原样保留；停球/松球等
+不可取状态必须经显式发球程序重建可取性，不得以「流程活球、球不可取」
+进入新的一节（seed 14 实测缺陷：停球跨节 201 tick 后被伪判后场违例）。
 
 > 完整转换表作为 `domain` 的状态机数据，配合穷举测试（每个非法边都必须被拒绝）。
 
@@ -275,7 +280,9 @@ build_tick                   // 快照输出（无副作用）
 
 ### 4.3 状态组划分
 
-`MatchEngine` 的 82 个字段收敛为十个具名状态组。分组依据是**写入点的同现关系**（同一函数同时写入的字段归入同组），按此准则 82 个字段无遗漏、无重叠：
+`MatchEngine` 的字段收敛为十个具名状态组（ADR-014 时的 82 字段；后续周期的
+字段归并与新增以 `crates/engine/src/match_engine/state.rs` 为单一事实源，本节
+注释中的分组与计数随状态组演进同步，不再另行维护总数）。分组依据是**写入点的同现关系**（同一函数同时写入的字段归入同组）：
 
 ```rust
 pub struct MatchEngine {
@@ -286,17 +293,23 @@ pub struct MatchEngine {
     flow: state::GameFlow,                         // 10：game_flow, possession(_id), possession_arrow,
                                                    //   scope_active/boundary, target/completed_possessions,
                                                    //   simulation_complete, inbound_baseline
-    ball: state::BallRuntime,                      //  9：ball_pos_3d, ball_state, last_passer_id,
+    ball: state::BallRuntime,                      // 11：ball_pos_3d, ball_state, last_passer_id,
                                                    //   pending_pass_receiver, receiver_estimate,
                                                    //   pending_loose_ball_terminal, pending_pass_inbound,
-                                                   //   prev_observed_ball_pos, beaten_defender_id
+                                                   //   prev_observed_ball_pos, beaten_defender_id,
+                                                   //   loose_contact_resolved, pass_contact_states
     config: state::TeamConfig,                     // 13：rules, tactical_set, home/away_team, team_traits,
                                                    //   home/away_roster_order, home/away_offense_tactic,
                                                    //   home/away_offense_spec, home/away_defensive_tactic
-    systems: state::Systems,                       //  5：physics, decision, coach, rng, world
-    observations: state::RuntimeObservations,      //  7：active_windows, last_decision_trace, latest_spacing,
+    systems: state::Systems,                       //  4：physics, decision, coach, rng
+                                                   //   （原 world 字段已随 shadow world
+                                                   //   移除，见 ADR-015 修订注记）
+    observations: state::RuntimeObservations,     // 11：active_windows, last_decision_trace,
+                                                   //   latest_spacing, potential_field,
                                                    //   latest_contacts, beaten_recovery_until,
-                                                   //   advancing_player, modulation
+                                                   //   advancing_player, modulation,
+                                                   //   rotation_clock, substitutions_this_window,
+                                                   //   rotation_window_done
     journal: state::EventJournal,                  // 10：pending_events, current_event, current_event_types,
                                                    //   current_enforcements, event_id_counter, causal_links,
                                                    //   current_event_log, event_sequence, current_callout,

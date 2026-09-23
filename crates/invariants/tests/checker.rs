@@ -12,6 +12,7 @@ fn base_player(id: &str, team: &str, x: f32, y: f32, on_court: bool) -> RenderPl
         has_ball: false,
         on_court,
         action: "Idle".to_string(),
+        action_phase: None,
         slot: "G".to_string(),
         morale: "Normal".to_string(),
         stm: 100.0,

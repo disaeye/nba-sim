@@ -183,6 +183,8 @@ impl MatchEngine {
                         z: 4.0,
                         vel_z: 0.0,
                         last_touch_team: Possession::Home,
+                        // 跳球尚未发生：还没有任何触球人。
+                        last_touch_player: None,
                     }
                 } else {
                     BallTrajectoryKind::Held {
@@ -222,6 +224,8 @@ impl MatchEngine {
                 away_offense_tactic: away_tactic,
                 home_offense_spec: home_spec,
                 away_offense_spec: away_spec,
+                home_playbook: setup.home_playbook,
+                away_playbook: setup.away_playbook,
                 home_defensive_tactic: home_defense,
                 away_defensive_tactic: away_defense,
             },

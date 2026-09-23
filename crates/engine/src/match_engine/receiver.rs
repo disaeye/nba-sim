@@ -147,6 +147,8 @@ impl MatchEngine {
             z: self.ball.ball_pos_3d.1,
             vel_z: 0.0,
             last_touch_team: self.flow.possession,
+            // 传球失败转松球：最后触球人是传球人（球离开的是他的手）。
+            last_touch_player: self.ball.last_passer_id.clone(),
         }
     }
 

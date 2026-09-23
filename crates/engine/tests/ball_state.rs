@@ -24,6 +24,7 @@ fn test_offensive_rebound_does_not_switch_possession() {
         start_time: engine.current_time(),
         duration: 10.0,
         peak_z: engine.rules().rim_height_ft + 1.5,
+        last_touch_player: None,
     };
     engine.set_ball_state_for_test(rebound);
     assert_eq!(engine.possession(), before);
@@ -443,6 +444,7 @@ fn free_rebound_flight_bounces_off_a_standing_player() {
         start_time: engine.current_time(),
         duration: 0.5,
         peak_z: 10.0,
+        last_touch_player: None,
     });
     engine.set_ball_pos_for_test(from_pos, from_z);
     // 接触半径从 5.8 ft 收窄到 2.2 ft（球体碰撞的真实尺寸）后，
@@ -526,6 +528,7 @@ fn rolling_loose_ball_bounces_off_a_standing_player() {
         z,
         vel_z: 0.0,
         last_touch_team: Possession::Home,
+        last_touch_player: None,
     });
     engine.set_ball_pos_for_test(pos, z);
     // 步进到弹开发生：球速 15 ft/s 超过可控上限（12 ft/s），松球不可

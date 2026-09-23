@@ -32,6 +32,23 @@ impl MatchEngine {
         );
     }
 
+    #[doc(hidden)]
+    pub fn execute_drive_for_test(
+        &mut self,
+        driver_id: &str,
+        from_pos: Vec2,
+        target_pos: Vec2,
+        move_kind: Option<nba_domain::action_window::DribbleMoveKind>,
+    ) {
+        self.execute_drive(
+            driver_id,
+            from_pos,
+            target_pos,
+            move_kind,
+            self.clock.current_time,
+        );
+    }
+
     /// 设置交替拥有箭头（仅测试钩子，D20）。
     pub fn set_possession_arrow_for_test(&mut self, arrow: Option<nba_domain::Possession>) {
         self.flow.possession_arrow = arrow;

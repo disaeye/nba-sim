@@ -255,22 +255,20 @@ pub(crate) fn run_batch_simulation(
         start.elapsed().as_secs_f64()
     );
 
-    if total_violations > 0 {
-        std::process::exit(1);
-    }
-    // 账本不平衡 = Hard（与单场模式同一判据）：金额式不对平意味着
-    // 事实流不能独立重建比赛，比任何分布误差都更严重。
-    if total_ledger_violations > 0 {
-        eprintln!(
-            "⛔ batch LEDGER gate FAILED: {} violation(s) across {} games",
-            total_ledger_violations,
-            seeds.len()
-        );
-        std::process::exit(1);
-    }
-    // gap.md §18.6：batch 此前只把 Hard 门打印成一行，即便
-    // hard_gate_failed 且上百条 Hard defect 也以 0 退出。
-    if enforce_hard_gate(&report, "batch") {
+    // 三个门（公理违规 / 账本 / Hard 缺陷）是三类独立失败：结论先全部
+    // 打印，退出码取三者的或。此前账本门先 `process::exit(1)`，会把
+    // Hard 缺陷归属（enforce_hard_gate 的准则清单）完全遮蔽——16-seed
+    // 矩阵的 seed 14 实测：批量输出只见 LEDGER gate FAILED，看不到
+    // TURNOVER_ACTOR_CONSISTENCY Hard 归属。
+    let hard_gate_failed = enforce_hard_gate(&report, "batch");
+    if total_violations > 0 || total_ledger_violations > 0 || hard_gate_failed {
+        if total_ledger_violations > 0 {
+            eprintln!(
+                "⛔ batch LEDGER gate FAILED: {} violation(s) across {} games",
+                total_ledger_violations,
+                seeds.len()
+            );
+        }
         std::process::exit(1);
     }
     Ok(())
