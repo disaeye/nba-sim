@@ -18,7 +18,7 @@ use nba_decision::{
     StableFieldOutput,
 };
 use nba_domain::play::PlaySpec;
-use nba_domain::{GameFlowState, Possession, SubPhase};
+use nba_domain::{GameEvent, GameFlowState, Possession, SubPhase};
 use nba_physics::ballistics::BallTrajectoryKind;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -186,6 +186,12 @@ impl MatchEngine {
                     .insert(activation.play_id.clone(), activation.cooldown_ticks);
                 *self.active_play_mut(possession) = Some(super::state::ActivePlay {
                     spec: activation.spec,
+                });
+                // 激活是可观测事实：经事件通道发布，供 UI/评判器重建
+                // Play 的激活/冷却时间线（tactics.md §2.2.4）。
+                self.journal.pending_events.push(GameEvent::PlayActivated {
+                    play_id: activation.play_id,
+                    possession,
                 });
             }
         }
