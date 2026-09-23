@@ -71,7 +71,32 @@ impl MatchEngine {
         //
         // 时机上这也更正确：封盖是出手者在**可干扰区间**内发生的触及，
         // 与“球是否已到达篮筐”无关——先判封盖，再让后续分支看到新球态。
-        let block_candidate = match &self.ball.ball_state {
+        let block_candidate = if let Some(pending) = self.observations.pending_shot_release.as_ref()
+        {
+            // 挂起的投篮（球在手、窗口执行段）：封盖在 Execution 段的第一个
+            // tick 掷一次，与旧时序（Shot 球态在入口建立）的「刚进入
+            // Execution」触发点一致。出手点用当前球位（球在手，出手人所在
+            // 即球所在），与封盖入射速度的「出手点到筐」口径一致。
+            let window = self.observations.active_windows.get(&pending.shooter_id);
+            let just_entered_execution = window
+                .map(|w| {
+                    let elapsed = current_t - w.start_time;
+                    let prev = elapsed - self.config.rules.tick_seconds;
+                    elapsed >= w.prep_duration && prev < w.prep_duration
+                })
+                .unwrap_or(false);
+            just_entered_execution.then(|| {
+                (
+                    pending.shooter_id.clone(),
+                    self.ball.ball_pos_3d.0,
+                    pending.release_time,
+                    pending.flight_time,
+                    pending.is_made,
+                    pending.is_three,
+                )
+            })
+        } else {
+            match &self.ball.ball_state {
             BallTrajectoryKind::Shot {
                 shooter_id,
                 from_pos,
@@ -112,6 +137,7 @@ impl MatchEngine {
                 })
             }
             _ => None,
+        }
         };
         if let Some((shooter_id, from_pos, _start_time, _duration, is_made, is_three)) =
             block_candidate
@@ -121,6 +147,17 @@ impl MatchEngine {
             {
                 outcome.new_ball_state = Some(block.next_state);
                 outcome.blocked_shot_event = Some(block.event);
+                // 被封盖的出手永远不再 Release：球已转松球，窗口照旧推进
+                // 到 FollowThrough（封盖是身体接触，出手者动作不中断），
+                // 但冻结的裁定载荷必须同步作废，否则 Exec→Follow 边界会
+                // 把一个已被封盖的出手重新发布为 Shot。
+                if let Some(pending) = self.observations.pending_shot_release.as_ref() {
+                    assert_eq!(
+                        pending.shooter_id, shooter_id,
+                        "blocked shot release belongs to a different shooter"
+                    );
+                }
+                self.observations.pending_shot_release = None;
             }
         }
         // 自由球-人接触（ADR-017 第三步）：与封盖判定同一借用纪律——

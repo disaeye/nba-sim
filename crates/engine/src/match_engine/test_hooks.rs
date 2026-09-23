@@ -237,4 +237,13 @@ impl MatchEngine {
     pub fn carrier_id_for_test(&self) -> String {
         self.carrier_id()
     }
+
+/// 挂起投篮的出手者（只读，仅测试）：Release 时序闭环的泄漏探针。
+#[doc(hidden)]
+pub fn pending_release_shooter_for_test(&self) -> Option<String> {
+    self.observations
+        .pending_shot_release
+        .as_ref()
+        .map(|pending| pending.shooter_id.clone())
+}
 }

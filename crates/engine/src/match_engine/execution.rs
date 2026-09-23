@@ -489,6 +489,58 @@ impl MatchEngine {
 
     /// Resolve shot quality at release; the resulting outcome is then replayable
     /// independently of the later presentation trajectory.
+    /// 消费挂起的投篮释放：窗口跨过 Execution→FollowThrough 边界时由
+    /// `advance_action_windows` 调用（plan.md §6.2 的 Release 时刻）。
+    /// 载荷是 `execute_shot` 入口冻结的裁定，这里只做原样回放：
+    /// 转球态、发事件、进入 ShotAttempt 子阶段。
+    pub(crate) fn consume_pending_shot_release(&mut self, current_t: f32) {
+        // 逐字段取出，避免借用冲突。
+        let Some(pending) = self.observations.pending_shot_release.take() else {
+            return;
+        };
+        // 同生共死：挂起必须属于一个仍存在的 JumpShot 窗口；窗口已消失
+        // （被封盖清理或回合重置）而挂起仍在属于状态机破缺。
+        assert!(
+            self.observations
+                .active_windows
+                .get(&pending.shooter_id)
+                .is_some_and(|window| {
+                    window.action_type == nba_domain::action_window::ActionType::JumpShot
+                }),
+            "pending shot release for `{}` lost its JumpShot window",
+            pending.shooter_id
+        );
+        assert!(
+            current_t + f32::EPSILON >= pending.release_time,
+            "shot release consumed before its frozen release time (t={current_t}, release={})",
+            pending.release_time
+        );
+        // 出手点用释放时刻的实际球位：挂起期间球一直在手（Held 臂采样），
+        // 用入口冻结的旧位置会在 Release 瞬间瞬移回去并产生超速弹道
+        // （实测 BALL_SPEED 99 ft/s > 85 上限）。球位是释放时刻的空间事实。
+        let release_pos = self.ball.ball_pos_3d.0;
+        self.transition_ball_state(BallTrajectoryKind::Shot {
+            shooter_id: pending.shooter_id.clone(),
+            from_pos: release_pos,
+            hoop_pos: pending.hoop_pos,
+            start_time: pending.release_time,
+            duration: pending.flight_time,
+            is_made: pending.is_made,
+            is_three: pending.is_three,
+            peak_z: pending.peak_z,
+            fouled: pending.fouled,
+            fouler_id: pending.fouler_id,
+        });
+        self.transition_phase(SubPhase::ShotAttempt);
+        self.journal.pending_events.push(GameEvent::ShotRelease {
+            shooter_id: pending.shooter_id,
+            pos: (release_pos.x, release_pos.y),
+            is_three: pending.is_three,
+            contest_level: pending.contest_intensity,
+            make_probability: pending.make_probability,
+        });
+    }
+
     pub(crate) fn execute_shot(
         &mut self,
         shooter_id: &str,
@@ -611,25 +663,34 @@ impl MatchEngine {
         self.possession_ctx.current_possession_shooter = Some(shooter_id.to_string());
         self.possession_ctx.current_possession_contest = Some(openness.contest_intensity);
 
-        let release_pos = self.ball.ball_pos_3d.0;
-        self.transition_ball_state(BallTrajectoryKind::Shot {
+        // plan.md §6.2：出手裁定在入口冻结，但球仍在手（球态保持 Held）。
+        // 真正的 Release 发生在窗口 Preparation+Execution 边界
+        // （`release_time`），由 advance_action_windows 消费挂起：转
+        // Shot 球态、发 ShotRelease、进入 ShotAttempt 子阶段。
+        // Preparation/Execution 段内持球决策被挂起门禁（decision.rs）
+        // 跳过，防守人 Poke/Strip 与封盖门控照常工作。
+        assert!(
+            self.observations.pending_shot_release.is_none(),
+            "a pending shot release already exists for `{}` while `{shooter_id}` shoots",
+            self.observations
+                .pending_shot_release
+                .as_ref()
+                .map(|pending| pending.shooter_id.as_str())
+                .unwrap_or("?")
+        );
+        self.observations.pending_shot_release = Some(super::state::PendingShotRelease {
             shooter_id: shooter_id.to_string(),
-            from_pos: release_pos,
             hoop_pos: hoop,
-            start_time: current_t,
-            duration: flight_time,
+            release_time: current_t
+                + self.config.rules.jump_shot_prep_seconds
+                + self.config.rules.jump_shot_exec_seconds,
+            flight_time,
             is_made,
             is_three,
             peak_z,
             fouled,
             fouler_id,
-        });
-        self.transition_phase(SubPhase::ShotAttempt);
-        self.journal.pending_events.push(GameEvent::ShotRelease {
-            shooter_id: shooter_id.to_string(),
-            pos: (release_pos.x, release_pos.y),
-            is_three,
-            contest_level: openness.contest_intensity,
+            contest_intensity: openness.contest_intensity,
             make_probability: final_fg_pct,
         });
         let action_name = match jumper_kind {

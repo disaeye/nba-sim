@@ -77,6 +77,37 @@ pub(crate) struct RuntimeObservations {
     pub(crate) substitutions_this_window: (u32, u32),
     /// 当前死球窗口是否已评估过轮换：同一窗口只评估一次。
     pub(crate) rotation_window_done: bool,
+    /// 已裁定、待释放的投篮（plan.md §6.2 四阶段时序）：`execute_shot`
+    /// 在入口完成全部裁定（is_made/fouled/peak_z/flight_time），但球态
+    /// 仍为 `Held`；等动作窗口走到 `Preparation+Execution` 边界（真正的
+    /// Release 时刻）才由 [`MatchEngine::consume_pending_shot_release`]
+    /// 转成 `Shot` 球态并发 `ShotRelease` 事件。
+    ///
+    /// 不变量：同一时刻至多一个挂起（同一名出手者），且它必须与该出手者
+    /// 的 `active_windows` 里 `JumpShot` 窗口同生共死——窗口消失而挂起
+    /// 仍在属于状态机破缺，消费点就地 panic（fast-fail）。
+    pub(crate) pending_shot_release: Option<PendingShotRelease>,
+}
+
+/// 一次已裁定、待释放的投篮快照（plan.md §6.2）。
+///
+/// 载荷在 `execute_shot` 入口冻结；`release_time` 之后的字段只被原样
+/// 回放，不做二次裁定，保证「裁定一次、回放一致」的释放语义。
+#[derive(Debug, Clone)]
+pub(crate) struct PendingShotRelease {
+    pub(crate) shooter_id: String,
+    pub(crate) hoop_pos: Vec2,
+    /// Release 发生的单调仿真时刻：窗口 `start_time + prep + exec`。
+    pub(crate) release_time: f32,
+    pub(crate) flight_time: f32,
+    pub(crate) is_made: bool,
+    pub(crate) is_three: bool,
+    pub(crate) peak_z: f32,
+    pub(crate) fouled: bool,
+    pub(crate) fouler_id: Option<String>,
+    pub(crate) contest_intensity: f32,
+    /// 发布 `ShotRelease` 时回放的命中概率（入口裁定的 `final_fg_pct`）。
+    pub(crate) make_probability: f32,
 }
 
 /// 一名球员的轮换时刻记录。
@@ -129,6 +160,7 @@ impl RuntimeObservations {
             rotation_clock: HashMap::new(),
             substitutions_this_window: (0, 0),
             rotation_window_done: false,
+            pending_shot_release: None,
         }
     }
 }

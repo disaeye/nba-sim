@@ -285,8 +285,12 @@ impl MatchEngine {
                 }
             }
             SubPhase::ActionExecution => {
-                if current_t - self.clock.last_decision_time
-                    >= self.config.rules.decision_interval_seconds
+                // 挂起的投篮释放（已裁定、球在手、窗口执行段）期间禁止
+                // 新的持球决策：出手者正在执行已冻结的投篮，再决策会
+                // 重复出手或让窗口与球态分叉。
+                if self.observations.pending_shot_release.is_none()
+                    && current_t - self.clock.last_decision_time
+                        >= self.config.rules.decision_interval_seconds
                 {
                     let carrier = self.carrier_id();
                     let stamina = self
