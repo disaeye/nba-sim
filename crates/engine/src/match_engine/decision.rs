@@ -95,6 +95,13 @@ impl MatchEngine {
             .note_possession_end(&cooldowns);
         *self.active_play_mut(possession) = None;
         self.observations.possession_ticks = 0;
+        // 回合边界作废挂起的投篮释放：回合已结束（出界/犯规/违例），
+        // 冻结的出手不可能再起飞。若不在此时作废，窗口的 Exec→Follow
+        // 边界会在发球程序期间触发 consume，把 sub_phase 拉回 ShotAttempt，
+        // 覆盖 begin_inbound 刚设置的 Initiation，发球决策永不触发
+        // （INBOUND_READY 永久滞留，实测 seed42 tick 41499 死锁）。
+        // 窗口本体仍照常推进到结束（封盖后的动作余辉语义），但不再消费。
+        self.observations.pending_shot_release = None;
     }
 
     pub(crate) fn build_play_selection_context(

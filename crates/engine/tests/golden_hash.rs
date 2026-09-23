@@ -666,7 +666,19 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //   (d) Play 引擎接线：MatchSetup 主客 Playbook、决策相前的 Play 选择
 //       与同 tick 效用效果（`decide_on_ball_with_play`）、战术层的
 //       槽位动词目标与动作窗口、每回合结束的冷却/激活清理。
-const GOLDEN_SEED42_2000: u64 = 0xd4b502481b803de9;
+// v76 0x7df0fec11e01faa3 - 2026-09-24 D25 出手时序闭环（plan.md §6.2 / D25）：
+//   (a) 投篮裁定与脱手分离：`execute_shot` 在入口冻结全部裁定
+//       （is_made/fouled/peak_z/flight_time），球态保持 `Held`；窗口跨过
+//       Execution→FollowThrough 边界（真正的 Release，合球起跳完成）才由
+//       `consume_pending_shot_release` 转 Shot 球态、发 ShotRelease、进入
+//       ShotAttempt 子阶段。出手点用释放时刻实际球位（冻结入口球位会在
+//       Release 瞬间瞬移并产生超速弹道，实测 BALL_SPEED 99 ft/s > 85）。
+//   (b) 封盖在挂起期裁定（Execution 段第一个 tick 掷一次，与旧触发点
+//       语义一致），命中时作废挂起；球在手段的切球（Strip）路径不变。
+//   (c) 挂起期禁止新的持球决策（防重复出手与状态分叉）。
+//   (d) Preparation 段（合球阶段）球在人手：防守人 Poke/Strip 照常生效，
+//       投篮窗口期间持球人的动作锁定与战术目标保护不变。
+const GOLDEN_SEED42_2000: u64 = 0x7df0fec11e01faa3;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。
