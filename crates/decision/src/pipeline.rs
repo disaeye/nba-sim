@@ -646,6 +646,26 @@ impl DecisionSystem {
                 let openness = ctx.physics.openness(driver_id);
                 let drive_preference = tendency.map(|t| t.drive_frequency).unwrap_or(0.5);
                 let finishing_skill = attributes.map(|a| a.finishing).unwrap_or(0.5);
+                // G6a 链 3：转换期篮下终结。回合前段（防守未落位）且目标
+                // 指向篮下时，突破攻框获得窗口内线性衰减的加成；窗口外
+                // 零影响，阵地战攻框比例由其余项决定（不动 v66 校准）。
+                let transition_finish = {
+                    let window = ctx
+                        .rules
+                        .tactics
+                        .transition_finish_window_seconds
+                        .max(f32::from(0u8));
+                    if ctx.possession_elapsed_seconds < window
+                        && (*target_pos - ctx.rules.court.hoop_pos(ctx.possession_team == "home"))
+                            .length()
+                            <= ctx.rules.tactics.drive_early_finish_dist_ft
+                    {
+                        let remaining = (window - ctx.possession_elapsed_seconds) / window;
+                        ctx.rules.tactics.transition_finish_bonus * remaining
+                    } else {
+                        f32::from(0u8)
+                    }
+                };
                 self.weights.drive_base
                     * coach.pace_factor
                     * (0.35 + (1.0 - dist_to_hoop / ctx.rules.court.width_ft.max(1.0)) * 0.45)
@@ -654,6 +674,7 @@ impl DecisionSystem {
                     + (openness.contest_free_score() - 0.5) * self.weights.team_style_weight
                     + centered(style.rim_pressure) * self.weights.team_style_weight
                     + drive_distance.min(ctx.rules.court.width_ft) * 0.001
+                    + transition_finish
                     - (1.0 - openness.contest_free_score()) * self.weights.team_style_weight * 0.5
             }
             CandidateAction::Pass {

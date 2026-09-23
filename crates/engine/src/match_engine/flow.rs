@@ -53,6 +53,9 @@ impl MatchEngine {
             rules: &self.config.rules,
             team_traits: &self.config.team_traits,
             possession_had_shot: self.possession_ctx.current_possession_shooter.is_some(),
+            possession_elapsed_seconds: (self.clock.current_time
+                - self.possession_ctx.current_possession_start_time)
+                .max(f32::from(0u8)),
         }
     }
     /// 球的宏观相位（由领域层 BallState 派生，M2：标签不再是独立状态）。

@@ -90,6 +90,7 @@ pub fn base_ctx<'a>(physics: &'a nba_physics::PhysicsWorld) -> ConstraintContext
         rules,
         team_traits: &TEAM_TRAITS,
         possession_had_shot: false,
+        possession_elapsed_seconds: f32::from(0u8),
     }
 }
 

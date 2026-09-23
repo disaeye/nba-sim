@@ -229,6 +229,9 @@ pub struct ConstraintContext<'a> {
     /// 本回合内已发生过出手（前场篮板语境的判据，G6a 链 2）：
     /// 持球人抢到前场板后近筐的二次攻框（putback）效用由此开启。
     pub possession_had_shot: bool,
+    /// 回合已进行秒数（转换进攻语境的判据，G6a 链 3）：
+    /// 防守未落位的早期回合，篮下终结候选的效用由此开启。
+    pub possession_elapsed_seconds: f32,
 }
 
 impl<'a> ConstraintContext<'a> {

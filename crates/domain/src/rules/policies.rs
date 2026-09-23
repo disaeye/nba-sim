@@ -770,6 +770,12 @@ pub struct TacticalRules {
     pub transition_defense_threshold_ratio: f32,
     /// 转换推进期间前场空间拉开速度系数（全速冲刺拉开）
     pub transition_sprint_ratio: f32,
+    /// 转换进攻篮下终结窗口（秒，G6a 链 3）：回合前段防守未落位，
+    /// 突破攻框的效用加成只在此窗口内生效，避免把阵地战的攻框比例
+    /// 一并抬高（此前校准迭代 4 的教训：强抬攻框砸穿 3P% 带）。
+    pub transition_finish_window_seconds: f32,
+    /// 转换期篮下终结的效用加成基准。
+    pub transition_finish_bonus: f32,
     /// 掩护人身位卡位距离（ft）：持球人与掩护人距离小于此值时判定掩护墙确立
     pub screen_hold_separation_ft: f32,
     /// 掩护人顺下触发的持球人纵向摆脱距离（ft）：持球人越过掩护人此距离后触发顺下

@@ -328,6 +328,12 @@ impl Default for TacticalRules {
             apf_opponent_repulsion_accel: 10.0,
             transition_defense_threshold_ratio: 0.38,
             transition_sprint_ratio: 0.88,
+            // 转换进攻篮下终结窗口（秒，G6a 链 3）：回合前段防守未落位，
+            // 突破攻框的效用加成只在此窗口内生效，避免把阵地战的攻框
+            // 比例一并抬高（此前校准迭代 4 的教训：强抬攻框砸穿 3P% 带）。
+            transition_finish_window_seconds: 6.0,
+            // 转换期篮下终结的效用加成基准。
+            transition_finish_bonus: 0.35,
             screen_hold_separation_ft: 6.0,
             screen_roll_separation_ft: 8.0,
             drop_coverage_depth_ft: 14.0,

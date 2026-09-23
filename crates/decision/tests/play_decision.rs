@@ -124,6 +124,7 @@ fn decision_probabilities(
         rules: &rules,
         team_traits: &team_traits,
         possession_had_shot: false,
+        possession_elapsed_seconds: f32::from(0u8),
     };
     let play = evaluate_active_play(spec, play_context);
     let decision = OnBallDecisionContext {
