@@ -702,7 +702,6 @@ mod tests {
         serde_json::to_vec(&value).expect("test JSON should serialize")
     }
     #[test]
-    #[allow(clippy::arc_with_non_send_sync)]
     fn studio_catalog_round_trips_into_simulation() {
         let (status, _, body) = route(&request("GET", "/api/studio", Vec::new()), &session_unused());
         assert_eq!(status, "200 OK");
@@ -724,13 +723,15 @@ mod tests {
         assert!(!response.2.is_empty());
     }
 
+    #[allow(clippy::arc_with_non_send_sync)]
     fn session_unused() -> SharedSession {
         Arc::new(Mutex::new(MatchService::new()))
     }
 
     #[test]
+    #[allow(clippy::arc_with_non_send_sync)]
     fn session_routes_preserve_setup_and_lifecycle() {
-        let session = Arc::new(Mutex::new(MatchService::new()));
+        let session = session_unused();
         let setup = MatchSetup::builtin(GameRules::default());
         let setup_body = serde_json::to_vec(&setup).expect("builtin setup should serialize");
         let (status, content_type, body) =
