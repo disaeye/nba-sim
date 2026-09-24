@@ -364,7 +364,13 @@
   let selectedPlayerId = null;
 
   async function loadStudio() {
-    studio = JSON.parse(await fetchText("/api/studio"));
+    let text;
+    try {
+      text = await fetchText("/api/studio");
+    } catch {
+      text = await fetchText("/studio.json");
+    }
+    studio = JSON.parse(text);
     selectedPlayerId = studio.default_setup.home_team.players[0].id;
     renderStudio();
   }
@@ -641,14 +647,19 @@
       const wasm = await ensureWasm();
       let responseText;
       const setup = studio?.default_setup || null;
-      if (wasm && wasm.simulateToNdjson && !setup) {
+      if (wasm && wasm.simulateToNdjson) {
         let rulesJson = null;
         if (withRules) {
           rulesJson = JSON.stringify(withRules);
         } else if (state.rules) {
           rulesJson = JSON.stringify(state.rules);
         }
-        responseText = wasm.simulateToNdjson(BigInt(seed), scope, rulesJson);
+        responseText = wasm.simulateToNdjson(
+          BigInt(seed),
+          scope,
+          rulesJson,
+          setup ? JSON.stringify(setup) : null,
+        );
       } else {
         responseText = await fetchText("/api/simulate", {
           method: "POST",

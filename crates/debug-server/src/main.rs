@@ -21,6 +21,12 @@ const MAX_REQUEST_BODY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SIMULATION_TICKS: usize = 500_000;
 #[allow(clippy::arc_with_non_send_sync)]
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--write-studio-asset") {
+        let body = studio_catalog().unwrap_or_else(|error| panic!("studio catalog: {error}"));
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("static/studio.json");
+        std::fs::write(path, body).unwrap_or_else(|error| panic!("studio asset: {error}"));
+        return;
+    }
     let port: u16 = std::env::args()
         .nth(1)
         .and_then(|p| p.parse().ok())
@@ -721,6 +727,13 @@ mod tests {
         ));
         assert_eq!(response.0, "200 OK");
         assert!(!response.2.is_empty());
+    }
+
+    #[test]
+    fn studio_catalog_matches_static_page_asset() {
+        let generated = studio_catalog().expect("studio catalog should serialize");
+        let asset = include_bytes!("../static/studio.json");
+        assert_eq!(generated, asset);
     }
 
     #[allow(clippy::arc_with_non_send_sync)]

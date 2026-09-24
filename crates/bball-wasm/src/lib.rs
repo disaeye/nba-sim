@@ -134,6 +134,7 @@ pub fn simulate_to_ndjson(
     seed: u64,
     scope: &str,
     rules_json: Option<String>,
+    setup_json: Option<String>,
 ) -> Result<String, JsError> {
     let rules = if let Some(json_str) = rules_json {
         let trimmed = json_str.trim();
@@ -147,7 +148,22 @@ pub fn simulate_to_ndjson(
         nba_domain::GameRules::default()
     };
 
-    let mut engine = nba_engine::MatchEngine::with_rules(seed, rules);
+    let mut engine = if let Some(json_str) = setup_json {
+        let trimmed = json_str.trim();
+        if trimmed.is_empty() {
+            nba_engine::MatchEngine::with_rules(seed, rules)
+        } else {
+            let mut setup = serde_json::from_str::<nba_engine::MatchSetup>(trimmed)
+                .map_err(|error| JsError::new(&format!("invalid match setup json: {error}")))?;
+            setup.rules = rules;
+            setup
+                .validate()
+                .map_err(|error| JsError::new(&format!("invalid match setup json: {error}")))?;
+            nba_engine::MatchEngine::with_setup(setup, seed)
+        }
+    } else {
+        nba_engine::MatchEngine::with_rules(seed, rules)
+    };
     let trimmed_scope = scope.trim().to_ascii_lowercase();
     let normalized_scope = match trimmed_scope.as_str() {
         "possession" | "1p" => "1p",
