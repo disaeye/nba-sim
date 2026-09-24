@@ -223,20 +223,25 @@ impl MatchEngine {
                     .get(&player_id)
                     .map(|w| !w.is_finished(current_t))
                     .unwrap_or(false);
-                let is_action_locked = self
-                    .systems
-                    .physics
-                    .get_player(&player_id)
-                    .map(|p| {
-                        let a = p.action.as_str();
-                        a == "TripleThreat"
-                            || a == "PostUp"
-                            || a.ends_with("Shot")
-                            || a == "Layup"
-                            || a == "Dunk"
-                            || a == "Floater"
-                    })
-                    .unwrap_or(false);
+                let ball_in_hands_for_lock = matches!(
+                    &self.ball.ball_state,
+                    BallTrajectoryKind::Held { .. } | BallTrajectoryKind::Drive { .. }
+                );
+                let is_action_locked = ball_in_hands_for_lock
+                    && self
+                        .systems
+                        .physics
+                        .get_player(&player_id)
+                        .map(|p| {
+                            let a = p.action.as_str();
+                            a == "TripleThreat"
+                                || a == "PostUp"
+                                || a.ends_with("Shot")
+                                || a == "Layup"
+                                || a == "Dunk"
+                                || a == "Floater"
+                        })
+                        .unwrap_or(false);
 
                 if in_active_window || is_action_locked {
                     continue;
@@ -264,8 +269,16 @@ impl MatchEngine {
                 // `Advance`（把球推过中线），战术槽位（弧顶 x=66 等）
                 // 会把目标改回半场站位，导致推进速度被反复打断
                 // （实测仅 3.5–3.9 ft/s，而 8 秒规则需要 ≥4.5 ft/s）。
-                let is_carrier_advancing = self.observations.advancing_player.as_deref()
-                    == Some(player_id.as_str())
+                // 球已脱手（LooseBall/Pass/Shot 等）时保护对象不存在，
+                // 必须照常接受覆盖——否则被 Poke 松球后原推进者被永久
+                // 跳过，连松球争抢分支也被跳过，实测 seed13 死锁 608s
+                // （球静止在场上无人捡，直到 PERIOD_END 强制收束）。
+                let ball_in_hands = matches!(
+                    &self.ball.ball_state,
+                    BallTrajectoryKind::Held { .. } | BallTrajectoryKind::Drive { .. }
+                );
+                let is_carrier_advancing = ball_in_hands
+                    && self.observations.advancing_player.as_deref() == Some(player_id.as_str())
                     && self.clock.sub_phase != SubPhase::Initiation;
                 if is_carrier_advancing {
                     continue;
@@ -432,11 +445,23 @@ impl MatchEngine {
             let player_id = target
                 .player_id
                 .as_deref()
-                .unwrap_or_else(|| panic!("play slot `{}` has no filled player", action.slot));
+                .unwrap_or_else(|| panic!("play slot `{}` has no filled player", action.slot))
+                .to_string();
+            // 松球争抢优先于 Play 跑位：本 tick 战术规划已把松球最近的球员
+            // 派去捡球（REBOUND_CRASH），Play 的槽位动词不得把他拉回站位——
+            // 否则球静止在场上无人捡（实测 seed13 死锁 608s 直到 PERIOD_END）。
+            if self
+                .systems
+                .physics
+                .get_player(&player_id)
+                .is_some_and(|player| player.action == "REBOUND_CRASH")
+            {
+                continue;
+            }
             let actor = self
                 .systems
                 .physics
-                .get_player(player_id)
+                .get_player(&player_id)
                 .unwrap_or_else(|| {
                     panic!("play slot `{}` player `{player_id}` is absent", action.slot)
                 });
@@ -477,14 +502,14 @@ impl MatchEngine {
                 .min(self.config.rules.tactics.action_duration_seconds);
             let should_start_window = verb_progress
                 >= self.config.rules.tactics.action_duration_seconds
-                && !self.observations.active_windows.contains_key(player_id);
+                && !self.observations.active_windows.contains_key(&player_id);
             let target_speed = target.speed;
             let target_slot = target.slot.clone();
             let target_morale = target.morale.clone();
             target.target_pos = next_target;
             target.action = format!("PLAY_{}", action.verb.as_str());
             self.systems.physics.set_player_target(
-                player_id,
+                &player_id,
                 next_target,
                 target_speed,
                 &target.action,
@@ -496,21 +521,21 @@ impl MatchEngine {
                     let window = match action_type {
                         nba_domain::action_window::ActionType::JumpShot => {
                             Some(nba_domain::action_window::ActionTimeWindow::new_jump_shot(
-                                player_id,
+                                &player_id,
                                 current_t,
                                 &self.config.rules,
                             ))
                         }
                         nba_domain::action_window::ActionType::PassRelease => {
                             Some(nba_domain::action_window::ActionTimeWindow::new_pass(
-                                player_id,
+                                &player_id,
                                 current_t,
                                 &self.config.rules,
                             ))
                         }
                         nba_domain::action_window::ActionType::ScreenSet => {
                             Some(nba_domain::action_window::ActionTimeWindow::new_screen_set(
-                                player_id,
+                                &player_id,
                                 current_t,
                                 &self.config.rules,
                             ))
@@ -526,7 +551,7 @@ impl MatchEngine {
                         }
                     };
                     self.observations.active_windows.insert(
-                        player_id.to_string(),
+                        player_id.clone(),
                         window.expect("play verb resolved a window"),
                     );
                 }
