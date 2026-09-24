@@ -421,14 +421,11 @@ impl Default for PassPolicy {
 pub struct BaseRates {
     pub pass_success: f32,
     pub drive_success: f32,
-    /// 篮下（`dist_to_hoop < GameRules.rim_shot_distance_ft`）投篮命中基准。
-    pub shot_make_2pt: f32,
-    /// 中距离（廊下之外、三分线内）投篮命中基准。
-    ///
-    /// 规格依据：`docs/attributes.md` §4 / `docs/quality.md` §2.1 要求命中率
-    /// 与出手区域匹配。真实篮球中距离命中（约 0.42）显著低于廊下（约 0.63）；
-    /// 二者共用一个基准会把中距离按廊下结算，形成结构性高估。
-    /// 分区而非硬编码在引擎里，以遵守 `charter` C1（行为参数走数据通道）。
+    /// 篮下（ShotZone::Rim，< 5 ft）投篮命中基准。
+    pub shot_make_rim: f32,
+    /// 近筐（ShotZone::Near，5–14 ft）投篮命中基准。
+    pub shot_make_near: f32,
+    /// 中投（ShotZone::Mid，≥ 14 ft 且三分线内）投篮命中基准。
     pub shot_make_mid: f32,
     pub shot_make_3pt: f32,
     pub ft_make: f32,
@@ -471,9 +468,12 @@ impl Default for BaseRates {
         Self {
             pass_success: 0.94,
             drive_success: 0.78,
-            shot_make_2pt: 0.54,
-            // 中距离基准：公开赛季口径约 0.42。此前与廊下共用 0.565，
-            // 使 8ft–三分线的出手被按廊下结算（evidence/problem.md §21.3）。
+            // 四区基准（attributes.md §2.3a）：公开赛季口径 Rim ≈ 0.63、
+            // Near（5–14 ft 非篮下两分）≈ 0.45、Mid（≥ 14 ft 两分）≈ 0.42、
+            // 3P ≈ 0.36。旧口径以 8 ft 分 Rim/Mid 且 4 ft 统计篮下，
+            // 同一次出手在不同环节分类不一致；统一四区后基准重新锚定。
+            shot_make_rim: 0.63,
+            shot_make_near: 0.45,
             shot_make_mid: 0.40,
             // 三分基准 0.34→0.36（ADR-017 第三步校准）：身体碰撞与传球
             // 接触进入后，乱战出手增多，三分出手时平均 make_probability
@@ -572,9 +572,10 @@ impl ResolveConfig {
         let probabilities = [
             self.base_rates.pass_success,
             self.base_rates.drive_success,
-            self.base_rates.shot_make_2pt,
-            self.base_rates.shot_make_3pt,
+            self.base_rates.shot_make_rim,
+            self.base_rates.shot_make_near,
             self.base_rates.shot_make_mid,
+            self.base_rates.shot_make_3pt,
             self.base_rates.ft_make,
             self.base_rates.foul_on_drive_rate,
             self.base_rates.foul_on_shot_rate,

@@ -23,7 +23,7 @@
     player_radius_ft: 1.8,
     min_player_separation_ft: 3.6,
     ball_max_speed_ftps: 85,
-    rim_shot_distance_ft: 8,
+    rim_shot_distance_ft: 5,
     three_point_distance_ft: 23.75,
     court_width_ft: 94,
     court_height_ft: 50,
@@ -253,6 +253,48 @@
   };
   function getSlotZh(slot) {
     return SLOT_ZH[slot] || slot || "自由战术位";
+  }
+
+  const POSITION_ZH = {
+    Point: "控卫",
+    Combo: "双能卫",
+    Wing: "侧翼",
+    Forward: "锋线",
+    Big: "内线",
+    Center: "中锋",
+  };
+  function getPositionZh(position) {
+    return POSITION_ZH[position] || position || "—";
+  }
+
+  const OFFENSIVE_ROLE_ZH = {
+    PrimaryHandler: "主控",
+    SecondaryHandler: "副控",
+    ShotCreator: "持球得分手",
+    Slasher: "突破手",
+    AthleticFinisher: "空切终结者",
+    OffScreenShooter: "绕掩护射手",
+    StationaryShooter: "定点射手",
+    VersatileBig: "多面手内线",
+    PostScorer: "背身得分手",
+    StretchBig: "空间型内线",
+    RollCutBig: "顺下内线",
+  };
+  function getOffensiveRoleZh(role) {
+    return OFFENSIVE_ROLE_ZH[role] || role || "—";
+  }
+
+  const DEFENSIVE_ROLE_ZH = {
+    PointOfAttack: "领防人",
+    Chaser: "追射手",
+    Helper: "协防者",
+    WingStopper: "侧翼锁编",
+    MobileBig: "机动内线",
+    AnchorBig: "护框中枢",
+    LowActivity: "低活动量",
+  };
+  function getDefensiveRoleZh(role) {
+    return DEFENSIVE_ROLE_ZH[role] || role || "—";
   }
 
   const PHASE_ZH = {
@@ -2178,6 +2220,11 @@
       }
       tooltip.replaceChildren(
         el("strong", null, `${getTeamNameZh(player.team)} · ${player.id} · #${player.jersey}`),
+        el(
+          "span",
+          null,
+          `${getPositionZh(player.position)} · 攻 ${getOffensiveRoleZh(player.offensiveRole)} · 防 ${getDefensiveRoleZh(player.defensiveRole)}`,
+        ),
         el("span", null, `${getActionZh(player.action)} · ${getSlotZh(player.slot)}`),
         el(
           "span",

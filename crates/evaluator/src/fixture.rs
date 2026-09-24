@@ -71,10 +71,13 @@ pub struct CompositionBands {
     pub note: String,
     pub three_attempt_rate: Band,
     pub two_attempt_rate: Band,
-    /// 中距离出手占 FGA 比例（中距离回归的直接证据，§6.2 D3.2）。
-    pub mid_range_share_of_fga: Band,
-    /// 篮下出手占 FGA 比例。
-    pub rim_share_of_fga: Band,
+    /// 中距离出手占 FGA 比例（≥ 14 ft 且三分线内；中距离回归的直接证据，§6.2 D3.2）。
+    /// v1 fixture 无此带时准则按 NotApplicable 处理（向后兼容）。
+    pub mid_range_share_of_fga: Option<Band>,
+    /// 近筐出手占 FGA 比例（5–14 ft，attributes.md §2.3a）。
+    pub near_range_share_of_fga: Option<Band>,
+    /// 篮下出手占 FGA 比例（< 5 ft）。
+    pub rim_share_of_fga: Option<Band>,
     /// 罚球率 FTA/FGA。
     pub free_throw_rate: Band,
     /// 48 分钟等效回合数。

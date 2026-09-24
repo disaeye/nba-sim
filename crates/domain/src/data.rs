@@ -13,7 +13,10 @@ pub struct PlayerAttributes {
     pub stamina: f32,
     pub ball_handling: f32,
     pub passing: f32,
+    /// 篮下出手精度（< 5 ft，attributes.md §2.3a 统一分区）。
     pub shooting_close: f32,
+    /// 近筐出手精度（5–14 ft；抛投/短勾手）。
+    pub shooting_near: f32,
     pub shooting_mid: f32,
     pub shooting_three: f32,
     pub free_throw: f32,
@@ -40,6 +43,7 @@ impl Default for PlayerAttributes {
             ball_handling: 0.5,
             passing: 0.5,
             shooting_close: 0.5,
+            shooting_near: 0.5,
             shooting_mid: 0.5,
             shooting_three: 0.5,
             free_throw: 0.5,
@@ -90,6 +94,7 @@ impl PlayerAttributes {
             self.ball_handling,
             self.passing,
             self.shooting_close,
+            self.shooting_near,
             self.shooting_mid,
             self.shooting_three,
             self.free_throw,
@@ -183,6 +188,155 @@ impl Default for PlayerTendencies {
     }
 }
 
+/// 球员位置（六类，attributes.md §2.7a）。
+///
+/// 身份字段：分类依据是**长期阵容位置**（借鉴 Cleaning the Glass 出场时间法，
+/// 本项目六类单列 Center）；不随单场角色变化，不提供能力加成，引擎零读取。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlayerPosition {
+    Point,
+    Combo,
+    Wing,
+    Forward,
+    Big,
+    Center,
+}
+
+impl PlayerPosition {
+    /// 展示/事件流中的稳定字符串口径。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PlayerPosition::Point => "Point",
+            PlayerPosition::Combo => "Combo",
+            PlayerPosition::Wing => "Wing",
+            PlayerPosition::Forward => "Forward",
+            PlayerPosition::Big => "Big",
+            PlayerPosition::Center => "Center",
+        }
+    }
+
+    pub fn name_zh(self) -> &'static str {
+        match self {
+            PlayerPosition::Point => "控卫",
+            PlayerPosition::Combo => "双能卫",
+            PlayerPosition::Wing => "侧翼",
+            PlayerPosition::Forward => "锋线",
+            PlayerPosition::Big => "内线",
+            PlayerPosition::Center => "中锋",
+        }
+    }
+}
+
+/// 赛前固定的进攻角色目录（attributes.md §2.7b）。目录参考 Basketball Index
+/// 的 12 类进攻角色，但判据由本项目定义：衡量球员的**半场得分部署方式**，
+/// 不评价组织能力（组织由 §2.9 展示面的组织栏承担）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OffensiveRoleSpec {
+    /// 主控（Primary Ball Handler）：进攻发起的第一选择。
+    PrimaryHandler,
+    /// 副控（Secondary Ball Handler）：第二持球点，无球兼定点/移动投射。
+    SecondaryHandler,
+    /// 持球得分手（Shot Creator）：高比例单打自创出手。
+    ShotCreator,
+    /// 突破手（Slasher）：高频率持球攻框。
+    Slasher,
+    /// 空切终结者（Athletic Finisher）：无球切入与前场补篮。
+    AthleticFinisher,
+    /// 绕掩护射手（Off Screen Shooter）：借掩护/手递手接球投。
+    OffScreenShooter,
+    /// 定点射手（Stationary Shooter）：接球就投为主。
+    StationaryShooter,
+    /// 多面手内线（Versatile Big）：外弹投篮、背身与顺下兼备。
+    VersatileBig,
+    /// 背身得分手（Post Scorer）：低位背身为主。
+    PostScorer,
+    /// 空间型内线（Stretch Big）：外弹投三为主、低位使用率低。
+    StretchBig,
+    /// 顺下内线（Roll & Cut Big）：顺下、空切、吃饼终结。
+    RollCutBig,
+}
+
+/// 赛前固定的防守角色目录（attributes.md §2.7b）。目录参考 Basketball Index
+/// 的 7 类防守角色，判据由本项目定义：衡量球员承担的**防守职责**
+/// （领防/追射/协防/护框），由教练在赛前按球员能力指派。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DefensiveRoleSpec {
+    /// 领防人（Point of Attack）：主防持球核心，少协防职责。
+    PointOfAttack,
+    /// 追射手（Chaser）：绕掩护追无球射手，少协防职责。
+    Chaser,
+    /// 协防者（Helper）：离球协防与轮转为主要职责。
+    Helper,
+    /// 侧翼锁编（Wing Stopper）：主防对方持球得分手，兼顾协防。
+    WingStopper,
+    /// 机动内线（Mobile Big）：挡拆上提延误/换防。
+    MobileBig,
+    /// 护框中枢（Anchor Big）：沉退护框。
+    AnchorBig,
+    /// 低活动量（Low Activity）：防守职责轻，承担沟通/保护弱侧。
+    LowActivity,
+}
+
+impl OffensiveRoleSpec {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OffensiveRoleSpec::PrimaryHandler => "PrimaryHandler",
+            OffensiveRoleSpec::SecondaryHandler => "SecondaryHandler",
+            OffensiveRoleSpec::ShotCreator => "ShotCreator",
+            OffensiveRoleSpec::Slasher => "Slasher",
+            OffensiveRoleSpec::AthleticFinisher => "AthleticFinisher",
+            OffensiveRoleSpec::OffScreenShooter => "OffScreenShooter",
+            OffensiveRoleSpec::StationaryShooter => "StationaryShooter",
+            OffensiveRoleSpec::VersatileBig => "VersatileBig",
+            OffensiveRoleSpec::PostScorer => "PostScorer",
+            OffensiveRoleSpec::StretchBig => "StretchBig",
+            OffensiveRoleSpec::RollCutBig => "RollCutBig",
+        }
+    }
+
+    pub fn name_zh(self) -> &'static str {
+        match self {
+            OffensiveRoleSpec::PrimaryHandler => "主控",
+            OffensiveRoleSpec::SecondaryHandler => "副控",
+            OffensiveRoleSpec::ShotCreator => "持球得分手",
+            OffensiveRoleSpec::Slasher => "突破手",
+            OffensiveRoleSpec::AthleticFinisher => "空切终结者",
+            OffensiveRoleSpec::OffScreenShooter => "绕掩护射手",
+            OffensiveRoleSpec::StationaryShooter => "定点射手",
+            OffensiveRoleSpec::VersatileBig => "多面手内线",
+            OffensiveRoleSpec::PostScorer => "背身得分手",
+            OffensiveRoleSpec::StretchBig => "空间型内线",
+            OffensiveRoleSpec::RollCutBig => "顺下内线",
+        }
+    }
+}
+
+impl DefensiveRoleSpec {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DefensiveRoleSpec::PointOfAttack => "PointOfAttack",
+            DefensiveRoleSpec::Chaser => "Chaser",
+            DefensiveRoleSpec::Helper => "Helper",
+            DefensiveRoleSpec::WingStopper => "WingStopper",
+            DefensiveRoleSpec::MobileBig => "MobileBig",
+            DefensiveRoleSpec::AnchorBig => "AnchorBig",
+            DefensiveRoleSpec::LowActivity => "LowActivity",
+        }
+    }
+
+    pub fn name_zh(self) -> &'static str {
+        match self {
+            DefensiveRoleSpec::PointOfAttack => "领防人",
+            DefensiveRoleSpec::Chaser => "追射手",
+            DefensiveRoleSpec::Helper => "协防者",
+            DefensiveRoleSpec::WingStopper => "侧翼锁编",
+            DefensiveRoleSpec::MobileBig => "机动内线",
+            DefensiveRoleSpec::AnchorBig => "护框中枢",
+            DefensiveRoleSpec::LowActivity => "低活动量",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerData {
     pub id: String,
@@ -192,6 +346,12 @@ pub struct PlayerData {
     pub height_cm: u16,
     pub weight_kg: u16,
     pub age: u8,
+    /// 六类位置（attributes.md §2.7a）。必填，无默认值。
+    pub position: PlayerPosition,
+    /// 赛前确定的进攻角色（attributes.md §2.7b）。
+    pub offensive_role: OffensiveRoleSpec,
+    /// 赛前确定的防守角色（attributes.md §2.7b）。
+    pub defensive_role: DefensiveRoleSpec,
     pub attributes: PlayerAttributes,
     pub tendencies: PlayerTendencies,
     /// 是否为首发（round-10 Step4a）。
@@ -427,7 +587,7 @@ fn load_roster(json: &str, geometry: CourtGeometry) -> Vec<PlayerData> {
 
 /// D5.1b：slot fill 的能力画像（tactics.md §3 规定）。
 ///
-/// 承载全部 21 个能力维度，因为档案槽位的 `requirements` 可以声明任意一维
+/// 承载全部 22 个能力维度，因为档案槽位的 `requirements` 可以声明任意一维
 /// （`TacticalSlotSpec::requirements`），只暴露子集会让档案声明一维不在
 /// 子集内的能力时静默拿到 0 分。本身不承担任何可变状态。
 #[derive(Debug, Clone, PartialEq)]
@@ -459,6 +619,7 @@ impl PlayerSlotFitness {
             K::BallHandling => a.ball_handling,
             K::Passing => a.passing,
             K::ShootingClose => a.shooting_close,
+            K::ShootingNear => a.shooting_near,
             K::ShootingMid => a.shooting_mid,
             K::ShootingThree => a.shooting_three,
             K::FreeThrow => a.free_throw,
@@ -475,19 +636,14 @@ impl PlayerSlotFitness {
     }
 }
 
-/// 展示用角色的**纯函数投影**（attributes.md §2.7/§2.9）。
+/// 展示槽位的**纯函数投影**（golden_hash v55 的保留语义：不按名册下标
+/// 分派，名册顺序不携带语义）。
 ///
-/// ## 为什么是纯函数而不是字段
-///
-/// 文档要求 `roles` 从球员档案移除、降级为「上层派生视图」——因为
-/// 「角色是槽位不是身份」（`tactics.md TA3`）。原先的
-/// `PlayerData.roles: Vec<PlayerRole>` 由 `builtin_roles(index)` 按**数组下标**
-/// 分派，使「顺序即身份」：球员"是什么"取决于他在名册里排第几。
-///
-/// 现在展示标签由 `(attributes, tendencies)` 重算，因此：
-/// - 名册数组顺序不携带语义（打乱顺序不改变任何标签）；
-/// - 标签不参与任何行为判定（只用于 UI 展示）；
-/// - 同一份数据必得同一标签（纯函数，可复现）。
+/// 职责范围（attributes.md §2.7b 修订）：它只服务场上投影 `RenderPlayer.slot`
+/// 的兜底展示（战术槽位未分配时的能力描述），与球员资料页的六类位置
+/// （`PlayerPosition`）和赛前攻防角色（`OffensiveRoleSpec`/`DefensiveRoleSpec`）
+/// 无关——那两者是档案身份字段，由名册声明。
+/// 标签不参与任何行为判定（只用于 UI 展示）。
 ///
 /// 判定顺序按"最能区分该球员的维度"降序：先看极端专长，再看通用倾向。
 pub fn project_display_role(

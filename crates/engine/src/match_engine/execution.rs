@@ -554,14 +554,15 @@ impl MatchEngine {
         let shooter = self.systems.physics.get_player(shooter_id);
         let shooter_pos = shooter.map(|player| player.pos_ft).unwrap_or(from_pos);
         let dist_to_hoop = (shooter_pos - hoop).length();
-        // 底角三分是更近的直线（NBA 22ft vs 弧顶 23.75ft），必须几何判定。
-        let is_three_by_distance = self.config.rules.court.is_three_point_attempt(
+        // 统一出手分区（attributes.md §2.3a）：先判三分（含底角特例），
+        // 再按距离分 Rim(<5ft)/Near(5–14ft)/Mid。决策、裁决、统计、评判共用。
+        let shot_zone = self.config.rules.court.shot_zone(
             shooter_pos,
             is_home,
             self.config.rules.league.three_point_distance_ft,
             self.config.rules.league.corner_three_distance_ft,
         );
-        let is_three = is_three_by_distance || is_three_hint;
+        let is_three = shot_zone == nba_domain::ShotZone::Three || is_three_hint;
         let openness = self.systems.physics.openness(shooter_id);
         let spacing_bonus = self
             .observations
@@ -569,29 +570,28 @@ impl MatchEngine {
             .map(|spacing| spacing.shot_quality_bonus)
             .unwrap_or(0.0);
         let skill = shooter
-            .map(|player| {
-                if dist_to_hoop < self.config.rules.rim_shot_distance_ft {
-                    // 近筐出手按**对抗强度**在两维技能间过渡
-                    // （attributes.md §2.3 的可辨识性配对）：
-                    //
-                    // - `shooting_close` ↔ 非对抗近筐（挑篮/勾手）
-                    // - `finishing`      ↔ 对抗近筐（顶人上篮 / and-1）
-                    //
-                    // 两维解释同一出手族，若只用其一会使另一维成为无效维度，
-                    // 且使「无对抗的近筐准度」与「对抗下的完成度」不可区分。
-                    // 过渡权重取自 `contest_intensity`（距离 + 朝向 + 逼近速度），
-                    // 不另立阈值。
+            .map(|player| match shot_zone {
+                // 篮下出手按**对抗强度**在两维技能间过渡
+                // （attributes.md §2.3a 的可辨识性配对）：
+                //
+                // - `shooting_close` ↔ 非对抗篮下（挑篮/勾手）
+                // - `finishing`      ↔ 对抗篮下（顶人上篮 / and-1）
+                //
+                // 两维解释同一出手族，若只用其一会使另一维成为无效维度，
+                // 且使「无对抗的篮下准度」与「对抗下的完成度」不可区分。
+                // 过渡权重取自 `contest_intensity`（距离 + 朝向 + 逼近速度），
+                // 不另立阈值。
+                nba_domain::ShotZone::Rim => {
                     let contest = openness
                         .contest_intensity
                         .clamp(f32::from(0u8), f32::from(1u8));
                     let uncontested = f32::from(1u8) - contest;
                     player.attributes.shooting_close * uncontested
                         + player.attributes.finishing * contest
-                } else if is_three {
-                    player.attributes.shooting_three
-                } else {
-                    player.attributes.shooting_mid
                 }
+                nba_domain::ShotZone::Near => player.attributes.shooting_near,
+                nba_domain::ShotZone::Mid => player.attributes.shooting_mid,
+                nba_domain::ShotZone::Three => player.attributes.shooting_three,
             })
             .unwrap_or(0.5)
             .clamp(0.0, 1.0);
@@ -604,18 +604,17 @@ impl MatchEngine {
             (stamina - 1.0) * self.config.rules.resolve.player_skill.shooting_weight;
         let contest_penalty =
             openness.contest_intensity * self.config.rules.shot_contest_sensitivity;
-        // 分区命中基准（charter C1：三种基准走 GameRules 数据通道）：
-        //   廊下      dist < rim_shot_distance_ft        -> shot_make_2pt
-        //   中距离    rim 以外、三分线以内             -> shot_make_mid
-        //   三分      is_three                          -> shot_make_3pt
-        // 此前中距离与廊下共用 shot_make_2pt，使 8ft–三分线的出手被按廊下
-        // 结算（真实 0.42 vs 0.63），形成结构性高估：evidence/problem.md §21.3。
-        let base_fg = if dist_to_hoop < self.config.rules.rim_shot_distance_ft {
-            self.config.rules.resolve.base_rates.shot_make_2pt
-        } else if is_three {
-            self.config.rules.resolve.base_rates.shot_make_3pt
-        } else {
-            self.config.rules.resolve.base_rates.shot_make_mid
+        // 分区命中基准（charter C1：四区基准走 GameRules 数据通道，
+        // attributes.md §2.3a）：
+        //   Rim 篮下   -> shot_make_rim
+        //   Near 近筐  -> shot_make_near
+        //   Mid 中投   -> shot_make_mid
+        //   Three 三分 -> shot_make_3pt
+        let base_fg = match shot_zone {
+            nba_domain::ShotZone::Rim => self.config.rules.resolve.base_rates.shot_make_rim,
+            nba_domain::ShotZone::Near => self.config.rules.resolve.base_rates.shot_make_near,
+            nba_domain::ShotZone::Mid => self.config.rules.resolve.base_rates.shot_make_mid,
+            nba_domain::ShotZone::Three => self.config.rules.resolve.base_rates.shot_make_3pt,
         };
         let final_fg_pct = (base_fg + skill_adjustment + stamina_adjustment + spacing_bonus
             - contest_penalty)

@@ -907,7 +907,7 @@ pub struct DecisionRules {
     /// 传球衰减最大比例（衰减因子下限 = 1 - 此值）。
     pub pass_distance_max_decay: f32,
     /// 篮下接球攻框加成（G6a 链 1 最后一环）：接球人处于篮下
-    /// （rim_shot_distance_ft 内）时传球效用按此值乘以接球人 finishing
+    /// （`ShotZone::Rim`，距篮小于 `RIM_ZONE_MAX_DIST_FT`）时传球效用按此值乘以接球人 finishing
     /// 技能叠加，使切入者的篮下空位成为优先传球终点。
     pub rim_catch_bonus: f32,
     /// 防守自主体基础效用乘数（由规则层提供基准，严禁决策层硬编码）。

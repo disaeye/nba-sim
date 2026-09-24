@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 
 use glam::Vec2;
+use nba_domain::court::RIM_ZONE_MAX_DIST_FT;
 use nba_domain::GameRules;
 use nba_engine::MatchEngine;
 use nba_protocol::{FrameEvent, RenderFrame, RenderPlayer};
@@ -27,7 +28,6 @@ const ROTATE_RIM_HELP_ACTION: &str = "ROTATE_RIM_HELP";
 /// 阵地战弱侧协防语义不成立（转换段突破不考察收缩）。
 const SETTLED_DEFENSE_MAX_DISTANCE_FT: f32 = 30.0;
 const CORNER_RADIUS_FT: f32 = 8.0;
-const RIM_ZONE_RADIUS_FT: f32 = 4.0;
 
 /// 突破窗口内单个非领防防守人的收缩观察（首末距离 + 引擎动作标签）。
 #[derive(Debug)]
@@ -325,7 +325,7 @@ fn observe_game(seed: u64, rules: &GameRules) -> GameObservation {
                             )
                         })
                         .expect("ShotRelease must expose its position");
-                    if (position - hoop_for(&shooter.team, frame)).length() <= RIM_ZONE_RADIUS_FT {
+                    if (position - hoop_for(&shooter.team, frame)).length() < RIM_ZONE_MAX_DIST_FT {
                         observation.rim_attempts += 1;
                     }
                 }

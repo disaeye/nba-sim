@@ -229,6 +229,8 @@ jobs:
             command: cargo test -p nba-engine --test action_phase_projection
           - name: shot-release-timing
             command: cargo test -p nba-engine --test shot_release_timing
+          - name: identity-projection
+            command: cargo test -p nba-engine --test identity_projection
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

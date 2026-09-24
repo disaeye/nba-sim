@@ -82,6 +82,7 @@
 **M8 · 回合/阶段评判**
 
 - 每个回合和阶段转换有裁决或显式证据不足；
+- 动作完成、结果、防守责任和罚则都能沿父事件定位；
 - 评判使用版本化参考分布；
 - `judgments`、归因账本和不变量工件可相互定位；
 - Hard 缺陷使总体门失败，不能被综合指数抵消。
@@ -100,7 +101,7 @@
 
 **M10 · 多联赛**
 
-- `LeagueProfile` 表达计时、犯规、bonus、几何和程序语义；
+- `LeagueProfile` 表达 `docs/basketball.md` §6 的计时、罚则、违例开关、暂停、几何和程序语义；
 - semantics/officiating 接收事实与 profile，而不是联赛专用分支；
 - 每个支持的 profile 有程序级情景矩阵和完整事件工件。
 
@@ -159,6 +160,7 @@ sanity net 的具体带宽属于带版本的评判 fixture 或周期门，不在
 - `docs/charter.md` 定义目标与红线；
 - `docs/architecture.md` 定义系统边界和状态/数据流；
 - `docs/quality.md` 定义检测、评判和工件语义；
+- `docs/basketball.md` 定义动作、结果权、防守责任和规则程序；
 - `docs/attributes.md`、`docs/tactics.md` 定义输入规格；
 - `docs/dev/roadmap.md` 提供里程碑顺序；
 - `docs/dev/status.md` 记录当前实现状态；

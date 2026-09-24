@@ -37,11 +37,12 @@
 
 ```
 PlayerData（底层机器面 · 唯一事实源）
-├── 身份     id / name / jersey / team_id
+├── 身份     id / name / jersey / team_id / position（六类位置，§2.7a）
+│           + offensive_role / defensive_role（赛前固定攻防角色，§2.7b）
 ├── 体格     height_cm / weight_kg / wingspan_cm✚ / age          （量纲，§2.1）
-├── 能力     运动 6 维 + 进攻技术 7 维 + 防守与篮板 6 维 + 心智 2 维（归一，§2.2–2.5）
+├── 能力     运动 6 维 + 进攻技术 8 维 + 防守与篮板 6 维 + 心智 2 维（归一，§2.2–2.5）
 ├── 倾向     持球 3 + 无球 3 + 防守 4✚ + 节奏 2 = 12 维           （归一，§2.6）
-└── （v2 移除）roles: Vec<PlayerRole> —— 降级为上层派生视图（§2.7/§2.9）
+└── （v2 移除）roles: Vec<PlayerRole> —— 聚类标签降级为展示面纯函数（§2.7）
 
 TeamTraits  战术风格 5 维（教练意志，§2.8）
 
@@ -79,22 +80,46 @@ TeamTraits  战术风格 5 维（教练意志，§2.8）
 
 > 可辨识性配对（PA6）：`agility` 与 `defense_perimeter` 的扰动观测量重叠（被过率）——运动禀赋与防守技术的分离只能靠联合标定（agility 同时影响进攻变向，def_perimeter 不影响），逆向管线必须把两者放进同一回归。
 
-### 2.3 进攻技术层（归一，7 维）
+### 2.3 进攻技术层（归一，8 维）
 
 | 维度 | 语义 | 标定 | 消费链 | 扰动观测量 |
 | ------ | ------ | ------ | -------- | ----------- |
 | `ball_handling` | 控球稳定性 | latent | 运球被抢风险、高压持球能力 | 被抢率、失误率 |
 | `passing` | 传球**执行**精度（决策质量归 `decision_iq`） | observable（助攻/失误） | 传球成功率权重 | 助攻率、传球被断率 |
-| `shooting_close` | 近距离出手精度（挑篮/勾手） | observable（restrict zone FG%） | close FG% 技能分量 | 篮下 FG% |
-| `shooting_mid` | 中距离出手精度 | observable | mid FG% 技能分量 | 中距 FG% |
-| `shooting_three` | 三分出手精度 | observable（3P%） | 3P% 技能分量、射程偏好派生 | 3P%、三分占比 |
+| `shooting_close` | 篮下出手精度（< 5 ft；挑篮/勾手） | observable（RA FG%） | Rim 区 FG% 技能分量 | 篮下 FG% |
+| `shooting_near`✚ | 近筐出手精度（5–14 ft；抛投/短勾手/小后仰） | observable（非 RA 两分 FG%） | Near 区 FG% 技能分量 | 近筐 FG% |
+| `shooting_mid` | 中距离出手精度（≥ 14 ft 且三分线内） | observable | Mid 区 FG% 技能分量 | 中距 FG% |
+| `shooting_three` | 三分出手精度 | observable（3P%） | Three 区 FG% 技能分量、射程偏好派生 | 3P%、三分占比 |
 | `free_throw`✚ | 罚球命中率 | observable（FT%） | 罚球裁决技能分量 | FT% |
 | `finishing` | **对抗下**的终结完成度 | observable（对抗投篮 FG%） | drive 裁决、对抗上篮 | 突破得分率、AND-1 率 |
 
-> 三条边界注记：
->
-> 1. **close/finishing 可辨识性配对**：两维解释同一出手族，观测量必须固定配对——`shooting_close` ↔ 非对抗 RA FG%（defender distance 4–6ft+）；`finishing` ↔ 对抗 RA FG%（0–2ft）+ and-1 率 + 突破罚球率。不配对则逆向标定无法分离两维（PA6 违反）；
-> 2. **近筐特殊性的辩护**：只有 close 族设"对抗终结"独立维而中距/三分不设，是因为篮下是**身体接触**裁决（垂直起跳、and-1、罚球制造），跳投是**几何干扰**裁决（openness）——两类裁决在引擎里走不同管线，这是结构性不对称，不是随意；
+### 2.3a 统一出手分区（四区）
+
+投篮相关的一切分类（能力维度、命中基准、效用选技、事件统计、评判准则）
+共用同一份出手分区判定，落点 `domain::court::CourtGeometry::shot_zone`：
+
+| 区 | 边界（距进攻篮筐） | 能力维度 | 命中基准 |
+| ---- | ---- | ------ | ---- |
+| `Rim` 篮下 | < 5 ft | `shooting_close`（对抗下由 `finishing` 承接） | `shot_make_rim` |
+| `Near` 近筐 | 5–14 ft | `shooting_near` | `shot_make_near` |
+| `Mid` 中投 | ≥ 14 ft 且三分线内 | `shooting_mid` | `shot_make_mid` |
+| `Three` 三分 | 三分线外（含底角特例几何，优先于距离） | `shooting_three` | `shot_make_3pt` |
+
+三分判定优先：一次出手先过 `is_three_point_attempt`（含底角更近的直线），
+在线内才按距离分 Rim/Near/Mid。历史口径差异（引擎 8 ft、评判器 4 ft、
+突破动作参数 14 ft）以本表为准统一；突破动作阈值（`drive_*_dist_ft`）
+继续表达动作阶段选择，不承担出手分区职责。
+
+分类事实统一取「释放时刻出手点」（`ShotRelease.pos`）：
+`pending_shot_release` 挂起期球员可能移动，意图点与释放点会有偏差。
+
+> 1. **close/finishing 可辨识性配对**：`shooting_close` 解释 Rim 区（< 5 ft）
+>    出手族；`finishing` 继续表达**对抗下**的完成度（对抗 Rim 出手 + and-1 率
+>    + 突破罚球率）。两维配对观测量：`shooting_close` ↔ 非对抗 Rim FG%；
+>    `finishing` ↔ 对抗 Rim FG% + and-1 率。
+> 2. **近筐特殊性的辩护**：只有篮下族设「对抗终结」独立维，是因为篮下是
+>    **身体接触**裁决（垂直起跳、and-1、罚球制造），近筐/中距/三分跳投是
+>    **几何干扰**裁决（openness）——两类裁决走不同管线，这是结构性不对称。
 > 3. **背身打法不设维**：post 得分身份 = `shooting_close` + `strength` + 体格经映射层的涌现组合，不加 `post_game` 维度（2K 把 post hook/fade 分列为操作游戏的需要，模拟器里它派生即可）。
 
 ### 2.4 防守与篮板层（归一，6 维 · **位置轴**，v2 换轴）
@@ -166,15 +191,88 @@ TeamTraits  战术风格 5 维（教练意志，§2.8）
 
 > `TeamTraits.defense_aggression` 等战术意志与个体防守倾向的关系：**方案定基线，个体在其上调制**——相乘而非替代，禁止合并（双事实源）。
 
-### 2.7 Roles 降级为派生视图（v2 移除 `Vec<PlayerRole>`）
+### 2.7 Roles 边界（v2 收窄）
 
-"3&D 侧翼""挡拆巨兽"是属性+倾向的**描述**（聚类标签，给 UI/经营层看），或**教练指派**（战术任务）。两者都不是数据本体：
+"3&D 侧翼""挡拆巨兽"这类描述标签，与球员的攻防角色、位置的关系：
 
-- **派生角色**：`(attributes, tendencies) → role` 的纯函数（聚类规则），归入上层展示面（§2.9）；UI 与球探报告消费它；
-- **指派角色**：对位与战术任务归战术层（TeamTraits/战术档案），不写进 PlayerData；
-- **约束**：显示只能使用派生视图；角色标签不得写回 `PlayerData`，也不得成为引擎行为分支。
+- **派生原型标签**：`(attributes, tendencies) → label` 的纯函数（聚类规则），
+  归入上层展示面（§2.9）；UI 与球探报告消费它，不参与行为；
+- **赛前攻防角色**：固定指派的战术板配置，属身份字段（§2.7b），
+  整场不变，不随回合任务变化；
+- **六类位置**：长期阵容位置归纳的风格标签，属身份字段（§2.7a）；
+- **战术槽位**：战术档案声明的能力需求槽位（tactics.md TA3），
+  逐回合按能力填充，与球员本体身份无关；
+- **约束**：以上标签均不得成为引擎行为分支；引擎对位置与角色零读取
+  （行为中立），角色也不得写回 `PlayerData` 之外的状态。
 
 同理**明确不入本体**：OVR/badges/特质（属性组合的派生包装）、clutch（不可标定的噪声）、leadership/chemistry（经营层且是队伍级量）。
+
+### 2.7a 球员位置（六类 · 身份字段，v2 新增）
+
+`PlayerData.position` 是**身份字段**：每名球员恰一个六类位置，表达区别于
+传统 PG/SG/SF/PF/C 的现代位置风格。分类依据**长期阵容位置**（借鉴
+Cleaning the Glass 的出场时间法，按本项目六类单列 Center）：
+
+| 位置 | 中文 | 判据（长期出场位置归纳） |
+| ---- | ---- | ------ |
+| `Point` | 控卫 | 主要承担 PG |
+| `Combo` | 双能卫 | 持续兼顾 PG 与 SG |
+| `Wing` | 侧翼 | 主要承担 SG 或 SF，或两者兼有 |
+| `Forward` | 锋线 | 持续兼顾 SF 与 PF |
+| `Big` | 内线 | 主要承担 PF，或持续兼顾 PF 与 C |
+| `Center` | 中锋 | 主要承担 C，且很少承担 PF |
+
+- **判据来源声明**：资料可核实时按长期出场位置归入；资料不足时由项目
+  人工定类并记录依据（清册/名册 note 声明）。basketball-excel.com 使用
+  同样六类名称，但其计算阈值未公开，本项目不假定为已核实事实；
+  Cleaning the Glass 的判据按赛季出场时间推导，只有五类且 `big`
+  涵盖中锋。
+- **稳定语义**：位置是球员的长期属性，不随单场角色、换防或单回合动作变化；
+  标签允许随赛季（多份数据源）更新，同一份档案内不变。
+- **行为中立**：位置不提供任何能力加成，不进入效用/概率公式，不参与
+  引擎行为分支（引擎对位置零读取，charter C1 的 id-中立同理）。
+- **校验**：反序列化枚举 + `validate_team` 必填检查，不允许缺省值。
+
+### 2.7b 赛前固定的攻防角色（战术板配置 · 身份字段，v2 新增）
+
+每名球员在档案中声明**一个进攻角色与一个防守角色**。它们是教练赛前在
+战术板上的固定指派，**整场比赛保持不变**；替补登场使用该替补自己的配置。
+单次换防、突破分球或回合任务不改变角色；回合内的当下职责由实时
+`action`、战术 `slot` 与防守对位表达，不改写角色。
+
+目录参考 Basketball Index 的角色体系（进攻 12 类评价半场得分部署、
+防守 7 类评价防守职责），名称与判据由本项目定义，赛前校验（§2.7a 同）。
+
+| 进攻角色 | 中文 | 部署方式 |
+| ---- | ---- | ------ |
+| `PrimaryHandler` | 主控 | 第一发起人：挡拆持球与持球单打的主要承担者 |
+| `SecondaryHandler` | 副控 | 第二持球点，兼无球投射 |
+| `ShotCreator` | 持球得分手 | 高比例单打自创出手 |
+| `Slasher` | 突破手 | 高频率持球攻框 |
+| `AthleticFinisher` | 空切终结者 | 无球切入、补篮吃饼 |
+| `OffScreenShooter` | 绕掩护射手 | 借掩护/手递手接球投 |
+| `StationaryShooter` | 定点射手 | 接球就投为主 |
+| `VersatileBig` | 多面手内线 | 外弹、背身、顺下兼备 |
+| `PostScorer` | 背身得分手 | 低位背身为主 |
+| `StretchBig` | 空间型内线 | 外弹投三为主 |
+| `RollCutBig` | 顺下内线 | 顺下、空切、终结喂球 |
+
+| 防守角色 | 中文 | 防守职责 |
+| ---- | ---- | ------ |
+| `PointOfAttack` | 领防人 | 主防持球核心，少协防 |
+| `Chaser` | 追射手 | 绕掩护追无球射手，少协防 |
+| `Helper` | 协防者 | 离球协防与轮转为主 |
+| `WingStopper` | 侧翼锁编 | 主防对方持球得分手，兼顾协防 |
+| `MobileBig` | 机动内线 | 挡拆上提延误/换防 |
+| `AnchorBig` | 护框中枢 | 沉退护框 |
+| `LowActivity` | 低活动量 | 防守职责轻，承担沟通 |
+
+- **存储**：角色随档案存于 `PlayerData`（`offensive_role` / `defensive_role`），
+  经比赛配置进入投影；比赛内零写入。
+- **行为中立**：角色描述部署方式，不改变引擎行为分支；战术分工仍由
+  `data/tactics/*.json` 槽位（tactics.md TA3）与对位逻辑承担，两者互不替代。
+- **与派生标签的关系**：`project_display_role`（阈值聚类标签）继续作为
+  展示面原型标签；它不再是攻防角色的展示来源。
 
 ### 2.8 TeamTraits 边界
 
@@ -182,26 +280,40 @@ TeamTraits  战术风格 5 维（教练意志，§2.8）
 
 ### 2.9 上层展示面（派生投影 · 用户友好层，v2 新增）
 
-**双面结构（PA7）**：21 能力 + 12 倾向 + 体格是**机器面**——为涌现与校准而完整；直接示人则用户不可适应（行业共识：FM 隐藏属性+可见分组、2K 模拟全量属性+界面六维、OOTP 真实值+球探 20–80 制）。故在其上包一层**展示面**：
+**双面结构（PA7）**：22 能力 + 12 倾向 + 体格是**机器面**——为涌现与校准而完整；直接示人则用户不可适应（行业共识：FM 隐藏属性+可见分组、2K 模拟全量属性+界面六维、OOTP 真实值+球探 20–80 制）。故在其上包一层**展示面**：
 
 - **纯函数投影**：`(底层全部维度) → 展示视图`，落点 `domain::scouting`（domain 零依赖、应用层皆可调用；**引擎 crate 禁止引用**，grep 守卫）；
 - **永不回流**：引擎不读展示值；roster JSON 不存展示值；任何系统不得把展示值当真值写回；
 - **独立版本化**（`scouting v1`）：改复合权重/标签阈值不动引擎、不动黄金哈希、不触发校准协议。
 
-**复合轴（8 轴 · scouting 配置建议）**：
+**球员资料四大块（展示分类 · 页面组织方式）**：
+
+球员资料页以**得分、组织、篮板、防守**四块组织，每块直接展示底层维度数值，
+**不把块内维度合并成单一数值**：
+
+| 栏目 | 展示的底层维度 | 备注 |
+| ---- | ------ | ---- |
+| 得分 | 四区能力（§2.3a：shooting_close / shooting_near / shooting_mid / shooting_three）+ `finishing` + `free_throw` | 罚球以真实 FT% 量纲数值并列展示（Shaq 案例） |
+| 组织 | `ball_handling` / `passing` / `decision_iq` | 持球创造；三值并列，不平均 |
+| 篮板 | `offensive_rebound` / `defensive_rebound` | 前后场分开展示，禁止均值遮盖分化（Rodman 型） |
+| 防守 | `defense_perimeter` / `defense_interior` / `steal` / `block` | 内外线分开展示，禁止简单均值（会抹平位置轴差异） |
+
+运动能力与体格继续作为底层输入，展示于球员基础资料（身高/体重/速度等量纲数值）。
+四大块之外仍可提供 8 轴复合视图（下表）作为球探/比较页的透镜；
+复合轴是声明式加权和，权重表属 scouting 配置（版本化），永不回流引擎：
 
 | 展示轴 | 聚合自（底层维度） | 备注 |
 | -------- | -------------------- | ------ |
-| 外线得分 | shooting_three / shooting_mid | 射术总览；罚球（free_throw）不入复合轴——以真实 FT% 量纲数值并列展示（Shaq 案例） |
-| 内线得分 | shooting_close / finishing | 篮下完成 |
+| 外线得分 | shooting_three / shooting_mid | 射术总览；罚球（free_throw）不入复合轴 |
+| 内线得分 | shooting_close / shooting_near / finishing | 篮下与近筐完成 |
 | 组织 | passing / decision_iq / ball_handling | 持球创造 |
-| 防守 | defense_perimeter / defense_interior / steal / block | **禁止简单均值聚合**（会抹平 Gobert 的位置轴差异）；展示面取 max(perimeter, interior) 主显并标注形状/次轴 |
+| 防守 | defense_perimeter / defense_interior / steal / block | **禁止简单均值聚合**；取 max(perimeter, interior) 主显并标注形状/次轴 |
 | 篮板 | rebound_offensive / rebound_defensive | |
 | 运动 | speed / acceleration / agility / vertical / stamina | |
 | 对抗 | strength | 单维轴；体格（身高/体重/臂展）以量纲数值并列展示，不参与归一聚合 |
 | 心智 | decision_iq / off_ball_sense | 与"组织"共享 decision_iq——不同透镜允许共享底层维度 |
 
-聚合为声明式加权和，权重表属 scouting 配置（版本化）；锚点表（§3.1）穿透投影：复合值 0.5 = 联盟中位。位置敏感轴（防守）禁止简单均值聚合——见各轴备注。
+锚点表（§3.1）穿透投影：复合值 0.5 = 联盟中位。位置敏感轴（防守）禁止简单均值聚合——见各轴备注。
 
 **倾向的展示**：倾向**不以数字示人**——展示为文字化派生标签：
 

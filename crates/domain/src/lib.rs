@@ -26,10 +26,11 @@ pub use capability::{
     poke_ball_exposure, poke_check_success, poke_check_success_with_context, poke_pressure_factor,
     receive_estimate_noise,
 };
-pub use court::CourtGeometry;
+pub use court::{CourtGeometry, ShotZone};
 pub use data::{
-    project_display_role, CoachProfile, PlayerAttributes, PlayerData, PlayerSlotFitness,
-    PlayerTendencies, SubstitutionEvent, SubstitutionReason, TeamData, TeamTraits,
+    project_display_role, CoachProfile, DefensiveRoleSpec, OffensiveRoleSpec, PlayerAttributes,
+    PlayerData, PlayerPosition, PlayerSlotFitness, PlayerTendencies, SubstitutionEvent,
+    SubstitutionReason, TeamData, TeamTraits,
 };
 pub use event::{GameEvent, PossessionEndCause, PossessionSummary, TimedGameEvent};
 pub use flow::{transition_ball_state, BallPhase, BallState, GameFlowState, PhaseType};

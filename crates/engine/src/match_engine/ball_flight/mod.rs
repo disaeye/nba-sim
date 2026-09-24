@@ -159,11 +159,23 @@ impl MatchEngine {
                 // 到 FollowThrough（封盖是身体接触，出手者动作不中断），
                 // 但冻结的裁定载荷必须同步作废，否则 Exec→Follow 边界会
                 // 把一个已被封盖的出手重新发布为 Shot。
-                if let Some(pending) = self.observations.pending_shot_release.as_ref() {
+                //
+                // 出手事实本身在裁定冻结时已经发生（D25 时序）：被封盖的
+                // 出手在真实统计中计为一次出手，且箱体在封盖分支已补记
+                // fg*_attempts。因此作废挂起前必须补发 ShotRelease 事实，
+                // 事件流与箱体才能对平（box_score 逐字段守卫）。
+                if let Some(pending) = self.observations.pending_shot_release.take() {
                     assert_eq!(
                         pending.shooter_id, shooter_id,
                         "blocked shot release belongs to a different shooter"
                     );
+                    self.journal.pending_events.push(GameEvent::ShotRelease {
+                        shooter_id: pending.shooter_id,
+                        pos: (from_pos.x, from_pos.y),
+                        is_three: pending.is_three,
+                        contest_level: pending.contest_intensity,
+                        make_probability: pending.make_probability,
+                    });
                 }
                 self.observations.pending_shot_release = None;
             }

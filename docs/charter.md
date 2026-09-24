@@ -1,6 +1,6 @@
 # NBA-Sim · 愿景与目标宪章
 
-> 定位：全文档体系的目标锚。本文档回答“要做出什么、什么算好、哪些红线不可放宽”。系统组织见 `docs/architecture.md`，质量观测见 `docs/quality.md`，过程验收见 `docs/protocol.md`。
+> 定位：全文档体系的目标锚。本文档回答“要做出什么、什么算好、哪些红线不可放宽”。系统组织见 `docs/architecture.md`，比赛过程见 `docs/basketball.md`，质量观测见 `docs/quality.md`，过程验收见 `docs/protocol.md`。
 > 修订纪律：本文档只定义稳定目标和约束，不记录当前实现、周期结果、执行命令或历史快照。
 
 ## 1. 这个引擎是什么
@@ -76,7 +76,7 @@ O1 不能由单一综合分数直接证明。合法的逼近路径是同时建�
               比赛过程
 ```
 
-能力与倾向的维度、锚点和值语义由 `docs/attributes.md` 统一定义；球队组织和战术槽位由 `docs/tactics.md` 定义。任何新增维度都必须声明消费点、可观测响应和不可混淆的标定语义。
+能力与倾向的维度、锚点和值语义由 `docs/attributes.md` 统一定义；球队组织和战术槽位由 `docs/tactics.md` 定义；这些输入如何变成动作、责任、接触和结果由 `docs/basketball.md` 定义。任何新增维度都必须声明消费点、可观测响应和不可混淆的标定语义。
 
 能力扰动测试是 C1 的机械守卫：在相同规则和状态下，改变单一输入应在相关机会、执行或结果上产生可解释响应；故意断开消费链时，测试必须失败。
 
@@ -100,7 +100,7 @@ O1 不能由单一综合分数直接证明。合法的逼近路径是同时建�
 
 ## 7. 多联赛目标
 
-首批档案覆盖 NBA 与 FIBA 的计时、进攻时钟、犯规政策、罚球/bonus、几何和拥有权程序；NCAA 是路线项（见 `docs/dev/roadmap.md`），不在首批验收范围内。档案的具体字段由 `docs/architecture.md` §6.3 定义，验收顺序由 `docs/protocol.md` 定义。
+首批档案覆盖 NBA 与 FIBA 的计时、进攻时钟、犯规政策、罚球、违例、几何和拥有权程序；NCAA 是路线项（见 `docs/dev/roadmap.md`），不在首批验收范围内。档案字段由 `docs/architecture.md` §6.3 定义，程序差异由 `docs/basketball.md` §6 定义，验收顺序由 `docs/protocol.md` 定义。
 
 成功的多联赛切换必须同时证明：
 
@@ -127,6 +127,7 @@ O1 不能由单一综合分数直接证明。合法的逼近路径是同时建�
 - 本文档定义**为什么做、不能违反什么**；
 - `docs/decisions.md` 记录跨模块取舍和开放决策；
 - `docs/architecture.md` 定义**系统如何组织**；
+- `docs/basketball.md` 定义**比赛过程如何产生事实**；
 - `docs/quality.md` 定义**如何观测和判定**；
 - `docs/attributes.md` 与 `docs/tactics.md` 定义**输入数据的语义**；
 - `docs/protocol.md` 定义**如何校准和验收**；

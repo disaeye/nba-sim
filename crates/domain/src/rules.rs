@@ -101,7 +101,8 @@ pub struct GameRules {
     /// 裁决参数嵌套组（M7 并轨）：概率与权重的唯一规则通道。
     #[serde(default)]
     pub resolve: ResolveConfig,
-    /// Distance from the rim below which a shot is treated as a rim attempt.
+    /// 补篮与篮下接球的距离上限，等于 `court::RIM_ZONE_MAX_DIST_FT`。
+    /// 出手分区不再读取本字段，统一走 `CourtGeometry::shot_zone`。
     pub rim_shot_distance_ft: f32,
     /// Maximum accepted distance from the court boundary for an inbound release.
     pub inbound_boundary_tolerance_ft: f32,
@@ -420,7 +421,7 @@ impl Default for GameRules {
             shot_contest_sensitivity: 0.32,
             semantics: SemanticRules::default(),
             resolve: crate::resolve::ResolveConfig::default(),
-            rim_shot_distance_ft: 8.0,
+            rim_shot_distance_ft: crate::court::RIM_ZONE_MAX_DIST_FT,
             inbound_boundary_tolerance_ft: 5.5,
             inbound_release_depth_ft: 3.0,
             free_throw_distance_ft: 13.75,

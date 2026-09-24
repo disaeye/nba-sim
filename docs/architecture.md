@@ -1,7 +1,7 @@
 # NBA-Sim · 系统架构
 
 > 定位：系统组织与模块交互的**架构规格**——分层、数据流、状态机、管线、决策、语义/裁决和多联赛。
-> 上游文档：`docs/charter.md`；关联规格：`docs/quality.md`、`docs/attributes.md`、`docs/tactics.md`、`docs/protocol.md`。
+> 上游文档：`docs/charter.md`；关联规格：`docs/basketball.md`、`docs/quality.md`、`docs/attributes.md`、`docs/tactics.md`、`docs/protocol.md`。
 > 实现状态、迁移差距和验证范围统一见 `docs/dev/status.md` 与 `docs/dev/gap.md`；跨模块取舍见 `docs/decisions.md`。
 > 修订纪律：本文档只定义目标架构和稳定边界，不记录当前实现快照、周期结果或执行命令。
 
@@ -13,7 +13,7 @@
 
 1. **系统如何组织** —— 分层架构与依赖规则（§1–§2）；
 2. **状态如何流转** —— 球权状态机、主循环阶段管线、决策系统（§3–§5）；
-3. **如何支撑多联赛** —— 规则档案与约束分轴（§6）。
+3. **如何支撑多联赛** —— 规则档案与约束分轴（§6）。比赛动作和罚则程序见 `docs/basketball.md`，本文档只规定它们属于哪一层。
 
 阅读顺序：§1（分层）→ §2（数据流）→ §3（球权状态机）→ §4（阶段管线）→ §5（决策）→ §6（语义/裁决/多联赛）。
 
@@ -121,8 +121,9 @@
                           │
                           ▼
                 [7] 弹道裁决 ballistics resolve
-                   传球到达/被断、投篮命中/打铁、篮板落点
+                   传球到达、封盖、触筐、篮板落点
                    球权状态转移（经唯一写通道 · P1）
+                   结果在对应事实出现时产生（basketball.md §3）
                           │
                           ▼
                 [8] 语义解释 semantics
@@ -202,12 +203,15 @@ BallTrajectoryKind (运动学采样参数 · crates/physics · 私有于执行)
 
 | 状态 | 触发事实 | 下一状态 | 副作用事件 |
 | --------- | --------- | --------- | ----------- |
-| Held(c) | 决策 Pass 执行 | InFlight{Pass} | PassReleased |
-| InFlight{Pass} | 到达接球人 | Held(receiver) | PassCompleted |
-| InFlight{Pass} | 防守者抢断 | Held(defender) + 球权翻转 | Steal + PossessionChange |
+| Held(c) | 决策 Pass 执行 | InFlight{Pass} | PassReleased（不含接球结果） |
+| InFlight{Pass} | 到达并被接住 | Held(receiver) | PassCompleted |
+| InFlight{Pass} | 到达但未接住 | Loose | PassDropped |
+| InFlight{Pass} | 防守者触球未控制 | Loose | PassTipped |
+| InFlight{Pass} | 防守者完成控制 | Held(defender) + 球权翻转 | PassIntercepted + PossessionChange |
 | InFlight{Pass} | 出界 | Dead{OutOfBounds} | Turnover |
-| InFlight{Shot} | 命中 | Dead{MadeBasket} | Score(n) |
-| InFlight{Shot} | 打铁触筐 | Loose (RimRebound) | ReboundAvailable |
+| InFlight{Shot} | 合法封盖 | Loose | BlockedShot |
+| InFlight{Shot} | 触筐后入筐 | Dead{MadeBasket} | Score(n) |
+| InFlight{Shot} | 触筐后弹出 | Loose (RimRebound) | ReboundAvailable |
 | InFlight{FreeThrow} | 命中（非末罚） | Dead{FreeThrowMade} | Score(1)，准备下一罚 |
 | InFlight{FreeThrow} | 命中（末罚） | Dead{MadeBasket} | Score(1) |
 | InFlight{FreeThrow} | 不中触筐 | Loose (罚球篮板) | ReboundAvailable |
@@ -351,12 +355,12 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
                − SoftPenalty − RiskPenalty + MoraleBias(action family)
 ```
 
-- 乘性部分是**物理与可行性门**：Feasibility 为 [0, 1] 连续系数（几何/防守封堵，不可行直接乘零）；StaminaModulation 为体力衰减因子；
+- 乘性部分是**物理与可行性门**：Feasibility 为 [0, 1] 连续系数（几何、防守封堵，不可行直接乘零）；StaminaModulation 为体力衰减因子；
 - 加性部分是**偏好与惩罚修正**：战术基值、个体技能加成、倾向偏好、情境偏好在 BaseValue 侧求和；软约束、风险与士气作为独立项修正。
   士气项按**动作族**加权后相加（`ModulationRules.morale_*_affinity`）：采样是 softmax，
   全候选共享的加性常数在归一化中相互抵消，阶参数因此对选择分布零影响；
   按族加权使同一标量对不同候选产生不同修正，参数扰动可改变选择分布；
-- `RoleFit` 因子已随 roles 降级移除（`attributes.md` §2.7）：`PlayerData` 无 `role` 字段，效用管线禁止读取任何身份性 role；战术槽位适配只能作为 `TacticalFit` 输入由 `(attributes, tendencies)` 经 `tactics.md` §2.3 适配分派生。
+- `RoleFit` 因子已随聚类标签降级移除（`attributes.md` §2.7）：效用管线禁止读取位置、赛前攻防角色或派生标签。战术槽位适配只能作为 `TacticalFit` 输入，由 `(attributes, tendencies)` 经 `tactics.md` §2.3 适配分派生。
 
 > **涌现要求（P7）**：上式所有因子必须可从 `(PlayerAttributes/PlayerTendencies, DecisionRules, 当前状态)` 派生；`TacticalFit` / 任何权重禁止是与能力无关的硬编码常数。能力耦合与扰动验证见 `quality.md` §6。
 
@@ -418,7 +422,7 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 | 计时结构 | 4×12 min | 4×10 min |
 | 进攻时钟 | 24 s，前场板重置 14 s | 24 s，前场板重置 14 s |
 | 个人犯满 | 6 犯 | 5 犯 |
-| 球队犯规罚则 | 单节 bonus（第 5 次犯规起） | 单节 bonus（第 4 次犯规起） |
+| 球队犯规罚则 | 每节第 5 次起；加时独立限额 | 每节第 5 次起；加时计入第 4 节 |
 | 三分线 | ~23.75 ft（底角 22） | 6.75 m（等半径，无底角特例） |
 | 交替拥有 | 跳球 | 交替拥有箭头 |
 
@@ -440,7 +444,7 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 | `GameRules` | 全部可调参数（时钟、物理上限、权重、阈值） | `validate()` 在 setup 时强制执行 |
 | `DecisionRules` | 决策子系统参数（效用权重、约束阈值、采样个性化） | 独立 `validate()`，由 `decision` 消费；作为 `GameRules` 嵌套组注入 |
 | `PlayerData` 系（`data.rs`） | `PlayerAttributes` 能力向量 + `PlayerTendencies` + 球队级 `TeamTraits` | 能力是行为差异的唯一合法来源（P7）；被 decision/physics/officiating 消费；**本体规格（分类学/值语义/锚点/迁移路线）以 `docs/attributes.md` 为单一事实源**；涌现要求见 quality.md §6 |
-| `LeagueProfile` | 联赛规则档案：计时结构、进攻时钟与重置、犯规政策与 bonus、几何、语义阈值 | 由规则档案提供，不进入引擎联赛分支 |
+| `LeagueProfile` | 联赛规则档案：计时、进攻时钟、犯规与罚则、违例开关、暂停、几何 | 程序见 `docs/basketball.md` §6，不进入引擎联赛分支 |
 | `GameFlowState` | 宏观生命周期（TipOff/LiveBall/DeadBall/FreeThrow/QuarterEnd/Halftime/Overtime/GameEnd） | 转换由 `engine` 驱动，此处仅定义 |
 | `SubPhase` | 回合内子阶段（Initiation/ActionExecution/ShotAttempt/FlightAndRebound/DeadBallReset） | 与 GameFlowState 正交 |
 | `BallState`（见 §3） | 球的宏观归属状态 | **唯一事实源** |
@@ -460,6 +464,7 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 ### 8.1 与其他文档的关系
 
 - `charter.md` 是**目标宪章**：要做出什么、什么算好、红线与成功判据。本文档是**系统组织规格**：模块如何分层、状态如何流转。映射：`charter` §4 宪章条款 → 本文档 §1.3；C1 → P6/P7；C3 → §6.3；C4 → P5；
+- `basketball.md` 是**比赛过程规格**：动作生命周期、结果权、防守责任和罚则。本文档规定这些事实由哪个阶段产生，不复制其比赛语义；
 - `quality.md` 是**检测与评判体系**：不变量、真实度评判、工具链、性能预算——本文档的架构如何被观测与验证；
 - `attributes.md` / `tactics.md` 是**数据规格**：球员/阵容/战术的分类学与值语义——本文档的领域层消费它们；
 - `protocol.md` 是**过程规格**：校准协议、验收标准和证据要求；

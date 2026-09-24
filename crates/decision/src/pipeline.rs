@@ -569,36 +569,55 @@ impl DecisionSystem {
                 let open_bonus = openness.contest_free_score() * self.weights.shot_openness_weight;
                 let shooting_skill = attributes
                     .map(|a| {
-                        if dist_to_hoop < ctx.rules.rim_shot_distance_ft {
-                            a.finishing
-                        } else if *is_three {
-                            a.shooting_three
-                        } else {
-                            a.shooting_mid
+                        // 统一出手分区（attributes.md §2.3a）：效用选技与
+                        // 裁决层共用 `CourtGeometry::shot_zone`，禁止内联
+                        // 距离阈值。射手出手点取自 Shoot 候选的射手位置，
+                        // 攻击方向按持有球权方。
+                        let shooter_pos = match &s.action {
+                            CandidateAction::Shoot { from_pos, .. } => *from_pos,
+                            _ => ctx
+                                .physics
+                                .get_player(s.action.actor_id())
+                                .map(|p| p.pos_ft)
+                                .unwrap_or_default(),
+                        };
+                        let zone = ctx.rules.court.shot_zone(
+                            shooter_pos,
+                            ctx.possession_team == "home",
+                            ctx.rules.league.three_point_distance_ft,
+                            ctx.rules.league.corner_three_distance_ft,
+                        );
+                        match zone {
+                            nba_domain::ShotZone::Rim => a.finishing,
+                            nba_domain::ShotZone::Near => a.shooting_near,
+                            nba_domain::ShotZone::Mid => a.shooting_mid,
+                            nba_domain::ShotZone::Three => a.shooting_three,
                         }
                     })
                     .unwrap_or(0.5);
                 let shoot_preference = tendency.map(|t| t.shoot_frequency).unwrap_or(0.5);
-                // G6a 链 2：前场篮板后的近筐二次攻框（putback）。判定条件是
-                // 「本回合已有出手 && 持球人在篮下」——这正是抢到前场板的
-                // 空间事实。效用加成由 `effective_putback_bias`（属性曲线，
-                // finishing 驱动）提供，使高 finishing 内线更倾向直接补篮
-                // 而非运出重新组织。规则字段 `rebound.putback_distance_discount`
+                // G6a 链 2：前场篮板后的篮下二次攻框（putback）。判定条件是
+                // 「本回合已有出手 && 持球人在篮下（ShotZone::Rim）」——
+                // 这正是抢到前场板的空间事实。效用加成由
+                // `effective_putback_bias`（属性曲线，finishing 驱动）提供，
+                // 使高 finishing 内线更倾向直接补篮而非运出重新组织。
+                // 规则字段 `rebound.putback_distance_discount`
                 // 同时把有效距离折扣用于距离因子，保持同一语义通道。
-                let putback_bonus =
-                    if ctx.possession_had_shot && dist_to_hoop <= ctx.rules.rim_shot_distance_ft {
-                        attributes
-                            .map(|a| {
-                                nba_domain::effective_putback_bias(ctx.rules, a)
-                                    * ctx.rules.resolve.rebound.putback_distance_discount
-                            })
-                            .unwrap_or(0.0)
-                    } else {
-                        0.0
-                    };
+                let putback_bonus = if ctx.possession_had_shot
+                    && dist_to_hoop < nba_domain::court::RIM_ZONE_MAX_DIST_FT
+                {
+                    attributes
+                        .map(|a| {
+                            nba_domain::effective_putback_bias(ctx.rules, a)
+                                * ctx.rules.resolve.rebound.putback_distance_discount
+                        })
+                        .unwrap_or(0.0)
+                } else {
+                    0.0
+                };
                 let range_bias = if *is_three {
                     centered(style.three_point_emphasis) * coach.three_point_bias
-                } else if dist_to_hoop <= ctx.rules.rim_shot_distance_ft {
+                } else if dist_to_hoop < nba_domain::court::RIM_ZONE_MAX_DIST_FT {
                     centered(style.rim_pressure)
                 } else {
                     0.0
@@ -727,7 +746,7 @@ impl DecisionSystem {
                         .get_player(receiver_id)
                         .map(|receiver| receiver.attributes.finishing)
                         .unwrap_or(f32::from(0u8));
-                    if (*to_pos - hoop).length() <= ctx.rules.rim_shot_distance_ft {
+                    if (*to_pos - hoop).length() < nba_domain::court::RIM_ZONE_MAX_DIST_FT {
                         receiver_finishing.max(f32::from(0u8)) * ctx.rules.decision.rim_catch_bonus
                     } else {
                         f32::from(0u8)

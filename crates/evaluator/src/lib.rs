@@ -29,7 +29,9 @@ pub use report::{
 };
 // 评判口径常数由准则函数（本文件）与报表聚合（`report.rs`）共用：
 // 公开给子模块而不重复定义，避免两处口径漂移。
-pub(crate) use report::{REGULATION_SECONDS_48MIN, RIM_OFFSET_FT, RIM_ZONE_RADIUS_FT};
+pub(crate) use report::{REGULATION_SECONDS_48MIN, RIM_OFFSET_FT};
+// 统一出手分区阈值与 domain 同源（charter C1：常数不游离于规则体系）。
+pub(crate) use nba_domain::court::{NEAR_ZONE_MAX_DIST_FT, RIM_ZONE_MAX_DIST_FT};
 
 /// 单回合上下文：从上一 POSSESSION_SUMMARY 到本条之间的全部事件。
 /// 一次传球释放：`(sequence, passer, receiver, from, to, 是否已终结)`。
@@ -748,13 +750,16 @@ fn evaluate_game_level(ticks: &[StreamTick], fixture: &ReferenceDistributions) -
     let mut possessions = 0usize;
     let mut idx: Option<u64> = None;
 
-    // D2 构成准则采集（dev 方案 §5.1）：出手/命中按区域划分。
+    // D2 构成准则采集（dev 方案 §5.1）：出手/命中按四区划分
+    // （attributes.md §2.3a）：Rim < 5ft / Near 5–14ft / Mid ≥14ft 线内 / Three。
     let mut fga_three = 0usize;
     let mut fga_two = 0usize;
     let mut fgm_three = 0usize;
     let mut fgm_two = 0usize;
-    // 中距离/篮下区分需要出手位置与篮筐距离（ft）。
+    // 四区区分需要出手位置与篮筐距离（ft）；命中归属用回合内最后一次
+    // 出手区域与到筐距离（评判器只看事件流，不读引擎内部状态）。
     let mut fga_mid = 0usize;
+    let mut fga_near = 0usize;
     let mut fga_rim = 0usize;
     let mut fta = 0usize;
     // 比赛时长（秒，墙钟 t 单调），用于 48 分钟等效回合数。
@@ -804,8 +809,12 @@ fn evaluate_game_level(ticks: &[StreamTick], fixture: &ReferenceDistributions) -
                                 let x = p.first().and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
                                 let y = p.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
                                 let dist = ((x - hoop_x).powi(2) + (y - hoop_y).powi(2)).sqrt();
-                                if dist <= RIM_ZONE_RADIUS_FT {
+                                // 统一四区（attributes.md §2.3a）：Rim < 5、
+                                // Near 5–14、Mid ≥ 14。三分已单独计数。
+                                if dist < RIM_ZONE_MAX_DIST_FT {
                                     fga_rim += 1;
+                                } else if dist < NEAR_ZONE_MAX_DIST_FT {
+                                    fga_near += 1;
                                 } else {
                                     fga_mid += 1;
                                 }
@@ -926,6 +935,7 @@ fn evaluate_game_level(ticks: &[StreamTick], fixture: &ReferenceDistributions) -
             fgm_two,
             fgm_three,
             fga_mid,
+            fga_near,
             fga_rim,
             fta,
             wall_seconds: wall_start

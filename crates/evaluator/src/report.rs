@@ -195,9 +195,6 @@ pub struct CriterionRow {
 const W_HARD: f32 = 1.0;
 const W_SOFT: f32 = 0.25;
 
-/// 篮下区域半径（ft）：取 GameRules 篮下/禁区几何同源的判定阈值，
-/// 用于 SHOT_PROFILE_ZONE_MIX 的 rim/mid 区分。属评判口径常数，集中于此。
-pub(crate) const RIM_ZONE_RADIUS_FT: f32 = 4.0;
 /// 篮筐距端线的距离（ft）：NBA 篮筐距端线 5.25ft， hoop_x = court_width - offset。
 pub(crate) const RIM_OFFSET_FT: f32 = 5.25;
 /// 48 分钟等效的标准比赛秒数（NBA 4×12min）。

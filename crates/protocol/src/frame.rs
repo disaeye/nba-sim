@@ -6,6 +6,15 @@ pub struct RenderPlayer {
     pub id: String,
     pub jersey: String,
     pub team: String,
+    /// 六类位置（attributes.md §2.7a）：Point/Combo/Wing/Forward/Big/Center。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub position: String,
+    /// 赛前固定的进攻角色（attributes.md §2.7b），整场不变。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub offensive_role: String,
+    /// 赛前固定的防守角色（attributes.md §2.7b），整场不变。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub defensive_role: String,
     pub x: f32,
     pub y: f32,
     pub zone: String,

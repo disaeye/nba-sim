@@ -1,233 +1,60 @@
 # NBA-Sim · 当前实现状态
 
 > 状态类型：当前快照，不是执行日志。
-> 当前工作周期：`20260917_first_principles_next`（第一性原理驱动的连续动力学与 ECS 解耦周期，`D22–D29`）。
-> 历史归档：上周期体系化实施（`D14–D21`）已完整归档至 [`cycles/20260916_systematization/plan.md`](cycles/20260916_systematization/plan.md)。
-> 证据原则：本文件只写当前工作区可以由代码、测试或守卫复核的结论；历史轮次见 `docs/dev/cycles/`，原始实验见 `docs/dev/evidence/`。
+> 证据原则：本文件只写当前工作区可以由代码、测试或守卫复核的结论。历史轮次见 `docs/dev/cycles/`，原始实验见 `docs/dev/evidence/` 与 `docs/decisions.md`。
+> 复核日期：2026-09-24。本快照没有在本次复核中重跑 16-seed 矩阵或全量测试套件。
 
-## 1. 结论摘要
+## 1. 结论
 
-当前工作区已经具备一条可运行、可复现、带事件和评判工件的模拟链，但**不能宣称已经满足全部设计规格**。最重要的判断如下：
+当前工作区有一条可运行的单场模拟链：固定种子可重放，事件带身份和父链，评判器区分通过、缺陷、不适用和证据不足，得分、球权、时间、犯规峰值和失误责任有账本检查。
 
-- **可宣称**：领域层提供 `BallState` 与受约束的状态转换；事件帧带稳定 `event_id` / `parent_event_id`；评判器有 `NotApplicable` / `InsufficientEvidence` 与 Hard gate；账本检查器和多种负面对照测试已存在；名册数据不再以数组顺序定义身份；防守方案已经通过规则参数影响目标几何；默认事实流有资源上限。
-- **只能部分宣称**：防守方案对几何和部分结果有因果影响，但完整 switch/drop/hedge/recover 责任链、动态对位与反事实覆盖仍未形成完整证据包；战术档案已接入当前目标生成路径，旧 `TacticalSet` 的**几何分支**已删除但仍作为兼容枚举存在，`carrier_idx` 经调查确认非等价可删（见 `evidence/problem.md` §25）。
-- **不能宣称**：所有 `MatchEngine` 真相字段已经封装；完整阶段管线已经按 `architecture.md` 的窄签名完成；所有战术都已成为可扩展 JSON 资产；NBA/FIBA 全部情景门已通过；真实度和统计目标带已在全矩阵连续校准中达标。
-
-因此当前唯一合法的整体标签是：**实现进行中，核心证据链已明显增强，结构和行为规格仍有未闭合门**。
-
-## 1.1 最近验证边界
-
-**统计门已全部关闭（2026-09-15）**：`./scripts/run-tests.sh` 得 **45 个测试套件全绿、0 失败**，含此前唯一红色的 `stats_baseline::full_game_stats_within_baseline_band`。全程**未修改任何门限或分母**。（其后 D29 文件划分周期全量套件增至 54/54，见 §2 门矩阵。）
-
-> **本边界已被 ADR-017 超越（2026-09-21）**：随后的球飞行抛体化、触筐物理与统一接触模型三次重冻结黄金哈希（v68→v69→v72），比赛节奏与统计基线整体后移；2026-09-22 的节间开场球权程序修复登记为 v73（`0xee0429df2bfdde79`，行为变更不在黄金窗口内、哈希实测不变，见 `crates/engine/tests/golden_hash.rs` 冻结记录）。当前物理基线与 8-seed 统计以 [`docs/decisions.md`](../decisions.md) ADR-017 为准，下表为抛体化**之前**的历史边界。
-
-累计效果（**16 seed** full，对照仓库自己的 `nba.v2.json` composition_bands）：
-
-| 指标 | 起点 | 现在 | 门/带 |
-| --- | --- | --- | --- |
-| `total_p50` | 237.0 ✗ | **216.5** | [140, 230] ✓ |
-| `two_make_pct` | 0.621 ✗ | **0.503** | [0.48, 0.58] ✓ |
-| `three_make_pct` | 0.348 | 0.334 | [0.30, 0.40] ✓ |
-| `three_attempt_rate` | 0.329 | 0.330 | [0.30, 0.45] ✓ |
-| `two_attempt_rate` | 0.671 | 0.670 | [0.55, 0.70] ✓ |
-| **`free_throw_rate`** | 0.122 ✗ | **0.204** | [0.20, 0.35] ✓ |
-| ORB% | 0.070 ✗ | 0.244–0.330 | ~0.245 ✓ |
-| `pace` | 234.5 ✗ | 218.6 | [185, 220] ✓ |
-
-（L1 Axiom = 0、Ledger = 0。）
-
-四项修复均为**结构性缺陷**而非调参：分区命中率（中距离误用廊下基准）、
-篮板冲抢指派（无人抢篮板）、箱体失误/犯规零写入、突破犯规产生率
-（`foul_on_drive_rate` 0.10→0.18，附反事实验证）。机制定位与 A/B 证据见
-`docs/dev/evidence/problem.md` §21–§32。
-
-**已修正的一处判断**（evidence §32.29.2）：黄金哈希（单 seed × 有限窗口）
-**结构性无法**守卫概率类参数（`*_rate` / `*_ratio`）——实测把
-`foul_on_drive_rate` 降 72% 后，2000/5000/10200 三个窗口的哈希全部不变
-（10200 tick 内仅 19 次突破、2 次犯规，采样量不足）。
-概率参数的正确守卫是跨 seed 聚合的 `stats_baseline`。
-
-**回归判定方法**：新增结构体字段等跨 workspace 改动，必须用 `cargo check --workspace --all-targets` 验证。本会话曾因只验证单个 crate 而提交了破坏测试 target 的改动（已在 `cde5084` 修复并记录）。
+当前工作区不能宣称已经达到 `docs/charter.md` 的真实比赛目标。`docs/basketball.md` 现已定义动作生命周期、结果权、防守责任、罚则和违例程序；实现尚未满足该规格。传球和突破结果仍在动作开始时写入球态，投篮结果权的工作区改动尚未完成；篮下出手分布、无球动作、防守责任、犯规程序、个体身份和情境评判仍有明确缺口。
 
 ## 2. 门矩阵
 
-状态含义：`verified` 只表示所列范围通过；`partial` 表示存在已知实现或证据边界；`blocked` 表示下一步依赖尚未满足；`unknown` 表示没有当前证据。
+状态含义：`verified` 只表示所列代码和测试范围存在；`partial` 表示实现或证据只覆盖规格的一部分。历史命令输出不在本表重复。
 
-| 门 | 当前状态 | 当前可核验事实 | 未闭合边界 | 证据/代码 |
-| --- | --- | --- | --- | --- |
-| L0 解析与资源边界 | verified（局部） | 严格流解析、默认有界事实/摘要流、磁盘/临时文件守卫存在 | 全部 CLI 模式和异常路径仍需统一矩阵 | `crates/evaluator/src/lib.rs`、`scripts/check_disk_budget.py`、`scripts/run-tests.sh` |
-| L1 物理/状态不变量 | verified（测试范围） | `InvariantChecker`、Hard/Soft 严重度、历史失败路径回归测试存在 | 当前快照未提供新的全 profile 全场矩阵，不能外推到所有 seed | `crates/invariants/`、`crates/engine/tests/invariants.rs` |
-| 回合终结归因 | verified（类型与回归范围） | `PossessionEndCause` 无 `UNATTRIBUTED_END` 变体；跨节 `PeriodEnd`、传球点掉归因测试存在 | 需要持续跑完整矩阵并确保摘要责任字段与事件窗口完全一致 | `crates/domain/src/event.rs`、`crates/engine/tests/attribution.rs` |
-| 四式账本 | partial | evaluator 已实现得分、球权、时间、犯规检查并导出 `ledger_violations` | 犯规守恒仍是单节峰值粗检，不是完整个人/团队账本；跨模式工件矩阵不足 | `crates/evaluator/src/ledger.rs`、`crates/cli/src/main.rs` |
-| 评判证据模型 | verified（单测范围） | 四态 `Verdict`、固定分母字段、空证据不计通过、Hard gate 使指数失效 | 当前评判准则仍有盲区；`ASSIST_PROFILE` 等明确标记为证据不足 | `crates/evaluator/src/lib.rs`、`crates/evaluator/tests/evaluator.rs` |
-| 构成评判 | partial | 3PA、区域、节奏、失误率等比赛级准则和 fixture 字段存在 | 参考带来源/联合分布/跨 profile 标定仍不完整；不能把进带当作机制真实 | `crates/evaluator/src/fixture.rs`、`crates/evaluator/fixtures/`、`docs/dev/gap.md` §15 |
-| 事件因果链 | verified（协议字段与回归范围） | `FrameEvent` 有全场 `event_id` 和可选 `parent_event_id`，语义父链有测试 | 仍需把所有事件族纳入稳定 schema，并让 ledger 直接消费而非解析字符串载荷 | `crates/protocol/src/frame.rs`、`crates/engine/tests/attribution.rs` |
-| World 封装 | verified（字段可见性）/ partial（snapshot 投影） | `MatchEngine` 的 16 个 `pub` 字段已全部私有（`da453cf`），只保留只读访问器与显式 `*_for_test` 钩子；守卫判据已由「字段清单」升级为「零 `pub` 字段」（`0bc7496`），两类负面对照均能变红；巨石拆分后 `world` 字段也私有，零 `pub` 字段守卫在 `match_engine/mod.rs` 上通过 | CLI/回放/评判尚未统一到单一只读 `snapshot()` 投影；`step_inner` 的阶段拆分属 D8 | `scripts/check_world_privacy.py`、`crates/engine/src/match_engine/mod.rs`、`docs/dev/evidence/problem.md` §24 |
-| 超大源文件按职责划分（D29） | **verified（行数门已机械守卫）** | 五份超 1200 行的源文件全部划分完成（§10.4–§10.7）：`physics/movement.rs` 1643 → `movement/mod.rs` 971 + `kinematics.rs` 729；`decision/constraint.rs` 1214 → `constraint/mod.rs` 836 + `evaluate.rs` 442；`domain/rules.rs` 1709 → `rules.rs` 963 + `rules/policies.rs` 760；`evaluator/lib.rs` 1543 → `lib.rs` 1014 + `report.rs` 300 + `composition.rs` 221 + `parse.rs` 46；`cli/main.rs` 1169 → `main.rs` 639 + 四个 `commands/*.rs`（260/241/72/9）。14 个新/拆后文件逐一实测均 ≤ 1200 行；外部引用面零变动（`crates/decision/src/lib.rs` 的 `pub use constraint::{...}` 与 HEAD 逐字相同）；每次搬移后 `golden_hash` 均未变。后续 `ball_flight/mod.rs` 曾回涨到 1309 行（ADR-017 接触模型），已按臂划分：`mod.rs` 485（总 match 薄调度）+ `arms.rs`（四大臂体），划分全程哈希不变；行数门现由 `scripts/check_max_source_lines.py`（含自测）机械守卫并接入 `run-tests.sh` | 无 | `crates/physics/src/movement/`、`crates/decision/src/constraint/`、`crates/domain/src/rules/`、`crates/evaluator/src/`、`crates/cli/src/commands/`、`crates/engine/src/match_engine/ball_flight/`、`scripts/check_max_source_lines.py`、`docs/dev/current/plan.md` §10 |
-| 球态单一写入口 | partial | domain 转换表、engine `transition_ball_state`、BallState 领域测试存在 | engine 内部仍使用 `BallTrajectoryKind` 别名和多个运行态派生字段；目标 `BallControl × BallMotion` 尚未完成 | `crates/domain/src/flow.rs`、`crates/engine/src/match_engine/mod.rs`、`docs/dev/gap.md` §5 |
-| 主循环阶段化 | partial | 生命周期与子阶段类型存在，事件/不变量在主循环中接入；巨石划分把弹道状态机、动作执行、对抗裁定、球权转移、战术导航、事件发布各自移出独立模块；`phases.rs` 把跳球/节间/暂停/终场四个生命周期分支抽为带 `PhaseOutcome` 短路信号的具名阶段；D22 把构造（`construction.rs`）、只读访问器（`accessors.rs`）、`*_for_test` 钩子（`test_hooks.rs`）、弹道裁决与球态写入口与结果消费链（`ball_flight/` 模块）、名册与换人（`roster.rs`）、流程、作用域与回合总结（`flow.rs`）、动作窗口推进（`action_windows.rs`）、决策阶段（`decision.rs`）、每 tick 收尾簿记（`bookkeeping.rs`）、运行时约束/罚球/节末短路与贴身切球（`runtime_phase.rs`）、对外值类型（`types.rs`）移出 `mod.rs`，并删除 12 个零引用方法；D22 的状态组收敛把 82 个字段收为十个具名组（`state.rs` 398 行），`MatchEngine` 零裸字段，`mod.rs` 3213 → 252 行 | `step_inner` 已由 1483 行降为 95 行的纯调度器（顺序调用具名阶段，每个可短路阶段返回 `PhaseOutcome`，由调度器统一 `return self.build_tick()`）；`MatchEngine` 的十个状态组仍对子模块以 `pub(crate)` 字段可见，窄签名由各函数签名中列出的组名表达（ADR-014）；shadow world（`MatchWorld`/`sync_to_world`/`PerceptionSystem`）已整体移除，`Systems` 不再持有 `world` 字段，全场防守拓扑改由 `crates/decision/src/potential_field.rs` 的 `DefensePotentialFieldSolver` 在求解时涌现（ADR-015 supersede），`wiring_proof.rs` 十项全绿；**子阶段迁移合法性已有回归覆盖**：非投篮犯规在球飞行中不再重置子阶段（原先会产生非法的 `Initiation -> FlightAndRebound`，实测 seed 12 tick 51080），新增 `crates/engine/tests/invariants.rs::phase_transitions_are_legal_across_seeds` 按 `nba.v2` 的 `phase_transitions` 合法表断言 4 seed × 90000 tick 的全部相邻迁移合法，并用负面对照验证过会变红 | `crates/engine/src/match_engine/mod.rs`、`crates/engine/src/match_engine/state.rs`、`crates/engine/src/match_engine/ball_flight/mod.rs`、`crates/engine/src/match_engine/events.rs`、`crates/engine/tests/invariants.rs`、`scripts/check_engine_state_groups.py`、`docs/architecture.md` §4 |
-| 能力扰动 | partial | `evidence/problem.md` §29 已交付**逐维消费链清单**（29 维：19 有消费点、6 已实证零消费、3 名义有消费点但未接线）；领域 capability 映射、属性扰动测试与 roster 资产存在 | 29 维中**仅 7 维有扰动测试**（`free_throw` 独占 6 处用例）；零消费维度待接线或移除 | `crates/domain/src/capability.rs`、`crates/engine/tests/attribute_perturbation.rs`、`docs/attributes.md` §2、`docs/dev/evidence/problem.md` §29 |
-| 规则字段因果闭环（D27） | partial | `UNIMPLEMENTED_RULE_FIELDS` 现为空数组；14 个 `effective_*` 能力函数存在；士气调制已改为按动作族加权（`ModulationRules.morale_*_affinity`）；士气状态机的两个不可达分支已修复（`record_shot` 已在 `ball_flight.rs` 的 `HoopArrival` 处接线，`MoraleState::Clutch` 已删除以免 `clutch_bias` 双计），`wiring_proof.rs::morale_hot_hand_state_must_be_reachable` 验证 `HotHand` 可达；六个 D27 维度的曲线系数已进入 `GameRules.capability`（默认值与原内联算术逐项相等）；三条过弱的消费通道已加强并走规则通道；`rules_complete_wiring.rs` 六项全部转绿（无 `#[ignore]`）——末项的修复包括给 `PostUp` 独立的效用结构：`DecisionRules.post_up_base`（2.2）、`post_up_mismatch_weight`（0.9）、距离因子改 `dist/18`、引入以 `strength` 对抗 `effective_post_defense_physicality` 的错位收益项——修后 `PostUp` 进入候选 20 次、被选中 2 次（修前 15 次 / 0 次）。错位收益项的实测影响范围有限：权重从 0.9 改为 0.0 时效用总和 12.69 → 13.51（确实进入计算），但选中次数均为 2 次；另把 `label_of` 的 `PostUp`/`TripleThreatJab` 从共用的 `OTHER` 拆为各自标签，使该 match 变为穷尽；`wiring_proof.rs` 十项全绿 | 无（D27 验收门已全部达成） | `crates/domain/src/rules.rs`、`crates/domain/src/resolve.rs`、`crates/domain/src/capability.rs`、`crates/decision/src/pipeline.rs`、`crates/decision/src/modulation.rs`、`crates/engine/tests/rules_complete_wiring.rs` |
-| 进攻战术资产化 | partial | 两个内置 JSON 档案、slot fill、能力适配和目标绑定已进入当前路径；**旧 `TacticalSet` 的 6 个硬编码几何分支已删除**（`db31fe7`，330 行死计算，8 seed 逐字段比对差异 0） | `TacticalSet` 仍作为**兼容/解析枚举**存在（`from_id`/`id`/`name_zh` 与 `tactical_set` 字段）；更多档案未纳入统一库；slot fill 回退路径仍按 roster 顺序 | `data/tactics/`、`crates/domain/src/tactics.rs`、`crates/decision/src/tactics.rs`、`crates/engine/src/match_engine/mod.rs`、`docs/dev/evidence/problem.md` §26 |
-| 防守因果链 | partial | `DefenseRules` 从 `data/defense/schemes.json` 进入目标几何（`sag_multiplier` / `on_ball_gap_multiplier` / `help_priority` 已接线且有方向性断言）；`switch_aggressiveness` 经实测为零消费 | 三层声明**均未接线**（evidence §28）：`DefensiveSystem` 含四个子配置消费点全为 0；旧 `decision/src/defense.rs` 两个评估函数全仓零调用（该文件已删，职责并入 `crates/decision/src/pipeline.rs`）；档案数据缺对位/换防/协防规则字段 | `data/defense/schemes.json`、`crates/domain/src/rules.rs`、`crates/domain/src/tactics.rs`、`crates/decision/src/pipeline.rs`、`crates/engine/tests/defense_effect.rs`、`docs/dev/evidence/problem.md` §28 |
-| 名册身份独立 | verified（守卫与回归范围） | roster JSON 数据资产、`check_no_index_identity.py`、顺序中性测试均存在；`PlayerRole` 与 `PlayerData.roles` 已物理删除（提交 `487293c`） | 仍需清理通用工具中以 index 访问的非身份用途，避免守卫只覆盖已知模式 | `data/roster/`、`scripts/check_no_index_identity.py`、`crates/engine/tests/roster_order_neutrality.rs` |
-| LeagueProfile | partial | `LeagueProfile` 类型、NBA/FIBA fixture 与 league 测试存在；`e63d320` 新增 **6 个程序级情景用例**（节时长/ORB 时钟/三分几何/犯规上限/bonus 门槛/节末终场），其中三分几何用例带负面对照 | **交替拥有与罚球程序仍未覆盖**；评判 fixture 带来源/版本的规格未完成；固定种子矩阵未运行；NCAA 仍是路线项 | `crates/domain/src/league.rs`、`crates/engine/tests/league_profile.rs`、`crates/evaluator/fixtures/` |
-| 确定性与黄金哈希 | verified（现有测试范围） | golden hash 测试和事件 ID 单调测试存在 | 行为改动仍需按 protocol 重新冻结；黄金哈希不能证明真实性 | `crates/engine/tests/golden_hash.rs`、`docs/protocol.md` §3 |
-| 文档与阈值守卫 | verified（脚本与 CI 范围） | `check_docs.py`、`no_index_identity`、`threshold_integrity`、`world_privacy`、`engine_state_groups`、`inline_constants`、`docs`、`disk-budget` 八项全部接线到 CI guards matrix；前五项含 `--self-test` 负面对照；常数守卫已把 `#[cfg(test)]` 段单独棘轮（生产 1670 / 测试 356）；`check_max_source_lines.py`（D29 行数门的机械形式）已建立，接入 `run-tests.sh` 后置门 | 无 | `scripts/check_docs.py`、`scripts/check_threshold_integrity.py`、`scripts/check_no_index_identity.py`、`scripts/check_max_source_lines.py`、`.github/workflows/ci.yml` |
-| 统计形态（G-STATS） | **verified（Hard 门、账本与构成准则全过；矩阵已进套件）** | 节间开场球权程序修复后重跑（`./target/release/nba-sim --seeds 1..16 --league nba full`）：`Median Total Points=176.0`、`Median 3P=32.3%`、`Median Dur=13.73s`、Axiom=0、Ledger=0、**`Realism Index=0.998`、Hard 门通过**（29375 judgments、127 defects，全部 soft）。同一验收已内化为 `stats_baseline`（16 seed 全场：统计带 + 账本五式 + Hard 门断言），不再依赖人工跑矩阵；`attribution` 的违例归因回归同步扩到 16 seed 全场 | 127 条 soft 缺陷按既有盲区登记处置；矩阵中位数随引擎演进由 `stats_baseline` 的带门与逐场输出跟踪 | `crates/engine/tests/stats_baseline.rs`、`crates/engine/tests/attribution.rs`、`crates/evaluator/fixtures/nba.v2.json`、`docs/dev/evidence/problem.md` §21–§32 |
+| 门 | 状态 | 当前代码事实 | 未闭合边界 |
+| --- | --- | --- | --- |
+| 确定性 | verified（测试范围） | `crates/engine/tests/golden_hash.rs` 冻结固定窗口哈希，并记录后续行为变更 | 黄金哈希只证明声明窗口内的输入输出稳定，不证明比赛真实 |
+| L1 不变量 | verified（测试范围） | `crates/invariants` 检查发布帧；`crates/engine/tests/invariants.rs` 覆盖非法阶段迁移等回归 | 不能从单个测试范围外推到所有种子和所有联赛 |
+| 事件身份 | verified（协议范围） | `crates/protocol/src/frame.rs` 的 `FrameEvent` 带 `event_id` 与 `parent_event_id` | 账本仍解析事件载荷，不是全部直接消费类型化事件 |
+| 回合终结 | verified（类型范围） | `PossessionEndCause` 没有未归因变体，失误终结要求责任球员 | 责任字段与所有事件窗口的持续矩阵不在本快照重跑 |
+| 账本 | partial | `crates/evaluator/src/ledger.rs` 检查得分、球权、时间、犯规和失误责任，共五式 | `check_foul_conservation` 只比较犯规事件数与单节球队犯规峰值，不重建个人犯规、bonus 和罚则 |
+| 评判模型 | partial | `Verdict` 有四态；`ASSIST_PROFILE` 固定返回 `InsufficientEvidence`；构成准则有固定分母 | `crates/evaluator/fixtures/blind_spots.md` 登记的联合分布、情境、个体和序列仍无准则 |
+| 统计带 | partial | `crates/engine/tests/stats_baseline.rs` 对 16 个全场种子断言统计带、五式账本和 Hard 门 | 最近一次全矩阵的原始数字只存在于历史证据；本快照不引用未重跑的结果。篮下占比带见 `gap.md` G6a |
+| 出手结果 | partial | `PendingShotRelease` 在 `execute_shot` 写入 `is_made`、`fouled`、飞行时间和弧顶；释放时刻只回放这些字段。封盖有独立 `BlockedShot` 事实 | 球路、封盖和触筐不重新决定这颗球是否命中。`docs/blind_spots.md` 第 4 条登记此缺口 |
+| 球态 | partial | `crates/domain/src/flow.rs` 的 `BallState` 是归属、飞行参数和预定结果的联合类型；转换有领域测试 | `BallControl` 与 `BallMotion` 正交迁移仍是 ADR-007 proposed |
+| 阶段调度 | partial | `MatchEngine::step_inner` 按具名阶段顺序调用；`PhaseOutcome` 表达短路；十个状态组由 `scripts/check_engine_state_groups.py` 守卫 | 阶段函数仍接收 `&mut MatchEngine`。ADR-014 记录了未改成字段级窄签名的原因 |
+| 执行重校验 | partial | `apply_decision_output` 位于决策之后、物理步进之前 | 投篮命中和犯规已在进入释放前回放路径之前抽签 |
+| Play | partial | `advance_active_play` 进入主循环；偏好和抑制进入决策效用；命中规则经 `resolve_verb` 改槽位目标。`play_engine_integration.rs` 覆盖触发、追踪和目标改写 | 动词产出的是固定深度的目标偏移。掩护接触、挡拆覆盖和防守选择没有统一生命周期 |
+| 防守 | partial | `data/defense/schemes.json` 的部分参数进入目标几何，`defense_effect.rs` 检查几何和结果分布；势能场、滞回、协防混合和弱侧标签有单元测试 | 挤过、绕过、换防、延误、沉退、恢复没有完整的触发、责任、失败和反事实证据。ADR-008 仍是 proposed |
+| 能力 | partial | `PlayerAttributes` 有 22 个归一维度，含 `shooting_near`。出手分区由 `CourtGeometry::shot_zone` 决定，决策和出手结算共用 | 规格要求每个保留维度都有行为响应和断路测试。当前测试集合没有逐维覆盖全部 22 维 |
+| 倾向 | partial | `PlayerTendencies` 有 8 个字段。`attributes.md` 登记 12 个倾向 | `gamble_steal`、`block_aggressiveness`、`help_aggressiveness`、`physicality` 不在结构体中。`cut_frequency`、`screen_frequency` 进入档案和派生角色，没有决策或运动消费点 |
+| 阵容与疲劳 | partial | `roster.rs` 处理换人；`modulation.rs` 更新体力；`rotation.rs` 检查疲劳换人 | `tactics.md` 的轮换表、暂停、垃圾时间和临场换体系没有完整程序 |
+| 联赛档案 | partial | `LeagueProfile` 参数化节时长、进攻时钟、个人犯满、bonus、三分几何和交替拥有。`league_profile.rs` 与 `fiba_scenarios.rs` 覆盖这些程序 | 走步、三秒、干扰球、技术犯规和完整罚则账本没有按联赛档案分开验证。NCAA 不在首批范围 |
+| 动作模型 | partial | 持球候选为投、突、背身、传、发球、试探、停顿、推进。动作窗口有准备、执行、随挥 | `PostMoveKind` 无决策消费点。运球和跳投细分主要改变动作名。无球九种动作没有独立候选生成器 |
+| 出手分布 | partial | 评判按四区统计：篮下、近筐、中投、三分。`nba.v2.json` 带有四区占比带 | 四区占比带未在本次合并中重跑。文档禁止单独用效用斜率凑这些数字 |
+| 球员身份 | partial | `PlayerData` 有六类位置和赛前攻防角色；投影写入 `RenderPlayer`，`identity_projection.rs` 检查整场稳定 | 身份字段不进入行为。个体表现评判仍未按身份聚合 |
+| 文档守卫 | verified（脚本范围） | `scripts/check_docs.py`、常数、阈值、身份、状态组和行数守卫有负面对照，并接入 CI | 守卫证明所列规则，不证明规格全部实现 |
 
 ## 3. 当前未完成工作
 
-当前周期任务为第一性原理动力学与架构演进（`D22–D29`），详细设计见 [`current/plan.md`](current/plan.md)：
+按 `docs/dev/gap.md` 的依赖顺序，当前执行队列是：
 
-- D22: 状态组收敛与 `mod.rs` 瘦身（`architecture.md` §4.3、ADR-014）— **已完成**
-- D23: 空间 Voronoi 拓扑与防守压迫感知 — **已完成**
-- D24: 几何突破裁定 + 制动/牵引 — **已完成**（`DriveGeometryPolicy` 规则通道、
-  `drive_geometry` 5 项、后端 12 项全绿）
-- D25: 出手时序闭环 — **已完成**（裁定冻结与 Release 分离、封盖挂起期裁定、
-  回合边界挂起作废、`shot_release_timing` 3 项全绿；golden v77）
-- D26: 弱侧协防责任链 — **已完成**（突破收缩激励 `drive_help_threat_gain`，
-  响应率 70.1%→96.6%（≥90% 门，4 seeds）；测试语义与引擎连续势能场同构）；
-  rim 出手分布 [0.25,0.5] 带的收敛作为开放校准项（`gap.md` G6a，非阻塞）
-- D27: 规则字段因果闭环的实证补齐 — **已完成**
-- D28: 周期出口、全矩阵回归与归档 — **已完成**（tier1 全绿、tier2 19/19、
-  17-seed 矩阵 0 Hard/Realism 0.998、吞吐带 [4400,7220] 重冻结；唯一开放项
-  为 gap.md G6a 登记的 rim 出手分布收敛，非阻塞缺陷）
+1. 出手、传球和突破的结果改由飞行、接触和封盖事实决定；
+2. 在新的结果通道上闭合篮下出手分布；
+3. 把已声明的无球和对抗动作接成可取消的动作生命周期；
+4. 完成挡拆到防守选择的责任图；
+5. 补齐走步、三秒、干扰球和个人犯规罚则账本；
+6. 对齐 12 个倾向规格，并补个体与情境评判；
+7. 用有来源的参考分布重标定真实度目标线。
 
-## 4. 最近关闭项
+第 1 项的当前代码入口是 `crates/engine/src/match_engine/execution.rs` 的 `execute_shot` 和 `crates/engine/src/match_engine/state.rs` 的 `PendingShotRelease`。
 
-### 4.0 节间开场球权程序与后场计时控球谓词（2026-09-22，缺陷修复）
+## 4. 证据入口
 
-**缺陷**（seed 14 全场，16-seed 矩阵唯一失败点）：第 3 节最后 0.3 秒 H_08
-持球被拨掉（`BALL_POKED_LOOSE`，松球态 `last_passer_id` 已清），节末
-`settle_ball_for_period_break` 把在飞松球结算为停球；第 4 节开场
-`sync_game_flow` 只恢复活球流程，停球直接带入——**球态停球与活球流程并存**，
-连续 201 tick 无人能触球（最近球员距球 0.04 ft 亦无法取得），后场计时按球位
-累加到 8 秒判出 `EIGHT_SECOND_BACKCOURT`，责任人派生全空，产出
-`turnover_player_id=null` 的失误终结（possession 185）：账本
-`TURNOVER_CONSERVATION` 违规 + 评判 `TURNOVER_ACTOR_CONSISTENCY` Hard，
-矩阵以账本门失败退出（修复前：Ledger=1、Index=0.000、中位总分 163）。
-同类缺陷历史前科见 evidence §32.14（当时只在实验配置下出现，成因未查）；
-引入提交为 fe5e233（松球争抢者限制改变轨迹使命中），结构性条件（停球跨节、
-计时无控球要求）更早已存在。
-
-**修复**（三项，全部在引擎层）：
-
-| 项 | 内容 | 位置 |
-| --- | --- | --- |
-| 节间开场球权程序 | `sync_game_flow` 新增 `start_period_ball_program`：球已被在场球员持有时原样保留（常规路径行为不变，黄金哈希实测不变）；否则按保留的进攻方进入显式发球程序（`begin_inbound` 从 `start_inbound_transition` 抽出，不翻转球权、不重复回合结算） | `crates/engine/src/match_engine/{flow,transitions}.rs` |
-| 后场计时控球谓词 | 累加与违例判定同增控球前置：松球/篮板/停球/投篮飞行不累加、不判违例；谓词在决策侧为 `ConstraintContext::offense_has_possession`，两侧同一口径 | `crates/engine/src/match_engine/phases.rs`、`crates/decision/src/constraint/{mod,evaluate}.rs` |
-| 松球最后触球人载荷 | `LooseBall`/`RimRebound` 增加 `last_touch_player`（P1：状态是唯一事实源），12 处构造点逐一写入物理触球人，`Dead` 经松球链路继承；`current_turnover_player_id` 对松球态优先读载荷；新增 L1 不变量 `LIVE_FLOW_DEAD_BALL`、`TURNOVER_ACTOR_MISSING`（ fast-fail，问题在产生它的 tick 就显形） | `crates/domain/src/flow.rs`、`crates/invariants/src/{lib,taxonomy}.rs`、`crates/engine/src/match_engine/`（构造点） |
-
-**验收**（全部实测）：
-
-- 修复前 `stats_baseline` 新账本/Hard 门断言在 seed 14 变红（复现）；修复后 16-seed
-  矩阵：Ledger=0、无 Hard 缺陷、`Realism Index=0.998`（29375 judgments、127 soft）、
-  中位总分 163 → 176、3P% 中位 30.3 → 32.3；seed 14 全场帧流中「活球流程 + 停球」
-  从 201 tick 降为 **0** tick；
-- 黄金哈希不变（两处行为变更均不在开局窗口内；冻结记录补登 v73 并覆盖
-  fe5e233 未登记的常量，见 `golden_hash.rs`）；
-- 同批关闭的监控缺口：16-seed 账本 + Hard 门断言内化进 `stats_baseline`，
-  违例归因回归扩到 16 seed 全场——此类缺陷不再只能靠人工跑矩阵发现；
-- 吞吐无退化（seed42 6530 / seed1 6365 ticks/s，带内；fixture 已重冻结）。
-
-### 4.1 调试链缺陷与验证通道（D12）
-
-D12 从本周期计划执行完毕后已从 `current/plan.md` 移除（该文件只保留未完成工作，见 `docs/dev/README.md` §1.2）；六项均已实施并验证：
-
-| 项 | 结论 | 证据 |
-| --- | --- | --- |
-| D12.1 `events_since` 游标 | 改用跨 tick 唯一的 `event_id`；`step_once` 去重同步 | `crates/engine/src/service.rs`、`crates/engine/tests/session.rs::match_service_events_since_cursor_uses_global_event_id` |
-| D12.2 前端三项指标 | 面板 `offensiveReboundPct`/`turnoverRate`/`foulRate` 为真实值（在线读取：20.0%/0.0%/0.0%，原恒为 `—`） | `crates/debug-server/static/app.js`、`scripts/verify_ui_alignment.py`（8 行渲染通过） |
-| D12.3 投篮因果配对 | 按 `parent_event_id → SHOT_RELEASE.event_id` 配对；旧流无父链时才退化 FIFO | `crates/debug-server/static/app.js` |
-| D12.4 规则投影单一化 | `frame_rules_from_game_rules` 为唯一投影；一致性测试抓出**两处**既有漂移（`player_radius_ft` 1.0→1.8、`separation_safety_margin_ft` 0.0→0.05） | `crates/engine/src/match_engine/mod.rs`、`crates/protocol/src/frame.rs`、`crates/engine/tests/projection.rs::frame_rules_default_matches_game_rules_default_projection` |
-| D12.5 命中列表 | 每帧重建（在线读取：10 条在场球员，原无界增长） | `crates/debug-server/static/app.js` |
-| D12.6 violations 通道 | `/api/simulate` 流末 `run_summary` 携带引擎官方违规；前端 `detectAnomalies` 已退役（在线确认 `undefined`），异常面板只渲染引擎违规 | `crates/debug-server/src/main.rs`、`crates/debug-server/src/main.rs::c6_6_tests`、`crates/debug-server/static/app.js` |
-
-同批完成：渲染层移除全部 `innerHTML` 拼接（改 `el()` + `textContent`，`esc` 随之删除）。
-
-验证范围：`golden_hash`、`constraint_system`（75 项，现 `constraints.rs`）、`pass_information`、`attribution_integrity`（现 `attribution.rs`）、`nba-debug-server`（3 项）、`verify_ui_alignment.py`（全部卡片与画布对齐）、四项守卫 + 阈值自测。**未运行**：完整 workspace 套件（受统计门阻塞，见 `current/plan.md` §8）。
-
-> 编号说明：`D12` 是本周期状态快照对已关闭任务的登记号；项内 `c6_6_tests` 等标识符是代码中的模块名，保留不改。
-
-### 4.2 收敛周期成果（20260916_convergence，D7–D13 归档）
-
-本周期已按 `docs/dev/README.md` §7 完成周期出口并归档至 [`cycles/20260916_convergence/plan.md`](cycles/20260916_convergence/plan.md)；以下为本周期关闭与验证项：
-
-| 项 | 结论 | 证据/提交 |
-| --- | --- | --- |
-| **G-STATS 统计门全部关闭** | 16 seed full：七项构成指标全绿（`two_make_pct` 0.503、`three_make_pct` 0.334、`free_throw_rate` **0.204**、`pace` 218.6、`total_p50` 216.5）；`stats_baseline` 转绿。未改任何门限或分母 | `8e42bcb`；机制见 evidence §32 |
-| 多联赛双硬门通过（D11.2） | 16-seed NBA / 8-seed FIBA 矩阵硬门全部通过；按 2843 回合实测分布统一标定 `duration_tolerance_seconds = 15.0s` | `f8425f1`、`c13131b` |
-| 批量模式账本盲区修复（D11.3） | batch 现逐场跑 `check_ledger`、写入 `ledger_report.json`、违规非零退出 | `f178e32` |
-| 篮板端到端扰动（D10.2） | 补齐前场板、后场板、弹跳三维度端到端因果扰动，18 项测试全绿，三类断路负面对照有效 | `4914107` |
-| 能力消费链清单（D10.1） | 29 维逐维清单，6 个零消费维度经实证确认（§29） | `8410f75` |
-| 公共边界私有化（D7.1） | 16 个 `pub` 字段全部私有；测试后门集中化；`check_world_privacy.py` 升级为「零 pub 字段」守卫 | `da453cf`、`0bc7496` |
-| 球态边穷举矩阵（D8.3） | 10×10=100 种组合全覆盖（49 合法 / 51 非法），替代样例式测试 | `72661d5` |
-| 旧 `TacticalSet` 几何退役（D9.1） | 删 330 行死计算；三组对照实验 + 8 seed 逐字段比对差异 0 | `3e9011b`、`db31fe7` |
-| `BaseRates` 死参数清理（D9.4） | 删四个零消费字段，并区分「重复声明」与「未实现功能」两类 | `320bcaf`、`22bb764` |
-| 分区命中率模型（D8.4） | 修结构性缺陷：中距离命中率基准与廊下解耦 | `7e331fc` |
-| 篮板冲抢指派（D8.5） | 修行为缺失：球在空中时守方与攻方冲抢速率平衡 | `10f2a53` |
-| 失误计数单一入口（D8.6） | 修零写入字段：5 种失误终结统一步进 | `ef4bd39` |
-| 黄金哈希长窗口覆盖断言 | 10200-tick 长窗口覆盖断言；明确黄金哈希结构上无法守卫概率类参数的认知 | `872443d` |
-| 守卫失效面修复 | 常数棘轮测试预算分离；两项守卫接入 CI；文档守卫编号命名空间校验 | `323a012`、`0bc7496` |
-| 周期归档出口（D13） | 归档 D7–D13 计划至 `cycles/20260916_convergence/plan.md`，结转 D14–D21 至新周期 | `docs/dev/cycles/20260916_convergence/plan.md` |
-
-验证范围：`./scripts/run-tests.sh` **45 个套件全绿、0 失败**（含 `stats_baseline`）；6 项守卫 + 负面对照全通过。
-
-### 4.3 体系化实施周期成果（D14–D20 闭环）
-
-本周期全部 7 项实施任务（D14–D20）已全部闭环并通过机械判定出口门：
-
-| 项 | 结论 | 证据/测试 |
-| --- | --- | --- |
-| **D14** 最小只读 snapshot 投影 | 定义零拷贝借用 `EngineSnapshot<'a>`；消费方完成迁移；保留 `render_frame()` 保证 StreamTick 兼容 | `crates/engine/src/snapshot.rs`、`tests/engine_snapshot.rs` |
-| **D15** carrier_idx 彻底解耦 | 采纳 ADR-010 裁定球态派生焦点球员，彻底删除引擎内私有字段 `carrier_idx` 及其写入旁路；消除了 phantom index 对位残留 | `docs/decisions.md`（ADR-010）、`crates/engine/src/match_engine/mod.rs` |
-| **D16** step_inner 窄签名划分 | 弹道裁决、动作执行、对抗裁定、球权转移、战术导航、事件发布与只读投影已移出为独立模块；`step_phases_isolation.rs` 覆盖阶段隔离；D22 把 `step_inner` 由 1484 行降为 95 行的纯调度器，顺序调用具名阶段并由调度器统一处理 `PhaseOutcome::ShortCircuit` | `crates/engine/src/match_engine/mod.rs`、`crates/engine/src/match_engine/phases.rs`、`tests/step_phases_isolation.rs` |
-| **D17** 防守方案责任链实施 | `schemes.json` 扩展 `screen_defense` 参数（schema v2）；打通 Drop/Switch/Hedge 结构化责任动作 | `data/defense/schemes.json`、`crates/decision/tests/defense_responsibility_chain.rs` |
-| **D18** 零消费字段处置 | `clutch_*` 与 `drive_finish_range_ft` 接回数据通道；死字段显式清单化（`UNIMPLEMENTED_RULE_FIELDS`） | `crates/domain/src/rules.rs`、`tests/rules_consumption.rs` |
-| **D19** 核心能力维度扰动覆盖 | 补齐 `shooting_mid`、`passing`、`decision_iq`、`strength`、`defense_*` 扰动与断路负面对照（18 项全绿） | `crates/engine/tests/attribute_perturbation.rs` |
-| **D20** FIBA 交替拥有与罚球覆盖 | 新增交替拥有箭头全流程与罚球情景测试；证明 NBA 跳球 vs FIBA 箭头程序差异；0 账本违规 | `crates/engine/tests/fiba_scenarios.rs` |
-
-黄金哈希受控演进至 **v64（`0x01885463019631e7`）**，全套件全绿，8-seed stats 在带（total_p50=212.0，3P%=37.3%）。
-
-### 4.4 第一性原理连续势能场与主干闭环成果（完整实施闭环）
-
-本周期通过连续势能场动力学求解与主干管线深度手术，彻底打破死代码孤岛，实现 100% 真实执行与因果单调性：
-
-| 项 | 结论 | 证据/测试 |
-| --- | --- | --- |
-| **连续势能场求解器** | 实现 `DefensePotentialFieldSolver`，将持球威胁重力、空间真空吸力、对位张力连续积分，弱侧 Low-man 护筐与 High-man X-Out 跑位作为能量极小值平衡点自然涌现（无硬编码脚本） | `crates/decision/src/potential_field.rs`、`tests/defense_responsibility_chain.rs` |
-| **规则与能力因果闭环** | 篮板争抢真实消费 `effective_defensive_boxout_bonus` 与力量对抗；传球拦截真实消费 `effective_risk_tolerance`；协防速度真实消费 `effective_help_awareness` | `crates/officiating/src/resolution.rs`、`crates/engine/tests/attribute_perturbation.rs`（19 项全绿） |
-| **裁判规则修正与防死锁** | 修正阻挡犯规误判为投篮罚球的历史旧 bug；前场普通犯规回表至 14 秒并保持球权继续组织，终结级联犯规与罚球虚高 | `crates/officiating/src/resolution.rs`、`crates/engine/src/match_engine/mod.rs` |
-| **主干巨石收敛** | `MatchEngine` 巨石按职责拆为具名模块，`mod.rs` 收敛为纯调度器（≤ 400 行，守卫强制），十个状态组零裸字段（原内置 `MatchWorld` 双向同步驱动 `PerceptionSystem` 已随 shadow world 整体移除，见 ADR-015 supersede） | `crates/engine/src/match_engine/mod.rs`、`scripts/check_engine_state_groups.py` |
-| **多线程并行并发模拟** | `stats_baseline` 引入 `std::thread::scope` 并行执行 8-seed 回归，耗时暴降，`total_p50=204.5`，`3P%=36.9%` | `crates/engine/tests/stats_baseline.rs` |
-| **黄金哈希科学重校准** | 签署并冻结基准哈希至 **v65（`0xde010befa25c77b0`）**，15200-tick 长程回归与跨种子不变量零违规 | `crates/engine/tests/golden_hash.rs` |
-
-## 5. 开放问题
-
-| 问题 | 依赖 | 下一验证动作（新周期） |
-| --- | --- | --- |
-| `carrier_idx` 解耦（D15） | ~~需先定「无关联球员的球态下谁算 ball handler」~~ **已裁定（ADR-010）** | 语义裁定已登记 `docs/decisions.md` ADR-010（accepted）：采用球态关联语义，否定名单下标投影。按 ADR-010 + `gap.md` §5.2a 落实派生，planner 改以 `ball_pos_3d` 为参考，删除 `carrier_idx` |
-| 防守方案责任链实施（D17） | ~~需先补全档案数据~~ **参数字段集已设计** | `schemes.json` 责任链参数字段集（`screen_defense` 块，schema_version 2）已设计入 `current/plan.md` §6.2；按字段集补数据并打通 switch/drop/hedge/recover（§28） |
-| `GameRules` 零消费字段（D18） | 分属四个未接线子系统 | 21 字段三分类处置表已设计入 `current/plan.md` §7.2（A 接线 / B 未启用 / C 删除）；clutch 与 drive_finish 为「接回数据通道」（硬编码绕过规则字段） |
-| 能力维度零消费（D18） | 分属四个未实现的战术行为 | 6 维度已分类（见 §7.2）；`block`/`risk_tolerance` 随 D17 接线；`free_throw` 经复核已接入主循环，移出零消费清单 |
-| 剩余能力维度扰动覆盖（D19） | — | 为 `passing`、`shooting_mid`、`decision_iq`、`strength` 等建立单调性与断路负面对照 |
-| FIBA 交替拥有与罚球情景（D20） | — | 建立争球箭头翻转与罚球违例进出情景测试 |
-| 最小只读 `snapshot` 投影（D14） | ~~—~~ **字段清单已设计** | `EngineSnapshot<'a>` 字段清单与消费方迁移清单已设计入 `current/plan.md` §3.2；关键：重命名现有 `snapshot()→StreamTick` 为 `render_frame()`，让名给内部借用投影 |
-| `D12.6` 代码标识符遗留 | 无 | `debug-server::c6_6_tests` 等模块名仍用旧编号；不影响行为，可随下次触及该文件时改名 |
-
-## 6. 当前周期计划入口
-
-详见 [`current/plan.md`](current/plan.md)（本周期任务：`D22–D29`，第一性原理连续博弈与空间动力学引擎）。
-战术系统升级（规则化 play + 选板）与势能场优化的执行编排见 [`current/plan_play.md`](current/plan_play.md)（任务 #12–#24，含并行波次与 subagent 分派）。
-
-## 7. 证据索引
-
-- 历史问题复现与逐 seed 结果：[`evidence/problem.md`](evidence/problem.md)；
-- 历史伤害排序：[`evidence/impact_assessment.md`](evidence/impact_assessment.md)；
-- 20260916 收敛周期归档计划：[`cycles/20260916_convergence/plan.md`](cycles/20260916_convergence/plan.md)；
-- Round-6–9 闭环修复：[`cycles/20260911_first-principles/closure_plan.md`](cycles/20260911_first-principles/closure_plan.md)；
-- Round-10–17 传球与身份修复：[`cycles/20260911_first-principles/pass_and_identity_fix.md`](cycles/20260911_first-principles/pass_and_identity_fix.md)；
-- 第一原则周期原始状态历史：[`cycles/20260911_first-principles/status_history.md`](cycles/20260911_first-principles/status_history.md)。
-
-历史记录中的数字只回答“当时观察到什么”，不自动回答“现在是什么”。
+- 原始实验和历史实测：[`evidence/problem.md`](evidence/problem.md)
+- 跨周期差距和关闭条件：[`gap.md`](gap.md)
+- 稳定里程碑顺序：[`roadmap.md`](roadmap.md)
+- 已结束周期：[`cycles/`](cycles/)

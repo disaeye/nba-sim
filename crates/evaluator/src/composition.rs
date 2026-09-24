@@ -13,6 +13,8 @@ use crate::report::Judgment;
 use crate::{bands_turnover, REGULATION_SECONDS_48MIN};
 
 /// D2 构成准则的输入证据（dev 方案 §5.1）：从事件流采集的比赛级统计量。
+/// 出手按四区（attributes.md §2.3a）：`fga_rim` < 5ft、`fga_near` 5–14ft、
+/// `fga_mid` ≥ 14ft 且三分线内、`fga_three` 三分线外。`fga_two = rim+near+mid`。
 pub(crate) struct CompositionEvidence {
     pub(crate) possessions: usize,
     pub(crate) turnovers: usize,
@@ -21,6 +23,7 @@ pub(crate) struct CompositionEvidence {
     pub(crate) fgm_two: usize,
     pub(crate) fgm_three: usize,
     pub(crate) fga_mid: usize,
+    pub(crate) fga_near: usize,
     pub(crate) fga_rim: usize,
     pub(crate) fta: usize,
     pub(crate) wall_seconds: f32,
@@ -78,7 +81,8 @@ pub(crate) fn evaluate_composition_criteria(
         }
     }
 
-    // SHOT_PROFILE_ZONE_MIX：中距离/篮下构成（中距离回归的直接证据）。
+    // SHOT_PROFILE_ZONE_MIX：篮下/近筐/中投构成（attributes.md §2.3a 四区，
+    // 中距离回归的直接证据）。三带全入带才通过；fixture 缺带 = NotApplicable。
     if fga < MIN_SHOTS_FOR_PROFILE {
         out.push(Judgment::insufficient(
             "SHOT_PROFILE_ZONE_MIX",
@@ -87,18 +91,38 @@ pub(crate) fn evaluate_composition_criteria(
         ));
     } else {
         let mid_share = ev.fga_mid as f32 / fga as f32;
+        let near_share = ev.fga_near as f32 / fga as f32;
         let rim_share = ev.fga_rim as f32 / fga as f32;
-        let mid_ok = bands.mid_range_share_of_fga.contains(&mid_share);
-        let rim_ok = bands.rim_share_of_fga.contains(&rim_share);
-        if mid_ok && rim_ok {
+        let mid_ok = bands
+            .mid_range_share_of_fga
+            .as_ref()
+            .map(|band| band.contains(&mid_share))
+            .unwrap_or(true);
+        let near_ok = bands
+            .near_range_share_of_fga
+            .as_ref()
+            .map(|band| band.contains(&near_share))
+            .unwrap_or(true);
+        let rim_ok = bands
+            .rim_share_of_fga
+            .as_ref()
+            .map(|band| band.contains(&rim_share))
+            .unwrap_or(true);
+        if mid_ok && near_ok && rim_ok {
             out.push(Judgment::pass("SHOT_PROFILE_ZONE_MIX", "decision", idx));
         } else {
             out.push(Judgment::defect(
                 "SHOT_PROFILE_ZONE_MIX",
                 "soft",
                 format!(
-                    "zone mix off: mid {:.3} (band {:?}), rim {:.3} (band {:?}) of {} FGA",
-                    mid_share, bands.mid_range_share_of_fga, rim_share, bands.rim_share_of_fga, fga
+                    "zone mix off: rim {:.3} (band {:?}), near {:.3} (band {:?}), mid {:.3} (band {:?}) of {} FGA",
+                    rim_share,
+                    bands.rim_share_of_fga,
+                    near_share,
+                    bands.near_range_share_of_fga,
+                    mid_share,
+                    bands.mid_range_share_of_fga,
+                    fga
                 ),
                 "decision",
                 idx,

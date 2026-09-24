@@ -23,12 +23,13 @@
 | --- | ------ | ----------- | ------ |
 | **TA1** | 战术是数据不是代码 | 战术体系由 JSON 档案声明（阵型、触发、优先级、分支），引擎认识"档案的类型"，不认识"某个具体战术" | 战术档案 schema 版本化；新增战术 = 新档案，零引擎改动 |
 | **TA2** | 指派与执行分离 | 指派（slot 分配、对位、换人）是**离散决策**（回合级），执行（跑位、掩护、协防）是**连续行为**（tick 级）；前者产出指令，后者由 decision/physics 消费 | 指派器输出 TargetAssignment/RotationEvent，执行器零指派逻辑 |
-| **TA3** | 角色是槽位不是身份 | 战术档案声明**槽位**（slot：需要什么样的球员），球员按能力填充；slot 是战术的输入接口，不是球员的本体身份 | 槽位需求 ↔ attributes.md §2.9 派生视图匹配；球员无 `role` 字段（attributes.md §2.7） |
+| **TA3** | 角色是槽位不是身份 | 战术档案声明**槽位**（slot：需要什么样的球员），球员按能力填充；slot 是战术的输入接口，不是球员的本体身份 | 槽位需求 ↔ attributes.md §2.9 派生视图匹配；战术槽位与球员赛前攻防角色（attributes.md §2.7b）是两个概念，互不替代 |
 | **TA4** | 适配是纯函数 | 阵容适配、slot 填充、对位指派 = `(roster, tactics, game_state) → assignment` 的纯函数；可复现、可扰动、可单测 | 适配器落 `domain::lineup`（零依赖）；随机性经种子注入 |
 | **TA5** | 教练是策略不是脚本 | 教练决策（换人、暂停、战术切换）由**策略档案**驱动（何时换、换谁、换什么战术），不是预编排的比赛脚本 | CoachStrategy 消费 TeamTraits + 比赛状态；禁止硬编码时间/比分触发 |
 | **TA6** | 战术与倾向共存不覆盖 | TeamTraits（球队意志）定基线，PlayerTendencies（个体偏好）在其上调制；两者是同层独立输入，各自生效、互不覆盖 | 效用管线中 TeamTraits 与 tendencies 作为独立加法项进入 BaseValue（各自权重归 DecisionRules），禁止合并字段或互相覆盖（architecture.md §5.1） |
 | **TA7** | 无死档案字段 | 战术档案每个字段必须有 ≥1 条消费链（引擎行为响应）+ ≥1 条可观测的扰动响应链；死字段要么接线、要么删除 | 战术扰动测试（quality.md §6 / protocol.md §2.1 M9 扩展） |
 | **TA8** | Play 是窗口化覆盖，不是剧本 | Play 在触发窗口内注入行为规则、候选偏好与抑制；它改变候选生成语境与效用输入，从不声明动作顺序，从不绕过效用管线 | 谓词与动词封闭枚举；场输出谓词强制走滞回稳定通道；hard 抑制必须保留合法出路（§2.2.4） |
+| **TA9** | 赛前攻防角色整场固定 | 每名球员的进攻角色与防守角色（attributes.md §2.7b）在赛前确定，整场不变；替补登场使用替补自己的配置。回合内职责由实时动作、战术槽位和对位表达 | 比赛投影按档案输出角色；引擎不读取角色决定行为；角色不随单回合行为变化 |
 
 ---
 
@@ -43,7 +44,7 @@
 │   ├── 轮换表      rotation: Vec<RotationEntry>（换人时机与对象）
 │   └── 当前在场    on_court: [PlayerId; 5]（运行态，引擎持有）
 ├── 战术（Tactics · 打什么体系）
-│   ├── 进攻体系    offensive_system: OffensiveSystem（阵型 + 动作序列）
+│   ├── 进攻体系    offensive_system: OffensiveSystem（阵型 + 槽位能力需求）
 │   ├── 防守体系    defensive_system: DefensiveSystem（对位 + 协防 + 挡拆策略）
 │   ├── 特殊情境    situational: SituationalTactics（关键时刻、最后两攻、领先/落后）
 │   └── Play 库     playbook: Vec<PlaySpec>（规则化战术，回合级行为覆盖，§2.2.4）
@@ -298,7 +299,7 @@ pub fn assign_matchups(
 
 2. 最小化总代价（匈牙利算法，或贪心近似）；
 3. 应用 `defensive_system.matchup_rules` 覆盖（如 `deny_catch` 条件触发）；
-4. 输出对位 + 协防责任图（谁是第一协防、谁是轮转补位）。
+4. 输出初始对位和协防候选。比赛中的换防、延误、挤过、绕过、沉退、补位和回位按 `docs/basketball.md` §4 发布责任变化，不在本次纯函数里改写。
 
 #### 2.3.3 轮换决策（Rotation Decision）
 
@@ -408,11 +409,13 @@ TeamTraits / CoachProfile / Tactics JSON（本文档 §2）
 
 - **适配层集中**：`球员能力 → slot 适配分`、`对位代价矩阵`、`轮换决策` 收敛为 `domain::lineup` 纯函数模块（零依赖可单测，engine/decision/officiating 共用）；
 - **战术权重归档案**：slot 需求的权重、对位代价的权重、换人触发的阈值全部走战术 JSON 档案；本规格只定义字段语义，不定义权重数值；
+- **赛前身份字段与战术的关系**：六类位置（attributes.md §2.7a）与赛前攻防角色（attributes.md §2.7b）是球员档案的身份描述，随名册进入比赛配置与投影。战术分工仍由 slot fill 与对位逻辑逐回合承担（TA3），两者互不替代；
 - **禁止事项**：
   1. 战术层任何分支依赖球员 id（C1）；
   2. 子系统内散落适配逻辑（必须经 `domain::lineup`）；
   3. 战术档案直接当代码用（`TacticalSet` 枚举 + 硬编码点位）；
-  4. 运行期修改战术档案（战术是不可变输入，临场调整 = 切换到另一份档案）。
+  4. 运行期修改战术档案（战术是不可变输入，临场调整 = 切换到另一份档案）；
+  5. 行为分支读取位置或攻防角色（TA9：身份字段不改变行为）。
 
 ---
 
@@ -443,10 +446,10 @@ TeamTraits / CoachProfile / Tactics JSON（本文档 §2）
 
 ```rust
 pub fn generate_candidates(
-    slot: &SlotAssignment,           // 槽位分配
-    sequence: &[ActionStep],         // 战术动作序列
-    game_state: &GameState,          // 比赛状态
-    player: &PlayerData,             // 球员档案
+    slot: &SlotAssignment,
+    active_play: Option<&PlaySpec>,
+    game_state: &GameState,
+    player: &PlayerData,
 ) -> Vec<CandidateAction>
 ```
 
@@ -456,10 +459,10 @@ pub fn generate_candidates(
 - screener slot：`[Roll, Pop, Screen]`
 - corner_left/right slot：`[CatchAndShoot, Drive, Pass]`
 
-每个候选动作的**战术基线效用**由战术档案声明（`sequence[].utility_weight`）。下列展开不是最终效用的独立公式，而是 `architecture.md` §5.1 效用式中 BaseValue 因子的内部构成——最终复合律以该节为唯一权威：
+每个候选动作的战术基线效用来自槽位行为、激活 Play 的偏好和抑制。下列展开是 `architecture.md` §5.1 效用式中 BaseValue 的内部构成，最终复合律以该节为准：
 
 ```
-base_value (战术) = tactical_base (档案：sequence[].utility_weight)
+base_value (战术) = tactical_base (槽位行为 + Play 偏好)
                   + skill_utility (attributes.md：能力 × 权重)
                   + tendency_utility (attributes.md：倾向 × 权重)
                   + context_utility (architecture.md §5.1：比分、时间、对位经调制层)

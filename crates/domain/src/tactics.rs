@@ -194,7 +194,7 @@ impl SlotBehaviour {
     }
 }
 
-/// 槽位的能力需求：`(属性, 权重)` 列表。权重只表达「多看重这项能力」，
+/// 档案槽位的能力需求：`(属性, 权重)` 列表。权重只表达「多看重这项能力」，
 /// 不预设任何具体球员。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SlotRequirement {
@@ -216,6 +216,7 @@ pub enum PlayerAttributeKey {
     BallHandling,
     Passing,
     ShootingClose,
+    ShootingNear,
     ShootingMid,
     ShootingThree,
     FreeThrow,

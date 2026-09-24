@@ -27,6 +27,7 @@ docs/
 ├── charter.md         ← 愿景、范围、红线与成功判据
 ├── decisions.md       ← 跨模块设计决策、理由与开放决策
 ├── architecture.md    ← 分层、数据流、状态机与模块边界
+├── basketball.md      ← 动作、结果权、防守责任、犯规与违例程序
 ├── quality.md         ← 不变量、评判、确定性与质量工件
 ├── attributes.md      ← 球员/球队输入的分类学和值语义
 ├── tactics.md         ← 阵容、战术、适配与教练输入规格
@@ -40,6 +41,7 @@ docs/
 
 - `charter.md` 只决定目标、范围和不可放宽的红线；
 - `architecture.md` 只决定系统如何分层、事实如何流动和状态如何转移；
+- `basketball.md` 只决定比赛动作、结果、防守责任和规则程序；
 - `quality.md` 只决定如何观测、发现违反并表达证据缺口；
 - `blind_spots.md` 只登记物理与接触模型的数据缺口（ADR-017 第四步的盲区登记；评判器侧的准则盲区另见 `crates/evaluator/fixtures/blind_spots.md`，随评判准则扩展逐轮收缩）；
 - `attributes.md` 只决定输入维度和值的语义；
@@ -96,7 +98,7 @@ docs/dev/
 
 ## 5. 阅读路径
 
-- **了解项目**：`charter.md` → `decisions.md` → `architecture.md` → `quality.md` → `attributes.md` / `tactics.md` → `protocol.md`；
+- **了解项目**：`charter.md` → `decisions.md` → `architecture.md` → `basketball.md` → `quality.md` → `attributes.md` / `tactics.md` → `protocol.md`；
 - **准备改引擎**：规格面相关文档 → `docs/dev/status.md` → `docs/dev/current/plan.md`；
 - **追溯证据**：从 `status.md` 的证据链接进入 `evidence/` 或对应 `cycles/`，不要反过来把归档快照当状态入口；
 - **审查文档结构**：先读本文档，再读 `docs/dev/README.md`。

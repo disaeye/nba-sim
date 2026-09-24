@@ -106,6 +106,35 @@ impl MatchEngine {
                     id: p.id.clone(),
                     jersey: p.jersey.clone(),
                     team: p.team.clone(),
+                    // 六类位置与赛前攻防角色（attributes.md §2.7a/§2.7b）：
+                    // 从档案只读投影，整场不变；引擎行为不分支于此。
+                    position: self
+                        .config
+                        .home_team
+                        .players
+                        .iter()
+                        .chain(self.config.away_team.players.iter())
+                        .find(|player| player.id == p.id)
+                        .map(|player| player.position.as_str().to_string())
+                        .unwrap_or_default(),
+                    offensive_role: self
+                        .config
+                        .home_team
+                        .players
+                        .iter()
+                        .chain(self.config.away_team.players.iter())
+                        .find(|player| player.id == p.id)
+                        .map(|player| player.offensive_role.as_str().to_string())
+                        .unwrap_or_default(),
+                    defensive_role: self
+                        .config
+                        .home_team
+                        .players
+                        .iter()
+                        .chain(self.config.away_team.players.iter())
+                        .find(|player| player.id == p.id)
+                        .map(|player| player.defensive_role.as_str().to_string())
+                        .unwrap_or_default(),
                     x: (norm.x * 1_000_000.0).round() / 1_000_000.0,
                     y: (norm.y * 1_000_000.0).round() / 1_000_000.0,
                     zone: format!(

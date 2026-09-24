@@ -64,11 +64,9 @@
 
 **状态：accepted**
 
-防守档案不能只改变展示字段或站位标签。防守方案必须通过责任分配、轮转、施压、协防或执行重校验改变可观测行为；中性档案必须能复原行为中性基线。
+防守档案不能只改变展示字段或站位标签。防守方案必须通过 `docs/basketball.md` §4 的责任分配、轮转、施压、协防或执行重校验改变可观测行为；中性档案必须能复原行为中性基线。
 
-最小执行范围由开发计划决定，完整责任图超出当前规格的隐含承诺。
-
-规范落点：`tactics.md` §3–§5；验收引用 `quality.md` §6。
+规范落点：`tactics.md` §3–§5、`basketball.md` §4；验收引用 `quality.md` §6。
 
 ### ADR-005 · 名册顺序不是身份
 
@@ -86,6 +84,18 @@ G/M/D/L/F/Round 是不同层级的计划或执行编号，不是完成度。任�
 
 当前状态唯一来源：`docs/dev/status.md`。当前待办唯一入口：`docs/dev/current/plan.md`。
 
+### ADR-020 · 统一出手分区与赛前固定角色
+
+**状态：accepted**
+
+投篮分类只有一份判据：`domain::court::CourtGeometry::shot_zone`。分区为篮下小于 5 英尺、近筐 5 至 14 英尺、中投至少 14 英尺且位于三分线内、三分按联赛几何并优先于距离。分类事实取释放时刻出手点。`shooting_close` 对应篮下，`shooting_near` 对应近筐，`finishing` 保留对抗终结语义。命中基准分为 `shot_make_rim`、`shot_make_near`、`shot_make_mid`、`shot_make_3pt`。突破动作阶段仍由动作阈值表达，不承担出手分区。
+
+球员档案新增 `position`、`offensive_role`、`defensive_role`。位置使用 Point、Combo、Wing、Forward、Big、Center 六类，依据长期阵容位置。攻防角色在赛前确定，整场不变；替补登场使用替补自己的配置。三者只进入身份和投影，不进入效用、概率或行为分支。回合内职责仍由实时动作、战术槽位和对位表达。
+
+球员资料页按得分、组织、篮板、防守四块展示底层维度，不把同一块内的维度合并成一个数。
+
+规范落点：`attributes.md` §2.3a、§2.7a、§2.7b、§2.9，`tactics.md` TA9，`basketball.md` §3.2。
+
 ## 2. 待决策事项
 
 ### ADR-007 · 是否完成 BallControl × BallMotion 的内部迁移
@@ -102,7 +112,7 @@ G/M/D/L/F/Round 是不同层级的计划或执行编号，不是完成度。任�
 
 **状态：proposed**
 
-当前已接入防守方案对几何/部分结果的影响，但 `switch/drop/hedge/recover` 的完整意图—执行—事实链尚未形成统一证据包。是否把完整责任图纳入下一周期，由本周期 `D9`（防守责任链）与 `D11`（情景矩阵）的验收结果决定。
+`docs/basketball.md` §4 已定义对位、挤过、绕过、延误、换防、沉退、协防、补位和回位的责任事实。本决策不再决定规格范围；实现是否形成统一证据包由 `docs/dev/status.md` 记录。
 
 ### ADR-009 · 真实度目标线的重标定
 
@@ -393,8 +403,7 @@ putback ≥4/6、boxout 3/6（boxout 的最大可能杠杆受 boxout_bonus ≈ 0
    shot_arc_solve_iterations/rebound_min_arc_ft）删除，新增
    `pass_peak_distance_factor`。出手速度自然达到真实量级（25 ft 三分
    ≈ 37 ft/s）。松球路径本来就是真物理，不动。
-2. 第二步：触筐物理。命中/打铁的统计裁定保留在出手时刻（校准架构不动），
-   但打铁时按入射方向采样触筐位置，反弹初速 = 入射 × 衰减、方向 =
+2. 第二步：触筐物理。按入射方向采样触筐位置，反弹初速 = 入射 × 衰减、方向 =
    镜像反射 + 受控散射，落点由物理自然产生，加距离分布校准门。
    实施记录（2026-09-21，v69）：接触点在近筐沿受控扇形上采样（新增
    rim_radius_ft 与 4 个 rim_contact 参数），水平恢复系数随接触角从硬碰

@@ -123,6 +123,38 @@ impl CourtGeometry {
     }
 }
 
+/// 统一出手分区（attributes.md §2.3a）：按**出手点**把一次运动战出手归入
+/// 恰好一个区域，决策（候选生成/效用选技）、裁决（命中基准与技能选择）、
+/// 事件统计与评判共用同一判定，禁止各子系统自定边界。
+///
+/// 边界（ft，均按出手点到进攻篮筐的距离）:
+/// - `Rim`   距篮 < 5
+/// - `Near`  5 ≤ 距篮 < 14
+/// - `Mid`   距篮 ≥ 14 且在三分线内（含底角特例几何）
+/// - `Three` 三分线外；三分判定优先于距离分区
+///
+/// `pending_shot_release` 释放时刻的实际球位可能与出手意图点不同，
+/// 因此引擎与评判器一律使用「释放时刻出手点」为分类事实。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShotZone {
+    Rim,
+    Near,
+    Mid,
+    Three,
+}
+
+impl ShotZone {
+    /// 展示/事件流中的稳定字符串口径。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShotZone::Rim => "Rim",
+            ShotZone::Near => "Near",
+            ShotZone::Mid => "Mid",
+            ShotZone::Three => "Three",
+        }
+    }
+}
+
 /// Semantic areas used by shot quality, spacing, tactics, and replay views.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CourtRegion {
@@ -181,6 +213,41 @@ impl CourtGeometry {
             pos.x < midcourt
         } else {
             pos.x > midcourt
+        }
+    }
+}
+
+/// 统一出手分区的距离阈值（ft，attributes.md §2.3a）。
+pub const RIM_ZONE_MAX_DIST_FT: f32 = 5.0;
+pub const NEAR_ZONE_MAX_DIST_FT: f32 = 14.0;
+
+impl CourtGeometry {
+    /// 统一出手分区判定：先判三分（含底角特例），再按距离分 Rim/Near/Mid。
+    ///
+    /// 所有环节（决策效用、命中裁决、事件统计、评判）必须调用本函数，
+    /// 不得各自内联 `dist < 8` 类判定（attributes.md §2.3a 的单一事实源）。
+    pub fn shot_zone(
+        self,
+        pos: Vec2,
+        attacking_right: bool,
+        three_point_distance_ft: f32,
+        corner_three_distance_ft: f32,
+    ) -> ShotZone {
+        if self.is_three_point_attempt(
+            pos,
+            attacking_right,
+            three_point_distance_ft,
+            corner_three_distance_ft,
+        ) {
+            return ShotZone::Three;
+        }
+        let distance = (pos - self.hoop_pos(attacking_right)).length();
+        if distance < RIM_ZONE_MAX_DIST_FT {
+            ShotZone::Rim
+        } else if distance < NEAR_ZONE_MAX_DIST_FT {
+            ShotZone::Near
+        } else {
+            ShotZone::Mid
         }
     }
 }

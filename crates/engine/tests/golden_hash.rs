@@ -681,17 +681,25 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //   (c) 挂起期禁止新的持球决策（防重复出手与状态分叉）。
 //   (d) Preparation 段（合球阶段）球在人手：防守人 Poke/Strip 照常生效，
 //       投篮窗口期间持球人的动作锁定与战术目标保护不变。
-// v77 0xb849b30e273881b1 - 2026-09-24 D26 校准：突破终结起跳延伸 + 传球篮下接球效用（G6a 链 1/分布）：
-//   (a) 成功终结时出手位置向篮筐延伸 drive_finish_extend_ft (6.0 ft)：突破者
-//       最后一步腾空前冲，出手点在停点与篮筐之间——「停点即出手点」模型
-//       被分离投影推开的接触停点吞噬 rim 出手分布（实测 rim(4ft) 占比
-//       1.7%，延伸后 7.1%）。dist_to_hoop 同步用延伸后距离（扣/抛/上篮
-//       分型与出手时长随真实出手点重算）。
-//   (b) 传球篮下接球效用（G6a 链 1 最后一环）：接球人处于篮下
-//       (rim_shot_distance_ft 内) 时传球效用叠加接球人 finishing ×
-//       decision.rim_catch_bonus (0.8)——切入者的篮下空位成为优先传球终点。
-//   (c) 实验负结果（记录防重蹈）：drive_rim_attack_bias 2.2 使 successful
-//       drives 69→48、rim share 0.071→0.059（走廊拥挤负反馈），回退 1.2。
+// v77 0xb849b30e273881b1 - 2026-09-24 统一出手分区四区 + 赛前身份字段
+//   （ADR-020，attributes.md §2.3a/§2.7a/§2.7b；含 D26/D27 回移与收尾）：
+//   (a) 分区统一：出手分区改由 `CourtGeometry::shot_zone` 判定
+//       （Rim <5ft / Near 5–14ft / Mid ≥14ft 线内 / Three 优先），
+//       决策效用选技、命中裁决共用；`BaseRates` 扩为四档
+//       （shot_make_rim 0.63 / shot_make_near 0.45 / mid 0.40 / 3pt 0.36），
+//       rim_shot_distance_ft 8→5 与分区阈值同源。
+//   (b) 能力维度：`PlayerAttributes` 新增 `shooting_near`；名册按新分区
+//       校准篮下/近筐能力并声明六类位置与赛前攻防角色。
+//   (c) 封盖作废挂起时补发 ShotRelease 事实（修复 v76 的箱体/事件流
+//       对平回归，attribution 守卫红转绿）。
+//   (d) D26/D27 回移（177641d/7164e21/a987fc6 的主分支提交）：突破终结
+//       起跳延伸（drive_finish_extend_ft 6.0，rim 出手占比 1.7%→7.1%；
+//       实验负结果：drive_rim_attack_bias 2.2 走廊拥挤负反馈，回退 1.2）、
+//       篮下接球攻框加成（rim_catch_bonus 0.8，接球人 finishing）、
+//       弱侧突破收缩激励（drive_help_threat_gain 3.0）、松球争抢
+//       不受残留动作锁阻塞（seed13 死锁 616s 修复）、
+//       defense_rotation_response 判定口径重构（分布带判定归还评判器
+//       与 stats_baseline，本测试保留行为断言）。
 const GOLDEN_SEED42_2000: u64 = 0xb849b30e273881b1;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
