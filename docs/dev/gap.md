@@ -465,6 +465,26 @@ Smoke、Regression 和 Calibration 使用不同目的、样本量和通过标准
 突破链参数已回滚至 v66 原值（rim_attack_bias 1.2、finish_range 16）；
 禁止用效用参数硬凑分布数字，也禁止单独抬攻框比例。
 
+**实施状态（2026-09-24）**：四条行为链已全部落地，效用通道与规则字段均经
+`check_inline_constants` 守卫（charter C1）：
+
+1. 前场篮板二次攻框：`ConstraintContext.possession_had_shot` + Shoot 效用
+   `effective_putback_bias × rebound.putback_distance_discount`
+   （`rebound_putback_distance_discount` 6-seed 扰动可见性恢复）；
+2. 转换期篮下终结：`possession_elapsed_seconds` + `transition_finish_window_seconds`
+   (6s) × `transition_finish_bonus` (0.35)，窗口外零影响；
+3. 弱侧背切：`SlotBehaviour::BackdoorCut`（`backdoor_cut_depth_ratio` 0.85），
+   five_out 右翼槽位启用；
+4. 下沉禁区：`SlotBehaviour::DipToRim`（`dip_to_rim_depth_ratio` 0.7），
+   five_out 右底角槽位启用；传球侧配套 `decision.rim_catch_bonus`（接球人
+   处于篮下时传球效用按 finishing 叠加）。
+
+分布级验收（rim_share 回到 [0.25, 0.5] 带）仍开放：效用通道已通，
+分布响应需 G6a 链的登场率与传球选择联合收敛，归入全周行为校准。
+附带修复：封盖后球出界的回合终端语义（封盖松球显式
+`TurnoverLooseBall` + 评判器 `BLOCKED_SHOT` 原因事实），seed 43 的
+`TURNOVER_ATTRIBUTION` Hard 1→0。
+
 ### G7 · 联赛规则闭环
 
 补齐 profile 程序、犯规/bonus、罚球、交替拥有和情景矩阵。
