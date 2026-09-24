@@ -657,7 +657,23 @@ impl MatchEngine {
                     Some(format!("{} 突破造成投篮犯规，获得罚球机会", driver_id));
             } else if successful {
                 let hoop_pos = self.config.rules.court.hoop_pos(ctx.is_home);
-                let dist_to_hoop = (driver_pos - hoop_pos).length();
+                // 起跳延伸：最后一步腾空后出手点在停点与篮筐之间（规则通道
+                // drive_finish_extend_ft，不超过到筐距离）。分离投影把接触
+                // 停点推离篮筐的位移不再直接吞噬 rim 出手分布。
+                let to_hoop_finish = hoop_pos - driver_pos;
+                let finish_dist = to_hoop_finish.length();
+                let extend = self
+                    .config
+                    .rules
+                    .tactics
+                    .drive_finish_extend_ft
+                    .min(finish_dist);
+                let finish_pos = if finish_dist > f32::EPSILON {
+                    driver_pos + to_hoop_finish * (extend / finish_dist)
+                } else {
+                    driver_pos
+                };
+                let dist_to_hoop = finish_dist - extend;
                 // Spatial gate: if driver is still outside the paint / perimeter,
                 // this drive was stalled before reaching finishing position.
                 let finish_range = self.config.rules.tactics.drive_finish_range_ft;
@@ -721,7 +737,7 @@ impl MatchEngine {
                     self.transition_phase(SubPhase::ShotAttempt);
                     self.journal.pending_events.push(GameEvent::ShotRelease {
                         shooter_id: driver_id.clone(),
-                        pos: (driver_pos.x, driver_pos.y),
+                        pos: (finish_pos.x, finish_pos.y),
                         is_three: false,
                         contest_level: 0.2,
                         make_probability: if finish_made { 1.0 } else { 0.0 },

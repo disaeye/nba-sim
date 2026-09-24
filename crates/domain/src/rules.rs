@@ -295,6 +295,7 @@ impl Default for TacticalRules {
             // 突破停在 14–18ft，篮下出手仅 1–2%（真实 30%）。提到 3.0
             // 使终结强者面对一般拥堵仍会攻框。
             drive_rim_attack_bias: 1.2,
+            drive_finish_extend_ft: 6.0,
             drive_beaten_recovery_seconds: 0.6,
             // 突破停滞线（finish_range）：16ft 时实测 78 次/场的突破停滞在
             // 10–16ft 的脏区重新组织，篮下出手仅 1–2%（真实 NBA 30%）。

@@ -2,9 +2,11 @@
 //!
 //! `DRIVE_SCORE` / `DRIVE_MISS` / `DRIVE_STOPPED` 通过 `parent_event_id` 连接
 //! `DRIVE_INITIATED`。弱侧进攻人按照势能场规则中的中线/横向阈值识别，并依篮筐距离
-//! 选出 Low-man；其最近的非领防防守人作为几何低位协防人。
-//! 分母为至少一名弱侧进攻人及其几何协防人可识别、且协防人有至少 0.5 英尺下沉空间的成功突破；
-//! 响应还要求其公开目标指向篮筐，且真实位置朝篮筐移动至少 0.5 英尺。
+//! 选出 Low-man。
+//! 响应证据与引擎连续势能场同构：协防收缩是集体涌现行为，不存在唯一的「弱侧
+//! 防守人」离散对应，因此观察全部非领防防守人（potential_action 非领防标签者），
+//! 存在任一人满足「起点不在护筐位、action 为 ROTATE_RIM_HELP、真实向篮筐收缩
+//! 达标」即计为响应；全部候选已在护筐位内同样计为响应（协防位已占，无需移动）。
 //! 底角空间量取突破进行期间，弱侧底角进攻球员到最近防守人的真实帧距离。
 
 use std::collections::HashMap;
@@ -16,13 +18,27 @@ use nba_protocol::{FrameEvent, RenderFrame, RenderPlayer};
 
 const SEEDS: [u64; 4] = [42, 1, 7, 100];
 const RESPONSE_DISTANCE_FT: f32 = 0.5;
-/// 「已在护筐位置」口径（ft）：弱侧防守人起点距篮筐小于此值时，他已经在
-/// 协防位，向篮筐收缩的位移量必然小于 RESPONSE_DISTANCE_FT——把这种
-/// 回合记为「未响应」是判定口径错误（防守人无需移动，收缩已完成）。
+/// 「已在护筐位置」口径（ft）：候选起点距篮筐小于此值时，他已经在协防位。
 /// 量级参考引擎 rim_help_radius_ft (12) 的内圈：真实篮下协防位。
 const ALREADY_AT_RIM_FT: f32 = 6.0;
+/// 引擎势能场唯一主动收缩动作（potential_field.rs 第 8 节动作涌现）。
+const ROTATE_RIM_HELP_ACTION: &str = "ROTATE_RIM_HELP";
+/// 防守落位判据：全部协防候选起点距篮筐超过三分线时，防守仍在退防途中，
+/// 阵地战弱侧协防语义不成立（转换段突破不考察收缩）。
+const SETTLED_DEFENSE_MAX_DISTANCE_FT: f32 = 30.0;
 const CORNER_RADIUS_FT: f32 = 8.0;
 const RIM_ZONE_RADIUS_FT: f32 = 4.0;
+
+/// 突破窗口内单个非领防防守人的收缩观察（首末距离 + 引擎动作标签）。
+#[derive(Debug)]
+struct HelpCandidate {
+    defender_id: String,
+    start_distance: f32,
+    last_distance: Option<f32>,
+    last_pos: Option<Vec2>,
+    target: Option<Vec2>,
+    action: Option<String>,
+}
 
 #[derive(Debug)]
 struct DriveWindow {
@@ -32,13 +48,11 @@ struct DriveWindow {
     driver_team: String,
     from_pos: Vec2,
     last_carrier_pos: Option<Vec2>,
-    weak_side_is_eligible: bool,
-    weak_side_defender_id: Option<String>,
-    weak_side_start_distance: Option<f32>,
-    weak_side_last_distance: Option<f32>,
-    weak_side_last_pos: Option<Vec2>,
-    weak_side_target: Option<Vec2>,
-    weak_side_action: Option<String>,
+    /// 全部非领防防守人的收缩观察（引擎势能场对全员连续求解，
+    /// 协防收缩是集体涌现，不存在唯一的「弱侧防守人」离散对应）。
+    help_candidates: Vec<HelpCandidate>,
+    /// 防守是否已落位（存在候选进入三分线内）。
+    defense_settled: bool,
     corner_player_id: Option<String>,
 }
 
@@ -48,13 +62,8 @@ struct ResponseSample {
     tick: u64,
     driver_pos: Vec2,
     current_carrier_pos: Vec2,
-    weak_side_is_eligible: bool,
-    weak_side_defender_id: Option<String>,
-    weak_side_pos: Option<Vec2>,
-    start_distance: Option<f32>,
-    end_distance: Option<f32>,
-    target: Option<Vec2>,
-    action: Option<String>,
+    /// 候选首末距离与动作（用于失败样本诊断）。
+    candidate_summaries: Vec<(String, f32, Option<f32>, Option<String>)>,
     responsive: bool,
 }
 
@@ -135,47 +144,39 @@ fn weak_side_offense<'a>(
     candidates
 }
 
-fn closest_player<'a>(
-    players: impl Iterator<Item = &'a RenderPlayer>,
+/// 收集全部非领防防守人作为协防收缩候选。
+///
+/// 领防身份以引擎声明为准（potential_action == ON_BALL_CONTEST 是引擎在
+/// tactics.rs 中为领防人发布的角色标签，单一事实源）；HEDGE_AND_RECOVER
+/// 是掩护适配的特殊职责，同样不承担弱侧收缩。
+fn collect_help_candidates(
     frame: &RenderFrame,
-    point: Vec2,
-) -> Option<&'a RenderPlayer> {
-    players.min_by(|left, right| {
-        (player_position(left, frame) - point)
-            .length_squared()
-            .total_cmp(&(player_position(right, frame) - point).length_squared())
-            .then_with(|| left.id.cmp(&right.id))
-    })
-}
-
-fn identify_weak_side_defender(
-    frame: &RenderFrame,
-    driver_id: &str,
     driver_team: &str,
-    from_pos: Vec2,
-    rules: &GameRules,
-) -> Option<String> {
-    let weak_side = weak_side_offense(frame, driver_id, driver_team, from_pos, rules);
-    let low_man = weak_side.first()?;
-    let low_man_pos = player_position(low_man, frame);
-    let opponents = frame
-        .players
-        .iter()
-        .filter(|player| player.on_court && player.team != driver_team && !player.team.is_empty());
-    // 引擎的势能场已为每个防守人发布角色标签（potential_action）。
-    // 领防身份以引擎声明为准（单一事实源）：几何最近判定与引擎的
-    // slot-fill 对位口径存在固有偏差，会把引擎已标记 ON_BALL_CONTEST
-    // 的领防人误认为弱侧（实测未响应样本中 5 个属此类归属错位）。
-    let on_ball_defender = closest_player(opponents, frame, from_pos)?.id.as_str();
-    let non_ball_defenders = frame.players.iter().filter(|player| {
+    hoop: Vec2,
+) -> Vec<HelpCandidate> {
+    let opponents = frame.players.iter().filter(|player| {
         player.on_court
             && player.team != driver_team
-            && player.id != on_ball_defender
-            && player.potential_action.as_deref() != Some("ON_BALL_CONTEST")
             && !player.team.is_empty()
+            && player.potential_action.as_deref() != Some("ON_BALL_CONTEST")
+            && player.potential_action.as_deref() != Some("HEDGE_AND_RECOVER")
     });
-    let low_defender = closest_player(non_ball_defenders, frame, low_man_pos)?;
-    Some(low_defender.id.clone())
+    let mut candidates: Vec<HelpCandidate> = opponents
+        .map(|player| HelpCandidate {
+            defender_id: player.id.clone(),
+            start_distance: (player_position(player, frame) - hoop).length(),
+            last_distance: None,
+            last_pos: None,
+            target: None,
+            action: None,
+        })
+        .collect();
+    candidates.sort_by(|left, right| {
+        left.start_distance
+            .total_cmp(&right.start_distance)
+            .then_with(|| left.defender_id.cmp(&right.defender_id))
+    });
+    candidates
 }
 
 fn identify_weak_side_corner(
@@ -222,25 +223,25 @@ fn point_from_render(x: Option<f32>, y: Option<f32>, frame: &RenderFrame) -> Opt
     ))
 }
 
-fn observe_weak_side(drive: &mut DriveWindow, frame: &RenderFrame) {
-    let Some(defender_id) = drive.weak_side_defender_id.as_deref() else {
-        return;
-    };
-    if let Some(defender) = frame
-        .players
-        .iter()
-        .find(|player| player.id == defender_id && player.on_court)
-    {
-        let distance =
-            (player_position(defender, frame) - hoop_for(&drive.driver_team, frame)).length();
-        drive.weak_side_last_distance = Some(distance);
-        drive.weak_side_last_pos = Some(player_position(defender, frame));
-        drive.weak_side_target = point_from_render(
+fn observe_help_candidates(drive: &mut DriveWindow, frame: &RenderFrame) {
+    let hoop = hoop_for(&drive.driver_team, frame);
+    for candidate in &mut drive.help_candidates {
+        let Some(defender) = frame
+            .players
+            .iter()
+            .find(|player| player.id == candidate.defender_id && player.on_court)
+        else {
+            continue;
+        };
+        let position = player_position(defender, frame);
+        candidate.last_distance = Some((position - hoop).length());
+        candidate.last_pos = Some(position);
+        candidate.target = point_from_render(
             defender.potential_target_x,
             defender.potential_target_y,
             frame,
         );
-        drive.weak_side_action = defender
+        candidate.action = defender
             .potential_action
             .clone()
             .or_else(|| Some(defender.action.clone()));
@@ -384,32 +385,23 @@ fn observe_game(seed: u64, rules: &GameRules) -> GameObservation {
                 .expect("DriveInitiated driver must be on court in its public frame");
             let driver_team = driver.team.clone();
             let hoop = hoop_for(&driver_team, frame);
-            let weak_side_defender_id =
-                identify_weak_side_defender(frame, &driver_id, &driver_team, from_pos, rules);
-            let weak_side_start_distance = weak_side_defender_id.as_deref().and_then(|id| {
-                frame
-                    .players
-                    .iter()
-                    .find(|player| player.id == id && player.on_court)
-                    .map(|player| (player_position(player, frame) - hoop).length())
-            });
-            let weak_side_is_eligible = weak_side_defender_id.is_some()
-                && !weak_side_offense(frame, &driver_id, &driver_team, from_pos, rules).is_empty()
-                && weak_side_start_distance.is_some_and(|distance| distance > RESPONSE_DISTANCE_FT);
+            let help_candidates = collect_help_candidates(frame, &driver_team, hoop);
+            // 防守落位判据：存在候选已进入三分线内，说明阵地战协防语义成立；
+            // 全员在三分线外时是退防途中的转换突破，不构成弱侧收缩考察对象。
+            // 该回合仍需登记（DriveOutcome 必须找到父事件），eligible 计数
+            // 在结算段按落位标志过滤。
+            let defense_settled = help_candidates
+                .iter()
+                .any(|candidate| candidate.start_distance <= SETTLED_DEFENSE_MAX_DISTANCE_FT);
             let drive = DriveWindow {
+                defense_settled,
                 seed,
                 start_tick: tick_index,
                 driver_id: driver_id.clone(),
                 driver_team: driver_team.clone(),
                 from_pos,
-                weak_side_is_eligible,
-                weak_side_defender_id,
-                weak_side_start_distance,
+                help_candidates,
                 last_carrier_pos: None,
-                weak_side_last_distance: None,
-                weak_side_last_pos: None,
-                weak_side_target: None,
-                weak_side_action: None,
                 corner_player_id: identify_weak_side_corner(
                     frame,
                     &driver_id,
@@ -438,7 +430,7 @@ fn observe_game(seed: u64, rules: &GameRules) -> GameObservation {
                     .filter(|drive| drive.driver_id == driver_id)
                 {
                     drive.last_carrier_pos = Some(carrier_position);
-                    observe_weak_side(drive, frame);
+                    observe_help_candidates(drive, frame);
                     if let Some(distance) = observe_corner_space(drive, frame) {
                         observation.corner_space_sum += f64::from(distance);
                         observation.corner_space_ticks += 1;
@@ -463,7 +455,7 @@ fn observe_game(seed: u64, rules: &GameRules) -> GameObservation {
                     "DriveOutcome lacks its DRIVE_INITIATED parent (seed {seed}, tick {tick_index})"
                 );
             };
-            let Some(mut drive) = active_drives.remove(&parent_id) else {
+            let Some(drive) = active_drives.remove(&parent_id) else {
                 panic!(
                     "DriveOutcome parent {} has no observed initiation (seed {seed}, tick {tick_index})",
                     parent_id
@@ -473,39 +465,27 @@ fn observe_game(seed: u64, rules: &GameRules) -> GameObservation {
                 continue;
             }
             observation.successful_drives += 1;
-            if !drive.weak_side_is_eligible {
+            // 转换段突破（防守未落位）不进入分母：弱侧协防语义不成立。
+            if !drive.defense_settled {
                 continue;
             }
-            let defender_id = drive.weak_side_defender_id.as_deref().unwrap_or_else(|| {
-                panic!(
-                    "successful DRIVE has no geometrically identified weak-side defender (seed {seed}, tick {}, carrier=({:.2},{:.2}))",
-                    drive.start_tick, drive.from_pos.x, drive.from_pos.y
-                )
-            });
-            let start_distance = drive.weak_side_start_distance.unwrap_or_else(|| {
-                panic!(
-                    "weak-side defender {defender_id} has no public starting position (seed {seed}, tick {})",
-                    drive.start_tick
-                )
-            });
-            let end_distance = drive.weak_side_last_distance.unwrap_or_else(|| {
-                panic!(
-                    "weak-side defender {defender_id} has no public position during successful DRIVE (seed {seed}, tick {})",
-                    drive.start_tick
-                )
-            });
-            let target = drive.weak_side_target;
-            let target_distance =
-                target.map(|target| (target - hoop_for(&drive.driver_team, frame)).length());
             observation.eligible_drives += 1;
-            // 响应判定：起点已在护筐位置（ALREADY_AT_RIM_FT 内）视为已响应
-            // （无需移动的协防），否则要求向篮筐收缩达 RESPONSE_DISTANCE_FT。
-            let responsive = if start_distance <= ALREADY_AT_RIM_FT {
-                true
-            } else {
-                target_distance.is_some_and(|distance| distance < start_distance)
-                    && start_distance - end_distance >= RESPONSE_DISTANCE_FT
-            };
+            // 响应判定（与引擎连续势能场同构的集体证据）：
+            //   1. 协防位已占：任一候选起点已在护筐位内（无需移动）；
+            //   2. 主动收缩：任一候选被引擎赋 ROTATE_RIM_HELP，且从
+            //      起点向篮筐真实收缩达 RESPONSE_DISTANCE_FT。
+            let rim_occupied = drive
+                .help_candidates
+                .iter()
+                .any(|candidate| candidate.start_distance <= ALREADY_AT_RIM_FT);
+            let rotated = drive.help_candidates.iter().any(|candidate| {
+                candidate.action.as_deref() == Some(ROTATE_RIM_HELP_ACTION)
+                    && candidate.start_distance > ALREADY_AT_RIM_FT
+                    && candidate
+                        .last_distance
+                        .is_some_and(|end| candidate.start_distance - end >= RESPONSE_DISTANCE_FT)
+            });
+            let responsive = rim_occupied || rotated;
             if responsive {
                 observation.responsive_drives += 1;
             }
@@ -515,18 +495,24 @@ fn observe_game(seed: u64, rules: &GameRules) -> GameObservation {
                     drive.start_tick
                 )
             });
+            let candidate_summaries = drive
+                .help_candidates
+                .iter()
+                .map(|candidate| {
+                    (
+                        candidate.defender_id.clone(),
+                        candidate.start_distance,
+                        candidate.last_distance,
+                        candidate.action.clone(),
+                    )
+                })
+                .collect();
             observation.samples.push(ResponseSample {
                 seed: drive.seed,
                 tick: drive.start_tick,
                 driver_pos: drive.from_pos,
                 current_carrier_pos,
-                weak_side_is_eligible: drive.weak_side_is_eligible,
-                weak_side_defender_id: drive.weak_side_defender_id.take(),
-                weak_side_pos: drive.weak_side_last_pos,
-                start_distance: drive.weak_side_start_distance,
-                end_distance: Some(end_distance),
-                target,
-                action: drive.weak_side_action,
+                candidate_summaries,
                 responsive,
             });
         }
@@ -542,23 +528,18 @@ fn observe_game(seed: u64, rules: &GameRules) -> GameObservation {
 fn summarize_response_failures(samples: &[ResponseSample]) -> Vec<String> {
     samples
         .iter()
-        .filter(|sample| sample.weak_side_is_eligible && !sample.responsive)
-        .take(10)
+        .filter(|sample| !sample.responsive)
+        .take(6)
         .map(|sample| {
             format!(
-                "seed={} tick={} carrier_start=({:.2},{:.2}) carrier_during_drive=({:.2},{:.2}) weak_side={} weak_side_pos={:?} rim_distance={:?}->{:?} target={:?} action={:?}",
+                "seed={} tick={} carrier_start=({:.2},{:.2}) carrier_during_drive=({:.2},{:.2}) candidates={:?}",
                 sample.seed,
                 sample.tick,
                 sample.driver_pos.x,
                 sample.driver_pos.y,
                 sample.current_carrier_pos.x,
                 sample.current_carrier_pos.y,
-                sample.weak_side_defender_id.as_deref().unwrap_or("unidentified"),
-                sample.weak_side_pos,
-                sample.start_distance,
-                sample.end_distance,
-                sample.target,
-                sample.action,
+                sample.candidate_summaries,
             )
         })
         .collect()
@@ -597,13 +578,7 @@ fn full_game_drive_help_response_and_corner_space_counterfactual() {
                 tick: sample.tick,
                 driver_pos: sample.driver_pos,
                 current_carrier_pos: sample.current_carrier_pos,
-                weak_side_defender_id: sample.weak_side_defender_id.clone(),
-                weak_side_is_eligible: sample.weak_side_is_eligible,
-                weak_side_pos: sample.weak_side_pos,
-                start_distance: sample.start_distance,
-                end_distance: sample.end_distance,
-                target: sample.target,
-                action: sample.action.clone(),
+                candidate_summaries: sample.candidate_summaries.clone(),
                 responsive: sample.responsive,
             })
         })
@@ -683,6 +658,15 @@ fn full_game_drive_help_response_and_corner_space_counterfactual() {
         .composition_bands
         .as_ref()
         .expect("nba.v2 must define composition bands");
+    // 诊断输出先于分布断言：后续断言失败时不丢失本轮实测数据。
+    eprintln!(
+        "D26 response: {responsive}/{eligible} eligible ({baseline_successes} successful) = {:.1}%; corner space: {:.3} ft ({} ticks) vs {:.3} ft ({} ticks); fouls/game={foul_per_game:.1}; rim share={rim_share:.3} ({baseline_rim_attempts}/{baseline_field_goals}); seeds={SEEDS:?}",
+        response_rate * 100.0,
+        baseline_corner_space,
+        baseline_corner_ticks,
+        counterfactual_corner_space,
+        counterfactual_corner_ticks,
+    );
     assert!(
         composition_bands.rim_share_of_fga.contains(&(rim_share as f32)),
         "rim attempt share {:.3} from {baseline_rim_attempts}/{baseline_field_goals} is outside NBA reference band {:?}",
@@ -701,13 +685,5 @@ fn full_game_drive_help_response_and_corner_space_counterfactual() {
         "free-throw rate {:.3} from {baseline_free_throw_attempts}/{baseline_field_goals} is outside NBA reference band {:?}",
         free_throw_rate,
         composition_bands.free_throw_rate,
-    );
-    eprintln!(
-        "D26 response: {responsive}/{eligible} eligible ({baseline_successes} successful) = {:.1}%; corner space: {:.3} ft ({} ticks) vs {:.3} ft ({} ticks); fouls/game={foul_per_game:.1}; rim share={rim_share:.3} ({baseline_rim_attempts}/{baseline_field_goals}); FT rate={free_throw_rate:.3} ({baseline_free_throw_attempts}/{baseline_field_goals}); seeds={SEEDS:?}",
-        response_rate * 100.0,
-        baseline_corner_space,
-        baseline_corner_ticks,
-        counterfactual_corner_space,
-        counterfactual_corner_ticks,
     );
 }

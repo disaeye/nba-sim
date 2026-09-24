@@ -718,17 +718,17 @@ impl DecisionSystem {
                 let distance_factor = 1.0 - over * ctx.rules.decision.pass_distance_max_decay;
                 // G6a 链 1 的最后一环：接球人处于篮下（BackdoorCut/DipToRim
                 // 切入后的落点）时，传球就是一次攻框机会（接球后直接终结）。
-                // 效用加成接球人 finishing 技能驱动——内线终结者优先；
-                // 无篮下接球点时零影响，外线 spacing 传球不受扰动。
+                // 效用加成用接球人（非持球人）的 finishing 技能驱动——内线
+                // 终结者优先；无篮下接球点时零影响，外线 spacing 传球不受扰动。
                 let rim_catch_bonus = {
                     let hoop = ctx.rules.court.hoop_pos(ctx.possession_team == "home");
+                    let receiver_finishing = ctx
+                        .physics
+                        .get_player(receiver_id)
+                        .map(|receiver| receiver.attributes.finishing)
+                        .unwrap_or(f32::from(0u8));
                     if (*to_pos - hoop).length() <= ctx.rules.rim_shot_distance_ft {
-                        attributes
-                            .map(|a| {
-                                (a.finishing - f32::from(0u8)).max(f32::from(0u8))
-                                    * ctx.rules.decision.rim_catch_bonus
-                            })
-                            .unwrap_or(f32::from(0u8))
+                        receiver_finishing.max(f32::from(0u8)) * ctx.rules.decision.rim_catch_bonus
                     } else {
                         f32::from(0u8)
                     }
