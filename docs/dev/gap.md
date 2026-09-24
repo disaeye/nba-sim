@@ -480,10 +480,16 @@ Smoke、Regression 和 Calibration 使用不同目的、样本量和通过标准
    处于篮下时传球效用按 finishing 叠加）。
 
 分布级验收（rim_share 回到 [0.25, 0.5] 带）仍开放：效用通道已通，
-分布响应需 G6a 链的登场率与传球选择联合收敛，归入全周行为校准。
+实测 rim(4ft) 出手占比 1.7%→7.1%（突破终结起跳延伸
+`drive_finish_extend_ft` = 6.0 后）；剩余缺口需要突破终结总量与三路
+rim 出手来源（转换/二次进攻/无球切入接球）联合收敛，单杠杆实验
+（`drive_rim_attack_bias` 2.2 负反馈回退、延伸量 3→6 饱和）已证明
+非单调耦合，归入全周行为校准。
 附带修复：封盖后球出界的回合终端语义（封盖松球显式
 `TurnoverLooseBall` + 评判器 `BLOCKED_SHOT` 原因事实），seed 43 的
-`TURNOVER_ATTRIBUTION` Hard 1→0。
+`TURNOVER_ATTRIBUTION` Hard 1→0；松球争抢被残留持球动作锁死
+（seed13 poss#64 卡死 616s，`POSSESSION_DURATION_BOUNDS` Hard 来源，
+动作锁定增加球在手的语义前提），17-seed 矩阵复测 0 Hard。
 
 ### G7 · 联赛规则闭环
 
