@@ -106,6 +106,8 @@ impl MatchEngine {
             .unwrap_or(0);
 
         // 防守目标沿用对位/协防逻辑（含 D5.2 的执行器）。
+        // D26：突破球态传入弱侧激励——突破时弱侧防守人向篮筐收缩。
+        let drive_active = matches!(&self.ball.ball_state, BallTrajectoryKind::Drive { .. });
         let (mut home_targets, mut away_targets) =
             TacticalPlanner::plan_possession_targets_with_rules(
                 self.config.tactical_set,
@@ -117,6 +119,7 @@ impl MatchEngine {
                 &mut self.systems.rng,
                 &self.config.rules,
                 Some(&live_off_positions),
+                drive_active,
             );
         let home_roster = self.config.home_roster_order.clone();
         let away_roster = self.config.away_roster_order.clone();

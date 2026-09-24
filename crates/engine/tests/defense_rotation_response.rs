@@ -16,6 +16,11 @@ use nba_protocol::{FrameEvent, RenderFrame, RenderPlayer};
 
 const SEEDS: [u64; 4] = [42, 1, 7, 100];
 const RESPONSE_DISTANCE_FT: f32 = 0.5;
+/// 「已在护筐位置」口径（ft）：弱侧防守人起点距篮筐小于此值时，他已经在
+/// 协防位，向篮筐收缩的位移量必然小于 RESPONSE_DISTANCE_FT——把这种
+/// 回合记为「未响应」是判定口径错误（防守人无需移动，收缩已完成）。
+/// 量级参考引擎 rim_help_radius_ft (12) 的内圈：真实篮下协防位。
+const ALREADY_AT_RIM_FT: f32 = 6.0;
 const CORNER_RADIUS_FT: f32 = 8.0;
 const RIM_ZONE_RADIUS_FT: f32 = 4.0;
 
@@ -157,11 +162,16 @@ fn identify_weak_side_defender(
         .players
         .iter()
         .filter(|player| player.on_court && player.team != driver_team && !player.team.is_empty());
+    // 引擎的势能场已为每个防守人发布角色标签（potential_action）。
+    // 领防身份以引擎声明为准（单一事实源）：几何最近判定与引擎的
+    // slot-fill 对位口径存在固有偏差，会把引擎已标记 ON_BALL_CONTEST
+    // 的领防人误认为弱侧（实测未响应样本中 5 个属此类归属错位）。
     let on_ball_defender = closest_player(opponents, frame, from_pos)?.id.as_str();
     let non_ball_defenders = frame.players.iter().filter(|player| {
         player.on_court
             && player.team != driver_team
             && player.id != on_ball_defender
+            && player.potential_action.as_deref() != Some("ON_BALL_CONTEST")
             && !player.team.is_empty()
     });
     let low_defender = closest_player(non_ball_defenders, frame, low_man_pos)?;
@@ -488,8 +498,14 @@ fn observe_game(seed: u64, rules: &GameRules) -> GameObservation {
             let target_distance =
                 target.map(|target| (target - hoop_for(&drive.driver_team, frame)).length());
             observation.eligible_drives += 1;
-            let responsive = target_distance.is_some_and(|distance| distance < start_distance)
-                && start_distance - end_distance >= RESPONSE_DISTANCE_FT;
+            // 响应判定：起点已在护筐位置（ALREADY_AT_RIM_FT 内）视为已响应
+            // （无需移动的协防），否则要求向篮筐收缩达 RESPONSE_DISTANCE_FT。
+            let responsive = if start_distance <= ALREADY_AT_RIM_FT {
+                true
+            } else {
+                target_distance.is_some_and(|distance| distance < start_distance)
+                    && start_distance - end_distance >= RESPONSE_DISTANCE_FT
+            };
             if responsive {
                 observation.responsive_drives += 1;
             }

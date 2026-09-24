@@ -234,6 +234,7 @@ impl TacticalPlanner {
             rng,
             &GameRules::default(),
             None,
+            false,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -247,6 +248,7 @@ impl TacticalPlanner {
         rng: &mut impl Rng,
         rules: &GameRules,
         live_off_positions: Option<&[Vec2]>,
+        drive_active: bool,
     ) -> (Vec<TargetAssignment>, Vec<TargetAssignment>) {
         Self::plan_possession_targets_with_geometry(
             tactical_set,
@@ -258,6 +260,7 @@ impl TacticalPlanner {
             rng,
             rules,
             live_off_positions,
+            drive_active,
         )
     }
     /// D5.1b：以战术档案（slot 元数据）为准生成进攻目标。
@@ -410,6 +413,7 @@ impl TacticalPlanner {
         _rng: &mut impl Rng,
         rules: &GameRules,
         live_off_positions: Option<&[Vec2]>,
+        drive_active: bool,
     ) -> (Vec<TargetAssignment>, Vec<TargetAssignment>) {
         let court = rules.court;
         let policy = &rules.tactics;
@@ -581,6 +585,7 @@ impl TacticalPlanner {
                         carrier_idx,
                         rules,
                         1.0,
+                        drive_active,
                     );
                     (
                         emergent.target_pos,
@@ -810,6 +815,7 @@ mod tests {
                 &mut rng,
                 &rules,
                 None,
+                false,
             );
             assert_eq!(home.len(), 5);
             assert_eq!(away.len(), 5);

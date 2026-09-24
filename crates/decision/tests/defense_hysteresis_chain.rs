@@ -238,7 +238,7 @@ fn stable_output_derives_from_solve_equilibrium() {
     let far_carrier = hoop - Vec2::new(34.0, 0.0);
     for _ in 0..4 {
         let emergent =
-            solver.solve_equilibrium(far_carrier, hoop, &off_positions, 1, 0, &rules, 1.0);
+            solver.solve_equilibrium(far_carrier, hoop, &off_positions, 1, 0, &rules, 1.0, false);
         let out = solver.observe_field(&emergent, &mut low_man_state);
         assert!(!out.help_pulled_off);
         assert!(!out.weak_side_vacant);
@@ -250,7 +250,7 @@ fn stable_output_derives_from_solve_equilibrium() {
     let mut low_man_flipped = false;
     for _ in 0..4 {
         let emergent =
-            solver.solve_equilibrium(deep_carrier, hoop, &off_positions, 1, 0, &rules, 1.0);
+            solver.solve_equilibrium(deep_carrier, hoop, &off_positions, 1, 0, &rules, 1.0, false);
         let out = solver.observe_field(&emergent, &mut low_man_state);
         low_man_flipped |= out.help_pulled_off;
     }
@@ -263,7 +263,7 @@ fn stable_output_derives_from_solve_equilibrium() {
     // 逐防守人伴生状态互不串扰。
     for _ in 0..4 {
         let emergent =
-            solver.solve_equilibrium(deep_carrier, hoop, &off_positions, 4, 0, &rules, 1.0);
+            solver.solve_equilibrium(deep_carrier, hoop, &off_positions, 4, 0, &rules, 1.0, false);
         let out = solver.observe_field(&emergent, &mut far_state);
         assert!(!out.weak_side_vacant);
     }

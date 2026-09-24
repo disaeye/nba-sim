@@ -133,6 +133,7 @@ impl DefensePotentialFieldSolver {
         carrier_idx: usize,
         rules: &GameRules,
         stamina: f32,
+        drive_active: bool,
     ) -> EmergentDefenseTarget {
         // 系数从规则档案读取（`DefenseRules` 经防守方案实例化，`potential_field`
         // 随方案一起进入规则通道）。
@@ -213,26 +214,30 @@ impl DefensePotentialFieldSolver {
         // 威胁中心点位于持球人与篮筐之间的禁区缓冲带；受 sag_multiplier 协同下沉
         let rim_target =
             hoop_pos + (carrier_pos - hoop_pos).normalize_or_zero() * config.rim_buffer_ft;
-        // 只有弱侧低位人拥有高耦合的护筐引力；高位人需保留在外线，防备三分
+        // 只有弱侧低位人拥有高耦合的护筐引力；高位人需保留在外线，防备三分。
+        // D26：突破发生时（Drive 球态），弱侧防守人（非领防）获得突破激励
+        // 的护筐引力增益（drive_help_threat_gain）——NBA 协防铁律「突破必
+        // 收缩」。增益取「原角色增益」与「突破增益」的较大者，使原本被
+        // 压低的 default/high 弱侧人的 threat_ratio 能越过 rim_help_threat_ratio。
+        let role_gain = if is_low_man {
+            config.low_man_threat_gain
+        } else if is_high_man {
+            config.high_man_threat_gain
+        } else {
+            config.default_threat_gain
+        };
+        let effective_gain = if drive_active {
+            role_gain.max(config.drive_help_threat_gain)
+        } else {
+            role_gain
+        };
+        let sag_factor = if is_high_man { 1.0 } else { sag_mult };
         let w_threat = stamina_mult
-            * if is_low_man {
-                config.k_threat_base
-                    * global_threat
-                    * local_rim_proximity
-                    * config.low_man_threat_gain
-                    * sag_mult
-            } else if is_high_man {
-                config.k_threat_base
-                    * global_threat
-                    * local_rim_proximity
-                    * config.high_man_threat_gain
-            } else {
-                config.k_threat_base
-                    * global_threat
-                    * local_rim_proximity
-                    * config.default_threat_gain
-                    * sag_mult
-            };
+            * config.k_threat_base
+            * global_threat
+            * local_rim_proximity
+            * effective_gain
+            * sag_factor;
 
         // 6. 势能分量三：弱侧外线空间真空吸力 (Voronoi Space Deficit Pull)
         // 物理因果律：只有当持球人突破深入且弱侧低位人 (Low-man) 产生显著下沉护筐时，

@@ -462,6 +462,11 @@ pub struct PotentialFieldRules {
     pub void_gain: f32,
     /// 涌现为「护筐轮转」的威胁占比阈值。
     pub rim_help_threat_ratio: f32,
+    /// 突破激励的护筐引力增益（D26）：持球人突破（Drive 球态）时，弱侧
+    /// 防守人的 w_threat 以此增益重新计算，使 threat_ratio 越过
+    /// rim_help_threat_ratio 而涌现 ROTATE_RIM_HELP——NBA 语义里突破
+    /// 时弱侧收缩是协防铁律，此前只有 low-man 被激励（实测响应率 64-70%）。
+    pub drive_help_threat_gain: f32,
     /// 涌现为「X-Out 补位」的真空占比阈值。
     pub x_out_void_ratio: f32,
     /// 判定为「已在护筐位置」的距篮距离（ft）。
@@ -658,6 +663,7 @@ impl Default for PotentialFieldRules {
             default_threat_gain: 0.4,
             void_gain: 4.0,
             rim_help_threat_ratio: 0.40,
+            drive_help_threat_gain: 3.0,
             x_out_void_ratio: 0.32,
             rim_help_radius_ft: 12.0,
             weak_side_lateral_ft: 12.0,
@@ -892,6 +898,10 @@ pub struct DecisionRules {
     pub pass_distance_decay_reference_ft: f32,
     /// 传球衰减最大比例（衰减因子下限 = 1 - 此值）。
     pub pass_distance_max_decay: f32,
+    /// 篮下接球攻框加成（G6a 链 1 最后一环）：接球人处于篮下
+    /// （rim_shot_distance_ft 内）时传球效用按此值乘以接球人 finishing
+    /// 技能叠加，使切入者的篮下空位成为优先传球终点。
+    pub rim_catch_bonus: f32,
     /// 防守自主体基础效用乘数（由规则层提供基准，严禁决策层硬编码）。
     pub def_steal_gamble_base: f32,
     pub def_steal_risk_penalty: f32,
@@ -949,6 +959,7 @@ impl Default for DecisionRules {
             pass_distance_free_ft: 20.0,
             pass_distance_decay_reference_ft: 55.0,
             pass_distance_max_decay: 0.75,
+            rim_catch_bonus: 0.8,
             def_steal_gamble_base: 0.70,
             def_steal_risk_penalty: 0.85,
             def_rim_help_base: 0.80,

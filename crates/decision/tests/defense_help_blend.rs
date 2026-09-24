@@ -37,7 +37,16 @@ fn solve_low_man(
     geo: &Geometry,
 ) -> nba_decision::potential_field::EmergentDefenseTarget {
     let solver = DefensePotentialFieldSolver::new(rules.tactics.defense.potential_field);
-    solver.solve_equilibrium(geo.carrier, geo.hoop, &geo.off_positions, 1, 0, rules, 1.0)
+    solver.solve_equilibrium(
+        geo.carrier,
+        geo.hoop,
+        &geo.off_positions,
+        1,
+        0,
+        rules,
+        1.0,
+        false,
+    )
 }
 
 #[test]
