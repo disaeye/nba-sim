@@ -1200,6 +1200,212 @@ body {
  box-shadow: 0 4px 16px rgba(255, 255, 255, 0.2);
 }
 
+.studio-board,
+.roster-studio {
+ display: grid;
+ gap: 14px;
+}
+
+.studio-side {
+ display: grid;
+ gap: 10px;
+ padding: 12px;
+ border: 1px solid var(--border-subtle);
+ border-radius: var(--radius-md);
+ background: var(--bg-surface-elevated);
+}
+
+.studio-side.home {
+ box-shadow: inset 3px 0 0 var(--color-home);
+}
+
+.studio-side.away {
+ box-shadow: inset 3px 0 0 var(--color-away);
+}
+
+.studio-head {
+ display: flex;
+ justify-content: space-between;
+ gap: 8px;
+ align-items: baseline;
+}
+
+.studio-head strong {
+ font-size: 14px;
+}
+
+.studio-head span,
+.choice-meta,
+.play-note {
+ color: var(--text-muted);
+ font-size: 11px;
+}
+
+.choice-row,
+.play-list,
+.meter-list {
+ display: grid;
+ gap: 6px;
+}
+
+.choice-card,
+.play-card {
+ display: grid;
+ gap: 3px;
+ width: 100%;
+ text-align: left;
+ padding: 8px 10px;
+ border-radius: var(--radius-sm);
+ border: 1px solid var(--border-subtle);
+ background: var(--bg-input);
+ color: var(--text-primary);
+ cursor: pointer;
+}
+
+.choice-card.active,
+.play-card.active {
+ border-color: var(--color-cyan);
+ background: rgba(0, 210, 255, 0.1);
+}
+
+.choice-card strong,
+.play-card strong {
+ font-size: 12px;
+}
+
+.court-mini {
+ position: relative;
+ height: 180px;
+ border-radius: var(--radius-sm);
+ background:
+  linear-gradient(rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.08)),
+  #12301f;
+ overflow: hidden;
+}
+
+.court-mini::before {
+ content: "";
+ position: absolute;
+ inset: 10px;
+ border: 1px solid rgba(255, 255, 255, 0.35);
+ border-radius: 4px;
+}
+
+.slot-pin {
+ position: absolute;
+ transform: translate(-50%, -50%);
+ min-width: 64px;
+ max-width: 92px;
+ padding: 3px 5px;
+ border-radius: 999px;
+ background: rgba(8, 10, 15, 0.82);
+ border: 1px solid rgba(255, 255, 255, 0.3);
+ color: white;
+ font-size: 10px;
+ text-align: center;
+}
+
+.roster-layout {
+ display: grid;
+ grid-template-columns: 220px minmax(0, 1fr);
+ gap: 12px;
+}
+
+.player-list {
+ display: grid;
+ gap: 6px;
+ align-content: start;
+}
+
+.player-list button {
+ display: grid;
+ gap: 2px;
+ text-align: left;
+ padding: 8px;
+ border-radius: var(--radius-sm);
+ border: 1px solid var(--border-subtle);
+ background: var(--bg-input);
+ color: var(--text-primary);
+ cursor: pointer;
+}
+
+.player-list button.active {
+ border-color: var(--color-cyan);
+}
+
+.player-sheet {
+ display: grid;
+ gap: 12px;
+ padding: 12px;
+ border-radius: var(--radius-md);
+ background: var(--bg-surface-elevated);
+}
+
+.player-identity {
+ display: flex;
+ justify-content: space-between;
+ gap: 12px;
+}
+
+.role-pills {
+ display: flex;
+ flex-wrap: wrap;
+ gap: 6px;
+}
+
+.role-pills span {
+ padding: 3px 8px;
+ border-radius: 999px;
+ background: rgba(255, 255, 255, 0.08);
+ font-size: 11px;
+}
+
+.meter {
+ display: grid;
+ grid-template-columns: 72px minmax(0, 1fr) 34px;
+ gap: 8px;
+ align-items: center;
+ font-size: 11px;
+}
+
+.meter i {
+ display: block;
+ height: 6px;
+ border-radius: 999px;
+ background: rgba(255, 255, 255, 0.08);
+ overflow: hidden;
+}
+
+.meter b {
+ display: block;
+ height: 100%;
+ background: linear-gradient(90deg, var(--color-cyan), white);
+}
+
+.trait-grid {
+ display: grid;
+ grid-template-columns: repeat(5, minmax(0, 1fr));
+ gap: 8px;
+}
+
+.trait-grid div {
+ padding: 8px;
+ border-radius: var(--radius-sm);
+ background: var(--bg-input);
+}
+
+.trait-grid strong {
+ display: block;
+ font-size: 16px;
+}
+
+@media (max-width: 760px) {
+ .roster-layout,
+ .trait-grid {
+  grid-template-columns: 1fr;
+ }
+}
+
 /* ==========================================================================
    8. 移动端自适应微调 (Mobile Responsive)
    ========================================================================== */

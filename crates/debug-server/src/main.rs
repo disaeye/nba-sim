@@ -155,6 +155,7 @@ fn route(req: &Request, session: &SharedSession) -> Response {
             Ok(json) => ("200 OK", "application/json; charset=utf-8", json),
             Err(e) => internal_error(e.to_string()),
         },
+        ("GET", "/api/studio") => api_studio(),
         ("GET", "/api/simulate") | ("POST", "/api/simulate") => api_simulate(req),
         ("POST", "/api/session/setup") => api_session_setup(req, session),
         ("GET", "/api/session") | ("GET", "/api/session/state") => api_session_state(session),
@@ -390,7 +391,7 @@ fn api_simulate(req: &Request) -> (&'static str, &'static str, Vec<u8>) {
         Ok(run) => run,
         Err(e) => return bad_request(e),
     };
-    match run_simulation(run.seed, &run.scope, run.rules) {
+    match run_simulation(run.seed, &run.scope, run.rules, run.setup) {
         Ok(body) => ("200 OK", "application/x-ndjson; charset=utf-8", body),
         Err(e) => bad_request(e),
     }
@@ -400,6 +401,7 @@ struct RunRequest {
     seed: u64,
     scope: String,
     rules: GameRules,
+    setup: Option<nba_engine::MatchSetup>,
 }
 
 fn parse_run_request(req: &Request) -> Result<RunRequest, String> {
@@ -407,6 +409,7 @@ fn parse_run_request(req: &Request) -> Result<RunRequest, String> {
     let mut seed = 42u64;
     let mut scope = "5p".to_string();
     let mut rules_value: Option<Value> = None;
+    let mut setup_value: Option<Value> = None;
 
     if req.method == "POST" {
         let value: Value = serde_json::from_slice(&req.body)
@@ -423,6 +426,7 @@ fn parse_run_request(req: &Request) -> Result<RunRequest, String> {
                 .to_string();
         }
         rules_value = value.get("rules").cloned();
+        setup_value = value.get("setup").cloned();
     } else {
         for pair in req.query.split('&').filter(|s| !s.is_empty()) {
             let (key, value) = match pair.split_once('=') {
@@ -456,15 +460,160 @@ fn parse_run_request(req: &Request) -> Result<RunRequest, String> {
             .map_err(|e| format!("rules object invalid: {}", e))?,
     };
     validate_rules(&rules)?;
-    Ok(RunRequest { seed, scope, rules })
+    let setup = match setup_value {
+        None | Some(Value::Null) => None,
+        Some(value) => {
+            let mut setup = serde_json::from_value::<nba_engine::MatchSetup>(value)
+                .map_err(|error| format!("match setup invalid: {error}"))?;
+            setup.rules = rules.clone();
+            setup
+                .validate()
+                .map_err(|error| format!("match setup invalid: {error}"))?;
+            Some(setup)
+        }
+    };
+    Ok(RunRequest {
+        seed,
+        scope,
+        rules,
+        setup,
+    })
+}
+
+fn api_studio() -> Response {
+    match studio_catalog() {
+        Ok(body) => ("200 OK", "application/json; charset=utf-8", body),
+        Err(error) => internal_error(error),
+    }
+}
+
+fn studio_catalog() -> Result<Vec<u8>, String> {
+    let setup = nba_engine::MatchSetup::builtin(GameRules::default());
+    let payload = serde_json::json!({
+        "default_setup": setup,
+        "offense": offense_catalog(),
+        "defense": defense_catalog(),
+        "plays": play_catalog(),
+        "labels": studio_labels(),
+    });
+    serde_json::to_vec(&payload).map_err(|error| error.to_string())
+}
+
+fn offense_catalog() -> Vec<serde_json::Value> {
+    [
+        ("off_horns_pnr", "高位挡拆战术"),
+        ("off_motion_spacing", "五外动态进攻"),
+        ("off_transition_push", "快攻闪击反击"),
+        ("off_delay_attack", "高位单打"),
+        ("off_post_split", "低位背身单打"),
+        ("off_drag_screen", "突分投射"),
+    ]
+    .into_iter()
+    .map(|(id, fallback)| {
+        let spec = nba_domain::TacticalSetSpec::builtin(id);
+        serde_json::json!({
+            "id": id,
+            "name_zh": spec.as_ref().map(|item| item.name_zh.clone()).unwrap_or_else(|| fallback.to_string()),
+            "available": spec.is_some(),
+            "spec": spec,
+        })
+    })
+    .collect()
+}
+
+fn defense_catalog() -> Vec<serde_json::Value> {
+    [
+        ("def_man_conservative", "保守人盯人"),
+        ("def_man_pressure", "压迫人盯人"),
+        ("def_switch_heavy", "大量换防"),
+        ("def_drop_coverage", "沉退防守"),
+        ("def_hedge_recover", "延误回位"),
+        ("def_zone_23", "2-3 联防"),
+    ]
+    .into_iter()
+    .map(|(id, name_zh)| serde_json::json!({ "id": id, "name_zh": name_zh }))
+    .collect()
+}
+
+fn play_catalog() -> Vec<nba_domain::PlaySpec> {
+    const PLAYS: [&str; 3] = [
+        include_str!("../../../data/tactics/plays/high_pnr_roll_v1.json"),
+        include_str!("../../../data/tactics/plays/corner_backdoor_v1.json"),
+        include_str!("../../../data/tactics/plays/weak_side_lift_v1.json"),
+    ];
+    PLAYS
+        .into_iter()
+        .map(|json| {
+            nba_domain::PlaySpec::from_json(json)
+                .unwrap_or_else(|error| panic!("内建 PlaySpec 必须合法: {error}"))
+        })
+        .collect()
+}
+
+fn studio_labels() -> serde_json::Value {
+    serde_json::json!({
+        "attributes": {
+            "speed": "速度",
+            "acceleration": "加速",
+            "agility": "敏捷",
+            "strength": "力量",
+            "vertical": "弹跳",
+            "stamina": "耐力",
+            "ball_handling": "控球",
+            "passing": "传球",
+            "shooting_close": "篮下",
+            "shooting_near": "近筐",
+            "shooting_mid": "中投",
+            "shooting_three": "三分",
+            "free_throw": "罚球",
+            "finishing": "对抗终结",
+            "defense_perimeter": "外线防守",
+            "defense_interior": "内线防守",
+            "steal": "抢断",
+            "block": "封盖",
+            "offensive_rebound": "前场篮板",
+            "defensive_rebound": "后场篮板",
+            "decision_iq": "持球决策",
+            "off_ball_sense": "无球感觉"
+        },
+        "tendencies": {
+            "shoot_frequency": "出手倾向",
+            "drive_frequency": "突破倾向",
+            "pass_frequency": "传球倾向",
+            "cut_frequency": "切入倾向",
+            "screen_frequency": "掩护倾向",
+            "offensive_rebound_frequency": "冲板倾向",
+            "risk_tolerance": "风险容忍",
+            "transition_sprint": "转换冲刺"
+        },
+        "traits": {
+            "pace": "节奏",
+            "three_point_emphasis": "三分倾向",
+            "rim_pressure": "攻框倾向",
+            "defense_aggression": "防守强度",
+            "rebound_emphasis": "篮板投入"
+        }
+    })
 }
 
 fn validate_rules(rules: &GameRules) -> Result<(), String> {
     rules.validate()
 }
 
-fn run_simulation(seed: u64, scope: &str, rules: GameRules) -> Result<Vec<u8>, String> {
-    let mut engine = MatchEngine::with_rules(seed, rules);
+fn run_simulation(
+    seed: u64,
+    scope: &str,
+    rules: GameRules,
+    setup: Option<nba_engine::MatchSetup>,
+) -> Result<Vec<u8>, String> {
+    let mut engine = match setup {
+        Some(mut setup) => {
+            setup.rules = rules;
+            setup.validate()?;
+            MatchEngine::with_setup(setup, seed)
+        }
+        None => MatchEngine::with_rules(seed, rules),
+    };
     engine.set_scope(scope)?;
     let mut body = Vec::with_capacity(1024 * 1024);
     let mut ticks = 0usize;
@@ -554,6 +703,32 @@ mod tests {
     }
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
+    fn studio_catalog_round_trips_into_simulation() {
+        let (status, _, body) = route(&request("GET", "/api/studio", Vec::new()), &session_unused());
+        assert_eq!(status, "200 OK");
+        let catalog: Value = serde_json::from_slice(&body).expect("studio catalog should be JSON");
+        let setup = catalog["default_setup"].clone();
+        assert!(setup["home_team"]["players"].as_array().unwrap().len() >= 5);
+        assert!(catalog["offense"].as_array().unwrap().len() >= 2);
+        assert!(catalog["defense"].as_array().unwrap().len() >= 2);
+        let response = api_simulate(&request(
+            "POST",
+            "/api/simulate",
+            json_body(serde_json::json!({
+                "seed": 7,
+                "scope": "1p",
+                "setup": setup,
+            })),
+        ));
+        assert_eq!(response.0, "200 OK");
+        assert!(!response.2.is_empty());
+    }
+
+    fn session_unused() -> SharedSession {
+        Arc::new(Mutex::new(MatchService::new()))
+    }
+
+    #[test]
     fn session_routes_preserve_setup_and_lifecycle() {
         let session = Arc::new(Mutex::new(MatchService::new()));
         let setup = MatchSetup::builtin(GameRules::default());

@@ -124,10 +124,13 @@
 
   window.__nbaDebug = state;
   window.__nbaDebugReady = true;
-  function el(tag, className, text) {
+  function el(tag, className, ...parts) {
     const node = document.createElement(tag);
     if (className) node.className = className;
-    if (text !== undefined && text !== null) node.textContent = String(text);
+    for (const part of parts) {
+      if (part == null || part === false) continue;
+      node.append(part.nodeType ? part : document.createTextNode(String(part)));
+    }
     return node;
   }
   // `esc` 已移除：全部渲染路径改用 `el()` + textContent（DOM 自动转义）。
@@ -357,6 +360,190 @@
     return TEAM_ZH[name] || TEAM_ZH[team.id] || name || "—";
   }
 
+  let studio = null;
+  let selectedPlayerId = null;
+
+  async function loadStudio() {
+    studio = JSON.parse(await fetchText("/api/studio"));
+    selectedPlayerId = studio.default_setup.home_team.players[0].id;
+    renderStudio();
+  }
+
+  function label(group, key) {
+    return studio?.labels?.[group]?.[key] || key;
+  }
+
+  function renderStudio() {
+    if (!studio) return;
+    renderBoard();
+    renderRoster();
+    syncScoreboardTactics();
+  }
+
+  function syncScoreboardTactics() {
+    const setup = studio.default_setup;
+    const away = studio.defense.find((item) => item.id === setup.away_lineup.defense_tactic);
+    const home = studio.defense.find((item) => item.id === setup.home_lineup.defense_tactic);
+    document.querySelector(".away-side .team-tactic-tag").textContent = away?.name_zh || "客队防守";
+    document.querySelector(".home-side .team-tactic-tag").textContent = home?.name_zh || "主队防守";
+  }
+
+  function renderBoard() {
+    const root = $("tacticBoard");
+    root.replaceChildren(
+      boardSide("away", studio.default_setup.away_team, studio.default_setup.away_lineup, studio.default_setup.away_playbook),
+      boardSide("home", studio.default_setup.home_team, studio.default_setup.home_lineup, studio.default_setup.home_playbook),
+    );
+  }
+
+  function boardSide(side, team, lineup, playbook) {
+    const offense = studio.offense.find((item) => item.id === lineup.offense_tactic);
+    const card = el("section", `studio-side ${side}`);
+    card.append(
+      el("div", "studio-head", el("strong", null, team.name), el("span", null, side === "home" ? "主队" : "客队")),
+      el("div", "choice-meta", "进攻体系"),
+      choiceRow(studio.offense, lineup.offense_tactic, (id) => {
+        lineup.offense_tactic = id;
+        const next = studio.offense.find((item) => item.id === id);
+        const compatible = (studio.plays || []).filter((play) => playFits(play, next?.spec));
+        if (side === "home") studio.default_setup.home_playbook = compatible;
+        else studio.default_setup.away_playbook = compatible;
+        renderStudio();
+      }),
+      courtMini(offense?.spec),
+      el("div", "choice-meta", "防守体系"),
+      choiceRow(studio.defense, lineup.defense_tactic, (id) => {
+        lineup.defense_tactic = id;
+        renderStudio();
+      }),
+      el("div", "choice-meta", "战术板"),
+      playList(playbook),
+    );
+    return card;
+  }
+
+  function choiceRow(items, selected, onPick) {
+    const row = el("div", "choice-row");
+    for (const item of items) {
+      const button = el(
+        "button",
+        `choice-card${item.id === selected ? " active" : ""}${item.available === false ? " disabled" : ""}`,
+      );
+      button.type = "button";
+      button.disabled = item.available === false;
+      button.append(el("strong", null, item.name_zh), el("span", "choice-meta", item.available === false ? "当前没有落位档案" : item.id));
+      button.addEventListener("click", () => onPick(item.id));
+      row.append(button);
+    }
+    return row;
+  }
+
+  function courtMini(spec) {
+    const court = el("div", "court-mini");
+    if (!spec) {
+      court.append(el("span", "play-note", "这个体系目前只有名称，没有落位点。"));
+      return court;
+    }
+    for (const slot of spec.slots) {
+      const pin = el("div", "slot-pin", slot.name_zh);
+      const x = Math.max(8, Math.min(92, (slot.base_offset_y / 50) * 100));
+      const y = Math.max(12, Math.min(88, 100 - (slot.base_offset_x / 47) * 100));
+      pin.style.left = x + "%";
+      pin.style.top = y + "%";
+      pin.title = slot.behaviour;
+      court.append(pin);
+    }
+    return court;
+  }
+
+  function playList(playbook) {
+    const list = el("div", "play-list");
+    if (!playbook.length) {
+      list.append(el("div", "play-note", "当前进攻体系没有可配合的战术。"));
+      return list;
+    }
+    for (const play of playbook) {
+      const card = el("article", "play-card active");
+      const verbs = (play.rules || []).map((rule) => rule.then.verb + " · " + rule.then.slot).join(" / ");
+      card.append(el("strong", null, play.name_zh), el("span", "play-note", verbs || play.id));
+      list.append(card);
+    }
+    return list;
+  }
+
+  function playFits(play, spec) {
+    if (!spec) return false;
+    const slots = new Set(spec.slots.map((slot) => slot.id));
+    return (play.rules || []).every((rule) => slots.has(rule.then.slot));
+  }
+
+  function renderRoster() {
+    const root = $("rosterStudio");
+    const teams = [studio.default_setup.home_team, studio.default_setup.away_team];
+    const players = teams.flatMap((team) => team.players.map((player) => ({ team, player })));
+    const selected = players.find((item) => item.player.id === selectedPlayerId) || players[0];
+    const list = el("div", "player-list");
+    for (const item of players) {
+      const button = el("button", item.player.id === selected.player.id ? "active" : "");
+      button.type = "button";
+      button.append(
+        el("strong", null, item.player.jersey + " " + item.player.name),
+        el("span", "choice-meta", item.team.short_name + " · " + getPositionZh(item.player.position)),
+      );
+      button.addEventListener("click", () => {
+        selectedPlayerId = item.player.id;
+        renderRoster();
+      });
+      list.append(button);
+    }
+    root.replaceChildren(el("div", "roster-layout", list, playerSheet(selected.team, selected.player)));
+  }
+
+  function playerSheet(team, player) {
+    const sheet = el("article", "player-sheet");
+    const identity = el("div", "player-identity");
+    identity.append(
+      el("div", null, el("strong", null, player.name), el("div", "choice-meta", team.name + " · #" + player.jersey + " · " + player.height_cm + " cm · " + player.weight_kg + " kg")),
+      el("div", "role-pills",
+        el("span", null, getPositionZh(player.position)),
+        el("span", null, getOffensiveRoleZh(player.offensive_role)),
+        el("span", null, getDefensiveRoleZh(player.defensive_role)),
+        el("span", null, player.starter ? "首发" : "替补"),
+      ),
+    );
+    sheet.append(
+      identity,
+      el("div", "choice-meta", "能力"),
+      meters(player.attributes, "attributes"),
+      el("div", "choice-meta", "倾向"),
+      meters(player.tendencies, "tendencies"),
+      el("div", "choice-meta", "球队风格"),
+      traitGrid(team.team_traits),
+    );
+    return sheet;
+  }
+
+  function meters(values, group) {
+    const list = el("div", "meter-list");
+    for (const [key, value] of Object.entries(values)) {
+      const ratio = Math.max(0, Math.min(1, Number(value)));
+      const bar = el("i", null, el("b"));
+      bar.firstChild.style.width = Math.round(ratio * 100) + "%";
+      list.append(el("div", "meter", el("span", null, label(group, key)), bar, el("span", null, ratio.toFixed(2))));
+    }
+    return list;
+  }
+
+  function traitGrid(traits) {
+    const grid = el("div", "trait-grid");
+    for (const [key, value] of Object.entries(traits)) {
+      const item = el("div");
+      item.append(el("span", "choice-meta", label("traits", key)), el("strong", null, Number(value).toFixed(2)));
+      grid.append(item);
+    }
+    return grid;
+  }
+
   // 动态岛核心高光事件白名单（过滤 CONTACT_BUMP 等底层物理微小碰擦杂音）
   const HIGHLIGHT_EVENTS = new Set([
     "SCORE",
@@ -450,9 +637,11 @@
     setControlsBusy(true);
     try {
       if (!withRules) await fetchDefaultRules(false);
+      if (!studio) await loadStudio();
       const wasm = await ensureWasm();
       let responseText;
-      if (wasm && wasm.simulateToNdjson) {
+      const setup = studio?.default_setup || null;
+      if (wasm && wasm.simulateToNdjson && !setup) {
         let rulesJson = null;
         if (withRules) {
           rulesJson = JSON.stringify(withRules);
@@ -461,15 +650,16 @@
         }
         responseText = wasm.simulateToNdjson(BigInt(seed), scope, rulesJson);
       } else {
-        responseText = withRules
-          ? await fetchText("/api/simulate", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ seed, scope, rules: withRules }),
-            })
-          : await fetchText(
-              `/api/simulate?seed=${encodeURIComponent(seed)}&scope=${encodeURIComponent(scope)}`,
-            );
+        responseText = await fetchText("/api/simulate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            seed,
+            scope,
+            rules: withRules || state.rules || null,
+            setup,
+          }),
+        });
       }
       if (withRules) state.rules = { ...state.rules, ...withRules };
       loadStream(responseText, `seed ${seed} · ${scope}`);
@@ -2286,8 +2476,23 @@
   async function boot() {
     wire();
     await loadDefaultRules();
+    await loadStudio();
     await runSimulation();
   }
+  window.__nbaStudio = {
+    load(catalog) {
+      studio = catalog;
+      selectedPlayerId = catalog.default_setup.home_team.players[0].id;
+      renderStudio();
+    },
+    selectOffense(side, id) {
+      const lineup = studio.default_setup[side + "_lineup"];
+      lineup.offense_tactic = id;
+      const next = studio.offense.find((item) => item.id === id);
+      studio.default_setup[side + "_playbook"] = (studio.plays || []).filter((play) => playFits(play, next?.spec));
+      renderStudio();
+    },
+  };
   boot().catch((error) => {
     setRunStatus("启动失败", true);
     $("streamSummary").textContent = error.message;
