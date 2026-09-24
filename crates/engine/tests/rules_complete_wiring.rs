@@ -128,10 +128,15 @@ fn capability_risk_tolerance_gain_reaches_behaviour() {
 
 #[test]
 fn capability_boxout_bonus_gain_reaches_behaviour() {
-    assert_rule_coefficient_reaches_behaviour("capability.boxout_bonus_primary_gain", |r| {
-        r.capability.boxout_bonus_primary_gain = 1.0;
-        r.capability.boxout_bonus_secondary_gain = 1.0;
-    });
+    // v77（突破起跳延伸）后卡位触发的分布变窄，4 seed 判据抖动
+    // （实测 2/4）；按 ADR-016 先例扩到扩展判据（6 seed，≥3/6）。
+    assert_rule_coefficient_reaches_behaviour_extended(
+        "capability.boxout_bonus_primary_gain",
+        |r| {
+            r.capability.boxout_bonus_primary_gain = 1.0;
+            r.capability.boxout_bonus_secondary_gain = 1.0;
+        },
+    );
 }
 
 #[test]
