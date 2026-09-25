@@ -390,8 +390,10 @@
     const setup = studio.default_setup;
     const away = studio.defense.find((item) => item.id === setup.away_lineup.defense_tactic);
     const home = studio.defense.find((item) => item.id === setup.home_lineup.defense_tactic);
-    document.querySelector(".away-side .team-tactic-tag").textContent = away?.name_zh || "客队防守";
-    document.querySelector(".home-side .team-tactic-tag").textContent = home?.name_zh || "主队防守";
+    const awayTag = document.querySelector(".away-side .team-tactic-tag");
+    if (awayTag) awayTag.textContent = away?.name_zh || "客队防守";
+    const homeTag = document.querySelector(".home-side .team-tactic-tag");
+    if (homeTag) homeTag.textContent = home?.name_zh || "主队防守";
   }
 
   function renderBoard() {
@@ -1234,10 +1236,16 @@
   function renderAnomalies() {
     const count = state.anomalies.length;
     const badge = $("anomalyBadge");
-    badge.textContent = count ? `● ${count} anomalies` : "● 0 anomalies";
-    badge.className = `anomaly-badge ${count > 10 ? "anomaly-danger" : count ? "anomaly-warn" : "anomaly-ok"}`;
+    if (badge) {
+      const textSpan = badge.querySelector(".anomaly-text");
+      const label = count ? `● ${count} 违规` : "● 0 违规";
+      if (textSpan) textSpan.textContent = label;
+      else badge.textContent = label;
+      badge.className = `anomaly-pill-badge ${count > 10 ? "anomaly-danger" : count ? "anomaly-warn" : "anomaly-ok"}`;
+    }
     // DOM API 构建（textContent 赋值，无 HTML 拼接）。
     const list = $("anomalyList");
+    if (!list) return;
     const bindSeek = (button) =>
       button.addEventListener("click", () =>
         seek(Number(button.dataset.index)),
@@ -1259,9 +1267,6 @@
       empty.textContent = "引擎不变量未报告违规。";
       list.replaceChildren(empty);
     }
-    $("streamSummary").textContent = count
-      ? `引擎报告 ${count} 条违规（点击定位）`
-      : "流已加载 · 引擎不变量 0 违规";
   }
   function updateReadouts(source) {
     $("eventReadout").textContent = `共 ${state.events.length} 条事件`;
@@ -2048,43 +2053,57 @@
 
   function renderShotMap() {
     const canvas = $("shotCanvas");
+    if (!canvas) return;
     const ctx = canvas.getContext("2d");
+    if (!ctx) return;
     const rules = runtimeRules(state.ticks[0] || {});
     const scaleX = canvas.width / rules.courtWidth;
     const scaleY = canvas.height / rules.courtHeight;
     const leftHoopX = rules.leftHoopX;
     const rightHoopX = rules.rightHoopX;
     const hoopY = rules.hoopY;
-    ctx.fillStyle = "#b8a27d";
+
+    // 高质感深色运动科技底色
+    ctx.fillStyle = "#0a0e16";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = "rgba(247,239,214,.86)";
+
+    // 绘制微弱球场外框与半场线
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
     ctx.lineWidth = 1.2;
+    ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
+
+    ctx.beginPath();
+    ctx.moveTo(canvas.width / 2, 10);
+    ctx.lineTo(canvas.width / 2, canvas.height - 10);
+    ctx.stroke();
+
     for (const hoopX of [leftHoopX, rightHoopX]) {
       ctx.beginPath();
       ctx.arc(hoopX * scaleX, hoopY * scaleY, 7 * scaleX, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255, 120, 40, 0.4)";
       ctx.stroke();
     }
     for (const shot of state.shots) {
+      const sx = shot.x * scaleX;
+      const sy = shot.y * scaleY;
+      const r = shot.three ? 5.5 : 4;
       ctx.beginPath();
-      ctx.arc(
-        shot.x * scaleX,
-        shot.y * scaleY,
-        shot.three ? 5 : 4,
-        0,
-        Math.PI * 2,
-      );
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
       if (shot.made === true) {
         ctx.fillStyle = "#2ce59b";
         ctx.fill();
-        ctx.strokeStyle = "#bffff0";
+        ctx.strokeStyle = "#a7f3d0";
+        ctx.lineWidth = 1.0;
+        ctx.stroke();
       } else if (shot.made === false) {
         ctx.strokeStyle = "#ff6f7e";
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
       } else {
         ctx.strokeStyle = "#f5bd45";
         ctx.lineWidth = 1.2;
+        ctx.stroke();
       }
-      if (shot.made !== true) ctx.stroke();
     }
     const rim = rules.rimShotDistance;
     const three = rules.threePointDistance;
@@ -2256,12 +2275,39 @@
         $("streamSummary").textContent = error.message;
       }
     });
+
+    // 伴随式实时透视台选项卡 (Deck Tabs)
+    document.querySelectorAll(".deck-tab-button").forEach((button) =>
+      button.addEventListener("click", () => {
+        const tab = button.dataset.deckTab;
+        document
+          .querySelectorAll(".deck-tab-button")
+          .forEach((item) => item.classList.toggle("active", item === button));
+        document.querySelectorAll(".deck-pane").forEach((pane) => {
+          const active = pane.id === `deck-${tab}`;
+          pane.classList.toggle("active", active);
+        });
+        if (tab === "decisions" && state.ticks[state.idx]) {
+          renderDecision(state.ticks[state.idx]);
+        }
+        if (tab === "anomalies") {
+          renderAnomalies();
+        }
+      }),
+    );
+
     $("anomalyBadge").addEventListener("click", () => {
+      const anomaliesBtn = document.querySelector('.deck-tab-button[data-deck-tab="anomalies"]');
+      if (anomaliesBtn) anomaliesBtn.click();
       const panel = $("anomalyPanel");
-      const open = panel.hidden;
-      panel.hidden = !open;
-      $("anomalyBadge").setAttribute("aria-expanded", String(open));
+      if (panel) {
+        const open = panel.hidden;
+        panel.hidden = !open;
+        $("anomalyBadge").setAttribute("aria-expanded", String(open));
+      }
     });
+
+    // 底部研讨舱选项卡 (Studio Tabs)
     document.querySelectorAll(".tab-button").forEach((button) =>
       button.addEventListener("click", () => {
         state.currentTab = button.dataset.tab;
@@ -2274,6 +2320,9 @@
           pane.classList.toggle("active", active);
         });
         if (state.currentTab === "shots") renderShotMap();
+        if (state.currentTab === "frame" && state.ticks[state.idx]) {
+          renderFrameJson(state.ticks[state.idx]);
+        }
       }),
     );
     $("prevPossessionButton").addEventListener("click", () =>
@@ -2289,6 +2338,13 @@
       seek(event.target.value),
     );
     $("jumpButton").addEventListener("click", () => seek($("jumpInput").value));
+    const jumpInput = $("jumpInput");
+    if (jumpInput) {
+      jumpInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") seek(jumpInput.value);
+      });
+    }
+
     document.querySelectorAll(".speed-group button").forEach((button) =>
       button.addEventListener("click", () => {
         state.speed = Number(button.dataset.speed);
@@ -2377,8 +2433,24 @@
     const randomBtn = $("randomSeedBtn");
     if (randomBtn) {
       randomBtn.addEventListener("click", () => {
-        $("seedInput").value = String(Math.floor(Math.random() * 90000) + 1000);
+        const val = String(Math.floor(Math.random() * 90000) + 1000);
+        $("seedInput").value = val;
+        if ($("sheetSeedInput")) $("sheetSeedInput").value = val;
       });
+    }
+
+    const sheetRandom = $("sheetRandomSeedBtn");
+    if (sheetRandom) {
+      sheetRandom.addEventListener("click", () => {
+        const val = String(Math.floor(Math.random() * 90000) + 1000);
+        $("seedInput").value = val;
+        if ($("sheetSeedInput")) $("sheetSeedInput").value = val;
+      });
+    }
+
+    const sheetUpload = $("sheetUploadTriggerBtn");
+    if (sheetUpload) {
+      sheetUpload.addEventListener("click", () => $("fileInput").click());
     }
 
     const uploadTrigger = $("uploadTriggerBtn");
@@ -2479,8 +2551,20 @@
       }
       if (event.key === "ArrowLeft") step(-1);
       if (event.key === "ArrowRight") step(1);
-      if (event.key === "[" || event.key === "{") possessionJump(-1);
-      if (event.key === "]" || event.key === "}") possessionJump(1);
+      if (event.key === "[" || event.key === "{" || event.key === "ArrowUp") possessionJump(-1);
+      if (event.key === "]" || event.key === "}" || event.key === "ArrowDown") possessionJump(1);
+      if (event.code === "KeyR") {
+        event.preventDefault();
+        runSimulation();
+      }
+      if (event.code === "KeyP") {
+        event.preventDefault();
+        $("potentialFieldToggle")?.click();
+      }
+      if (event.code === "KeyM") {
+        event.preventDefault();
+        $("courtViewBtn")?.click();
+      }
     });
   }
 
