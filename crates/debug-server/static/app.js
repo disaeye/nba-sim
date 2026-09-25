@@ -120,6 +120,8 @@
     courtMode: "half",
     potentialFieldVisible: true,
     lastFrameJson: -1,
+    courtFX: null,
+    fxRafId: null,
   };
 
   window.__nbaDebug = state;
@@ -1379,14 +1381,687 @@
     state.lastFrameJson = state.idx;
   }
 
+  // ========================================================
+  // 球场视觉动效与动态物理渲染系统 (CourtVisualFXManager)
+  // ========================================================
+  class CourtVisualFXManager {
+    constructor() {
+      this.effects = [];
+      this.processedKeys = new Set();
+      this.lastProcessedIdx = -1;
+      this.ballHistory = []; // { x, y, z, ftX, ftY, t, speed }
+      this.playerHistories = new Map(); // id -> [{ x, y, vx, vy, speed }]
+      this.rimStates = {
+        left: { shake: 0, netOffset: 0, netVel: 0 },
+        right: { shake: 0, netOffset: 0, netVel: 0 },
+      };
+      this.activeHalfCourt = "right";
+      this.ballRotationAngle = 0;
+      this.lastTickTime = performance.now();
+    }
+
+    reset() {
+      this.effects = [];
+      this.processedKeys.clear();
+      this.lastProcessedIdx = -1;
+      this.ballHistory = [];
+      this.playerHistories.clear();
+      this.rimStates.left = { shake: 0, netOffset: 0, netVel: 0 };
+      this.rimStates.right = { shake: 0, netOffset: 0, netVel: 0 };
+      this.ballRotationAngle = 0;
+    }
+
+    update(tick, frameIdx, rules) {
+      if (!tick) return;
+      const now = performance.now();
+      const dt = Math.min(0.1, Math.max(0.01, (now - this.lastTickTime) / 1000));
+      this.lastTickTime = now;
+
+      // 跨帧跳变时清理过期特效
+      if (Math.abs(frameIdx - this.lastProcessedIdx) > 6) {
+        this.processedKeys.clear();
+        this.effects = [];
+        this.ballHistory = [];
+      }
+      this.lastProcessedIdx = frameIdx;
+
+      // 1. 动态半场追踪防抖更新
+      const ballNormX = finite(tick.ball?.x, 0.5);
+      if (ballNormX > 0.55) {
+        this.activeHalfCourt = "right";
+      } else if (ballNormX < 0.45) {
+        this.activeHalfCourt = "left";
+      }
+
+      // 2. 篮球轨迹与运动学统计
+      if (tick.ball) {
+        const bx = finite(tick.ball.x) * rules.courtWidth;
+        const by = finite(tick.ball.y) * rules.courtHeight;
+        const bz = finite(tick.ball.z, 0);
+        const prevBall = this.ballHistory[this.ballHistory.length - 1];
+        let speed = 0;
+        if (prevBall) {
+          const dx = bx - prevBall.x;
+          const dy = by - prevBall.y;
+          speed = Math.hypot(dx, dy) / Math.max(0.01, rules.tickSeconds);
+          this.ballRotationAngle += Math.hypot(dx, dy) * 0.4;
+        }
+        this.ballHistory.push({
+          x: bx,
+          y: by,
+          z: bz,
+          speed,
+          t: now,
+          frame: frameIdx,
+        });
+        if (this.ballHistory.length > 16) this.ballHistory.shift();
+
+        // 运球触地扩散波纹检测
+        if (
+          prevBall &&
+          prevBall.z >= 1.2 &&
+          bz < 1.0 &&
+          tick.ball.status !== "Flying"
+        ) {
+          this.effects.push({
+            type: "ground_ripple",
+            x: bx,
+            y: by,
+            color: "#f59e0b",
+            startR: 4,
+            endR: 16,
+            duration: 450,
+            startTime: now,
+            startFrame: frameIdx,
+          });
+        }
+      }
+
+      // 3. 球员轨迹与运动学统计
+      for (const player of tick.players || []) {
+        if (player.onCourt === false) continue;
+        const px = finite(player.x) * rules.courtWidth;
+        const py = finite(player.y) * rules.courtHeight;
+        let hist = this.playerHistories.get(player.id);
+        if (!hist) {
+          hist = [];
+          this.playerHistories.set(player.id, hist);
+        }
+        let vx = 0;
+        let vy = 0;
+        let speed = 0;
+        const prev = hist[hist.length - 1];
+        if (prev) {
+          vx = px - prev.x;
+          vy = py - prev.y;
+          speed = Math.hypot(vx, vy) / Math.max(0.01, rules.tickSeconds);
+        }
+        hist.push({ x: px, y: py, vx, vy, speed, frame: frameIdx });
+        if (hist.length > 8) hist.shift();
+      }
+
+      // 4. 事件扫描与动效激发
+      const events = eventNames(tick);
+      for (const evtName of events) {
+        const key = `${frameIdx}_${evtName}`;
+        if (this.processedKeys.has(key)) continue;
+        this.processedKeys.add(key);
+
+        this.triggerEventFX(evtName, tick, frameIdx, rules, now);
+      }
+
+      // 5. 篮筐物理动力学更新（Net Swish & Rim Shake）
+      for (const side of ["left", "right"]) {
+        const rim = this.rimStates[side];
+        if (rim.shake > 0.01) {
+          rim.shake *= 0.86;
+        } else {
+          rim.shake = 0;
+        }
+        if (rim.netOffset > 0.1 || Math.abs(rim.netVel) > 0.1) {
+          const spring = -28.0 * rim.netOffset;
+          const damping = -4.8 * rim.netVel;
+          rim.netVel += (spring + damping) * dt;
+          rim.netOffset += rim.netVel * dt;
+          if (rim.netOffset < 0) rim.netOffset = 0;
+        } else {
+          rim.netOffset = 0;
+          rim.netVel = 0;
+        }
+      }
+
+      // 6. 清理生命周期结束的特效
+      this.effects = this.effects.filter((fx) => {
+        const age = now - fx.startTime;
+        return age < fx.duration;
+      });
+    }
+
+    triggerEventFX(evtName, tick, frameIdx, rules, now) {
+      const ballFtX = tick.ball
+        ? finite(tick.ball.x) * rules.courtWidth
+        : rules.courtWidth * 0.5;
+      const ballFtY = tick.ball
+        ? finite(tick.ball.y) * rules.courtHeight
+        : rules.courtHeight * 0.5;
+
+      const targetRight = tick.ball ? tick.ball.x > 0.45 : true;
+      const targetHoopX = targetRight ? rules.rightHoopX : rules.leftHoopX;
+      const targetSide = targetRight ? "right" : "left";
+
+      if (evtName === "SHOT_RELEASE") {
+        let shooter = (tick.players || []).find((p) => p.hasBall);
+        if (!shooter && tick.ball) {
+          let minDist = Infinity;
+          for (const p of tick.players || []) {
+            const d = Math.hypot(
+              finite(p.x) * rules.courtWidth - ballFtX,
+              finite(p.y) * rules.courtHeight - ballFtY,
+            );
+            if (d < minDist) {
+              minDist = d;
+              shooter = p;
+            }
+          }
+        }
+        const sx = shooter ? finite(shooter.x) * rules.courtWidth : ballFtX;
+        const sy = shooter ? finite(shooter.y) * rules.courtHeight : ballFtY;
+        const distToHoop = Math.hypot(sx - targetHoopX, sy - rules.hoopY);
+        const isThree = distToHoop >= rules.threePointDistance;
+
+        // 起跳聚光扩散光圈
+        this.effects.push({
+          type: "ground_ripple",
+          x: sx,
+          y: sy,
+          color: isThree ? "#fbbf24" : "#34d399",
+          startR: 16,
+          endR: 44,
+          duration: 900,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+
+        // 投篮抛物线飞行弧光 (Shot Arc)
+        this.effects.push({
+          type: "shot_arc",
+          startX: sx,
+          startY: sy,
+          targetX: targetHoopX,
+          targetY: rules.hoopY,
+          isThree,
+          duration: 1300,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+
+        // 投篮提示浮动标牌
+        this.effects.push({
+          type: "floating_text",
+          x: sx,
+          y: sy - 4,
+          text: isThree ? "🔥 3PT 出手！" : "🎯 投篮出手！",
+          color: isThree ? "#fbbf24" : "#34d399",
+          bg: "rgba(10, 16, 24, 0.88)",
+          scaleUp: 1.15,
+          duration: 1100,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+      } else if (
+        evtName === "SHOT_MADE" ||
+        evtName === "SCORE" ||
+        evtName === "DRIVE_SCORE"
+      ) {
+        // 投篮命中 / 空心入网
+        const rim = this.rimStates[targetSide];
+        rim.netOffset = 18;
+        rim.netVel = 32;
+
+        // 入网水花扩散 (Swish Waves)
+        this.effects.push({
+          type: "swish_splash",
+          x: targetHoopX,
+          y: rules.hoopY,
+          color: "#10b981",
+          duration: 1250,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+
+        // 庆祝礼花粒子爆裂 (Confetti Sparks)
+        const particles = [];
+        for (let i = 0; i < 22; i++) {
+          const angle = (Math.PI * 2 * i) / 22 + (Math.sin(i) * 0.3);
+          const spd = 16 + (i % 5) * 6;
+          particles.push({
+            x: targetHoopX,
+            y: rules.hoopY,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: i % 2 === 0 ? "#10b981" : "#fbbf24",
+            size: 2.2 + (i % 3),
+          });
+        }
+        this.effects.push({
+          type: "particles",
+          particles,
+          duration: 1200,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+
+        // 震撼浮动大字标牌
+        const isDrive = evtName === "DRIVE_SCORE";
+        const is3Pt = (tick.event || "").includes("3PT");
+        const bannerText = isDrive
+          ? "⚡ 突破上篮！+2"
+          : is3Pt
+            ? "🔥 三分命中！+3"
+            : "🎯 空心入网！+2";
+        const bannerColor = is3Pt ? "#fbbf24" : "#10b981";
+        this.effects.push({
+          type: "floating_text",
+          x: targetHoopX,
+          y: rules.hoopY - 4,
+          text: bannerText,
+          color: bannerColor,
+          bg: "rgba(10, 16, 24, 0.92)",
+          scaleUp: 1.35,
+          duration: 1500,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+      } else if (evtName === "SHOT_MISS" || evtName === "DRIVE_MISS") {
+        // 投篮打铁
+        const rim = this.rimStates[targetSide];
+        rim.shake = 1.0;
+
+        // 打铁火花与撞击圆环
+        this.effects.push({
+          type: "ground_ripple",
+          x: targetHoopX,
+          y: rules.hoopY,
+          color: "#ef4444",
+          startR: 6,
+          endR: 32,
+          duration: 750,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+
+        const sparks = [];
+        for (let i = 0; i < 12; i++) {
+          const angle = (Math.PI * 2 * i) / 12 + (Math.cos(i) * 0.4);
+          const spd = 12 + (i % 4) * 5;
+          sparks.push({
+            x: targetHoopX,
+            y: rules.hoopY,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: i % 2 === 0 ? "#ef4444" : "#f97316",
+            size: 2.0 + (i % 2),
+          });
+        }
+        this.effects.push({
+          type: "particles",
+          particles: sparks,
+          duration: 750,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+
+        this.effects.push({
+          type: "floating_text",
+          x: targetHoopX,
+          y: rules.hoopY - 4,
+          text: "💥 弹筐打铁！",
+          color: "#f87171",
+          bg: "rgba(28, 12, 12, 0.9)",
+          scaleUp: 1.2,
+          duration: 1050,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+      } else if (evtName === "BLOCK") {
+        // 盖帽封盖
+        this.effects.push({
+          type: "block_shield",
+          x: ballFtX,
+          y: ballFtY,
+          duration: 1100,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+        this.effects.push({
+          type: "floating_text",
+          x: ballFtX,
+          y: ballFtY - 4,
+          text: "🛡️ 惊天封盖！BLOCK!",
+          color: "#38bdf8",
+          bg: "rgba(8, 20, 36, 0.92)",
+          scaleUp: 1.3,
+          duration: 1350,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+      } else if (evtName === "STEAL" || evtName === "BALL_POKED_LOOSE") {
+        // 抢断与破坏球权
+        this.effects.push({
+          type: "steal_lightning",
+          x: ballFtX,
+          y: ballFtY,
+          duration: 850,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+        this.effects.push({
+          type: "floating_text",
+          x: ballFtX,
+          y: ballFtY - 4,
+          text: evtName === "STEAL" ? "⚡ 抢断拦截！STEAL!" : "🖐️ 破坏球权！",
+          color: "#fbbf24",
+          bg: "rgba(28, 20, 6, 0.9)",
+          scaleUp: 1.25,
+          duration: 1200,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+      } else if (evtName === "REBOUND") {
+        // 争抢篮板
+        this.effects.push({
+          type: "ground_ripple",
+          x: ballFtX,
+          y: ballFtY,
+          color: "#60a5fa",
+          startR: 10,
+          endR: 38,
+          duration: 900,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+        this.effects.push({
+          type: "floating_text",
+          x: ballFtX,
+          y: ballFtY - 4,
+          text: "🏀 摘下篮板！",
+          color: "#93c5fd",
+          bg: "rgba(10, 20, 36, 0.9)",
+          scaleUp: 1.15,
+          duration: 1050,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+      } else if (evtName === "FOUL" || evtName === "VIOLATION") {
+        // 犯规与违例
+        this.effects.push({
+          type: "ground_ripple",
+          x: ballFtX,
+          y: ballFtY,
+          color: evtName === "FOUL" ? "#f59e0b" : "#ef4444",
+          startR: 12,
+          endR: 44,
+          duration: 1050,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+        this.effects.push({
+          type: "floating_text",
+          x: ballFtX,
+          y: ballFtY - 4,
+          text: evtName === "FOUL" ? "⚠️ 犯规吹罚！FOUL" : "🚨 违例吹停！",
+          color: evtName === "FOUL" ? "#fde047" : "#fca5a5",
+          bg: "rgba(28, 14, 8, 0.9)",
+          scaleUp: 1.25,
+          duration: 1300,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+      } else if (
+        evtName === "CONTACT_BUMP" ||
+        evtName === "SCREEN_CONTACT"
+      ) {
+        // 对抗与掩护
+        this.effects.push({
+          type: "ground_ripple",
+          x: ballFtX,
+          y: ballFtY,
+          color: "#fb923c",
+          startR: 8,
+          endR: 26,
+          duration: 650,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+        this.effects.push({
+          type: "floating_text",
+          x: ballFtX,
+          y: ballFtY - 3,
+          text: evtName === "SCREEN_CONTACT" ? "🧱 扎实掩护！" : "💥 身体对抗",
+          color: "#fed7aa",
+          bg: "rgba(24, 14, 8, 0.85)",
+          scaleUp: 1.1,
+          duration: 850,
+          startTime: now,
+          startFrame: frameIdx,
+        });
+      }
+    }
+
+    // 绘制地面层特效
+    drawGroundFX(ctx, point, now) {
+      for (const fx of this.effects) {
+        const progress = Math.min(1.0, (now - fx.startTime) / fx.duration);
+        if (progress >= 1.0) continue;
+        const alpha = (1.0 - progress) * 0.85;
+
+        if (fx.type === "ground_ripple") {
+          const pt = point(fx.x, fx.y);
+          const r = fx.startR + (fx.endR - fx.startR) * Math.sqrt(progress);
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+          ctx.strokeStyle = fx.color;
+          ctx.globalAlpha = alpha;
+          ctx.lineWidth = 2.5 * (1.0 - progress * 0.7);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    }
+
+    // 绘制空中层特效
+    drawAirFX(ctx, point, now) {
+      for (const fx of this.effects) {
+        const progress = Math.min(1.0, (now - fx.startTime) / fx.duration);
+        if (progress >= 1.0) continue;
+        const alpha = 1.0 - progress;
+
+        if (fx.type === "shot_arc") {
+          // 优雅的三维投篮抛物线飞行弧光
+          const startPt = point(fx.startX, fx.startY);
+          const targetPt = point(fx.targetX, fx.targetY);
+          const dist = Math.hypot(targetPt.x - startPt.x, targetPt.y - startPt.y);
+          const midX = (startPt.x + targetPt.x) * 0.5;
+          const arcPeak = Math.min(85, dist * 0.28);
+          const midY = Math.min(startPt.y, targetPt.y) - arcPeak;
+
+          ctx.save();
+          ctx.strokeStyle = fx.isThree
+            ? "rgba(251, 191, 36, 0.75)"
+            : "rgba(52, 211, 153, 0.75)";
+          ctx.lineWidth = 2.2;
+          ctx.setLineDash([6, 6]);
+          ctx.lineDashOffset = -now * 0.08;
+          ctx.beginPath();
+          ctx.moveTo(startPt.x, startPt.y);
+          ctx.quadraticCurveTo(midX, midY, targetPt.x, targetPt.y);
+          ctx.stroke();
+
+          // 弧线上飞驰的能量光子
+          const photonT = (progress * 1.5) % 1.0;
+          const invT = 1.0 - photonT;
+          const px =
+            invT * invT * startPt.x +
+            2 * invT * photonT * midX +
+            photonT * photonT * targetPt.x;
+          const py =
+            invT * invT * startPt.y +
+            2 * invT * photonT * midY +
+            photonT * photonT * targetPt.y;
+
+          ctx.beginPath();
+          ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+          ctx.fillStyle = fx.isThree ? "#fde047" : "#6ee7b7";
+          ctx.globalAlpha = 0.95;
+          ctx.fill();
+          ctx.restore();
+        } else if (fx.type === "swish_splash") {
+          // 空心入网水花波纹
+          const pt = point(fx.x, fx.y);
+          ctx.save();
+          for (let w = 0; w < 3; w++) {
+            const wProg = Math.min(1.0, progress * 1.2 + w * 0.25);
+            if (wProg > 1.0) continue;
+            const r = 8 + wProg * 45;
+            const wAlpha = (1.0 - wProg) * 0.8;
+            ctx.beginPath();
+            ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+            ctx.strokeStyle = w % 2 === 0 ? "#10b981" : "#fbbf24";
+            ctx.lineWidth = 2.4 * (1.0 - wProg);
+            ctx.globalAlpha = wAlpha;
+            ctx.stroke();
+          }
+          ctx.restore();
+        } else if (fx.type === "block_shield") {
+          // 极光护盾冲击波
+          const pt = point(fx.x, fx.y);
+          const r = 10 + progress * 40;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+          ctx.strokeStyle = "#38bdf8";
+          ctx.lineWidth = 3.0 * (1.0 - progress);
+          ctx.globalAlpha = alpha * 0.9;
+          ctx.stroke();
+
+          // 能量十字射线
+          ctx.beginPath();
+          ctx.moveTo(pt.x - r, pt.y);
+          ctx.lineTo(pt.x + r, pt.y);
+          ctx.moveTo(pt.x, pt.y - r);
+          ctx.lineTo(pt.x, pt.y + r);
+          ctx.strokeStyle = "rgba(56, 189, 248, 0.6)";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.restore();
+        } else if (fx.type === "steal_lightning") {
+          // 抢断金黄电光闪现
+          const pt = point(fx.x, fx.y);
+          ctx.save();
+          ctx.strokeStyle = "#fbbf24";
+          ctx.lineWidth = 2.5;
+          ctx.globalAlpha = alpha;
+          ctx.beginPath();
+          ctx.moveTo(pt.x - 14, pt.y - 14);
+          ctx.lineTo(pt.x - 2, pt.y - 1);
+          ctx.lineTo(pt.x + 3, pt.y - 10);
+          ctx.lineTo(pt.x + 15, pt.y + 12);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 6 + progress * 24, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(251, 191, 36, 0.7)";
+          ctx.lineWidth = 1.8;
+          ctx.stroke();
+          ctx.restore();
+        } else if (fx.type === "particles") {
+          // 爆裂礼花粒子更新
+          ctx.save();
+          for (const p of fx.particles) {
+            const age = (now - fx.startTime) / 1000;
+            const px = p.x + p.vx * age;
+            const py = p.y + p.vy * age + 15 * age * age; // 轻微重力
+            const pPt = point(px, py);
+            ctx.beginPath();
+            ctx.arc(pPt.x, pPt.y, Math.max(0.5, p.size * (1.0 - progress)), 0, Math.PI * 2);
+            ctx.fillStyle = p.color;
+            ctx.globalAlpha = alpha * 0.9;
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+      }
+    }
+
+    // 绘制顶层浮动大标牌文字
+    drawFloatingTextFX(ctx, point, now) {
+      for (const fx of this.effects) {
+        if (fx.type !== "floating_text") continue;
+        const progress = Math.min(1.0, (now - fx.startTime) / fx.duration);
+        if (progress >= 1.0) continue;
+
+        const easeOut = Math.sin((progress * Math.PI) / 2);
+        const floatY = easeOut * 24; // 向上飘浮 24px
+        const pt = point(fx.x, fx.y);
+        const drawX = pt.x;
+        const drawY = pt.y - 20 - floatY;
+
+        const alpha = Math.min(1.0, (1.0 - progress) * 1.5);
+        const scaleVal = (fx.scaleUp || 1.1) * (1.0 + (1.0 - progress) * 0.12);
+
+        ctx.save();
+        ctx.translate(drawX, drawY);
+        ctx.scale(scaleVal, scaleVal);
+        ctx.globalAlpha = alpha;
+
+        ctx.font = "800 13px 'Plus Jakarta Sans', -apple-system, sans-serif";
+        const metrics = ctx.measureText(fx.text);
+        const padX = 10;
+        const padY = 5;
+        const w = metrics.width + padX * 2;
+        const h = 22;
+
+        // 背景半透明圆角胶囊
+        ctx.fillStyle = fx.bg || "rgba(10, 16, 26, 0.9)";
+        ctx.beginPath();
+        ctx.roundRect(-w / 2, -h / 2, w, h, 11);
+        ctx.fill();
+
+        // 边框描边
+        ctx.strokeStyle = fx.color;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // 居中文本
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(fx.text, 0, 0.5);
+
+        ctx.restore();
+      }
+    }
+  }
+
+  const courtFX = new CourtVisualFXManager();
+  state.courtFX = courtFX;
+
+  // ========================================================
+  // 核心球场绘制函数 (drawCourt)
+  // ========================================================
   function drawCourt(tick) {
     const canvas = $("courtCanvas");
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const rules = runtimeRules(tick);
+    const now = performance.now();
 
-    // 标准 NBA 全场物理世界等比例严密映射 (Zero Distortion Uniform Scaling)
+    // 更新动效状态机
+    courtFX.update(tick, state.idx, rules);
+
+    // 标准 NBA 全场物理世界等比例严密映射
     // Canvas: 1000 x 560
     // 外圈 Apron 缓冲区: 30px (带底线球队标识)
     // 比赛场内有效尺寸: 940px x 500px (10px = 1英尺, 严格 94:50 物理长宽比)
@@ -1400,6 +2075,33 @@
     });
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 视口变换管理（全场鸟瞰 / 半场特写）
+    ctx.save();
+    let viewScale = 1.0;
+    let viewCenterCourtX = 500;
+    let viewCenterCourtY = 280;
+
+    if (state.courtMode === "half") {
+      viewScale = 1.62;
+      viewCenterCourtX = courtFX.activeHalfCourt === "right" ? 730 : 270;
+      viewCenterCourtY = 280;
+
+      ctx.translate(500, 280);
+      ctx.scale(viewScale, viewScale);
+      ctx.translate(-viewCenterCourtX, -viewCenterCourtY);
+    }
+
+    // 屏幕物理像素映射转换（保证 hitPlayers 无论全场还是半场均精准命中）
+    const toScreen = (courtX, courtY) => {
+      if (state.courtMode === "half") {
+        return {
+          x: 500 + (courtX - viewCenterCourtX) * viewScale,
+          y: 280 + (courtY - viewCenterCourtY) * viewScale,
+        };
+      }
+      return { x: courtX, y: courtY };
+    };
 
     // 1. 赛场外围环带 (Arena Apron / Perimeter)
     ctx.fillStyle = "#0a0d12";
@@ -1441,7 +2143,7 @@
     ctx.fillStyle = floorGrad;
     ctx.fillRect(30, 30, 940, 500);
 
-    // 枫木拼板纵向缝隙细纹
+    // 枫木拼板纵向缝隙微纹
     ctx.strokeStyle = "rgba(0, 0, 0, 0.025)";
     ctx.lineWidth = 1;
     for (let x = 50; x < 970; x += 20) {
@@ -1487,17 +2189,32 @@
     drawKey(ctx, true);
     drawThreePointLine(ctx, false);
     drawThreePointLine(ctx, true);
-    drawHoop(ctx, 30 + rules.leftHoopX * 10, 280, false);
-    drawHoop(ctx, 30 + rules.rightHoopX * 10, 280, true);
+    drawEnhancedHoop(
+      ctx,
+      30 + rules.leftHoopX * 10,
+      280,
+      false,
+      courtFX.rimStates.left,
+    );
+    drawEnhancedHoop(
+      ctx,
+      30 + rules.rightHoopX * 10,
+      280,
+      true,
+      courtFX.rimStates.right,
+    );
 
     if (state.potentialFieldVisible) drawPotentialField(ctx, tick, point, rules);
 
-    // 轨迹绘制
+    // 动感高级轨迹绘制
     drawTrails(ctx, point);
+
+    // 动效系统：地面层动效渲染
+    courtFX.drawGroundFX(ctx, point, now);
 
     // 5. 球员渲染
     state.hitPlayers.length = 0;
-    const playerRadius = 15; // 严格人体防守圆柱体比例
+    const playerRadius = 16.5;
 
     for (const player of tick.players || []) {
       if (player.onCourt === false) continue;
@@ -1505,19 +2222,33 @@
         finite(player.x) * rules.courtWidth,
         finite(player.y) * rules.courtHeight,
       );
-      state.hitPlayers.push({ player, x: playerPoint.x, y: playerPoint.y });
+
+      // 计算屏幕物理映射坐标用于鼠标检测
+      const screenPt = toScreen(playerPoint.x, playerPoint.y);
+      state.hitPlayers.push({ player, x: screenPt.x, y: screenPt.y });
+
+      // 提取球员运动学历史
+      const hist = courtFX.playerHistories.get(player.id) || [];
+      const curSpeed = hist[hist.length - 1]?.speed || 0;
+      const curVx = hist[hist.length - 1]?.vx || 0;
+      const curVy = hist[hist.length - 1]?.vy || 0;
 
       // 战术路线 (Play-art route)
-      if (state.potentialFieldVisible && player.potential_target_x !== undefined && player.potential_target_y !== undefined) {
+      if (
+        state.potentialFieldVisible &&
+        player.potential_target_x !== undefined &&
+        player.potential_target_y !== undefined
+      ) {
         const fieldTargetPt = point(
           finite(player.potential_target_x) * rules.courtWidth,
           finite(player.potential_target_y) * rules.courtHeight,
         );
         ctx.save();
         ctx.setLineDash([2, 5]);
-        ctx.strokeStyle = player.team === "home"
-          ? "rgba(0, 210, 255, 0.6)"
-          : "rgba(255, 109, 171, 0.62)";
+        ctx.strokeStyle =
+          player.team === "home"
+            ? "rgba(0, 210, 255, 0.6)"
+            : "rgba(255, 109, 171, 0.62)";
         ctx.lineWidth = 1.3;
         ctx.beginPath();
         ctx.moveTo(playerPoint.x, playerPoint.y);
@@ -1530,7 +2261,6 @@
         ctx.restore();
       }
 
-      // 战术路线 (Play-art route)
       if (player.target_x !== undefined && player.target_y !== undefined) {
         const targetPt = point(
           finite(player.target_x) * rules.courtWidth,
@@ -1563,115 +2293,334 @@
         }
       }
 
-      // 球员地面阴影
+      // 高速奔跑动态残影 (Ghosting Motion Blur)
+      if (curSpeed > 8.0 && hist.length >= 3) {
+        const ghostCount = Math.min(2, hist.length - 1);
+        for (let g = 1; g <= ghostCount; g++) {
+          const gh = hist[hist.length - 1 - g];
+          if (!gh) continue;
+          const ghPt = point(gh.x, gh.y);
+          ctx.beginPath();
+          ctx.arc(ghPt.x, ghPt.y, playerRadius * (1 - g * 0.12), 0, Math.PI * 2);
+          ctx.fillStyle =
+            player.team === "home"
+              ? `rgba(16, 185, 129, ${0.22 - g * 0.08})`
+              : `rgba(245, 158, 11, ${0.22 - g * 0.08})`;
+          ctx.fill();
+        }
+      }
+
+      // 球员地面羽化动态阴影
       ctx.beginPath();
+      const shadowOffsetX = curVx * 0.3;
+      const shadowOffsetY = curVy * 0.3;
       ctx.ellipse(
-        playerPoint.x,
-        playerPoint.y + 2,
-        playerRadius * 0.9,
-        playerRadius * 0.45,
+        playerPoint.x - shadowOffsetX,
+        playerPoint.y + 3 - shadowOffsetY,
+        playerRadius * 0.95,
+        playerRadius * 0.48,
         0,
         0,
         Math.PI * 2,
       );
-      ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+      ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
       ctx.fill();
 
-      // 持球人高亮能量环 (温和律动光波)
-      if (player.hasBall) {
-        const nowPulse = (Math.sin(performance.now() / 300) + 1) * 0.5;
-        const pulseR = playerRadius + 4 + nowPulse * 2.5;
-        ctx.beginPath();
-        ctx.arc(playerPoint.x, playerPoint.y, pulseR, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(245, 158, 11, ${0.45 + nowPulse * 0.4})`;
-        ctx.lineWidth = 2.0;
-        ctx.stroke();
+      // 特殊战术动作基座（如掩护设立基座）
+      const act = String(player.action || "");
+      if (act.includes("Screen")) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.75)";
+        ctx.lineWidth = 1.8;
+        ctx.strokeRect(
+          playerPoint.x - playerRadius - 3,
+          playerPoint.y - playerRadius - 3,
+          (playerRadius + 3) * 2,
+          (playerRadius + 3) * 2,
+        );
+        ctx.restore();
       }
 
-      // 球员身体圆环 (主队翠绿 / 客队暖金)
-      const teamColor = player.team === "home" ? "#10b981" : "#f59e0b";
+      // 持球人“全场超级聚光灯”体系 (Supreme Ball Handler Spotlight)
+      if (player.hasBall) {
+        // 1. 地面大范围金色呼吸聚光灯底盘
+        const pulse = (Math.sin(now / 220) + 1) * 0.5;
+        const spotRadius = playerRadius + 15 + pulse * 4;
+        const gGrad = ctx.createRadialGradient(
+          playerPoint.x,
+          playerPoint.y,
+          4,
+          playerPoint.x,
+          playerPoint.y,
+          spotRadius,
+        );
+        gGrad.addColorStop(0, "rgba(245, 158, 11, 0.48)");
+        gGrad.addColorStop(0.65, "rgba(245, 158, 11, 0.18)");
+        gGrad.addColorStop(1, "rgba(245, 158, 11, 0)");
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, spotRadius, 0, Math.PI * 2);
+        ctx.fillStyle = gGrad;
+        ctx.fill();
+
+        // 2. 动态逆时针旋转能量双弧
+        ctx.save();
+        const rotAngle = (now / 350) % (Math.PI * 2);
+        ctx.strokeStyle = "rgba(251, 191, 36, 0.95)";
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, playerRadius + 5.5, rotAngle, rotAngle + 1.9);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(
+          playerPoint.x,
+          playerPoint.y,
+          playerRadius + 5.5,
+          rotAngle + Math.PI,
+          rotAngle + Math.PI + 1.9,
+        );
+        ctx.stroke();
+        ctx.restore();
+
+        // 3. 球员头顶上方动感悬浮持球标志
+        ctx.save();
+        const tagY = playerPoint.y - playerRadius - 16;
+        ctx.font = "800 9.5px 'Plus Jakarta Sans', sans-serif";
+        const tagText = "🏀 BALL";
+        const tagW = ctx.measureText(tagText).width + 8;
+        ctx.fillStyle = "rgba(20, 14, 5, 0.9)";
+        ctx.beginPath();
+        ctx.roundRect(playerPoint.x - tagW / 2, tagY - 7, tagW, 14, 7);
+        ctx.fill();
+        ctx.strokeStyle = "#fbbf24";
+        ctx.lineWidth = 1.3;
+        ctx.stroke();
+        ctx.fillStyle = "#fde047";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(tagText, playerPoint.x, tagY);
+        ctx.restore();
+      }
+
+      // 球员身体立体圆盘 (主队翡翠绿 / 客队珀金橙)
+      const isHome = player.team === "home";
+      const outerColor = isHome ? "#10b981" : "#f59e0b";
+      const innerGlow = isHome ? "#34d399" : "#fbbf24";
+
+      // 圆盘内部径向渐变
+      const bodyGrad = ctx.createRadialGradient(
+        playerPoint.x - 3,
+        playerPoint.y - 3,
+        2,
+        playerPoint.x,
+        playerPoint.y,
+        playerRadius,
+      );
+      if (isHome) {
+        bodyGrad.addColorStop(0, "#084925");
+        bodyGrad.addColorStop(1, "#032412");
+      } else {
+        bodyGrad.addColorStop(0, "#4a2106");
+        bodyGrad.addColorStop(1, "#200d02");
+      }
+
       ctx.beginPath();
       ctx.arc(playerPoint.x, playerPoint.y, playerRadius, 0, Math.PI * 2);
-      ctx.fillStyle = "#11161f";
+      ctx.fillStyle = bodyGrad;
       ctx.fill();
-      ctx.strokeStyle = teamColor;
-      ctx.lineWidth = 2.5;
+
+      // 双层高光外框
+      ctx.strokeStyle = outerColor;
+      ctx.lineWidth = 2.6;
       ctx.stroke();
 
-      // 背号 (纯白高对比度粗体)
-      ctx.font = "700 11px 'JetBrains Mono', monospace";
-      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(playerPoint.x, playerPoint.y, playerRadius - 2.5, 0, Math.PI * 2);
+      ctx.strokeStyle = innerGlow;
+      ctx.lineWidth = 1.1;
+      ctx.stroke();
+
+      // 身体朝向视线小箭头指示 (Facing Direction Chevron)
+      let facingAngle = null;
+      if (
+        player.facing_x !== undefined &&
+        player.facing_y !== undefined &&
+        Math.hypot(player.facing_x, player.facing_y) > 0.05
+      ) {
+        facingAngle = Math.atan2(player.facing_y, player.facing_x);
+      } else if (Math.hypot(curVx, curVy) > 0.3) {
+        facingAngle = Math.atan2(curVy, curVx);
+      } else {
+        // 静止时朝向对方半场篮筐
+        const hoopX = isHome ? rules.rightHoopX : rules.leftHoopX;
+        facingAngle = Math.atan2(rules.hoopY - finite(player.y) * rules.courtHeight, hoopX - finite(player.x) * rules.courtWidth);
+      }
+
+      if (facingAngle !== null) {
+        ctx.save();
+        ctx.translate(playerPoint.x, playerPoint.y);
+        ctx.rotate(facingAngle);
+
+        // 前向视线尖端三角标
+        ctx.beginPath();
+        ctx.moveTo(playerRadius + 4.5, 0);
+        ctx.lineTo(playerRadius + 0.5, -3.5);
+        ctx.lineTo(playerRadius + 0.5, 3.5);
+        ctx.closePath();
+        ctx.fillStyle = innerGlow;
+        ctx.fill();
+
+        // 微弱前向视线光锥
+        ctx.beginPath();
+        ctx.moveTo(playerRadius - 1, 0);
+        ctx.lineTo(playerRadius + 10, -5);
+        ctx.lineTo(playerRadius + 10, 5);
+        ctx.closePath();
+        ctx.fillStyle = isHome
+          ? "rgba(52, 211, 153, 0.14)"
+          : "rgba(251, 191, 36, 0.14)";
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // 纯白高对比度背号
+      ctx.font = "800 12px 'JetBrains Mono', monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       const num =
         player.number === undefined
           ? String(player.id || "")
           : String(player.number);
+
+      // 背号微暗投影
+      ctx.fillStyle = "#000000";
+      ctx.fillText(num, playerPoint.x + 0.6, playerPoint.y + 1.2);
+      ctx.fillStyle = "#ffffff";
       ctx.fillText(num, playerPoint.x, playerPoint.y + 0.5);
+
+      // 下方位置简称微标胶囊 (PG / SG / SF / PF / C)
+      const posText = String(player.position || "").slice(0, 2).toUpperCase() || "PL";
+      ctx.save();
+      const posTagY = playerPoint.y + playerRadius + 8;
+      ctx.font = "800 9px 'Plus Jakarta Sans', sans-serif";
+      const posTagW = ctx.measureText(posText).width + 6;
+      ctx.fillStyle = "rgba(10, 14, 20, 0.85)";
+      ctx.beginPath();
+      ctx.roundRect(playerPoint.x - posTagW / 2, posTagY - 5, posTagW, 11, 4);
+      ctx.fill();
+      ctx.fillStyle = isHome ? "#6ee7b7" : "#fde047";
+      ctx.fillText(posText, playerPoint.x, posTagY + 0.5);
+      ctx.restore();
     }
 
-    // 6. 篮球渲染 (严格三维投射与地面阴影)
+    // 6. 篮球渲染 (严格三维空间投射与自转物理)
     if (tick.ball) {
-      const ballPoint = point(
-        finite(tick.ball.x) * rules.courtWidth,
-        finite(tick.ball.y) * rules.courtHeight,
-      );
-      const ballRadius = 6.5;
-      const ballZ = finite(tick.ball.z);
-      const heightOffset = Math.min(30, ballZ * 2.8);
-      const ballCenterY = ballPoint.y - heightOffset;
+      const ballFtX = finite(tick.ball.x) * rules.courtWidth;
+      const ballFtY = finite(tick.ball.y) * rules.courtHeight;
+      const groundPoint = point(ballFtX, ballFtY);
 
-      // 地面阴影
-      if (heightOffset > 2) {
-        ctx.beginPath();
-        ctx.ellipse(
-          ballPoint.x,
-          ballPoint.y,
-          Math.max(2, ballRadius * (1 - heightOffset / 60)),
-          Math.max(1, ballRadius * 0.5 * (1 - heightOffset / 60)),
-          0,
-          0,
-          Math.PI * 2,
-        );
-        ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
-        ctx.fill();
+      const ballZ = finite(tick.ball.z, 0);
+      const heightOffset = Math.min(42, ballZ * 3.2);
+      const ballCenterY = groundPoint.y - heightOffset;
+      const zScale = 1.0 + Math.min(0.35, ballZ * 0.024);
+      const ballRadius = 7.5 * zScale;
+
+      // 地面物理投影阴影 (随着高度上升阴影扩散变淡)
+      ctx.beginPath();
+      const shadowSpread = 1.0 + Math.min(1.2, ballZ * 0.06);
+      const shadowAlpha = Math.max(0.12, 0.45 * (1.0 - Math.min(0.75, ballZ * 0.035)));
+      ctx.ellipse(
+        groundPoint.x,
+        groundPoint.y + 2,
+        Math.max(3, ballRadius * 1.1 * shadowSpread),
+        Math.max(2, ballRadius * 0.55 * shadowSpread),
+        0,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha.toFixed(3)})`;
+      ctx.fill();
+
+      // 高速飞行金色流光彗星尾迹 (Comet Trail)
+      if (courtFX.ballHistory.length >= 3) {
+        const tailPts = courtFX.ballHistory.slice(-8);
+        for (let i = 0; i < tailPts.length - 1; i++) {
+          const p1 = tailPts[i];
+          const p2 = tailPts[i + 1];
+          const pt1 = point(p1.x, p1.y);
+          const pt2 = point(p2.x, p2.y);
+          const y1 = pt1.y - Math.min(42, p1.z * 3.2);
+          const y2 = pt2.y - Math.min(42, p2.z * 3.2);
+          const trailAlpha = ((i + 1) / tailPts.length) * 0.55;
+
+          ctx.beginPath();
+          ctx.moveTo(pt1.x, y1);
+          ctx.lineTo(pt2.x, y2);
+          ctx.strokeStyle = "rgba(249, 115, 22, " + trailAlpha.toFixed(3) + ")";
+          ctx.lineWidth = 1.5 + (i / tailPts.length) * 3.5;
+          ctx.lineCap = "round";
+          ctx.stroke();
+        }
       }
 
-      // 篮球球体高光
+      // 篮球球体渐变与立体高光
+      ctx.save();
       ctx.beginPath();
-      ctx.arc(ballPoint.x, ballCenterY, ballRadius, 0, Math.PI * 2);
+      ctx.arc(groundPoint.x, ballCenterY, ballRadius, 0, Math.PI * 2);
       const bGrad = ctx.createRadialGradient(
-        ballPoint.x - 2,
-        ballCenterY - 2,
-        1,
-        ballPoint.x,
+        groundPoint.x - ballRadius * 0.35,
+        ballCenterY - ballRadius * 0.35,
+        ballRadius * 0.1,
+        groundPoint.x,
         ballCenterY,
         ballRadius,
       );
-      bGrad.addColorStop(0, "#f97316");
-      bGrad.addColorStop(0.7, "#ea580c");
-      bGrad.addColorStop(1, "#9a3412");
+      bGrad.addColorStop(0, "#fb923c");
+      bGrad.addColorStop(0.65, "#ea580c");
+      bGrad.addColorStop(1, "#7c2d12");
       ctx.fillStyle = bGrad;
       ctx.fill();
-      ctx.strokeStyle = "#431407";
-      ctx.lineWidth = 0.8;
+
+      // 篮球经典黑色十字旋转筋线 (Seams)
+      ctx.save();
+      ctx.translate(groundPoint.x, ballCenterY);
+      ctx.rotate(courtFX.ballRotationAngle);
+      ctx.strokeStyle = "#381006";
+      ctx.lineWidth = 1.1;
+
+      // 横向弧线
+      ctx.beginPath();
+      ctx.ellipse(0, 0, ballRadius * 0.95, ballRadius * 0.45, 0, 0, Math.PI * 2);
       ctx.stroke();
 
-      // 进球篮筐光波
-      const hasScoreEvent =
-        (tick.event || "").includes("MADE") ||
-        (tick.event || "").includes("3PT") ||
-        (tick.event || "").includes("2PT");
-      if (hasScoreEvent) {
-        const hoopX =
-          tick.ball && tick.ball.x > 0.5
-            ? 30 + rules.rightHoopX * 10
-            : 30 + rules.leftHoopX * 10;
-        ctx.beginPath();
-        ctx.arc(hoopX, 280, 22, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(44, 229, 155, 0.85)";
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
+      // 纵向线
+      ctx.beginPath();
+      ctx.moveTo(0, -ballRadius);
+      ctx.lineTo(0, ballRadius);
+      ctx.stroke();
+      ctx.restore();
+
+      // 球体边缘微深描边
+      ctx.strokeStyle = "#431407";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 动效系统：空中层与顶层浮动大标牌渲染
+    courtFX.drawAirFX(ctx, point, now);
+    courtFX.drawFloatingTextFX(ctx, point, now);
+
+    ctx.restore();
+
+    // 暂停状态下，若场上有正在消散的动效粒子与水花，以轻量帧循环平滑完成过渡
+    if (!state.playing && courtFX.effects.length > 0) {
+      if (!state.fxRafId) {
+        state.fxRafId = requestAnimationFrame(() => {
+          state.fxRafId = null;
+          if (!state.playing && state.ticks && state.ticks[state.idx]) {
+            drawCourt(state.ticks[state.idx]);
+          }
+        });
       }
     }
   }
@@ -1684,13 +2633,11 @@
     ctx.save();
     ctx.globalCompositeOperation = "source-over";
 
-    // 1. 全场网格连续势能曲面 (SkillCorner 全场场地控制与多体势能场)
-    // 物理球场尺寸: rules.courtWidth x rules.courtHeight (94 x 50 呎)
-    // 采用 2 呎 x 2 呎均匀网格平铺整个赛场
+    // 全场网格连续势能曲面
     const stepFt = 2.0;
     const nx = Math.ceil(rules.courtWidth / stepFt);
     const ny = Math.ceil(rules.courtHeight / stepFt);
-    const sigma2 = 2 * 8.5 * 8.5; // 空间影响核方差
+    const sigma2 = 2 * 8.5 * 8.5;
 
     const homePlayers = [];
     const awayPlayers = [];
@@ -1759,7 +2706,7 @@
     }
     ctx.restore();
 
-    // 2. 弱侧防守平衡驱动向量与目标锚点
+    // 弱侧防守平衡驱动向量与目标锚点
     if (solverSamples.length) {
       ctx.save();
       ctx.lineCap = "round";
@@ -1813,30 +2760,98 @@
     }
   }
 
-  function drawHoop(ctx, hoopX, hoopY, right) {
-    // 篮板 (Backboard: 宽 6 ft = 60px, 厚 4px, 距底线 4 ft = 40px)
+  // ========================================================
+  // 增强篮筐与动态晃动篮网绘制 (drawEnhancedHoop)
+  // ========================================================
+  function drawEnhancedHoop(ctx, hoopX, hoopY, right, rimState) {
+    const shake = rimState?.shake || 0;
+    const netOffset = rimState?.netOffset || 0;
+
+    // 晃动偏置 (打铁与暴扣时震颤)
+    const shakeX = shake > 0 ? (Math.sin(performance.now() * 0.08) * shake * 3.5) : 0;
+    const shakeY = shake > 0 ? (Math.cos(performance.now() * 0.08) * shake * 2.5) : 0;
+
+    const actualHoopX = hoopX + shakeX;
+    const actualHoopY = hoopY + shakeY;
+
+    // 篮板 (Backboard: 宽 60px, 厚 5px)
     const boardX = right ? 970 - 40 : 30 + 40;
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 5.0;
     ctx.beginPath();
     ctx.moveTo(boardX, hoopY - 30);
     ctx.lineTo(boardX, hoopY + 30);
     ctx.stroke();
 
-    // 篮板连接支架 (Stanchion)
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 3.0;
+    ctx.beginPath();
+    ctx.moveTo(boardX, hoopY - 30);
+    ctx.lineTo(boardX, hoopY + 30);
+    ctx.stroke();
+
+    // 篮板内侧小方框 (Target Box: 24px x 18px)
+    ctx.strokeStyle = "rgba(239, 68, 68, 0.75)";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(boardX - (right ? 1 : -1) * 3, hoopY - 10, right ? -2 : 2, 20);
+
+    // 支架 (Stanchion)
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(right ? 970 : 30, hoopY);
     ctx.lineTo(boardX, hoopY);
     ctx.stroke();
 
-    // 篮筐 (Rim: 直径 1.5 ft = 15px, 橙红色)
-    ctx.strokeStyle = "#f97316";
-    ctx.lineWidth = 2.0;
+    // 篮圈连接杆 (Neck)
+    ctx.strokeStyle = "#ea580c";
+    ctx.lineWidth = 3.0;
     ctx.beginPath();
-    ctx.arc(hoopX, hoopY, 7.5, 0, Math.PI * 2);
+    ctx.moveTo(boardX, hoopY);
+    ctx.lineTo(actualHoopX + (right ? 7.5 : -7.5), actualHoopY);
     ctx.stroke();
+
+    // 动态摆动白色纤维篮网 (Net)
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.7)";
+    ctx.lineWidth = 1.1;
+    const netBottomY = actualHoopY + 18 + netOffset;
+    const netWidth = 14;
+    const netBottomWidth = Math.max(4, 9 - netOffset * 0.25);
+
+    // 篮网垂直织线
+    for (let i = -3; i <= 3; i++) {
+      const topX = actualHoopX + (i / 3) * (netWidth / 2);
+      const botX = actualHoopX + (i / 3) * (netBottomWidth / 2);
+      ctx.beginPath();
+      ctx.moveTo(topX, actualHoopY + 3);
+      ctx.lineTo(botX, netBottomY);
+      ctx.stroke();
+    }
+    // 篮网横向编织环
+    ctx.beginPath();
+    ctx.moveTo(actualHoopX - netWidth * 0.45, actualHoopY + 8 + netOffset * 0.35);
+    ctx.lineTo(actualHoopX + netWidth * 0.45, actualHoopY + 8 + netOffset * 0.35);
+    ctx.moveTo(actualHoopX - netBottomWidth * 0.7, actualHoopY + 14 + netOffset * 0.65);
+    ctx.lineTo(actualHoopX + netBottomWidth * 0.7, actualHoopY + 14 + netOffset * 0.65);
+    ctx.stroke();
+    ctx.restore();
+
+    // 加厚实心橙红篮圈 (Rim)
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(actualHoopX, actualHoopY, 7.5, 0, Math.PI * 2);
+    ctx.strokeStyle = "#ea580c";
+    ctx.lineWidth = 2.8;
+    ctx.stroke();
+
+    // 篮圈内沿高光
+    ctx.beginPath();
+    ctx.arc(actualHoopX, actualHoopY, 6.5, 0, Math.PI * 2);
+    ctx.strokeStyle = "#fdba74";
+    ctx.lineWidth = 1.0;
+    ctx.stroke();
+    ctx.restore();
   }
 
   function drawKey(ctx, right) {
@@ -1914,23 +2929,33 @@
 
   function drawTrails(ctx, point) {
     if (state.ticks.length < 2) return;
-    const start = Math.max(0, state.idx - 70);
-    ctx.beginPath();
-    for (let index = start; index <= state.idx; index += 1) {
+    const start = Math.max(0, state.idx - 40);
+    const count = state.idx - start;
+    if (count <= 1) return;
+
+    for (let index = start; index < state.idx; index += 1) {
       const tick = state.ticks[index];
-      const ball = tick.ball;
-      if (!ball) continue;
+      const nextTick = state.ticks[index + 1];
+      if (!tick?.ball || !nextTick?.ball) continue;
       const rules = runtimeRules(tick);
-      const ballPoint = point(
-        finite(ball.x) * rules.courtWidth,
-        finite(ball.y) * rules.courtHeight,
+
+      const p1 = point(
+        finite(tick.ball.x) * rules.courtWidth,
+        finite(tick.ball.y) * rules.courtHeight,
       );
-      if (index === start) ctx.moveTo(ballPoint.x, ballPoint.y);
-      else ctx.lineTo(ballPoint.x, ballPoint.y);
+      const p2 = point(
+        finite(nextTick.ball.x) * rules.courtWidth,
+        finite(nextTick.ball.y) * rules.courtHeight,
+      );
+
+      const progress = (index - start) / count;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.strokeStyle = `rgba(251, 191, 36, ${(progress * 0.45).toFixed(3)})`;
+      ctx.lineWidth = 1.0 + progress * 2.2;
+      ctx.stroke();
     }
-    ctx.strokeStyle = "rgba(255,235,188,.32)";
-    ctx.lineWidth = 1.4;
-    ctx.stroke();
   }
 
   function renderDecision(tick) {
