@@ -128,7 +128,7 @@ def main():
         events = run_chrome_eval(js_find_events)
         print(f"🎯 关键事件分布: 出手={events['shotReleaseIdx']}, 命中={events['scoreIdx']}, 打铁={events['missIdx']}, 抢断={events['stealIdx']}, 盖帽={events['blockIdx']}")
 
-        # 验证投篮出手动效 (Shot Arc, Ground Ripple, 无杂乱文字)
+        # 验证投篮出手帧真实动效 (Shot Arc 战术抛物线, 无火花, 无浮夸文字)
         if events['shotReleaseIdx'] >= 0:
             target = events['shotReleaseIdx']
             js_verify_shot = f"""
@@ -144,15 +144,15 @@ def main():
             """
             shot_fx = run_chrome_eval(js_verify_shot)
             has_arc = any(e["type"] == "shot_arc" for e in shot_fx["effects"])
-            has_ripple = any(e["type"] == "ground_ripple" for e in shot_fx["effects"])
             has_text = any(e["type"] == "floating_text" for e in shot_fx["effects"])
+            has_particles = any(e["type"] == "particles" for e in shot_fx["effects"])
             print(f"🏹 投篮出手帧 ({target}) 动效列表: {shot_fx['effects']}")
-            assert has_arc, "投篮出手帧必须产生投篮抛物线飞行弧光 (shot_arc)"
-            assert has_ripple, "投篮出手帧必须产生脚下起跳聚能光环 (ground_ripple)"
-            assert not has_text, "球场不得包含浮夸悬浮文字 (floating_text)"
-            print("✅ 投篮出手流星光弧与起跳光效验证通过（无悬浮文字）")
+            assert has_arc, "投篮出手帧必须产生真实细致抛物线 (shot_arc)"
+            assert not has_text, "不得展示浮夸悬浮文字"
+            assert not has_particles, "不得展示非现实火花粒子"
+            print("✅ 投篮出手真实抛物线验证通过（无火花无杂乱文字）")
 
-        # 验证投篮命中得分动效 (Swish Splash, Confetti, Net Swish, 无杂乱文字)
+        # 验证投篮命中得分帧真实物理 (Net Swish 真实网兜下抽与回弹)
         if events['scoreIdx'] >= 0:
             target = events['scoreIdx']
             js_verify_score = f"""
@@ -168,17 +168,15 @@ def main():
             }})()
             """
             score_fx = run_chrome_eval(js_verify_score)
-            has_swish = any(e["type"] == "swish_splash" for e in score_fx["effects"])
-            has_particles = any(e["type"] == "particles" for e in score_fx["effects"])
             has_text = any(e["type"] == "floating_text" for e in score_fx["effects"])
-            print(f"🎯 进球得分帧 ({target}) 动效列表: {score_fx['effects']}")
-            assert has_swish, "进球得分帧必须产生入网水花冲击波 (swish_splash)"
-            assert has_particles, "进球得分帧必须产生庆祝爆裂礼花粒子 (particles)"
-            assert score_fx["netMoved"], "进球得分帧必须触发篮网物理下抽形变 (netOffset > 0)"
-            assert not has_text, "球场不得包含浮夸悬浮文字 (floating_text)"
-            print("✅ 投篮命中空心入网水花、礼花粒子与篮网形变验证通过（无悬浮文字）")
+            has_particles = any(e["type"] == "particles" for e in score_fx["effects"])
+            print(f"🎯 进球得分帧 ({target}) 篮网状态: netMoved={score_fx['netMoved']}")
+            assert score_fx["netMoved"], "进球得分帧必须触发白色篮网物理下抽贯穿形变 (netOffset > 0)"
+            assert not has_text, "不得展示浮夸悬浮文字"
+            assert not has_particles, "不得展示非现实礼花粒子"
+            print("✅ 投篮命中真实编织篮网下抽与回弹形变验证通过（无火花无杂乱文字）")
 
-        # 验证打铁动效 (Rim Shake, Sparks, 无杂乱文字)
+        # 验证打铁帧真实物理 (Rim Shake 金属篮圈机械阻尼震颤)
         if events['missIdx'] >= 0:
             target = events['missIdx']
             js_verify_miss = f"""
@@ -194,15 +192,13 @@ def main():
             }})()
             """
             miss_fx = run_chrome_eval(js_verify_miss)
-            has_ripple = any(e["type"] == "ground_ripple" for e in miss_fx["effects"])
-            has_particles = any(e["type"] == "particles" for e in miss_fx["effects"])
             has_text = any(e["type"] == "floating_text" for e in miss_fx["effects"])
-            print(f"💥 打铁帧 ({target}) 动效列表: {miss_fx['effects']}")
-            assert has_ripple, "投篮打铁帧必须产生撞击圆环 (ground_ripple)"
-            assert has_particles, "投篮打铁帧必须产生金属撞击火花 (particles)"
-            assert miss_fx["rimShaking"], "投篮打铁帧必须触发篮筐金属高频震颤 (shake > 0)"
-            assert not has_text, "球场不得包含浮夸悬浮文字 (floating_text)"
-            print("✅ 投篮打铁金属震颤与撞击火花验证通过（无悬浮文字）")
+            has_particles = any(e["type"] == "particles" for e in miss_fx["effects"])
+            print(f"💥 打铁帧 ({target}) 篮筐状态: rimShaking={miss_fx['rimShaking']}")
+            assert miss_fx["rimShaking"], "投篮打铁帧必须触发金属加厚篮圈机械高频阻尼震颤 (shake > 0)"
+            assert not has_text, "不得展示浮夸悬浮文字"
+            assert not has_particles, "不得展示非现实火花粒子"
+            print("✅ 投篮打铁真实金属加厚篮圈机械震颤验证通过（无火花无杂乱文字）")
 
         # 3. 验证半场特写与全场鸟瞰视角切换及坐标自适应
         js_verify_court_mode = """
