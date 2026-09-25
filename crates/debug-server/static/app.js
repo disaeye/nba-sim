@@ -372,8 +372,12 @@
     } catch {
       text = await fetchText("/studio.json");
     }
-    studio = JSON.parse(text);
-    selectedPlayerId = studio.default_setup.home_team.players[0].id;
+    try {
+      studio = JSON.parse(text);
+    } catch {
+      studio = null;
+    }
+    selectedPlayerId = studio?.default_setup?.home_team?.players?.[0]?.id || null;
     renderStudio();
   }
 
@@ -1569,14 +1573,14 @@
         const distToHoop = Math.hypot(sx - targetHoopX, sy - rules.hoopY);
         const isThree = distToHoop >= rules.threePointDistance;
 
-        // 起跳聚光扩散光圈
+        // 起跳聚力扩散光环
         this.effects.push({
           type: "ground_ripple",
           x: sx,
           y: sy,
           color: isThree ? "#fbbf24" : "#34d399",
           startR: 16,
-          endR: 44,
+          endR: 48,
           duration: 900,
           startTime: now,
           startFrame: frameIdx,
@@ -1590,21 +1594,7 @@
           targetX: targetHoopX,
           targetY: rules.hoopY,
           isThree,
-          duration: 1300,
-          startTime: now,
-          startFrame: frameIdx,
-        });
-
-        // 投篮提示浮动标牌
-        this.effects.push({
-          type: "floating_text",
-          x: sx,
-          y: sy - 4,
-          text: isThree ? "🔥 3PT 出手！" : "🎯 投篮出手！",
-          color: isThree ? "#fbbf24" : "#34d399",
-          bg: "rgba(10, 16, 24, 0.88)",
-          scaleUp: 1.15,
-          duration: 1100,
+          duration: 1400,
           startTime: now,
           startFrame: frameIdx,
         });
@@ -1615,8 +1605,8 @@
       ) {
         // 投篮命中 / 空心入网
         const rim = this.rimStates[targetSide];
-        rim.netOffset = 18;
-        rim.netVel = 32;
+        rim.netOffset = 22;
+        rim.netVel = 36;
 
         // 入网水花扩散 (Swish Waves)
         this.effects.push({
@@ -1624,16 +1614,16 @@
           x: targetHoopX,
           y: rules.hoopY,
           color: "#10b981",
-          duration: 1250,
+          duration: 1300,
           startTime: now,
           startFrame: frameIdx,
         });
 
         // 庆祝礼花粒子爆裂 (Confetti Sparks)
         const particles = [];
-        for (let i = 0; i < 22; i++) {
-          const angle = (Math.PI * 2 * i) / 22 + (Math.sin(i) * 0.3);
-          const spd = 16 + (i % 5) * 6;
+        for (let i = 0; i < 26; i++) {
+          const angle = (Math.PI * 2 * i) / 26 + Math.sin(i) * 0.35;
+          const spd = 18 + (i % 6) * 6;
           particles.push({
             x: targetHoopX,
             y: rules.hoopY,
@@ -1646,34 +1636,12 @@
         this.effects.push({
           type: "particles",
           particles,
-          duration: 1200,
-          startTime: now,
-          startFrame: frameIdx,
-        });
-
-        // 震撼浮动大字标牌
-        const isDrive = evtName === "DRIVE_SCORE";
-        const is3Pt = (tick.event || "").includes("3PT");
-        const bannerText = isDrive
-          ? "⚡ 突破上篮！+2"
-          : is3Pt
-            ? "🔥 三分命中！+3"
-            : "🎯 空心入网！+2";
-        const bannerColor = is3Pt ? "#fbbf24" : "#10b981";
-        this.effects.push({
-          type: "floating_text",
-          x: targetHoopX,
-          y: rules.hoopY - 4,
-          text: bannerText,
-          color: bannerColor,
-          bg: "rgba(10, 16, 24, 0.92)",
-          scaleUp: 1.35,
-          duration: 1500,
+          duration: 1250,
           startTime: now,
           startFrame: frameIdx,
         });
       } else if (evtName === "SHOT_MISS" || evtName === "DRIVE_MISS") {
-        // 投篮打铁
+        // 投篮打铁：金属震颤与撞击火花
         const rim = this.rimStates[targetSide];
         rim.shake = 1.0;
 
@@ -1684,136 +1652,95 @@
           y: rules.hoopY,
           color: "#ef4444",
           startR: 6,
-          endR: 32,
-          duration: 750,
+          endR: 36,
+          duration: 800,
           startTime: now,
           startFrame: frameIdx,
         });
 
         const sparks = [];
-        for (let i = 0; i < 12; i++) {
-          const angle = (Math.PI * 2 * i) / 12 + (Math.cos(i) * 0.4);
-          const spd = 12 + (i % 4) * 5;
+        for (let i = 0; i < 16; i++) {
+          const angle = (Math.PI * 2 * i) / 16 + Math.cos(i) * 0.45;
+          const spd = 15 + (i % 5) * 6;
           sparks.push({
             x: targetHoopX,
             y: rules.hoopY,
             vx: Math.cos(angle) * spd,
             vy: Math.sin(angle) * spd,
             color: i % 2 === 0 ? "#ef4444" : "#f97316",
-            size: 2.0 + (i % 2),
+            size: 2.0 + (i % 3),
           });
         }
         this.effects.push({
           type: "particles",
           particles: sparks,
-          duration: 750,
-          startTime: now,
-          startFrame: frameIdx,
-        });
-
-        this.effects.push({
-          type: "floating_text",
-          x: targetHoopX,
-          y: rules.hoopY - 4,
-          text: "💥 弹筐打铁！",
-          color: "#f87171",
-          bg: "rgba(28, 12, 12, 0.9)",
-          scaleUp: 1.2,
-          duration: 1050,
+          duration: 800,
           startTime: now,
           startFrame: frameIdx,
         });
       } else if (evtName === "BLOCK") {
-        // 盖帽封盖
+        // 盖帽封盖：极光护盾与冰晶碎裂
         this.effects.push({
           type: "block_shield",
           x: ballFtX,
           y: ballFtY,
-          duration: 1100,
+          duration: 1150,
           startTime: now,
           startFrame: frameIdx,
         });
+        const iceSparks = [];
+        for (let i = 0; i < 14; i++) {
+          const angle = (Math.PI * 2 * i) / 14 + Math.sin(i) * 0.4;
+          const spd = 14 + (i % 4) * 6;
+          iceSparks.push({
+            x: ballFtX,
+            y: ballFtY,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: i % 2 === 0 ? "#38bdf8" : "#e0f2fe",
+            size: 2.0 + (i % 2),
+          });
+        }
         this.effects.push({
-          type: "floating_text",
-          x: ballFtX,
-          y: ballFtY - 4,
-          text: "🛡️ 惊天封盖！BLOCK!",
-          color: "#38bdf8",
-          bg: "rgba(8, 20, 36, 0.92)",
-          scaleUp: 1.3,
-          duration: 1350,
+          type: "particles",
+          particles: iceSparks,
+          duration: 900,
           startTime: now,
           startFrame: frameIdx,
         });
       } else if (evtName === "STEAL" || evtName === "BALL_POKED_LOOSE") {
-        // 抢断与破坏球权
+        // 抢断与破坏球权：金色雷霆电光
         this.effects.push({
           type: "steal_lightning",
           x: ballFtX,
           y: ballFtY,
-          duration: 850,
-          startTime: now,
-          startFrame: frameIdx,
-        });
-        this.effects.push({
-          type: "floating_text",
-          x: ballFtX,
-          y: ballFtY - 4,
-          text: evtName === "STEAL" ? "⚡ 抢断拦截！STEAL!" : "🖐️ 破坏球权！",
-          color: "#fbbf24",
-          bg: "rgba(28, 20, 6, 0.9)",
-          scaleUp: 1.25,
-          duration: 1200,
+          duration: 900,
           startTime: now,
           startFrame: frameIdx,
         });
       } else if (evtName === "REBOUND") {
-        // 争抢篮板
+        // 争抢篮板：深蓝重力冲击环
         this.effects.push({
           type: "ground_ripple",
           x: ballFtX,
           y: ballFtY,
           color: "#60a5fa",
           startR: 10,
-          endR: 38,
-          duration: 900,
-          startTime: now,
-          startFrame: frameIdx,
-        });
-        this.effects.push({
-          type: "floating_text",
-          x: ballFtX,
-          y: ballFtY - 4,
-          text: "🏀 摘下篮板！",
-          color: "#93c5fd",
-          bg: "rgba(10, 20, 36, 0.9)",
-          scaleUp: 1.15,
-          duration: 1050,
+          endR: 44,
+          duration: 950,
           startTime: now,
           startFrame: frameIdx,
         });
       } else if (evtName === "FOUL" || evtName === "VIOLATION") {
-        // 犯规与违例
+        // 犯规与违例：高频声波震颤波纹
         this.effects.push({
           type: "ground_ripple",
           x: ballFtX,
           y: ballFtY,
           color: evtName === "FOUL" ? "#f59e0b" : "#ef4444",
           startR: 12,
-          endR: 44,
-          duration: 1050,
-          startTime: now,
-          startFrame: frameIdx,
-        });
-        this.effects.push({
-          type: "floating_text",
-          x: ballFtX,
-          y: ballFtY - 4,
-          text: evtName === "FOUL" ? "⚠️ 犯规吹罚！FOUL" : "🚨 违例吹停！",
-          color: evtName === "FOUL" ? "#fde047" : "#fca5a5",
-          bg: "rgba(28, 14, 8, 0.9)",
-          scaleUp: 1.25,
-          duration: 1300,
+          endR: 50,
+          duration: 1100,
           startTime: now,
           startFrame: frameIdx,
         });
@@ -1821,27 +1748,35 @@
         evtName === "CONTACT_BUMP" ||
         evtName === "SCREEN_CONTACT"
       ) {
-        // 对抗与掩护
+        // 对抗与掩护：接触冲击微波与受力火星
         this.effects.push({
           type: "ground_ripple",
           x: ballFtX,
           y: ballFtY,
           color: "#fb923c",
           startR: 8,
-          endR: 26,
-          duration: 650,
+          endR: 30,
+          duration: 700,
           startTime: now,
           startFrame: frameIdx,
         });
+        const bumpSparks = [];
+        for (let i = 0; i < 8; i++) {
+          const angle = (Math.PI * 2 * i) / 8;
+          const spd = 10 + (i % 3) * 5;
+          bumpSparks.push({
+            x: ballFtX,
+            y: ballFtY,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            color: i % 2 === 0 ? "#fed7aa" : "#ffffff",
+            size: 1.8,
+          });
+        }
         this.effects.push({
-          type: "floating_text",
-          x: ballFtX,
-          y: ballFtY - 3,
-          text: evtName === "SCREEN_CONTACT" ? "🧱 扎实掩护！" : "💥 身体对抗",
-          color: "#fed7aa",
-          bg: "rgba(24, 14, 8, 0.85)",
-          scaleUp: 1.1,
-          duration: 850,
+          type: "particles",
+          particles: bumpSparks,
+          duration: 650,
           startTime: now,
           startFrame: frameIdx,
         });
@@ -1991,55 +1926,6 @@
           }
           ctx.restore();
         }
-      }
-    }
-
-    // 绘制顶层浮动大标牌文字
-    drawFloatingTextFX(ctx, point, now) {
-      for (const fx of this.effects) {
-        if (fx.type !== "floating_text") continue;
-        const progress = Math.min(1.0, (now - fx.startTime) / fx.duration);
-        if (progress >= 1.0) continue;
-
-        const easeOut = Math.sin((progress * Math.PI) / 2);
-        const floatY = easeOut * 24; // 向上飘浮 24px
-        const pt = point(fx.x, fx.y);
-        const drawX = pt.x;
-        const drawY = pt.y - 20 - floatY;
-
-        const alpha = Math.min(1.0, (1.0 - progress) * 1.5);
-        const scaleVal = (fx.scaleUp || 1.1) * (1.0 + (1.0 - progress) * 0.12);
-
-        ctx.save();
-        ctx.translate(drawX, drawY);
-        ctx.scale(scaleVal, scaleVal);
-        ctx.globalAlpha = alpha;
-
-        ctx.font = "800 13px 'Plus Jakarta Sans', -apple-system, sans-serif";
-        const metrics = ctx.measureText(fx.text);
-        const padX = 10;
-        const padY = 5;
-        const w = metrics.width + padX * 2;
-        const h = 22;
-
-        // 背景半透明圆角胶囊
-        ctx.fillStyle = fx.bg || "rgba(10, 16, 26, 0.9)";
-        ctx.beginPath();
-        ctx.roundRect(-w / 2, -h / 2, w, h, 11);
-        ctx.fill();
-
-        // 边框描边
-        ctx.strokeStyle = fx.color;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        // 居中文本
-        ctx.fillStyle = "#ffffff";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(fx.text, 0, 0.5);
-
-        ctx.restore();
       }
     }
   }
@@ -2380,25 +2266,6 @@
         );
         ctx.stroke();
         ctx.restore();
-
-        // 3. 球员头顶上方动感悬浮持球标志
-        ctx.save();
-        const tagY = playerPoint.y - playerRadius - 16;
-        ctx.font = "800 9.5px 'Plus Jakarta Sans', sans-serif";
-        const tagText = "🏀 BALL";
-        const tagW = ctx.measureText(tagText).width + 8;
-        ctx.fillStyle = "rgba(20, 14, 5, 0.9)";
-        ctx.beginPath();
-        ctx.roundRect(playerPoint.x - tagW / 2, tagY - 7, tagW, 14, 7);
-        ctx.fill();
-        ctx.strokeStyle = "#fbbf24";
-        ctx.lineWidth = 1.3;
-        ctx.stroke();
-        ctx.fillStyle = "#fde047";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(tagText, playerPoint.x, tagY);
-        ctx.restore();
       }
 
       // 球员身体立体圆盘 (主队翡翠绿 / 客队珀金橙)
@@ -2606,9 +2473,8 @@
       ctx.restore();
     }
 
-    // 动效系统：空中层与顶层浮动大标牌渲染
+    // 动效系统：空中层纯视觉动效渲染
     courtFX.drawAirFX(ctx, point, now);
-    courtFX.drawFloatingTextFX(ctx, point, now);
 
     ctx.restore();
 
