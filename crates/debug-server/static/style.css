@@ -2193,52 +2193,343 @@ body {
 }
 
 @media (max-width: 768px) {
+  /* 0. 根容器与安全边距 */
+  html,
+  body {
+    overflow-x: hidden;
+  }
+  .workbench-layout {
+    padding: 8px 8px max(24px, env(safe-area-inset-bottom));
+    gap: 10px;
+  }
+
+  /* 1. 顶栏导航：结构化双行紧凑布局 */
   .app-nav {
-    padding: 0 12px;
-    height: auto;
-    padding-top: 8px;
-    padding-bottom: 8px;
+    display: flex;
     flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    padding: max(6px, env(safe-area-inset-top)) 10px 6px;
+    height: auto;
+    gap: 6px;
+  }
+  .nav-brand-section {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .brand-logo {
+    font-size: 15px;
+  }
+  .brand-badge {
+    font-size: 10px;
+    padding: 2px 7px;
+  }
+  .anomaly-pill-badge {
+    font-size: 10px;
+    padding: 2px 7px;
+  }
+  .nav-right-section {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .stream-summary-pill {
+    display: none; /* 移动端隐藏过长的桌面端推演摘要文字，由状态徽章承载 */
+  }
+  .btn-nav-icon {
+    width: 32px;
+    height: 32px;
   }
   .nav-control-section {
     order: 3;
     width: 100%;
-    justify-content: flex-start;
-    overflow-x: auto;
+    display: flex;
+    justify-content: center;
+    margin-top: 2px;
   }
-  .workbench-layout {
-    padding: 10px 10px 40px;
-    gap: 12px;
+  .control-cluster {
+    width: 100%;
+    max-width: 390px;
+    justify-content: space-between;
+    padding: 2px 4px;
+    gap: 4px;
   }
+  .input-seed-wrap,
+  .scope-select-wrap {
+    padding: 2px 6px;
+    gap: 4px;
+  }
+  .seed-input-number {
+    width: 48px;
+    font-size: 11px;
+  }
+  .select-scope-pill {
+    font-size: 11px;
+  }
+  .cluster-label {
+    font-size: 10px;
+  }
+  .btn-primary-action {
+    padding: 5px 10px;
+    font-size: 11px;
+    height: 28px;
+  }
+
+  /* 2. 转播记分牌：移动端紧凑横向广播排版 */
   .match-scoreboard {
-    padding: 10px 12px;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: minmax(75px, 1fr) auto minmax(75px, 1fr);
+    align-items: center;
+    padding: 8px 8px;
+    gap: 6px;
+  }
+  .team-tactic-tag,
+  .team-badge-sub {
+    display: none; /* 移动端隐藏冗长文字，由下方战术板完整展现 */
+  }
+  .team-block.away-team-block {
+    align-items: flex-start;
+  }
+  .team-block.home-team-block {
+    align-items: flex-end;
+  }
+  .team-badge-pill {
+    padding: 2px 7px;
+    gap: 5px;
+    max-width: 100%;
   }
   .team-title {
-    font-size: 12px;
+    font-size: 11px;
+    letter-spacing: 0;
+  }
+  .team-fouls-indicator {
+    font-size: 9.5px;
+  }
+  .clock-capsule {
+    padding: 2px 8px;
+    font-size: 10px;
+    gap: 4px;
+  }
+  .score-display-row {
+    gap: 8px;
   }
   .score-num {
-    font-size: 32px;
+    font-size: 30px;
   }
   .score-divider-colon {
-    font-size: 22px;
+    font-size: 20px;
+  }
+  .match-status-sub-row {
+    gap: 3px;
+    max-width: 220px;
+    justify-content: center;
+  }
+  .match-flow-pill,
+  .match-meta-pill,
+  .free-throw-pill {
+    font-size: 9px;
+    padding: 1px 5px;
+  }
+
+  /* 3. 球场主视口与 HUD 控制层移动端精简 */
+  .court-hud-toolbar {
+    top: 6px;
+    right: 6px;
+    gap: 5px;
+  }
+  .hud-key-hints {
+    display: none !important; /* 手机触摸屏隐藏物理键盘提示 */
+  }
+  .hud-pill-btn {
+    min-height: 26px;
+    padding: 3px 8px;
+    font-size: 10px;
+    gap: 4px;
+  }
+  .floating-event-pill {
+    top: 8px;
+    left: 8px;
+    font-size: 11px;
+    padding: 4px 10px;
+  }
+  .player-hud-card {
+    max-width: 240px;
+    font-size: 11px;
+    padding: 8px 10px;
+  }
+
+  /* 4. 战况字幕条 */
+  .subtitle-bar {
+    padding: 6px 10px;
+    gap: 6px;
+    font-size: 11px;
+  }
+  .subtitle-badge {
+    font-size: 9.5px;
+    padding: 1px 5px;
+  }
+  .event-inline-chip {
+    font-size: 9.5px;
+    padding: 1px 5px;
+  }
+  .subtitle-frame {
+    font-size: 10px;
+  }
+
+  /* 5. 传输控制台触控尺寸达标 */
+  .stage-controller {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+  .timeline-bar-wrap input[type="range"] {
+    height: 18px; /* 加大触控操作槽 */
+  }
+  .timeline-ticks-layer {
+    font-size: 10px;
   }
   .controller-actions {
-    flex-wrap: wrap;
-    justify-content: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
   }
   .time-readout-box {
     width: 100%;
     justify-content: center;
+    font-size: 11px;
+  }
+  .transport-btns {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+  }
+  .btn-media {
+    width: 38px;
+    height: 38px;
+  }
+  .btn-media-play {
+    width: 48px;
+    height: 48px;
   }
   .speed-and-jump-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     width: 100%;
+    gap: 6px;
+  }
+  .speed-group {
+    flex: 1;
+    display: flex;
     justify-content: center;
   }
+  .speed-btn {
+    padding: 4px 6px;
+    font-size: 10px;
+    min-width: 28px;
+  }
+  .jump-frame-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .jump-input {
+    width: 48px;
+    height: 28px;
+    font-size: 11px;
+  }
+  .btn-jump-action {
+    height: 28px;
+    padding: 0 8px;
+    font-size: 10.5px;
+  }
+
+  /* 6. 伴随式透视台选项卡 */
+  .tactical-deck-card {
+    min-height: 280px;
+  }
+  .deck-nav {
+    display: flex;
+    width: 100%;
+  }
+  .deck-tab-button {
+    flex: 1;
+    padding: 8px 4px;
+    font-size: 11.5px;
+    justify-content: center;
+  }
+  .feed-header-toolbar {
+    padding: 6px 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .filter-pill-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .feed-filter-btn {
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 2px 7px;
+    font-size: 10px;
+  }
+  .feed-item {
+    padding: 6px 8px;
+    gap: 6px;
+    font-size: 11.5px;
+  }
+
+  /* 7. 底部分段导航栏：平滑横向滚动与防溢出 */
+  .segmented-nav {
+    display: flex;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; /* Firefox 隐藏滚动条 */
+    padding: 4px;
+    gap: 4px;
+    width: 100%;
+  }
+  .segmented-nav::-webkit-scrollbar {
+    display: none; /* WebKit 隐藏滚动条 */
+  }
+  .tab-button {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+    padding: 6px 12px;
+    font-size: 11.5px;
+  }
+
+  /* 8. 球员资料库与球队高阶数据卡片单列排布 */
   .roster-layout {
     grid-template-columns: 1fr;
+    gap: 12px;
   }
   .trait-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+  .team-stats-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .rule-group-grid {
+    grid-template-columns: 1fr;
+  }
+  .rules-editor-layout {
+    grid-template-columns: 1fr;
+  }
+
+  /* 9. 底部弹窗抽屉移动端安全边距适配 */
+  .modal-sheet-panel {
+    max-width: 100vw;
+    padding: 18px 14px max(20px, env(safe-area-inset-bottom));
   }
 }

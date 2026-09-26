@@ -3291,7 +3291,7 @@
       }
       const player = hit.player;
       tooltip.hidden = false;
-      const isMobile = window.innerWidth <= 640;
+      const isMobile = window.innerWidth <= 768;
       if (isMobile) {
         tooltip.style.left = "50%";
         tooltip.style.transform = "translateX(-50%)";
@@ -3348,10 +3348,13 @@
     $("courtCanvas").addEventListener("mouseleave", () => {
       $("playerTooltip").hidden = true;
     });
+    $("playerTooltip").addEventListener("click", () => {
+      $("playerTooltip").hidden = true;
+    });
     $("courtCanvas").addEventListener("touchend", () => {
       setTimeout(() => {
         $("playerTooltip").hidden = true;
-      }, 2500);
+      }, 3500);
     });
     document.addEventListener("keydown", (event) => {
       if (event.target.matches("input, textarea, select")) return;
