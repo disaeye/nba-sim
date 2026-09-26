@@ -1892,8 +1892,8 @@
         ctx.setLineDash([2, 5]);
         ctx.strokeStyle =
           player.team === "home"
-            ? "rgba(0, 210, 255, 0.6)"
-            : "rgba(255, 109, 171, 0.62)";
+            ? "rgba(16, 185, 129, 0.75)"
+            : "rgba(245, 158, 11, 0.75)";
         ctx.lineWidth = 1.3;
         ctx.beginPath();
         ctx.moveTo(playerPoint.x, playerPoint.y);
@@ -2331,19 +2331,20 @@
     ctx.save();
     ctx.globalCompositeOperation = "source-over";
 
-    // 全场网格连续势能曲面
-    const stepFt = 2.0;
+    // 全场空间连续势能曲面 (高分辨率 1.5ft 步长)
+    const stepFt = 1.5;
     const nx = Math.ceil(rules.courtWidth / stepFt);
     const ny = Math.ceil(rules.courtHeight / stepFt);
-    const sigma2 = 2 * 8.5 * 8.5;
+    const sigma2 = 2 * 7.5 * 7.5; // 控制辐射半衰期
 
     const homePlayers = [];
     const awayPlayers = [];
     for (const p of players) {
       const px = finite(p.x) * rules.courtWidth;
       const py = finite(p.y) * rules.courtHeight;
-      if (p.team === "home") homePlayers.push({ x: px, y: py });
-      else if (p.team === "away") awayPlayers.push({ x: px, y: py });
+      const weight = p.hasBall ? 1.5 : 1.0;
+      if (p.team === "home") homePlayers.push({ x: px, y: py, weight });
+      else if (p.team === "away") awayPlayers.push({ x: px, y: py, weight });
     }
 
     const solverSamples = samples.map((s) => ({
@@ -2355,6 +2356,9 @@
       team: s.team,
     }));
 
+    let homeControlPoints = 0;
+    let awayControlPoints = 0;
+
     for (let ix = 0; ix < nx; ix++) {
       const gx = ix * stepFt;
       for (let iy = 0; iy < ny; iy++) {
@@ -2363,25 +2367,29 @@
         let uHome = 0;
         for (const hp of homePlayers) {
           const d2 = (gx - hp.x) * (gx - hp.x) + (gy - hp.y) * (gy - hp.y);
-          uHome += Math.exp(-d2 / sigma2);
+          uHome += Math.exp(-d2 / sigma2) * hp.weight;
         }
 
         let uAway = 0;
         for (const ap of awayPlayers) {
           const d2 = (gx - ap.x) * (gx - ap.x) + (gy - ap.y) * (gy - ap.y);
-          uAway += Math.exp(-d2 / sigma2);
+          uAway += Math.exp(-d2 / sigma2) * ap.weight;
         }
 
         for (const ss of solverSamples) {
           const d2 = (gx - ss.x) * (gx - ss.x) + (gy - ss.y) * (gy - ss.y);
-          const weight = Math.exp(-d2 / (2 * 11 * 11)) * ss.pressure * 1.5;
+          const weight = Math.exp(-d2 / (2 * 10 * 10)) * ss.pressure * 1.6;
           if (ss.team === "home") uHome += weight;
           else if (ss.team === "away") uAway += weight;
         }
 
-        const total = uHome + uAway + 0.08;
-        const dominance = (uHome - uAway) / total;
-        const totalDensity = Math.min(1.0, uHome + uAway);
+        const total = uHome + uAway + 0.05;
+        const dominance = (uHome - uAway) / total; // [-1, 1]
+        const intensity = Math.min(1.0, (uHome + uAway) * 0.7);
+
+        // 统计全场两队空间占有率
+        if (dominance > 0.08) homeControlPoints++;
+        else if (dominance < -0.08) awayControlPoints++;
 
         if (Math.abs(dominance) > 0.06) {
           const cellPt = point(gx, gy);
@@ -2389,22 +2397,31 @@
           const w = cellNext.x - cellPt.x;
           const h = cellNext.y - cellPt.y;
 
+          // 高辨识度色彩映射：主队翡翠绿 (#10b981)，客队琥珀金 (#f59e0b)
           const alpha = Math.min(
-            0.32,
-            Math.abs(dominance) * 0.3 * (0.35 + totalDensity * 0.65),
+            0.40,
+            0.15 + Math.abs(dominance) * 0.25 * (0.35 + intensity * 0.65),
           );
           if (dominance > 0) {
-            ctx.fillStyle = `rgba(0, 210, 255, ${alpha.toFixed(3)})`;
+            ctx.fillStyle = `rgba(16, 185, 129, ${alpha.toFixed(3)})`;
           } else {
-            ctx.fillStyle = `rgba(255, 80, 146, ${alpha.toFixed(3)})`;
+            ctx.fillStyle = `rgba(245, 158, 11, ${alpha.toFixed(3)})`;
           }
+          ctx.fillRect(cellPt.x, cellPt.y, w + 0.5, h + 0.5);
+        } else if (intensity > 0.28) {
+          // 均势交锋争夺分界区域 (白色微透光带)
+          const cellPt = point(gx, gy);
+          const cellNext = point(gx + stepFt, gy + stepFt);
+          const w = cellNext.x - cellPt.x;
+          const h = cellNext.y - cellPt.y;
+          ctx.fillStyle = `rgba(255, 255, 255, ${(0.08 + intensity * 0.1).toFixed(3)})`;
           ctx.fillRect(cellPt.x, cellPt.y, w + 0.5, h + 0.5);
         }
       }
     }
     ctx.restore();
 
-    // 弱侧防守平衡驱动向量与目标锚点
+    // 弱侧防守平衡驱动向量与目标锚点 (主队绿 / 客队金)
     if (solverSamples.length) {
       ctx.save();
       ctx.lineCap = "round";
@@ -2420,12 +2437,12 @@
           x: start.x + (driveX / magnitude) * length,
           y: start.y + (driveY / magnitude) * length,
         };
-        const color = sample.team === "home" ? "#00d2ff" : "#ff6dab";
+        const color = sample.team === "home" ? "#10b981" : "#f59e0b";
 
-        // 驱动箭头主体
+        // 驱动虚线与主体箭头
         ctx.strokeStyle = color;
-        ctx.globalAlpha = 0.55 + sample.pressure * 0.45;
-        ctx.lineWidth = 1.8;
+        ctx.globalAlpha = 0.65 + sample.pressure * 0.35;
+        ctx.lineWidth = 2.0;
         ctx.beginPath();
         ctx.moveTo(start.x, start.y);
         ctx.lineTo(end.x, end.y);
@@ -2437,25 +2454,87 @@
         ctx.beginPath();
         ctx.moveTo(end.x, end.y);
         ctx.lineTo(
-          end.x - Math.cos(angle - 0.5) * 6,
-          end.y - Math.sin(angle - 0.5) * 6,
+          end.x - Math.cos(angle - 0.45) * 7,
+          end.y - Math.sin(angle - 0.45) * 7,
         );
         ctx.lineTo(
-          end.x - Math.cos(angle + 0.5) * 6,
-          end.y - Math.sin(angle + 0.5) * 6,
+          end.x - Math.cos(angle + 0.45) * 7,
+          end.y - Math.sin(angle + 0.45) * 7,
         );
         ctx.closePath();
         ctx.fill();
 
-        // 平衡目标锚点
+        // 平衡目标锚点 (实心内点 + 轮廓环)
         const targetPt = point(sample.targetX, sample.targetY);
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(targetPt.x, targetPt.y, 4.5, 0, Math.PI * 2);
+        ctx.arc(targetPt.x, targetPt.y, 4.0, 0, Math.PI * 2);
         ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(targetPt.x, targetPt.y, 7.5, 0, Math.PI * 2);
+        ctx.stroke();
       }
       ctx.restore();
     }
+
+    // 全场空间控制率统计面板 (Tactical Territory HUD)
+    const totalControl = homeControlPoints + awayControlPoints || 1;
+    const homePct = Math.round((homeControlPoints / totalControl) * 100);
+    const awayPct = 100 - homePct;
+
+    const awayTeamName = getTeamNameZh(tick.away_team) || "客队";
+    const homeTeamName = getTeamNameZh(tick.home_team) || "主队";
+
+    ctx.save();
+    // 居中放置在球场顶部中央
+    const hudW = 210;
+    const hudH = 26;
+    const hudX = 500 - hudW / 2;
+    const hudY = 12;
+
+    ctx.fillStyle = "rgba(8, 12, 20, 0.88)";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.14)";
+    ctx.lineWidth = 1.0;
+    ctx.beginPath();
+    ctx.roundRect(hudX, hudY, hudW, hudH, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.font = "700 11px system-ui, -apple-system, sans-serif";
+    ctx.textBaseline = "middle";
+
+    // 客队控制率 (左侧，琥珀金)
+    ctx.fillStyle = "#f59e0b";
+    ctx.textAlign = "left";
+    ctx.fillText(`${awayTeamName.slice(0, 4)} ${awayPct}%`, hudX + 10, hudY + 9);
+
+    // 中间标签
+    ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+    ctx.textAlign = "center";
+    ctx.font = "600 9.5px system-ui, -apple-system, sans-serif";
+    ctx.fillText("空间控制", 500, hudY + 9);
+
+    // 主队控制率 (右侧，翡翠绿)
+    ctx.fillStyle = "#10b981";
+    ctx.textAlign = "right";
+    ctx.font = "700 11px system-ui, -apple-system, sans-serif";
+    ctx.fillText(`${homePct}% ${homeTeamName.slice(0, 4)}`, hudX + hudW - 10, hudY + 9);
+
+    // 底部双色空间对比进度条
+    const barW = hudW - 20;
+    const barH = 3.0;
+    const barX = hudX + 10;
+    const barY = hudY + 19;
+    const awayBarW = (barW * awayPct) / 100;
+
+    ctx.fillStyle = "#f59e0b";
+    ctx.fillRect(barX, barY, awayBarW, barH);
+    ctx.fillStyle = "#10b981";
+    ctx.fillRect(barX + awayBarW, barY, barW - awayBarW, barH);
+
+    ctx.restore();
   }
 
   // ========================================================

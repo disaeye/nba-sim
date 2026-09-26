@@ -633,8 +633,8 @@ body {
   border-radius: 50%;
   background: var(--text-muted);
 }
-.hud-indicator-dot.cyan {
-  background: var(--color-cyan);
+.hud-indicator-dot.emerald {
+  background: var(--color-home);
 }
 
 .hud-key-hints {

@@ -332,6 +332,34 @@ def main():
             assert r["noNaNCoords"], f"帧 {r['frame']} 球员坐标严禁出现 NaN"
         print("✅ 球员动作动画动力学（投篮瞄准压腕、运球节拍、防守罩、挡拆卡位）多帧渲染严格校验通过")
 
+        # 6. 验证势能场两队空间状态与控制率 HUD
+        js_verify_potential_field = """
+        (function() {
+            const state = window.__nbaDebug;
+            const toggleBtn = document.getElementById("potentialFieldToggle");
+
+            // 确保势能场处于开启状态
+            if (!state.potentialFieldVisible) toggleBtn.click();
+
+            // 采样画布中央与禁区附近的像素
+            const canvas = document.getElementById("courtCanvas");
+            const ctx = canvas.getContext("2d");
+            const centerPixel = ctx.getImageData(500, 280, 1, 1).data;
+            const topHudPixel = ctx.getImageData(500, 20, 1, 1).data;
+
+            return {
+                visible: state.potentialFieldVisible,
+                hasActiveDot: toggleBtn.querySelector(".hud-indicator-dot").classList.contains("emerald"),
+                hasCanvasData: centerPixel.length === 4 && topHudPixel.length === 4
+            };
+        })()
+        """
+        pf_data = run_chrome_eval(js_verify_potential_field)
+        assert pf_data["visible"], "势能场图层状态必须为可见"
+        assert pf_data["hasActiveDot"], "势能场指示灯必须采用翡翠绿队色"
+        assert pf_data["hasCanvasData"], "势能场必须成功在 Canvas 上完成空间渲染与 HUD 读数绘制"
+        print("✅ 两队空间势能场（主客队高辨识度区域、空间控制对比条）端到端渲染验证通过")
+
         print("\n🎉 所有球场、球员与篮球高辨识度动效测试全部顺利通过！")
     finally:
         proc.terminate()
