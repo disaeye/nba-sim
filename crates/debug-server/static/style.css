@@ -67,8 +67,8 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  min-height: 100vh;
-  overflow-x: hidden;
+  height: 100%;
+  overflow: hidden;
 }
 
 /* 全局隐藏规则：带有 hidden 属性的元素绝对严禁渲染，彻底杜绝任何占位与黑块残留 */
@@ -349,26 +349,30 @@ body {
    ========================================================================== */
 
 .workbench-layout {
-  max-width: 1720px;
+  width: 100%;
+  max-width: 1920px;
   margin: 0 auto;
-  padding: 16px 20px 48px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  padding: 8px 12px;
+  height: calc(100vh - 42px);
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(440px, 0.95fr);
+  gap: 10px;
+  align-items: stretch;
+  overflow: hidden;
 }
 
 .workbench-upper-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.75fr) minmax(360px, 1fr);
-  gap: 16px;
-  align-items: stretch;
+  display: contents;
 }
 
 /* 左侧舞台容器 */
 .stage-column {
   min-width: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .broadcast-stage-card {
@@ -380,6 +384,8 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  justify-content: space-between;
 }
 
 /* ==========================================================================
@@ -390,10 +396,11 @@ body {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  padding: 10px 18px;
+  padding: 8px 16px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, transparent 100%);
   border-bottom: 1px solid var(--border-subtle);
-  gap: 12px;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .team-block {
@@ -574,17 +581,21 @@ body {
 
 .court-stage-wrap {
   position: relative;
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  aspect-ratio: 1000 / 560;
   background: #080b11;
   overflow: hidden;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 #courtCanvas {
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 1000 / 560;
   display: block;
-  width: 100%;
-  height: 100%;
   object-fit: contain;
 }
 
@@ -736,12 +747,13 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 9px 18px;
+  padding: 6px 14px;
   background: rgba(0, 0, 0, 0.35);
   border-top: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
-  font-size: 12px;
-  gap: 12px;
+  font-size: 11.5px;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .subtitle-left-meta {
@@ -801,10 +813,10 @@ body {
 .stage-controller {
   display: flex;
   flex-direction: column;
-  padding: 10px 18px;
+  padding: 8px 14px;
   background: var(--bg-surface);
-  gap: 8px;
-  margin-top: auto;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 /* 进度条轨道 */
@@ -1030,9 +1042,11 @@ body {
 
 .deck-column {
   min-width: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  gap: 10px;
+  overflow: hidden;
 }
 
 .tactical-deck-card {
@@ -1043,7 +1057,7 @@ body {
   border: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 0 0 310px;
   min-height: 0;
 }
 
@@ -1051,11 +1065,12 @@ body {
 .deck-nav {
   display: flex;
   align-items: center;
-  padding: 4px;
-  margin: 12px 14px 0;
+  padding: 3px;
+  margin: 8px 10px 0;
   background: var(--bg-surface-elevated);
   border-radius: var(--radius-md);
-  gap: 4px;
+  gap: 3px;
+  flex-shrink: 0;
 }
 
 .deck-tab-button {
@@ -1063,14 +1078,14 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 7px 0;
+  gap: 5px;
+  padding: 5px 0;
   background: transparent;
   border: none;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-family: var(--font-display);
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -1094,7 +1109,7 @@ body {
 }
 
 .deck-content {
-  padding: 12px 14px;
+  padding: 8px 10px;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -1111,6 +1126,7 @@ body {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 /* Deck Tab 1: 文字直播流 */
@@ -1438,6 +1454,11 @@ body {
 
 .workbench-bottom-studio {
   width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .studio-card {
@@ -1446,18 +1467,23 @@ body {
   box-shadow: var(--shadow-workbench);
   overflow: hidden;
   border: 1px solid var(--border-subtle);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* 底部标签导航 */
 .segmented-nav {
   display: flex;
   align-items: center;
-  padding: 4px;
-  margin: 14px 18px 0;
+  padding: 3px;
+  margin: 8px 10px 0;
   background: var(--bg-surface-elevated);
   border-radius: var(--radius-md);
-  gap: 4px;
+  gap: 3px;
   overflow-x: auto;
+  flex-shrink: 0;
 }
 
 .tab-button {
@@ -1465,14 +1491,14 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 4px;
+  padding: 5px 8px;
   background: transparent;
   border: none;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -1492,8 +1518,10 @@ body {
 }
 
 .tab-content-card {
-  padding: 18px;
-  min-height: 320px;
+  padding: 10px 12px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .tab-pane {
@@ -2189,8 +2217,44 @@ body {
    ========================================================================== */
 
 @media (max-width: 1180px) {
-  .workbench-upper-grid {
-    grid-template-columns: 1fr;
+  html,
+  body {
+    height: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .workbench-layout {
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+  }
+  .stage-column,
+  .deck-column,
+  .broadcast-stage-card,
+  .tactical-deck-card,
+  .workbench-bottom-studio,
+  .studio-card {
+    height: auto;
+    overflow: visible;
+  }
+  .court-stage-wrap {
+    aspect-ratio: 1000 / 560;
+    width: 100%;
+    height: auto;
+  }
+  .tactical-deck-card {
+    flex: none;
+    min-height: 280px;
+  }
+  .feed-timeline-stream,
+  .decision-panel-stream,
+  .anomaly-panel-wrap {
+    max-height: 380px;
+  }
+  .tab-content-card {
+    min-height: 320px;
+    overflow: visible;
   }
   .shots-studio-wrap {
     grid-template-columns: 1fr;
