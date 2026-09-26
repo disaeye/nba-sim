@@ -150,7 +150,30 @@ def main():
             assert has_arc, "投篮出手帧必须产生真实细致抛物线 (shot_arc)"
             assert not has_text, "不得展示浮夸悬浮文字"
             assert not has_particles, "不得展示非现实火花粒子"
-            print("✅ 投篮出手真实抛物线验证通过（无火花无杂乱文字）")
+            # 验证投篮路线与目标篮筐中心严密吻合
+            arc = next((e for e in shot_fx["effects"] if e["type"] == "shot_arc"), None)
+            if arc:
+                js_check_target = """
+                (function() {
+                    const state = window.__nbaDebug;
+                    const fx = state.courtFX;
+                    const arc = fx ? fx.effects.find(e => e.type === "shot_arc") : null;
+                    if (!arc) return { found: false };
+                    const tick = state.ticks[state.idx];
+                    const courtWidth = 94, courtHeight = 50;
+                    const hoopY = 25;
+                    const rightHoopX = 88.75, leftHoopX = 5.25;
+                    const isRight = Math.abs(arc.targetX - rightHoopX) < Math.abs(arc.targetX - leftHoopX);
+                    const expectedHoopX = isRight ? rightHoopX : leftHoopX;
+                    const hoopXDiff = Math.abs(arc.targetX - expectedHoopX);
+                    const hoopYDiff = Math.abs(arc.targetY - hoopY);
+                    return { found: true, hoopXDiff, hoopYDiff };
+                })()
+                """
+                target_check = run_chrome_eval(js_check_target)
+                if target_check.get("found"):
+                    assert target_check["hoopXDiff"] < 0.001 and target_check["hoopYDiff"] < 0.001, "投篮路线目标点必须严格精确对齐篮筐几何圆心"
+            print("✅ 投篮出手真实抛物线验证通过（无火花无杂乱文字，目标点严格对齐篮筐）")
 
         # 验证投篮命中得分帧真实物理 (Net Swish 真实网兜下抽与回弹，以及篮板得分确认灯框点亮)
         if events['scoreIdx'] >= 0:
@@ -178,7 +201,29 @@ def main():
             assert not has_text, "不得展示浮夸悬浮文字"
             assert not has_particles, "不得展示非现实礼花粒子"
             assert not any(ord(c) > 0x1F000 for c in score_fx["chipText"]), f"事件标签严禁拼接 Emoji: {score_fx['chipText']}"
-            print("✅ 投篮命中真实编织篮网下抽与篮板确认绿灯验证通过（无Emoji拼接）")
+
+            # 验证进球时篮球坐标与篮筐圆心精确吻合 (重合距离 < 1.0 像素)
+            js_verify_ball_hoop_alignment = f"""
+            (function() {{
+                const state = window.__nbaDebug;
+                const tick = state.ticks[{target}];
+                if (!tick || !tick.ball) return {{ ok: false }};
+                const ballX = tick.ball.x * 94 * 10 + 30;
+                const ballY = tick.ball.y * 50 * 10 + 30;
+                const rightHoop = 88.75 * 10 + 30;
+                const leftHoop = 5.25 * 10 + 30;
+                const hoopY = 25 * 10 + 30;
+                const dRight = Math.hypot(ballX - rightHoop, ballY - hoopY);
+                const dLeft = Math.hypot(ballX - leftHoop, ballY - hoopY);
+                const minDist = Math.min(dRight, dLeft);
+                return {{ ok: true, minDist, ballX, ballY, targetHoop: dRight < dLeft ? "right" : "left" }};
+            }})()
+            """
+            alignment = run_chrome_eval(js_verify_ball_hoop_alignment)
+            if alignment.get("ok"):
+                print(f"🏀 进球时篮球与篮筐重合距离: {alignment['minDist']:.4f}px (目标篮筐: {alignment['targetHoop']})")
+                assert alignment["minDist"] < 1.0, f"进球瞬间篮球中心必须与篮圈几何圆心严格重合 (误差必须小于 1px，实际={alignment['minDist']:.4f}px)"
+            print("✅ 投篮命中真实编织篮网下抽与篮板确认绿灯验证通过（篮球与篮圈几何完全吻合，无Emoji拼接）")
 
         # 验证打铁帧真实物理 (Rim Shake 金属篮圈机械阻尼震颤，且篮板绝不亮灯)
         if events['missIdx'] >= 0:

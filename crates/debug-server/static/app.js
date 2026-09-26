@@ -1547,9 +1547,11 @@
         ? finite(tick.ball.y) * rules.courtHeight
         : rules.courtHeight * 0.5;
 
-      const targetRight = tick.ball ? tick.ball.x > 0.45 : true;
-      const targetHoopX = targetRight ? rules.rightHoopX : rules.leftHoopX;
-      const targetSide = targetRight ? "right" : "left";
+      const isAttackingHome =
+        tick.possession_team === "home" ||
+        (tick.ball ? tick.ball.x > 0.45 : true);
+      const targetHoopX = isAttackingHome ? rules.rightHoopX : rules.leftHoopX;
+      const targetSide = isAttackingHome ? "right" : "left";
 
       if (evtName === "SHOT_RELEASE") {
         let shooter = (tick.players || []).find((p) => p.hasBall);
@@ -1566,12 +1568,20 @@
             }
           }
         }
-        const sx = shooter ? finite(shooter.x) * rules.courtWidth : ballFtX;
-        const sy = shooter ? finite(shooter.y) * rules.courtHeight : ballFtY;
+        const sx = tick.ball
+          ? ballFtX
+          : shooter
+            ? finite(shooter.x) * rules.courtWidth
+            : ballFtX;
+        const sy = tick.ball
+          ? ballFtY
+          : shooter
+            ? finite(shooter.y) * rules.courtHeight
+            : ballFtY;
         const distToHoop = Math.hypot(sx - targetHoopX, sy - rules.hoopY);
         const isThree = distToHoop >= rules.threePointDistance;
 
-        // 真实战术分析投篮飞行抛物虚线 (Shot Arc, 1.2px 极细弱灰白虚线)
+        // 真实战术分析投篮飞行路线 (严格指向目标篮筐几何圆心)
         this.effects.push({
           type: "shot_arc",
           startX: sx,
@@ -1640,14 +1650,10 @@
         if (fx.type === "shot_arc") {
           const startPt = point(fx.startX, fx.startY);
           const targetPt = point(fx.targetX, fx.targetY);
-          const dist = Math.hypot(targetPt.x - startPt.x, targetPt.y - startPt.y);
-          const midX = (startPt.x + targetPt.x) * 0.5;
-          const arcPeak = Math.min(80, dist * 0.28);
-          const midY = Math.min(startPt.y, targetPt.y) - arcPeak;
 
           ctx.save();
           if (fx.status === "made") {
-            // 进球命中：鲜明实线绿弧，空心穿网路径极具辨识度
+            // 进球命中：鲜明实线绿导轨，空心穿网路径极具辨识度
             ctx.strokeStyle = `rgba(16, 185, 129, ${Math.min(0.95, alpha * 2.2).toFixed(3)})`;
             ctx.lineWidth = 2.4;
             ctx.setLineDash([]);
@@ -1657,14 +1663,14 @@
             ctx.lineWidth = 1.0;
             ctx.setLineDash([3, 4]);
           } else {
-            // 飞行中：细弱纯白虚线
+            // 飞行中：极弱纯白战术瞄准虚线
             ctx.strokeStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
             ctx.lineWidth = 1.2;
             ctx.setLineDash([4, 4]);
           }
           ctx.beginPath();
           ctx.moveTo(startPt.x, startPt.y);
-          ctx.quadraticCurveTo(midX, midY, targetPt.x, targetPt.y);
+          ctx.lineTo(targetPt.x, targetPt.y);
           ctx.stroke();
           ctx.restore();
         } else if (fx.type === "disabled_block_shield") {
@@ -2036,27 +2042,27 @@
       ctx.restore();
     }
 
-    // 6. 篮球渲染 (严格三维空间投射与自转物理)
+    // 6. 篮球渲染 (严格对齐真实俯视投影平面与三维透视物理)
     if (tick.ball) {
       const ballFtX = finite(tick.ball.x) * rules.courtWidth;
       const ballFtY = finite(tick.ball.y) * rules.courtHeight;
       const groundPoint = point(ballFtX, ballFtY);
 
       const ballZ = finite(tick.ball.z, 0);
-      const heightOffset = Math.min(42, ballZ * 3.2);
-      const ballCenterY = groundPoint.y - heightOffset;
-      const zScale = 1.0 + Math.min(0.35, ballZ * 0.024);
-      const ballRadius = 7.5 * zScale;
+      const zScale = 1.0 + Math.min(0.42, ballZ * 0.035);
+      const ballRadius = 7.0 * zScale;
+      const ballCenterX = groundPoint.x;
+      const ballCenterY = groundPoint.y;
 
       // 地面物理投影阴影 (随着高度上升阴影扩散变淡)
       ctx.beginPath();
-      const shadowSpread = 1.0 + Math.min(1.2, ballZ * 0.06);
-      const shadowAlpha = Math.max(0.12, 0.45 * (1.0 - Math.min(0.75, ballZ * 0.035)));
+      const shadowSpread = 1.0 + Math.min(1.3, ballZ * 0.07);
+      const shadowAlpha = Math.max(0.1, 0.45 * (1.0 - Math.min(0.75, ballZ * 0.04)));
       ctx.ellipse(
         groundPoint.x,
-        groundPoint.y + 2,
-        Math.max(3, ballRadius * 1.1 * shadowSpread),
-        Math.max(2, ballRadius * 0.55 * shadowSpread),
+        groundPoint.y + 1,
+        Math.max(3, ballRadius * 1.05 * shadowSpread),
+        Math.max(2, ballRadius * 0.52 * shadowSpread),
         0,
         0,
         Math.PI * 2,
@@ -2064,7 +2070,7 @@
       ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha.toFixed(3)})`;
       ctx.fill();
 
-      // 高速飞行金色流光彗星尾迹 (Comet Trail)
+      // 高速飞行金色流光彗星尾迹 (Comet Trail: 严格对齐球体同轴轨迹)
       if (courtFX.ballHistory.length >= 3) {
         const tailPts = courtFX.ballHistory.slice(-8);
         for (let i = 0; i < tailPts.length - 1; i++) {
@@ -2072,29 +2078,27 @@
           const p2 = tailPts[i + 1];
           const pt1 = point(p1.x, p1.y);
           const pt2 = point(p2.x, p2.y);
-          const y1 = pt1.y - Math.min(42, p1.z * 3.2);
-          const y2 = pt2.y - Math.min(42, p2.z * 3.2);
           const trailAlpha = ((i + 1) / tailPts.length) * 0.55;
 
           ctx.beginPath();
-          ctx.moveTo(pt1.x, y1);
-          ctx.lineTo(pt2.x, y2);
+          ctx.moveTo(pt1.x, pt1.y);
+          ctx.lineTo(pt2.x, pt2.y);
           ctx.strokeStyle = "rgba(249, 115, 22, " + trailAlpha.toFixed(3) + ")";
-          ctx.lineWidth = 1.5 + (i / tailPts.length) * 3.5;
+          ctx.lineWidth = 1.5 + (i / tailPts.length) * 3.0;
           ctx.lineCap = "round";
           ctx.stroke();
         }
       }
 
-      // 篮球球体渐变与立体高光
+      // 篮球球体渐变与立体高光 (圆心分毫不差坐落于物理平面点)
       ctx.save();
       ctx.beginPath();
-      ctx.arc(groundPoint.x, ballCenterY, ballRadius, 0, Math.PI * 2);
+      ctx.arc(ballCenterX, ballCenterY, ballRadius, 0, Math.PI * 2);
       const bGrad = ctx.createRadialGradient(
-        groundPoint.x - ballRadius * 0.35,
+        ballCenterX - ballRadius * 0.35,
         ballCenterY - ballRadius * 0.35,
         ballRadius * 0.1,
-        groundPoint.x,
+        ballCenterX,
         ballCenterY,
         ballRadius,
       );
@@ -2106,7 +2110,7 @@
 
       // 篮球经典黑色十字旋转筋线 (Seams)
       ctx.save();
-      ctx.translate(groundPoint.x, ballCenterY);
+      ctx.translate(ballCenterX, ballCenterY);
       ctx.rotate(courtFX.ballRotationAngle);
       ctx.strokeStyle = "#381006";
       ctx.lineWidth = 1.1;
@@ -2123,7 +2127,7 @@
       ctx.stroke();
       ctx.restore();
 
-      // 球体边缘微深描边
+      // 球体边缘深色描边
       ctx.strokeStyle = "#431407";
       ctx.lineWidth = 1.2;
       ctx.stroke();
