@@ -159,11 +159,6 @@ body {
   background: var(--color-away-subtle);
   color: var(--color-away);
   border-color: rgba(245, 158, 11, 0.4);
-  animation: badgeBlink 1.2s infinite alternate ease-in-out;
-}
-@keyframes badgeBlink {
-  from { opacity: 0.65; }
-  to { opacity: 1; filter: drop-shadow(0 0 5px var(--color-away-glow)); }
 }
 
 .anomaly-pill-badge {
@@ -522,13 +517,8 @@ body {
   background: rgba(255, 120, 40, 0.14);
 }
 .shot-clock-badge.urgent-shot-clock {
-  color: var(--color-urgent);
-  background: rgba(239, 68, 68, 0.22);
-  animation: urgentPulse 0.65s infinite alternate ease-in-out;
-}
-@keyframes urgentPulse {
-  from { transform: scale(1); opacity: 0.85; }
-  to { transform: scale(1.12); opacity: 1; filter: drop-shadow(0 0 6px var(--color-urgent-glow)); }
+  color: #ffffff;
+  background: var(--color-urgent);
 }
 
 .score-display-row {
@@ -545,21 +535,10 @@ body {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.5px;
   color: #ffffff;
-  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
-.score-num.away-score-color {
-  text-shadow: 0 0 22px var(--color-away-glow);
-}
+.score-num.away-score-color,
 .score-num.home-score-color {
-  text-shadow: 0 0 22px var(--color-home-glow);
-}
-.score-pulse {
-  animation: scoreBounce 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-@keyframes scoreBounce {
-  0% { transform: scale(1); }
-  45% { transform: scale(1.2) translateY(-2px); color: #fef08a; }
-  100% { transform: scale(1); }
+  color: #ffffff;
 }
 
 .score-divider-colon {

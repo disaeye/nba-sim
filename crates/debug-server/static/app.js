@@ -1920,119 +1920,22 @@
         }
       }
 
-      // 高速奔跑动态残影 (Ghosting Motion Blur)
-      if (curSpeed > 8.0 && hist.length >= 3) {
-        const ghostCount = Math.min(2, hist.length - 1);
-        for (let g = 1; g <= ghostCount; g++) {
-          const gh = hist[hist.length - 1 - g];
-          if (!gh) continue;
-          const ghPt = point(gh.x, gh.y);
-          ctx.beginPath();
-          ctx.arc(ghPt.x, ghPt.y, playerRadius * (1 - g * 0.12), 0, Math.PI * 2);
-          ctx.fillStyle =
-            player.team === "home"
-              ? `rgba(16, 185, 129, ${0.22 - g * 0.08})`
-              : `rgba(245, 158, 11, ${0.22 - g * 0.08})`;
-          ctx.fill();
-        }
-      }
-
       // ========================================================
-      // 球员战术几何抽象与全动作动力学渲染
+      // 5. 真实战术板球员渲染 (Pro Tactical Player Badge)
+      // 脚踏实地自然跑位，绝不悬浮飞行，无花哨 AI 特效
       // ========================================================
-      const act = String(player.action || "");
-      const phase = String(player.action_phase || "");
       const isHome = player.team === "home";
+      const px = playerPoint.x;
+      const py = playerPoint.y;
+      const radius = 14.5;
 
-      // 1. 战术动作分类判定
-      const isShooting =
-        /JumpShot|Layup|Dunk|CatchShoot|PullUp|Shot|3PT/i.test(act);
-      const isContesting = /Contest|Block|Closeout/i.test(act);
-      const isRebounding = /Rebound/i.test(act);
-      const isDunkOrLayup = /Dunk|Layup/i.test(act);
-      const isScreening = /Screen/i.test(act);
-      const isCutting = /Cut|Drive|Dip/i.test(act) || curSpeed > 8.5;
-      const isStealing = /Steal|Deflection|Poke/i.test(act);
-      const isDefending =
-        isContesting ||
-        /Chaser|PointOfAttack|WingStopper|CONTAIN|SHELL|HELP/i.test(
-          act + (player.defensive_role || ""),
-        );
-
-      // 2. 垂直起跳动力学高度与缩放 (Vertical Lift & Perspective Scale)
-      // 俯视透视中：离地跳起靠近镜头，圆盘与背号放大、地面保留阴影与垂直高度虚线
-      let bodyLift = 0;
-      let jumpScale = 1.0;
-      let prepSquat = 1.0;
-
-      const isJumping = isShooting || isContesting || isRebounding;
-      if (isJumping) {
-        if (/Prep/i.test(phase)) {
-          prepSquat = 0.94;
-          bodyLift = 0;
-          jumpScale = 0.96;
-        } else if (/Exec/i.test(phase)) {
-          bodyLift = isDunkOrLayup ? 17.0 : isShooting ? 15.0 : isRebounding ? 16.5 : 13.0;
-          jumpScale = 1.34;
-        } else if (/Follow/i.test(phase)) {
-          bodyLift = 5.5;
-          jumpScale = 1.10;
-        } else {
-          bodyLift = 11.0;
-          jumpScale = 1.22;
-        }
-      }
-
-      // 3. 地面阴影与地面起跳基准锚点 (Ground Shadow & Drop-Line)
-      const groundX = playerPoint.x;
-      const groundY = playerPoint.y;
-
-      ctx.save();
-      const shadowScale = (1.0 + bodyLift * 0.035) * prepSquat;
-      const shadowAlpha = Math.max(0.08, (0.34 - bodyLift * 0.016) * (prepSquat > 0.99 ? 1 : 1.3));
-      const shadowOffsetX = curVx * 0.22;
-      const shadowOffsetY = curVy * 0.22;
-
+      // 1. 地面自然接触阴影 (自然紧贴脚下，柔和逼真)
       ctx.beginPath();
-      ctx.ellipse(
-        groundX - shadowOffsetX,
-        groundY + 3 - shadowOffsetY,
-        (playerRadius + 1.5) * shadowScale,
-        (playerRadius * 0.52) * shadowScale,
-        0,
-        0,
-        Math.PI * 2,
-      );
-      ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha.toFixed(3)})`;
+      ctx.ellipse(px, py + 2, radius * 0.95, radius * 0.45, 0, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
       ctx.fill();
-      ctx.restore();
 
-      // 4. 起跳空战高度连接虚线与地面基准环 (Drop Line & Stems)
-      if (bodyLift > 2.0) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(groundX, groundY, playerRadius * 0.75, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-        ctx.lineWidth = 1.0;
-        ctx.setLineDash([2, 3]);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(groundX, groundY);
-        ctx.lineTo(groundX, groundY - bodyLift);
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
-        ctx.lineWidth = 1.2;
-        ctx.setLineDash([3, 3]);
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // 5. 身体渲染中心 (叠加垂直升空位移)
-      const bodyCenterX = groundX;
-      const bodyCenterY = groundY - bodyLift;
-      const currentRadius = playerRadius * jumpScale * prepSquat;
-
-      // 6. 身体朝向角 (Facing Angle)
+      // 2. 身体朝向角 (Facing Angle)
       let facingAngle = 0;
       if (
         player.facing_x !== undefined &&
@@ -2050,201 +1953,45 @@
         );
       }
 
-      // 7. 特殊战术屏障：掩护筑墙双翼屏障 (Screen Flaps & Base)
-      if (isScreening) {
-        ctx.save();
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
-        ctx.lineWidth = 2.0;
-        ctx.strokeRect(
-          bodyCenterX - currentRadius - 3.5,
-          bodyCenterY - currentRadius - 3.5,
-          (currentRadius + 3.5) * 2,
-          (currentRadius + 3.5) * 2,
-        );
-        ctx.beginPath();
-        ctx.moveTo(bodyCenterX - currentRadius - 7, bodyCenterY);
-        ctx.lineTo(bodyCenterX - currentRadius - 2, bodyCenterY);
-        ctx.moveTo(bodyCenterX + currentRadius + 2, bodyCenterY);
-        ctx.lineTo(bodyCenterX + currentRadius + 7, bodyCenterY);
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // 8. 战术动作专属视觉层：
-      // (a) 投篮瞄准线 (Shooting Aim Line)
-      if (isShooting && bodyLift > 3.0) {
-        ctx.save();
-        const targetHoopX = isHome ? rules.rightHoopX : rules.leftHoopX;
-        const targetPt = point(targetHoopX, rules.hoopY);
-        ctx.beginPath();
-        ctx.moveTo(bodyCenterX, bodyCenterY);
-        ctx.lineTo(targetPt.x, targetPt.y);
-        ctx.strokeStyle = "rgba(251, 191, 36, 0.4)";
-        ctx.lineWidth = 1.2;
-        ctx.setLineDash([4, 4]);
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // (b) 防守对位压迫扇面 (Defensive Pressure Fan)
-      if (isDefending) {
-        ctx.save();
-        ctx.translate(bodyCenterX, bodyCenterY);
-        ctx.rotate(facingAngle);
-
-        const fanRadius = currentRadius + 15;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.arc(0, 0, fanRadius, -Math.PI * 0.28, Math.PI * 0.28);
-        ctx.closePath();
-        ctx.fillStyle = isContesting
-          ? "rgba(239, 68, 68, 0.18)"
-          : isHome
-          ? "rgba(16, 185, 129, 0.14)"
-          : "rgba(245, 158, 11, 0.14)";
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.arc(0, 0, fanRadius, -Math.PI * 0.28, Math.PI * 0.28);
-        ctx.strokeStyle = isContesting
-          ? "rgba(239, 68, 68, 0.65)"
-          : isHome
-          ? "rgba(52, 211, 153, 0.6)"
-          : "rgba(251, 191, 36, 0.6)";
-        ctx.lineWidth = 1.4;
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // (c) 抢断与破坏球权突刺尖端 (Steal Poke Arrow)
-      if (isStealing) {
-        ctx.save();
-        ctx.translate(bodyCenterX, bodyCenterY);
-        ctx.rotate(facingAngle);
-        ctx.beginPath();
-        ctx.moveTo(currentRadius + 4, 0);
-        ctx.lineTo(currentRadius + 18, 0);
-        ctx.strokeStyle = "#fbbf24";
-        ctx.lineWidth = 2.4;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(currentRadius + 18, 0);
-        ctx.lineTo(currentRadius + 12, -4);
-        ctx.lineTo(currentRadius + 12, 4);
-        ctx.closePath();
-        ctx.fillStyle = "#fbbf24";
-        ctx.fill();
-        ctx.restore();
-      }
-
-      // 9. 持球人专属高对比度战术光标 (Ball Handler Ring)
-      if (player.hasBall) {
-        ctx.save();
-        const auraGrad = ctx.createRadialGradient(
-          groundX,
-          groundY,
-          currentRadius * 0.4,
-          groundX,
-          groundY,
-          currentRadius + 12,
-        );
-        auraGrad.addColorStop(0, "rgba(245, 158, 11, 0.32)");
-        auraGrad.addColorStop(0.7, "rgba(245, 158, 11, 0.12)");
-        auraGrad.addColorStop(1, "rgba(245, 158, 11, 0)");
-        ctx.beginPath();
-        ctx.arc(groundX, groundY, currentRadius + 12, 0, Math.PI * 2);
-        ctx.fillStyle = auraGrad;
-        ctx.fill();
-
-        const ringAngle = (now * 0.0035) % (Math.PI * 2);
-        ctx.strokeStyle = "#fbbf24";
-        ctx.lineWidth = 2.4;
-        ctx.beginPath();
-        ctx.arc(bodyCenterX, bodyCenterY, currentRadius + 5, ringAngle, ringAngle + 1.8);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(
-          bodyCenterX,
-          bodyCenterY,
-          currentRadius + 5,
-          ringAngle + Math.PI,
-          ringAngle + Math.PI + 1.8,
-        );
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // 10. 战术朝向几何指针 (Facing Chevron & Vision Cone)
-      const teamBrightColor = isHome ? "#10b981" : "#f59e0b";
-      const teamGlowColor = isHome ? "#34d399" : "#fbbf24";
-
+      // 3. 稳重专业的朝向指示微标 (极小等腰三角，长 4px，低调清晰)
       ctx.save();
-      ctx.translate(bodyCenterX, bodyCenterY);
+      ctx.translate(px, py);
       ctx.rotate(facingAngle);
-
       ctx.beginPath();
-      ctx.moveTo(currentRadius - 1, 0);
-      ctx.lineTo(currentRadius + 14 * jumpScale, -5.5 * jumpScale);
-      ctx.lineTo(currentRadius + 14 * jumpScale, 5.5 * jumpScale);
+      ctx.moveTo(radius + 4, 0);
+      ctx.lineTo(radius, -3);
+      ctx.lineTo(radius, 3);
       ctx.closePath();
-      ctx.fillStyle = isHome
-        ? "rgba(52, 211, 153, 0.16)"
-        : "rgba(251, 191, 36, 0.16)";
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.moveTo(currentRadius + 6 * jumpScale, 0);
-      ctx.lineTo(currentRadius + 0.5, -4.5 * jumpScale);
-      ctx.lineTo(currentRadius + 0.5, 4.5 * jumpScale);
-      ctx.closePath();
-      ctx.fillStyle = teamGlowColor;
+      ctx.fillStyle = isHome ? "#10b981" : "#f59e0b";
       ctx.fill();
       ctx.restore();
 
-      // 11. 战术圆形图徽底盘 (Tactical Player Disc, 支持冲刺动态形变)
+      // 4. 战术圆盘徽章 (Pro Tactical Disc)
+      // 主队：高级墨绿；客队：沉稳深琥珀；拒绝塑料感
       ctx.save();
-      ctx.translate(bodyCenterX, bodyCenterY);
-      if (isCutting && Math.hypot(curVx, curVy) > 0.3) {
-        ctx.rotate(Math.atan2(curVy, curVx));
-        ctx.scale(1.15, 0.88);
-      }
-
-      const discGrad = ctx.createRadialGradient(
-        -3,
-        -3,
-        2,
-        0,
-        0,
-        currentRadius,
-      );
-      if (isHome) {
-        discGrad.addColorStop(0, "#084925");
-        discGrad.addColorStop(1, "#022413");
-      } else {
-        discGrad.addColorStop(0, "#4a2106");
-        discGrad.addColorStop(1, "#220e02");
-      }
-
       ctx.beginPath();
-      ctx.arc(0, 0, currentRadius, 0, Math.PI * 2);
-      ctx.fillStyle = discGrad;
+      ctx.arc(px, py, radius, 0, Math.PI * 2);
+      ctx.fillStyle = isHome ? "#084925" : "#632704";
       ctx.fill();
 
-      ctx.strokeStyle = isJumping && bodyLift > 5 ? "#ffffff" : teamBrightColor;
-      ctx.lineWidth = 2.4 * jumpScale;
+      // 队色边框 (持球人加粗至 3.2px 醒目标识，绝无发光飞碟或白色虚浮框)
+      ctx.strokeStyle = isHome ? "#10b981" : "#f59e0b";
+      ctx.lineWidth = player.hasBall ? 3.2 : 2.0;
       ctx.stroke();
 
-      ctx.beginPath();
-      ctx.arc(0, 0, currentRadius - 2.4 * jumpScale, 0, Math.PI * 2);
-      ctx.strokeStyle = teamGlowColor;
-      ctx.lineWidth = 1.0;
-      ctx.stroke();
+      // 持球人外围极细微自然提示环
+      if (player.hasBall) {
+        ctx.beginPath();
+        ctx.arc(px, py, radius + 3.5, 0, Math.PI * 2);
+        ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.6)" : "rgba(245, 158, 11, 0.6)";
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
       ctx.restore();
 
-      // 12. 纯白高清晰背号 (随起跳透视缩放)
+      // 5. 纯白清晰数字背号 (居中，高对比度)
       ctx.save();
-      const fontSize = Math.round(12 * jumpScale * prepSquat);
-      ctx.font = `800 ${fontSize}px 'JetBrains Mono', monospace`;
+      ctx.font = "700 11.5px monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       const num =
@@ -2252,26 +1999,26 @@
           ? String(player.id || "")
           : String(player.number);
 
-      ctx.fillStyle = "rgba(0, 0, 0, 0.9)";
-      ctx.fillText(num, bodyCenterX + 0.6, bodyCenterY + 1.2);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+      ctx.fillText(num, px + 0.5, py + 1.0);
       ctx.fillStyle = "#ffffff";
-      ctx.fillText(num, bodyCenterX, bodyCenterY + 0.5);
+      ctx.fillText(num, px, py + 0.5);
       ctx.restore();
 
-      // 9. 脚下极小位置角色微标 (纯中文：控卫 / 分卫 / 小前 / 大前 / 中锋)
+      // 6. 脚下纯中文位置角色微标 (控卫 / 分卫 / 小前 / 大前 / 中锋)
       const posText = getPositionZh(player.position);
       ctx.save();
-      const posTagY = playerPoint.y + 16.5;
-      ctx.font = "800 8.5px 'Plus Jakarta Sans', system-ui, sans-serif";
+      const posTagY = py + 16.5;
+      ctx.font = "700 8.5px system-ui, -apple-system, sans-serif";
       const posTagW = ctx.measureText(posText).width + 8;
-      ctx.fillStyle = "rgba(10, 14, 20, 0.85)";
+      ctx.fillStyle = "rgba(12, 16, 26, 0.85)";
       ctx.beginPath();
-      ctx.roundRect(playerPoint.x - posTagW / 2, posTagY - 4.5, posTagW, 11, 3.5);
+      ctx.roundRect(px - posTagW / 2, posTagY - 4.5, posTagW, 11, 3.5);
       ctx.fill();
       ctx.fillStyle = isHome ? "#6ee7b7" : "#fde047";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(posText, playerPoint.x, posTagY + 0.5);
+      ctx.fillText(posText, px, posTagY + 0.5);
       ctx.restore();
     }
 

@@ -28,7 +28,7 @@
         <div class="input-seed-wrap" title="随机数种子">
           <span class="cluster-label">种子</span>
           <input id="seedInput" class="seed-input-number" type="number" value="42" min="1" max="9999999">
-          <button id="randomSeedBtn" class="btn-seed-dice" type="button" title="生成随机种子">🎲</button>
+          <button id="randomSeedBtn" class="btn-seed-dice" type="button" title="生成随机种子">随机</button>
         </div>
 
         <div class="scope-select-wrap" title="推演范围">
@@ -43,7 +43,6 @@
         </div>
 
         <button id="quickSimBtn" class="btn-primary-action" type="button" title="立即运行推演 (快捷键: R)">
-          <span class="btn-icon">⚡</span>
           <span class="btn-text">推演模拟</span>
         </button>
         <button id="runButton" style="display:none" type="button" aria-hidden="true"></button>
@@ -302,27 +301,21 @@
         <!-- 底部高级分段导航栏 -->
         <div class="segmented-nav">
           <button class="tab-button active" type="button" data-tab="board">
-            <span class="tab-icon">📋</span>
             <span>战术体系板</span>
           </button>
           <button class="tab-button" type="button" data-tab="roster">
-            <span class="tab-icon">👤</span>
             <span>球员资料库</span>
           </button>
           <button class="tab-button" type="button" data-tab="shots">
-            <span class="tab-icon">🎯</span>
             <span>投篮热区分布</span>
           </button>
           <button class="tab-button" type="button" data-tab="stats">
-            <span class="tab-icon">📊</span>
             <span>球队高阶数据</span>
           </button>
           <button class="tab-button" type="button" data-tab="rules">
-            <span class="tab-icon">⚙</span>
             <span>规则物理调测</span>
           </button>
           <button class="tab-button" type="button" data-tab="frame">
-            <span class="tab-icon">🔬</span>
             <span>原始帧数据</span>
           </button>
         </div>
