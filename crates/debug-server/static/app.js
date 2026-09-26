@@ -2155,15 +2155,15 @@
       ctx.lineTo(radius + 0.5, -3);
       ctx.lineTo(radius + 0.5, 3);
       ctx.closePath();
-      ctx.fillStyle = isHome ? "#10b981" : "#f59e0b";
+      ctx.fillStyle = isHome ? "#059669" : "#d97706";
       ctx.fill();
       ctx.restore();
 
-      // 9. 战术圆盘徽章主体 (Pro Tactical Disc)
-      // 主队：高级墨绿；客队：沉稳深琥珀
+      // 9. 战术圆盘徽章主体 (Pro Tactical Disc - 清新活力运动风格)
+      // 主队：鲜活薄荷翡翠绿；客队：明媚阳光琥珀金
       ctx.beginPath();
       ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.fillStyle = isHome ? "#084925" : "#632704";
+      ctx.fillStyle = isHome ? "#059669" : "#d97706";
       ctx.fill();
 
       // 队色边框 (持球人加粗至 3.2px 醒目标识)
@@ -2189,24 +2189,27 @@
           ? String(player.id || "")
           : String(player.number);
 
-      ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+      ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
       ctx.fillText(num, 0.5, 1.0);
       ctx.fillStyle = "#ffffff";
       ctx.fillText(num, 0, 0.5);
 
       ctx.restore(); // 还原 translate(px, py)
 
-      // 6. 脚下纯中文位置角色微标 (控卫 / 分卫 / 小前 / 大前 / 中锋)
+      // 6. 脚下纯中文位置角色微标 (清新纯白微标签)
       const posText = getPositionZh(player.position);
       ctx.save();
       const posTagY = py + 16.5;
       ctx.font = "700 8.5px system-ui, -apple-system, sans-serif";
       const posTagW = ctx.measureText(posText).width + 8;
-      ctx.fillStyle = "rgba(12, 16, 26, 0.85)";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+      ctx.strokeStyle = "rgba(203, 213, 225, 0.8)";
+      ctx.lineWidth = 1.0;
       ctx.beginPath();
       ctx.roundRect(px - posTagW / 2, posTagY - 4.5, posTagW, 11, 3.5);
       ctx.fill();
-      ctx.fillStyle = isHome ? "#6ee7b7" : "#fde047";
+      ctx.stroke();
+      ctx.fillStyle = isHome ? "#065f46" : "#92400e";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(posText, px, posTagY + 0.5);
@@ -2488,14 +2491,14 @@
     const homeTeamName = getTeamNameZh(tick.home_team) || "主队";
 
     ctx.save();
-    // 居中放置在球场顶部中央
+    // 居中放置在球场顶部中央 (清新现代微浮动卡片)
     const hudW = 210;
     const hudH = 26;
     const hudX = 500 - hudW / 2;
     const hudY = 12;
 
-    ctx.fillStyle = "rgba(8, 12, 20, 0.88)";
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.14)";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
+    ctx.strokeStyle = "rgba(203, 213, 225, 0.9)";
     ctx.lineWidth = 1.0;
     ctx.beginPath();
     ctx.roundRect(hudX, hudY, hudW, hudH, 6);
@@ -2505,19 +2508,19 @@
     ctx.font = "700 11px system-ui, -apple-system, sans-serif";
     ctx.textBaseline = "middle";
 
-    // 客队控制率 (左侧，琥珀金)
-    ctx.fillStyle = "#f59e0b";
+    // 客队控制率 (左侧，明朗琥珀金)
+    ctx.fillStyle = "#d97706";
     ctx.textAlign = "left";
     ctx.fillText(`${awayTeamName.slice(0, 4)} ${awayPct}%`, hudX + 10, hudY + 9);
 
     // 中间标签
-    ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+    ctx.fillStyle = "#64748b";
     ctx.textAlign = "center";
     ctx.font = "600 9.5px system-ui, -apple-system, sans-serif";
     ctx.fillText("空间控制", 500, hudY + 9);
 
-    // 主队控制率 (右侧，翡翠绿)
-    ctx.fillStyle = "#10b981";
+    // 主队控制率 (右侧，薄荷翡翠绿)
+    ctx.fillStyle = "#059669";
     ctx.textAlign = "right";
     ctx.font = "700 11px system-ui, -apple-system, sans-serif";
     ctx.fillText(`${homePct}% ${homeTeamName.slice(0, 4)}`, hudX + hudW - 10, hudY + 9);
@@ -2529,9 +2532,13 @@
     const barY = hudY + 19;
     const awayBarW = (barW * awayPct) / 100;
 
-    ctx.fillStyle = "#f59e0b";
+    // 底槽浅灰
+    ctx.fillStyle = "#e2e8f0";
+    ctx.fillRect(barX, barY, barW, barH);
+
+    ctx.fillStyle = "#d97706";
     ctx.fillRect(barX, barY, awayBarW, barH);
-    ctx.fillStyle = "#10b981";
+    ctx.fillStyle = "#059669";
     ctx.fillRect(barX + awayBarW, barY, barW - awayBarW, barH);
 
     ctx.restore();
@@ -2590,7 +2597,7 @@
     ctx.strokeRect(boardX - (right ? 1 : -1) * 3, hoopY - 10, right ? -2 : 2, 20);
 
     // 支架 (Stanchion)
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+    ctx.strokeStyle = "#94a3b8";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(right ? 970 : 30, hoopY);
