@@ -139,7 +139,7 @@
               </button>
 
               <div class="hud-key-hints" title="键盘快捷操作: Space 播放/暂停, [ / ] 切换回合, ← / → 单帧微调, R 重新推演">
-                <span>⌨ 快捷键</span>
+                <span>快捷说明</span>
               </div>
             </div>
 
@@ -178,7 +178,10 @@
             <div class="controller-actions">
               <!-- 左侧：帧与刻度信息 -->
               <div class="time-readout-box">
-                <span class="readout-icon">⏱</span>
+                <svg class="readout-icon-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
                 <span id="tickReadout">0 / 0 帧</span>
               </div>
 
@@ -269,7 +272,11 @@
             <div id="deck-decisions" class="deck-pane">
               <div id="decisionPanel" class="decision-panel-stream">
                 <div class="empty-state">
-                  <span class="empty-icon">🧠</span>
+                  <svg class="empty-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                    <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                    <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                  </svg>
                   <span>等待推演或选择特定决策帧…</span>
                   <small>点击事件流中的出手/传球事件可直接追踪决策</small>
                 </div>

@@ -19,16 +19,12 @@
 
   /* 球队与战术状态色彩 */
   --color-away: #f59e0b;
-  --color-away-glow: rgba(245, 158, 11, 0.4);
   --color-away-subtle: rgba(245, 158, 11, 0.12);
   --color-home: #10b981;
-  --color-home-glow: rgba(16, 185, 129, 0.4);
   --color-home-subtle: rgba(16, 185, 129, 0.12);
   --color-ball: #ff7828;
   --color-urgent: #ef4444;
-  --color-urgent-glow: rgba(239, 68, 68, 0.45);
   --color-cyan: #06b6d4;
-  --color-cyan-glow: rgba(6, 182, 212, 0.35);
 
   /* 文字分级 */
   --text-primary: #ffffff;
@@ -52,8 +48,6 @@
 
   --shadow-workbench: 0 16px 36px -10px rgba(0, 0, 0, 0.75), 0 0 1px 1px rgba(255, 255, 255, 0.07);
   --shadow-elevated: 0 10px 25px -5px rgba(0, 0, 0, 0.65);
-  --shadow-glow-cyan: 0 0 16px rgba(6, 182, 212, 0.25);
-  --shadow-glow-home: 0 0 16px rgba(16, 185, 129, 0.25);
 }
 
 *,
@@ -186,15 +180,12 @@ body {
   height: 6px;
   border-radius: 50%;
   background: var(--color-home);
-  box-shadow: 0 0 6px var(--color-home-glow);
 }
 .anomaly-pill-badge.anomaly-warn .anomaly-dot {
   background: var(--color-away);
-  box-shadow: 0 0 6px var(--color-away-glow);
 }
 .anomaly-pill-badge.anomaly-danger .anomaly-dot {
   background: var(--color-urgent);
-  box-shadow: 0 0 8px var(--color-urgent-glow);
 }
 
 /* 顶栏推演参数快速组 */
@@ -438,11 +429,9 @@ body {
 }
 .away-dot {
   background: var(--color-away);
-  box-shadow: 0 0 10px var(--color-away-glow);
 }
 .home-dot {
   background: var(--color-home);
-  box-shadow: 0 0 10px var(--color-home-glow);
 }
 
 .team-title {
@@ -633,9 +622,9 @@ body {
   background: rgba(14, 20, 30, 0.95);
 }
 .hud-pill-btn.active {
-  color: #e0faff;
-  border-color: rgba(6, 182, 212, 0.65);
-  box-shadow: 0 0 16px rgba(6, 182, 212, 0.25);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .hud-indicator-dot {
@@ -646,7 +635,6 @@ body {
 }
 .hud-indicator-dot.cyan {
   background: var(--color-cyan);
-  box-shadow: 0 0 8px var(--color-cyan-glow);
 }
 
 .hud-key-hints {
@@ -761,11 +749,12 @@ body {
 }
 .subtitle-badge {
   font-size: 10px;
-  font-weight: 800;
-  padding: 2px 7px;
+  font-weight: 700;
+  padding: 2.5px 8px;
   border-radius: var(--radius-xs);
-  background: var(--color-cyan);
-  color: #000000;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
   letter-spacing: 0.5px;
 }
 .event-inline-chip {
@@ -896,9 +885,14 @@ body {
   color: var(--text-secondary);
   min-width: 120px;
 }
-.readout-icon {
-  font-size: 13px;
-  opacity: 0.7;
+.readout-icon-svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.empty-icon-svg {
+  color: var(--text-muted);
+  margin-bottom: 6px;
 }
 
 .transport-btns {
@@ -1324,7 +1318,6 @@ body {
 }
 .score-bar-fill.chosen {
   background: var(--color-cyan);
-  box-shadow: 0 0 8px var(--color-cyan-glow);
 }
 .score-bar-value {
   font-family: var(--font-mono);
@@ -1877,11 +1870,9 @@ body {
 }
 .stat-indicator.pass {
   background: var(--color-home);
-  box-shadow: 0 0 6px var(--color-home-glow);
 }
 .stat-indicator.warn {
   background: var(--color-urgent);
-  box-shadow: 0 0 6px var(--color-urgent-glow);
 }
 
 /* ----------------- 规则与物理调测 ----------------- */

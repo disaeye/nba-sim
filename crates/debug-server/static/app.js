@@ -1095,7 +1095,7 @@
       case "ACTION_WINDOW_SHIFT":
         return "动作窗口时钟推进";
       case "PHASE_TRANSITION":
-        return `阶段流转 ➔ ${getPhaseZh(tick.phase)}`;
+        return `阶段流转 → ${getPhaseZh(tick.phase)}`;
       case "PASS":
         return "持球人传球转移出球";
       case "PASS_RECEIVED":
@@ -1759,32 +1759,30 @@
     ctx.fillStyle = "#0a0d12";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 底线外侧主客队文字 (纯中文)
+    // 底线外侧主客队文字 (球队规范全称)
     ctx.save();
-    ctx.font = "900 16px 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
+    ctx.font = "800 13px 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+
+    const awayTeamName = getTeamNameZh(tick.away_team) || "客队";
+    const homeTeamName = getTeamNameZh(tick.home_team) || "主队";
 
     // 左侧底线外客队字样
     ctx.save();
     ctx.translate(15, 280);
     ctx.rotate(-Math.PI / 2);
-    ctx.fillStyle = "rgba(245, 158, 11, 0.55)";
-    ctx.fillText("客 队", 0, 0);
+    ctx.fillStyle = "rgba(245, 158, 11, 0.65)";
+    ctx.fillText(awayTeamName, 0, 0);
     ctx.restore();
 
     // 右侧底线外主队字样
     ctx.save();
     ctx.translate(985, 280);
     ctx.rotate(Math.PI / 2);
-    ctx.fillStyle = "rgba(16, 185, 129, 0.55)";
-    ctx.fillText("主 队", 0, 0);
+    ctx.fillStyle = "rgba(16, 185, 129, 0.65)";
+    ctx.fillText(homeTeamName, 0, 0);
     ctx.restore();
-
-    // 边线外侧副标
-    ctx.font = "700 10.5px 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
-    ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
-    ctx.fillText("篮球战术推演竞技场", 500, 15);
     ctx.restore();
 
     // 2. 比赛主场地高级浅色枫木地板 (Playing Surface: 940 x 500)
