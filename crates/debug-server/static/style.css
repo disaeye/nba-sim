@@ -349,24 +349,26 @@ body {
    ========================================================================== */
 
 .workbench-layout {
-  max-width: 1680px;
+  max-width: 1720px;
   margin: 0 auto;
   padding: 16px 20px 48px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
 }
 
 .workbench-upper-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.75fr) minmax(360px, 1fr);
-  gap: 18px;
-  align-items: start;
+  gap: 16px;
+  align-items: stretch;
 }
 
 /* 左侧舞台容器 */
 .stage-column {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .broadcast-stage-card {
@@ -377,6 +379,7 @@ body {
   border: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
+  height: 100%;
 }
 
 /* ==========================================================================
@@ -387,10 +390,10 @@ body {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  padding: 14px 20px;
+  padding: 10px 18px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, transparent 100%);
   border-bottom: 1px solid var(--border-subtle);
-  gap: 14px;
+  gap: 12px;
 }
 
 .team-block {
@@ -472,14 +475,14 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .clock-capsule {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 12px;
+  padding: 2px 10px;
   border-radius: var(--radius-full);
   background: rgba(0, 0, 0, 0.45);
   border: 1px solid var(--border-subtle);
@@ -513,12 +516,12 @@ body {
 .score-display-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .score-num {
   font-family: var(--font-score);
-  font-size: 42px;
+  font-size: 34px;
   font-weight: 800;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -532,7 +535,7 @@ body {
 
 .score-divider-colon {
   font-family: var(--font-score);
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--text-muted);
   opacity: 0.5;
@@ -798,9 +801,10 @@ body {
 .stage-controller {
   display: flex;
   flex-direction: column;
-  padding: 14px 20px;
+  padding: 10px 18px;
   background: var(--bg-surface);
-  gap: 12px;
+  gap: 8px;
+  margin-top: auto;
 }
 
 /* 进度条轨道 */
@@ -1026,6 +1030,9 @@ body {
 
 .deck-column {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .tactical-deck-card {
@@ -1037,7 +1044,7 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
-  min-height: 520px;
+  min-height: 0;
 }
 
 /* 顶部伴随式选项卡导航 */
@@ -1087,8 +1094,9 @@ body {
 }
 
 .deck-content {
-  padding: 14px;
+  padding: 12px 14px;
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1149,7 +1157,8 @@ body {
 
 .feed-timeline-stream {
   flex: 1;
-  max-height: 440px;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1244,7 +1253,8 @@ body {
 /* Deck Tab 2: 决策透视流 */
 .decision-panel-stream {
   flex: 1;
-  max-height: 480px;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1394,7 +1404,8 @@ body {
 
 .anomaly-panel-wrap {
   flex: 1;
-  max-height: 480px;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
 }
 .anomaly-list-stream {
@@ -1748,7 +1759,7 @@ body {
   border-radius: 50%;
   margin-right: 2px;
 }
-.shot-legend .dot.made { background: #2ce59b; box-shadow: 0 0 6px rgba(44, 229, 155, 0.5); }
+.shot-legend .dot.made { background: #2ce59b; }
 .shot-legend .dot.missed { background: #ff6f7e; }
 .shot-legend .dot.three { background: #f5bd45; }
 
@@ -2438,6 +2449,11 @@ body {
   /* 6. 伴随式透视台选项卡 */
   .tactical-deck-card {
     min-height: 280px;
+  }
+  .feed-timeline-stream,
+  .decision-panel-stream,
+  .anomaly-panel-wrap {
+    max-height: 380px;
   }
   .deck-nav {
     display: flex;
