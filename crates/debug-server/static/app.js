@@ -117,7 +117,7 @@
     previousRaf: 0,
     accumulator: 0,
     currentTab: "timeline",
-    courtMode: "half",
+    courtMode: "full",
     potentialFieldVisible: true,
     lastFrameJson: -1,
     courtFX: null,
@@ -1276,8 +1276,15 @@
   }
   function updateReadouts(source) {
     $("eventReadout").textContent = `共 ${state.events.length} 条事件`;
+    const normalizedSource = String(source || "")
+      .replace("seed", "种子")
+      .replace("5p", "5 回合")
+      .replace("1p", "1 回合")
+      .replace("10p", "10 回合")
+      .replace("1q", "1 单节")
+      .replace("full", "全场 48 分钟");
     $("streamSummary").textContent =
-      `${source} · ${state.possessions.length} possessions · ${state.shots.length} shots`;
+      `${normalizedSource} · ${state.possessions.length} 回合 · ${state.shots.length} 次投篮`;
   }
   function setRunStatus(text, error = false) {
     $("runStatus").textContent = text;
@@ -1725,40 +1732,16 @@
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // 视口变换管理（全场鸟瞰 / 半场特写）
-    ctx.save();
-    let viewScale = 1.0;
-    let viewCenterCourtX = 500;
-    let viewCenterCourtY = 280;
-
-    if (state.courtMode === "half") {
-      viewScale = 1.62;
-      viewCenterCourtX = courtFX.activeHalfCourt === "right" ? 730 : 270;
-      viewCenterCourtY = 280;
-
-      ctx.translate(500, 280);
-      ctx.scale(viewScale, viewScale);
-      ctx.translate(-viewCenterCourtX, -viewCenterCourtY);
-    }
-
-    // 屏幕物理像素映射转换（保证 hitPlayers 无论全场还是半场均精准命中）
-    const toScreen = (courtX, courtY) => {
-      if (state.courtMode === "half") {
-        return {
-          x: 500 + (courtX - viewCenterCourtX) * viewScale,
-          y: 280 + (courtY - viewCenterCourtY) * viewScale,
-        };
-      }
-      return { x: courtX, y: courtY };
-    };
+    // 屏幕物理像素映射转换（全场恒定标准展示）
+    const toScreen = (courtX, courtY) => ({ x: courtX, y: courtY });
 
     // 1. 赛场外围环带 (Arena Apron / Perimeter)
     ctx.fillStyle = "#0a0d12";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 底线外侧主客队文字 (Visitor / Home Lettering)
+    // 底线外侧主客队文字 (纯中文)
     ctx.save();
-    ctx.font = "900 16px 'Plus Jakarta Sans', -apple-system, sans-serif";
+    ctx.font = "900 16px 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
@@ -1766,22 +1749,22 @@
     ctx.save();
     ctx.translate(15, 280);
     ctx.rotate(-Math.PI / 2);
-    ctx.fillStyle = "rgba(245, 158, 11, 0.45)";
-    ctx.fillText("VISITOR", 0, 0);
+    ctx.fillStyle = "rgba(245, 158, 11, 0.55)";
+    ctx.fillText("客 队", 0, 0);
     ctx.restore();
 
     // 右侧底线外主队字样
     ctx.save();
     ctx.translate(985, 280);
     ctx.rotate(Math.PI / 2);
-    ctx.fillStyle = "rgba(16, 185, 129, 0.45)";
-    ctx.fillText("HOME", 0, 0);
+    ctx.fillStyle = "rgba(16, 185, 129, 0.55)";
+    ctx.fillText("主 队", 0, 0);
     ctx.restore();
 
     // 边线外侧副标
-    ctx.font = "700 9.5px 'Plus Jakarta Sans', -apple-system, sans-serif";
-    ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
-    ctx.fillText("NBA SIMULATION ARENA", 500, 15);
+    ctx.font = "700 10.5px 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
+    ctx.fillText("篮球战术推演竞技场", 500, 15);
     ctx.restore();
 
     // 2. 比赛主场地高级浅色枫木地板 (Playing Surface: 940 x 500)
@@ -1823,15 +1806,10 @@
     ctx.lineTo(500, 530);
     ctx.stroke();
 
-    // 中圈 (Center Circle, 半径 6 ft = 60px; 内圈半径 2 ft = 20px)
+    // 中圈 (Center Circle, NBA 标准半径 6 ft = 60px)
     ctx.beginPath();
     ctx.arc(500, 280, 60, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(500, 280, 20, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
-    ctx.stroke();
-    ctx.strokeStyle = "#ffffff";
 
     // 绘制标准禁区、三分线与篮筐
     drawKey(ctx, false);
@@ -2280,16 +2258,15 @@
       ctx.fillText(num, bodyCenterX, bodyCenterY + 0.5);
       ctx.restore();
 
-      // 9. 脚下极小位置角色微标 (PG / SG / SF / PF / C)
-      const posText =
-        String(player.position || "").slice(0, 2).toUpperCase() || "PL";
+      // 9. 脚下极小位置角色微标 (纯中文：控卫 / 分卫 / 小前 / 大前 / 中锋)
+      const posText = getPositionZh(player.position);
       ctx.save();
-      const posTagY = playerPoint.y + 16;
-      ctx.font = "800 8.5px 'Plus Jakarta Sans', sans-serif";
-      const posTagW = ctx.measureText(posText).width + 6;
-      ctx.fillStyle = "rgba(10, 14, 20, 0.82)";
+      const posTagY = playerPoint.y + 16.5;
+      ctx.font = "800 8.5px 'Plus Jakarta Sans', system-ui, sans-serif";
+      const posTagW = ctx.measureText(posText).width + 8;
+      ctx.fillStyle = "rgba(10, 14, 20, 0.85)";
       ctx.beginPath();
-      ctx.roundRect(playerPoint.x - posTagW / 2, posTagY - 4.5, posTagW, 10, 3.5);
+      ctx.roundRect(playerPoint.x - posTagW / 2, posTagY - 4.5, posTagW, 11, 3.5);
       ctx.fill();
       ctx.fillStyle = isHome ? "#6ee7b7" : "#fde047";
       ctx.textAlign = "center";
@@ -3194,22 +3171,6 @@
       });
     }
 
-    const courtViewBtn = $("courtViewBtn");
-    if (courtViewBtn) {
-      courtViewBtn.addEventListener("click", () => {
-        state.courtMode = state.courtMode === "half" ? "full" : "half";
-        const icon = $("courtViewIcon");
-        const label = $("courtViewLabel");
-        if (icon) icon.textContent = state.courtMode === "half" ? "🔍" : "🌐";
-        if (label)
-          label.textContent =
-            state.courtMode === "half" ? "半场特写" : "全场鸟瞰";
-        if (state.ticks && state.ticks[state.idx]) {
-          drawCourt(state.ticks[state.idx]);
-        }
-      });
-    }
-
     const quickBtn = $("quickSimBtn");
     if (quickBtn) quickBtn.addEventListener("click", () => runSimulation());
 
@@ -3302,17 +3263,17 @@
         tooltip.style.top = `${Math.max(4, (y / canvas.height) * rect.height - 35)}px`;
       }
       tooltip.replaceChildren(
-        el("strong", null, `${getTeamNameZh(player.team)} · ${player.id} · #${player.jersey}`),
+        el("strong", null, `${getTeamNameZh(player.team)} · ${player.number ?? player.jersey ?? "—"}号`),
         el(
           "span",
           null,
-          `${getPositionZh(player.position)} · 攻 ${getOffensiveRoleZh(player.offensiveRole)} · 防 ${getDefensiveRoleZh(player.defensiveRole)}`,
+          `${getPositionZh(player.position)} · 进攻职责：${getOffensiveRoleZh(player.offensiveRole)} · 防守职责：${getDefensiveRoleZh(player.defensiveRole)}`,
         ),
-        el("span", null, `${getActionZh(player.action)} · ${getSlotZh(player.slot)}`),
+        el("span", null, `战术动作：${getActionZh(player.action)} · 战术落位：${getSlotZh(player.slot)}`),
         el(
           "span",
           null,
-          `体力 ${one(player.stm)}/${one(player.stmMax)} · 士气 ${getMoraleZh(player.morale)}`,
+          `体能储备 ${one(player.stm)}/${one(player.stmMax)} · 心理士气 ${getMoraleZh(player.morale)}`,
         ),
       );
     }
@@ -3373,10 +3334,6 @@
       if (event.code === "KeyP") {
         event.preventDefault();
         $("potentialFieldToggle")?.click();
-      }
-      if (event.code === "KeyM") {
-        event.preventDefault();
-        $("courtViewBtn")?.click();
       }
     });
   }

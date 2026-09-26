@@ -2277,17 +2277,18 @@ body {
     height: 28px;
   }
 
-  /* 2. 转播记分牌：移动端紧凑横向广播排版 */
+  /* 2. 转播记分牌：移动端极简高级转播排版 (去除杂乱标签) */
   .match-scoreboard {
     display: grid;
-    grid-template-columns: minmax(75px, 1fr) auto minmax(75px, 1fr);
+    grid-template-columns: minmax(80px, 1fr) auto minmax(80px, 1fr);
     align-items: center;
-    padding: 8px 8px;
+    padding: 6px 8px;
     gap: 6px;
   }
   .team-tactic-tag,
-  .team-badge-sub {
-    display: none; /* 移动端隐藏冗长文字，由下方战术板完整展现 */
+  .team-badge-sub,
+  .match-status-sub-row {
+    display: none !important; /* 移动端彻底隐藏花哨冗余标签，回归极简纯粹转播画面 */
   }
   .team-block.away-team-block {
     align-items: flex-start;
@@ -2301,11 +2302,11 @@ body {
     max-width: 100%;
   }
   .team-title {
-    font-size: 11px;
+    font-size: 11.5px;
     letter-spacing: 0;
   }
   .team-fouls-indicator {
-    font-size: 9.5px;
+    font-size: 9px;
   }
   .clock-capsule {
     padding: 2px 8px;
@@ -2316,37 +2317,15 @@ body {
     gap: 8px;
   }
   .score-num {
-    font-size: 30px;
+    font-size: 28px;
   }
   .score-divider-colon {
-    font-size: 20px;
-  }
-  .match-status-sub-row {
-    gap: 3px;
-    max-width: 220px;
-    justify-content: center;
-  }
-  .match-flow-pill,
-  .match-meta-pill,
-  .free-throw-pill {
-    font-size: 9px;
-    padding: 1px 5px;
+    font-size: 18px;
   }
 
-  /* 3. 球场主视口与 HUD 控制层移动端精简 */
+  /* 3. 球场主视口：移动端全净空无遮挡 */
   .court-hud-toolbar {
-    top: 6px;
-    right: 6px;
-    gap: 5px;
-  }
-  .hud-key-hints {
-    display: none !important; /* 手机触摸屏隐藏物理键盘提示 */
-  }
-  .hud-pill-btn {
-    min-height: 26px;
-    padding: 3px 8px;
-    font-size: 10px;
-    gap: 4px;
+    display: none !important; /* 移动端完全隐藏悬浮工具栏，释放 100% 纯净球场视野 */
   }
   .floating-event-pill {
     top: 8px;

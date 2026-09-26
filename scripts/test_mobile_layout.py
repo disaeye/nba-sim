@@ -145,16 +145,16 @@ try:
     print("📱 375px (iPhone SE / mini) 渲染指标:", json.dumps(res_375, indent=2))
     assert not res_375["hasHorizontalOverflow"], "375px 屏幕严禁产生水平滚动条溢出"
     assert res_375["nav"]["height"] <= 95, f"顶栏高度超出移动端标准: {res_375['nav']['height']}px > 95px"
-    assert res_375["scoreboard"]["height"] <= 135, f"记分牌高度过高: {res_375['scoreboard']['height']}px > 135px"
-    assert res_375["hudToolbar"]["width"] <= 150, f"HUD 遮挡球场过宽: {res_375['hudToolbar']['width']}px > 150px"
+    assert res_375["scoreboard"]["height"] <= 90, f"记分牌高度过高: {res_375['scoreboard']['height']}px > 90px"
+    assert res_375["hudToolbar"] is None or res_375["hudToolbar"]["width"] == 0, "移动端必须隐藏悬浮 HUD 工具栏释放纯净球场"
     assert res_375["playBtn"]["width"] >= 44 and res_375["playBtn"]["height"] >= 44, "播放按钮触控区需符合移动端 >=44px 标准"
 
     res_390 = eval_js(js_check, width=390, height=844)
     print("📱 390px (iPhone 14 / Pro) 渲染指标:", json.dumps(res_390, indent=2))
     assert not res_390["hasHorizontalOverflow"], "390px 屏幕严禁产生水平滚动条溢出"
     assert res_390["nav"]["height"] <= 95, f"顶栏高度超出移动端标准: {res_390['nav']['height']}px > 95px"
-    assert res_390["scoreboard"]["height"] <= 135, f"记分牌高度过高: {res_390['scoreboard']['height']}px > 135px"
-    assert res_390["hudToolbar"]["width"] <= 150, f"HUD 遮挡球场过宽: {res_390['hudToolbar']['width']}px > 150px"
+    assert res_390["scoreboard"]["height"] <= 90, f"记分牌高度过高: {res_390['scoreboard']['height']}px > 90px"
+    assert res_390["hudToolbar"] is None or res_390["hudToolbar"]["width"] == 0, "移动端必须隐藏悬浮 HUD 工具栏释放纯净球场"
     assert res_390["playBtn"]["width"] >= 44 and res_390["playBtn"]["height"] >= 44, "播放按钮触控区需符合移动端 >=44px 标准"
 
     print("🎉 移动端 (375px & 390px) 布局与触控自适应全部检验合格！")

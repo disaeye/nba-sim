@@ -9,7 +9,7 @@ def check_dom():
     assert "ticks" in out and "运行失败" not in out, "runStatus must show ticks, not failure"
     assert "overlapLimit" not in out, "no overlapLimit ReferenceError"
     assert "运行失败" not in out, "page must not show failure"
-    assert "seed 42 · 5p" in out, "streamSummary must render"
+    assert "42" in out and "回合" in out, "streamSummary must render"
     print("✅ UI DOM regression check passed (boot, controls, summary)")
 
 if __name__ == "__main__":

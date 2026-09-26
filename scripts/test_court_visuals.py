@@ -200,32 +200,25 @@ def main():
             assert not has_particles, "不得展示非现实火花粒子"
             print("✅ 投篮打铁真实金属加厚篮圈机械震颤验证通过（无火花无杂乱文字）")
 
-        # 3. 验证半场特写与全场鸟瞰视角切换及坐标自适应
-        js_verify_court_mode = """
+        # 3. 验证球场恒定以标准 NBA 全场鸟瞰模式呈现 (无半场聚焦扰动)
+        js_verify_full_court = """
         (function() {
             const state = window.__nbaDebug;
             const btn = document.getElementById("courtViewBtn");
-            const initialMode = state.courtMode;
-            const initialHits = [...state.hitPlayers];
+            const hits = state.hitPlayers ? [...state.hitPlayers] : [];
 
-            // 切换视角
-            btn.click();
-            const toggledMode = state.courtMode;
-            const toggledHits = [...state.hitPlayers];
+            // 验证 10 名在场球员像素点全都在标准比赛场边界内 (originX=30..970, originY=30..530)
+            const insideBounds = hits.every(h => h.x >= 25 && h.x <= 975 && h.y >= 25 && h.y <= 535);
 
-            // 再次切换还原
-            btn.click();
-            const restoredMode = state.courtMode;
-
-            return { initialMode, toggledMode, restoredMode, initialHitsCount: initialHits.length, toggledHitsCount: toggledHits.length };
+            return { courtMode: state.courtMode, hasCourtViewBtn: !!btn, hitsCount: hits.length, insideBounds };
         })()
         """
-        mode_data = run_chrome_eval(js_verify_court_mode)
-        print(f"🔍 视角切换测试: 初始={mode_data['initialMode']} -> 切换后={mode_data['toggledMode']} -> 还原={mode_data['restoredMode']}")
-        assert mode_data["initialMode"] != mode_data["toggledMode"], "点击 courtViewBtn 必须改变视角模式"
-        assert mode_data["restoredMode"] == mode_data["initialMode"], "二次点击必须恢复原有视角模式"
-        assert mode_data["toggledHitsCount"] == 10, "切换特写视角后在场10人触控锚点必须保持完整映射"
-        print("✅ 半场特写视口缩放与全场鸟瞰平滑切换验证通过")
+        court_data = run_chrome_eval(js_verify_full_court)
+        print(f"🏟️ 全场展示测试: courtMode={court_data['courtMode']}, 按钮已移除={not court_data['hasCourtViewBtn']}, 球员锚点数量={court_data['hitsCount']}")
+        assert court_data["courtMode"] == "full", "球场视角模式必须恒定为全场 (full)"
+        assert not court_data["hasCourtViewBtn"], "courtViewBtn 半场切换按钮必须已彻底移除"
+        assert court_data["hitsCount"] == 10 and court_data["insideBounds"], "全场鸟瞰图下10名球员像素点必须精准映射在比赛场边界内"
+        print("✅ 恒定标准全场鸟瞰图展示验证通过（无半场聚焦扰动）")
 
         # 4. 验证播放连续推进与动画帧平滑运转
         js_playback = """
