@@ -574,21 +574,6 @@
     "TIPOFF_SECURED",
   ]);
 
-  const EVENT_ICONS = {
-    SCORE: "🏀",
-    SHOT_RELEASE: "🎯",
-    SHOT_MISS: "💥",
-    REBOUND: "🛡️",
-    STEAL: "⚡",
-    BLOCK: "🚫",
-    FOUL: "⚠️",
-    TURNOVER: "🔄",
-    SCREEN_CONTACT: "🧱",
-    OUT_OF_BOUNDS: "🛑",
-    TIPOFF: "⏱️",
-    TIPOFF_SECURED: "✋",
-  };
-
   let overlayTimer = null;
 
   function eventClass(name) {
@@ -1324,8 +1309,7 @@
     const chip = $("eventChip");
     const overlay = $("eventOverlayChip");
     if (highlightNames.length) {
-      const icon = EVENT_ICONS[highlightNames[0]] || "⚡";
-      const txt = `${icon} ${highlightNames.map(getEventNameZh).join(" · ")}`;
+      const txt = highlightNames.map(getEventNameZh).join(" · ");
       if (chip) {
         chip.textContent = txt;
         chip.classList.add("active");
@@ -1417,8 +1401,8 @@
       this.lastProcessedIdx = -1;
       this.ballHistory = [];
       this.playerHistories.clear();
-      this.rimStates.left = { shake: 0, netOffset: 0, netVel: 0 };
-      this.rimStates.right = { shake: 0, netOffset: 0, netVel: 0 };
+      this.rimStates.left = { shake: 0, netOffset: 0, netVel: 0, backboardLight: 0 };
+      this.rimStates.right = { shake: 0, netOffset: 0, netVel: 0, backboardLight: 0 };
       this.ballRotationAngle = 0;
     }
 
@@ -1433,6 +1417,8 @@
         this.processedKeys.clear();
         this.effects = [];
         this.ballHistory = [];
+        this.rimStates.left = { shake: 0, netOffset: 0, netVel: 0, backboardLight: 0 };
+        this.rimStates.right = { shake: 0, netOffset: 0, netVel: 0, backboardLight: 0 };
       }
       this.lastProcessedIdx = frameIdx;
 
@@ -1521,13 +1507,18 @@
         this.triggerEventFX(evtName, tick, frameIdx, rules, now);
       }
 
-      // 5. 篮筐物理动力学更新（Net Swish & Rim Shake）
+      // 5. 篮筐物理动力学更新（Net Swish & Rim Shake & Backboard Light）
       for (const side of ["left", "right"]) {
         const rim = this.rimStates[side];
         if (rim.shake > 0.01) {
           rim.shake *= 0.86;
         } else {
           rim.shake = 0;
+        }
+        if (rim.backboardLight > 0.01) {
+          rim.backboardLight *= 0.88;
+        } else {
+          rim.backboardLight = 0;
         }
         if (rim.netOffset > 0.1 || Math.abs(rim.netVel) > 0.1) {
           const spring = -28.0 * rim.netOffset;
@@ -1597,15 +1588,25 @@
         evtName === "SCORE" ||
         evtName === "DRIVE_SCORE"
       ) {
-        // 真实空心入网物理：白色篮网下抽与阻尼摆动
+        // 进球得分强反馈：白色编织篮网大幅下抽激荡，篮板四周瞬间点亮绿色得分确认灯框
         const rim = this.rimStates[targetSide];
-        rim.netOffset = 24;
-        rim.netVel = 38;
+        rim.netOffset = 36;
+        rim.netVel = 52;
+        rim.backboardLight = 1.0;
+
+        // 投篮弧线瞬间转为鲜明实线绿弧，清晰指引空心穿网
+        const lastArc = [...this.effects].reverse().find((e) => e.type === "shot_arc" && !e.status);
+        if (lastArc) lastArc.status = "made";
 
       } else if (evtName === "SHOT_MISS" || evtName === "DRIVE_MISS") {
-        // 真实打铁物理：金属加厚篮圈机械阻尼震颤
+        // 投篮打铁强反馈：加厚金属篮圈机械高频阻尼震颤，篮网不动，篮板绝不亮灯
         const rim = this.rimStates[targetSide];
-        rim.shake = 1.0;
+        rim.shake = 1.6;
+        rim.backboardLight = 0;
+
+        // 投篮弧线转为暗红虚线迅速消散
+        const lastArc = [...this.effects].reverse().find((e) => e.type === "shot_arc" && !e.status);
+        if (lastArc) lastArc.status = "missed";
       }
     }
 
@@ -1645,9 +1646,22 @@
           const midY = Math.min(startPt.y, targetPt.y) - arcPeak;
 
           ctx.save();
-          ctx.strokeStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
-          ctx.lineWidth = 1.2;
-          ctx.setLineDash([4, 4]);
+          if (fx.status === "made") {
+            // 进球命中：鲜明实线绿弧，空心穿网路径极具辨识度
+            ctx.strokeStyle = `rgba(16, 185, 129, ${Math.min(0.95, alpha * 2.2).toFixed(3)})`;
+            ctx.lineWidth = 2.4;
+            ctx.setLineDash([]);
+          } else if (fx.status === "missed") {
+            // 打铁未中：暗红虚线并迅速消散
+            ctx.strokeStyle = `rgba(239, 68, 68, ${Math.min(0.55, alpha * 1.2).toFixed(3)})`;
+            ctx.lineWidth = 1.0;
+            ctx.setLineDash([3, 4]);
+          } else {
+            // 飞行中：细弱纯白虚线
+            ctx.strokeStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
+            ctx.lineWidth = 1.2;
+            ctx.setLineDash([4, 4]);
+          }
           ctx.beginPath();
           ctx.moveTo(startPt.x, startPt.y);
           ctx.quadraticCurveTo(midX, midY, targetPt.x, targetPt.y);
@@ -2298,6 +2312,23 @@
     ctx.moveTo(boardX, hoopY - 30);
     ctx.lineTo(boardX, hoopY + 30);
     ctx.stroke();
+
+    // 进球命中得分时，篮板四周瞬间点亮高对比度亮绿确认灯框 (Backboard Goal Flash)
+    const goalLight = rimState?.backboardLight || 0;
+    if (goalLight > 0.05) {
+      ctx.save();
+      ctx.strokeStyle = `rgba(16, 185, 129, ${(goalLight * 0.95).toFixed(3)})`;
+      ctx.lineWidth = 5.0;
+      ctx.beginPath();
+      ctx.moveTo(boardX, hoopY - 32);
+      ctx.lineTo(boardX, hoopY + 32);
+      ctx.stroke();
+
+      ctx.strokeStyle = `rgba(16, 185, 129, ${(goalLight * 0.9).toFixed(3)})`;
+      ctx.lineWidth = 2.0;
+      ctx.strokeRect(boardX - (right ? 1 : -1) * 3, hoopY - 11, right ? -3 : 3, 22);
+      ctx.restore();
+    }
 
     // 篮板内侧小方框 (Target Box: 24px x 18px)
     ctx.strokeStyle = "rgba(239, 68, 68, 0.75)";

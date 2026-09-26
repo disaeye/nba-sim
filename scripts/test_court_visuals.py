@@ -152,7 +152,7 @@ def main():
             assert not has_particles, "不得展示非现实火花粒子"
             print("✅ 投篮出手真实抛物线验证通过（无火花无杂乱文字）")
 
-        # 验证投篮命中得分帧真实物理 (Net Swish 真实网兜下抽与回弹)
+        # 验证投篮命中得分帧真实物理 (Net Swish 真实网兜下抽与回弹，以及篮板得分确认灯框点亮)
         if events['scoreIdx'] >= 0:
             target = events['scoreIdx']
             js_verify_score = f"""
@@ -164,19 +164,23 @@ def main():
                 const fx = state.courtFX;
                 const effects = fx ? fx.effects.map(e => ({{ type: e.type }})) : [];
                 const netMoved = fx ? (fx.rimStates.left.netOffset > 0 || fx.rimStates.right.netOffset > 0) : false;
-                return {{ effects, netMoved }};
+                const boardLit = fx ? (fx.rimStates.left.backboardLight > 0 || fx.rimStates.right.backboardLight > 0) : false;
+                const chipText = document.getElementById("eventChip") ? document.getElementById("eventChip").textContent : "";
+                return {{ effects, netMoved, boardLit, chipText }};
             }})()
             """
             score_fx = run_chrome_eval(js_verify_score)
             has_text = any(e["type"] == "floating_text" for e in score_fx["effects"])
             has_particles = any(e["type"] == "particles" for e in score_fx["effects"])
-            print(f"🎯 进球得分帧 ({target}) 篮网状态: netMoved={score_fx['netMoved']}")
+            print(f"🎯 进球得分帧 ({target}) 状态: netMoved={score_fx['netMoved']}, boardLit={score_fx['boardLit']}, chipText={score_fx['chipText']}")
             assert score_fx["netMoved"], "进球得分帧必须触发白色篮网物理下抽贯穿形变 (netOffset > 0)"
+            assert score_fx["boardLit"], "进球得分帧必须触发篮板绿色得分确认灯框点亮 (backboardLight > 0)"
             assert not has_text, "不得展示浮夸悬浮文字"
             assert not has_particles, "不得展示非现实礼花粒子"
-            print("✅ 投篮命中真实编织篮网下抽与回弹形变验证通过（无火花无杂乱文字）")
+            assert not any(ord(c) > 0x1F000 for c in score_fx["chipText"]), f"事件标签严禁拼接 Emoji: {score_fx['chipText']}"
+            print("✅ 投篮命中真实编织篮网下抽与篮板确认绿灯验证通过（无Emoji拼接）")
 
-        # 验证打铁帧真实物理 (Rim Shake 金属篮圈机械阻尼震颤)
+        # 验证打铁帧真实物理 (Rim Shake 金属篮圈机械阻尼震颤，且篮板绝不亮灯)
         if events['missIdx'] >= 0:
             target = events['missIdx']
             js_verify_miss = f"""
@@ -188,17 +192,21 @@ def main():
                 const fx = state.courtFX;
                 const effects = fx ? fx.effects.map(e => ({{ type: e.type }})) : [];
                 const rimShaking = fx ? (fx.rimStates.left.shake > 0 || fx.rimStates.right.shake > 0) : false;
-                return {{ effects, rimShaking }};
+                const boardLit = fx ? (fx.rimStates.left.backboardLight > 0 || fx.rimStates.right.backboardLight > 0) : false;
+                const chipText = document.getElementById("eventChip") ? document.getElementById("eventChip").textContent : "";
+                return {{ effects, rimShaking, boardLit, chipText }};
             }})()
             """
             miss_fx = run_chrome_eval(js_verify_miss)
             has_text = any(e["type"] == "floating_text" for e in miss_fx["effects"])
             has_particles = any(e["type"] == "particles" for e in miss_fx["effects"])
-            print(f"💥 打铁帧 ({target}) 篮筐状态: rimShaking={miss_fx['rimShaking']}")
+            print(f"💥 打铁帧 ({target}) 状态: rimShaking={miss_fx['rimShaking']}, boardLit={miss_fx['boardLit']}, chipText={miss_fx['chipText']}")
             assert miss_fx["rimShaking"], "投篮打铁帧必须触发金属加厚篮圈机械高频阻尼震颤 (shake > 0)"
+            assert not miss_fx["boardLit"], "投篮打铁未中帧篮板绝不可点亮得分确认灯框 (boardLit 必须为 false)"
             assert not has_text, "不得展示浮夸悬浮文字"
             assert not has_particles, "不得展示非现实火花粒子"
-            print("✅ 投篮打铁真实金属加厚篮圈机械震颤验证通过（无火花无杂乱文字）")
+            assert not any(ord(c) > 0x1F000 for c in miss_fx["chipText"]), f"事件标签严禁拼接 Emoji: {miss_fx['chipText']}"
+            print("✅ 投篮打铁真实金属篮圈震颤且篮板灭灯验证通过（与命中形成鲜明对比，无Emoji拼接）")
 
         # 3. 验证球场恒定以标准 NBA 全场鸟瞰模式呈现 (无半场聚焦扰动)
         js_verify_full_court = """
