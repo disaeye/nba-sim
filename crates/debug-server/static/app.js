@@ -1755,8 +1755,8 @@
     // 屏幕物理像素映射转换（全场恒定标准展示）
     const toScreen = (courtX, courtY) => ({ x: courtX, y: courtY });
 
-    // 1. 赛场外围环带 (Arena Apron / Perimeter)
-    ctx.fillStyle = "#0a0d12";
+    // 1. 赛场外围环带 (Arena Apron / Perimeter - 清新素雅运动质感)
+    ctx.fillStyle = "#edf1f7";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // 底线外侧主客队文字 (球队规范全称)
@@ -1772,7 +1772,7 @@
     ctx.save();
     ctx.translate(15, 280);
     ctx.rotate(-Math.PI / 2);
-    ctx.fillStyle = "rgba(245, 158, 11, 0.65)";
+    ctx.fillStyle = "#d97706";
     ctx.fillText(awayTeamName, 0, 0);
     ctx.restore();
 
@@ -1780,7 +1780,7 @@
     ctx.save();
     ctx.translate(985, 280);
     ctx.rotate(Math.PI / 2);
-    ctx.fillStyle = "rgba(16, 185, 129, 0.65)";
+    ctx.fillStyle = "#059669";
     ctx.fillText(homeTeamName, 0, 0);
     ctx.restore();
     ctx.restore();
@@ -2882,12 +2882,12 @@
     const rightHoopX = rules.rightHoopX;
     const hoopY = rules.hoopY;
 
-    // 高质感深色运动科技底色
-    ctx.fillStyle = "#0a0e16";
+    // 高质感清新素雅科技底色
+    ctx.fillStyle = "#f8fafc";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 绘制微弱球场外框与半场线
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+    // 绘制清晰球场外框与半场线
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.4)";
     ctx.lineWidth = 1.2;
     ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
 
@@ -2899,7 +2899,7 @@
     for (const hoopX of [leftHoopX, rightHoopX]) {
       ctx.beginPath();
       ctx.arc(hoopX * scaleX, hoopY * scaleY, 7 * scaleX, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(255, 120, 40, 0.4)";
+      ctx.strokeStyle = "rgba(234, 88, 12, 0.45)";
       ctx.stroke();
     }
     for (const shot of state.shots) {
