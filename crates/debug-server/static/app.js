@@ -3254,16 +3254,32 @@
       tooltip.hidden = false;
       const isMobile = window.innerWidth <= 768;
       if (isMobile) {
-        tooltip.style.left = "50%";
-        tooltip.style.transform = "translateX(-50%)";
-        tooltip.style.top = "8px";
+        tooltip.style.left = "";
+        tooltip.style.right = "";
+        tooltip.style.top = "";
+        tooltip.style.bottom = "";
+        tooltip.style.transform = "";
       } else {
         tooltip.style.transform = "none";
         tooltip.style.left = `${Math.min(rect.width - 165, (x / canvas.width) * rect.width + 12)}px`;
         tooltip.style.top = `${Math.max(4, (y / canvas.height) * rect.height - 35)}px`;
       }
-      tooltip.replaceChildren(
+
+      const closeBtn = el("button", "btn-close-tooltip", "✕");
+      closeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        tooltip.hidden = true;
+      });
+
+      const headerRow = el(
+        "div",
+        "tooltip-header-row",
         el("strong", null, `${getTeamNameZh(player.team)} · ${player.number ?? player.jersey ?? "—"}号`),
+        closeBtn,
+      );
+
+      tooltip.replaceChildren(
+        headerRow,
         el(
           "span",
           null,

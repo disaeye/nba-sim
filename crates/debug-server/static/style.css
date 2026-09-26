@@ -77,6 +77,12 @@ body {
   overflow-x: hidden;
 }
 
+/* 全局隐藏规则：带有 hidden 属性的元素绝对严禁渲染，彻底杜绝任何占位与黑块残留 */
+[hidden],
+.player-hud-card[hidden] {
+  display: none !important;
+}
+
 /* 优雅滚动条 */
 ::-webkit-scrollbar {
   width: 6px;
@@ -601,9 +607,7 @@ body {
   aspect-ratio: 1000 / 560;
   background: #080b11;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
 }
 
 #courtCanvas {
@@ -691,7 +695,7 @@ body {
   overflow: hidden;
   white-space: nowrap;
   pointer-events: none;
-  display: inline-flex;
+  display: none;
   align-items: center;
   gap: 7px;
   padding: 6px 14px;
@@ -707,6 +711,7 @@ body {
   transition: max-width 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .floating-event-pill.active {
+  display: inline-flex;
   max-width: 420px;
   opacity: 1;
   transform: scale(1) translateY(0);
@@ -718,16 +723,35 @@ body {
   z-index: 35;
   padding: 10px 14px;
   border-radius: var(--radius-md);
-  background: rgba(14, 18, 28, 0.94);
+  background: rgba(14, 18, 28, 0.96);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--border-medium);
   box-shadow: var(--shadow-elevated);
   font-size: 11.5px;
-  pointer-events: none;
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+.player-hud-card[hidden] {
+  display: none !important;
+}
+.tooltip-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.btn-close-tooltip {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.btn-close-tooltip:hover {
+  color: #ffffff;
 }
 .player-hud-card strong {
   color: #ffffff;
@@ -2334,9 +2358,22 @@ body {
     padding: 4px 10px;
   }
   .player-hud-card {
-    max-width: 240px;
+    position: absolute;
+    bottom: 8px !important;
+    left: 8px !important;
+    right: 8px !important;
+    top: auto !important;
+    transform: none !important;
+    width: auto !important;
+    max-width: none !important;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
     font-size: 11px;
-    padding: 8px 10px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+  .player-hud-card[hidden] {
+    display: none !important;
   }
 
   /* 4. 战况字幕条 */
