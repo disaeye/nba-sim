@@ -3351,6 +3351,290 @@
     setRulesStatus(`已载入 ${name.toUpperCase()} 预设，点击应用并重跑`);
   }
 
+  // ========================================================
+  // 全维战术推演与比赛设置中心 (SettingsCenterManager)
+  // ========================================================
+  function initSettingsCenter() {
+    const sheet = $("settingsSheet");
+    if (!sheet) return;
+
+    // 侧边栏导航切换
+    document.querySelectorAll(".settings-nav-item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".settings-nav-item").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        const paneId = `pane-${btn.dataset.pane}`;
+        document.querySelectorAll(".settings-pane").forEach((p) => {
+          p.classList.toggle("active", p.id === paneId);
+        });
+      });
+    });
+
+    // 打开设置中心并同步
+    function openSettings() {
+      sheet.hidden = false;
+      syncSettingsCenter();
+    }
+    function closeSettings() {
+      sheet.hidden = true;
+    }
+
+    const openBtn = $("openSettingsBtn");
+    if (openBtn) openBtn.addEventListener("click", openSettings);
+    const closeBtn = $("closeSettingsBtn");
+    if (closeBtn) closeBtn.addEventListener("click", closeSettings);
+    const cancelBtn = $("cancelSettingsBtn");
+    if (cancelBtn) cancelBtn.addEventListener("click", closeSettings);
+    sheet.addEventListener("click", (e) => {
+      if (e.target === sheet) closeSettings();
+    });
+
+    // 快捷键支持 (S / O 键打开设置中心，Escape 关闭)
+    window.addEventListener("keydown", (e) => {
+      const activeEl = document.activeElement;
+      const isInput = activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA" || activeEl.isContentEditable);
+      if (e.key === "Escape" && !sheet.hidden) {
+        closeSettings();
+        return;
+      }
+      if ((e.key === "s" || e.key === "S" || e.key === "o" || e.key === "O") && !isInput && !e.ctrlKey && !e.metaKey) {
+        if (sheet.hidden) openSettings();
+        else closeSettings();
+      }
+    });
+
+    // 种子输入双向同步
+    const seedInput = $("seedInput");
+    const sheetSeedInput = $("sheetSeedInput");
+    if (sheetSeedInput) {
+      sheetSeedInput.addEventListener("input", () => {
+        if (seedInput) seedInput.value = sheetSeedInput.value;
+        updateSettingsSummaryHint();
+      });
+    }
+
+    // 随机种子按钮
+    const sheetRandomBtn = $("sheetRandomSeedBtn");
+    if (sheetRandomBtn) {
+      sheetRandomBtn.addEventListener("click", () => {
+        const val = String(Math.floor(Math.random() * 90000) + 1000);
+        if (seedInput) seedInput.value = val;
+        if (sheetSeedInput) sheetSeedInput.value = val;
+        updateSettingsSummaryHint();
+      });
+    }
+
+    // 范围选择双向同步
+    document.querySelectorAll(".scope-chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        document.querySelectorAll(".scope-chip").forEach((c) => c.classList.remove("active"));
+        chip.classList.add("active");
+        $("scopeInput").value = chip.dataset.scope;
+        updateSettingsSummaryHint();
+      });
+    });
+
+    // 快速预设模式卡片
+    document.querySelectorAll(".preset-mode-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        const mode = card.dataset.presetMode;
+        if (mode === "default") {
+          applyPreset("default");
+          $("scopeInput").value = "5p";
+          if (sheetSeedInput) sheetSeedInput.value = "42";
+          if (seedInput) seedInput.value = "42";
+        } else if (mode === "fast") {
+          applyPreset("fast");
+          $("scopeInput").value = "10p";
+          if (sheetSeedInput) sheetSeedInput.value = String(Math.floor(Math.random() * 90000) + 1000);
+          if (seedInput) seedInput.value = sheetSeedInput.value;
+        } else if (mode === "contest") {
+          applyPreset("contest");
+          $("scopeInput").value = "5p";
+        }
+        syncSettingsCenter();
+      });
+    });
+
+    // 本地文件导入
+    const sheetUploadBtn = $("sheetUploadTriggerBtn");
+    if (sheetUploadBtn) {
+      sheetUploadBtn.addEventListener("click", () => $("fileInput").click());
+    }
+
+    // 主客队视角切换
+    const homeBtn = $("sheetTeamHomeBtn");
+    const awayBtn = $("sheetTeamAwayBtn");
+    if (homeBtn) {
+      homeBtn.addEventListener("click", () => {
+        setTeamPerspective("home");
+        syncSettingsCenter();
+      });
+    }
+    if (awayBtn) {
+      awayBtn.addEventListener("click", () => {
+        setTeamPerspective("away");
+        syncSettingsCenter();
+      });
+    }
+
+    // 规则预设按钮
+    document.querySelectorAll(".sheet-preset-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const preset = btn.dataset.rulesPreset;
+        applyPreset(preset);
+        if ($("sheetRulesEditor")) $("sheetRulesEditor").value = $("rulesEditor").value;
+        updateSettingsSummaryHint();
+      });
+    });
+
+    // 规则编辑框同步
+    const sheetRulesEditor = $("sheetRulesEditor");
+    if (sheetRulesEditor) {
+      sheetRulesEditor.addEventListener("input", () => {
+        if ($("rulesEditor")) $("rulesEditor").value = sheetRulesEditor.value;
+      });
+    }
+
+    // 应用并立即推演
+    const applyBtn = $("applyAndRunBtn");
+    if (applyBtn) {
+      applyBtn.addEventListener("click", async () => {
+        closeSettings();
+        if (seedInput && sheetSeedInput) seedInput.value = sheetSeedInput.value;
+        if (sheetRulesEditor && $("rulesEditor")) $("rulesEditor").value = sheetRulesEditor.value;
+        let rules = null;
+        try {
+          if ($("rulesEditor").value.trim()) {
+            rules = JSON.parse($("rulesEditor").value);
+          }
+        } catch (e) {
+          console.warn("规则解析异常", e);
+        }
+        await runSimulation(rules);
+      });
+    }
+  }
+
+  function syncSettingsCenter() {
+    if (!studio) return;
+    const isHome = state.teamPerspective === "home";
+    const setup = studio.default_setup;
+    const homeTeam = setup.home_team;
+    const awayTeam = setup.away_team;
+    const lineup = isHome ? setup.home_lineup : setup.away_lineup;
+    const currentTeam = isHome ? homeTeam : awayTeam;
+
+    // 同步种子与范围
+    if ($("sheetSeedInput") && $("seedInput")) $("sheetSeedInput").value = $("seedInput").value;
+    const currentScope = $("scopeInput")?.value || "5p";
+    document.querySelectorAll(".scope-chip").forEach((chip) => {
+      chip.classList.toggle("active", chip.dataset.scope === currentScope);
+    });
+
+    // 同步规则编辑器内容
+    if ($("sheetRulesEditor") && $("rulesEditor")) {
+      $("sheetRulesEditor").value = $("rulesEditor").value;
+    }
+
+    // 同步队伍按钮
+    const homeBtn = $("sheetTeamHomeBtn");
+    const awayBtn = $("sheetTeamAwayBtn");
+    if (homeBtn) homeBtn.classList.toggle("active", isHome);
+    if (awayBtn) awayBtn.classList.toggle("active", !isHome);
+    const homeName = getTeamNameZh(homeTeam.id) || homeTeam.name;
+    const awayName = getTeamNameZh(awayTeam.id) || awayTeam.name;
+    if ($("sheetHomeTeamName")) $("sheetHomeTeamName").textContent = `${homeName} (主队)`;
+    if ($("sheetAwayTeamName")) $("sheetAwayTeamName").textContent = `${awayName} (客队)`;
+
+    // 渲染战术选项卡
+    renderSheetTactics(isHome ? "home" : "away", lineup);
+
+    // 渲染阵容列表
+    renderSheetRoster(currentTeam);
+
+    // 更新底部简报
+    updateSettingsSummaryHint();
+  }
+
+  function renderSheetTactics(side, lineup) {
+    const offContainer = $("sheetOffenseChoiceRow");
+    const defContainer = $("sheetDefenseChoiceRow");
+    if (!offContainer || !defContainer || !studio) return;
+
+    offContainer.replaceChildren(
+      ...studio.offense.map((item) => {
+        const btn = el(
+          "button",
+          `choice-card${item.id === lineup.offense_tactic ? " active" : ""}`,
+          el("strong", null, cleanTacticNameZh(item.name_zh)),
+          el("span", "choice-meta", getTacticDescZh(item.id))
+        );
+        btn.type = "button";
+        btn.addEventListener("click", () => {
+          lineup.offense_tactic = item.id;
+          const next = studio.offense.find((t) => t.id === item.id);
+          const compatible = (studio.plays || []).filter((play) => playFits(play, next?.spec));
+          if (side === "home") studio.default_setup.home_playbook = compatible;
+          else studio.default_setup.away_playbook = compatible;
+          renderStudio();
+          syncSettingsCenter();
+        });
+        return btn;
+      })
+    );
+
+    defContainer.replaceChildren(
+      ...studio.defense.map((item) => {
+        const btn = el(
+          "button",
+          `choice-card${item.id === lineup.defense_tactic ? " active" : ""}`,
+          el("strong", null, cleanTacticNameZh(item.name_zh)),
+          el("span", "choice-meta", getTacticDescZh(item.id))
+        );
+        btn.type = "button";
+        btn.addEventListener("click", () => {
+          lineup.defense_tactic = item.id;
+          renderStudio();
+          syncSettingsCenter();
+        });
+        return btn;
+      })
+    );
+  }
+
+  function renderSheetRoster(team) {
+    const startersBox = $("sheetStartersList");
+    const benchBox = $("sheetBenchList");
+    if (!startersBox || !benchBox || !team) return;
+
+    const players = team.players || [];
+    const starters = players.filter((p) => p.starter);
+    const bench = players.filter((p) => !p.starter);
+
+    const makeItem = (p) => {
+      const row = el("div", "sheet-roster-item");
+      row.append(
+        el("strong", null, `#${p.jersey} ${getPlayerNameZh(p.name)}`),
+        el("span", null, `${getPositionZh(p.position)} · ${getOffensiveRoleZh(p.offensive_role)}`)
+      );
+      return row;
+    };
+
+    startersBox.replaceChildren(...starters.map(makeItem));
+    benchBox.replaceChildren(...bench.map(makeItem));
+  }
+
+  function updateSettingsSummaryHint() {
+    const hint = $("settingsSummaryHint");
+    if (!hint) return;
+    const seed = $("sheetSeedInput")?.value || $("seedInput")?.value || "42";
+    const scope = $("scopeInput")?.value || "5p";
+    const isHome = state.teamPerspective === "home";
+    const teamLabel = isHome ? "北城老鹰 (主)" : "南湾水手 (客)";
+    hint.textContent = `就绪 · 当前执教：${teamLabel} · 种子：${seed} · 范围：${scope} · 点击立即生效并推演`;
+  }
+
   function wire() {
     $("runButton").addEventListener("click", () => runSimulation());
     $("fileInput").addEventListener("change", async (event) => {
@@ -3491,32 +3775,7 @@
     const quickBtn = $("quickSimBtn");
     if (quickBtn) quickBtn.addEventListener("click", () => runSimulation());
 
-    const openSet = $("openSettingsBtn");
-    const closeSet = $("closeSettingsBtn");
-    const sheet = $("settingsSheet");
-    if (openSet && sheet) {
-      openSet.addEventListener("click", () => {
-        sheet.hidden = false;
-      });
-    }
-    if (closeSet && sheet) {
-      closeSet.addEventListener("click", () => {
-        sheet.hidden = true;
-      });
-    }
-    if (sheet) {
-      sheet.addEventListener("click", (e) => {
-        if (e.target === sheet) sheet.hidden = true;
-      });
-    }
-
-    const applyRun = $("applyAndRunBtn");
-    if (applyRun && sheet) {
-      applyRun.addEventListener("click", () => {
-        sheet.hidden = true;
-        runSimulation();
-      });
-    }
+    initSettingsCenter();
 
     const randomBtn = $("randomSeedBtn");
     if (randomBtn) {
@@ -3525,20 +3784,6 @@
         $("seedInput").value = val;
         if ($("sheetSeedInput")) $("sheetSeedInput").value = val;
       });
-    }
-
-    const sheetRandom = $("sheetRandomSeedBtn");
-    if (sheetRandom) {
-      sheetRandom.addEventListener("click", () => {
-        const val = String(Math.floor(Math.random() * 90000) + 1000);
-        $("seedInput").value = val;
-        if ($("sheetSeedInput")) $("sheetSeedInput").value = val;
-      });
-    }
-
-    const sheetUpload = $("sheetUploadTriggerBtn");
-    if (sheetUpload) {
-      sheetUpload.addEventListener("click", () => $("fileInput").click());
     }
 
     const uploadTrigger = $("uploadTriggerBtn");

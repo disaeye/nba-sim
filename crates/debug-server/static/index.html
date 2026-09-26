@@ -62,11 +62,12 @@
         </svg>
       </button>
 
-      <button id="openSettingsBtn" class="btn-nav-icon" type="button" title="参数设置抽屉">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button id="openSettingsBtn" class="btn-nav-icon btn-nav-settings" type="button" title="打开推演与比赛设置中心 (快捷键: S / O)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"></circle>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
         </svg>
+        <span class="btn-settings-label">设置中枢</span>
       </button>
     </div>
   </header>
@@ -301,26 +302,33 @@
       <!-- 下半部：战术研讨舱与深度分析 (Tactical Studio & Deep Analytics) -->
       <section class="workbench-bottom-studio">
         <div class="studio-card">
-          <!-- 底部高级分段导航栏 -->
+          <!-- 底部高级分段导航栏 (按人机交互功能聚合理念区分为【设置中枢】与【实战分析】) -->
           <div class="segmented-nav">
-            <button class="tab-button active" type="button" data-tab="board">
-              <span>战术体系板</span>
-            </button>
-            <button class="tab-button" type="button" data-tab="roster">
-              <span>球员资料库</span>
-            </button>
-            <button class="tab-button" type="button" data-tab="shots">
-              <span>投篮热区分布</span>
-            </button>
-            <button class="tab-button" type="button" data-tab="stats">
-              <span>球队高阶数据</span>
-            </button>
-            <button class="tab-button" type="button" data-tab="rules">
-              <span>规则物理调测</span>
-            </button>
-            <button class="tab-button" type="button" data-tab="frame">
-              <span>原始帧数据</span>
-            </button>
+            <div class="nav-group-cluster nav-group-setup">
+              <span class="nav-group-badge">设置中枢</span>
+              <button class="tab-button active" type="button" data-tab="board">
+                <span>战术体系板</span>
+              </button>
+              <button class="tab-button" type="button" data-tab="roster">
+                <span>球员资料库</span>
+              </button>
+              <button class="tab-button" type="button" data-tab="rules">
+                <span>规则物理调测</span>
+              </button>
+            </div>
+            <div class="nav-group-divider"></div>
+            <div class="nav-group-cluster nav-group-analytics">
+              <span class="nav-group-badge">实战分析</span>
+              <button class="tab-button" type="button" data-tab="shots">
+                <span>投篮热区分布</span>
+              </button>
+              <button class="tab-button" type="button" data-tab="stats">
+                <span>球队高阶数据</span>
+              </button>
+              <button class="tab-button" type="button" data-tab="frame">
+                <span>原始帧数据</span>
+              </button>
+            </div>
           </div>
 
           <!-- 球队执教视角切换栏 (仅配置与查看当前所选队伍内部机密信息) -->
@@ -425,38 +433,179 @@
     </aside>
   </main>
 
-  <!-- 调测与高级参数抽屉 (Modal Bottom Sheet) -->
+  <!-- 全维战术推演与比赛设置中心 (Unified Tactical & Match Settings Center) -->
   <div id="settingsSheet" class="modal-sheet-backdrop" hidden>
-    <div class="modal-sheet-panel">
-      <div class="sheet-header">
-        <h3>引擎推演参数配置</h3>
-        <button id="closeSettingsBtn" class="btn-close-sheet" type="button">✕</button>
-      </div>
-      <div class="sheet-body">
-        <div class="setting-item">
-          <label for="sheetSeedInput">随机数种子</label>
-          <div class="input-with-actions">
-            <input id="sheetSeedInput" type="number" value="42">
-            <button id="sheetRandomSeedBtn" class="btn-secondary-sm" type="button">随机生成</button>
+    <div class="modal-settings-dialog">
+      <!-- 头部：标题与关闭 -->
+      <div class="settings-dialog-header">
+        <div class="settings-header-left">
+          <div class="settings-header-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </div>
+          <div>
+            <h3 class="settings-title">推演与比赛统一设置中心</h3>
+            <span class="settings-subtitle">集中配置推演环境、球队战术、球员名单与引擎规则</span>
           </div>
         </div>
-        <div class="setting-item">
-          <label>模拟推演范围 (Scope)</label>
-          <div class="scope-chip-selector">
-            <button class="scope-chip active" type="button" data-scope="5p">5 回合</button>
-            <button class="scope-chip" type="button" data-scope="1p">单回合</button>
-            <button class="scope-chip" type="button" data-scope="10p">10 回合</button>
-            <button class="scope-chip" type="button" data-scope="1q">单节比赛</button>
-            <button class="scope-chip" type="button" data-scope="full">整场 48m</button>
+        <button id="closeSettingsBtn" class="btn-close-sheet" type="button" title="关闭设置">✕</button>
+      </div>
+
+      <!-- 主体：侧边分类导航 + 配置内容区域 -->
+      <div class="settings-dialog-body">
+        <!-- 侧边导航栏 -->
+        <nav class="settings-sidebar">
+          <button class="settings-nav-item active" type="button" data-pane="env">
+            <span class="nav-item-icon">⚙️</span>
+            <span class="nav-item-text">推演环境参数</span>
+          </button>
+          <button class="settings-nav-item" type="button" data-pane="tactics">
+            <span class="nav-item-icon">📋</span>
+            <span class="nav-item-text">球队战术体系</span>
+          </button>
+          <button class="settings-nav-item" type="button" data-pane="roster">
+            <span class="nav-item-icon">👤</span>
+            <span class="nav-item-text">阵容球员档案</span>
+          </button>
+          <button class="settings-nav-item" type="button" data-pane="rules">
+            <span class="nav-item-icon">⚖️</span>
+            <span class="nav-item-text">比赛规则物理</span>
+          </button>
+        </nav>
+
+        <!-- 内容区域 -->
+        <div class="settings-content-wrapper">
+          <!-- Pane 1: 推演环境参数 -->
+          <div id="pane-env" class="settings-pane active">
+            <div class="settings-group">
+              <div class="group-title">随机数种子</div>
+              <div class="group-desc">控制比赛推演的伪随机数序列，相同种子产出完全确定的攻防过程</div>
+              <div class="input-with-actions">
+                <input id="sheetSeedInput" class="sheet-number-input" type="number" value="42">
+                <button id="sheetRandomSeedBtn" class="btn-secondary-sm" type="button">随机生成</button>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="group-title">模拟推演范围 (Scope)</div>
+              <div class="group-desc">指定本次推演执行的时间跨度与回合数量</div>
+              <div class="scope-chip-selector">
+                <button class="scope-chip" type="button" data-scope="1p">1 单回合</button>
+                <button class="scope-chip active" type="button" data-scope="5p">5 回合</button>
+                <button class="scope-chip" type="button" data-scope="10p">10 回合</button>
+                <button class="scope-chip" type="button" data-scope="1q">1 完整单节</button>
+                <button class="scope-chip" type="button" data-scope="full">整场 48 分钟</button>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="group-title">快速比赛预设模式</div>
+              <div class="group-desc">一键应用经典的比赛节奏与攻防战术组合</div>
+              <div class="quick-preset-cards">
+                <button class="preset-mode-card" type="button" data-preset-mode="default">
+                  <strong>常规标准攻防</strong>
+                  <span>标准节奏 · 均衡攻防 · 默认规则</span>
+                </button>
+                <button class="preset-mode-card" type="button" data-preset-mode="fast">
+                  <strong>极速攻防对决</strong>
+                  <span>快打风暴 · 高回合数 · 极速推进</span>
+                </button>
+                <button class="preset-mode-card" type="button" data-preset-mode="contest">
+                  <strong>高强度肉搏战</strong>
+                  <span>严密防守 · 强力对抗 · 禁区肉搏</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="group-title">本地数据轨迹导入</div>
+              <div class="group-desc">上传已保存的比赛物理帧轨迹文件 (.ndjson) 离线复盘</div>
+              <button id="sheetUploadTriggerBtn" class="btn-outline-block" type="button">
+                选择 NDJSON 轨迹文件导入
+              </button>
+            </div>
+          </div>
+
+          <!-- Pane 2: 球队战术体系 -->
+          <div id="pane-tactics" class="settings-pane">
+            <div class="settings-group">
+              <div class="group-title">执教球队视角</div>
+              <div class="group-desc">选择要查看和调配战术的单方队伍（严密隔离对手内部战术机密）</div>
+              <div class="sheet-team-selector">
+                <button id="sheetTeamHomeBtn" class="sheet-team-btn active" type="button">
+                  <span class="perspective-dot home-dot"></span>
+                  <span id="sheetHomeTeamName">北城老鹰 (主队)</span>
+                </button>
+                <button id="sheetTeamAwayBtn" class="sheet-team-btn" type="button">
+                  <span class="perspective-dot away-dot"></span>
+                  <span id="sheetAwayTeamName">南湾水手 (客队)</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="group-title">进攻战术体系</div>
+              <div class="group-desc">决定本队在阵地战中的核心空间落位与配合构型</div>
+              <div id="sheetOffenseChoiceRow" class="sheet-choice-grid"></div>
+            </div>
+
+            <div class="settings-group">
+              <div class="group-title">防守战术策略</div>
+              <div class="group-desc">配置面对挡拆与持球突破时的协同防守原则</div>
+              <div id="sheetDefenseChoiceRow" class="sheet-choice-grid"></div>
+            </div>
+          </div>
+
+          <!-- Pane 3: 阵容球员档案 -->
+          <div id="pane-roster" class="settings-pane">
+            <div class="settings-group">
+              <div class="group-title">当前球队主力首发阵容</div>
+              <div class="group-desc">首发 5 人名单与场上战术角色</div>
+              <div id="sheetStartersList" class="sheet-roster-list"></div>
+            </div>
+
+            <div class="settings-group">
+              <div class="group-title">常规轮换替补阵容</div>
+              <div class="group-desc">替补深度与特定战术特质</div>
+              <div id="sheetBenchList" class="sheet-roster-list"></div>
+            </div>
+          </div>
+
+          <!-- Pane 4: 比赛规则物理 -->
+          <div id="pane-rules" class="settings-pane">
+            <div class="settings-group">
+              <div class="group-title">比赛规则预设方案</div>
+              <div class="group-desc">快速加载引擎调测预设参数</div>
+              <div class="sheet-rules-presets">
+                <button class="sheet-preset-btn" type="button" data-rules-preset="default">默认标准规则</button>
+                <button class="sheet-preset-btn" type="button" data-rules-preset="fast">极速对决模式</button>
+                <button class="sheet-preset-btn" type="button" data-rules-preset="contest">高强度对抗模式</button>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="group-title">GameRules JSON 规则参数编辑</div>
+              <div class="group-desc">直接调节物理常量、场地几何与判罚阈值</div>
+              <textarea id="sheetRulesEditor" class="sheet-rules-textarea" spellcheck="false" placeholder="GameRules JSON..."></textarea>
+            </div>
           </div>
         </div>
-        <div class="setting-item">
-          <label>导入本地轨迹数据文件</label>
-          <button id="sheetUploadTriggerBtn" class="btn-outline-block" type="button">选择 NDJSON 文件导入</button>
-        </div>
       </div>
-      <div class="sheet-footer">
-        <button id="applyAndRunBtn" class="btn-full-primary" type="button">应用参数并推演</button>
+
+      <!-- 底部动作条 -->
+      <div class="settings-dialog-footer">
+        <div class="footer-summary-hint">
+          <span class="hint-dot"></span>
+          <span id="settingsSummaryHint">就绪 · 所有设置将在点击应用时生效</span>
+        </div>
+        <div class="footer-actions">
+          <button id="cancelSettingsBtn" class="btn-secondary-sm" type="button">关闭</button>
+          <button id="applyAndRunBtn" class="btn-primary-action" type="button">
+            <span class="btn-text">应用设置并立即推演</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
