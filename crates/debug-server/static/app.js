@@ -342,25 +342,163 @@
     return MORALE_ZH[morale] || morale || "平稳";
   }
 
+  const INTENSITY_ZH = {
+    BuildUp: "战术组织",
+    Climax: "关键攻防",
+    Plateau: "平稳推进",
+    Low: "轻度试探",
+    Medium: "中度对抗",
+    High: "高度焦灼",
+    Physical: "强力肉搏",
+  };
+  function getIntensityZh(intensity) {
+    return INTENSITY_ZH[intensity] || intensity || "常规战况";
+  }
+
   const TEAM_ZH = {
-    north_city_hawks: "老鹰",
-    south_coast_celtics: "凯尔特人",
-    hawks: "老鹰",
-    celtics: "凯尔特人",
-    Hawks: "老鹰",
-    Celtics: "凯尔特人",
-    lakers: "湖人",
-    LAL: "湖人",
-    BOS: "凯尔特人",
-    home: "主队",
-    away: "客队",
-    HOME: "主队",
-    AWAY: "客队",
+    north_city_hawks: "北城老鹰",
+    south_bay_mariners: "南湾水手",
+    hawks: "北城老鹰",
+    mariners: "南湾水手",
+    Hawks: "北城老鹰",
+    Mariners: "南湾水手",
+    "North City Hawks": "北城老鹰",
+    "South Bay Mariners": "南湾水手",
+    south_coast_celtics: "波士顿凯尔特人",
+    celtics: "波士顿凯尔特人",
+    Celtics: "波士顿凯尔特人",
+    lakers: "南湾水手",
+    LAL: "南湾水手",
+    BOS: "北城老鹰",
+    home: "北城老鹰",
+    away: "南湾水手",
+    HOME: "北城老鹰",
+    AWAY: "南湾水手",
   };
   function getTeamNameZh(team) {
     if (!team) return "—";
     const name = typeof team === "string" ? team : (team.short_name || team.name || "");
     return TEAM_ZH[name] || TEAM_ZH[team.id] || name || "—";
+  }
+
+  const PLAYER_NAME_ZH = {
+    // 客队 (南湾水手)
+    "Luka Maren": "卢卡·马伦",
+    "Kellan Price": "凯兰·普莱斯",
+    "Scott Rowan": "斯科特·罗万",
+    "Drake Ellis": "德雷克·埃利斯",
+    "Anton Vale": "安东·韦尔",
+    "Tyler Quinn": "泰勒·奎因",
+    "Mika Stone": "米卡·斯通",
+    "Niko Voss": "尼科·沃斯",
+    // 主队 (北城老鹰)
+    "Darius Vale": "达柳斯·韦尔",
+    "Malik Rowan": "马利克·罗万",
+    "Andre Mercer": "安德烈·默瑟",
+    "Caleb North": "凯莱布·诺斯",
+    "Jonas Reed": "乔纳斯·里德",
+    "Jordan Pike": "乔丹·派克",
+    "Aaron Wells": "阿隆·韦尔斯",
+    "Rudy Moss": "鲁迪·莫斯",
+  };
+  function getPlayerNameZh(name) {
+    if (!name) return "球员";
+    return PLAYER_NAME_ZH[name] || name;
+  }
+
+  const TACTIC_SYSTEM_DESC_ZH = {
+    off_horns_pnr: "高位挡拆顺下配合",
+    off_motion_spacing: "五人外围流动传切",
+    off_transition_push: "快攻快速推进入筐",
+    off_delay_attack: "高位弧顶拉开单打",
+    off_post_split: "内线低位背身策应",
+    off_drag_screen: "转换跟进追身掩护",
+    def_man_conservative: "常规半场对位人盯人",
+    def_man_pressure: "全场紧逼持球施压",
+    def_switch_heavy: "无缝轮转换防阻截",
+    def_drop_coverage: "中锋沉退护筐策略",
+    def_hedge_recover: "大延误阻绝突破返位",
+    def_zone_23: "经典二三联防保护油漆区",
+  };
+  function getTacticDescZh(id) {
+    return TACTIC_SYSTEM_DESC_ZH[id] || "战术执行策略";
+  }
+
+  function cleanTacticNameZh(name) {
+    if (!name) return "";
+    return name.replace(/\s*\([^)]*\)/g, "").trim();
+  }
+
+  const PLAY_VERB_ZH = {
+    ScreenRoll: "挡拆顺下",
+    CutBackdoor: "空切后门",
+    Lift: "弱侧上提",
+    SpotUp: "定点待命",
+    Drive: "持球突破",
+    Pass: "传球转移",
+    DipToRim: "直切篮下",
+    BackdoorCut: "空切偷门",
+    DribbleTop: "弧顶组织",
+    PerimeterRelocate: "外线跑位",
+    HighScreenRoll: "高位挡拆",
+  };
+  function getPlayVerbZh(verb) {
+    return PLAY_VERB_ZH[verb] || verb || "执行战术";
+  }
+
+  const BEHAVIOUR_ZH = {
+    DribbleTop: "弧顶运球组织",
+    SpotUp: "定点待命拉开",
+    PerimeterRelocate: "外线跑位重置",
+    HighScreenRoll: "高位挡拆顺下",
+    BackdoorCut: "空切反跑偷后门",
+    DipToRim: "底角切入直插篮下",
+  };
+  function getBehaviourZh(behaviour) {
+    return BEHAVIOUR_ZH[behaviour] || behaviour || "战术落位职责";
+  }
+
+  const DECISION_KIND_ZH = {
+    Shoot: "投篮出手",
+    Pass: "传球配合",
+    Drive: "持球突破",
+    Dwell: "持球观察",
+    Reset: "重置战术",
+    Cut: "空切跑位",
+    Screen: "设立掩护",
+  };
+  function getDecisionKindZh(kind) {
+    return DECISION_KIND_ZH[kind] || kind || "—";
+  }
+
+  const ANOMALY_KIND_ZH = {
+    SpeedViolation: "移动超速违例",
+    InvariantViolation: "引擎不变量违规",
+    CollisionViolation: "物理碰撞穿透违例",
+    BallHolderLeash: "持球人脱缰位移违规",
+    BoundaryViolation: "非法出界脱轨违例",
+    ShotClockViolation: "24秒进攻违例",
+    BackcourtViolation: "回场违例",
+    EightSecondViolation: "8秒未过半场违例",
+  };
+  function getAnomalyKindZh(kind) {
+    return ANOMALY_KIND_ZH[kind] || kind || "不变量监测记录";
+  }
+
+  function formatCalloutZh(text) {
+    if (!text) return "";
+    let res = String(text);
+    for (const [enName, zhName] of Object.entries(PLAYER_NAME_ZH)) {
+      if (res.includes(enName)) {
+        res = res.replaceAll(enName, zhName);
+      }
+    }
+    for (const [enTeam, zhTeam] of Object.entries(TEAM_ZH)) {
+      if (res.includes(enTeam)) {
+        res = res.replaceAll(enTeam, zhTeam);
+      }
+    }
+    return res;
   }
 
   let studio = null;
@@ -459,8 +597,8 @@
       el("span", `perspective-dot ${isHome ? "home-dot" : "away-dot"}`),
       el("strong", null, `${teamNameZh} · 战术指挥中枢`),
       el("span", `banner-team-tag ${isHome ? "home" : "away"}`, isHome ? "主场作战" : "客场作战"),
-      el("span", "banner-team-tag", `进攻: ${offense?.name_zh || "未配置"}`),
-      el("span", "banner-team-tag", `防守: ${defense?.name_zh || "未配置"}`),
+      el("span", "banner-team-tag", `进攻: ${cleanTacticNameZh(offense?.name_zh) || "未配置"}`),
+      el("span", "banner-team-tag", `防守: ${cleanTacticNameZh(defense?.name_zh) || "未配置"}`),
     );
     const privacyHint = el(
       "div",
@@ -529,7 +667,10 @@
       );
       button.type = "button";
       button.disabled = item.available === false;
-      button.append(el("strong", null, item.name_zh), el("span", "choice-meta", item.available === false ? "当前没有落位档案" : item.id));
+      button.append(
+        el("strong", null, cleanTacticNameZh(item.name_zh)),
+        el("span", "choice-meta", item.available === false ? "当前没有落位档案" : getTacticDescZh(item.id)),
+      );
       button.addEventListener("click", () => onPick(item.id));
       row.append(button);
     }
@@ -548,7 +689,7 @@
       const y = Math.max(12, Math.min(88, 100 - (slot.base_offset_x / 47) * 100));
       pin.style.left = x + "%";
       pin.style.top = y + "%";
-      pin.title = slot.behaviour;
+      pin.title = `${slot.name_zh} · ${getBehaviourZh(slot.behaviour)}`;
       court.append(pin);
     }
     return court;
@@ -562,8 +703,10 @@
     }
     for (const play of playbook) {
       const card = el("article", "play-card active");
-      const verbs = (play.rules || []).map((rule) => rule.then.verb + " · " + rule.then.slot).join(" / ");
-      card.append(el("strong", null, play.name_zh), el("span", "play-note", verbs || play.id));
+      const verbs = (play.rules || [])
+        .map((rule) => `${getPlayVerbZh(rule.then.verb)} · ${getSlotZh(rule.then.slot)}`)
+        .join(" / ");
+      card.append(el("strong", null, cleanTacticNameZh(play.name_zh)), el("span", "play-note", verbs || "战术配合"));
       list.append(card);
     }
     return list;
@@ -621,7 +764,7 @@
     );
     button.type = "button";
     button.append(
-      el("strong", null, `#${player.jersey} ${player.name}`),
+      el("strong", null, `#${player.jersey} ${getPlayerNameZh(player.name)}`),
       el("span", "choice-meta", `${getPositionZh(player.position)} · ${getOffensiveRoleZh(player.offensive_role)}`),
     );
     button.addEventListener("click", () => {
@@ -634,22 +777,24 @@
   function playerSheet(team, player) {
     const sheet = el("article", "player-sheet");
     const identity = el("div", "player-identity");
+    const pNameZh = getPlayerNameZh(player.name);
+    const tNameZh = getTeamNameZh(team.id) || team.name;
     identity.append(
-      el("div", null, el("strong", null, player.name), el("div", "choice-meta", team.name + " · #" + player.jersey + " · " + player.height_cm + " cm · " + player.weight_kg + " kg")),
+      el("div", null, el("strong", null, pNameZh), el("div", "choice-meta", tNameZh + " · #" + player.jersey + " · " + player.height_cm + " 厘米 · " + player.weight_kg + " 公斤")),
       el("div", "role-pills",
         el("span", null, getPositionZh(player.position)),
         el("span", null, getOffensiveRoleZh(player.offensive_role)),
         el("span", null, getDefensiveRoleZh(player.defensive_role)),
-        el("span", null, player.starter ? "首发" : "替补"),
+        el("span", null, player.starter ? "首发主力" : "轮换替补"),
       ),
     );
     sheet.append(
       identity,
-      el("div", "choice-meta", "能力"),
+      el("div", "choice-meta", "球员关键属性"),
       meters(player.attributes, "attributes"),
-      el("div", "choice-meta", "倾向"),
+      el("div", "choice-meta", "战术决策倾向"),
       meters(player.tendencies, "tendencies"),
-      el("div", "choice-meta", "球队风格"),
+      el("div", "choice-meta", "球队作战风格"),
       traitGrid(team.team_traits),
     );
     return sheet;
@@ -1365,7 +1510,7 @@
         const button = document.createElement("button");
         button.className = "anomaly-item";
         button.dataset.index = String(item.index);
-        button.textContent = `#${item.index} · ${item.kind} · ${item.detail}`;
+        button.textContent = `#${item.index} · ${getAnomalyKindZh(item.kind)} · ${item.detail}`;
         bindSeek(button);
         fragment.appendChild(button);
       }
@@ -1402,7 +1547,7 @@
     updateTimelineCursor();
     $("progressInput").value = String(state.idx);
     $("jumpInput").value = String(state.idx);
-    if ($("frameLabel")) $("frameLabel").textContent = `frame ${state.idx}`;
+    if ($("frameLabel")) $("frameLabel").textContent = `第 ${state.idx} 帧`;
     $("tickReadout").textContent =
       `${state.idx.toLocaleString()} / ${state.ticks.length.toLocaleString()} 帧`;
     $("progressTime").textContent = timeWithTenths(tick.t);
@@ -1474,8 +1619,8 @@
     $("foulsReadout").textContent =
       `${tick.team_fouls_home ?? 0} / ${tick.team_fouls_away ?? 0}`;
     $("freeThrows").textContent = String(tick.free_throws_remaining ?? 0);
-    $("intensityReadout").textContent = tick.intensity || "—";
-    const callout = tick.callout || "—";
+    $("intensityReadout").textContent = getIntensityZh(tick.intensity);
+    const callout = formatCalloutZh(tick.callout) || "—";
     if ($("calloutText").textContent !== callout) {
       $("calloutText").textContent = callout;
       if (callout !== "—") {
@@ -2891,7 +3036,7 @@
         el(
           "small",
           null,
-          "跳到一个决策帧，或点击事件流中的 PASS / SHOT_RELEASE",
+          "跳到一个决策帧，或点击事件流中的传球 / 投篮出手",
         ),
       );
       panel.replaceChildren(empty);
@@ -2923,7 +3068,7 @@
         fill.style.width = `${clamp(Math.abs(number) * scale, 1, 100)}%`;
         track.append(fill);
         row.append(
-          el("span", "score-bar-label", item.kind),
+          el("span", "score-bar-label", getDecisionKindZh(item.kind)),
           track,
           el("span", "score-bar-value", number.toFixed(3)),
         );
@@ -2957,27 +3102,27 @@
     };
     const head = el("div", "decision-head");
     head.append(
-      el("strong", null, chosen || "—"),
-      el("span", null, `${debug.player || "—"} · frame ${decisionIndex}`),
+      el("strong", null, getDecisionKindZh(chosen) || "—"),
+      el("span", null, `${getPlayerNameZh(debug.player) || "—"} · 第 ${decisionIndex} 帧`),
     );
     panel.append(
       head,
       section(
-        "Utility ranking",
+        "效用评分排序 (Utility)",
         scoreRows(utilities, (item) => item.utility, 100 / maxUtility),
       ),
       section(
-        "Softmax probability",
+        "决策概率分布 (Softmax)",
         scoreRows(probabilities, (item) => item.prob, 100),
       ),
       section(
-        "Hard blockers",
+        "硬性约束阻截 (Blockers)",
         chips(debug.blocked, "bad", "没有被硬约束剔除的候选"),
       ),
-      section("Constraint flags", flagSection(debug.flags || [])),
-      section("Active constraints", chips(debug.active_constraints, "", "—")),
+      section("约束惩罚标记 (Flags)", flagSection(debug.flags || [])),
+      section("当前激活约束条件", chips(debug.active_constraints, "", "—")),
       section(
-        "Enforcement feedback",
+        "执行阻碍反馈",
         chips(debug.enforcement, "warn", "本帧没有执行意图"),
       ),
     );
@@ -3052,13 +3197,13 @@
     const rim = rules.rimShotDistance;
     const three = rules.threePointDistance;
     const zones = [
-      [`Rim < ${rim} ft`, (shot) => shot.distance < rim],
+      [`篮下近筐 (< ${rim} 英尺)`, (shot) => shot.distance < rim],
       [
-        `Mid ${rim}–16 ft`,
+        `近中距离 (${rim}–16 英尺)`,
         (shot) => shot.distance >= rim && shot.distance < 16,
       ],
-      [`Long 16–${three} ft`, (shot) => shot.distance >= 16 && !shot.three],
-      [`Three ${three}+ ft`, (shot) => shot.three],
+      [`远中距离 (16–${three} 英尺)`, (shot) => shot.distance >= 16 && !shot.three],
+      [`三分外线 (${three}+ 英尺)`, (shot) => shot.three],
     ];
     // DOM API 构建（textContent 赋值，无 HTML 拼接）。
     const zoneTable = $("zoneTable");
