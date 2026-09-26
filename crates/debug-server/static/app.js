@@ -1939,23 +1939,62 @@
       }
 
       // ========================================================
-      // 5. 真实战术板球员渲染 (Pro Tactical Player Badge)
-      // 脚踏实地自然跑位，绝不悬浮飞行，无花哨 AI 特效
+      // 5. 真实战术板球员动作动力学渲染 (Pro Tactical Player Kinetics)
+      // 脚踏实地自然跑位，动作姿态清晰鲜明，无悬浮飞行
       // ========================================================
       const isHome = player.team === "home";
       const px = playerPoint.x;
       const py = playerPoint.y;
-      const radius = 14.5;
+      let radius = 14.5;
 
-      // 1. 地面自然接触阴影 (自然紧贴脚下，柔和逼真)
-      ctx.beginPath();
-      ctx.ellipse(px, py + 2, radius * 0.95, radius * 0.45, 0, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
-      ctx.fill();
+      // 提取动作意图与动作窗口阶段
+      const actionRaw = String(player.action || "").toUpperCase();
+      const actionPhase = String(player.action_phase || "Execution");
 
-      // 2. 身体朝向角 (Facing Angle)
+      const isShooting = actionRaw.includes("SHOT") || actionRaw.includes("3PT") || actionRaw.includes("LAYUP");
+      const isCrossover = actionRaw.includes("CROSSOVER") || actionRaw.includes("BETWEENTHELEGS");
+      const isDribbleDrive = isCrossover || actionRaw.includes("DRIVE") || actionRaw.includes("ADVANCE") || actionRaw.includes("INITIATE") || actionRaw.includes("DRIBBLE");
+      const isScreen = actionRaw.includes("SCREEN") || actionRaw.includes("SET_HIGH_SCREEN");
+      const isContest = actionRaw.includes("CONTEST") || actionRaw.includes("DROP_CONTAIN") || actionRaw.includes("HELP_SIDE") || actionRaw.includes("CLOSEOUT");
+      const isRebounding = actionRaw.includes("BOXOUT") || actionRaw.includes("REBOUND") || actionRaw.includes("CRASH");
+      const isCutting = actionRaw.includes("CUT") || actionRaw.includes("DIP_TO_RIM");
+
+      // 步频周期震荡（支撑高速跑动与运球动感节奏）
+      const gaitCycle = curSpeed > 0.4 ? (state.idx * 0.45 + (Number(player.number) || 1) * 1.5) : 0;
+      const gaitPulse = Math.sin(gaitCycle);
+
+      // 1. 身体朝向角 (Facing Angle) 与动态锁定
       let facingAngle = 0;
-      if (
+      if (isShooting) {
+        // 投篮动作严格朝向进攻目标篮筐
+        const targetHoopX = isHome ? rules.rightHoopX : rules.leftHoopX;
+        facingAngle = Math.atan2(
+          rules.hoopY - finite(player.y) * rules.courtHeight,
+          targetHoopX - finite(player.x) * rules.courtWidth,
+        );
+      } else if (isContest) {
+        // 防守压迫时优先朝向对方持球人
+        const carrier = (tick.players || []).find((p) => p.hasBall && p.onCourt !== false);
+        if (carrier && carrier.id !== player.id) {
+          const carrierPt = point(
+            finite(carrier.x) * rules.courtWidth,
+            finite(carrier.y) * rules.courtHeight,
+          );
+          facingAngle = Math.atan2(carrierPt.y - py, carrierPt.x - px);
+        } else if (
+          player.facing_x !== undefined &&
+          player.facing_y !== undefined &&
+          Math.hypot(player.facing_x, player.facing_y) > 0.05
+        ) {
+          facingAngle = Math.atan2(player.facing_y, player.facing_x);
+        } else {
+          const hoopX = isHome ? rules.rightHoopX : rules.leftHoopX;
+          facingAngle = Math.atan2(
+            rules.hoopY - finite(player.y) * rules.courtHeight,
+            hoopX - finite(player.x) * rules.courtWidth,
+          );
+        }
+      } else if (
         player.facing_x !== undefined &&
         player.facing_y !== undefined &&
         Math.hypot(player.facing_x, player.facing_y) > 0.05
@@ -1971,28 +2010,163 @@
         );
       }
 
-      // 3. 稳重专业的朝向指示微标 (极小等腰三角，长 4px，低调清晰)
+      // 动作特定几何形变调整
+      if (isShooting && actionPhase === "Preparation") {
+        // 投篮准备蓄力屈膝，重心压低
+        radius -= 1.2;
+      }
+
+      // 2. 地面自然接触阴影 (真实紧贴地面，动作蓄力与移动时自适应形变)
+      ctx.beginPath();
+      const shadowStretch = Math.min(1.25, 1.0 + curSpeed * 0.04);
+      ctx.ellipse(
+        px,
+        py + 2,
+        radius * 0.95 * shadowStretch,
+        radius * 0.46,
+        curSpeed > 0.4 ? Math.atan2(curVy, curVx) : 0,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fillStyle = "rgba(0, 0, 0, 0.24)";
+      ctx.fill();
+
+      // 3. 掩护挡拆基座动作 (Screen Base Stance)
+      if (isScreen) {
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(facingAngle);
+        ctx.fillStyle = isHome ? "#042c16" : "#421801";
+        ctx.strokeStyle = isHome ? "#10b981" : "#f59e0b";
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.roundRect(-4, -radius - 4, 8, (radius + 4) * 2, 3);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 4. 防守压迫干扰罩动作 (Defensive Contest Envelope)
+      if (isContest) {
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(facingAngle);
+        const contestR = actionPhase === "Execution" ? radius + 8.5 : radius + 5.5;
+        ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.85)" : "rgba(245, 158, 11, 0.85)";
+        ctx.lineWidth = actionPhase === "Execution" ? 2.4 : 1.6;
+        ctx.beginPath();
+        ctx.arc(0, 0, contestR, -Math.PI / 3, Math.PI / 3);
+        ctx.stroke();
+
+        // 强力扑防干扰触点 (封盖伸臂位)
+        if (actionPhase === "Execution") {
+          const capAng1 = -Math.PI / 3;
+          const capAng2 = Math.PI / 3;
+          ctx.fillStyle = isHome ? "#10b981" : "#f59e0b";
+          ctx.beginPath();
+          ctx.arc(Math.cos(capAng1) * contestR, Math.sin(capAng1) * contestR, 2.0, 0, Math.PI * 2);
+          ctx.arc(Math.cos(capAng2) * contestR, Math.sin(capAng2) * contestR, 2.0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      // 5. 篮板卡位阻隔弧动作 (Box-Out Wall Barrier)
+      if (actionRaw.includes("BOXOUT")) {
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(facingAngle + Math.PI); // 朝向后方阻隔
+        ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.75)" : "rgba(245, 158, 11, 0.75)";
+        ctx.lineWidth = 2.0;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius + 4.5, -Math.PI * 0.38, Math.PI * 0.38);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 6. 投篮瞄准与跟随压腕动作 (Shooting Aim & Follow-Through)
+      if (isShooting) {
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(facingAngle);
+
+        if (actionPhase === "Execution") {
+          // 出手瞬间瞄准导引线
+          ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.9)" : "rgba(245, 158, 11, 0.9)";
+          ctx.lineWidth = 1.8;
+          ctx.beginPath();
+          ctx.moveTo(radius, 0);
+          ctx.lineTo(radius + 12, 0);
+          ctx.stroke();
+          // 出手准星导向标
+          ctx.fillStyle = isHome ? "#10b981" : "#f59e0b";
+          ctx.beginPath();
+          ctx.moveTo(radius + 14, 0);
+          ctx.lineTo(radius + 9, -2.5);
+          ctx.lineTo(radius + 9, 2.5);
+          ctx.closePath();
+          ctx.fill();
+        } else if (actionPhase === "FollowThrough") {
+          // 压腕保持跟随指针
+          ctx.fillStyle = isHome ? "#10b981" : "#f59e0b";
+          ctx.beginPath();
+          ctx.moveTo(radius + 7, 0);
+          ctx.lineTo(radius + 1, -2);
+          ctx.lineTo(radius + 1, 2);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      // 7. 运球触地节奏脉冲 (Dribble Bounce Cadence)
+      if (player.hasBall && isDribbleDrive && curSpeed > 0.5) {
+        const handSide = gaitPulse >= 0 ? 1 : -1;
+        const dribbleAngle = facingAngle + handSide * 0.42;
+        const dribbleDist = radius + 6.0;
+        const dx = px + Math.cos(dribbleAngle) * dribbleDist;
+        const dy = py + Math.sin(dribbleAngle) * dribbleDist;
+        const bounceR = 2.5 + Math.abs(gaitPulse) * 3.0;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(dx, dy, bounceR, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255, 120, 40, " + (0.55 - Math.abs(gaitPulse) * 0.25).toFixed(2) + ")";
+        ctx.lineWidth = 1.3;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 8. 奔跑动感切向微拉伸 (Locomotion Stretch)
       ctx.save();
       ctx.translate(px, py);
+      if (curSpeed > 0.6) {
+        const moveAng = Math.atan2(curVy, curVx);
+        ctx.rotate(moveAng);
+        ctx.scale(1.0 + Math.min(0.12, curSpeed * 0.015), 1.0 - Math.min(0.06, curSpeed * 0.008));
+        ctx.rotate(-moveAng);
+      }
+
+      // 稳重专业的朝向指示微标 (等腰三角，长 4.5px)
+      ctx.save();
       ctx.rotate(facingAngle);
       ctx.beginPath();
-      ctx.moveTo(radius + 4, 0);
-      ctx.lineTo(radius, -3);
-      ctx.lineTo(radius, 3);
+      ctx.moveTo(radius + 4.5, 0);
+      ctx.lineTo(radius + 0.5, -3);
+      ctx.lineTo(radius + 0.5, 3);
       ctx.closePath();
       ctx.fillStyle = isHome ? "#10b981" : "#f59e0b";
       ctx.fill();
       ctx.restore();
 
-      // 4. 战术圆盘徽章 (Pro Tactical Disc)
-      // 主队：高级墨绿；客队：沉稳深琥珀；拒绝塑料感
-      ctx.save();
+      // 9. 战术圆盘徽章主体 (Pro Tactical Disc)
+      // 主队：高级墨绿；客队：沉稳深琥珀
       ctx.beginPath();
-      ctx.arc(px, py, radius, 0, Math.PI * 2);
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
       ctx.fillStyle = isHome ? "#084925" : "#632704";
       ctx.fill();
 
-      // 队色边框 (持球人加粗至 3.2px 醒目标识，绝无发光飞碟或白色虚浮框)
+      // 队色边框 (持球人加粗至 3.2px 醒目标识)
       ctx.strokeStyle = isHome ? "#10b981" : "#f59e0b";
       ctx.lineWidth = player.hasBall ? 3.2 : 2.0;
       ctx.stroke();
@@ -2000,15 +2174,13 @@
       // 持球人外围极细微自然提示环
       if (player.hasBall) {
         ctx.beginPath();
-        ctx.arc(px, py, radius + 3.5, 0, Math.PI * 2);
+        ctx.arc(0, 0, radius + 3.5, 0, Math.PI * 2);
         ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.6)" : "rgba(245, 158, 11, 0.6)";
         ctx.lineWidth = 1.2;
         ctx.stroke();
       }
-      ctx.restore();
 
-      // 5. 纯白清晰数字背号 (居中，高对比度)
-      ctx.save();
+      // 纯白清晰数字背号 (居中，高对比度)
       ctx.font = "700 11.5px monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -2018,10 +2190,11 @@
           : String(player.number);
 
       ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
-      ctx.fillText(num, px + 0.5, py + 1.0);
+      ctx.fillText(num, 0.5, 1.0);
       ctx.fillStyle = "#ffffff";
-      ctx.fillText(num, px, py + 0.5);
-      ctx.restore();
+      ctx.fillText(num, 0, 0.5);
+
+      ctx.restore(); // 还原 translate(px, py)
 
       // 6. 脚下纯中文位置角色微标 (控卫 / 分卫 / 小前 / 大前 / 中锋)
       const posText = getPositionZh(player.position);

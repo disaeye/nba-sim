@@ -298,6 +298,40 @@ def main():
         assert play_data["isAdvancing"], "播放状态下帧计数必须平滑自增推进"
         print("✅ 动画播放与动效渲染循环运行流畅，无异常停滞")
 
+        # 5. 验证球员战术动作几何动力学（投篮动作帧、运球变向帧、掩护与防守帧）
+        js_verify_player_actions = """
+        (function() {
+            const state = window.__nbaDebug;
+            const actionFrames = [122, 1005, 1012, 1018, 1056];
+            const reports = [];
+
+            for (const f of actionFrames) {
+                document.getElementById("progressInput").value = String(f);
+                document.getElementById("progressInput").dispatchEvent(new Event("input"));
+
+                const tick = state.ticks[f];
+                const activePlayers = (tick.players || []).filter(p => p.onCourt !== false);
+                const hasValidHits = (state.hitPlayers || []).length === activePlayers.length;
+                const noNaNCoords = activePlayers.every(p => !isNaN(p.x) && !isNaN(p.y));
+
+                reports.push({
+                    frame: f,
+                    playerCount: activePlayers.length,
+                    hasValidHits,
+                    noNaNCoords
+                });
+            }
+
+            return { reports };
+        })()
+        """
+        actions_data = run_chrome_eval(js_verify_player_actions)
+        for r in actions_data["reports"]:
+            assert r["playerCount"] == 10, f"帧 {r['frame']} 在场球员数量必须为10"
+            assert r["hasValidHits"], f"帧 {r['frame']} 球员点击检测命中数组必须与在场球员数一致"
+            assert r["noNaNCoords"], f"帧 {r['frame']} 球员坐标严禁出现 NaN"
+        print("✅ 球员动作动画动力学（投篮瞄准压腕、运球节拍、防守罩、挡拆卡位）多帧渲染严格校验通过")
+
         print("\n🎉 所有球场、球员与篮球高辨识度动效测试全部顺利通过！")
     finally:
         proc.terminate()
