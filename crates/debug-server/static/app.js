@@ -1646,7 +1646,7 @@
           ctx.quadraticCurveTo(midX, midY, targetPt.x, targetPt.y);
           ctx.stroke();
           ctx.restore();
-        } else if (false /* TO_REMOVE_2 */) {
+        } else if (fx.type === "disabled_block_shield") {
           ctx.moveTo(pt.x, pt.y - r);
           ctx.lineTo(pt.x, pt.y + r);
           ctx.strokeStyle = "rgba(56, 189, 248, 0.6)";
@@ -2031,132 +2031,154 @@
         );
       }
 
+      // 5. 特殊战术基座 (如掩护设立战术方框底盘)
+      const isScreening = /Screen/i.test(act);
+      if (isScreening) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.75)";
+        ctx.lineWidth = 1.8;
+        ctx.strokeRect(
+          bodyCenterX - playerRadius - 3.5,
+          bodyCenterY - playerRadius - 3.5,
+          (playerRadius + 3.5) * 2,
+          (playerRadius + 3.5) * 2,
+        );
+        ctx.restore();
+      }
+
+      // 6. 持球人专属高对比度战术光标 (Ball Handler Ring)
+      if (player.hasBall) {
+        ctx.save();
+        // 地面柔和战术聚光底盘
+        const auraGrad = ctx.createRadialGradient(
+          playerPoint.x,
+          playerPoint.y,
+          playerRadius * 0.4,
+          playerPoint.x,
+          playerPoint.y,
+          playerRadius + 11,
+        );
+        auraGrad.addColorStop(0, "rgba(245, 158, 11, 0.32)");
+        auraGrad.addColorStop(0.7, "rgba(245, 158, 11, 0.12)");
+        auraGrad.addColorStop(1, "rgba(245, 158, 11, 0)");
+        ctx.beginPath();
+        ctx.arc(playerPoint.x, playerPoint.y, playerRadius + 11, 0, Math.PI * 2);
+        ctx.fillStyle = auraGrad;
+        ctx.fill();
+
+        // 旋转金色持球双弧线
+        const ringAngle = (now * 0.0035) % (Math.PI * 2);
+        ctx.strokeStyle = "#fbbf24";
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.arc(bodyCenterX, bodyCenterY, playerRadius + 4.5, ringAngle, ringAngle + 1.8);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(
+          bodyCenterX,
+          bodyCenterY,
+          playerRadius + 4.5,
+          ringAngle + Math.PI,
+          ringAngle + Math.PI + 1.8,
+        );
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 7. 战术朝向几何指针 (Facing Chevron & Vision Cone)
+      const teamBrightColor = isHome ? "#10b981" : "#f59e0b";
+      const teamGlowColor = isHome ? "#34d399" : "#fbbf24";
+
       ctx.save();
       ctx.translate(bodyCenterX, bodyCenterY);
       ctx.rotate(facingAngle);
 
-      // 5. 肢体动作与手臂几何结构 (Articulated Arms & Hands)
-      const shoulderWidth = 27;
-      const chestDepth = 15.5;
-      const jerseyBaseColor = isHome ? "#084925" : "#4a2106";
-      const jerseyTrimColor = isHome ? "#10b981" : "#f59e0b";
-      const skinColor = "#c68a58";
+      // 战术视线微弱扇形
+      ctx.beginPath();
+      ctx.moveTo(playerRadius - 1, 0);
+      ctx.lineTo(playerRadius + 13, -5.5);
+      ctx.lineTo(playerRadius + 13, 5.5);
+      ctx.closePath();
+      ctx.fillStyle = isHome
+        ? "rgba(52, 211, 153, 0.16)"
+        : "rgba(251, 191, 36, 0.16)";
+      ctx.fill();
 
-      // 动作态势手臂关节
-      let leftHand = { x: 7, y: -13 };
-      let rightHand = { x: 7, y: 13 };
-      let leftElbow = { x: 2, y: -14 };
-      let rightElbow = { x: 2, y: 14 };
+      // 朝向等腰三角形战术指针 (Chevron)
+      ctx.beginPath();
+      ctx.moveTo(playerRadius + 5.5, 0);
+      ctx.lineTo(playerRadius + 0.5, -4);
+      ctx.lineTo(playerRadius + 0.5, 4);
+      ctx.closePath();
+      ctx.fillStyle = teamGlowColor;
+      ctx.fill();
 
-      const isScreening = /Screen/i.test(act);
-      const isCutting = /Cut|Drive|Dip/i.test(act) || curSpeed > 9.0;
+      // 防守对位正面防护弧线 (当积极防守时张开)
       const isDefending =
         isContestingAction ||
         /Chaser|PointOfAttack|WingStopper|CONTAIN|SHELL|HELP/i.test(
           act + (player.defensive_role || ""),
         );
-
-      if (isShootingAction) {
-        // 投篮动作：右臂全力伸展压腕出手，左手辅助护球
-        rightElbow = { x: 12, y: 3 };
-        rightHand = { x: 22, y: 4 };
-        leftElbow = { x: 8, y: -7 };
-        leftHand = { x: 14, y: -3 };
-      } else if (player.hasBall) {
-        // 真实运球体态：运球手在身侧有规律引球摆动，护球手向前微架
-        const dribbleCycle = Math.sin(now * 0.015);
-        rightElbow = { x: 5 + dribbleCycle * 2, y: 11 };
-        rightHand = { x: 14 + dribbleCycle * 4, y: 12 };
-        leftElbow = { x: 6, y: -11 };
-        leftHand = { x: 12, y: -7 };
-      } else if (isScreening) {
-        // 掩护筑墙：双臂紧抱胸前
-        leftElbow = { x: 4, y: -10 };
-        leftHand = { x: 9, y: 2 };
-        rightElbow = { x: 4, y: 10 };
-        rightHand = { x: 9, y: -2 };
-      } else if (isContestingAction) {
-        // 扑起封盖干扰：双臂高高举起向前伸展封盖
-        leftElbow = { x: 10, y: -14 };
-        leftHand = { x: 20, y: -11 };
-        rightElbow = { x: 10, y: 14 };
-        rightHand = { x: 20, y: 11 };
-      } else if (isDefending) {
-        // 防守滑步：双臂完全向两侧张开呈巨大臂展
-        leftElbow = { x: 0, y: -17 };
-        leftHand = { x: 4, y: -20 };
-        rightElbow = { x: 0, y: 17 };
-        rightHand = { x: 4, y: 20 };
-      } else if (isCutting) {
-        // 空切奔跑：前后自然摆臂
-        const armSwing = Math.sin(now * 0.012) * 8;
-        leftElbow = { x: -armSwing * 0.5, y: -13 };
-        leftHand = { x: -armSwing, y: -12 };
-        rightElbow = { x: armSwing * 0.5, y: 13 };
-        rightHand = { x: armSwing, y: 12 };
+      if (isDefending) {
+        ctx.beginPath();
+        ctx.arc(0, 0, playerRadius + 2.8, -Math.PI * 0.45, Math.PI * 0.45);
+        ctx.strokeStyle = teamGlowColor;
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
       }
 
-      // 绘制真实双臂
-      ctx.strokeStyle = skinColor;
-      ctx.lineWidth = 3.6;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
+      ctx.restore();
 
-      ctx.beginPath();
-      ctx.moveTo(-1, -shoulderWidth * 0.42);
-      ctx.lineTo(leftElbow.x, leftElbow.y);
-      ctx.lineTo(leftHand.x, leftHand.y);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(-1, shoulderWidth * 0.42);
-      ctx.lineTo(rightElbow.x, rightElbow.y);
-      ctx.lineTo(rightHand.x, rightHand.y);
-      ctx.stroke();
-
-      // 手腕手掌微标
-      ctx.fillStyle = skinColor;
-      ctx.beginPath();
-      ctx.arc(leftHand.x, leftHand.y, 2.4, 0, Math.PI * 2);
-      ctx.arc(rightHand.x, rightHand.y, 2.4, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 6. 躯干与球衣背心 (宽厚肩背圆角轮廓)
-      ctx.fillStyle = jerseyBaseColor;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, chestDepth * 0.75, shoulderWidth * 0.55, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = jerseyTrimColor;
-      ctx.lineWidth = 1.8;
-      ctx.stroke();
-
-      // 7. 头部 (中心圆头型发带)
-      ctx.fillStyle = "#1e1e24";
-      ctx.beginPath();
-      ctx.arc(1, 0, 5.8, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = jerseyTrimColor;
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
-
-      // 8. 球衣后背背号 (清晰纯白粗体)
+      // 8. 战术圆形图徽底盘 (Tactical Player Disc)
       ctx.save();
-      ctx.rotate(-Math.PI / 2);
-      ctx.font = "800 10.5px 'JetBrains Mono', monospace";
+      const discGrad = ctx.createRadialGradient(
+        bodyCenterX - 3,
+        bodyCenterY - 3,
+        2,
+        bodyCenterX,
+        bodyCenterY,
+        playerRadius,
+      );
+      if (isHome) {
+        discGrad.addColorStop(0, "#084925");
+        discGrad.addColorStop(1, "#022413");
+      } else {
+        discGrad.addColorStop(0, "#4a2106");
+        discGrad.addColorStop(1, "#220e02");
+      }
+
+      ctx.beginPath();
+      ctx.arc(bodyCenterX, bodyCenterY, playerRadius, 0, Math.PI * 2);
+      ctx.fillStyle = discGrad;
+      ctx.fill();
+
+      // 双层高质感描边外圈
+      ctx.strokeStyle = teamBrightColor;
+      ctx.lineWidth = 2.4;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(bodyCenterX, bodyCenterY, playerRadius - 2.4, 0, Math.PI * 2);
+      ctx.strokeStyle = teamGlowColor;
+      ctx.lineWidth = 1.0;
+      ctx.stroke();
+      ctx.restore();
+
+      // 9. 纯白高清晰背号 (Back Number)
+      ctx.save();
+      ctx.font = "800 12px 'JetBrains Mono', monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       const num =
         player.number === undefined
           ? String(player.id || "")
           : String(player.number);
-      ctx.fillStyle = "#000000";
-      ctx.fillText(num, 0.5, 0.5);
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(num, 0, 0);
-      ctx.restore();
 
+      // 背号立体黑投影
+      ctx.fillStyle = "rgba(0, 0, 0, 0.9)";
+      ctx.fillText(num, bodyCenterX + 0.6, bodyCenterY + 1.2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(num, bodyCenterX, bodyCenterY + 0.5);
       ctx.restore();
 
       // 9. 脚下极小位置角色微标 (PG / SG / SF / PF / C)
