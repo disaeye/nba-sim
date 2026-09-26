@@ -117,6 +117,7 @@
     previousRaf: 0,
     accumulator: 0,
     currentTab: "timeline",
+    teamPerspective: "home",
     courtMode: "full",
     potentialFieldVisible: true,
     lastFrameJson: -1,
@@ -378,11 +379,37 @@
       studio = null;
     }
     selectedPlayerId = studio?.default_setup?.home_team?.players?.[0]?.id || null;
+    updatePerspectiveNav();
     renderStudio();
   }
 
   function label(group, key) {
     return studio?.labels?.[group]?.[key] || key;
+  }
+
+  function setTeamPerspective(side) {
+    state.teamPerspective = side;
+    const isHome = side === "home";
+    const team = isHome ? studio?.default_setup?.home_team : studio?.default_setup?.away_team;
+    selectedPlayerId = team?.players?.[0]?.id || null;
+    updatePerspectiveNav();
+    renderStudio();
+  }
+
+  function updatePerspectiveNav() {
+    if (!studio) return;
+    const homeName = getTeamNameZh(studio.default_setup.home_team.id) || studio.default_setup.home_team.name;
+    const awayName = getTeamNameZh(studio.default_setup.away_team.id) || studio.default_setup.away_team.name;
+    const homeText = $("perspectiveHomeText");
+    const awayText = $("perspectiveAwayText");
+    if (homeText) homeText.textContent = `${homeName} (主队)`;
+    if (awayText) awayText.textContent = `${awayName} (客队)`;
+
+    const homeBtn = $("perspectiveHomeBtn");
+    const awayBtn = $("perspectiveAwayBtn");
+    const isHome = state.teamPerspective === "home";
+    if (homeBtn) homeBtn.classList.toggle("active", isHome);
+    if (awayBtn) awayBtn.classList.toggle("active", !isHome);
   }
 
   function renderStudio() {
@@ -404,18 +431,54 @@
 
   function renderBoard() {
     const root = $("tacticBoard");
+    if (!root || !studio) return;
+    const setup = studio.default_setup;
+    const isHome = state.teamPerspective === "home";
+    const side = isHome ? "home" : "away";
+    const team = isHome ? setup.home_team : setup.away_team;
+    const lineup = isHome ? setup.home_lineup : setup.away_lineup;
+    const playbook = isHome ? setup.home_playbook : setup.away_playbook;
+
     root.replaceChildren(
-      boardSide("away", studio.default_setup.away_team, studio.default_setup.away_lineup, studio.default_setup.away_playbook),
-      boardSide("home", studio.default_setup.home_team, studio.default_setup.home_lineup, studio.default_setup.home_playbook),
+      singleTeamTacticalBoard(side, team, lineup, playbook)
     );
   }
 
-  function boardSide(side, team, lineup, playbook) {
+  function singleTeamTacticalBoard(side, team, lineup, playbook) {
     const offense = studio.offense.find((item) => item.id === lineup.offense_tactic);
-    const card = el("section", `studio-side ${side}`);
-    card.append(
-      el("div", "studio-head", el("strong", null, team.name), el("span", null, side === "home" ? "主队" : "客队")),
-      el("div", "choice-meta", "进攻体系"),
+    const defense = studio.defense.find((item) => item.id === lineup.defense_tactic);
+    const isHome = side === "home";
+    const teamNameZh = getTeamNameZh(team.id) || team.name;
+
+    const wrap = el("div", "studio-board");
+
+    // 顶部执教信息横幅
+    const banner = el("div", "studio-team-banner");
+    const metaBox = el("div", "banner-team-meta");
+    metaBox.append(
+      el("span", `perspective-dot ${isHome ? "home-dot" : "away-dot"}`),
+      el("strong", null, `${teamNameZh} · 战术指挥中枢`),
+      el("span", `banner-team-tag ${isHome ? "home" : "away"}`, isHome ? "主场作战" : "客场作战"),
+      el("span", "banner-team-tag", `进攻: ${offense?.name_zh || "未配置"}`),
+      el("span", "banner-team-tag", `防守: ${defense?.name_zh || "未配置"}`),
+    );
+    const privacyHint = el(
+      "div",
+      "banner-privacy-badge",
+      el("span", null, "更衣室机密档案 (对手不可见)")
+    );
+    banner.append(metaBox, privacyHint);
+    wrap.append(banner);
+
+    // 三列并列专业战术网格
+    const grid = el("div", "tactic-three-grid");
+
+    // 第 1 栏：进攻体系与半场落位沙盘
+    const offenseCard = el("section", "tactic-panel-card");
+    const offTitle = el("div", "tactic-panel-title");
+    offTitle.append(el("strong", null, "进攻战术体系"), el("span", null, "阵地落位与构型"));
+    offenseCard.append(
+      offTitle,
       choiceRow(studio.offense, lineup.offense_tactic, (id) => {
         lineup.offense_tactic = id;
         const next = studio.offense.find((item) => item.id === id);
@@ -425,15 +488,36 @@
         renderStudio();
       }),
       courtMini(offense?.spec),
-      el("div", "choice-meta", "防守体系"),
+    );
+
+    // 第 2 栏：防守战术体系
+    const defenseCard = el("section", "tactic-panel-card");
+    const defTitle = el("div", "tactic-panel-title");
+    defTitle.append(el("strong", null, "防守博弈策略"), el("span", null, "限制与协防倾向"));
+    defenseCard.append(
+      defTitle,
       choiceRow(studio.defense, lineup.defense_tactic, (id) => {
         lineup.defense_tactic = id;
         renderStudio();
       }),
-      el("div", "choice-meta", "战术板"),
+    );
+
+    // 第 3 栏：战术剧本库 (Playbook)
+    const playbookCard = el("section", "tactic-panel-card");
+    const playTitle = el("div", "tactic-panel-title");
+    playTitle.append(el("strong", null, "战术触发手册"), el("span", null, `已装配 ${playbook.length} 套战术`));
+    playbookCard.append(
+      playTitle,
       playList(playbook),
     );
-    return card;
+
+    grid.append(offenseCard, defenseCard, playbookCard);
+    wrap.append(grid);
+    return wrap;
+  }
+
+  function boardSide(side, team, lineup, playbook) {
+    return singleTeamTacticalBoard(side, team, lineup, playbook);
   }
 
   function choiceRow(items, selected, onPick) {
@@ -493,24 +577,58 @@
 
   function renderRoster() {
     const root = $("rosterStudio");
-    const teams = [studio.default_setup.home_team, studio.default_setup.away_team];
-    const players = teams.flatMap((team) => team.players.map((player) => ({ team, player })));
-    const selected = players.find((item) => item.player.id === selectedPlayerId) || players[0];
-    const list = el("div", "player-list");
-    for (const item of players) {
-      const button = el("button", item.player.id === selected.player.id ? "active" : "");
-      button.type = "button";
-      button.append(
-        el("strong", null, item.player.jersey + " " + item.player.name),
-        el("span", "choice-meta", item.team.short_name + " · " + getPositionZh(item.player.position)),
-      );
-      button.addEventListener("click", () => {
-        selectedPlayerId = item.player.id;
-        renderRoster();
-      });
-      list.append(button);
+    if (!root || !studio) return;
+    const isHome = state.teamPerspective === "home";
+    const team = isHome ? studio.default_setup.home_team : studio.default_setup.away_team;
+    const teamPlayers = team.players || [];
+
+    // 若当前选中的球员不属于该队伍，默认切换为该队伍首位球员
+    let selected = teamPlayers.find((p) => p.id === selectedPlayerId);
+    if (!selected) {
+      selected = teamPlayers[0];
+      selectedPlayerId = selected?.id || null;
     }
-    root.replaceChildren(el("div", "roster-layout", list, playerSheet(selected.team, selected.player)));
+
+    const list = el("div", "player-list");
+
+    // 首发阵容
+    const starters = teamPlayers.filter((p) => p.starter);
+    if (starters.length) {
+      list.append(el("div", "roster-group-label", "首发阵容"));
+      for (const player of starters) {
+        list.append(createPlayerButton(player, team, selected));
+      }
+    }
+
+    // 轮换替补
+    const bench = teamPlayers.filter((p) => !p.starter);
+    if (bench.length) {
+      list.append(el("div", "roster-group-label", "轮换替补"));
+      for (const player of bench) {
+        list.append(createPlayerButton(player, team, selected));
+      }
+    }
+
+    root.replaceChildren(
+      el("div", "roster-layout", list, playerSheet(team, selected))
+    );
+  }
+
+  function createPlayerButton(player, team, selected) {
+    const button = el(
+      "button",
+      player.id === selected.id ? "active" : ""
+    );
+    button.type = "button";
+    button.append(
+      el("strong", null, `#${player.jersey} ${player.name}`),
+      el("span", "choice-meta", `${getPositionZh(player.position)} · ${getOffensiveRoleZh(player.offensive_role)}`),
+    );
+    button.addEventListener("click", () => {
+      selectedPlayerId = player.id;
+      renderRoster();
+    });
+    return button;
   }
 
   function playerSheet(team, player) {
@@ -3145,12 +3263,27 @@
           pane.hidden = !active;
           pane.classList.toggle("active", active);
         });
+        const isTeamConfigTab = state.currentTab === "board" || state.currentTab === "roster";
+        const perspectiveBar = $("teamPerspectiveBar");
+        if (perspectiveBar) {
+          perspectiveBar.style.display = isTeamConfigTab ? "flex" : "none";
+        }
         if (state.currentTab === "shots") renderShotMap();
         if (state.currentTab === "frame" && state.ticks[state.idx]) {
           renderFrameJson(state.ticks[state.idx]);
         }
       }),
     );
+
+    // 球队执教视角切换按钮 (主队 / 客队)
+    const perspectiveHomeBtn = $("perspectiveHomeBtn");
+    const perspectiveAwayBtn = $("perspectiveAwayBtn");
+    if (perspectiveHomeBtn) {
+      perspectiveHomeBtn.addEventListener("click", () => setTeamPerspective("home"));
+    }
+    if (perspectiveAwayBtn) {
+      perspectiveAwayBtn.addEventListener("click", () => setTeamPerspective("away"));
+    }
     $("prevPossessionButton").addEventListener("click", () =>
       possessionJump(-1),
     );

@@ -323,6 +323,26 @@
             </button>
           </div>
 
+          <!-- 球队执教视角切换栏 (仅配置与查看当前所选队伍内部机密信息) -->
+          <div id="teamPerspectiveBar" class="team-perspective-bar">
+            <div class="perspective-left">
+              <span class="perspective-badge">执教视角</span>
+              <div class="team-perspective-tabs" role="tablist">
+                <button id="perspectiveHomeBtn" class="perspective-btn active" type="button" data-team="home">
+                  <span class="perspective-dot home-dot"></span>
+                  <span id="perspectiveHomeText">波士顿凯尔特人 (主队)</span>
+                </button>
+                <button id="perspectiveAwayBtn" class="perspective-btn" type="button" data-team="away">
+                  <span class="perspective-dot away-dot"></span>
+                  <span id="perspectiveAwayText">洛杉矶湖人 (客队)</span>
+                </button>
+              </div>
+            </div>
+            <div class="perspective-right">
+              <span class="perspective-privacy-hint">仅展示与配置本队内部战术剧本与球员档案</span>
+            </div>
+          </div>
+
           <div class="tab-content-card">
             <!-- Tab 1: 战术体系板 -->
             <div id="tab-board" class="tab-pane active">

@@ -1523,6 +1523,102 @@ body {
   flex-shrink: 0;
 }
 
+/* 球队执教视角切换栏 (仅本队内部机密战术与专属资料) */
+.team-perspective-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  margin: 6px 10px 4px;
+  background: #f8fafc;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.perspective-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.perspective-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: var(--radius-xs);
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  color: #2563eb;
+  letter-spacing: 0.4px;
+}
+
+.team-perspective-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f1f5f9;
+  padding: 2px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+}
+
+.perspective-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-full);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  -webkit-tap-highlight-color: transparent;
+}
+.perspective-btn:hover {
+  color: var(--text-primary);
+}
+.perspective-btn.active {
+  background: #ffffff;
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+.perspective-btn[data-team="home"].active {
+  border: 1px solid rgba(5, 150, 105, 0.35);
+  color: #065f46;
+}
+.perspective-btn[data-team="away"].active {
+  border: 1px solid rgba(217, 119, 6, 0.35);
+  color: #92400e;
+}
+
+.perspective-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.perspective-dot.home-dot {
+  background: var(--color-home);
+}
+.perspective-dot.away-dot {
+  background: var(--color-away);
+}
+
+.perspective-right {
+  display: flex;
+  align-items: center;
+}
+.perspective-privacy-hint {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
 .tab-button {
   flex: 1;
   display: inline-flex;
@@ -1571,9 +1667,88 @@ body {
 
 /* ----------------- 战术板 (Tactic Board) ----------------- */
 .studio-board {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.studio-team-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.banner-team-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.banner-team-meta strong {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+.banner-team-tag {
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  background: #f1f5f9;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.banner-team-tag.home {
+  background: var(--color-home-subtle);
+  color: var(--color-home);
+  border: 1px solid rgba(5, 150, 105, 0.25);
+}
+.banner-team-tag.away {
+  background: var(--color-away-subtle);
+  color: var(--color-away);
+  border: 1px solid rgba(217, 119, 6, 0.25);
+}
+.banner-privacy-badge {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tactic-three-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.tactic-panel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.tactic-panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 6px;
+}
+.tactic-panel-title span {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
 }
 
 .studio-side {
@@ -1690,6 +1865,14 @@ body {
   display: grid;
   gap: 6px;
   align-content: start;
+}
+.roster-group-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 4px 2px;
 }
 .player-list button {
   display: grid;
