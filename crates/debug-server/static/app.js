@@ -803,14 +803,15 @@
     offTitle.append(el("strong", null, "核心进攻体系"), el("span", null, "7大职业战术体系"));
     offenseCard.append(
       offTitle,
-      choiceRow(studio.offense, lineup.offense_tactic, (id) => {
+      choiceRow(studio.offense, lineup.offense_tactic, async (id) => {
         lineup.offense_tactic = id;
         const next = studio.offense.find((item) => item.id === id);
         const compatible = (studio.plays || []).filter((play) => playFits(play, next?.spec));
         if (side === "home") studio.default_setup.home_playbook = compatible;
         else studio.default_setup.away_playbook = compatible;
         renderStudio();
-        runSimulation();
+        setRunStatus(`已切换至【${cleanTacticNameZh(next?.name_zh)}】，正在重新模拟比赛…`);
+        await runSimulation(null, true);
       }),
       renderTacticalDirectives(team),
     );
@@ -821,10 +822,12 @@
     defTitle.append(el("strong", null, "防守博弈策略"), el("span", null, "阵型与掩护应对"));
     defenseCard.append(
       defTitle,
-      defenseGroupedRow(studio.defense, lineup.defense_tactic, (id) => {
+      defenseGroupedRow(studio.defense, lineup.defense_tactic, async (id) => {
         lineup.defense_tactic = id;
+        const defItem = studio.defense.find((d) => d.id === id);
         renderStudio();
-        runSimulation();
+        setRunStatus(`已切换防守策略为【${cleanTacticNameZh(defItem?.name_zh || "防守")}】，正在重新模拟比赛…`);
+        await runSimulation(null, true);
       }),
       renderDefensiveIntel(lineup.defense_tactic),
     );
@@ -857,17 +860,19 @@
     const threeBtn = el("button", `directive-chip${traits.three_point_emphasis >= 0.55 ? " active" : ""}`, "三分投射");
     rimBtn.type = "button";
     threeBtn.type = "button";
-    rimBtn.addEventListener("click", () => {
+    rimBtn.addEventListener("click", async () => {
       traits.rim_pressure = 0.75;
       traits.three_point_emphasis = 0.45;
       renderStudio();
-      runSimulation();
+      setRunStatus("已调整战术倾向为【攻筐为主】，正在重新模拟比赛…");
+      await runSimulation(null, true);
     });
-    threeBtn.addEventListener("click", () => {
+    threeBtn.addEventListener("click", async () => {
       traits.rim_pressure = 0.45;
       traits.three_point_emphasis = 0.75;
       renderStudio();
-      runSimulation();
+      setRunStatus("已调整战术倾向为【三分投射】，正在重新模拟比赛…");
+      await runSimulation(null, true);
     });
     chips1.append(rimBtn, threeBtn);
     row1.append(chips1);
@@ -880,15 +885,17 @@
     const controlBtn = el("button", `directive-chip${traits.pace < 0.55 ? " active" : ""}`, "阵地耐心");
     fastBtn.type = "button";
     controlBtn.type = "button";
-    fastBtn.addEventListener("click", () => {
+    fastBtn.addEventListener("click", async () => {
       traits.pace = 0.75;
       renderStudio();
-      runSimulation();
+      setRunStatus("已调整比赛节奏为【快打风暴】，正在重新模拟比赛…");
+      await runSimulation(null, true);
     });
-    controlBtn.addEventListener("click", () => {
+    controlBtn.addEventListener("click", async () => {
       traits.pace = 0.42;
       renderStudio();
-      runSimulation();
+      setRunStatus("已调整比赛节奏为【阵地耐心】，正在重新模拟比赛…");
+      await runSimulation(null, true);
     });
     chips2.append(fastBtn, controlBtn);
     row2.append(chips2);
@@ -1418,14 +1425,14 @@
     return rules;
   }
 
-  async function runSimulation(withRules = null) {
+  async function runSimulation(withRules = null, autoPlay = true) {
     stopPlayback();
     // 移动端体验：模拟开始时视口保持在球场核心区域，杜绝下滚遮挡
     window.scrollTo({ top: 0, behavior: "smooth" });
     const parsedSeed = Number.parseInt($("seedInput").value, 10);
     const seed = Number.isFinite(parsedSeed) ? parsedSeed : 42;
     const scope = $("scopeInput").value;
-    setRunStatus("模拟运行中…");
+    setRunStatus("重新模拟推演中…");
     setControlsBusy(true);
     try {
       if (!withRules) await fetchDefaultRules(false);
@@ -1468,7 +1475,10 @@
 
       if (withRules) state.rules = { ...state.rules, ...withRules };
       loadStream(responseText, `seed ${seed} · ${scope}`);
-      setRunStatus(`${state.ticks.length.toLocaleString()} ticks`);
+      setRunStatus(`${state.ticks.length.toLocaleString()} 帧 · 模拟推演完成`);
+      if (autoPlay) {
+        startPlayback();
+      }
       return true;
     } catch (error) {
       setRunStatus("运行失败", true);
@@ -3848,6 +3858,14 @@
     state.playing = false;
     updatePlayButton();
   }
+  function startPlayback() {
+    if (!state.ticks.length) return;
+    state.playing = true;
+    state.previousRaf = 0;
+    updatePlayButton();
+    if (!state.rafId)
+      state.rafId = requestAnimationFrame(playbackFrame);
+  }
   function updatePlayButton() {
     $("playButton").textContent = state.playing ? "Ⅱ" : "▶";
   }
@@ -4260,6 +4278,8 @@
           perspectiveBar.style.display = isTeamConfigTab ? "flex" : "none";
         }
         if (state.currentTab === "shots") renderShotMap();
+        if (state.currentTab === "stats" && state.analytics) renderStats(state.analytics.stats);
+        if (state.currentTab === "board") renderStudio();
         if (state.currentTab === "frame" && state.ticks[state.idx]) {
           renderFrameJson(state.ticks[state.idx]);
         }
@@ -4490,12 +4510,19 @@
       selectedPlayerId = catalog.default_setup.home_team.players[0].id;
       renderStudio();
     },
-    selectOffense(side, id) {
+    async selectOffense(side, id) {
       const lineup = studio.default_setup[side + "_lineup"];
       lineup.offense_tactic = id;
       const next = studio.offense.find((item) => item.id === id);
       studio.default_setup[side + "_playbook"] = (studio.plays || []).filter((play) => playFits(play, next?.spec));
       renderStudio();
+      await runSimulation(null, true);
+    },
+    async selectDefense(side, id) {
+      const lineup = studio.default_setup[side + "_lineup"];
+      lineup.defense_tactic = id;
+      renderStudio();
+      await runSimulation(null, true);
     },
   };
   boot().catch((error) => {
