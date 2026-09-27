@@ -507,12 +507,13 @@ fn studio_catalog() -> Result<Vec<u8>, String> {
 
 fn offense_catalog() -> Vec<serde_json::Value> {
     [
-        ("off_horns_pnr", "高位挡拆战术"),
-        ("off_motion_spacing", "五外动态进攻"),
-        ("off_transition_push", "快攻闪击反击"),
-        ("off_delay_attack", "高位单打"),
-        ("off_post_split", "低位背身单打"),
-        ("off_drag_screen", "突分投射"),
+        ("off_horns_pnr", "牛角高位挡拆体系"),
+        ("off_spain_pnr", "西班牙双掩护体系"),
+        ("off_motion_spacing", "五外动态进攻体系"),
+        ("off_transition_push", "快攻闪击转换体系"),
+        ("off_delay_attack", "高位单打体系"),
+        ("off_post_split", "低位背身策应体系"),
+        ("off_drag_screen", "突分投射体系"),
     ]
     .into_iter()
     .map(|(id, fallback)| {
@@ -542,8 +543,9 @@ fn defense_catalog() -> Vec<serde_json::Value> {
 }
 
 fn play_catalog() -> Vec<nba_domain::PlaySpec> {
-    const PLAYS: [&str; 3] = [
+    const PLAYS: [&str; 4] = [
         include_str!("../../../data/tactics/plays/high_pnr_roll_v1.json"),
+        include_str!("../../../data/tactics/plays/spain_pnr_stack_v1.json"),
         include_str!("../../../data/tactics/plays/corner_backdoor_v1.json"),
         include_str!("../../../data/tactics/plays/weak_side_lift_v1.json"),
     ];

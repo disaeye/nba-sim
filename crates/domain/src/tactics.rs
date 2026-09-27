@@ -314,9 +314,17 @@ impl TacticalSetSpec {
         spec
     }
 
+    pub fn spain_pick_and_roll() -> Self {
+        const JSON: &str = include_str!("../../../data/tactics/spain_pick_and_roll.json");
+        let spec = Self::from_json(JSON).expect("内置 spain_pick_and_roll.json 必须合法");
+        spec.validate().expect("内置 spain_pick_and_roll.json 必须自洽");
+        spec
+    }
+
     pub fn builtin(id: &str) -> Option<Self> {
         match id {
             "off_horns_pnr" | "high_pick_and_roll" => Some(Self::high_pick_and_roll()),
+            "off_spain_pnr" | "spain_pick_and_roll" => Some(Self::spain_pick_and_roll()),
             "off_motion_spacing" | "five_out_motion" => Some(Self::five_out_motion()),
             _ => None,
         }

@@ -246,10 +246,15 @@
   const SLOT_ZH = {
     top: "弧顶持球位",
     screener: "高位掩护位",
+    stack_screener: "背掩护外弹位",
     weak_wing: "弱侧侧翼",
     strong_corner: "强侧底角",
     weak_corner: "弱侧底角",
     strong_wing: "强侧侧翼",
+    left_wing: "左侧 45° 侧翼",
+    right_wing: "右侧 45° 侧翼",
+    left_corner: "左底角射手位",
+    right_corner: "右底角射手位",
     paint: "禁区油漆区",
     rim: "篮下护筐位",
     on_ball: "领防对位",
@@ -407,15 +412,16 @@
   }
 
   const TACTIC_SYSTEM_DESC_ZH = {
-    off_horns_pnr: "高位挡拆顺下配合",
-    off_motion_spacing: "五人外围流动传切",
-    off_transition_push: "快攻快速推进入筐",
-    off_delay_attack: "高位弧顶拉开单打",
-    off_post_split: "内线低位背身策应",
-    off_drag_screen: "转换跟进追身掩护",
+    off_horns_pnr: "双高位牛角挡拆顺下配合",
+    off_spain_pnr: "西班牙双掩护顺下与外弹",
+    off_motion_spacing: "五外动态无球传切跑位",
+    off_transition_push: "快攻快速推进抢攻入筐",
+    off_delay_attack: "高位弧顶拉开单打分球",
+    off_post_split: "内线低位背身策应切入",
+    off_drag_screen: "转换跟进追身掩护投射",
     def_man_conservative: "常规半场对位人盯人",
     def_man_pressure: "全场紧逼持球施压",
-    def_switch_heavy: "无缝轮转换防阻截",
+    def_switch_heavy: "无限轮转换防阻截",
     def_drop_coverage: "中锋沉退护筐策略",
     def_hedge_recover: "大延误阻绝突破返位",
     def_zone_23: "经典二三联防保护油漆区",
@@ -628,13 +634,13 @@
       courtMini(offense?.spec),
     );
 
-    // 第 2 栏：防守战术体系
+    // 第 2 栏：防守战术体系 (按基础形态与挡拆应对正交解耦)
     const defenseCard = el("section", "tactic-panel-card");
     const defTitle = el("div", "tactic-panel-title");
-    defTitle.append(el("strong", null, "防守博弈策略"), el("span", null, "限制与协防倾向"));
+    defTitle.append(el("strong", null, "防守博弈策略"), el("span", null, "基础阵型与挡拆应对"));
     defenseCard.append(
       defTitle,
-      choiceRow(studio.defense, lineup.defense_tactic, (id) => {
+      defenseGroupedRow(studio.defense, lineup.defense_tactic, (id) => {
         lineup.defense_tactic = id;
         renderStudio();
       }),
@@ -656,6 +662,51 @@
 
   function boardSide(side, team, lineup, playbook) {
     return singleTeamTacticalBoard(side, team, lineup, playbook);
+  }
+
+  function defenseGroupedRow(items, selected, onPick) {
+    const wrap = el("div", "defense-grouped-wrap");
+
+    // 组 1：全队基础防守形态 (Base Scheme)
+    const baseIds = ["def_man_conservative", "def_man_pressure", "def_zone_23"];
+    const baseItems = items.filter((item) => baseIds.includes(item.id));
+    const baseGroup = el("div", "defense-group");
+    baseGroup.append(el("div", "tactic-sub-header", "全队基础防守阵型"));
+    const baseRow = el("div", "choice-row");
+    for (const item of baseItems) {
+      const button = el(
+        "button",
+        `choice-card${item.id === selected ? " active" : ""}`,
+        el("strong", null, cleanTacticNameZh(item.name_zh)),
+        el("span", "choice-meta", getTacticDescZh(item.id)),
+      );
+      button.type = "button";
+      button.addEventListener("click", () => onPick(item.id));
+      baseRow.append(button);
+    }
+    baseGroup.append(baseRow);
+
+    // 组 2：持球挡拆掩护应对 (Pick-and-Roll Coverage)
+    const pnrIds = ["def_drop_coverage", "def_hedge_recover", "def_switch_heavy"];
+    const pnrItems = items.filter((item) => pnrIds.includes(item.id));
+    const pnrGroup = el("div", "defense-group");
+    pnrGroup.append(el("div", "tactic-sub-header", "持球挡拆掩护应对策略"));
+    const pnrRow = el("div", "choice-row");
+    for (const item of pnrItems) {
+      const button = el(
+        "button",
+        `choice-card${item.id === selected ? " active" : ""}`,
+        el("strong", null, cleanTacticNameZh(item.name_zh)),
+        el("span", "choice-meta", getTacticDescZh(item.id)),
+      );
+      button.type = "button";
+      button.addEventListener("click", () => onPick(item.id));
+      pnrRow.append(button);
+    }
+    pnrGroup.append(pnrRow);
+
+    wrap.append(baseGroup, pnrGroup);
+    return wrap;
   }
 
   function choiceRow(items, selected, onPick) {
@@ -3585,20 +3636,10 @@
     );
 
     defContainer.replaceChildren(
-      ...studio.defense.map((item) => {
-        const btn = el(
-          "button",
-          `choice-card${item.id === lineup.defense_tactic ? " active" : ""}`,
-          el("strong", null, cleanTacticNameZh(item.name_zh)),
-          el("span", "choice-meta", getTacticDescZh(item.id))
-        );
-        btn.type = "button";
-        btn.addEventListener("click", () => {
-          lineup.defense_tactic = item.id;
-          renderStudio();
-          syncSettingsCenter();
-        });
-        return btn;
+      defenseGroupedRow(studio.defense, lineup.defense_tactic, (id) => {
+        lineup.defense_tactic = id;
+        renderStudio();
+        syncSettingsCenter();
       })
     );
   }
