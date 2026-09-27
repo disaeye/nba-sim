@@ -588,6 +588,168 @@
     );
   }
 
+  // ========================================================
+  // 职业战术百科全书与战术博弈情报库 (Tactical Playbook Encyclopedia)
+  // ========================================================
+  const TACTICAL_PLAYBOOK_ENCYCLOPEDIA = {
+    off_horns_pnr: {
+      name: "牛角高位挡拆战术体系",
+      style: "双高位牛角站位构型 (Horns Spacing)",
+      philosophy: "现代 NBA 最经典的挡拆起手式。中锋与大前锋分居罚球线左右两肘区，双射手底角拉开，迫使防守大个子远离禁区。控卫借掩护突破，顺下、外弹或分底角形成立体打击。",
+      progression: [
+        { rank: "第一选择", title: "持球突破 / 抛投急停", desc: "控卫借挡拆压低重心突破，若掩护防守人沉退，直接在罚球线干拔中投或抛投终结。" },
+        { rank: "第二配合", title: "中锋顺下空接攻筐", desc: "掩护中锋迅速转身向篮筐顺下，控卫送出高吊球或击地传球，直接完成篮下空接扣篮。" },
+        { rank: "第三策应", title: "弱侧肘区外弹三分", desc: "另一名大个子不顺下而选择向三分线外弹，接横传球命中大空位三分。" },
+        { rank: "弱侧兜底", title: "强弱侧大对角转移", desc: "若防守强侧过度协防收缩，控卫大跳传至弱侧底角射手，完成无干扰底角三分。" },
+      ],
+      advantage: "精准瓦解中锋沉退防守与传统人盯人；双掩护人令防守无法预判突破方向。",
+      caution: "若对手采取无限换防，应停止快速传切，转入内线错位背身单打。",
+      routes: [
+        { type: "screen", from: [38, 28], to: [46, 36], label: "高位掩护" },
+        { type: "dribble", from: [50, 42], to: [36, 26], label: "突破攻筐" },
+        { type: "roll", from: [38, 28], to: [48, 12], label: "顺下冲击" },
+        { type: "pop", from: [62, 28], to: [74, 34], label: "外弹远投" },
+      ],
+    },
+    off_spain_pnr: {
+      name: "西班牙双掩护战术体系",
+      style: "双掩护叠影构型 (Stack & Pop Spacing)",
+      philosophy: "针对沉退防守最高效的现代战术杀器。中锋高位给控卫挡拆顺下的同时，射手在罚球线为顺下中锋的防守人架设背掩护，迫使防守人同时面对顺下空接与外弹远投，陷入无解两难。",
+      progression: [
+        { rank: "第一选择", title: "顺下中锋空接终结", desc: "中锋借背掩护完全摆脱防守追赶，接控卫高吊传球直接完成空中接力暴扣。" },
+        { rank: "第二配合", title: "背掩护射手反弹三分", desc: "背掩护人员完成掩护后以极快速度外弹至弧顶三分线，接控卫回传命中绝对空位三分。" },
+        { rank: "第三策应", title: "持球控卫急停抛投", desc: "若防守内线被背掩护完全卡住，持球人面对真空禁区直接上篮或中投得分。" },
+        { rank: "弱侧兜底", title: "底角定点牵制投射", desc: "底角两名射手吸附弱侧底线防守人，一旦对方协防收缩，立刻形成致命底角三分。" },
+      ],
+      advantage: "完全破除大中锋沉退护筐策略；防守人若缺乏默契换防，必然出现顺下扣篮或弧顶空位三分。",
+      caution: "对第三人背掩护的设立质量要求极高；若对手采取提前高位包夹控卫，需持球人快速出球。",
+      routes: [
+        { type: "screen", from: [50, 30], to: [50, 36], label: "初次挡拆" },
+        { type: "dribble", from: [50, 42], to: [36, 28], label: "侧向突破" },
+        { type: "back_screen", from: [50, 20], to: [50, 24], label: "背掩护" },
+        { type: "roll", from: [50, 30], to: [50, 10], label: "切入空接" },
+        { type: "pop", from: [50, 20], to: [66, 38], label: "外弹三分" },
+      ],
+    },
+    off_motion_spacing: {
+      name: "五外动态无球传切体系",
+      style: "五外环形全拉开构型 (Perimeter Five-Out)",
+      philosophy: "极致动态空间篮球。五名球员均置身于三分线外，禁区彻底腾空。依靠高频次的传球转移、后门空切、手递手与弱侧无球反向掩护，创造无死角的进攻火力点。",
+      progression: [
+        { rank: "第一选择", title: "反跑后门空切攻筐", desc: "防守人外扑紧逼时，侧翼球员利用反向垫步反切篮下，接传球直取篮筐。" },
+        { rank: "第二配合", title: "弱侧连续上提三分", desc: "弱侧球员借连续无球掩护横穿底线并上提至侧翼，迎着防守空档干拔三分。" },
+        { rank: "第三策应", title: "手递手掩护突分", desc: "外线两人高位手递手快速借掩护突破，吸附协防后回敲外线射手群。" },
+        { rank: "弱侧兜底", title: "底角切入二次分球", desc: "底角人员沿底线纵深切入吸引防守，传球给空切跟进的侧翼终结者。" },
+      ],
+      advantage: "对机动性弱、沉退护筐的大中锋形成沉重打击；全员具备三分与切入能力，防不胜防。",
+      caution: "极其依赖全队的战术默契与传球视野；遇到对抗极强的肉搏盯人需保持耐心运转。",
+      routes: [
+        { type: "pass", from: [50, 42], to: [26, 32], style: "dashed" },
+        { type: "back_cut", from: [74, 32], to: [50, 14], label: "后门空切" },
+        { type: "lift", from: [10, 8], to: [20, 24], label: "弱侧上提" },
+      ],
+    },
+    off_delay_attack: {
+      name: "弧顶发牌策应战术体系",
+      style: "高位发牌五外构型 (Delay Hub Spacing)",
+      philosophy: "大个子站在弧顶三分线外作为核心分球中枢，后卫与侧翼球员通过交叉跑位、手递手配合与后门切入交织发起进攻。",
+      progression: [
+        { rank: "第一选择", title: "手递手急停跳投 / 突破", desc: "后卫高速绕过中枢接手递手，借中枢身躯阻挡防守人，直接急停跳投或突入内线。" },
+        { rank: "第二配合", title: "中枢击地妙传空切后门", desc: "防守人员提前预判手递手抢过时，后卫突然假动作变向反切篮下，接高位击地传球轻松上篮。" },
+        { rank: "第三策应", title: "中枢面框直接单打 / 远投", desc: "若防守人放一步防突破，大个子直接在弧顶干拔三分，或持球强力突破。" },
+        { rank: "弱侧兜底", title: "弱侧对角大空位投射", desc: "强侧双人手递手牵制全队防守，中枢大跨度横传弱侧底角射手投进空位三分。" },
+      ],
+      advantage: "彻底废黜对方内线防守护筐价值；发牌中枢视野宽广，进攻不易陷入失误停滞。",
+      caution: "要求发牌核心具备顶级传球智商与远投威胁；后卫切入时机必须与传球节奏精准同步。",
+      routes: [
+        { type: "dho", from: [50, 36], to: [42, 34], label: "手递手交接" },
+        { type: "dribble", from: [42, 34], to: [32, 20], label: "借掩护攻筐" },
+        { type: "back_cut", from: [74, 32], to: [50, 14], label: "反跑空切" },
+      ],
+    },
+    off_post_split: {
+      name: "低位背身策应战术体系",
+      style: "四外一内低位站位构型 (Post-Up Spacing)",
+      philosophy: "传统低位单打与现代动态切分的融合。球直接喂给低位背打核心，防守重心收缩包夹的瞬间，强侧两名外线射手立刻展开双人交叉反切，打乱防守阵型。",
+      progression: [
+        { rank: "第一选择", title: "低位核心直接背打终结", desc: "若对方不包夹，低位核心利用脚步、勾手或后仰跳投直接在禁区单打得分。" },
+        { rank: "第二配合", title: "强侧双人交叉反切空接", desc: "外线两名球员在肘区互相掩护交叉反跑，其中一人直切篮下接低位分球完成上篮。" },
+        { rank: "第三策应", title: "反弹外线急停三分", desc: "另一名反切人员在掩护后反弹外线，接低位回传命中正面大空位三分。" },
+        { rank: "弱侧兜底", title: "大对角分球弱侧底角", desc: "弱侧防守收缩协防时，低位核心背身单手大甩球至弱侧底角，命中底角三分。" },
+      ],
+      advantage: "杀伤力极高，能迅速令对方主力内线背上犯规困扰；战术节奏稳健，压迫感强。",
+      caution: "极其考验低位人员的出球视野与抗包夹能力；外线射手命中率过低时易遭铁桶合围。",
+      routes: [
+        { type: "post", from: [30, 18], to: [32, 14], label: "低位背打" },
+        { type: "screen", from: [48, 30], to: [42, 26], label: "交叉掩护" },
+        { type: "cut", from: [42, 26], to: [40, 14], label: "内切攻筐" },
+      ],
+    },
+    off_drag_screen: {
+      name: "突分与追身掩护战术体系",
+      style: "快节奏拖尾突分构型 (Pistol Drag Spacing)",
+      philosophy: "现代高节奏跑轰与魔球打法的主力引擎。由守转攻落位未稳之际，跟进的大个子直接在弧顶挂上追身掩护，控卫依仗冲势撕裂防守，突分结合外线拖尾投射。",
+      progression: [
+        { rank: "第一选择", title: "控卫借追身掩护冲筐", desc: "防守退防立足未稳，控卫借追身掩护加速过人，直取篮下完成上篮。" },
+        { rank: "第二配合", title: "拖尾大个子外弹追身三分", desc: "设立追身掩护后大个子留在弧顶三分线，接控卫突分回传命中追身三分。" },
+        { rank: "第三策应", title: "突破吸引协防分底角", desc: "持球人突入腹地吸引底线防守收缩，突分甩传两侧底角空位射手投篮。" },
+        { rank: "弱侧兜底", title: "次级持球人二次突破", desc: "球回给弱侧弧顶跟进人员，立刻发动二次突破冲击防守失衡的半场。" },
+      ],
+      advantage: "利用攻防转换立足未稳打时间差，防守极难设立包夹；进攻节拍极快，压迫力强。",
+      caution: "要求控卫拥有极强的终结和传球决断力；急躁失误易被对手反打快攻反击。",
+      routes: [
+        { type: "dribble", from: [50, 46], to: [40, 26], label: "高速突击" },
+        { type: "screen", from: [52, 40], to: [45, 36], label: "追身掩护" },
+        { type: "pop", from: [52, 40], to: [60, 42], label: "拖尾跳投" },
+      ],
+    },
+    off_transition_push: {
+      name: "快攻闪击全场转换体系",
+      style: "全场两翼极速拉开构型 (Fastbreak Wide Spacing)",
+      philosophy: "极致追求速度的快打旋风体系。抢下后场篮板或抢断瞬间，两翼飞奔球员以最快速度全速下快攻，控卫快速推进或长传，追求在防守落位前 8 秒内完成进攻。",
+      progression: [
+        { rank: "第一选择", title: "后场长传直冲篮下上篮", desc: "推进引擎在后场直接送出精确长传，快下球员迎球直接飞身冲筐或扣篮。" },
+        { rank: "第二配合", title: "前场以多打少击地分球", desc: "前场形成多打少，持球人吸引最后一名防守人后击地妙传队友空篮得分。" },
+        { rank: "第三策应", title: "追身急停三分破网", desc: "两翼射手快下底角拉开防线，持球人急停吸引防守后回敲外线命中追身三分。" },
+        { rank: "弱侧兜底", title: "拖尾跟进冲抢进攻篮板", desc: "内线大个子作为拖尾人员全力冲抢前场篮板，直接完成二次进攻补篮得分。" },
+      ],
+      advantage: "绕开阵地战复杂博弈，以极高效率获取轻松得分机会；极大消耗对手主力体能。",
+      caution: "退防失误率显著高于阵地战；遇到全场退防迅速的强队容易陷入进攻滞涩。",
+      routes: [
+        { type: "sprint", from: [20, 34], to: [20, 12], label: "左翼飞奔" },
+        { type: "dribble", from: [50, 46], to: [48, 26], label: "推进发牌" },
+        { type: "sprint", from: [80, 34], to: [80, 12], label: "右翼顺下" },
+      ],
+    },
+  };
+
+  const DEFENSIVE_INTEL_ENCYCLOPEDIA = {
+    def_drop_coverage: {
+      advantage: "克制冲击型控卫与空切内线；死守油漆区保护后场篮板。",
+      caution: "被西班牙背掩护射手与顶级急停跳投手严重惩罚。",
+    },
+    def_hedge_recover: {
+      advantage: "大延误阻绝控卫直接干拔跳投；强力压迫持球挡拆发起人。",
+      caution: "掩护中锋顺下空接威胁大，对弱侧底线轮转补位要求极高。",
+    },
+    def_switch_heavy: {
+      advantage: "彻底扑灭对手空位三分出手；所有传球路线均被贴身切断。",
+      caution: "频繁出现小防大与大防小错位，容易被对手错位单打强吃。",
+    },
+    def_man_conservative: {
+      advantage: "保持五对五基础防守平衡，防守失位概率最低。",
+      caution: "缺乏强力施压手段，面对顶级持球大核容易被单点打穿。",
+    },
+    def_man_pressure: {
+      advantage: "全场紧逼逼迫后卫失误；极大破坏对方战术执行节拍。",
+      caution: "全场防守体能消耗剧烈，一旦被突破容易失位形成多打少。",
+    },
+    def_zone_23: {
+      advantage: "铁桶合围禁区油漆区；强力克制突破攻筐与低位单打球队。",
+      caution: "弧顶与两翼 45 度三分线空档较大，易被连续外线三分射穿。",
+    },
+  };
+
   function singleTeamTacticalBoard(side, team, lineup, playbook) {
     const offense = studio.offense.find((item) => item.id === lineup.offense_tactic);
     const defense = studio.defense.find((item) => item.id === lineup.defense_tactic);
@@ -601,10 +763,10 @@
     const metaBox = el("div", "banner-team-meta");
     metaBox.append(
       el("span", `perspective-dot ${isHome ? "home-dot" : "away-dot"}`),
-      el("strong", null, `${teamNameZh} · 战术指挥中枢`),
+      el("strong", null, `${teamNameZh} · 战术研讨指挥中枢`),
       el("span", `banner-team-tag ${isHome ? "home" : "away"}`, isHome ? "主场作战" : "客场作战"),
-      el("span", "banner-team-tag", `进攻: ${cleanTacticNameZh(offense?.name_zh) || "未配置"}`),
-      el("span", "banner-team-tag", `防守: ${cleanTacticNameZh(defense?.name_zh) || "未配置"}`),
+      el("span", "banner-team-tag", `进攻体系: ${cleanTacticNameZh(offense?.name_zh) || "未配置"}`),
+      el("span", "banner-team-tag", `防守策略: ${cleanTacticNameZh(defense?.name_zh) || "未配置"}`),
     );
     const privacyHint = el(
       "div",
@@ -617,10 +779,10 @@
     // 三列并列专业战术网格
     const grid = el("div", "tactic-three-grid");
 
-    // 第 1 栏：进攻体系与半场落位沙盘
+    // 第 1 栏：进攻体系与战术偏好指令
     const offenseCard = el("section", "tactic-panel-card");
     const offTitle = el("div", "tactic-panel-title");
-    offTitle.append(el("strong", null, "进攻战术体系"), el("span", null, "阵地落位与构型"));
+    offTitle.append(el("strong", null, "核心进攻体系"), el("span", null, "7大职业战术体系"));
     offenseCard.append(
       offTitle,
       choiceRow(studio.offense, lineup.offense_tactic, (id) => {
@@ -631,33 +793,306 @@
         else studio.default_setup.away_playbook = compatible;
         renderStudio();
       }),
-      courtMini(offense?.spec),
+      renderTacticalDirectives(team),
     );
 
-    // 第 2 栏：防守战术体系 (按基础形态与挡拆应对正交解耦)
+    // 第 2 栏：防守博弈策略与克制情报
     const defenseCard = el("section", "tactic-panel-card");
     const defTitle = el("div", "tactic-panel-title");
-    defTitle.append(el("strong", null, "防守博弈策略"), el("span", null, "基础阵型与挡拆应对"));
+    defTitle.append(el("strong", null, "防守博弈策略"), el("span", null, "阵型与掩护应对"));
     defenseCard.append(
       defTitle,
       defenseGroupedRow(studio.defense, lineup.defense_tactic, (id) => {
         lineup.defense_tactic = id;
         renderStudio();
       }),
+      renderDefensiveIntel(lineup.defense_tactic),
     );
 
-    // 第 3 栏：战术剧本库 (Playbook)
+    // 第 3 栏：专业战术沙盘、破防决策树与战术手册
     const playbookCard = el("section", "tactic-panel-card");
     const playTitle = el("div", "tactic-panel-title");
-    playTitle.append(el("strong", null, "战术触发手册"), el("span", null, `已装配 ${playbook.length} 套战术`));
+    playTitle.append(el("strong", null, "战术沙盘与决策配合"), el("span", null, `装配 ${playbook.length} 套执行动作`));
     playbookCard.append(
       playTitle,
+      renderTacticalChalkboard(offense?.spec, lineup.offense_tactic),
+      renderTacticalBreakdown(lineup.offense_tactic),
       playList(playbook),
     );
 
     grid.append(offenseCard, defenseCard, playbookCard);
     wrap.append(grid);
     return wrap;
+  }
+
+  function renderTacticalDirectives(team) {
+    const wrap = el("div", "tactic-directives-panel");
+    const traits = team?.team_traits || {};
+
+    // 终结重心偏好
+    const row1 = el("div", "directive-row");
+    row1.append(el("span", "directive-label", "终结重心"));
+    const chips1 = el("div", "directive-chips");
+    const rimBtn = el("button", `directive-chip${traits.rim_pressure >= 0.55 ? " active" : ""}`, "攻筐为主");
+    const threeBtn = el("button", `directive-chip${traits.three_point_emphasis >= 0.55 ? " active" : ""}`, "三分投射");
+    rimBtn.type = "button";
+    threeBtn.type = "button";
+    rimBtn.addEventListener("click", () => {
+      traits.rim_pressure = 0.75;
+      traits.three_point_emphasis = 0.45;
+      renderStudio();
+    });
+    threeBtn.addEventListener("click", () => {
+      traits.rim_pressure = 0.45;
+      traits.three_point_emphasis = 0.75;
+      renderStudio();
+    });
+    chips1.append(rimBtn, threeBtn);
+    row1.append(chips1);
+
+    // 推进节奏偏好
+    const row2 = el("div", "directive-row");
+    row2.append(el("span", "directive-label", "推进节奏"));
+    const chips2 = el("div", "directive-chips");
+    const fastBtn = el("button", `directive-chip${traits.pace >= 0.55 ? " active" : ""}`, "快打风暴");
+    const controlBtn = el("button", `directive-chip${traits.pace < 0.55 ? " active" : ""}`, "阵地耐心");
+    fastBtn.type = "button";
+    controlBtn.type = "button";
+    fastBtn.addEventListener("click", () => {
+      traits.pace = 0.75;
+      renderStudio();
+    });
+    controlBtn.addEventListener("click", () => {
+      traits.pace = 0.42;
+      renderStudio();
+    });
+    chips2.append(fastBtn, controlBtn);
+    row2.append(chips2);
+
+    wrap.append(row1, row2);
+    return wrap;
+  }
+
+  function renderDefensiveIntel(defenseId) {
+    const intel = DEFENSIVE_INTEL_ENCYCLOPEDIA[defenseId];
+    if (!intel) return el("div");
+    const box = el("div", "tactic-intel-box");
+    box.append(
+      el("div", "intel-row", el("span", "intel-tag advantage", "战术优势"), el("span", "intel-text", intel.advantage)),
+      el("div", "intel-row", el("span", "intel-tag caution", "防守软肋"), el("span", "intel-text", intel.caution)),
+    );
+    return box;
+  }
+
+  function renderTacticalBreakdown(tacticId) {
+    const data = TACTICAL_PLAYBOOK_ENCYCLOPEDIA[tacticId];
+    if (!data) return el("div");
+
+    const wrap = el("div", "progression-list");
+    for (const item of data.progression) {
+      const row = el("div", "progression-item");
+      const head = el("div", "progression-head");
+      head.append(el("span", "progression-rank", item.rank), el("strong", "progression-title", item.title));
+      row.append(head, el("span", "progression-desc", item.desc));
+      wrap.append(row);
+    }
+
+    const intelBox = el("div", "tactic-intel-box");
+    intelBox.append(
+      el("div", "intel-row", el("span", "intel-tag advantage", "专克阵型"), el("span", "intel-text", data.advantage)),
+      el("div", "intel-row", el("span", "intel-tag caution", "破解之道"), el("span", "intel-text", data.caution)),
+    );
+    wrap.append(intelBox);
+    return wrap;
+  }
+
+  function renderTacticalChalkboard(spec, tacticId) {
+    const wrap = el("div", "tactic-chalkboard-wrap");
+    const box = el("div", "chalkboard-canvas-box");
+    const canvas = document.createElement("canvas");
+    canvas.width = 360;
+    canvas.height = 200;
+    box.append(canvas);
+
+    const data = TACTICAL_PLAYBOOK_ENCYCLOPEDIA[tacticId];
+    drawChalkboardRoutes(canvas, spec, data?.routes || []);
+
+    const toolbar = el("div", "chalkboard-toolbar");
+    const legend = el("div", "chalkboard-legend");
+    legend.append(
+      el("span", null, "──> 跑位"),
+      el("span", null, "~~~> 突破"),
+      el("span", null, "- - > 传球"),
+    );
+    const demoBtn = el("button", "btn-run-chalkboard", "▶ 跑位演练");
+    demoBtn.type = "button";
+    demoBtn.addEventListener("click", () => {
+      animateChalkboard(canvas, spec, data?.routes || []);
+    });
+    toolbar.append(legend, demoBtn);
+
+    wrap.append(box, toolbar);
+    return wrap;
+  }
+
+  function drawChalkboardRoutes(canvas, spec, routes, progress = 0) {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const w = canvas.width;
+    const h = canvas.height;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // 绘制半场战术板墨黑底色
+    ctx.fillStyle = "#0c1322";
+    ctx.fillRect(0, 0, w, h);
+
+    // 绘制半场白色球场线
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.28)";
+    ctx.lineWidth = 1.2;
+
+    // 半场边界
+    ctx.strokeRect(8, 8, w - 16, h - 16);
+
+    // 篮筐与禁区
+    const hoopX = w / 2;
+    const hoopY = 28;
+    ctx.beginPath();
+    ctx.arc(hoopX, hoopY, 6, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(245, 158, 11, 0.7)";
+    ctx.stroke();
+
+    // 禁区油漆区
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.28)";
+    ctx.strokeRect(w / 2 - 38, 8, 76, 75);
+
+    // 罚球线半圆
+    ctx.beginPath();
+    ctx.arc(w / 2, 83, 38, 0, Math.PI);
+    ctx.stroke();
+
+    // 三分线
+    ctx.beginPath();
+    ctx.moveTo(28, 8);
+    ctx.lineTo(28, 48);
+    ctx.arc(w / 2, hoopY, w / 2 - 28, 0.16 * Math.PI, 0.84 * Math.PI, false);
+    ctx.lineTo(w - 28, 48);
+    ctx.lineTo(w - 28, 8);
+    ctx.stroke();
+
+    // 绘制战术跑位路线
+    for (const r of routes) {
+      const sx = (r.from[0] / 100) * w;
+      const sy = (r.from[1] / 100) * h;
+      const ex = (r.to[0] / 100) * w;
+      const ey = (r.to[1] / 100) * h;
+
+      ctx.save();
+      if (r.style === "dashed" || r.type === "pass") {
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = "#fbbf24";
+        ctx.lineWidth = 1.5;
+      } else if (r.type === "screen" || r.type === "back_screen") {
+        ctx.strokeStyle = "#ef4444";
+        ctx.lineWidth = 2.0;
+      } else if (r.type === "dribble") {
+        ctx.strokeStyle = "#38bdf8";
+        ctx.lineWidth = 2.2;
+      } else {
+        ctx.strokeStyle = "#10b981";
+        ctx.lineWidth = 2.0;
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+
+      // 箭头
+      const angle = Math.atan2(ey - sy, ex - sx);
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - 7 * Math.cos(angle - Math.PI / 6), ey - 7 * Math.sin(angle - Math.PI / 6));
+      ctx.lineTo(ex - 7 * Math.cos(angle + Math.PI / 6), ey - 7 * Math.sin(angle + Math.PI / 6));
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.fill();
+
+      // 掩护 T 形挡板
+      if (r.type === "screen" || r.type === "back_screen") {
+        ctx.beginPath();
+        const perp = angle + Math.PI / 2;
+        ctx.moveTo(ex - 6 * Math.cos(perp), ey - 6 * Math.sin(perp));
+        ctx.lineTo(ex + 6 * Math.cos(perp), ey + 6 * Math.sin(perp));
+        ctx.stroke();
+      }
+
+      // 标注
+      if (r.label) {
+        ctx.font = "9px sans-serif";
+        ctx.fillStyle = "rgba(226, 232, 240, 0.85)";
+        ctx.fillText(r.label, (sx + ex) / 2 + 4, (sy + ey) / 2);
+      }
+      ctx.restore();
+    }
+
+    // 绘制 5 球员槽位点
+    if (spec?.slots) {
+      for (let i = 0; i < spec.slots.length; i++) {
+        const slot = spec.slots[i];
+        let px = Math.max(14, Math.min(w - 14, (slot.base_offset_y / 50) * w));
+        let py = Math.max(16, Math.min(h - 16, ((50 - slot.base_offset_x) / 50) * h));
+
+        // 动画插值移动
+        if (progress > 0 && routes[i]) {
+          const r = routes[i];
+          const ex = (r.to[0] / 100) * w;
+          const ey = (r.to[1] / 100) * h;
+          px = px + (ex - px) * progress;
+          py = py + (ey - py) * progress;
+        }
+
+        const isHandler = slot.id === "top" || slot.behaviour === "DribbleTop";
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(px, py, 11, 0, Math.PI * 2);
+        ctx.fillStyle = isHandler ? "#f59e0b" : "#0284c7";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 9px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(i + 1), px, py);
+
+        ctx.font = "8.5px sans-serif";
+        ctx.fillStyle = "#cbd5e1";
+        ctx.fillText(slot.name_zh, px, py + 15);
+        ctx.restore();
+      }
+    }
+  }
+
+  function animateChalkboard(canvas, spec, routes) {
+    let start = null;
+    const duration = 2200;
+    function step(timestamp) {
+      if (!start) start = timestamp;
+      const elapsed = timestamp - start;
+      const progress = Math.min(1, elapsed / duration);
+      // 正弦缓动
+      const ease = 0.5 - 0.5 * Math.cos(progress * Math.PI);
+      drawChalkboardRoutes(canvas, spec, routes, ease);
+      if (progress < 1) {
+        requestAnimationFrame(step);
+      } else {
+        setTimeout(() => drawChalkboardRoutes(canvas, spec, routes, 0), 1200);
+      }
+    }
+    requestAnimationFrame(step);
   }
 
   function boardSide(side, team, lineup, playbook) {
