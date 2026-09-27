@@ -537,6 +537,7 @@
     }
     try {
       studio = JSON.parse(text);
+      window.__studio = studio;
     } catch {
       studio = null;
     }
@@ -582,13 +583,15 @@
   }
 
   function syncScoreboardTactics() {
+    if (!studio) return;
     const setup = studio.default_setup;
-    const away = studio.defense.find((item) => item.id === setup.away_lineup.defense_tactic);
-    const home = studio.defense.find((item) => item.id === setup.home_lineup.defense_tactic);
-    const awayTag = document.querySelector(".away-side .team-tactic-tag");
-    if (awayTag) awayTag.textContent = away?.name_zh || "客队防守";
+    const homeOff = studio.offense.find((item) => item.id === setup.home_lineup.offense_tactic);
+    const awayOff = studio.offense.find((item) => item.id === setup.away_lineup.offense_tactic);
     const homeTag = document.querySelector(".home-side .team-tactic-tag");
-    if (homeTag) homeTag.textContent = home?.name_zh || "主队防守";
+    const awayTag = document.querySelector(".away-side .team-tactic-tag");
+    if (homeTag) homeTag.textContent = `进攻 · ${cleanTacticNameZh(homeOff?.name_zh) || "进攻体系"}`;
+    if (awayTag) awayTag.textContent = `进攻 · ${cleanTacticNameZh(awayOff?.name_zh) || "进攻体系"}`;
+    if ($("tacticalSet") && homeOff) $("tacticalSet").textContent = cleanTacticNameZh(homeOff.name_zh);
   }
 
   function renderBoard() {
@@ -623,10 +626,11 @@
       advantage: "精准瓦解中锋沉退防守与传统人盯人；双掩护人令防守无法预判突破方向。",
       caution: "若对手采取无限换防，应停止快速传切，转入内线错位背身单打。",
       routes: [
-        { type: "screen", from: [38, 28], to: [46, 36], label: "高位掩护" },
-        { type: "dribble", from: [50, 42], to: [36, 26], label: "突破攻筐" },
-        { type: "roll", from: [38, 28], to: [48, 12], label: "顺下冲击" },
-        { type: "pop", from: [62, 28], to: [74, 34], label: "外弹远投" },
+        { type: "dribble", from: [50, 62], to: [40, 46], label: "借掩护突破" },
+        { type: "roll", from: [38, 40], to: [48, 20], label: "顺下冲击" },
+        { type: "pop", from: [62, 40], to: [75, 52], label: "外弹远投" },
+        { type: "spot", from: [5, 9], to: [5, 9], label: "底角定点" },
+        { type: "spot", from: [95, 9], to: [95, 9], label: "底角定点" },
       ],
     },
     off_spain_pnr: {
@@ -642,11 +646,11 @@
       advantage: "完全破除大中锋沉退护筐策略；防守人若缺乏默契换防，必然出现顺下扣篮或弧顶空位三分。",
       caution: "对第三人背掩护的设立质量要求极高；若对手采取提前高位包夹控卫，需持球人快速出球。",
       routes: [
-        { type: "screen", from: [50, 30], to: [50, 36], label: "初次挡拆" },
-        { type: "dribble", from: [50, 42], to: [36, 28], label: "侧向突破" },
-        { type: "back_screen", from: [50, 20], to: [50, 24], label: "背掩护" },
-        { type: "roll", from: [50, 30], to: [50, 10], label: "切入空接" },
-        { type: "pop", from: [50, 20], to: [66, 38], label: "外弹三分" },
+        { type: "dribble", from: [50, 62], to: [38, 48], label: "侧向突破" },
+        { type: "roll", from: [50, 42], to: [50, 18], label: "切入空接" },
+        { type: "pop", from: [50, 26], to: [64, 58], label: "外弹三分" },
+        { type: "spot", from: [5, 9], to: [5, 9], label: "底角拉开" },
+        { type: "spot", from: [95, 9], to: [95, 9], label: "底角拉开" },
       ],
     },
     off_motion_spacing: {
@@ -662,9 +666,11 @@
       advantage: "对机动性弱、沉退护筐的大中锋形成沉重打击；全员具备三分与切入能力，防不胜防。",
       caution: "极其依赖全队的战术默契与传球视野；遇到对抗极强的肉搏盯人需保持耐心运转。",
       routes: [
-        { type: "pass", from: [50, 42], to: [26, 32], style: "dashed" },
-        { type: "back_cut", from: [74, 32], to: [50, 14], label: "后门空切" },
-        { type: "lift", from: [10, 8], to: [20, 24], label: "弱侧上提" },
+        { type: "pass", from: [50, 62], to: [30, 52], label: "传球转移", style: "dashed" },
+        { type: "screen", from: [22, 51], to: [28, 55], label: "外线组织" },
+        { type: "back_cut", from: [78, 51], to: [52, 20], label: "后门空切" },
+        { type: "lift", from: [5, 9], to: [16, 32], label: "弱侧上提" },
+        { type: "dip", from: [95, 9], to: [80, 16], label: "下沉禁区" },
       ],
     },
     off_delay_attack: {
@@ -680,9 +686,11 @@
       advantage: "彻底废黜对方内线防守护筐价值；发牌中枢视野宽广，进攻不易陷入失误停滞。",
       caution: "要求发牌核心具备顶级传球智商与远投威胁；后卫切入时机必须与传球节奏精准同步。",
       routes: [
-        { type: "dho", from: [50, 36], to: [42, 34], label: "手递手交接" },
-        { type: "dribble", from: [42, 34], to: [32, 20], label: "借掩护攻筐" },
-        { type: "back_cut", from: [74, 32], to: [50, 14], label: "反跑空切" },
+        { type: "dho", from: [50, 60], to: [46, 56], label: "手递手交接" },
+        { type: "dribble", from: [28, 47], to: [42, 32], label: "借掩护攻筐" },
+        { type: "back_cut", from: [72, 47], to: [52, 20], label: "反跑空切" },
+        { type: "spot", from: [5, 9], to: [5, 9], label: "定点待命" },
+        { type: "spot", from: [95, 9], to: [95, 9], label: "拉开空间" },
       ],
     },
     off_post_split: {
@@ -698,9 +706,11 @@
       advantage: "杀伤力极高，能迅速令对方主力内线背上犯规困扰；战术节奏稳健，压迫感强。",
       caution: "极其考验低位人员的出球视野与抗包夹能力；外线射手命中率过低时易遭铁桶合围。",
       routes: [
-        { type: "post", from: [30, 18], to: [32, 14], label: "低位背打" },
-        { type: "screen", from: [48, 30], to: [42, 26], label: "交叉掩护" },
-        { type: "cut", from: [42, 26], to: [40, 14], label: "内切攻筐" },
+        { type: "post", from: [30, 26], to: [34, 18], label: "低位单打" },
+        { type: "pass", from: [50, 60], to: [42, 52], label: "强侧拉开" },
+        { type: "pop", from: [28, 47], to: [22, 55], label: "反弹三分" },
+        { type: "cut", from: [72, 47], to: [46, 18], label: "内切攻筐" },
+        { type: "spot", from: [95, 9], to: [95, 9], label: "底角埋伏" },
       ],
     },
     off_drag_screen: {
@@ -716,9 +726,11 @@
       advantage: "利用攻防转换立足未稳打时间差，防守极难设立包夹；进攻节拍极快，压迫力强。",
       caution: "要求控卫拥有极强的终结和传球决断力；急躁失误易被对手反打快攻反击。",
       routes: [
-        { type: "dribble", from: [50, 46], to: [40, 26], label: "高速突击" },
-        { type: "screen", from: [52, 40], to: [45, 36], label: "追身掩护" },
-        { type: "pop", from: [52, 40], to: [60, 42], label: "拖尾跳投" },
+        { type: "dribble", from: [50, 68], to: [40, 36], label: "高速突击" },
+        { type: "pop", from: [56, 60], to: [64, 62], label: "拖尾跳投" },
+        { type: "spot", from: [24, 53], to: [18, 48], label: "侧翼跟进" },
+        { type: "spot", from: [76, 53], to: [82, 48], label: "拉开防守" },
+        { type: "roll", from: [90, 21], to: [60, 16], label: "冲筐冲板" },
       ],
     },
     off_transition_push: {
@@ -734,9 +746,11 @@
       advantage: "绕开阵地战复杂博弈，以极高效率获取轻松得分机会；极大消耗对手主力体能。",
       caution: "退防失误率显著高于阵地战；遇到全场退防迅速的强队容易陷入进攻滞涩。",
       routes: [
-        { type: "sprint", from: [20, 34], to: [20, 12], label: "左翼飞奔" },
-        { type: "dribble", from: [50, 46], to: [48, 26], label: "推进发牌" },
-        { type: "sprint", from: [80, 34], to: [80, 12], label: "右翼顺下" },
+        { type: "dribble", from: [50, 74], to: [50, 42], label: "快推发牌" },
+        { type: "sprint", from: [16, 43], to: [20, 16], label: "左翼飞奔" },
+        { type: "sprint", from: [84, 43], to: [80, 16], label: "右翼顺下" },
+        { type: "pop", from: [30, 64], to: [26, 55], label: "追身三分" },
+        { type: "roll", from: [70, 60], to: [52, 18], label: "冲抢篮板" },
       ],
     },
   };
@@ -978,45 +992,61 @@
     ctx.fillStyle = "#0c1322";
     ctx.fillRect(0, 0, w, h);
 
+    // 半场标准几何比例映射 (长 47ft, 宽 50ft)
+    const courtLeft = 14;
+    const courtTop = 14;
+    const courtW = w - 28;
+    const courtH = h - 28;
+
     // 绘制半场白色球场线
     ctx.strokeStyle = "rgba(148, 163, 184, 0.28)";
     ctx.lineWidth = 1.2;
 
     // 半场边界
-    ctx.strokeRect(8, 8, w - 16, h - 16);
+    ctx.strokeRect(courtLeft, courtTop, courtW, courtH);
 
-    // 篮筐与禁区
-    const hoopX = w / 2;
-    const hoopY = 28;
+    // 篮筐与禁区 (顶端为前场底线，篮筐距底线 5.25ft)
+    const hoopX = courtLeft + courtW / 2;
+    const hoopY = courtTop + (5.25 / 47) * courtH;
     ctx.beginPath();
     ctx.arc(hoopX, hoopY, 6, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(245, 158, 11, 0.7)";
+    ctx.strokeStyle = "rgba(245, 158, 11, 0.85)";
     ctx.stroke();
 
-    // 禁区油漆区
-    ctx.strokeStyle = "rgba(148, 163, 184, 0.28)";
-    ctx.strokeRect(w / 2 - 38, 8, 76, 75);
+    // 禁区油漆区 (宽 16ft, 长 19ft)
+    const paintW = (16 / 50) * courtW;
+    const paintH = (19 / 47) * courtH;
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.32)";
+    ctx.strokeRect(hoopX - paintW / 2, courtTop, paintW, paintH);
 
     // 罚球线半圆
     ctx.beginPath();
-    ctx.arc(w / 2, 83, 38, 0, Math.PI);
+    ctx.arc(hoopX, courtTop + paintH, (6 / 50) * courtW, 0, Math.PI);
     ctx.stroke();
 
-    // 三分线
+    // 三分线 (距边线 3ft 直线段，切入 23.75ft 圆弧)
+    const cornerXDist = (3 / 50) * courtW;
+    const leftCornerX = courtLeft + cornerXDist;
+    const rightCornerX = courtLeft + courtW - cornerXDist;
+    const cornerH = (14 / 47) * courtH;
+    const arcR = (23.75 / 47) * courtH;
     ctx.beginPath();
-    ctx.moveTo(28, 8);
-    ctx.lineTo(28, 48);
-    ctx.arc(w / 2, hoopY, w / 2 - 28, 0.16 * Math.PI, 0.84 * Math.PI, false);
-    ctx.lineTo(w - 28, 48);
-    ctx.lineTo(w - 28, 8);
+    ctx.moveTo(leftCornerX, courtTop);
+    ctx.lineTo(leftCornerX, courtTop + cornerH);
+    const chordHalf = hoopX - leftCornerX;
+    const angle = Math.acos(Math.min(1.0, chordHalf / arcR));
+    ctx.arc(hoopX, hoopY, arcR, Math.PI - angle, angle, false);
+    ctx.lineTo(rightCornerX, courtTop + cornerH);
+    ctx.lineTo(rightCornerX, courtTop);
     ctx.stroke();
 
     // 绘制战术跑位路线
     for (const r of routes) {
-      const sx = (r.from[0] / 100) * w;
-      const sy = (r.from[1] / 100) * h;
-      const ex = (r.to[0] / 100) * w;
-      const ey = (r.to[1] / 100) * h;
+      if (r.type === "spot") continue;
+      const sx = courtLeft + (r.from[0] / 100) * courtW;
+      const sy = courtTop + (r.from[1] / 100) * courtH;
+      const ex = courtLeft + (r.to[0] / 100) * courtW;
+      const ey = courtTop + (r.to[1] / 100) * courtH;
 
       ctx.save();
       if (r.style === "dashed" || r.type === "pass") {
@@ -1040,18 +1070,18 @@
       ctx.stroke();
 
       // 箭头
-      const angle = Math.atan2(ey - sy, ex - sx);
+      const angleArrow = Math.atan2(ey - sy, ex - sx);
       ctx.beginPath();
       ctx.moveTo(ex, ey);
-      ctx.lineTo(ex - 7 * Math.cos(angle - Math.PI / 6), ey - 7 * Math.sin(angle - Math.PI / 6));
-      ctx.lineTo(ex - 7 * Math.cos(angle + Math.PI / 6), ey - 7 * Math.sin(angle + Math.PI / 6));
+      ctx.lineTo(ex - 7 * Math.cos(angleArrow - Math.PI / 6), ey - 7 * Math.sin(angleArrow - Math.PI / 6));
+      ctx.lineTo(ex - 7 * Math.cos(angleArrow + Math.PI / 6), ey - 7 * Math.sin(angleArrow + Math.PI / 6));
       ctx.fillStyle = ctx.strokeStyle;
       ctx.fill();
 
       // 掩护 T 形挡板
       if (r.type === "screen" || r.type === "back_screen") {
         ctx.beginPath();
-        const perp = angle + Math.PI / 2;
+        const perp = angleArrow + Math.PI / 2;
         ctx.moveTo(ex - 6 * Math.cos(perp), ey - 6 * Math.sin(perp));
         ctx.lineTo(ex + 6 * Math.cos(perp), ey + 6 * Math.sin(perp));
         ctx.stroke();
@@ -1066,18 +1096,18 @@
       ctx.restore();
     }
 
-    // 绘制 5 球员槽位点
+    // 绘制 5 球员槽位点 (严格按档案几何坐标投影: 0=底线, 47=中圈)
     if (spec?.slots) {
       for (let i = 0; i < spec.slots.length; i++) {
         const slot = spec.slots[i];
-        let px = Math.max(14, Math.min(w - 14, (slot.base_offset_y / 50) * w));
-        let py = Math.max(16, Math.min(h - 16, ((50 - slot.base_offset_x) / 50) * h));
+        let px = courtLeft + (slot.base_offset_y / 50) * courtW;
+        let py = courtTop + (slot.base_offset_x / 47) * courtH;
 
         // 动画插值移动
-        if (progress > 0 && routes[i]) {
+        if (progress > 0 && routes[i] && routes[i].type !== "spot") {
           const r = routes[i];
-          const ex = (r.to[0] / 100) * w;
-          const ey = (r.to[1] / 100) * h;
+          const ex = courtLeft + (r.to[0] / 100) * courtW;
+          const ey = courtTop + (r.to[1] / 100) * courtH;
           px = px + (ex - px) * progress;
           py = py + (ey - py) * progress;
         }
@@ -1209,8 +1239,8 @@
         `slot-pin${isHandler ? " slot-handler" : ""}`,
         slot.name_zh,
       );
-      const x = Math.max(8, Math.min(92, (slot.base_offset_y / 50) * 100));
-      const y = Math.max(12, Math.min(88, 100 - (slot.base_offset_x / 47) * 100));
+      const x = Math.max(6, Math.min(94, (slot.base_offset_y / 50) * 100));
+      const y = Math.max(8, Math.min(92, (slot.base_offset_x / 47) * 100));
       pin.style.left = x + "%";
       pin.style.top = y + "%";
       pin.title = `${slot.name_zh} · ${getBehaviourZh(slot.behaviour)}`;
@@ -1425,7 +1455,7 @@
     return rules;
   }
 
-  async function runSimulation(withRules = null, autoPlay = true) {
+  async function runSimulation(withRules = null, autoPlay = true, startAtLive = true) {
     stopPlayback();
     // 移动端体验：模拟开始时视口保持在球场核心区域，杜绝下滚遮挡
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1476,6 +1506,10 @@
       if (withRules) state.rules = { ...state.rules, ...withRules };
       loadStream(responseText, `seed ${seed} · ${scope}`);
       setRunStatus(`${state.ticks.length.toLocaleString()} 帧 · 模拟推演完成`);
+      if (startAtLive && state.ticks.length) {
+        const liveIdx = state.ticks.findIndex((t) => t.game_flow === "LiveBall" && t.possession_id >= 1);
+        if (liveIdx > 0) seek(liveIdx);
+      }
       if (autoPlay) {
         startPlayback();
       }
@@ -1510,6 +1544,18 @@
       }
     }
     if (!parsed.length) throw new Error("流中没有可解析的帧");
+    let carriedTacticalSet = "";
+    let carriedRules = parsed[0]?.rules || {};
+    for (const tick of parsed) {
+      if (tick.tactical_set) {
+        carriedTacticalSet = tick.tactical_set;
+      } else if (carriedTacticalSet) {
+        tick.tactical_set = carriedTacticalSet;
+      }
+      if (!tick.rules && carriedRules) {
+        tick.rules = carriedRules;
+      }
+    }
     state.engineViolations = engineViolations;
     state.ticks = parsed;
     state.idx = 0;
@@ -2111,11 +2157,11 @@
     if ($("frameLabel")) $("frameLabel").textContent = `第 ${state.idx} 帧`;
     $("homeTeamName").textContent = getTeamNameZh(homeTeam);
     $("awayTeamName").textContent = getTeamNameZh(awayTeam);
-    $("tacticalSet").textContent = getTacticsZh(tick.tactical_set);
     const isHomePossession = tick.possession_team === "home" || tick.possession_id % 2 === 1;
-    const currentOffenseTactic = getTacticsZh(tick.tactical_set);
-    const homeTacticEl = document.querySelector(".home-side .team-tactic-tag");
-    const awayTacticEl = document.querySelector(".away-side .team-tactic-tag");
+    const currentOffenseTactic = getTacticsZh(tick.tactical_set) || "半场战术体系";
+    if ($("tacticalSet")) $("tacticalSet").textContent = currentOffenseTactic;
+    const homeTacticEl = $("homeTacticTag") || document.querySelector(".home-side .team-tactic-tag");
+    const awayTacticEl = $("awayTacticTag") || document.querySelector(".away-side .team-tactic-tag");
     if (homeTacticEl && awayTacticEl) {
       if (isHomePossession) {
         homeTacticEl.textContent = `进攻 · ${currentOffenseTactic}`;
