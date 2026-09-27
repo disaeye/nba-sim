@@ -210,23 +210,35 @@
   }
 
   const ACTION_ZH = {
-    SPOT_UP_3PT: "定点三分",
-    HighScreenRoll: "高位挡拆顺下",
+    SPOT_UP_3PT: "定点拉开",
+    HighScreenRoll: "挡拆顺下",
     DRIVE_OFF_SCREEN: "借掩护突破",
-    PERIMETER_CUT: "外线空切",
-    SET_HIGH_SCREEN: "设立高位掩护",
+    PERIMETER_CUT: "外线跑位",
+    SET_HIGH_SCREEN: "高位掩护",
     ROLL_TO_RIM: "顺下攻筐",
     ROTATE_RIM_HELP: "轮转护筐",
-    X_OUT_CLOSEOUT: "交叉扑防",
+    X_OUT_CLOSEOUT: "轮转扑防",
     HELP_SIDE_SHELL: "弱侧协防",
-    ON_BALL_CONTEST: "持球紧逼",
+    ON_BALL_CONTEST: "贴身紧逼",
     DROP_CONTAIN: "沉退遏制",
     HEDGE_AND_RECOVER: "延误返位",
     SWITCH_ASSIGNMENT: "对位换防",
     LOOSE_BALL_RECOVERY: "拼抢活球",
     REBOUND_CRASH: "冲抢篮板",
     BOXOUT: "卡位保护",
-    SetPosition: "站位就绪",
+    DRIBBLE_TOP: "弧顶组织",
+    BACKDOOR_CUT: "后门空切",
+    DIP_TO_RIM: "直插篮下",
+    LIFT: "弱侧上提",
+    SCREEN_POP: "外弹三分",
+    PLAY_ScreenRoll: "挡拆顺下",
+    PLAY_ScreenPop: "掩护外弹",
+    PLAY_CutBackdoor: "后门空切",
+    PLAY_Lift: "弱侧上提",
+    Initiate: "战术发起",
+    Crossover: "变向突破",
+    DriveToBasket: "突破攻筐",
+    SetPosition: "战术站位",
     TripleThreat: "三威胁准备",
     PostUp: "低位背打",
     JumpShot: "跳投出手",
@@ -798,6 +810,7 @@
         if (side === "home") studio.default_setup.home_playbook = compatible;
         else studio.default_setup.away_playbook = compatible;
         renderStudio();
+        runSimulation();
       }),
       renderTacticalDirectives(team),
     );
@@ -811,6 +824,7 @@
       defenseGroupedRow(studio.defense, lineup.defense_tactic, (id) => {
         lineup.defense_tactic = id;
         renderStudio();
+        runSimulation();
       }),
       renderDefensiveIntel(lineup.defense_tactic),
     );
@@ -847,11 +861,13 @@
       traits.rim_pressure = 0.75;
       traits.three_point_emphasis = 0.45;
       renderStudio();
+      runSimulation();
     });
     threeBtn.addEventListener("click", () => {
       traits.rim_pressure = 0.45;
       traits.three_point_emphasis = 0.75;
       renderStudio();
+      runSimulation();
     });
     chips1.append(rimBtn, threeBtn);
     row1.append(chips1);
@@ -867,10 +883,12 @@
     fastBtn.addEventListener("click", () => {
       traits.pace = 0.75;
       renderStudio();
+      runSimulation();
     });
     controlBtn.addEventListener("click", () => {
       traits.pace = 0.42;
       renderStudio();
+      runSimulation();
     });
     chips2.append(fastBtn, controlBtn);
     row2.append(chips2);
@@ -2084,6 +2102,21 @@
     $("homeTeamName").textContent = getTeamNameZh(homeTeam);
     $("awayTeamName").textContent = getTeamNameZh(awayTeam);
     $("tacticalSet").textContent = getTacticsZh(tick.tactical_set);
+    const isHomePossession = tick.possession_team === "home" || tick.possession_id % 2 === 1;
+    const currentOffenseTactic = getTacticsZh(tick.tactical_set);
+    const homeTacticEl = document.querySelector(".home-side .team-tactic-tag");
+    const awayTacticEl = document.querySelector(".away-side .team-tactic-tag");
+    if (homeTacticEl && awayTacticEl) {
+      if (isHomePossession) {
+        homeTacticEl.textContent = `进攻 · ${currentOffenseTactic}`;
+        const defTacticId = studio?.default_setup?.away_lineup?.defense_tactic;
+        awayTacticEl.textContent = `防守 · ${defTacticId ? cleanTacticNameZh(studio.defense.find((d) => d.id === defTacticId)?.name_zh || "沉退防守") : "沉退防守"}`;
+      } else {
+        awayTacticEl.textContent = `进攻 · ${currentOffenseTactic}`;
+        const defTacticId = studio?.default_setup?.home_lineup?.defense_tactic;
+        homeTacticEl.textContent = `防守 · ${defTacticId ? cleanTacticNameZh(studio.defense.find((d) => d.id === defTacticId)?.name_zh || "沉退防守") : "沉退防守"}`;
+      }
+    }
     $("phaseLabel").textContent = getPhaseZh(tick.phase);
     const allNames = eventNames(tick);
     const highlightNames = allNames.filter((name) =>
@@ -2979,23 +3012,42 @@
 
       ctx.restore(); // 还原 translate(px, py)
 
-      // 6. 脚下纯中文位置角色微标 (清新纯白微标签)
-      const posText = getPositionZh(player.position);
+      // 6. 脚下纯中文战术动作与位置角色微标 (动态呈现当前场上实时战意与配合)
+      const actionZh = getActionZh(player.action);
+      const isDynamicAction =
+        player.action &&
+        ![
+          "SetPosition",
+          "Bench",
+          "Normal",
+          "Idle",
+          "",
+          "—",
+        ].includes(player.action);
+      const tagText = isDynamicAction ? actionZh : getPositionZh(player.position);
       ctx.save();
       const posTagY = py + 16.5;
-      ctx.font = "700 8.5px system-ui, -apple-system, sans-serif";
-      const posTagW = ctx.measureText(posText).width + 8;
-      ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
-      ctx.strokeStyle = "rgba(203, 213, 225, 0.8)";
-      ctx.lineWidth = 1.0;
+      ctx.font = isDynamicAction
+        ? "800 8.5px system-ui, -apple-system, sans-serif"
+        : "700 8px system-ui, -apple-system, sans-serif";
+      const posTagW = ctx.measureText(tagText).width + 8;
+      ctx.fillStyle = isDynamicAction
+        ? "rgba(255, 255, 255, 0.98)"
+        : "rgba(255, 255, 255, 0.9)";
+      ctx.strokeStyle = isDynamicAction
+        ? (isHome ? "rgba(5, 150, 105, 0.6)" : "rgba(217, 119, 6, 0.6)")
+        : "rgba(203, 213, 225, 0.8)";
+      ctx.lineWidth = isDynamicAction ? 1.4 : 1.0;
       ctx.beginPath();
       ctx.roundRect(px - posTagW / 2, posTagY - 4.5, posTagW, 11, 3.5);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = isHome ? "#065f46" : "#92400e";
+      ctx.fillStyle = isDynamicAction
+        ? (isHome ? "#047857" : "#b45309")
+        : (isHome ? "#065f46" : "#92400e");
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(posText, px, posTagY + 0.5);
+      ctx.fillText(tagText, px, posTagY + 0.5);
       ctx.restore();
     }
 

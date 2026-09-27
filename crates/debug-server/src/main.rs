@@ -472,6 +472,33 @@ fn parse_run_request(req: &Request) -> Result<RunRequest, String> {
             let mut setup = serde_json::from_value::<nba_engine::MatchSetup>(value)
                 .map_err(|error| format!("match setup invalid: {error}"))?;
             setup.rules = rules.clone();
+            let all_plays = play_catalog();
+            if let Some(home_spec) = nba_domain::TacticalSetSpec::builtin(&setup.home_lineup.offense_tactic) {
+                let slots: std::collections::HashSet<&str> = home_spec.slots.iter().map(|s| s.id.as_str()).collect();
+                setup.home_playbook.retain(|play| {
+                    play.rules.iter().all(|r| slots.contains(r.then.slot.as_str()))
+                });
+                if setup.home_playbook.is_empty() {
+                    setup.home_playbook = all_plays
+                        .iter()
+                        .filter(|play| play.rules.iter().all(|r| slots.contains(r.then.slot.as_str())))
+                        .cloned()
+                        .collect();
+                }
+            }
+            if let Some(away_spec) = nba_domain::TacticalSetSpec::builtin(&setup.away_lineup.offense_tactic) {
+                let slots: std::collections::HashSet<&str> = away_spec.slots.iter().map(|s| s.id.as_str()).collect();
+                setup.away_playbook.retain(|play| {
+                    play.rules.iter().all(|r| slots.contains(r.then.slot.as_str()))
+                });
+                if setup.away_playbook.is_empty() {
+                    setup.away_playbook = all_plays
+                        .iter()
+                        .filter(|play| play.rules.iter().all(|r| slots.contains(r.then.slot.as_str())))
+                        .cloned()
+                        .collect();
+                }
+            }
             setup
                 .validate()
                 .map_err(|error| format!("match setup invalid: {error}"))?;
