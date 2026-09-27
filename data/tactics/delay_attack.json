@@ -1,0 +1,65 @@
+{
+  "id": "off_delay_attack",
+  "name_zh": "弧顶发牌策应体系 (Delay Action)",
+  "spacing_style": "DelayFiveOut",
+  "slots": [
+    {
+      "id": "top",
+      "name_zh": "弧顶发牌中枢",
+      "base_offset_x": 28.0,
+      "base_offset_y": 25.0,
+      "requirements": [
+        { "attribute": "Passing", "weight": 1.0 },
+        { "attribute": "DecisionIq", "weight": 0.9 },
+        { "attribute": "BallHandling", "weight": 0.7 }
+      ],
+      "behaviour": "DribbleTop"
+    },
+    {
+      "id": "left_wing",
+      "name_zh": "左翼手递手接球人",
+      "base_offset_x": 23.0,
+      "base_offset_y": 10.0,
+      "requirements": [
+        { "attribute": "ShootingMid", "weight": 0.8 },
+        { "attribute": "Speed", "weight": 0.8 },
+        { "attribute": "OffBallSense", "weight": 0.8 }
+      ],
+      "behaviour": "PerimeterRelocate"
+    },
+    {
+      "id": "right_wing",
+      "name_zh": "右翼反跑空切人",
+      "base_offset_x": 23.0,
+      "base_offset_y": 40.0,
+      "requirements": [
+        { "attribute": "Finishing", "weight": 0.8 },
+        { "attribute": "Speed", "weight": 0.8 },
+        { "attribute": "OffBallSense", "weight": 0.7 }
+      ],
+      "behaviour": "BackdoorCut"
+    },
+    {
+      "id": "left_corner",
+      "name_zh": "左底角牵制射手",
+      "base_offset_x": 4.0,
+      "base_offset_y": 2.5,
+      "requirements": [
+        { "attribute": "ShootingThree", "weight": 1.0 },
+        { "attribute": "OffBallSense", "weight": 0.5 }
+      ],
+      "behaviour": "SpotUp"
+    },
+    {
+      "id": "right_corner",
+      "name_zh": "右底角埋伏射手",
+      "base_offset_x": 4.0,
+      "base_offset_y": 47.5,
+      "requirements": [
+        { "attribute": "ShootingThree", "weight": 1.0 },
+        { "attribute": "OffBallSense", "weight": 0.5 }
+      ],
+      "behaviour": "SpotUp"
+    }
+  ]
+}

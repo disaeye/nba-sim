@@ -321,11 +321,43 @@ impl TacticalSetSpec {
         spec
     }
 
+    pub fn delay_attack() -> Self {
+        const JSON: &str = include_str!("../../../data/tactics/delay_attack.json");
+        let spec = Self::from_json(JSON).expect("内置 delay_attack.json 必须合法");
+        spec.validate().expect("内置 delay_attack.json 必须自洽");
+        spec
+    }
+
+    pub fn post_split() -> Self {
+        const JSON: &str = include_str!("../../../data/tactics/post_split.json");
+        let spec = Self::from_json(JSON).expect("内置 post_split.json 必须合法");
+        spec.validate().expect("内置 post_split.json 必须自洽");
+        spec
+    }
+
+    pub fn drag_screen() -> Self {
+        const JSON: &str = include_str!("../../../data/tactics/drag_screen.json");
+        let spec = Self::from_json(JSON).expect("内置 drag_screen.json 必须合法");
+        spec.validate().expect("内置 drag_screen.json 必须自洽");
+        spec
+    }
+
+    pub fn transition_push() -> Self {
+        const JSON: &str = include_str!("../../../data/tactics/transition_push.json");
+        let spec = Self::from_json(JSON).expect("内置 transition_push.json 必须合法");
+        spec.validate().expect("内置 transition_push.json 必须自洽");
+        spec
+    }
+
     pub fn builtin(id: &str) -> Option<Self> {
         match id {
             "off_horns_pnr" | "high_pick_and_roll" => Some(Self::high_pick_and_roll()),
             "off_spain_pnr" | "spain_pick_and_roll" => Some(Self::spain_pick_and_roll()),
             "off_motion_spacing" | "five_out_motion" => Some(Self::five_out_motion()),
+            "off_delay_attack" | "delay_attack" => Some(Self::delay_attack()),
+            "off_post_split" | "post_split" => Some(Self::post_split()),
+            "off_drag_screen" | "drag_screen" => Some(Self::drag_screen()),
+            "off_transition_push" | "transition_push" => Some(Self::transition_push()),
             _ => None,
         }
     }

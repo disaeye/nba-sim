@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "horns_flare_pop_v1",
+  "name_zh": "牛角外弹侧翼三分",
+  "kind": "play",
+  "rules": [
+    {
+      "id": "flare_pop_to_wing",
+      "when": [
+        { "predicate": "carrier_possed" },
+        { "predicate": "screen_established" }
+      ],
+      "then": { "verb": "Lift", "slot": "weak_wing" },
+      "carrier_preferences": [
+        { "action_family": "Pass", "bonus": 0.3 }
+      ]
+    }
+  ],
+  "triggers": [
+    {
+      "when": [
+        { "predicate": "carrier_possed" },
+        { "predicate": "screen_established" }
+      ],
+      "window_seconds": 5.0,
+      "cooldown_seconds": 8.0
+    }
+  ]
+}

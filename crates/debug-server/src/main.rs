@@ -543,9 +543,14 @@ fn defense_catalog() -> Vec<serde_json::Value> {
 }
 
 fn play_catalog() -> Vec<nba_domain::PlaySpec> {
-    const PLAYS: [&str; 4] = [
+    const PLAYS: [&str; 9] = [
         include_str!("../../../data/tactics/plays/high_pnr_roll_v1.json"),
         include_str!("../../../data/tactics/plays/spain_pnr_stack_v1.json"),
+        include_str!("../../../data/tactics/plays/horns_flare_pop_v1.json"),
+        include_str!("../../../data/tactics/plays/delay_dho_handoff_v1.json"),
+        include_str!("../../../data/tactics/plays/post_split_cut_v1.json"),
+        include_str!("../../../data/tactics/plays/drag_screen_drive_kick_v1.json"),
+        include_str!("../../../data/tactics/plays/transition_rim_runner_v1.json"),
         include_str!("../../../data/tactics/plays/corner_backdoor_v1.json"),
         include_str!("../../../data/tactics/plays/weak_side_lift_v1.json"),
     ];

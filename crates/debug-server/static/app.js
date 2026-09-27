@@ -412,19 +412,19 @@
   }
 
   const TACTIC_SYSTEM_DESC_ZH = {
-    off_horns_pnr: "双高位牛角挡拆顺下配合",
-    off_spain_pnr: "西班牙双掩护顺下与外弹",
-    off_motion_spacing: "五外动态无球传切跑位",
-    off_transition_push: "快攻快速推进抢攻入筐",
-    off_delay_attack: "高位弧顶拉开单打分球",
-    off_post_split: "内线低位背身策应切入",
-    off_drag_screen: "转换跟进追身掩护投射",
-    def_man_conservative: "常规半场对位人盯人",
-    def_man_pressure: "全场紧逼持球施压",
-    def_switch_heavy: "无限轮转换防阻截",
-    def_drop_coverage: "中锋沉退护筐策略",
-    def_hedge_recover: "大延误阻绝突破返位",
-    def_zone_23: "经典二三联防保护油漆区",
+    off_horns_pnr: "双高位牛角挡拆 · 掩护顺下攻筐",
+    off_spain_pnr: "西班牙双掩护 · 背挡顺下与外弹空位",
+    off_motion_spacing: "五外动态空间 · 无球传切与反跑后门",
+    off_transition_push: "快攻闪击转换 · 8秒奔袭冲筐与追身三分",
+    off_delay_attack: "弧顶高位发牌 · 手递手接球突分与反切",
+    off_post_split: "低位背身强打 · 强侧交叉反切与底角分球",
+    off_drag_screen: "转换追身掩护 · 突分突破与拖尾跳投",
+    def_man_conservative: "常规半场人盯人 · 保持对位与防守平衡",
+    def_man_pressure: "全场紧逼领防 · 持续消耗体能逼迫失误",
+    def_switch_heavy: "无限轮转换防 · 扑灭三分需警惕身材错位",
+    def_drop_coverage: "中锋沉退护筐 · 封锁油漆区迫使中距离",
+    def_hedge_recover: "大延误快速返位 · 阻绝后卫急停出手空间",
+    def_zone_23: "经典二三联防 · 保护篮下禁区与后场篮板",
   };
   function getTacticDescZh(id) {
     return TACTIC_SYSTEM_DESC_ZH[id] || "战术执行策略";
@@ -734,8 +734,15 @@
       court.append(el("span", "play-note", "这个体系目前只有名称，没有落位点。"));
       return court;
     }
+    const tag = el("div", "court-mini-tag", spec.spacing_style ? `空间站位: ${spec.spacing_style}` : "半场阵型构型");
+    court.append(tag);
     for (const slot of spec.slots) {
-      const pin = el("div", "slot-pin", slot.name_zh);
+      const isHandler = slot.id === "top" || slot.behaviour === "DribbleTop";
+      const pin = el(
+        "div",
+        `slot-pin${isHandler ? " slot-handler" : ""}`,
+        slot.name_zh,
+      );
       const x = Math.max(8, Math.min(92, (slot.base_offset_y / 50) * 100));
       const y = Math.max(12, Math.min(88, 100 - (slot.base_offset_x / 47) * 100));
       pin.style.left = x + "%";
@@ -755,9 +762,22 @@
     for (const play of playbook) {
       const card = el("article", "play-card active");
       const verbs = (play.rules || [])
-        .map((rule) => `${getPlayVerbZh(rule.then.verb)} · ${getSlotZh(rule.then.slot)}`)
+        .map((rule) => {
+          const actionText = `${getPlayVerbZh(rule.then.verb)} · ${getSlotZh(rule.then.slot)}`;
+          const bonus = (rule.carrier_preferences || [])
+            .map((p) => `${p.action_family === "Pass" ? "传球意图" : "终结意图"} +${Math.round(p.bonus * 100)}%`)
+            .join(" · ");
+          return bonus ? `${actionText} (${bonus})` : actionText;
+        })
         .join(" / ");
-      card.append(el("strong", null, cleanTacticNameZh(play.name_zh)), el("span", "play-note", verbs || "战术配合"));
+      const triggerNote = (play.triggers || []).length
+        ? "时机: 掩护确立或对位移动时触发"
+        : "时机: 阵地持球就位自动触发";
+      card.append(
+        el("strong", null, cleanTacticNameZh(play.name_zh)),
+        el("span", "play-note", verbs || "战术配合"),
+        el("span", "play-trigger-tag", triggerNote),
+      );
       list.append(card);
     }
     return list;
