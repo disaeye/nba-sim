@@ -25,7 +25,7 @@ impl MatchEngine {
         if let Err(error) = setup.validate() {
             panic!("invalid match setup: {error}");
         }
-        let rules = setup.rules.clone();
+        let mut rules = setup.rules.clone();
         let mut physics = PhysicsWorld::with_backend(&rules, setup.physics_backend);
         // 初始处理球人由**能力**派生（round-11 Step4b），而不是 `starters[0]`。
         //
@@ -146,6 +146,13 @@ impl MatchEngine {
             .expect("validated home defense tactic");
         let away_defense = DefensiveTactic::from_id(&setup.away_lineup.defense_tactic)
             .expect("validated away defense tactic");
+        if let Some(d) = nba_domain::DefenseRules::for_scheme(away_defense.id()) {
+            let tuned = rules.tactics.defense.potential_field;
+            rules.tactics.defense = nba_domain::DefenseRules {
+                potential_field: tuned,
+                ..d
+            };
+        }
         let team_traits = [
             ("home".to_string(), setup.home_team.team_traits.clone()),
             ("away".to_string(), setup.away_team.team_traits.clone()),

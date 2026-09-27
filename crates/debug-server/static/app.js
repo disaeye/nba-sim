@@ -323,11 +323,17 @@
   }
 
   const TACTICS_ZH = {
-    HighScreenRoll: "高位挡拆体系",
-    DriveKick: "突破分球体系",
+    HighScreenRoll: "牛角高位挡拆体系",
+    HighPickAndRoll: "牛角高位挡拆体系",
+    SpainPickAndRoll: "西班牙双掩护体系",
+    DriveKick: "突分与追身掩护体系",
+    DriveAndKick: "突分与追身掩护体系",
     FiveOutMotion: "五外动态进攻体系",
-    HornsSet: "牛角战术体系",
+    HornsSet: "牛角高位挡拆体系",
     TriangleOffense: "三角进攻体系",
+    IsolationDrive: "弧顶发牌高位单打",
+    PostUp: "低位背身策应体系",
+    FastBreakTransition: "快攻闪击转换体系",
     DropCoverage: "沉退护筐防守体系",
     SwitchAll: "无限换防体系",
     HedgeAndRecover: "延误返位防守体系",
@@ -1406,23 +1412,11 @@
     try {
       if (!withRules) await fetchDefaultRules(false);
       if (!studio) await loadStudio();
-      const wasm = await ensureWasm();
-      let responseText;
       const setup = studio?.default_setup || null;
-      if (wasm && wasm.simulateToNdjson) {
-        let rulesJson = null;
-        if (withRules) {
-          rulesJson = JSON.stringify(withRules);
-        } else if (state.rules) {
-          rulesJson = JSON.stringify(state.rules);
-        }
-        responseText = wasm.simulateToNdjson(
-          BigInt(seed),
-          scope,
-          rulesJson,
-          setup ? JSON.stringify(setup) : null,
-        );
-      } else {
+      let responseText = null;
+
+      // 优先请求后端真实的 Rust MatchEngine 模拟 API，完整消费战术体系、防守模型与剧本
+      try {
         responseText = await fetchText("/api/simulate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1433,7 +1427,27 @@
             setup,
           }),
         });
+      } catch (apiError) {
+        console.warn("后端 API 离线，尝试降级至本地 WASM 运行", apiError);
+        const wasm = await ensureWasm();
+        if (wasm && wasm.simulateToNdjson) {
+          let rulesJson = null;
+          if (withRules) {
+            rulesJson = JSON.stringify(withRules);
+          } else if (state.rules) {
+            rulesJson = JSON.stringify(state.rules);
+          }
+          responseText = wasm.simulateToNdjson(
+            BigInt(seed),
+            scope,
+            rulesJson,
+            setup ? JSON.stringify(setup) : null,
+          );
+        } else {
+          throw apiError;
+        }
       }
+
       if (withRules) state.rules = { ...state.rules, ...withRules };
       loadStream(responseText, `seed ${seed} · ${scope}`);
       setRunStatus(`${state.ticks.length.toLocaleString()} ticks`);
