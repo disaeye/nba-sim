@@ -207,6 +207,78 @@ impl MatchEngine {
             .map(|play| evaluate_active_play(&play.spec, &selection_context))
     }
 
+    /// 持球姿态落地：新持球人确立时评估一次面框/背身技术选择。
+    ///
+    /// 写入物理状态与朝向（背身面向传球侧，面框面向篮筐），并把姿态
+    /// 切换作为事件发布，使时间线可读出「技术选择」。PostUp 动作执行
+    /// 时也会强制写入背身（见 `mark_orientation`）。
+    fn refresh_ball_orientation(&mut self, carrier_id: &str) {
+        if self
+            .possession_ctx
+            .ball_orientation
+            .as_ref()
+            .is_some_and(|(id, _)| id == carrier_id)
+        {
+            return;
+        }
+        let hoop = self
+            .config
+            .rules
+            .court
+            .hoop_pos(self.flow.possession == Possession::Home);
+        let Some(carrier) = self.systems.physics.get_player(carrier_id) else {
+            return;
+        };
+        let orientation =
+            nba_decision::orientation::choose_orientation(&self.config.rules, carrier, hoop);
+        self.mark_orientation(carrier_id, orientation, hoop);
+    }
+
+    /// 写入姿态、朝向与事件；姿态缓存与物理状态保持一致。
+    fn mark_orientation(
+        &mut self,
+        carrier_id: &str,
+        orientation: nba_domain::action_window::BallOrientation,
+        hoop: glam::Vec2,
+    ) {
+        let is_back = orientation == nba_domain::action_window::BallOrientation::BackToBasket;
+        if let Some(p) = self.systems.physics.get_player_mut(carrier_id) {
+            p.ball_orientation = orientation;
+            let dir = if is_back {
+                p.pos_ft - hoop
+            } else {
+                hoop - p.pos_ft
+            }
+            .normalize_or_zero();
+            if dir.length_squared() > f32::EPSILON {
+                p.facing_dir = dir;
+            }
+        }
+        let player_name = self
+            .systems
+            .physics
+            .get_player(carrier_id)
+            .map(|p| format!("{}号", p.jersey))
+            .unwrap_or_else(|| carrier_id.to_string());
+        if is_back {
+            self.journal.current_callout = Some(format!(
+                "{} 背身要位，用身体卡住防守凿向篮筐！",
+                player_name
+            ));
+        } else {
+            self.journal.current_callout =
+                Some(format!("{} 面框三威胁，重心压低观察全场！", player_name));
+        }
+        // 姿态选择作为领域事件发布（帧投影的 orientation 字段与本事件同 tick）。
+        self.journal
+            .pending_events
+            .push(nba_domain::event::GameEvent::BallOrientationChosen {
+                player_id: carrier_id.to_string(),
+                back_to_basket: is_back,
+            });
+        self.possession_ctx.ball_orientation = Some((carrier_id.to_string(), orientation));
+    }
+
     fn decide_with_active_play(
         &mut self,
         carrier_id: &str,
@@ -217,6 +289,8 @@ impl MatchEngine {
         // 先完成需要 &mut self 的 Play 选择，再构建只读决策上下文，
         // 避免不可变借用与可变借用交叠。
         let play = self.choose_active_play(carrier_id);
+        // 持球姿态是新持球人的第一次技术决策，先于动作候选评估。
+        self.refresh_ball_orientation(carrier_id);
         let ctx = self.constraint_ctx();
         let decision = OnBallDecisionContext {
             constraint_context: &ctx,

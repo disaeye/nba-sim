@@ -472,18 +472,6 @@
     return PLAY_VERB_ZH[verb] || verb || "执行战术";
   }
 
-  const BEHAVIOUR_ZH = {
-    DribbleTop: "弧顶运球组织",
-    SpotUp: "定点待命拉开",
-    PerimeterRelocate: "外线跑位重置",
-    HighScreenRoll: "高位挡拆顺下",
-    BackdoorCut: "空切反跑偷后门",
-    DipToRim: "底角切入直插篮下",
-  };
-  function getBehaviourZh(behaviour) {
-    return BEHAVIOUR_ZH[behaviour] || behaviour || "战术落位职责";
-  }
-
   const DECISION_KIND_ZH = {
     Shoot: "投篮出手",
     Pass: "传球配合",
@@ -2813,6 +2801,7 @@
       const gaitPulse = Math.sin(gaitCycle);
 
       // 1. 身体朝向角 (Facing Angle) 与动态锁定
+      const isBackToBasket = player.hasBall && player.orientation === "back_to_basket";
       let facingAngle = 0;
       if (isShooting) {
         // 投篮动作严格朝向进攻目标篮筐
@@ -2843,6 +2832,10 @@
             hoopX - finite(player.x) * rules.courtWidth,
           );
         }
+      } else if (isBackToBasket && player.facing_x !== undefined && player.facing_y !== undefined && Math.hypot(player.facing_x, player.facing_y) > 0.05) {
+        // 背身持球人的朝向被姿态锚定（背对篮筐面向传球侧），
+        // 引擎下发的 facing 向量就是权威姿态朝向。
+        facingAngle = Math.atan2(player.facing_y, player.facing_x);
       } else if (
         player.facing_x !== undefined &&
         player.facing_y !== undefined &&
@@ -3090,6 +3083,32 @@
         ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.6)" : "rgba(245, 158, 11, 0.6)";
         ctx.lineWidth = 1.2;
         ctx.stroke();
+      }
+
+      // 背身姿态视觉：圆盘两侧张肘卡位短弧 + 盘下「背身」姿态标签
+      // （与面框三威胁的朝向三角形成直接的视觉对立语言）
+      if (isBackToBasket) {
+        const elbowColor = isHome ? "rgba(6, 95, 70, 0.85)" : "rgba(146, 64, 14, 0.85)";
+        ctx.strokeStyle = elbowColor;
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius + 2.0, Math.PI * 0.72, Math.PI * 0.98);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0, 0, radius + 2.0, Math.PI * 0.02, Math.PI * 0.28);
+        ctx.stroke();
+        ctx.font = "700 9.5px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillStyle = elbowColor;
+        ctx.fillText("背身", 0, radius + 6.5);
+      } else if (player.hasBall && !isShooting) {
+        // 面框三威胁：盘下细微姿态标签，与背身标签对称
+        ctx.font = "600 9.5px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillStyle = isHome ? "rgba(6, 95, 70, 0.55)" : "rgba(146, 64, 14, 0.55)";
+        ctx.fillText("面框", 0, radius + 6.5);
       }
 
       // 纯白清晰数字背号 (居中，高对比度)

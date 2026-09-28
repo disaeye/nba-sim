@@ -1,6 +1,17 @@
 use crate::rules::GameRules;
 use serde::{Deserialize, Serialize};
 
+/// 持球姿态：接球后的一次显式技术选择。
+///
+/// 面框（FaceUp）是三威胁姿态，适合外线持球与突破/拔起投篮；
+/// 背身（BackToBasket）背对篮筐要位，适合低位大个与力量错位。
+/// 姿态由决策层在新持球确立时评估，期间保持，失去球权即重置。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BallOrientation {
+    FaceUp,
+    BackToBasket,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActionPhase {
     Preparation,   // Wind-up / setup (can be interrupted or contested)

@@ -700,7 +700,7 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       不受残留动作锁阻塞（seed13 死锁 616s 修复）、
 //       defense_rotation_response 判定口径重构（分布带判定归还评判器
 //       与 stats_baseline，本测试保留行为断言）。
-const GOLDEN_SEED42_2000: u64 = 0xb849b30e273881b1;
+const GOLDEN_SEED42_2000: u64 = 0xe7a3d6d64826c898;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

@@ -23,6 +23,7 @@ use rapier2d::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+use nba_domain::action_window::BallOrientation;
 use nba_domain::{FixedDt, GameRules};
 
 use crate::spatial::{OpennessMetric, PassCorridorStatus, SpatialGeometry};
@@ -92,6 +93,9 @@ pub struct PlayerPhysicsState {
     pub foul_count: u8,
     pub locomotion: LocomotionState,
     pub facing_dir: Vec2,
+    /// 持球姿态（面框/背身）：新持球确立时由决策层评估的技术选择，
+    /// 失去球权即重置为面框。非持球人恒为面框。
+    pub ball_orientation: BallOrientation,
     pub turn_decel_timer: f32,
     pub is_locked_kinematics: bool,
     /// 显式 placement 豁免（gap.md §4.3）：发球程序中的发球员允许被
@@ -744,9 +748,14 @@ impl SpatialPhysics for RapierSpatialPhysics {
         }
     }
     fn set_ball_holder(&mut self, holder_id: Option<&str>) {
+        // 持球权变更是姿态生命周期边界：新持球人的姿态尚未评估，
+        // 旧持球人不再持球，两者都回到面框基准。
         for (id, player) in &mut self.players {
-            player.has_ball =
-                player.on_court && holder_id.map(|holder| holder == id).unwrap_or(false);
+            let holds = player.on_court && holder_id.map(|holder| holder == id).unwrap_or(false);
+            player.has_ball = holds;
+            if !holds {
+                player.ball_orientation = BallOrientation::FaceUp;
+            }
         }
     }
 
@@ -913,9 +922,13 @@ impl SpatialPhysics for SimpleCirclePhysics {
     }
 
     fn set_ball_holder(&mut self, holder_id: Option<&str>) {
+        // 与 Rapier 后端同步：姿态生命周期随持球权重置。
         for (id, player) in &mut self.players {
-            player.has_ball =
-                player.on_court && holder_id.map(|holder| holder == id).unwrap_or(false);
+            let holds = player.on_court && holder_id.map(|holder| holder == id).unwrap_or(false);
+            player.has_ball = holds;
+            if !holds {
+                player.ball_orientation = BallOrientation::FaceUp;
+            }
         }
     }
 

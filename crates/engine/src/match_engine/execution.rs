@@ -863,12 +863,19 @@ impl MatchEngine {
                     .hoop_pos(self.flow.possession == Possession::Home);
                 if let Some(p) = self.systems.physics.get_player_mut(&player_id) {
                     p.action = "PostUp".to_string();
+                    // 背身单打即姿态确立：物理状态与回合缓存同步标记，
+                    // 后续决策 tick 不再重新评估。
+                    p.ball_orientation = nba_domain::action_window::BallOrientation::BackToBasket;
                     // Facing opposite to hoop (backdown orientation)
                     let away_from_hoop = (p.pos_ft - hoop).normalize_or_zero();
                     if away_from_hoop.length_squared() > 0.1 {
                         p.facing_dir = away_from_hoop;
                     }
                 }
+                self.possession_ctx.ball_orientation = Some((
+                    player_id.clone(),
+                    nba_domain::action_window::BallOrientation::BackToBasket,
+                ));
                 let player_name = self
                     .systems
                     .physics

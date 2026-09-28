@@ -233,13 +233,19 @@ impl DecisionSystem {
                 target_pos: drive_target,
                 move_kind,
             });
+            let carrier_back = carrier.ball_orientation
+                == nba_domain::action_window::BallOrientation::BackToBasket;
+            let post_zone = ctx.rules.decision.orientation_post_zone_ft;
             let jumper_kind = if is_three {
                 if closest_def_dist < 4.0 && carrier_skill > 0.7 {
                     Some(nba_domain::action_window::JumperKind::StepBack)
                 } else {
                     Some(nba_domain::action_window::JumperKind::CatchAndShoot)
                 }
-            } else if dist_to_hoop > 12.0 {
+            } else if carrier_back && dist_to_hoop <= post_zone {
+                // 背身姿态下的低位出手是转身后仰，而不是面框的接球投。
+                Some(nba_domain::action_window::JumperKind::TurnaroundFadeaway)
+            } else if dist_to_hoop > post_zone {
                 Some(nba_domain::action_window::JumperKind::PullUp)
             } else {
                 Some(nba_domain::action_window::JumperKind::CatchAndShoot)
@@ -251,13 +257,17 @@ impl DecisionSystem {
                 jumper_kind,
             });
             let jab_dir = (hoop - carrier_pos).normalize_or_zero();
-            candidates.push(CandidateAction::TripleThreatJab {
-                player_id: carrier_id.to_string(),
-                pivot_pos: carrier_pos,
-                jab_dir,
-            });
+            if !carrier_back {
+                // 三威胁试探步是面框专属姿态；背身持球人的对应动作是
+                // 低位背身单打（PostUp），两者互斥。
+                candidates.push(CandidateAction::TripleThreatJab {
+                    player_id: carrier_id.to_string(),
+                    pivot_pos: carrier_pos,
+                    jab_dir,
+                });
+            }
             let post_target = hoop + (carrier_pos - hoop).normalize_or_zero() * 8.0;
-            if (carrier_pos - hoop).length() < 18.0 {
+            if (carrier_pos - hoop).length() < ctx.rules.decision.orientation_zone_fade_ft {
                 candidates.push(CandidateAction::PostUp {
                     player_id: carrier_id.to_string(),
                     from_pos: carrier_pos,
@@ -547,6 +557,35 @@ impl DecisionSystem {
             CandidateAction::Dwell { .. }
             | CandidateAction::TripleThreatJab { .. }
             | CandidateAction::Advance { .. } => -policy.morale_dwell_affinity,
+        };
+        // ## 姿态耦合：面框/背身是接球时的技术选择，它改变后续动作族的价值
+        //
+        // 已背身：低位单打增益（转身成本已付），面框突破与外线拔起
+        // 都要先转身付出成本；面框姿态下临时选背身单打同样要转身。
+        // 系数全部走 `DecisionRules` 通道。
+        let orientation_mult = {
+            let carrier_back = actor
+                .map(|p| {
+                    p.ball_orientation == nba_domain::action_window::BallOrientation::BackToBasket
+                })
+                .unwrap_or(false);
+            let d = &ctx.rules.decision;
+            match &s.action {
+                CandidateAction::PostUp { .. } => {
+                    if carrier_back {
+                        f32::from(1u8) + d.orientation_post_up_match_bonus
+                    } else {
+                        f32::from(1u8) - d.orientation_face_up_turn_cost
+                    }
+                }
+                CandidateAction::Drive { .. } if carrier_back => {
+                    f32::from(1u8) - d.orientation_back_drive_penalty
+                }
+                CandidateAction::Shoot { is_three, .. } if carrier_back && *is_three => {
+                    f32::from(1u8) - d.orientation_back_perimeter_penalty
+                }
+                _ => f32::from(1u8),
+            }
         };
         let base = match &s.action {
             CandidateAction::Advance { .. } => {
@@ -845,7 +884,7 @@ impl DecisionSystem {
             }
             _ => self.weights.risk_aversion,
         };
-        base * s.feasibility_score * stamina_mult
+        base * orientation_mult * s.feasibility_score * stamina_mult
             + morale_bias * morale_affinity
             + s.constraint_penalty
             - s.risk * risk_aversion

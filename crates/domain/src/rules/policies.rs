@@ -877,11 +877,32 @@ pub struct DecisionRules {
     /// （seed 42、20000 tick 的决策追踪实测）。
     /// 低位背身是独立的动作族，需要自己的量级与错位收益项。
     pub post_up_base: f32,
-    /// 低位背身的**错位收益**权重：以背身者的 `strength` 优势对抗
+    /// 低位背身的错位收益权重：以背身者的 `strength` 优势对抗
     /// 对位防守人的 `effective_post_defense_physicality`。
     /// 这是低位背身的战术意义所在（大打小、错位惩罚），
     /// 也是它与 `Drive` 的结构差异：Drive 看的是道路空旷，PostUp 看的是对位强弱。
     pub post_up_mismatch_weight: f32,
+    /// 持球姿态（面框/背身）技术选择的评估权重：
+    /// 背身亲和度 = strength×w + shooting_near×w + finishing×w
+    /// − ball_handling×w − shooting_three×w，再乘接球区域因子。
+    pub orientation_strength_weight: f32,
+    pub orientation_near_weight: f32,
+    pub orientation_finishing_weight: f32,
+    pub orientation_handling_penalty: f32,
+    pub orientation_three_penalty: f32,
+    /// 背身成立的接球区域：距篮不超过 `post_zone_ft` 时区域因子满 1，
+    /// 到 `zone_fade_ft` 线性衰减到 0（与 PostUp 候选生成的 18ft 门对齐）。
+    pub orientation_post_zone_ft: f32,
+    pub orientation_zone_fade_ft: f32,
+    /// 背身亲和度超过该阈值时选择背身，否则面框。
+    pub orientation_threshold: f32,
+    /// 姿态对后续动作效用的耦合：已背身时 PostUp 增益比例；面框下选
+    /// PostUp 的转身成本；背身下 Drive 的转身启动成本；背身下外线
+    /// 拔起投篮（三分/中距 PullUp）的惩罚。
+    pub orientation_post_up_match_bonus: f32,
+    pub orientation_face_up_turn_cost: f32,
+    pub orientation_back_drive_penalty: f32,
+    pub orientation_back_perimeter_penalty: f32,
     /// Play 候选偏好与软抑制的效用缩放系数。
     ///
     /// 偏好加到动作效用上，软抑制从动作效用中扣除；零值关闭两种调整。默认单位倍率
@@ -953,6 +974,20 @@ impl Default for DecisionRules {
             // 低位背身的量级：与 Drive 同阶，使两者在距篮较近时真正竞争。
             post_up_base: 2.2,
             post_up_mismatch_weight: 0.9,
+            // 持球姿态评估权重：内线技术（strength/near/finishing）推背身，
+            // 外线技术（handling/three）推面框；区域门与 PostUp 候选一致。
+            orientation_strength_weight: 0.35,
+            orientation_near_weight: 0.25,
+            orientation_finishing_weight: 0.20,
+            orientation_handling_penalty: 0.25,
+            orientation_three_penalty: 0.20,
+            orientation_post_zone_ft: 12.0,
+            orientation_zone_fade_ft: 18.0,
+            orientation_threshold: 0.45,
+            orientation_post_up_match_bonus: 0.35,
+            orientation_face_up_turn_cost: 0.15,
+            orientation_back_drive_penalty: 0.20,
+            orientation_back_perimeter_penalty: 0.45,
             play_effect_weight: f32::from(1u8),
             dwell_decay_max: 0.85,
             contested_patience_floor: 0.25,
@@ -1000,6 +1035,18 @@ impl DecisionRules {
             self.drive_base,
             self.post_up_base,
             self.post_up_mismatch_weight,
+            self.orientation_strength_weight,
+            self.orientation_near_weight,
+            self.orientation_finishing_weight,
+            self.orientation_handling_penalty,
+            self.orientation_three_penalty,
+            self.orientation_post_zone_ft,
+            self.orientation_zone_fade_ft,
+            self.orientation_threshold,
+            self.orientation_post_up_match_bonus,
+            self.orientation_face_up_turn_cost,
+            self.orientation_back_drive_penalty,
+            self.orientation_back_perimeter_penalty,
             self.play_effect_weight,
             self.dwell_decay_max,
             self.contested_patience_floor,
@@ -1031,6 +1078,18 @@ impl DecisionRules {
             || self.team_style_weight < zero
             || self.post_up_base < zero
             || self.post_up_mismatch_weight < zero
+            || self.orientation_strength_weight < zero
+            || self.orientation_near_weight < zero
+            || self.orientation_finishing_weight < zero
+            || self.orientation_handling_penalty < zero
+            || self.orientation_three_penalty < zero
+            || self.orientation_post_zone_ft <= zero
+            || self.orientation_zone_fade_ft <= self.orientation_post_zone_ft
+            || !(zero..=f32::from(1u8)).contains(&self.orientation_threshold)
+            || self.orientation_post_up_match_bonus < zero
+            || self.orientation_face_up_turn_cost < zero
+            || self.orientation_back_drive_penalty < zero
+            || self.orientation_back_perimeter_penalty < zero
             || self.pass_distance_free_ft < zero
             || self.pass_distance_decay_reference_ft <= self.pass_distance_free_ft
             || !(0.0..=1.0).contains(&self.pass_distance_max_decay)
