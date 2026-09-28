@@ -1341,7 +1341,7 @@
     for (const [key, value] of Object.entries(values)) {
       const ratio = Math.max(0, Math.min(1, Number(value)));
       const bar = el("i", null, el("b"));
-      bar.firstChild.style.width = Math.round(ratio * 100) + "%";
+      bar.firstChild.style.width = `${Math.round(ratio * 100)}%`;
       list.append(el("div", "meter", el("span", null, label(group, key)), bar, el("span", null, ratio.toFixed(2))));
     }
     return list;
@@ -1531,7 +1531,7 @@
     state.accumulator = 0;
     state.previousRaf = 0;
     state.lastFrameJson = -1;
-    state.rules = { ...state.rules, ...(parsed[0].rules || {}) };
+    state.rules = { ...state.rules, ...parsed[0].rules };
     state.analytics = buildAnalytics(parsed);
     state.events = state.analytics.events;
     state.possessions = state.analytics.possessions;
@@ -1563,7 +1563,8 @@
     const pendingShots = [];
     let previous = null;
 
-    ticks.forEach((tick, index) => {
+    for (let index = 0; index < ticks.length; index += 1) {
+      const tick = ticks[index];
       const id = tick.possession_id ?? 0;
       const holderId =
         tick.ball?.holderId ||
@@ -1576,7 +1577,9 @@
         possessionTeams.set(id, holder?.team || tick.possession_team || "home");
 
       const names = eventNames(tick);
-      names.forEach((name) => events.push({ index, name, tick }));
+      for (const name of names) {
+        events.push({ index, name, tick });
+      }
       let possession = possessionMap.get(id);
       if (!possession) {
         possession = {
@@ -1680,9 +1683,7 @@
           const parentId = domainEvent?.parent_event_id ?? null;
           const shotIndex =
             parentId == null
-              ? pendingShots.length > 0
-                ? 0
-                : -1
+              ? (pendingShots.length > 0 ? 0 : -1)
               : pendingShots.findIndex(
                   (candidate) => candidate.eventId === parentId,
                 );
@@ -1705,7 +1706,7 @@
         }
       }
       previous = tick;
-    });
+    }
 
     const possessions = [...possessionMap.values()].sort(
       (a, b) => a.start - b.start,
@@ -1795,7 +1796,7 @@
     // 不一致：*1.05 vs speed_tolerance_ftps、自创 LONG_POSSESSION>35s 等）。
     const anomalies = state.engineViolations.map((violation) => ({
       index: finite(violation.tick_index),
-      kind: `${violation.rule}${violation.severity ? " · " + violation.severity : ""}`,
+      kind: `${violation.rule}${violation.severity ? ` · ${violation.severity}` : ""}`,
       detail: violation.detail || "",
     }));
     return {
@@ -1958,9 +1959,9 @@
     if (state.filters.size === 0) {
       // 默认排除高频物理底层事件（如单纯的每 tick 碰撞与动作窗口微调），默认呈现比赛核心技术与战术事件
       const defaultHidden = new Set(["CONTACT_BUMP", "ACTION_WINDOW_SHIFT"]);
-      names.forEach((name) => {
+      for (const name of names) {
         if (!defaultHidden.has(name)) state.filters.add(name);
-      });
+      }
     }
     const filterBox = $("eventFilters");
     filterBox.replaceChildren();
@@ -2409,16 +2410,14 @@
             }
           }
         }
-        const sx = tick.ball
-          ? ballFtX
-          : shooter
-            ? finite(shooter.x) * rules.courtWidth
-            : ballFtX;
-        const sy = tick.ball
-          ? ballFtY
-          : shooter
-            ? finite(shooter.y) * rules.courtHeight
-            : ballFtY;
+        const sx =
+          tick.ball || !shooter
+            ? ballFtX
+            : finite(shooter.x) * rules.courtWidth;
+        const sy =
+          tick.ball || !shooter
+            ? ballFtY
+            : finite(shooter.y) * rules.courtHeight;
         const distToHoop = Math.hypot(sx - targetHoopX, sy - rules.hoopY);
         const isThree = distToHoop >= rules.threePointDistance;
 
@@ -3156,15 +3155,25 @@
         ? "800 8.5px system-ui, -apple-system, sans-serif"
         : "700 8px system-ui, -apple-system, sans-serif";
       const posTagW = ctx.measureText(tagText).width + 8;
+      const jumpFill = jumpActionZh
+        ? "rgba(6, 95, 70, 0.95)"
+        : isHome
+          ? "rgba(6, 95, 70, 0.95)"
+          : "rgba(146, 64, 14, 0.95)";
       ctx.fillStyle = jumpActionZh
-        ? (isHome ? "rgba(6, 95, 70, 0.95)" : "rgba(146, 64, 14, 0.95)")
-        : (isDynamicAction ? "rgba(255, 255, 255, 0.98)" : "rgba(255, 255, 255, 0.9)");
+        ? jumpFill
+        : isDynamicAction
+          ? "rgba(255, 255, 255, 0.98)"
+          : "rgba(255, 255, 255, 0.9)";
+      const dynamicStroke = isHome
+        ? "rgba(5, 150, 105, 0.6)"
+        : "rgba(217, 119, 6, 0.6)";
       ctx.strokeStyle = jumpActionZh
         ? "#ffffff"
-        : (isDynamicAction
-          ? (isHome ? "rgba(5, 150, 105, 0.6)" : "rgba(217, 119, 6, 0.6)")
-          : "rgba(203, 213, 225, 0.8)");
-      ctx.lineWidth = jumpActionZh ? 1.6 : (isDynamicAction ? 1.4 : 1.0);
+        : isDynamicAction
+          ? dynamicStroke
+          : "rgba(203, 213, 225, 0.8)";
+      ctx.lineWidth = jumpActionZh ? 1.6 : isDynamicAction ? 1.4 : 1.0;
       ctx.beginPath();
       ctx.roundRect(px - posTagW / 2, posTagY - 4.5, posTagW, 11, 3.5);
       ctx.fill();
@@ -3944,15 +3953,15 @@
     $("fileInput").disabled = busy;
     $("runRulesButton").disabled = busy;
     $("loadRulesButton").disabled = busy;
-    document.querySelectorAll("[data-preset]").forEach((button) => {
+    for (const button of document.querySelectorAll("[data-preset]")) {
       button.disabled = busy;
-    });
-    document.querySelectorAll(".transport-group button").forEach((button) => {
+    }
+    for (const button of document.querySelectorAll(".transport-group button")) {
       button.disabled = busy;
-    });
-    document.querySelectorAll(".speed-group button").forEach((button) => {
+    }
+    for (const button of document.querySelectorAll(".speed-group button")) {
       button.disabled = busy;
-    });
+    }
     $("jumpButton").disabled = busy;
     $("progressInput").disabled = busy;
     if (busy) stopPlayback();
@@ -4068,16 +4077,18 @@
     if (!sheet) return;
 
     // 侧边栏导航切换
-    document.querySelectorAll(".settings-nav-item").forEach((btn) => {
+    for (const btn of document.querySelectorAll(".settings-nav-item")) {
       btn.addEventListener("click", () => {
-        document.querySelectorAll(".settings-nav-item").forEach((b) => b.classList.remove("active"));
+        for (const b of document.querySelectorAll(".settings-nav-item")) {
+          b.classList.remove("active");
+        }
         btn.classList.add("active");
         const paneId = `pane-${btn.dataset.pane}`;
-        document.querySelectorAll(".settings-pane").forEach((p) => {
+        for (const p of document.querySelectorAll(".settings-pane")) {
           p.classList.toggle("active", p.id === paneId);
-        });
+        }
       });
-    });
+    }
 
     // 打开设置中心并同步
     function openSettings() {
@@ -4134,17 +4145,19 @@
     }
 
     // 范围选择双向同步
-    document.querySelectorAll(".scope-chip").forEach((chip) => {
+    for (const chip of document.querySelectorAll(".scope-chip")) {
       chip.addEventListener("click", () => {
-        document.querySelectorAll(".scope-chip").forEach((c) => c.classList.remove("active"));
+        for (const c of document.querySelectorAll(".scope-chip")) {
+          c.classList.remove("active");
+        }
         chip.classList.add("active");
         $("scopeInput").value = chip.dataset.scope;
         updateSettingsSummaryHint();
       });
-    });
+    }
 
     // 快速预设模式卡片
-    document.querySelectorAll(".preset-mode-card").forEach((card) => {
+    for (const card of document.querySelectorAll(".preset-mode-card")) {
       card.addEventListener("click", () => {
         const mode = card.dataset.presetMode;
         if (mode === "default") {
@@ -4163,7 +4176,7 @@
         }
         syncSettingsCenter();
       });
-    });
+    }
 
     // 本地文件导入
     const sheetUploadBtn = $("sheetUploadTriggerBtn");
@@ -4188,14 +4201,14 @@
     }
 
     // 规则预设按钮
-    document.querySelectorAll(".sheet-preset-btn").forEach((btn) => {
+    for (const btn of document.querySelectorAll(".sheet-preset-btn")) {
       btn.addEventListener("click", () => {
         const preset = btn.dataset.rulesPreset;
         applyPreset(preset);
         if ($("sheetRulesEditor")) $("sheetRulesEditor").value = $("rulesEditor").value;
         updateSettingsSummaryHint();
       });
-    });
+    }
 
     // 规则编辑框同步
     const sheetRulesEditor = $("sheetRulesEditor");
@@ -4237,9 +4250,9 @@
     // 同步种子与范围
     if ($("sheetSeedInput") && $("seedInput")) $("sheetSeedInput").value = $("seedInput").value;
     const currentScope = $("scopeInput")?.value || "5p";
-    document.querySelectorAll(".scope-chip").forEach((chip) => {
+    for (const chip of document.querySelectorAll(".scope-chip")) {
       chip.classList.toggle("active", chip.dataset.scope === currentScope);
-    });
+    }
 
     // 同步规则编辑器内容
     if ($("sheetRulesEditor") && $("rulesEditor")) {
@@ -4351,24 +4364,24 @@
     });
 
     // 伴随式实时透视台选项卡 (Deck Tabs)
-    document.querySelectorAll(".deck-tab-button").forEach((button) =>
+    for (const button of document.querySelectorAll(".deck-tab-button")) {
       button.addEventListener("click", () => {
         const tab = button.dataset.deckTab;
-        document
-          .querySelectorAll(".deck-tab-button")
-          .forEach((item) => item.classList.toggle("active", item === button));
-        document.querySelectorAll(".deck-pane").forEach((pane) => {
+        for (const item of document.querySelectorAll(".deck-tab-button")) {
+          item.classList.toggle("active", item === button);
+        }
+        for (const pane of document.querySelectorAll(".deck-pane")) {
           const active = pane.id === `deck-${tab}`;
           pane.classList.toggle("active", active);
-        });
+        }
         if (tab === "decisions" && state.ticks[state.idx]) {
           renderDecision(state.ticks[state.idx]);
         }
         if (tab === "anomalies") {
           renderAnomalies();
         }
-      }),
-    );
+      });
+    }
 
     $("anomalyBadge").addEventListener("click", () => {
       const anomaliesBtn = document.querySelector('.deck-tab-button[data-deck-tab="anomalies"]');
@@ -4382,17 +4395,17 @@
     });
 
     // 底部研讨舱选项卡 (Studio Tabs)
-    document.querySelectorAll(".tab-button").forEach((button) =>
+    for (const button of document.querySelectorAll(".tab-button")) {
       button.addEventListener("click", () => {
         state.currentTab = button.dataset.tab;
-        document
-          .querySelectorAll(".tab-button")
-          .forEach((item) => item.classList.toggle("active", item === button));
-        document.querySelectorAll(".tab-pane").forEach((pane) => {
+        for (const item of document.querySelectorAll(".tab-button")) {
+          item.classList.toggle("active", item === button);
+        }
+        for (const pane of document.querySelectorAll(".tab-pane")) {
           const active = pane.id === `tab-${state.currentTab}`;
           pane.hidden = !active;
           pane.classList.toggle("active", active);
-        });
+        }
         const isTeamConfigTab = state.currentTab === "board" || state.currentTab === "roster";
         const perspectiveBar = $("teamPerspectiveBar");
         if (perspectiveBar) {
@@ -4404,8 +4417,8 @@
         if (state.currentTab === "frame" && state.ticks[state.idx]) {
           renderFrameJson(state.ticks[state.idx]);
         }
-      }),
-    );
+      });
+    }
 
     // 球队执教视角切换按钮 (主队 / 客队)
     const perspectiveHomeBtn = $("perspectiveHomeBtn");
@@ -4436,23 +4449,19 @@
       });
     }
 
-    document.querySelectorAll(".speed-group button").forEach((button) =>
+    for (const button of document.querySelectorAll(".speed-group button")) {
       button.addEventListener("click", () => {
         state.speed = Number(button.dataset.speed);
-        document
-          .querySelectorAll(".speed-group button")
-          .forEach((item) => item.classList.toggle("active", item === button));
-      }),
-    );
+        for (const item of document.querySelectorAll(".speed-group button")) {
+          item.classList.toggle("active", item === button);
+        }
+      });
+    }
     $("loadRulesButton").addEventListener("click", loadDefaultRules);
     $("runRulesButton").addEventListener("click", runEditedRules);
-    document
-      .querySelectorAll("[data-preset]")
-      .forEach((button) =>
-        button.addEventListener("click", () =>
-          applyPreset(button.dataset.preset),
-        ),
-      );
+    for (const button of document.querySelectorAll("[data-preset]")) {
+      button.addEventListener("click", () => applyPreset(button.dataset.preset));
+    }
     $("copyFrameButton").addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText($("frameJson").textContent);
@@ -4494,15 +4503,15 @@
       uploadTrigger.addEventListener("click", () => $("fileInput").click());
     }
 
-    document.querySelectorAll(".scope-chip").forEach((chip) => {
+    for (const chip of document.querySelectorAll(".scope-chip")) {
       chip.addEventListener("click", () => {
-        document
-          .querySelectorAll(".scope-chip")
-          .forEach((c) => c.classList.remove("active"));
+        for (const c of document.querySelectorAll(".scope-chip")) {
+          c.classList.remove("active");
+        }
         chip.classList.add("active");
         $("scopeInput").value = chip.dataset.scope;
       });
-    });
+    }
     function handlePointer(clientX, clientY, canvas) {
       const rect = canvas.getBoundingClientRect();
       const x = ((clientX - rect.left) * canvas.width) / rect.width;
@@ -4632,15 +4641,15 @@
       renderStudio();
     },
     async selectOffense(side, id) {
-      const lineup = studio.default_setup[side + "_lineup"];
+      const lineup = studio.default_setup[`${side}_lineup`];
       lineup.offense_tactic = id;
       const next = studio.offense.find((item) => item.id === id);
-      studio.default_setup[side + "_playbook"] = playsForTactic(next?.spec);
+      studio.default_setup[`${side}_playbook`] = playsForTactic(next?.spec);
       renderStudio();
       await runSimulation(null, true);
     },
     async selectDefense(side, id) {
-      const lineup = studio.default_setup[side + "_lineup"];
+      const lineup = studio.default_setup[`${side}_lineup`];
       lineup.defense_tactic = id;
       renderStudio();
       await runSimulation(null, true);
