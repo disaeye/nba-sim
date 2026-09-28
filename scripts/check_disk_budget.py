@@ -53,18 +53,22 @@ def free_bytes(path: Path) -> int:
 def temp_roots() -> list:
     """扫描本项目临时产物的目录。
 
-    项目临时文件专用根目录优先；其余位置通过 TMPDIR 环境变量
-    指定，不再内置系统临时目录路径。
+    与 test-support 的解析顺序一致：仓库根下的 `.work/test-tmp`
+    优先，再由 `NBA_TEST_TMP`/`TMPDIR` 环境变量补充，不内置
+    机器特定路径。
     """
-    roots = []
-    project_root = Path("/home/ubuntu/basketball")
-    if project_root.exists():
-        roots.append(project_root)
     import os
 
-    tmpdir = os.environ.get("TMPDIR")
-    if tmpdir and Path(tmpdir).exists() and Path(tmpdir) not in roots:
-        roots.append(Path(tmpdir))
+    roots = []
+    repo_tmp = ROOT / ".work" / "test-tmp"
+    if repo_tmp.exists():
+        roots.append(repo_tmp)
+    for env_name in ("NBA_TEST_TMP", "TMPDIR"):
+        value = os.environ.get(env_name)
+        if value:
+            p = Path(value)
+            if p.exists() and p not in roots:
+                roots.append(p)
     return roots
 
 
@@ -224,7 +228,7 @@ def main() -> int:
 
 def self_test() -> int:
     """负面对照：制造一个泄漏，断言守卫会失败；清理后断言通过。"""
-    probe_root = Path("/home/ubuntu/basketball")
+    probe_root = ROOT / ".work" / "test-tmp"
     probe_root.mkdir(parents=True, exist_ok=True)
     probe_dir = probe_root / f"{TEMP_PREFIX}test_888888"
     probe_dir.mkdir(parents=True, exist_ok=True)

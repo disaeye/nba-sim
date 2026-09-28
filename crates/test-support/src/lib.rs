@@ -23,11 +23,10 @@ pub const TEMP_PREFIX: &str = "nba_";
 
 /// 默认临时根目录（临时文件专用，不放在 /tmp 或 /dev/shm）。
 ///
-/// 为什么单设目录：`/dev/shm` 是内存盘（大流量事件流会耗尽内存），
-/// `/tmp` 可能与被清理的构建产物共享分区；专用目录让临时数据与
-/// 磁盘配额、清理路径、资源守卫三者边界清晰（problem.md §14.4）。
-/// 可由 `NBA_TEST_TMP` 环境变量覆盖（CI/runner 用于统一审计）。
-pub const DEFAULT_TEMP_ROOT: &str = "/home/ubuntu/basketball";
+/// 解析顺序：`NBA_TEST_TMP` 环境变量 → 仓库根下的 `.work/test-tmp`
+/// （已被 gitignore，随仓库存在，任何机器都可创建）。
+/// 不再依赖 `/home/ubuntu/basketball` 这类机器特定路径：它在 CI
+/// runner 上不可创建，曾导致 Tier 3 全量模拟测试直接报 NotFound。
 
 /// 单次测试写入的默认上限（字节）。超过即视为资源治理缺陷。
 pub const DEFAULT_ARTIFACT_LIMIT_BYTES: u64 = 128 * 1024 * 1024;
@@ -39,9 +38,12 @@ fn workspace_dir() -> &'static Path {
         // 便于在测试结束后一次性清理与审计。
         let base = std::env::var_os("NBA_TEST_TMP")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_TEMP_ROOT));
+            .unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.work/test-tmp")
+            });
         let dir = base.join(format!("{TEMP_PREFIX}test_{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
+        std::fs::create_dir_all(&dir)
+            .expect("test temp workspace must be creatable (set NBA_TEST_TMP to override)");
         dir
     })
 }

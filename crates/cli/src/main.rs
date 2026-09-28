@@ -155,13 +155,16 @@ fn write_judgment_artifacts(
 
 /// CLI 自己的临时目录根（与 test-support 的约定一致）。
 ///
-/// 项目约定临时数据统一放 `/home/ubuntu/basketball`（可用 `NBA_TEMP_ROOT`
-/// 覆盖）；不用 `/tmp`——那里与构建产物共享分区，且历史泄漏正是从
-/// `/tmp/nba_batch_*.ndjson` 累积出来的（单次实测残留 4.2 GB）。
+/// 解析顺序：`NBA_TEMP_ROOT` 环境变量 → 仓库根下的 `.work/test-tmp`。
+/// 不用 `/tmp`——那里与构建产物共享分区，且历史泄漏正是从
+/// `/tmp/nba_batch_*.ndjson` 累积出来的（单次实测残留 4.2 GB）；
+/// 也不用机器特定路径——它在 CI runner 上不可创建。
 pub(crate) fn cli_temp_root() -> std::path::PathBuf {
     std::env::var_os("NBA_TEMP_ROOT")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("/home/ubuntu/basketball"))
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.work/test-tmp")
+        })
 }
 
 /// release 模式下跑固定 tick 数，对照 ≥ 20,000 ticks/s 预算。
