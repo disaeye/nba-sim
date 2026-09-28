@@ -3362,7 +3362,67 @@ body {
     font-size: 11.5px;
   }
 
-  /* 8. 球员资料库与球队高阶数据卡片单列排布 */
+  /* 8. 战术板与沙盘移动端单列自适应与防形变 */
+  .tactic-three-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px;
+  }
+  .studio-team-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .banner-team-meta {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .choice-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 6px;
+  }
+  .choice-card {
+    padding: 8px 10px;
+    min-height: 48px;
+    width: 100%;
+  }
+  .directive-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .directive-chips {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .directive-chip {
+    width: 100%;
+    height: 32px;
+    justify-content: center;
+    text-align: center;
+  }
+  .chalkboard-canvas-box {
+    width: 100%;
+    overflow: hidden;
+  }
+  .chalkboard-canvas-box canvas {
+    width: 100% !important;
+    height: auto !important;
+    display: block;
+  }
+  .chalkboard-toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .btn-run-chalkboard {
+    height: 30px;
+    padding: 0 12px;
+  }
+
+  /* 9. 球员资料库与球队高阶数据卡片单列排布 */
   .roster-layout {
     grid-template-columns: 1fr;
     gap: 12px;
@@ -3381,7 +3441,7 @@ body {
     grid-template-columns: 1fr;
   }
 
-  /* 9. 全维设置中心移动端自适应 */
+  /* 10. 全维设置中心移动端自适应 */
   .modal-sheet-backdrop {
     padding: 0;
     align-items: flex-end;

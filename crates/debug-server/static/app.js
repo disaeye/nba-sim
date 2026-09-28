@@ -250,6 +250,8 @@
     CatchAndShoot: "接球就投",
     DriveAndKick: "突破分球",
     Inbounder: "发球球员",
+    BACK_SCREEN: "背掩护",
+    SPAIN_POP: "外弹三分",
   };
   function getActionZh(action) {
     return ACTION_ZH[action] || action || "—";

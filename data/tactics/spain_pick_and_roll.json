@@ -36,7 +36,7 @@
         { "attribute": "OffBallSense", "weight": 0.8 },
         { "attribute": "Strength", "weight": 0.4 }
       ],
-      "behaviour": "PerimeterRelocate"
+      "behaviour": "BackScreenPop"
     },
     {
       "id": "left_corner",

@@ -8,11 +8,11 @@
       "id": "stack_screen_and_pop",
       "when": [
         { "predicate": "carrier_possed" },
-        { "predicate": "screen_established" }
+        { "predicate": "halfcourt_possession" }
       ],
-      "then": { "verb": "Lift", "slot": "stack_screener" },
+      "then": { "verb": "ScreenPop", "slot": "stack_screener" },
       "carrier_preferences": [
-        { "action_family": "Pass", "bonus": 0.35 }
+        { "action_family": "Pass", "bonus": 0.4 }
       ]
     }
   ],
@@ -20,7 +20,7 @@
     {
       "when": [
         { "predicate": "carrier_possed" },
-        { "predicate": "screen_established" }
+        { "predicate": "halfcourt_possession" }
       ],
       "window_seconds": 6.0,
       "cooldown_seconds": 8.0

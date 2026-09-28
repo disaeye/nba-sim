@@ -738,6 +738,21 @@ impl TacticalPlanner {
                             slot.behaviour.action_label(initiating),
                         )
                     }
+                    nba_domain::SlotBehaviour::BackScreenPop => {
+                        // 西班牙背掩护外弹：发起期在罚球线中路架设背掩护，
+                        // 执行期反向弹向弧顶三分线外大空位。
+                        let popped = if initiating {
+                            base
+                        } else {
+                            let pop_dir = (base - hoop).normalize_or_zero();
+                            base + pop_dir * (action_t * 15.0)
+                        };
+                        (
+                            popped,
+                            policy.carrier_speed_ratio,
+                            slot.behaviour.action_label(initiating),
+                        )
+                    }
                 };
                 let _ = is_carrier;
                 TargetAssignment {

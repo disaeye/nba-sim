@@ -151,6 +151,8 @@ pub enum SlotBehaviour {
     /// 下沉禁区：外线球员沿边线下沉到篮下区域争抢内线落位
     /// （G6a 链 4，五外站位不再把全部无球人固定在外线）。
     DipToRim,
+    /// 西班牙背掩护外弹：在罚球线为顺下人架设背掩护后反弹外线三分。
+    BackScreenPop,
 }
 
 impl SlotBehaviour {
@@ -188,6 +190,13 @@ impl SlotBehaviour {
                     "SPOT_UP_3PT"
                 } else {
                     "DIP_TO_RIM"
+                }
+            }
+            Self::BackScreenPop => {
+                if initiating {
+                    "BACK_SCREEN"
+                } else {
+                    "SCREEN_POP"
                 }
             }
         }
