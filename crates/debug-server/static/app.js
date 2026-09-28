@@ -822,7 +822,7 @@
       choiceRow(studio.offense, lineup.offense_tactic, async (id) => {
         lineup.offense_tactic = id;
         const next = studio.offense.find((item) => item.id === id);
-        const compatible = (studio.plays || []).filter((play) => playFits(play, next?.spec));
+        const compatible = playsForTactic(id, next?.spec);
         if (side === "home") studio.default_setup.home_playbook = compatible;
         else studio.default_setup.away_playbook = compatible;
         renderStudio();
@@ -1279,6 +1279,24 @@
       list.append(card);
     }
     return list;
+  }
+
+  const TACTIC_PLAY_IDS = {
+    off_horns_pnr: ["high_pnr_roll_v1", "horns_flare_pop_v1"],
+    off_spain_pnr: ["spain_pnr_stack_v1"],
+    off_motion_spacing: ["corner_backdoor_v1", "weak_side_lift_v1"],
+    off_transition_push: ["transition_rim_runner_v1"],
+    off_delay_attack: ["delay_dho_handoff_v1"],
+    off_post_split: ["post_split_cut_v1"],
+    off_drag_screen: ["drag_screen_drive_kick_v1"],
+  };
+
+  function playsForTactic(tacticId, spec) {
+    if (!spec) return [];
+    const selectedIds = new Set(TACTIC_PLAY_IDS[tacticId] || []);
+    return (studio.plays || []).filter(
+      (play) => selectedIds.has(play.id) && playFits(play, spec),
+    );
   }
 
   function playFits(play, spec) {
@@ -4286,24 +4304,26 @@
           el("span", "choice-meta", getTacticDescZh(item.id))
         );
         btn.type = "button";
-        btn.addEventListener("click", () => {
+        btn.addEventListener("click", async () => {
           lineup.offense_tactic = item.id;
           const next = studio.offense.find((t) => t.id === item.id);
-          const compatible = (studio.plays || []).filter((play) => playFits(play, next?.spec));
+          const compatible = playsForTactic(item.id, next?.spec);
           if (side === "home") studio.default_setup.home_playbook = compatible;
           else studio.default_setup.away_playbook = compatible;
           renderStudio();
           syncSettingsCenter();
+          await runSimulation(null, true);
         });
         return btn;
       })
     );
 
     defContainer.replaceChildren(
-      defenseGroupedRow(studio.defense, lineup.defense_tactic, (id) => {
+      defenseGroupedRow(studio.defense, lineup.defense_tactic, async (id) => {
         lineup.defense_tactic = id;
         renderStudio();
         syncSettingsCenter();
+        await runSimulation(null, true);
       })
     );
   }
@@ -4639,7 +4659,7 @@
       const lineup = studio.default_setup[side + "_lineup"];
       lineup.offense_tactic = id;
       const next = studio.offense.find((item) => item.id === id);
-      studio.default_setup[side + "_playbook"] = (studio.plays || []).filter((play) => playFits(play, next?.spec));
+      studio.default_setup[side + "_playbook"] = playsForTactic(id, next?.spec);
       renderStudio();
       await runSimulation(null, true);
     },

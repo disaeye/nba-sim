@@ -473,31 +473,23 @@ fn parse_run_request(req: &Request) -> Result<RunRequest, String> {
                 .map_err(|error| format!("match setup invalid: {error}"))?;
             setup.rules = rules.clone();
             let all_plays = play_catalog();
-            if let Some(home_spec) = nba_domain::TacticalSetSpec::builtin(&setup.home_lineup.offense_tactic) {
-                let slots: std::collections::HashSet<&str> = home_spec.slots.iter().map(|s| s.id.as_str()).collect();
-                setup.home_playbook.retain(|play| {
-                    play.rules.iter().all(|r| slots.contains(r.then.slot.as_str()))
-                });
-                if setup.home_playbook.is_empty() {
-                    setup.home_playbook = all_plays
-                        .iter()
-                        .filter(|play| play.rules.iter().all(|r| slots.contains(r.then.slot.as_str())))
-                        .cloned()
-                        .collect();
-                }
+            if setup.home_playbook.is_empty() {
+                setup.home_playbook =
+                    plays_for_tactic(&setup.home_lineup.offense_tactic, &all_plays);
+            } else {
+                retain_compatible_plays(
+                    &mut setup.home_playbook,
+                    &setup.home_lineup.offense_tactic,
+                );
             }
-            if let Some(away_spec) = nba_domain::TacticalSetSpec::builtin(&setup.away_lineup.offense_tactic) {
-                let slots: std::collections::HashSet<&str> = away_spec.slots.iter().map(|s| s.id.as_str()).collect();
-                setup.away_playbook.retain(|play| {
-                    play.rules.iter().all(|r| slots.contains(r.then.slot.as_str()))
-                });
-                if setup.away_playbook.is_empty() {
-                    setup.away_playbook = all_plays
-                        .iter()
-                        .filter(|play| play.rules.iter().all(|r| slots.contains(r.then.slot.as_str())))
-                        .cloned()
-                        .collect();
-                }
+            if setup.away_playbook.is_empty() {
+                setup.away_playbook =
+                    plays_for_tactic(&setup.away_lineup.offense_tactic, &all_plays);
+            } else {
+                retain_compatible_plays(
+                    &mut setup.away_playbook,
+                    &setup.away_lineup.offense_tactic,
+                );
             }
             setup
                 .validate()
@@ -587,6 +579,68 @@ fn play_catalog() -> Vec<nba_domain::PlaySpec> {
             nba_domain::PlaySpec::from_json(json)
                 .unwrap_or_else(|error| panic!("内建 PlaySpec 必须合法: {error}"))
         })
+        .collect()
+}
+
+fn retain_compatible_plays(plays: &mut Vec<nba_domain::PlaySpec>, tactic_id: &str) {
+    let allowed: std::collections::HashSet<&str> = match tactic_id {
+        "off_horns_pnr" => ["high_pnr_roll_v1", "horns_flare_pop_v1"]
+            .into_iter()
+            .collect(),
+        "off_spain_pnr" => ["spain_pnr_stack_v1"].into_iter().collect(),
+        "off_motion_spacing" => ["weak_side_lift_v1", "corner_backdoor_v1"]
+            .into_iter()
+            .collect(),
+        "off_transition_push" => ["transition_rim_runner_v1"].into_iter().collect(),
+        "off_delay_attack" => ["delay_dho_handoff_v1"].into_iter().collect(),
+        "off_post_split" => ["post_split_cut_v1"].into_iter().collect(),
+        "off_drag_screen" => ["drag_screen_drive_kick_v1"].into_iter().collect(),
+        _ => panic!("战术体系必须存在: {tactic_id}"),
+    };
+    let spec = nba_domain::TacticalSetSpec::builtin(tactic_id)
+        .unwrap_or_else(|| panic!("战术体系必须存在: {tactic_id}"));
+    let slots: std::collections::HashSet<&str> =
+        spec.slots.iter().map(|slot| slot.id.as_str()).collect();
+    plays.retain(|play| {
+        allowed.contains(play.id.as_str())
+            && play
+                .rules
+                .iter()
+                .all(|rule| slots.contains(rule.then.slot.as_str()))
+    });
+    if plays.is_empty() {
+        *plays = plays_for_tactic(tactic_id, &play_catalog());
+    }
+}
+
+fn plays_for_tactic(
+    tactic_id: &str,
+    catalog: &[nba_domain::PlaySpec],
+) -> Vec<nba_domain::PlaySpec> {
+    let tactic_play_ids: &[&str] = match tactic_id {
+        "off_horns_pnr" => &["high_pnr_roll_v1", "horns_flare_pop_v1"],
+        "off_spain_pnr" => &["spain_pnr_stack_v1"],
+        "off_motion_spacing" => &["weak_side_lift_v1", "corner_backdoor_v1"],
+        "off_transition_push" => &["transition_rim_runner_v1"],
+        "off_delay_attack" => &["delay_dho_handoff_v1"],
+        "off_post_split" => &["post_split_cut_v1"],
+        "off_drag_screen" => &["drag_screen_drive_kick_v1"],
+        _ => &[],
+    };
+    let spec = nba_domain::TacticalSetSpec::builtin(tactic_id)
+        .unwrap_or_else(|| panic!("战术体系必须存在: {tactic_id}"));
+    let slots: std::collections::HashSet<&str> =
+        spec.slots.iter().map(|slot| slot.id.as_str()).collect();
+    catalog
+        .iter()
+        .filter(|play| {
+            tactic_play_ids.contains(&play.id.as_str())
+                && play
+                    .rules
+                    .iter()
+                    .all(|rule| slots.contains(rule.then.slot.as_str()))
+        })
+        .cloned()
         .collect()
 }
 
@@ -743,7 +797,10 @@ mod tests {
     }
     #[test]
     fn studio_catalog_round_trips_into_simulation() {
-        let (status, _, body) = route(&request("GET", "/api/studio", Vec::new()), &session_unused());
+        let (status, _, body) = route(
+            &request("GET", "/api/studio", Vec::new()),
+            &session_unused(),
+        );
         assert_eq!(status, "200 OK");
         let catalog: Value = serde_json::from_slice(&body).expect("studio catalog should be JSON");
         let setup = catalog["default_setup"].clone();
@@ -761,6 +818,87 @@ mod tests {
         ));
         assert_eq!(response.0, "200 OK");
         assert!(!response.2.is_empty());
+    }
+
+    #[test]
+    fn simulate_request_replaces_stale_slot_compatible_playbook() {
+        let mut setup = MatchSetup::builtin(GameRules::default());
+        setup.home_lineup.offense_tactic = "off_spain_pnr".to_string();
+        assert_eq!(setup.home_playbook[0].id, "high_pnr_roll_v1");
+        let response = parse_run_request(&request(
+            "POST",
+            "/api/simulate",
+            json_body(serde_json::json!({
+                "seed": 42,
+                "scope": "1p",
+                "setup": setup,
+            })),
+        ))
+        .expect("Spain PnR request should parse");
+        let setup = response.setup.expect("request setup should be retained");
+        assert_eq!(setup.home_lineup.offense_tactic, "off_spain_pnr");
+        assert_eq!(
+            setup
+                .home_playbook
+                .iter()
+                .map(|play| play.id.as_str())
+                .collect::<Vec<_>>(),
+            ["spain_pnr_stack_v1"]
+        );
+        let stream = run_simulation(response.seed, &response.scope, response.rules, Some(setup))
+            .expect("Spain PnR simulation should complete");
+        let records: Vec<Value> = std::str::from_utf8(&stream)
+            .expect("simulation stream should be UTF-8")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("simulation line should be JSON"))
+            .collect();
+        assert!(records.iter().any(|record| {
+            record["tactical_set"] == "西班牙双掩护体系 (Spain Pick-and-Roll)"
+        }));
+        assert!(records
+            .iter()
+            .any(|record| { record["debug"]["active_play_id"] == "spain_pnr_stack_v1" }));
+        assert!(records.iter().any(|record| {
+            record["players"].as_array().is_some_and(|players| {
+                players.iter().any(|player| {
+                    player["action"] == "BACK_SCREEN" || player["action"] == "SCREEN_POP"
+                })
+            })
+        }));
+    }
+
+    #[test]
+    fn offense_tactics_load_only_their_assigned_playbooks() {
+        let catalog = play_catalog();
+        let cases = [
+            (
+                "off_horns_pnr",
+                vec!["high_pnr_roll_v1", "horns_flare_pop_v1"],
+            ),
+            ("off_spain_pnr", vec!["spain_pnr_stack_v1"]),
+            (
+                "off_motion_spacing",
+                vec!["corner_backdoor_v1", "weak_side_lift_v1"],
+            ),
+            ("off_transition_push", vec!["transition_rim_runner_v1"]),
+            ("off_delay_attack", vec!["delay_dho_handoff_v1"]),
+            ("off_post_split", vec!["post_split_cut_v1"]),
+            ("off_drag_screen", vec!["drag_screen_drive_kick_v1"]),
+        ];
+        for (tactic_id, expected_ids) in cases {
+            let selected = plays_for_tactic(tactic_id, &catalog);
+            let actual_ids: Vec<&str> = selected.iter().map(|play| play.id.as_str()).collect();
+            assert_eq!(actual_ids, expected_ids, "playbook for {tactic_id}");
+
+            let mut incompatible = catalog.clone();
+            retain_compatible_plays(&mut incompatible, tactic_id);
+            let retained_ids: Vec<&str> =
+                incompatible.iter().map(|play| play.id.as_str()).collect();
+            assert_eq!(
+                retained_ids, expected_ids,
+                "retained playbook for {tactic_id}"
+            );
+        }
     }
 
     #[test]
