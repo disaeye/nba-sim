@@ -45,13 +45,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
+      - name: Resolve green CI baseline
+        id: baseline
+        run: |
+          # 变更基线是「当前分支最近一次 CI 全绿的 commit」，
+          # 而非上一次提交：大改动 commit A 失败后，紧随的小提交 B
+          # 若只看 HEAD~1..HEAD 会被判为「无改动」，跳过全部测试
+          # 并直接放行部署（洗白漏洞）。以绿色基线为界，基线之后
+          # 的所有改动都会被验证；失败未修复就没有新基线。
+          BASE=$(python3 scripts/ci_baseline.py --baseline)
+          if [ -z "$BASE" ]; then
+            echo "baseline=FULL" >> "$GITHUB_OUTPUT"
+            echo "无绿色基线，本次按全量处理"
+          else
+            echo "baseline=$BASE" >> "$GITHUB_OUTPUT"
+            echo "绿色基线: $BASE"
+            git diff --name-only "$BASE..HEAD" || true
+          fi
       - name: Check for [full] flag
         id: detect_full
         env:
           FORCE_FULL: ${{ inputs.force_full }}
+          BASELINE: ${{ steps.baseline.outputs.baseline }}
         run: |
-          MSG=$(git log -1 --pretty=%B)
+          if [ "$BASELINE" = "FULL" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="$BASELINE..HEAD"
+          fi
+          MSG=$(git log --pretty=%B $RANGE)
           if [[ "$MSG" =~ \[full\] ]] || \
              [[ "$FORCE_FULL" == "true" ]]; then
             echo "is_full=true" >> $GITHUB_OUTPUT
@@ -60,9 +83,16 @@ jobs:
           fi
       - name: Detect Changed Paths
         id: filter
+        env:
+          BASELINE: ${{ steps.baseline.outputs.baseline }}
         run: |
-          DIFF=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
-          echo "Changed files: $DIFF"
+          # 基线之后的全部改动（含基线即 HEAD 时的空集）。
+          if [ "$BASELINE" = "FULL" ]; then
+            DIFF=$(git ls-files)
+          else
+            DIFF=$(git diff --name-only "$BASELINE..HEAD")
+          fi
+          echo "Changed files (since $BASELINE): $DIFF"
           if echo "$DIFF" | grep -qE '\.rs$|Cargo\.(toml|lock)'; then
             echo "rust_changed=true" >> $GITHUB_OUTPUT
           else

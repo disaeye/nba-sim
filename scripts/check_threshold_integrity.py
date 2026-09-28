@@ -18,6 +18,11 @@
 
 **同一个提交不得同时修改「判定基准」与「被测源码」，除非显式豁免。**
 
+审计范围是「最近一次 CI 全绿 commit 之后的所有 commit」而非仅有
+HEAD（见 `scripts/ci_baseline.py`）：若无此设计，把基准改动与源码
+改动分装成两个 commit 推送（前者夹在失败后的小提交里），即可绕过
+本守卫。逐 commit 审计保证每个提交各自独立接受检查。
+
 豁免方式（二选一）：
 - 提交信息含 `Threshold-Change: <理由>` 尾注；或
 - 环境变量 `NBA_THRESHOLD_ACK` 指向一份豁免说明文件（CI 人工评审路径）。
@@ -27,7 +32,7 @@
 
 ## 用法
 
-    python3 scripts/check_threshold_integrity.py            # 检查 HEAD
+    python3 scripts/check_threshold_integrity.py            # 自动审计绿色基线后的 commit
     python3 scripts/check_threshold_integrity.py --range A..B
     python3 scripts/check_threshold_integrity.py --self-test # 负面对照
 """
@@ -39,6 +44,9 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ci_baseline import audit_range  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -72,28 +80,26 @@ def _run(args: list[str]) -> str:
     ).stdout
 
 
-def changed_files(rev_range: str | None) -> list[str]:
-    """返回本次改动涉及的文件路径（相对仓库根）。"""
-    if rev_range:
-        out = _run(["git", "diff", "--name-only", rev_range])
+def changed_files(sha: str, parent: str | None = None) -> list[str]:
+    """返回单个 commit 的改动文件路径（相对仓库根）。
+
+    根提交（无父提交）用树对比空目录，等价于整个文件集。
+    """
+    if parent is None:
+        parents = _run(["git", "rev-list", "--parents", "-n", "1", sha]).split()
+        parent = parents[1] if len(parents) > 1 else ""
+    spec = f"{parent}..{sha}" if parent else f"--root {sha}"
+    args = ["git", "diff", "--name-only"]
+    if parent:
+        args.append(spec)
     else:
-        # 优先比较 HEAD~1..HEAD；单提交仓库或首个提交时回退到 HEAD 树。
-        try:
-            out = _run(["git", "diff", "--name-only", "HEAD~1..HEAD"])
-        except subprocess.CalledProcessError:
-            out = _run(["git", "show", "--pretty=", "--name-only", "HEAD"])
-    return [l for l in out.splitlines() if l.strip()]
+        args.extend(["--root", sha])
+    out = _run(args)
+    return [line for line in out.splitlines() if line.strip()]
 
 
-def commit_message(rev_range: str | None) -> str:
-    if rev_range:
-        rev = rev_range.split("..")[-1] or "HEAD"
-    else:
-        rev = "HEAD"
-    try:
-        return _run(["git", "log", "-1", "--pretty=%B", rev])
-    except subprocess.CalledProcessError:
-        return ""
+def commit_message(sha: str) -> str:
+    return _run(["git", "log", "-1", "--pretty=%B", sha])
 
 
 def matches_any(path: str, patterns: list[str]) -> bool:
@@ -189,7 +195,8 @@ def self_test() -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--range", dest="rev_range", default=None,
-                    help="git diff 范围，例如 HEAD~1..HEAD")
+                    help="审计 commit 区间，例如 HEAD~3..HEAD；"
+                         "缺省时自动审计绿色 CI 基线之后的全部 commit")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
 
@@ -203,24 +210,33 @@ def main() -> int:
             print(f"   - {p}")
         return 1
 
-    files = changed_files(args.rev_range)
-    thresholds, subjects = classify(files)
-    msg = commit_message(args.rev_range)
+    commits = audit_range(args.rev_range)
+    print(f"🔍 threshold integrity: 逐 commit 审计 {len(commits)} 个 commit")
 
-    print(f"🔍 threshold integrity: {len(files)} changed files")
-    if thresholds:
-        print(f"   thresholds touched: {len(thresholds)}")
-        for f in thresholds:
-            print(f"      - {f}")
-    if subjects:
-        print(f"   subjects touched  : {len(subjects)}")
-
-    if thresholds and subjects:
+    violations: list[tuple[str, list[str], list[str]]] = []
+    for sha in commits:
+        files = changed_files(sha)
+        thresholds, subjects = classify(files)
+        if not (thresholds and subjects):
+            continue
+        msg = commit_message(sha)
+        short = sha[:12]
         if ACK_TRAILER in msg:
-            print(f"   ✅ acknowledged via `{ACK_TRAILER}` trailer — allowed")
-            return 0
-        print("❌ COUPLED CHANGE: this commit modifies BOTH a judgment threshold")
-        print("   and the source code that the threshold judges.")
+            reason = ""
+            for line in msg.splitlines():
+                if line.startswith(ACK_TRAILER):
+                    reason = line[len(ACK_TRAILER):].strip()
+                    break
+            print(f"   ✅ {short} 豁免生效：{reason or '（未附理由）'}")
+            continue
+        violations.append((short, thresholds, subjects))
+
+    if violations:
+        for short, thresholds, subjects in violations:
+            print(f"❌ COUPLED CHANGE @ {short}")
+            print("   判定基准与被测源码在同一个提交里被修改：")
+            print(f"   thresholds: {thresholds}")
+            print(f"   subjects  : {subjects}")
         print()
         print("   Why this is blocked: a threshold that the measured object can")
         print("   change in the same commit is not a threshold. See the module")

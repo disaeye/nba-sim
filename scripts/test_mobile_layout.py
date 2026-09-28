@@ -1,72 +1,105 @@
-import urllib.request, json, time, subprocess, socket, base64, os, sys
+import base64
+import json
+import os
+import socket
+import subprocess
+import time
+import urllib.request
+from typing import Any
 
-def eval_js(js, width=390, height=844):
+
+def _recv_frame(sock: socket.socket) -> dict[str, Any] | None:
+    """读取一条 WebSocket 帧并解析为 JSON；连接关闭时返回 None。"""
+    hdr = sock.recv(2)
+    if not hdr:
+        return None
+    length = hdr[1] & 0x7F
+    if length == 126:
+        length = int.from_bytes(sock.recv(2), "big")
+    raw = bytearray()
+    while len(raw) < length:
+        chunk = sock.recv(length - len(raw))
+        if not chunk:
+            return None
+        raw.extend(chunk)
+    return json.loads(raw.decode("utf-8", errors="ignore"))
+
+
+def eval_js(js: str, width: int = 390, height: int = 844) -> dict[str, Any]:
+    """连接调试端口，模拟移动端视口并执行 JavaScript，返回结果值。"""
     req = urllib.request.urlopen("http://127.0.0.1:9225/json/list", timeout=10)
     targets = json.loads(req.read().decode())
     page = next(t for t in targets if t.get("type") == "page")
     ws_url = page["webSocketDebuggerUrl"]
 
     host, port_str = ws_url.split("/")[2].split(":")
-    s = socket.create_connection((host, int(port_str)), timeout=10)
+    sock = socket.create_connection((host, int(port_str)), timeout=10)
     key = base64.b64encode(os.urandom(16)).decode()
     path = "/" + "/".join(ws_url.split("/")[3:])
-    s.sendall(f"GET {path} HTTP/1.1\r\nHost: {host}:{port_str}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n".encode())
+    sock.sendall(
+        f"GET {path} HTTP/1.1\r\nHost: {host}:{port_str}\r\n"
+        "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n".encode()
+    )
     resp = b""
     while b"\r\n\r\n" not in resp:
-        resp += s.recv(1024)
+        resp += sock.recv(1024)
 
-    def send_cmd(cmd_id, method, params=None):
+    def send_cmd(cmd_id: int, method: str, params: dict[str, Any] | None = None) -> None:
         payload = {"id": cmd_id, "method": method}
-        if params: payload["params"] = params
-        p = json.dumps(payload).encode()
-        plen = len(p)
-        h = bytearray([0x81, 0x80 | plen]) if plen <= 125 else bytearray([0x81, 0xFE]) + int(plen).to_bytes(2, "big")
-        m = bytearray(os.urandom(4))
-        masked = bytearray(b ^ m[i % 4] for i, b in enumerate(p))
-        s.sendall(h + m + masked)
+        if params:
+            payload["params"] = params
+        data = json.dumps(payload).encode()
+        size = len(data)
+        if size <= 125:
+            header = bytearray([0x81, 0x80 | size])
+        else:
+            header = bytearray([0x81, 0xFE]) + size.to_bytes(2, "big")
+        mask = bytearray(os.urandom(4))
+        masked = bytearray(b ^ mask[i % 4] for i, b in enumerate(data))
+        sock.sendall(header + mask + masked)
 
     # 模拟移动端视口
     send_cmd(10, "Emulation.setDeviceMetricsOverride", {
         "width": width,
         "height": height,
         "deviceScaleFactor": 3,
-        "mobile": True
+        "mobile": True,
     })
     # 等待页面 DOM 就绪
-    wait_js = "Boolean(document.querySelector('.app-nav') && document.querySelector('.match-scoreboard'))"
+    wait_js = (
+        "Boolean(document.querySelector('.app-nav') && "
+        "document.querySelector('.match-scoreboard'))"
+    )
     for _ in range(20):
         send_cmd(99, "Runtime.evaluate", {"expression": wait_js, "returnByValue": True})
         ready = False
         for _ in range(10):
-            hdr = s.recv(2)
-            if not hdr: break
-            pl = hdr[1] & 0x7F
-            if pl == 126: pl = int.from_bytes(s.recv(2), "big")
-            raw = bytearray()
-            while len(raw) < pl: raw.extend(s.recv(pl - len(raw)))
-            msg = json.loads(raw.decode("utf-8", errors="ignore"))
+            msg = _recv_frame(sock)
+            if msg is None:
+                break
             if msg.get("id") == 99:
                 ready = msg.get("result", {}).get("result", {}).get("value", False)
                 break
-        if ready: break
+        if ready:
+            break
         time.sleep(0.3)
 
     send_cmd(1, "Runtime.evaluate", {"expression": js, "returnByValue": True})
 
-    res = None
+    value: Any = None
     for _ in range(25):
-        hdr = s.recv(2)
-        if not hdr: break
-        pl = hdr[1] & 0x7F
-        if pl == 126: pl = int.from_bytes(s.recv(2), "big")
-        raw = bytearray()
-        while len(raw) < pl: raw.extend(s.recv(pl - len(raw)))
-        msg = json.loads(raw.decode("utf-8", errors="ignore"))
-        if msg.get("id") == 1:
-            res = msg.get("result", {}).get("result", {}).get("value")
+        msg = _recv_frame(sock)
+        if msg is None:
             break
-    s.close()
-    return res
+        if msg.get("id") == 1:
+            value = msg.get("result", {}).get("result", {}).get("value")
+            break
+    sock.close()
+    if not isinstance(value, dict):
+        raise RuntimeError("CDP Runtime.evaluate 未返回结果对象")
+    return value
+
 
 chrome_cmd = [
     "google-chrome",
@@ -74,7 +107,7 @@ chrome_cmd = [
     "--disable-gpu",
     "--no-sandbox",
     "--remote-debugging-port=9225",
-    "http://127.0.0.1:4173/"
+    "http://127.0.0.1:4173/",
 ]
 proc = subprocess.Popen(chrome_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(3.5)

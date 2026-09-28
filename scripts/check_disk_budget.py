@@ -53,17 +53,13 @@ def free_bytes(path: Path) -> int:
 def temp_roots() -> list:
     """扫描本项目临时产物的目录。
 
-    首位是项目临时文件专用根目录（不与 /tmp、/dev/shm 混用）；
-    其余为兼容历史残留的旧位置。
+    项目临时文件专用根目录优先；其余位置通过 TMPDIR 环境变量
+    指定，不再内置系统临时目录路径。
     """
     roots = []
     project_root = Path("/home/ubuntu/basketball")
     if project_root.exists():
         roots.append(project_root)
-    for candidate in ("/tmp", "/dev/shm", "/var/tmp"):
-        p = Path(candidate)
-        if p.exists():
-            roots.append(p)
     import os
 
     tmpdir = os.environ.get("TMPDIR")
@@ -134,11 +130,12 @@ def find_leftovers(include_live: bool = False) -> list:
 
 
 def human(n: int) -> str:
+    size = float(n)
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if n < 1024 or unit == "TiB":
-            return f"{n:.1f} {unit}" if unit != "B" else f"{n} B"
-        n /= 1024.0
-    return f"{n:.1f} TiB"
+        if size < 1024 or unit == "TiB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{n} B"
+        size /= 1024.0
+    return f"{size:.1f} TiB"
 
 
 def clean_leftovers(leftovers) -> int:
