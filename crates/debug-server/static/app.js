@@ -2882,31 +2882,94 @@
         );
       }
 
-      // 动作特定几何形变调整
-      if (isShooting && actionPhase === "Preparation") {
-        // 投篮准备蓄力屈膝，重心压低
-        radius -= 1.2;
+      // ========================================================
+      // 真实三维起跳腾空动力学系统 (Aerial Elevation & Jump Kinetics)
+      // 覆盖投篮、上篮、扣篮、抢篮板、盖帽、抢断突扑等核心发力动作
+      // ========================================================
+      const isDunk = actionRaw.includes("DUNK");
+      const isLayup = actionRaw.includes("LAYUP") || actionRaw.includes("FLOATER") || actionRaw.includes("HOOK");
+      const isJumpShot = actionRaw.includes("JUMP") || actionRaw.includes("3PT") || actionRaw.includes("SHOT") || actionRaw.includes("PULLUP");
+      const isBlock = actionRaw.includes("BLOCK") || (actionRaw.includes("HELP") && actionPhase === "Execution");
+      const isReboundJump = actionRaw.includes("REBOUND") || actionRaw.includes("CRASH");
+      const isStealLunge = actionRaw.includes("STEAL") || actionRaw.includes("POKE") || actionRaw.includes("LOOSE");
+      const isJumpAction = isDunk || isLayup || isJumpShot || isBlock || isReboundJump || isStealLunge;
+
+      let jumpHeight = 0; // 0.0 ~ 1.0 相对腾空高度
+      if (isJumpAction) {
+        let maxLift = 0.85;
+        if (isDunk) maxLift = 1.0;
+        else if (isBlock) maxLift = 0.95;
+        else if (isReboundJump) maxLift = 0.9;
+        else if (isJumpShot) maxLift = 0.85;
+        else if (isLayup) maxLift = 0.8;
+        else if (isStealLunge) maxLift = 0.65;
+
+        if (actionPhase === "Preparation") {
+          // 起跳准备：屈膝蓄力，身体下沉
+          radius -= 1.4;
+          jumpHeight = 0;
+        } else if (actionPhase === "Execution") {
+          // 腾空发力：达到起跳峰值高度
+          jumpHeight = maxLift;
+        } else if (actionPhase === "FollowThrough") {
+          // 落地缓冲：下落着地过程
+          jumpHeight = maxLift * 0.35;
+        } else {
+          jumpHeight = maxLift * 0.68;
+        }
       }
 
-      // 2. 地面自然接触阴影 (真实紧贴地面，动作蓄力与移动时自适应形变)
+      // 透视垂直位移与体量尺寸透视放大
+      const verticalLift = jumpHeight * 11.5; // 离地视差立体位移
+      const renderPx = px;
+      const renderPy = py - verticalLift; // 腾空后的圆盘中心
+      if (jumpHeight > 0) {
+        radius = radius * (1.0 + jumpHeight * 0.24); // 透视放大
+      }
+
+      // 2. 地面自然接触阴影 (起跳时阴影留在地面原点，并随高度扩散淡化)
       ctx.beginPath();
+      const shadowSpread = 1.0 + jumpHeight * 0.75;
       const shadowStretch = Math.min(1.25, 1.0 + curSpeed * 0.04);
       ctx.ellipse(
         px,
         py + 2,
-        radius * 0.95 * shadowStretch,
-        radius * 0.46,
+        radius * 0.95 * shadowStretch * shadowSpread,
+        radius * 0.46 * shadowSpread,
         curSpeed > 0.4 ? Math.atan2(curVy, curVx) : 0,
         0,
         Math.PI * 2,
       );
-      ctx.fillStyle = "rgba(0, 0, 0, 0.24)";
+      const shadowAlpha = Math.max(0.08, 0.24 * (1.0 - jumpHeight * 0.55));
+      ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha.toFixed(2)})`;
       ctx.fill();
+
+      // 2.1 地面起跳落点锚环与垂直落差轴线 (Ground Anchor Ring & Elevation Drop Line)
+      if (jumpHeight > 0.25) {
+        ctx.save();
+        // 地面垂直落差导引线 (从地面原点连向空中球员中心)
+        ctx.setLineDash([2, 3]);
+        ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.45)" : "rgba(245, 158, 11, 0.45)";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(px, py + 2);
+        ctx.lineTo(renderPx, renderPy);
+        ctx.stroke();
+
+        // 地面起跳落点锚环 (清晰指示起跳位置与身体落点)
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.ellipse(px, py + 2, 7.5 * shadowSpread, 3.8 * shadowSpread, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.65)" : "rgba(245, 158, 11, 0.65)";
+        ctx.lineWidth = 1.3;
+        ctx.stroke();
+        ctx.restore();
+      }
 
       // 3. 掩护挡拆基座动作 (Screen Base Stance)
       if (isScreen) {
         ctx.save();
-        ctx.translate(px, py);
+        ctx.translate(renderPx, renderPy);
         ctx.rotate(facingAngle);
         ctx.fillStyle = isHome ? "#042c16" : "#421801";
         ctx.strokeStyle = isHome ? "#10b981" : "#f59e0b";
@@ -2921,7 +2984,7 @@
       // 4. 防守压迫干扰罩动作 (Defensive Contest Envelope)
       if (isContest) {
         ctx.save();
-        ctx.translate(px, py);
+        ctx.translate(renderPx, renderPy);
         ctx.rotate(facingAngle);
         const contestR = actionPhase === "Execution" ? radius + 8.5 : radius + 5.5;
         ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.85)" : "rgba(245, 158, 11, 0.85)";
@@ -2946,7 +3009,7 @@
       // 5. 篮板卡位阻隔弧动作 (Box-Out Wall Barrier)
       if (actionRaw.includes("BOXOUT")) {
         ctx.save();
-        ctx.translate(px, py);
+        ctx.translate(renderPx, renderPy);
         ctx.rotate(facingAngle + Math.PI); // 朝向后方阻隔
         ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.75)" : "rgba(245, 158, 11, 0.75)";
         ctx.lineWidth = 2.0;
@@ -2959,7 +3022,7 @@
       // 6. 投篮瞄准与跟随压腕动作 (Shooting Aim & Follow-Through)
       if (isShooting) {
         ctx.save();
-        ctx.translate(px, py);
+        ctx.translate(renderPx, renderPy);
         ctx.rotate(facingAngle);
 
         if (actionPhase === "Execution") {
@@ -3011,7 +3074,7 @@
 
       // 8. 奔跑动感切向微拉伸 (Locomotion Stretch)
       ctx.save();
-      ctx.translate(px, py);
+      ctx.translate(renderPx, renderPy);
       if (curSpeed > 0.6) {
         const moveAng = Math.atan2(curVy, curVx);
         ctx.rotate(moveAng);
@@ -3066,12 +3129,22 @@
       ctx.fillStyle = "#ffffff";
       ctx.fillText(num, 0, 0.5);
 
-      ctx.restore(); // 还原 translate(px, py)
+      ctx.restore(); // 还原 translate(renderPx, renderPy)
 
       // 6. 脚下纯中文战术动作与位置角色微标 (动态呈现当前场上实时战意与配合)
       const actionZh = getActionZh(player.action);
+      let jumpActionZh = "";
+      if (jumpHeight > 0.25) {
+        if (isDunk) jumpActionZh = "腾空暴扣";
+        else if (isBlock) jumpActionZh = "跃起封盖";
+        else if (isReboundJump) jumpActionZh = "起跳争板";
+        else if (isJumpShot) jumpActionZh = "干拔跳投";
+        else if (isLayup) jumpActionZh = "飞身上篮";
+        else if (isStealLunge) jumpActionZh = "飞身抢断";
+      }
       const isDynamicAction =
-        player.action &&
+        Boolean(jumpActionZh) ||
+        (player.action &&
         ![
           "SetPosition",
           "Bench",
@@ -3079,28 +3152,32 @@
           "Idle",
           "",
           "—",
-        ].includes(player.action);
-      const tagText = isDynamicAction ? actionZh : getPositionZh(player.position);
+        ].includes(player.action));
+      const tagText = jumpActionZh || (isDynamicAction ? actionZh : getPositionZh(player.position));
       ctx.save();
       const posTagY = py + 16.5;
       ctx.font = isDynamicAction
         ? "800 8.5px system-ui, -apple-system, sans-serif"
         : "700 8px system-ui, -apple-system, sans-serif";
       const posTagW = ctx.measureText(tagText).width + 8;
-      ctx.fillStyle = isDynamicAction
-        ? "rgba(255, 255, 255, 0.98)"
-        : "rgba(255, 255, 255, 0.9)";
-      ctx.strokeStyle = isDynamicAction
-        ? (isHome ? "rgba(5, 150, 105, 0.6)" : "rgba(217, 119, 6, 0.6)")
-        : "rgba(203, 213, 225, 0.8)";
-      ctx.lineWidth = isDynamicAction ? 1.4 : 1.0;
+      ctx.fillStyle = jumpActionZh
+        ? (isHome ? "rgba(6, 95, 70, 0.95)" : "rgba(146, 64, 14, 0.95)")
+        : (isDynamicAction ? "rgba(255, 255, 255, 0.98)" : "rgba(255, 255, 255, 0.9)");
+      ctx.strokeStyle = jumpActionZh
+        ? "#ffffff"
+        : (isDynamicAction
+          ? (isHome ? "rgba(5, 150, 105, 0.6)" : "rgba(217, 119, 6, 0.6)")
+          : "rgba(203, 213, 225, 0.8)");
+      ctx.lineWidth = jumpActionZh ? 1.6 : (isDynamicAction ? 1.4 : 1.0);
       ctx.beginPath();
       ctx.roundRect(px - posTagW / 2, posTagY - 4.5, posTagW, 11, 3.5);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = isDynamicAction
-        ? (isHome ? "#047857" : "#b45309")
-        : (isHome ? "#065f46" : "#92400e");
+      ctx.fillStyle = jumpActionZh
+        ? "#ffffff"
+        : (isDynamicAction
+          ? (isHome ? "#047857" : "#b45309")
+          : (isHome ? "#065f46" : "#92400e"));
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(tagText, px, posTagY + 0.5);
