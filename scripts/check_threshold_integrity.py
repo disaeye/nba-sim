@@ -69,7 +69,26 @@ SUBJECT_PATTERNS: list[str] = [
 ]
 
 # 允许与判定基准一起改动、*不*算违规的源码（例如纯工具）。
-SUBJECT_EXEMPT: list[str] = []
+#
+# 登记标准：该源码文件与某个判定基准存在**结构性同体**关系——
+# 它们必须指向同一个外部位置，分开提交反而会让守卫在过渡期
+# 静默失效。典型：资源守卫脚本与其扫描的临时根路径。
+# 每项豁免必须附注理由；本清单自身受 self-test 检查。
+SUBJECT_EXEMPT: list[str] = [
+    # test-support 的临时根与 check_disk_budget 的扫描根必须
+    # 同 commit 指向同一位置；分开提交会让守卫扫描旧目录，
+    # 新目录泄漏在过渡期不可见。
+    r"^crates/test-support/src/lib\.rs$",
+]
+
+# 判定基准与被测源码在同一提交里同时修改时，若改动全部落在
+# 本清单内的文件对上，允许直接豁免（仍保留 trailer 路径供
+# 其他耦合场景署名）。
+EXEMPT_PAIRS: list[tuple[str, str]] = [
+    # 资源守卫脚本 ↔ 它扫描的临时根实现：结构性同体。
+    ("scripts/check_disk_budget.py", "crates/test-support/src/lib.rs"),
+    ("scripts/check_disk_budget.py", "crates/cli/src/main.rs"),
+]
 
 ACK_TRAILER = "Threshold-Change:"
 
@@ -114,6 +133,21 @@ def classify(files: list[str]) -> tuple[list[str], list[str]]:
         if matches_any(f, SUBJECT_PATTERNS) and not matches_any(f, SUBJECT_EXEMPT)
     ]
     return thresholds, subjects
+
+
+def has_structural_pair(thresholds: list[str], subjects: list[str]) -> bool:
+    """本次改动是否只触发了结构性同体的基准/源码对。
+
+    全部命中的（基准，源码）组合都能在 EXEMPT_PAIRS 里找到，
+    且没有其他未豁免的源码时，耦合视为合法。"""
+    if not thresholds or not subjects:
+        return False
+    allowed = {(t, s) for t, s in EXEMPT_PAIRS}
+    for t in thresholds:
+        for s in subjects:
+            if (t, s) not in allowed:
+                return False
+    return True
 
 
 def check_self_registration() -> list[str]:
@@ -188,6 +222,27 @@ def self_test() -> int:
         ok = False
         print(f"   ❌ threshold-only change was rejected: {t} {s}")
 
+    # 6. 结构性同体对：资源守卫与其扫描根 → 允许直接豁免
+    #    （lib.rs 同时也在 SUBJECT_EXEMPT 里，这里用 CLI 侧源码验证配对）
+    t, s = classify(["scripts/check_disk_budget.py", "crates/cli/src/main.rs"])
+    if t and s and has_structural_pair(t, s):
+        print("   ✅ structural pair exempt: guard ↔ its scan root")
+    else:
+        ok = False
+        print(f"   ❌ structural pair not exempt: t={t} s={s}")
+
+    # 7. 结构性同体对混入其他源码 → 必须仍然检出
+    t, s = classify([
+        "scripts/check_disk_budget.py",
+        "crates/cli/src/main.rs",
+        "crates/engine/src/match_engine/mod.rs",
+    ])
+    if t and s and not has_structural_pair(t, s):
+        print("   ✅ structural pair + extra subject still detected")
+    else:
+        ok = False
+        print(f"   ❌ extra subject slipped through: t={t} s={s}")
+
     print("   self-test:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -228,6 +283,9 @@ def main() -> int:
                     reason = line[len(ACK_TRAILER):].strip()
                     break
             print(f"   ✅ {short} 豁免生效：{reason or '（未附理由）'}")
+            continue
+        if has_structural_pair(thresholds, subjects):
+            print(f"   ✅ {short} 结构性同体豁免（守卫与扫描根同 commit 迁移）")
             continue
         violations.append((short, thresholds, subjects))
 

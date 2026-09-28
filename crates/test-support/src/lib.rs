@@ -27,10 +27,6 @@ pub const TEMP_PREFIX: &str = "nba_";
 /// （已被 gitignore，随仓库存在，任何机器都可创建）。
 /// 不再依赖 `/home/ubuntu/basketball` 这类机器特定路径：它在 CI
 /// runner 上不可创建，曾导致 Tier 3 全量模拟测试直接报 NotFound。
-
-/// 单次测试写入的默认上限（字节）。超过即视为资源治理缺陷。
-pub const DEFAULT_ARTIFACT_LIMIT_BYTES: u64 = 128 * 1024 * 1024;
-
 fn workspace_dir() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
@@ -47,6 +43,9 @@ fn workspace_dir() -> &'static Path {
         dir
     })
 }
+
+/// 单次测试写入的默认上限（字节）。超过即视为资源治理缺陷。
+pub const DEFAULT_ARTIFACT_LIMIT_BYTES: u64 = 128 * 1024 * 1024;
 
 /// 每个测试进程独占的临时目录。
 ///
