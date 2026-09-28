@@ -64,8 +64,9 @@ def _gh_run_list(branch: str) -> str:
     if not GH:
         raise FileNotFoundError("gh cli not available")
     return subprocess.run(
-        [GH, "run", "list", "--branch", branch, "--event", "push",
-         "--limit", str(_MAX_RUNS), "--json", "headSha,conclusion"],
+        [GH, "run", "list", "--workflow", "ci.yml", "--branch", branch,
+         "--event", "push", "--limit", str(_MAX_RUNS),
+         "--json", "headSha,conclusion"],
         cwd=ROOT, capture_output=True, text=True, check=True,
     ).stdout
 

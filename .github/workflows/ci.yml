@@ -14,6 +14,13 @@ on:
 
 permissions:
   contents: read
+  # 绿色基线解析需要查询 Actions 运行历史（gh run list）。
+  actions: read
+
+env:
+  # gh CLI 需要 token 才能解析「最近一次绿色 CI 基线」；
+  # 没有它，基线解析失败退化为全量模式，防护仍成立但轻量路径失效。
+  GH_TOKEN: ${{ github.token }}
 
 jobs:
   lint_commit:
@@ -21,19 +28,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 按绿色基线逐 commit 校验提交信息，需要完整历史。
+          fetch-depth: 0
       - name: Validate Commit Message Format
         run: |
-          MSG=$(git log -1 --pretty=%s)
-          echo "Commit subject: $MSG"
-          if [[ "$MSG" =~ ^(Merge|Revert|fixup!|squash!) ]]; then
-            exit 0
-          fi
-          PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci)"
-          PATTERN+="(\([a-zA-Z0-9_./-]+\))?: .+"
-          if ! [[ "$MSG" =~ $PATTERN ]]; then
-            echo "❌ Commit message does not follow Conventional Commits format."
-            exit 1
-          fi
+          BASE=$(python3 scripts/ci_baseline.py --baseline)
+          if [ -n "$BASE" ]; then RANGE="$BASE..HEAD"; else RANGE="-1"; fi
+          echo "Auditing message range: $RANGE"
+          mapfile -t SUBJECTS < <(git log --pretty=%s $RANGE)
+          echo "Commit subjects: ${#SUBJECTS[@]}"
+          for MSG in "${SUBJECTS[@]}"; do
+            echo "  - $MSG"
+            if [[ "$MSG" =~ ^(Merge|Revert|fixup!|squash!) ]]; then
+              continue
+            fi
+            PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci)"
+            PATTERN+="(\([a-zA-Z0-9_./-]+\))?: .+"
+            if ! [[ "$MSG" =~ $PATTERN ]]; then
+              echo "❌ Bad commit message: $MSG"
+              exit 1
+            fi
+          done
 
   change_detection:
     name: change-detection
@@ -140,9 +156,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # 守卫用 HEAD~1..HEAD 取本次提交的改动清单；浅克隆下 HEAD~1 无法
-          # 解析，回退分支会把整棵树当作改动，误报判定基准被修改。
-          fetch-depth: 2
+          # 守卫按「绿色基线之后的所有 commit」逐个审计，基线可能早于
+          # HEAD~1；浅克隆下基线对象缺失会让解析退化为仅审计 HEAD，
+          # 多 commit 洗白就从这个缺口漏过去。
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
