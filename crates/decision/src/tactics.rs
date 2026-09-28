@@ -745,7 +745,10 @@ impl TacticalPlanner {
                             base
                         } else {
                             let pop_dir = (base - hoop).normalize_or_zero();
-                            base + pop_dir * (action_t * 15.0)
+                            let pop_distance = (rules.league.three_point_distance_ft
+                                - (base - hoop).length())
+                            .max(f32::EPSILON);
+                            base + pop_dir * (action_t * pop_distance)
                         };
                         (
                             popped,

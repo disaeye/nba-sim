@@ -822,7 +822,7 @@
       choiceRow(studio.offense, lineup.offense_tactic, async (id) => {
         lineup.offense_tactic = id;
         const next = studio.offense.find((item) => item.id === id);
-        const compatible = playsForTactic(id, next?.spec);
+        const compatible = playsForTactic(next?.spec);
         if (side === "home") studio.default_setup.home_playbook = compatible;
         else studio.default_setup.away_playbook = compatible;
         renderStudio();
@@ -1158,10 +1158,6 @@
     requestAnimationFrame(step);
   }
 
-  function boardSide(side, team, lineup, playbook) {
-    return singleTeamTacticalBoard(side, team, lineup, playbook);
-  }
-
   function defenseGroupedRow(items, selected, onPick) {
     const wrap = el("div", "defense-grouped-wrap");
 
@@ -1226,31 +1222,6 @@
     return row;
   }
 
-  function courtMini(spec) {
-    const court = el("div", "court-mini");
-    if (!spec) {
-      court.append(el("span", "play-note", "这个体系目前只有名称，没有落位点。"));
-      return court;
-    }
-    const tag = el("div", "court-mini-tag", spec.spacing_style ? `空间站位: ${spec.spacing_style}` : "半场阵型构型");
-    court.append(tag);
-    for (const slot of spec.slots) {
-      const isHandler = slot.id === "top" || slot.behaviour === "DribbleTop";
-      const pin = el(
-        "div",
-        `slot-pin${isHandler ? " slot-handler" : ""}`,
-        slot.name_zh,
-      );
-      const x = Math.max(6, Math.min(94, (slot.base_offset_y / 50) * 100));
-      const y = Math.max(8, Math.min(92, (slot.base_offset_x / 47) * 100));
-      pin.style.left = x + "%";
-      pin.style.top = y + "%";
-      pin.title = `${slot.name_zh} · ${getBehaviourZh(slot.behaviour)}`;
-      court.append(pin);
-    }
-    return court;
-  }
-
   function playList(playbook) {
     const list = el("div", "play-list");
     if (!playbook.length) {
@@ -1281,19 +1252,9 @@
     return list;
   }
 
-  const TACTIC_PLAY_IDS = {
-    off_horns_pnr: ["high_pnr_roll_v1", "horns_flare_pop_v1"],
-    off_spain_pnr: ["spain_pnr_stack_v1"],
-    off_motion_spacing: ["corner_backdoor_v1", "weak_side_lift_v1"],
-    off_transition_push: ["transition_rim_runner_v1"],
-    off_delay_attack: ["delay_dho_handoff_v1"],
-    off_post_split: ["post_split_cut_v1"],
-    off_drag_screen: ["drag_screen_drive_kick_v1"],
-  };
-
-  function playsForTactic(tacticId, spec) {
+  function playsForTactic(spec) {
     if (!spec) return [];
-    const selectedIds = new Set(TACTIC_PLAY_IDS[tacticId] || []);
+    const selectedIds = new Set(spec.play_ids || []);
     return (studio.plays || []).filter(
       (play) => selectedIds.has(play.id) && playFits(play, spec),
     );
@@ -1326,7 +1287,7 @@
     if (starters.length) {
       list.append(el("div", "roster-group-label", "首发阵容"));
       for (const player of starters) {
-        list.append(createPlayerButton(player, team, selected));
+        list.append(createPlayerButton(player, selected));
       }
     }
 
@@ -1335,7 +1296,7 @@
     if (bench.length) {
       list.append(el("div", "roster-group-label", "轮换替补"));
       for (const player of bench) {
-        list.append(createPlayerButton(player, team, selected));
+        list.append(createPlayerButton(player, selected));
       }
     }
 
@@ -1344,7 +1305,7 @@
     );
   }
 
-  function createPlayerButton(player, team, selected) {
+  function createPlayerButton(player, selected) {
     const button = el(
       "button",
       player.id === selected.id ? "active" : ""
@@ -2751,7 +2712,6 @@
 
     // 5. 球员渲染
     state.hitPlayers.length = 0;
-    const playerRadius = 16.5;
 
     for (const player of tick.players || []) {
       if (player.onCourt === false) continue;
@@ -2848,9 +2808,6 @@
       const isDribbleDrive = isCrossover || actionRaw.includes("DRIVE") || actionRaw.includes("ADVANCE") || actionRaw.includes("INITIATE") || actionRaw.includes("DRIBBLE");
       const isScreen = actionRaw.includes("SCREEN") || actionRaw.includes("SET_HIGH_SCREEN");
       const isContest = actionRaw.includes("CONTEST") || actionRaw.includes("DROP_CONTAIN") || actionRaw.includes("HELP_SIDE") || actionRaw.includes("CLOSEOUT");
-      const isRebounding = actionRaw.includes("BOXOUT") || actionRaw.includes("REBOUND") || actionRaw.includes("CRASH");
-      const isCutting = actionRaw.includes("CUT") || actionRaw.includes("DIP_TO_RIM");
-
       // 步频周期震荡（支撑高速跑动与运球动感节奏）
       const gaitCycle = curSpeed > 0.4 ? (state.idx * 0.45 + (Number(player.number) || 1) * 1.5) : 0;
       const gaitPulse = Math.sin(gaitCycle);
@@ -4307,7 +4264,7 @@
         btn.addEventListener("click", async () => {
           lineup.offense_tactic = item.id;
           const next = studio.offense.find((t) => t.id === item.id);
-          const compatible = playsForTactic(item.id, next?.spec);
+          const compatible = playsForTactic(next?.spec);
           if (side === "home") studio.default_setup.home_playbook = compatible;
           else studio.default_setup.away_playbook = compatible;
           renderStudio();
@@ -4659,7 +4616,7 @@
       const lineup = studio.default_setup[side + "_lineup"];
       lineup.offense_tactic = id;
       const next = studio.offense.find((item) => item.id === id);
-      studio.default_setup[side + "_playbook"] = playsForTactic(id, next?.spec);
+      studio.default_setup[side + "_playbook"] = playsForTactic(next?.spec);
       renderStudio();
       await runSimulation(null, true);
     },
