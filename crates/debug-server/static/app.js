@@ -3399,8 +3399,6 @@
     // 动效系统：空中层纯视觉动效渲染
     courtFX.drawAirFX(ctx, point, now);
 
-    ctx.restore();
-
     // 暂停状态下，若场上有正在消散的动效粒子与水花，以轻量帧循环平滑完成过渡
     if (!state.playing && courtFX.effects.length > 0) {
       if (!state.fxRafId) {
