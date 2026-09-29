@@ -2888,17 +2888,18 @@
         }
       }
 
-      // 透视垂直位移与体量尺寸透视放大
-      const verticalLift = jumpHeight * 11.5; // 离地视差立体位移
+      // 透视垂直位移与体量尺寸透视放大：位移量级必须达到「一个身位」
+      // （全场视角下 11px 无感知，30px ≈ 1.8 倍圆盘半径才显著）
+      const verticalLift = jumpHeight * 30;
       const renderPx = px;
       const renderPy = py - verticalLift; // 腾空后的圆盘中心
       if (jumpHeight > 0) {
-        radius = radius * (1.0 + jumpHeight * 0.24); // 透视放大
+        radius = radius * (1.0 + jumpHeight * 0.45); // 透视放大（扈篮是 1.45x）
       }
 
       // 2. 地面自然接触阴影 (起跳时阴影留在地面原点，并随高度扩散淡化)
       ctx.beginPath();
-      const shadowSpread = 1.0 + jumpHeight * 0.75;
+      const shadowSpread = 1.0 + jumpHeight * 1.1;
       const shadowStretch = Math.min(1.25, 1.0 + curSpeed * 0.04);
       ctx.ellipse(
         px,
@@ -2955,9 +2956,9 @@
         ctx.save();
         ctx.translate(renderPx, renderPy);
         ctx.rotate(facingAngle);
-        const contestR = actionPhase === "Execution" ? radius + 8.5 : radius + 5.5;
+        const contestR = actionPhase === "Execution" ? radius + 11 : radius + 7;
         ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.85)" : "rgba(245, 158, 11, 0.85)";
-        ctx.lineWidth = actionPhase === "Execution" ? 2.4 : 1.6;
+        ctx.lineWidth = actionPhase === "Execution" ? 3.0 : 2.0;
         ctx.beginPath();
         ctx.arc(0, 0, contestR, -Math.PI / 3, Math.PI / 3);
         ctx.stroke();
@@ -2995,19 +2996,19 @@
         ctx.rotate(facingAngle);
 
         if (actionPhase === "Execution") {
-          // 出手瞬间瞄准导引线
+          // 出手瞬间瞄准导引线（加长到 22px，全场可辨）
           ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.9)" : "rgba(245, 158, 11, 0.9)";
-          ctx.lineWidth = 1.8;
+          ctx.lineWidth = 2.4;
           ctx.beginPath();
           ctx.moveTo(radius, 0);
-          ctx.lineTo(radius + 12, 0);
+          ctx.lineTo(radius + 22, 0);
           ctx.stroke();
           // 出手准星导向标
           ctx.fillStyle = isHome ? "#10b981" : "#f59e0b";
           ctx.beginPath();
-          ctx.moveTo(radius + 14, 0);
-          ctx.lineTo(radius + 9, -2.5);
-          ctx.lineTo(radius + 9, 2.5);
+          ctx.moveTo(radius + 27, 0);
+          ctx.lineTo(radius + 19, -4);
+          ctx.lineTo(radius + 19, 4);
           ctx.closePath();
           ctx.fill();
         } else if (actionPhase === "FollowThrough") {
@@ -3023,6 +3024,122 @@
         ctx.restore();
       }
 
+      // 6.5 攻击与防守动作专属轨迹标记（尺寸 ≥ 半径级，全场视角可辨认）
+      // 变向突破：地面 V 形折线残影（旧运动方向 → 新朝向的切向证据）
+      if (isCrossover && actionPhase === "Execution" && curSpeed > 0.4) {
+        const moveAng = Math.atan2(curVy, curVx);
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.strokeStyle = isHome ? "rgba(5, 150, 105, 0.8)" : "rgba(217, 119, 6, 0.8)";
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(moveAng) * (radius + 9), Math.sin(moveAng) * (radius + 9));
+        ctx.stroke();
+        const headX = Math.cos(facingAngle) * (radius + 12);
+        const headY = Math.sin(facingAngle) * (radius + 12);
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(facingAngle) * (radius + 2), Math.sin(facingAngle) * (radius + 2));
+        ctx.lineTo(headX, headY);
+        ctx.stroke();
+        ctx.fillStyle = isHome ? "#059669" : "#d97706";
+        ctx.beginPath();
+        ctx.moveTo(headX + Math.cos(facingAngle) * 6, headY + Math.sin(facingAngle) * 6);
+        ctx.lineTo(headX + Math.cos(facingAngle + 2.5) * 6, headY + Math.sin(facingAngle + 2.5) * 6);
+        ctx.lineTo(headX + Math.cos(facingAngle - 2.5) * 6, headY + Math.sin(facingAngle - 2.5) * 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // 三威胁：脚下三向箭头扇形（可投 / 可传 / 可突三个选项同时在线）
+      if (actionRaw.includes("TRIPLETHREAT")) {
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(facingAngle);
+        const threatColor = isHome ? "rgba(5, 150, 105, 0.8)" : "rgba(217, 119, 6, 0.8)";
+        for (const off of [-0.6, 0, 0.6]) {
+          const tipX = Math.cos(off) * (radius + 12);
+          const tipY = Math.sin(off) * (radius + 12);
+          ctx.strokeStyle = threatColor;
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(off) * (radius + 3), Math.sin(off) * (radius + 3));
+          ctx.lineTo(tipX, tipY);
+          ctx.stroke();
+          ctx.fillStyle = threatColor;
+          ctx.beginPath();
+          ctx.moveTo(tipX + Math.cos(off) * 5, tipY + Math.sin(off) * 5);
+          ctx.lineTo(tipX + Math.cos(off + 2.4) * 5, tipY + Math.sin(off + 2.4) * 5);
+          ctx.lineTo(tipX + Math.cos(off - 2.4) * 5, tipY + Math.sin(off - 2.4) * 5);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      // 上篮：朝篮筐的低平抛物虚线弧（腾空期间持续显示）
+      if (isLayup && jumpHeight > 0.2) {
+        const hoopX = isHome ? rules.rightHoopX : rules.leftHoopX;
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = "rgba(249, 115, 22, 0.85)";
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.quadraticCurveTo((px + hoopX) / 2, py - 12, hoopX, rules.hoopY);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 扣篮：起跳点到篮筐的直线冲刺轨迹（力度感与上篮的抛物线对立）
+      if (isDunk && jumpHeight > 0.2) {
+        const hoopX = isHome ? rules.rightHoopX : rules.leftHoopX;
+        ctx.save();
+        ctx.setLineDash([7, 4]);
+        ctx.strokeStyle = "rgba(234, 88, 12, 0.9)";
+        ctx.lineWidth = 3.0;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(hoopX, rules.hoopY);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 盖帽：腾空伸臂扑球（身体伸向朝向方向的粗臂条 + 掌端圆）
+      if (isBlock && jumpHeight > 0.2) {
+        ctx.save();
+        ctx.translate(renderPx, renderPy);
+        ctx.rotate(facingAngle);
+        ctx.strokeStyle = isHome ? "rgba(5, 150, 105, 0.9)" : "rgba(217, 119, 6, 0.9)";
+        ctx.lineWidth = 4.0;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(radius * 0.5, 0);
+        ctx.lineTo(radius * 1.75, 0);
+        ctx.stroke();
+        ctx.fillStyle = isHome ? "#059669" : "#d97706";
+        ctx.beginPath();
+        ctx.arc(radius * 1.75, 0, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // 篮板争抢：身体上方双臂上举标记
+      if (isReboundJump && jumpHeight > 0.25) {
+        ctx.save();
+        ctx.strokeStyle = isHome ? "rgba(5, 150, 105, 0.85)" : "rgba(217, 119, 6, 0.85)";
+        ctx.lineWidth = 2.8;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(renderPx - 4, renderPy - radius - 1);
+        ctx.lineTo(renderPx - 4, renderPy - radius - 9);
+        ctx.moveTo(renderPx + 4, renderPy - radius - 1);
+        ctx.lineTo(renderPx + 4, renderPy - radius - 9);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // 7. 运球触地节奏脉冲 (Dribble Bounce Cadence)
       if (player.hasBall && isDribbleDrive && curSpeed > 0.5) {
         const handSide = gaitPulse >= 0 ? 1 : -1;
@@ -3035,7 +3152,7 @@
         ctx.save();
         ctx.beginPath();
         ctx.arc(dx, dy, bounceR, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255, 120, 40, " + (0.55 - Math.abs(gaitPulse) * 0.25).toFixed(2) + ")";
+        ctx.strokeStyle = `rgba(255, 120, 40, ${(0.55 - Math.abs(gaitPulse) * 0.25).toFixed(2)})`;
         ctx.lineWidth = 1.3;
         ctx.stroke();
         ctx.restore();
@@ -3051,13 +3168,13 @@
         ctx.rotate(-moveAng);
       }
 
-      // 稳重专业的朝向指示微标 (等腰三角，长 4.5px)
+      // 稳重专业的朝向指示微标 (等腰三角，长 7px，全场视角可辨认)
       ctx.save();
       ctx.rotate(facingAngle);
       ctx.beginPath();
-      ctx.moveTo(radius + 4.5, 0);
-      ctx.lineTo(radius + 0.5, -3);
-      ctx.lineTo(radius + 0.5, 3);
+      ctx.moveTo(radius + 7.0, 0);
+      ctx.lineTo(radius + 0.5, -4.5);
+      ctx.lineTo(radius + 0.5, 4.5);
       ctx.closePath();
       ctx.fillStyle = isHome ? "#059669" : "#d97706";
       ctx.fill();
@@ -3089,14 +3206,14 @@
       if (isBackToBasket) {
         const elbowColor = isHome ? "rgba(6, 95, 70, 0.85)" : "rgba(146, 64, 14, 0.85)";
         ctx.strokeStyle = elbowColor;
-        ctx.lineWidth = 2.4;
+        ctx.lineWidth = 3.2;
         ctx.beginPath();
-        ctx.arc(0, 0, radius + 2.0, Math.PI * 0.72, Math.PI * 0.98);
+        ctx.arc(0, 0, radius + 5.0, Math.PI * 0.68, Math.PI * 1.0);
         ctx.stroke();
         ctx.beginPath();
-        ctx.arc(0, 0, radius + 2.0, Math.PI * 0.02, Math.PI * 0.28);
+        ctx.arc(0, 0, radius + 5.0, 0.0, Math.PI * 0.32);
         ctx.stroke();
-        ctx.font = "700 9.5px system-ui, sans-serif";
+        ctx.font = "800 10.5px system-ui, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
         ctx.fillStyle = elbowColor;
@@ -3150,42 +3267,40 @@
         ].includes(player.action));
       const tagText = jumpActionZh || (isDynamicAction ? actionZh : getPositionZh(player.position));
       ctx.save();
-      const posTagY = py + 16.5;
+      // 标签跟随腾空身体（否则人跳起来了标签留在地面，动作与文字分离）
+      const posTagY = renderPy + radius + 9;
       ctx.font = isDynamicAction
-        ? "800 8.5px system-ui, -apple-system, sans-serif"
-        : "700 8px system-ui, -apple-system, sans-serif";
-      const posTagW = ctx.measureText(tagText).width + 8;
-      const jumpFill = jumpActionZh
-        ? "rgba(6, 95, 70, 0.95)"
-        : isHome
-          ? "rgba(6, 95, 70, 0.95)"
-          : "rgba(146, 64, 14, 0.95)";
-      ctx.fillStyle = jumpActionZh
-        ? jumpFill
-        : isDynamicAction
-          ? "rgba(255, 255, 255, 0.98)"
-          : "rgba(255, 255, 255, 0.9)";
-      const dynamicStroke = isHome
-        ? "rgba(5, 150, 105, 0.6)"
-        : "rgba(217, 119, 6, 0.6)";
-      ctx.strokeStyle = jumpActionZh
-        ? "#ffffff"
-        : isDynamicAction
-          ? dynamicStroke
-          : "rgba(203, 213, 225, 0.8)";
-      ctx.lineWidth = jumpActionZh ? 1.6 : isDynamicAction ? 1.4 : 1.0;
+        ? "800 11px system-ui, -apple-system, sans-serif"
+        : "700 10.5px system-ui, -apple-system, sans-serif";
+      const posTagW = ctx.measureText(tagText).width + 10;
+      const homeFill = isHome ? "rgba(6, 95, 70, 0.95)" : "rgba(146, 64, 14, 0.95)";
+      let tagFill = "rgba(255, 255, 255, 0.92)";
+      let tagStroke = "rgba(203, 213, 225, 0.8)";
+      let tagWidth = 1.0;
+      let textColor = isHome ? "#065f46" : "#92400e";
+      if (isDynamicAction) {
+        tagFill = "rgba(255, 255, 255, 0.98)";
+        tagStroke = isHome ? "rgba(5, 150, 105, 0.6)" : "rgba(217, 119, 6, 0.6)";
+        tagWidth = 1.4;
+        textColor = isHome ? "#047857" : "#b45309";
+      }
+      if (jumpActionZh) {
+        tagFill = homeFill;
+        tagStroke = "#ffffff";
+        tagWidth = 1.8;
+        textColor = "#ffffff";
+      }
+      ctx.fillStyle = tagFill;
+      ctx.strokeStyle = tagStroke;
+      ctx.lineWidth = tagWidth;
       ctx.beginPath();
-      ctx.roundRect(px - posTagW / 2, posTagY - 4.5, posTagW, 11, 3.5);
+      ctx.roundRect(px - posTagW / 2, posTagY - 7, posTagW, 14, 4);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = jumpActionZh
-        ? "#ffffff"
-        : (isDynamicAction
-          ? (isHome ? "#047857" : "#b45309")
-          : (isHome ? "#065f46" : "#92400e"));
+      ctx.fillStyle = textColor;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(tagText, px, posTagY + 0.5);
+      ctx.fillText(tagText, px, posTagY);
       ctx.restore();
     }
 
@@ -3230,7 +3345,7 @@
           ctx.beginPath();
           ctx.moveTo(pt1.x, pt1.y);
           ctx.lineTo(pt2.x, pt2.y);
-          ctx.strokeStyle = "rgba(249, 115, 22, " + trailAlpha.toFixed(3) + ")";
+          ctx.strokeStyle = `rgba(249, 115, 22, ${trailAlpha.toFixed(3)})`;
           ctx.lineWidth = 1.5 + (i / tailPts.length) * 3.0;
           ctx.lineCap = "round";
           ctx.stroke();
