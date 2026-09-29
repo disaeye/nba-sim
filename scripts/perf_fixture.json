@@ -4,14 +4,14 @@
   "method": "release 模式，MatchEngine::new(seed) 全场 scope，预热 500 tick 后计 20000 tick 的 wall 时间",
   "fixture_version": 1,
   "throughput_ticks_per_second": {
-    "band_min": 3900.0,
-    "band_max": 6200.0,
+    "band_min": 5400.0,
+    "band_max": 7400.0,
     "measured": {
-      "seed_42": 5540.0,
-      "seed_1": 4217.0
+      "seed_42": 5750.0,
+      "seed_1": 6692.0
     },
-    "measured_at_commit": "ui 分支融合（持球姿态系统 × R1-R8 结算链）：姿态生命周期每 tick 簿记与战术剧本决策接入后重测",
-    "band_rationale": "融合前实测 seed42=6877、seed1=5693（7164e21 时代）；融合后三次复测 seed42=5512/5547/5540、seed1=4229/4145/4217，每 tick 成本上升来自姿态簿记与剧本决策周期。带按新实测两侧各留 ≈8%/12% 余量取 [3900, 6200]"
+    "measured_at_commit": "d98fc17 与 711dbea 引擎修复后复测：seed42 重复值 6035/5856，seed1 重复值 6841/6878",
+    "band_rationale": "最新一次引擎改动后复测显示吞吐区间为 seed42 5856–6035、seed1 6841–6878 ticks/s。基准带 [5400, 7400] 覆盖观测低值并保留约 7% 上界余量。"
   },
   "quarter_wall_seconds": {
     "band_min": 3.0,

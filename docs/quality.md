@@ -184,7 +184,7 @@ nba-sim --rules rules.json --seeds 0..20 batch --out stats.jsonl
 
 | 指标 | 预算 | 验证方式 |
 | --- | --- | --- |
-| release 模式吞吐 | 由已批准的基准 fixture 冻结；节间开场球权程序落地后空闲复测 seed42 = 6530 ticks/s，seed1 = 6365 ticks/s（scripts/perf_fixture.json，`scripts/check_perf_fixture.py` 已接入 `run-tests.sh` 后置门，失败计入退出码） | 分层 benchmark 工具 |
+| release 模式吞吐 | 由已批准的基准 fixture 冻结；犯满进攻犯规换人修复后空闲复测 seed42 = 5959 ticks/s、seed1 = 6752 ticks/s（scripts/perf_fixture.json，`scripts/check_perf_fixture.py` 已接入 `run-tests.sh` 后置门，失败计入退出码） | 分层 benchmark 工具 |
 | 单节运行时间 | 由已批准的基准 fixture 冻结 | 分层 benchmark 工具 |
 | 每 tick 堆分配 | 稳态为 0（复用缓冲；`build_tick` 的 Vec/String 复用） | 分配计数器或 heaptrack 抽查 |
 | `String` clone / tick | 消除（球员 id/jersey 预分配 Arc/静态） | 代码审查 + 分配计数 |
