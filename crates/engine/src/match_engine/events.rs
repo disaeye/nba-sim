@@ -4,7 +4,8 @@
 //! 依据 `gap.md` §7.1/§7.2：只有真实因果关系才串链，同 tick 相邻不等于因果。
 
 use nba_decision::constraint::{ConstraintStatus, EnforcementAction, PhaseType, ViolationKind};
-use nba_domain::{GameEvent, GameFlowState, SubPhase};
+use nba_domain::court::Court;
+use nba_domain::{GameEvent, GameFlowState, Possession, SubPhase};
 use nba_officiating::resolution::{ResolutionLayer, ResolutionOutcome};
 use nba_physics::ballistics::BallTrajectoryKind;
 use nba_protocol::FrameEvent;
@@ -116,6 +117,22 @@ impl MatchEngine {
                 .decision
                 .registry
                 .evaluate_events(&ctx, &adjudicated_events);
+            let possession_at_whistle = self.flow.possession;
+            let offensive_fouler_ids: std::collections::HashSet<String> = adjudicated_events
+                .iter()
+                .filter_map(|event| {
+                    let GameEvent::Foul { fouler_id, .. } = event else {
+                        return None;
+                    };
+                    let player = self.systems.physics.get_player(fouler_id)?;
+                    let is_offense = match possession_at_whistle {
+                        Possession::Home => player.team == "home",
+                        Possession::Away => player.team == "away",
+                    };
+                    is_offense.then(|| fouler_id.clone())
+                })
+                .collect();
+            let mut offensive_foul_turnover_applied = false;
 
             for event in &adjudicated_events {
                 if let GameEvent::Foul {
@@ -175,7 +192,10 @@ impl MatchEngine {
                         .to_string(),
                     );
 
-                    if *is_shooting || team_fouls >= self.config.rules.league.bonus_fouls_per_period
+                    let fouler_on_offense = offensive_fouler_ids.contains(fouler_id);
+                    if !fouler_on_offense
+                        && (*is_shooting
+                            || team_fouls >= self.config.rules.league.bonus_fouls_per_period)
                     {
                         let award = if *is_shooting {
                             self.config.rules.league.shooting_foul_free_throws
@@ -241,10 +261,65 @@ impl MatchEngine {
                             self.transition_ball_state(self.dead_state(foul_pos, foul_height));
                         }
                     } else {
-                        // 普通犯规（非投篮且未到奖励罚球）：进攻方保留球权，重置进攻时间至 14 秒重新组织！
+                        // 防守犯规后进攻方保留球权；进攻犯规后球权交给对方。
                         self.cancel_all_active_windows(
                             nba_domain::event::ActionCancellationReason::PreemptedByFoul,
                         );
+                        let fouler_fouled_out = self
+                            .systems
+                            .physics
+                            .get_player(fouler_id)
+                            .is_some_and(|player| {
+                                player.foul_count >= self.config.rules.league.max_personal_fouls
+                            });
+                        if fouler_on_offense && fouler_fouled_out {
+                            if !offensive_foul_turnover_applied {
+                                // 犯满进攻犯规者若继续持球，会阻塞强制换人；先转入死球，
+                                // 清除球态中的持球人引用，再执行犯满换人。
+                                offensive_foul_turnover_applied = true;
+                                let carrier_has_ball = matches!(
+                                    &self.ball.ball_state,
+                                    BallTrajectoryKind::Held { carrier_id }
+                                        if carrier_id == fouler_id
+                                ) || matches!(
+                                    &self.ball.ball_state,
+                                    BallTrajectoryKind::Drive { driver_id, .. }
+                                        if driver_id == fouler_id
+                                );
+                                if carrier_has_ball {
+                                    let (pos, height) = self.ball.ball_pos_3d;
+                                    self.transition_ball_state(self.dead_state(pos, height));
+                                }
+                                if let BallTrajectoryKind::Dead {
+                                    last_touch_player, ..
+                                } = &mut self.ball.ball_state
+                                {
+                                    if last_touch_player.as_deref() == Some(fouler_id.as_str()) {
+                                        *last_touch_player = None;
+                                    }
+                                }
+                                self.substitute(
+                                    fouler_id,
+                                    nba_domain::SubstitutionReason::FoulTrouble,
+                                    None,
+                                );
+                                self.emit_possession_summary(
+                                    nba_domain::PossessionEndCause::TurnoverOffensiveFoul,
+                                    None,
+                                    Some(fouler_id.clone()),
+                                    None,
+                                );
+                                self.emit_whistle_pass_drop();
+                                let current_ball_3d = self.ball.ball_pos_3d;
+                                let baseline = Court::nearest_boundary_with_geometry(
+                                    current_ball_3d.0,
+                                    self.config.rules.court,
+                                );
+                                self.start_inbound_transition(baseline, current_ball_3d);
+                            }
+                            continue;
+                        }
+                        // 防守方非投篮犯规：进攻方保留球权，重置进攻时间至 14 秒重新组织！
                         //
                         // ## 球在飞行中时不得重置子阶段（实测修复）
                         //
@@ -367,7 +442,9 @@ impl MatchEngine {
                     // 罚球数，非投篮但球队已达 bonus 给 bonus 罚球数——与
                     // 该判罚是否已进入队列无关（队列只影响执行时机），
                     // 犯规账本据此核对逐次罚球。
-                    let awarded_free_throws = if *is_shooting {
+                    let awarded_free_throws = if offensive_fouler_ids.contains(fouler_id) {
+                        0
+                    } else if *is_shooting {
                         self.config.rules.league.shooting_foul_free_throws
                     } else if t_count >= self.config.rules.league.bonus_fouls_per_period {
                         self.config.rules.league.bonus_free_throws
@@ -393,13 +470,13 @@ impl MatchEngine {
                             && self.ledger.free_throw_source_foul.is_none()
                         {
                             self.ledger.free_throw_source_foul = Some(event_id);
-                        } else if let Some(entry) = self
-                            .ledger
-                            .free_throw_queue
-                            .iter_mut()
-                            .find(|(shooter, _, src)| {
-                                *shooter == *fouled_player_id && src.is_none()
-                            })
+                        } else if let Some(entry) =
+                            self.ledger
+                                .free_throw_queue
+                                .iter_mut()
+                                .find(|(shooter, _, src)| {
+                                    *shooter == *fouled_player_id && src.is_none()
+                                })
                         {
                             entry.2 = Some(event_id);
                         }

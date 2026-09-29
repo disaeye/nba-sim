@@ -320,6 +320,7 @@ impl MatchEngine {
                 | nba_domain::PossessionEndCause::TurnoverSteal
                 | nba_domain::PossessionEndCause::TurnoverPassTipped
                 | nba_domain::PossessionEndCause::TurnoverPassDropped
+                | nba_domain::PossessionEndCause::TurnoverOffensiveFoul
                 | nba_domain::PossessionEndCause::TurnoverLooseBall
         ) {
             self.ledger.box_score.turnovers += 1;

@@ -84,6 +84,9 @@ struct PossessionWindow {
     offensive_rebounds: usize,
     drops: usize,
     violations: usize,
+    /// 回合内犯规事实数：进攻犯规终结回合（`TURNOVER_OFFENSIVE_FOUL`）
+    /// 的原因事实。
+    fouls: usize,
     /// 本回合是否发布了「传球接球点修正」事实。
     ///
     /// 层 A（有限信息）下，接球人按自己的估计跑位，接球成功时球的位置
@@ -305,6 +308,9 @@ fn evaluate_possessions(ticks: &[StreamTick], fixture: &ReferenceDistributions) 
                 "VIOLATION" | "RULE_VIOLATION" | "ENFORCEMENT_APPLIED" | "OUT_OF_BOUNDS" => {
                     window.violations += 1;
                 }
+                "FOUL" | "SHOOTING_FOUL" => {
+                    window.fouls += 1;
+                }
                 _ => {}
             }
         }
@@ -522,6 +528,7 @@ fn evaluate_possession_window(
             nba_domain::PossessionEndCause::TurnoverSteal => !window.steals.is_empty(),
             nba_domain::PossessionEndCause::TurnoverPassTipped => window.tipped_passes > 0,
             nba_domain::PossessionEndCause::TurnoverPassDropped => window.drops > 0,
+            nba_domain::PossessionEndCause::TurnoverOffensiveFoul => window.fouls > 0,
             nba_domain::PossessionEndCause::TurnoverViolation => window.violations > 0,
             nba_domain::PossessionEndCause::TurnoverLooseBall => {
                 // 原因事实：带球被切掉（`BALL_POKED_LOOSE`）、封盖打落

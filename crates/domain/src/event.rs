@@ -423,6 +423,8 @@ pub enum PossessionEndCause {
     TurnoverPassTipped,
     /// 传球掉球（未被点掉）后由对方控制。
     TurnoverPassDropped,
+    /// 进攻犯规（带球撞人/非法掩护）球权转移。
+    TurnoverOffensiveFoul,
     /// 松球易主（其他无法细分到上述三类的松球转换）。
     TurnoverLooseBall,
     /// 违例（24 秒/8 秒/回场/出界等）。
@@ -439,6 +441,7 @@ impl PossessionEndCause {
             PossessionEndCause::TurnoverSteal => "TURNOVER_STEAL",
             PossessionEndCause::TurnoverPassTipped => "TURNOVER_PASS_TIPPED",
             PossessionEndCause::TurnoverPassDropped => "TURNOVER_PASS_DROPPED",
+            PossessionEndCause::TurnoverOffensiveFoul => "TURNOVER_OFFENSIVE_FOUL",
             PossessionEndCause::TurnoverLooseBall => "TURNOVER_LOOSE_BALL",
             PossessionEndCause::TurnoverViolation => "TURNOVER_VIOLATION",
             PossessionEndCause::PeriodEnd => "PERIOD_END",

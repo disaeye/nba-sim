@@ -81,6 +81,32 @@ fn queued_free_throw_programs_execute_in_order() {
 }
 
 #[test]
+fn non_fouled_out_offensive_foul_retains_possession() {
+    let rules = nba_domain::GameRules {
+        tip_off_duration_seconds: 0.0,
+        ..Default::default()
+    };
+    let mut engine = MatchEngine::with_rules(722, rules);
+    engine.force_possession_for_test(nba_domain::Possession::Home);
+    engine.set_ball_state_for_test(nba_physics::ballistics::BallTrajectoryKind::Held {
+        carrier_id: "H_01".to_string(),
+    });
+    engine.push_event_for_test(nba_domain::GameEvent::new_foul("A_01", "H_01", false));
+
+    let tick = engine.step();
+    assert!(matches!(
+        engine.ball_state_for_test(),
+        nba_physics::ballistics::BallTrajectoryKind::Held { ref carrier_id } if carrier_id == "H_01"
+    ));
+    assert!(!tick
+        .frame
+        .events
+        .iter()
+        .any(|event| event == "POSSESSION_SUMMARY"));
+    assert_eq!(engine.box_score().turnovers, 0);
+}
+
+#[test]
 fn fouled_out_player_is_substituted_after_block_clears() {
     let rules = nba_domain::GameRules {
         tip_off_duration_seconds: 0.0,
@@ -137,4 +163,63 @@ fn fouled_out_player_is_substituted_after_block_clears() {
             .unwrap_or(true),
         "fouled-out player must leave the court"
     );
+}
+
+#[test]
+fn fouled_out_offensive_foul_transfers_possession_before_substitution() {
+    let rules = nba_domain::GameRules {
+        tip_off_duration_seconds: 0.0,
+        ..Default::default()
+    };
+    let mut engine = MatchEngine::with_rules(723, rules.clone());
+    engine.force_possession_for_test(nba_domain::Possession::Home);
+    engine.set_ball_state_for_test(nba_physics::ballistics::BallTrajectoryKind::Held {
+        carrier_id: "H_01".to_string(),
+    });
+    let player = engine
+        .physics_mut_for_test()
+        .get_player_mut("H_01")
+        .unwrap();
+    player.foul_count = rules.league.max_personal_fouls - 1;
+    engine.push_event_for_test(nba_domain::GameEvent::new_foul("A_01", "H_01", false));
+
+    let tick = engine.step();
+    assert_eq!(engine.possession_for_test(), nba_domain::Possession::Away);
+    assert!(matches!(
+        engine.ball_state_for_test(),
+        nba_physics::ballistics::BallTrajectoryKind::InboundTransfer { .. }
+    ));
+    assert_eq!(
+        engine
+            .physics_mut_for_test()
+            .get_player("H_01")
+            .unwrap()
+            .foul_count,
+        rules.league.max_personal_fouls
+    );
+    assert!(tick
+        .frame
+        .events
+        .iter()
+        .any(|event| event == "SUBSTITUTION"));
+    assert_eq!(
+        tick.frame
+            .players
+            .iter()
+            .find(|player| player.id == "H_01")
+            .map(|player| player.on_court),
+        Some(false)
+    );
+    let event_log = engine.current_event_log_for_test();
+    let summary = event_log
+        .iter()
+        .find(|event| event.kind == "POSSESSION_SUMMARY")
+        .expect("offensive foul must publish a possession summary");
+    let data = summary.data.as_ref().expect("possession summary data");
+    assert_eq!(
+        data.pointer("/PossessionSummary/terminal_event")
+            .and_then(serde_json::Value::as_str),
+        Some("TURNOVER_OFFENSIVE_FOUL")
+    );
+    assert_eq!(engine.box_score().turnovers, 1);
 }
