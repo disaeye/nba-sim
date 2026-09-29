@@ -16,6 +16,8 @@ use glam::Vec2;
 use nba_domain::action_window::ActionTimeWindow;
 use nba_domain::court::Court;
 use nba_domain::{GameEvent, GameFlowState, Possession, SubPhase};
+use nba_officiating::resolution::{ResolutionLayer, ResolutionOutcome};
+
 use nba_physics::ballistics::{BallTrajectoryKind, BallisticsEngine};
 use nba_semantics::SemanticEvaluator;
 use rand::Rng;
@@ -315,6 +317,72 @@ impl MatchEngine {
         }
     }
 
+    /// 篮板来源地板球的双人争抢裁定：取攻、守两侧距球最近者，
+    /// 以与空中篮板同一的卡位/补篮有效距离与 resolve_rebound 概率
+    /// 决定归属。单侧在场时直接收球，双方都不在时交由上层继续松球。
+    fn resolve_contested_floor_rebound(
+        &mut self,
+        candidates: &[String],
+        ball_pos: Vec2,
+    ) -> Option<String> {
+        let offense_team = match self.flow.possession {
+            Possession::Home => "home",
+            Possession::Away => "away",
+        };
+        let mut off_best: Option<(String, f32)> = None;
+        let mut def_best: Option<(String, f32)> = None;
+        for id in candidates {
+            let Some(player) = self.systems.physics.get_player(id) else {
+                continue;
+            };
+            let distance = (player.pos_ft - ball_pos).length();
+            let slot = if player.team == offense_team {
+                &mut off_best
+            } else {
+                &mut def_best
+            };
+            if slot.as_ref().is_none_or(|(_, d)| distance < *d) {
+                *slot = Some((id.clone(), distance));
+            }
+        }
+        let (offense_id, offensive_distance) = off_best?;
+        let Some((defensive_id, defensive_distance)) = def_best else {
+            return Some(offense_id);
+        };
+        let Some(offensive_player) = self.systems.physics.get_player(&offense_id).cloned() else {
+            return Some(defensive_id);
+        };
+        let Some(defensive_player) = self.systems.physics.get_player(&defensive_id).cloned() else {
+            return Some(offense_id);
+        };
+        let def_boxout_bonus = nba_domain::capability::effective_defensive_boxout_bonus(
+            &self.config.rules,
+            &defensive_player.attributes,
+        );
+        let off_putback_bias = nba_domain::capability::effective_putback_bias(
+            &self.config.rules,
+            &offensive_player.attributes,
+        );
+        let rebound_policy = &self.config.rules.resolve.rebound;
+        let effective_def_dist = (defensive_distance
+            * (f32::from(1u8) - def_boxout_bonus * rebound_policy.boxout_distance_discount))
+            .max(f32::from(0u8));
+        let effective_off_dist = (offensive_distance
+            * (f32::from(1u8) - off_putback_bias * rebound_policy.putback_distance_discount))
+            .max(f32::from(0u8));
+        match ResolutionLayer::resolve_rebound(
+            &offensive_player,
+            &defensive_player,
+            effective_off_dist,
+            effective_def_dist,
+            rebound_policy,
+            &mut self.systems.rng,
+        ) {
+            ResolutionOutcome::ReboundSecured { rebounder_id, .. } => Some(rebounder_id),
+            _ => Some(defensive_id),
+        }
+    }
+
     /// `RimRebound` 臂：落点归属裁定与无人控制时弹地转化。
     pub(crate) fn resolve_rim_rebound_arm(
         &mut self,
@@ -492,8 +560,19 @@ impl MatchEngine {
         );
         let next_speed_3d = (next_vel.length_squared() + next_vel_z * next_vel_z).sqrt();
         let controllable = next_speed_3d <= self.config.rules.loose_ball_control_speed_ftps;
+        // 篮板来源的地板球（投/罚不中弹出）：双方都在可及范围时，
+        // 归属是能力对决而非先到先得——与空中篮板同一裁决
+        // （resolve_rebound + 卡位/补篮有效距离，D27）。否则卡位
+        // 能力只在罕见的空中双人同窗场景可见，主流篮板路径完全不
+        // 消费它。其他来源（拨断/传球掉落）保持既有的确定性顺序收球。
+        let rebound_sourced = matches!(
+            self.ball.pending_loose_ball_terminal,
+            Some(nba_domain::PossessionEndCause::DefensiveRebound)
+        );
         let secure_candidate = if bounce_active || !controllable {
             None
+        } else if rebound_sourced {
+            self.resolve_contested_floor_rebound(&candidates, next_pos)
         } else {
             candidates.into_iter().next()
         };

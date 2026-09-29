@@ -531,14 +531,6 @@ impl MatchEngine {
         if offensive_id == defensive_id {
             unreachable!("offensive and defensive rebound candidates must be disjoint");
         }
-        if *offensive_distance + self.config.rules.invariant_speed_tolerance_ftps
-            < *defensive_distance
-        {
-            let one_candidate_margin = self.config.rules.min_player_separation_ft;
-            if *defensive_distance - *offensive_distance > one_candidate_margin {
-                return Some(offensive_id.clone());
-            }
-        }
         let Some(offensive_player) = self.systems.physics.get_player(offensive_id).cloned() else {
             return Some(defensive_id.clone());
         };
@@ -563,6 +555,17 @@ impl MatchEngine {
         let effective_off_dist = (*offensive_distance
             * (1.0 - off_putback_bias * rebound_policy.putback_distance_discount))
             .max(0.0);
+
+        // 「进攻方明显更近」的捷径同样用有效距离：卡位缩减防守人有效
+        // 距离的设计（D27）不得被捷径绕过——强卡位防守人把原本进攻方
+        // 白捡的球拉回争夺裁决，卡位能力由此传导到全部双方在场篮板。
+        let speed_tolerance = self.config.rules.invariant_speed_tolerance_ftps;
+        if effective_off_dist + speed_tolerance < effective_def_dist {
+            let one_candidate_margin = self.config.rules.min_player_separation_ft;
+            if effective_def_dist - effective_off_dist > one_candidate_margin {
+                return Some(offensive_id.clone());
+            }
+        }
 
         match ResolutionLayer::resolve_rebound(
             &offensive_player,
