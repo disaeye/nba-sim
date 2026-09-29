@@ -46,6 +46,10 @@ pub struct RenderPlayer {
     pub facing_x: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub facing_y: Option<f32>,
+    /// 持球姿态（技术选择）：`back_to_basket` 背身要位 / `face_up` 面框。
+    /// 只在背身时序列化，面框省略（向后兼容）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orientation: Option<String>,
     /// Continuous potential-field target produced by the defensive solver.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub potential_target_x: Option<f32>,

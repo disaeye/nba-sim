@@ -18,6 +18,11 @@
 
 **同一个提交不得同时修改「判定基准」与「被测源码」，除非显式豁免。**
 
+审计范围是「最近一次 CI 全绿 commit 之后的所有 commit」而非仅有
+HEAD（见 `scripts/ci_baseline.py`）：若无此设计，把基准改动与源码
+改动分装成两个 commit 推送（前者夹在失败后的小提交里），即可绕过
+本守卫。逐 commit 审计保证每个提交各自独立接受检查。
+
 豁免方式（二选一）：
 - 提交信息含 `Threshold-Change: <理由>` 尾注；或
 - 环境变量 `NBA_THRESHOLD_ACK` 指向一份豁免说明文件（CI 人工评审路径）。
@@ -27,7 +32,7 @@
 
 ## 用法
 
-    python3 scripts/check_threshold_integrity.py            # 检查 HEAD
+    python3 scripts/check_threshold_integrity.py            # 自动审计绿色基线后的 commit
     python3 scripts/check_threshold_integrity.py --range A..B
     python3 scripts/check_threshold_integrity.py --self-test # 负面对照
 """
@@ -39,6 +44,9 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ci_baseline import audit_range  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -61,7 +69,26 @@ SUBJECT_PATTERNS: list[str] = [
 ]
 
 # 允许与判定基准一起改动、*不*算违规的源码（例如纯工具）。
-SUBJECT_EXEMPT: list[str] = []
+#
+# 登记标准：该源码文件与某个判定基准存在**结构性同体**关系——
+# 它们必须指向同一个外部位置，分开提交反而会让守卫在过渡期
+# 静默失效。典型：资源守卫脚本与其扫描的临时根路径。
+# 每项豁免必须附注理由；本清单自身受 self-test 检查。
+SUBJECT_EXEMPT: list[str] = [
+    # test-support 的临时根与 check_disk_budget 的扫描根必须
+    # 同 commit 指向同一位置；分开提交会让守卫扫描旧目录，
+    # 新目录泄漏在过渡期不可见。
+    r"^crates/test-support/src/lib\.rs$",
+]
+
+# 判定基准与被测源码在同一提交里同时修改时，若改动全部落在
+# 本清单内的文件对上，允许直接豁免（仍保留 trailer 路径供
+# 其他耦合场景署名）。
+EXEMPT_PAIRS: list[tuple[str, str]] = [
+    # 资源守卫脚本 ↔ 它扫描的临时根实现：结构性同体。
+    ("scripts/check_disk_budget.py", "crates/test-support/src/lib.rs"),
+    ("scripts/check_disk_budget.py", "crates/cli/src/main.rs"),
+]
 
 ACK_TRAILER = "Threshold-Change:"
 
@@ -72,28 +99,26 @@ def _run(args: list[str]) -> str:
     ).stdout
 
 
-def changed_files(rev_range: str | None) -> list[str]:
-    """返回本次改动涉及的文件路径（相对仓库根）。"""
-    if rev_range:
-        out = _run(["git", "diff", "--name-only", rev_range])
+def changed_files(sha: str, parent: str | None = None) -> list[str]:
+    """返回单个 commit 的改动文件路径（相对仓库根）。
+
+    根提交（无父提交）用树对比空目录，等价于整个文件集。
+    """
+    if parent is None:
+        parents = _run(["git", "rev-list", "--parents", "-n", "1", sha]).split()
+        parent = parents[1] if len(parents) > 1 else ""
+    spec = f"{parent}..{sha}" if parent else f"--root {sha}"
+    args = ["git", "diff", "--name-only"]
+    if parent:
+        args.append(spec)
     else:
-        # 优先比较 HEAD~1..HEAD；单提交仓库或首个提交时回退到 HEAD 树。
-        try:
-            out = _run(["git", "diff", "--name-only", "HEAD~1..HEAD"])
-        except subprocess.CalledProcessError:
-            out = _run(["git", "show", "--pretty=", "--name-only", "HEAD"])
-    return [l for l in out.splitlines() if l.strip()]
+        args.extend(["--root", sha])
+    out = _run(args)
+    return [line for line in out.splitlines() if line.strip()]
 
 
-def commit_message(rev_range: str | None) -> str:
-    if rev_range:
-        rev = rev_range.split("..")[-1] or "HEAD"
-    else:
-        rev = "HEAD"
-    try:
-        return _run(["git", "log", "-1", "--pretty=%B", rev])
-    except subprocess.CalledProcessError:
-        return ""
+def commit_message(sha: str) -> str:
+    return _run(["git", "log", "-1", "--pretty=%B", sha])
 
 
 def matches_any(path: str, patterns: list[str]) -> bool:
@@ -108,6 +133,21 @@ def classify(files: list[str]) -> tuple[list[str], list[str]]:
         if matches_any(f, SUBJECT_PATTERNS) and not matches_any(f, SUBJECT_EXEMPT)
     ]
     return thresholds, subjects
+
+
+def has_structural_pair(thresholds: list[str], subjects: list[str]) -> bool:
+    """本次改动是否只触发了结构性同体的基准/源码对。
+
+    全部命中的（基准，源码）组合都能在 EXEMPT_PAIRS 里找到，
+    且没有其他未豁免的源码时，耦合视为合法。"""
+    if not thresholds or not subjects:
+        return False
+    allowed = {(t, s) for t, s in EXEMPT_PAIRS}
+    for t in thresholds:
+        for s in subjects:
+            if (t, s) not in allowed:
+                return False
+    return True
 
 
 def check_self_registration() -> list[str]:
@@ -182,6 +222,27 @@ def self_test() -> int:
         ok = False
         print(f"   ❌ threshold-only change was rejected: {t} {s}")
 
+    # 6. 结构性同体对：资源守卫与其扫描根 → 允许直接豁免
+    #    （lib.rs 同时也在 SUBJECT_EXEMPT 里，这里用 CLI 侧源码验证配对）
+    t, s = classify(["scripts/check_disk_budget.py", "crates/cli/src/main.rs"])
+    if t and s and has_structural_pair(t, s):
+        print("   ✅ structural pair exempt: guard ↔ its scan root")
+    else:
+        ok = False
+        print(f"   ❌ structural pair not exempt: t={t} s={s}")
+
+    # 7. 结构性同体对混入其他源码 → 必须仍然检出
+    t, s = classify([
+        "scripts/check_disk_budget.py",
+        "crates/cli/src/main.rs",
+        "crates/engine/src/match_engine/mod.rs",
+    ])
+    if t and s and not has_structural_pair(t, s):
+        print("   ✅ structural pair + extra subject still detected")
+    else:
+        ok = False
+        print(f"   ❌ extra subject slipped through: t={t} s={s}")
+
     print("   self-test:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -189,7 +250,8 @@ def self_test() -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--range", dest="rev_range", default=None,
-                    help="git diff 范围，例如 HEAD~1..HEAD")
+                    help="审计 commit 区间，例如 HEAD~3..HEAD；"
+                         "缺省时自动审计绿色 CI 基线之后的全部 commit")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
 
@@ -203,24 +265,36 @@ def main() -> int:
             print(f"   - {p}")
         return 1
 
-    files = changed_files(args.rev_range)
-    thresholds, subjects = classify(files)
-    msg = commit_message(args.rev_range)
+    commits = audit_range(args.rev_range)
+    print(f"🔍 threshold integrity: 逐 commit 审计 {len(commits)} 个 commit")
 
-    print(f"🔍 threshold integrity: {len(files)} changed files")
-    if thresholds:
-        print(f"   thresholds touched: {len(thresholds)}")
-        for f in thresholds:
-            print(f"      - {f}")
-    if subjects:
-        print(f"   subjects touched  : {len(subjects)}")
-
-    if thresholds and subjects:
+    violations: list[tuple[str, list[str], list[str]]] = []
+    for sha in commits:
+        files = changed_files(sha)
+        thresholds, subjects = classify(files)
+        if not (thresholds and subjects):
+            continue
+        msg = commit_message(sha)
+        short = sha[:12]
         if ACK_TRAILER in msg:
-            print(f"   ✅ acknowledged via `{ACK_TRAILER}` trailer — allowed")
-            return 0
-        print("❌ COUPLED CHANGE: this commit modifies BOTH a judgment threshold")
-        print("   and the source code that the threshold judges.")
+            reason = ""
+            for line in msg.splitlines():
+                if line.startswith(ACK_TRAILER):
+                    reason = line[len(ACK_TRAILER):].strip()
+                    break
+            print(f"   ✅ {short} 豁免生效：{reason or '（未附理由）'}")
+            continue
+        if has_structural_pair(thresholds, subjects):
+            print(f"   ✅ {short} 结构性同体豁免（守卫与扫描根同 commit 迁移）")
+            continue
+        violations.append((short, thresholds, subjects))
+
+    if violations:
+        for short, thresholds, subjects in violations:
+            print(f"❌ COUPLED CHANGE @ {short}")
+            print("   判定基准与被测源码在同一个提交里被修改：")
+            print(f"   thresholds: {thresholds}")
+            print(f"   subjects  : {subjects}")
         print()
         print("   Why this is blocked: a threshold that the measured object can")
         print("   change in the same commit is not a threshold. See the module")

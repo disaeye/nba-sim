@@ -5,6 +5,7 @@
 
 pub mod constraint;
 pub mod modulation;
+pub mod orientation;
 pub mod pipeline;
 pub mod play_actions;
 pub mod play_executor;

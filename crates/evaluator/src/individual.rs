@@ -514,6 +514,7 @@ mod tests {
             potential_action: None,
             potential_threat_ratio: None,
             potential_void_ratio: None,
+            orientation: None,
         }
     }
 

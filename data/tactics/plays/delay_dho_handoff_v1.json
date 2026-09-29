@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "delay_dho_handoff_v1",
+  "name_zh": "弧顶手递手分球突分",
+  "kind": "play",
+  "rules": [
+    {
+      "id": "dho_hand_off_drive",
+      "when": [
+        { "predicate": "carrier_possed" },
+        { "predicate": "halfcourt_possession" }
+      ],
+      "then": { "verb": "Lift", "slot": "left_wing" },
+      "carrier_preferences": [
+        { "action_family": "Pass", "bonus": 0.4 }
+      ]
+    }
+  ],
+  "triggers": [
+    {
+      "when": [
+        { "predicate": "carrier_possed" },
+        { "predicate": "halfcourt_possession" }
+      ],
+      "window_seconds": 6.0,
+      "cooldown_seconds": 8.0
+    }
+  ]
+}

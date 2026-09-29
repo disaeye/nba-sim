@@ -23,6 +23,7 @@ fn receiver(pos: Vec2, vel: Vec2) -> PlayerPhysicsState {
         foul_count: 0,
         locomotion: crate::movement::LocomotionState::Idle,
         facing_dir: Vec2::X,
+        ball_orientation: nba_domain::action_window::BallOrientation::FaceUp,
         turn_decel_timer: 0.0,
         is_locked_kinematics: false,
         out_of_bounds_placement: false,
@@ -34,6 +35,7 @@ fn receiver(pos: Vec2, vel: Vec2) -> PlayerPhysicsState {
     }
 }
 
+/// 不动点必须自洽：接球点所处距离对应的飞行时长 == 解出的飞行时长。
 #[test]
 fn solve_landing_is_a_fixed_point() {
     let rules = GameRules::default();
@@ -53,6 +55,7 @@ fn solve_landing_is_a_fixed_point() {
     }
 }
 
+/// 领传量不得超过接球人 T 秒内的制动可达距离（否则接球点不可达）。
 #[test]
 fn lead_never_exceeds_braking_reach() {
     let rules = GameRules::default();
@@ -72,9 +75,11 @@ fn lead_never_exceeds_braking_reach() {
         led <= reachable + 1e-3,
         "lead {led:.3} must not exceed braking reach {reachable:.3}"
     );
+    // 且必须为正（有提前量），否则接球人永远追不上球。
     assert!(led > 0.0, "a moving receiver must get a positive lead");
 }
 
+/// 静止接球人不得被领（接球点 = 自身位置）。
 #[test]
 fn stationary_receiver_gets_no_lead() {
     let rules = GameRules::default();
@@ -85,6 +90,7 @@ fn stationary_receiver_gets_no_lead() {
     assert!((t - rules.pass_duration((r.pos_ft - passer).length(), false)).abs() < 1e-4);
 }
 
+/// 旧固定时长（0.65s）与真实飞行时长的误差必须被本函数消除。
 #[test]
 fn lead_time_tracks_distance_not_a_constant() {
     let rules = GameRules::default();
@@ -95,6 +101,7 @@ fn lead_time_tracks_distance_not_a_constant() {
         let (_landing, t) = BallisticsEngine::solve_pass_landing(passer, &r, &rules);
         times.push(t);
     }
+    // 距离越远，解出的飞行时长必须非递减（真实关系），而不是恒定 0.65。
     assert!(
         times.windows(2).all(|w| w[1] >= w[0] - 1e-4),
         "flight time must grow with distance: {times:?}"
@@ -105,22 +112,28 @@ fn lead_time_tracks_distance_not_a_constant() {
     );
 }
 
+/// 自由球-人接触（ADR-017 第三步）：水平半径、摸高门、最近者与
+/// 确定性、板凳豁免。
 #[test]
 fn free_ball_contact_respects_radius_reach_and_priority() {
     let rules = GameRules::default();
     let at = |id: &str, cm: u16, vertical: f32, pos: Vec2, on_court: bool| {
         (id.to_string(), cm, vertical, pos, on_court)
     };
+    // 默认规则：人体半径 1.0 ft 加篮球半径 0.4 ft；200cm/0.5 摸高
+    // = (200/30.48)*0.5 + 0.25 ≈ 3.53 ft。
     let nearby = vec![at("H_01", 200, 0.5, Vec2::new(95.0 + 1.2, 25.0), true)];
     let hit =
         BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 3.0, &nearby, &rules);
     assert!(hit.is_some(), "ball inside radius and below reach must hit");
+    // 摸高门：球高于摸高时不命中。
     let hit_high =
         BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 4.0, &nearby, &rules);
     assert!(
         hit_high.is_none(),
         "ball above the reach ceiling must pass over"
     );
+    // 半径门：球在接触半径之外不命中。
     let hit_far = BallisticsEngine::free_ball_player_contact(
         Vec2::new(95.0, 25.0),
         3.0,
@@ -131,6 +144,7 @@ fn free_ball_contact_respects_radius_reach_and_priority() {
         hit_far.is_none(),
         "ball outside the horizontal radius must miss"
     );
+    // 最近者胜；距离相同按 id 字典序取小（确定性）。
     let two = vec![
         at("H_02", 200, 0.5, Vec2::new(95.0 + 0.8, 25.0), true),
         at("H_01", 200, 0.5, Vec2::new(95.0 + 1.2, 25.0), true),
@@ -147,6 +161,7 @@ fn free_ball_contact_respects_radius_reach_and_priority() {
         BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 3.0, &tied, &rules)
             .expect("tied candidates must hit");
     assert_eq!(tied_id, "H_01", "equal distance must tie-break by id order");
+    // 板凳球员不参与身体碰撞。
     let bench = vec![at("H_01", 200, 0.5, Vec2::new(95.0, 25.0), false)];
     let hit_bench =
         BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 3.0, &bench, &rules);

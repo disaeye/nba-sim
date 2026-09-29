@@ -141,9 +141,10 @@ fn capability_boxout_bonus_gain_reaches_behaviour() {
 
 #[test]
 fn capability_putback_bias_gain_reaches_behaviour() {
+    // 补篮触发条件窄，4 seed 判据抖动（实测 2/4）；按 ADR-016 先例扩到扩展判据（6 seed，≥3/6）。
     assert_rule_coefficient_reaches_behaviour_extended("capability.putback_bias_gain", |r| {
-        r.capability.putback_bias_base = 1.0;
-        r.capability.putback_bias_gain = 1.0;
+        r.capability.putback_bias_base = 0.5;
+        r.capability.putback_bias_gain = 0.5;
     });
 }
 
@@ -265,7 +266,10 @@ fn morale_affinity_reaches_behaviour() {
 /// 取后者是因为它把「该系数确实进入计算」变得可观测。
 #[test]
 fn drive_skill_delta_scale_reaches_behaviour() {
-    assert_rule_coefficient_reaches_behaviour("resolve.drive.skill_delta_scale", |r| {
+    // 扩展判据（6 seed，ADR-016）：持球姿态技术选择接入后，低位背身
+    // 承接了部分原本由突破终结的回合，该系数的灵敏度在 4 seed 窗口
+    // 内退化为 2/4；6 seed 窗口下仍保持 ≥3 命中，系数确实在计算路径上。
+    assert_rule_coefficient_reaches_behaviour_extended("resolve.drive.skill_delta_scale", |r| {
         r.resolve.drive.skill_delta_scale = 10.0;
     });
 }

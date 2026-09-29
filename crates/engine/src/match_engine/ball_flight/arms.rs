@@ -532,11 +532,23 @@ impl MatchEngine {
         out: &mut BallFlightOutcome,
     ) {
         let tau = ((ctx.current_t - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
-        self.ball.ball_pos_3d = BallisticsEngine::sample_ball_position(
+        let prev_ball = self.ball.ball_pos_3d;
+        let (sampled_pos, sampled_z) = BallisticsEngine::sample_ball_position(
             &self.ball.ball_state,
             ctx.current_t,
             self.systems.physics.get_players(),
             &self.config.rules,
+        );
+        let driver_carrier_pos = self
+            .systems
+            .physics
+            .get_player(&driver_id)
+            .map(|player| player.pos_ft);
+        self.ball.ball_pos_3d = self.clamp_held_family_ball_pos(
+            prev_ball,
+            (sampled_pos, sampled_z),
+            driver_carrier_pos,
+            ctx.dt,
         );
 
         let driver_pos = self

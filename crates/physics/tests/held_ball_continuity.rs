@@ -26,6 +26,7 @@ fn held_ball_position_respects_the_ball_speed_envelope() {
         foul_count: 0,
         locomotion: nba_physics::LocomotionState::Sprinting,
         facing_dir: Vec2::X,
+        ball_orientation: nba_domain::action_window::BallOrientation::FaceUp,
         turn_decel_timer: 0.0,
         is_locked_kinematics: false,
         out_of_bounds_placement: false,

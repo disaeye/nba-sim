@@ -1,0 +1,63 @@
+{
+  "id": "off_transition_push",
+  "name_zh": "快攻闪击转换体系 (Fastbreak)",
+  "spacing_style": "FastBreakWide",
+  "slots": [
+    {
+      "id": "top",
+      "name_zh": "推进引擎控卫",
+      "base_offset_x": 30.0,
+      "base_offset_y": 25.0,
+      "requirements": [
+        { "attribute": "Speed", "weight": 1.0 },
+        { "attribute": "Acceleration", "weight": 1.0 },
+        { "attribute": "Passing", "weight": 0.8 }
+      ],
+      "behaviour": "DribbleTop"
+    },
+    {
+      "id": "left_wing",
+      "name_zh": "左翼飞奔攻筐人",
+      "base_offset_x": 16.0,
+      "base_offset_y": 12.0,
+      "requirements": [
+        { "attribute": "Speed", "weight": 1.0 },
+        { "attribute": "Finishing", "weight": 0.9 }
+      ],
+      "behaviour": "DipToRim"
+    },
+    {
+      "id": "right_wing",
+      "name_zh": "右翼反击顺下人",
+      "base_offset_x": 16.0,
+      "base_offset_y": 38.0,
+      "requirements": [
+        { "attribute": "Speed", "weight": 1.0 },
+        { "attribute": "Finishing", "weight": 0.9 }
+      ],
+      "behaviour": "BackdoorCut"
+    },
+    {
+      "id": "left_corner",
+      "name_zh": "左侧追身三分射手",
+      "base_offset_x": 4.0,
+      "base_offset_y": 2.5,
+      "requirements": [
+        { "attribute": "ShootingThree", "weight": 1.0 },
+        { "attribute": "Speed", "weight": 0.8 }
+      ],
+      "behaviour": "SpotUp"
+    },
+    {
+      "id": "right_corner",
+      "name_zh": "右侧追身三分射手",
+      "base_offset_x": 4.0,
+      "base_offset_y": 47.5,
+      "requirements": [
+        { "attribute": "ShootingThree", "weight": 1.0 },
+        { "attribute": "Speed", "weight": 0.8 }
+      ],
+      "behaviour": "SpotUp"
+    }
+  ]
+}

@@ -10,6 +10,7 @@ const DEFAULT_HELP_AGGRESSIVENESS: f32 = 0.5;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TacticalSet {
     HighPickAndRoll,
+    SpainPickAndRoll,
     FiveOutMotion,
     IsolationDrive,
     DriveAndKick,
@@ -50,6 +51,7 @@ impl TacticalSet {
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
             "off_horns_pnr" => Some(Self::HighPickAndRoll),
+            "off_spain_pnr" => Some(Self::SpainPickAndRoll),
             "off_motion_spacing" => Some(Self::FiveOutMotion),
             "off_transition_push" => Some(Self::FastBreakTransition),
             "off_delay_attack" => Some(Self::IsolationDrive),
@@ -62,6 +64,7 @@ impl TacticalSet {
     pub fn id(self) -> &'static str {
         match self {
             Self::HighPickAndRoll => "off_horns_pnr",
+            Self::SpainPickAndRoll => "off_spain_pnr",
             Self::FiveOutMotion => "off_motion_spacing",
             Self::IsolationDrive => "off_delay_attack",
             Self::DriveAndKick => "off_drag_screen",
@@ -72,12 +75,13 @@ impl TacticalSet {
 
     pub fn name_zh(&self) -> &'static str {
         match self {
-            TacticalSet::HighPickAndRoll => "高位挡拆战术 (High Pick and Roll)",
-            TacticalSet::FiveOutMotion => "五外动态进攻 (5-Out Motion)",
-            TacticalSet::IsolationDrive => "巨星高位单打 (Isolation Drive)",
+            TacticalSet::HighPickAndRoll => "牛角高位挡拆体系 (Horns Pick-and-Roll)",
+            TacticalSet::SpainPickAndRoll => "西班牙双掩护体系 (Spain Pick-and-Roll)",
+            TacticalSet::FiveOutMotion => "五外动态进攻体系 (5-Out Motion)",
+            TacticalSet::IsolationDrive => "高位单打体系 (Isolation Drive)",
             TacticalSet::DriveAndKick => "突分投射体系 (Drive & Kick)",
-            TacticalSet::PostUp => "低位背身单打 (Post Up)",
-            TacticalSet::FastBreakTransition => "快攻闪击反击 (Fastbreak Transition)",
+            TacticalSet::PostUp => "低位背身策应体系 (Post Up & Split)",
+            TacticalSet::FastBreakTransition => "快攻闪击转换体系 (Fastbreak Transition)",
         }
     }
 }
@@ -931,6 +935,24 @@ impl TacticalPlanner {
                         (
                             base + dip,
                             policy.support_speed_ratio,
+                            slot.behaviour.action_label(initiating),
+                        )
+                    }
+                    nba_domain::SlotBehaviour::BackScreenPop => {
+                        // 西班牙背掩护外弹：发起期在罚球线中路架设背掩护，
+                        // 执行期反向弹向弧顶三分线外大空位。
+                        let popped = if initiating {
+                            base
+                        } else {
+                            let pop_dir = (base - hoop).normalize_or_zero();
+                            let pop_distance = (rules.league.three_point_distance_ft
+                                - (base - hoop).length())
+                            .max(f32::EPSILON);
+                            base + pop_dir * (action_t * pop_distance)
+                        };
+                        (
+                            popped,
+                            policy.carrier_speed_ratio,
                             slot.behaviour.action_label(initiating),
                         )
                     }

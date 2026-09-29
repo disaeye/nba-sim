@@ -3,7 +3,13 @@ name: CI/CD Pipeline
 on:
   push:
     branches:
-      - main
+      - '**'
+    # 纯文档推送不唤醒主流水线：docs 守卫由独立的 docs.yml 负责，
+    # 应用部署也不消费文档内容。开发期 WIP 提交可在提交信息带 [skip ci]。
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '**/*.md'
   pull_request:
   workflow_dispatch:
     inputs:
@@ -14,6 +20,13 @@ on:
 
 permissions:
   contents: read
+  # 绿色基线解析需要查询 Actions 运行历史（gh run list）。
+  actions: read
+
+env:
+  # gh CLI 需要 token 才能解析「最近一次绿色 CI 基线」；
+  # 没有它，基线解析失败退化为全量模式，防护仍成立但轻量路径失效。
+  GH_TOKEN: ${{ github.token }}
 
 jobs:
   lint_commit:
@@ -21,19 +34,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 按绿色基线逐 commit 校验提交信息，需要完整历史。
+          fetch-depth: 0
       - name: Validate Commit Message Format
         run: |
-          MSG=$(git log -1 --pretty=%s)
-          echo "Commit subject: $MSG"
-          if [[ "$MSG" =~ ^(Merge|Revert|fixup!|squash!) ]]; then
-            exit 0
-          fi
-          PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci)"
-          PATTERN+="(\([a-zA-Z0-9_./-]+\))?: .+"
-          if ! [[ "$MSG" =~ $PATTERN ]]; then
-            echo "❌ Commit message does not follow Conventional Commits format."
-            exit 1
-          fi
+          BASE=$(python3 scripts/ci_baseline.py --baseline)
+          if [ -n "$BASE" ]; then RANGE="$BASE..HEAD"; else RANGE="-1"; fi
+          echo "Auditing message range: $RANGE"
+          mapfile -t SUBJECTS < <(git log --pretty=%s $RANGE)
+          echo "Commit subjects: ${#SUBJECTS[@]}"
+          for MSG in "${SUBJECTS[@]}"; do
+            echo "  - $MSG"
+            if [[ "$MSG" =~ ^(Merge|Revert|fixup!|squash!) ]]; then
+              continue
+            fi
+            PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci)"
+            PATTERN+="(\([a-zA-Z0-9_./-]+\))?: .+"
+            if ! [[ "$MSG" =~ $PATTERN ]]; then
+              echo "❌ Bad commit message: $MSG"
+              exit 1
+            fi
+          done
 
   change_detection:
     name: change-detection
@@ -45,13 +67,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
+      - name: Resolve green CI baseline
+        id: baseline
+        run: |
+          # 变更基线是「当前分支最近一次 CI 全绿的 commit」，
+          # 而非上一次提交：大改动 commit A 失败后，紧随的小提交 B
+          # 若只看 HEAD~1..HEAD 会被判为「无改动」，跳过全部测试
+          # 并直接放行部署（洗白漏洞）。以绿色基线为界，基线之后
+          # 的所有改动都会被验证；失败未修复就没有新基线。
+          BASE=$(python3 scripts/ci_baseline.py --baseline)
+          if [ -z "$BASE" ]; then
+            echo "baseline=FULL" >> "$GITHUB_OUTPUT"
+            echo "无绿色基线，本次按全量处理"
+          else
+            echo "baseline=$BASE" >> "$GITHUB_OUTPUT"
+            echo "绿色基线: $BASE"
+            git diff --name-only "$BASE..HEAD" || true
+          fi
       - name: Check for [full] flag
         id: detect_full
         env:
           FORCE_FULL: ${{ inputs.force_full }}
+          BASELINE: ${{ steps.baseline.outputs.baseline }}
         run: |
-          MSG=$(git log -1 --pretty=%B)
+          if [ "$BASELINE" = "FULL" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="$BASELINE..HEAD"
+          fi
+          MSG=$(git log --pretty=%B $RANGE)
           if [[ "$MSG" =~ \[full\] ]] || \
              [[ "$FORCE_FULL" == "true" ]]; then
             echo "is_full=true" >> $GITHUB_OUTPUT
@@ -60,9 +105,16 @@ jobs:
           fi
       - name: Detect Changed Paths
         id: filter
+        env:
+          BASELINE: ${{ steps.baseline.outputs.baseline }}
         run: |
-          DIFF=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
-          echo "Changed files: $DIFF"
+          # 基线之后的全部改动（含基线即 HEAD 时的空集）。
+          if [ "$BASELINE" = "FULL" ]; then
+            DIFF=$(git ls-files)
+          else
+            DIFF=$(git diff --name-only "$BASELINE..HEAD")
+          fi
+          echo "Changed files (since $BASELINE): $DIFF"
           if echo "$DIFF" | grep -qE '\.rs$|Cargo\.(toml|lock)'; then
             echo "rust_changed=true" >> $GITHUB_OUTPUT
           else
@@ -76,62 +128,39 @@ jobs:
           fi
 
   guards:
-    name: Guard (${{ matrix.name }})
-    strategy:
-      fail-fast: false
-      max-parallel: 256
-      matrix:
-        include:
-          - name: inline-constants
-            script: scripts/check_inline_constants.py
-            self_test: true
-          - name: no-index-identity
-            script: scripts/check_no_index_identity.py
-            self_test: true
-          - name: threshold-integrity
-            script: scripts/check_threshold_integrity.py
-            self_test: true
-          - name: world-privacy
-            script: scripts/check_world_privacy.py
-            self_test: true
-          - name: engine-state-groups
-            script: scripts/check_engine_state_groups.py
-            self_test: true
-          - name: ball-state-writes
-            script: scripts/check_ball_state_writes.py
-            self_test: true
-          - name: docs
-            script: scripts/check_docs.py
-            self_test: false
-          - name: max-source-lines
-            script: scripts/check_max_source_lines.py
-            self_test: true
-          - name: disk-budget
-            script: scripts/check_disk_budget.py
-            self_test: false
+    # 八合一：脚本本身都是秒级，分列 job 时每个各自付一遍
+    # checkout + Python 环境的固定开销；合并后一份开销顺序执行全部。
+    name: guards
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          # 守卫用 HEAD~1..HEAD 取本次提交的改动清单；浅克隆下 HEAD~1 无法
-          # 解析，回退分支会把整棵树当作改动，误报判定基准被修改。
-          fetch-depth: 2
+          # 守卫按「绿色基线之后的所有 commit」逐个审计，基线可能早于
+          # HEAD~1；浅克隆下基线对象缺失会让解析退化为仅审计 HEAD，
+          # 多 commit 洗白就从这个缺口漏过去。
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run guard
-        env:
-          SCRIPT: ${{ matrix.script }}
-          REPORT_ARG: ${{ matrix.name == 'disk-budget' && '--report' || '' }}
-          RUN_SELF_TEST: ${{ matrix.self_test }}
+      - name: Run guards
         run: |
-          python3 "$SCRIPT" $REPORT_ARG
-          if [[ "$RUN_SELF_TEST" == "true" ]]; then
-            python3 "$SCRIPT" --self-test
-          fi
-          if [[ "${{ matrix.self_test }}" == "true" ]]; then
-            python3 "${{ matrix.script }}" --self-test
-          fi
+          set -e
+          python3 scripts/check_inline_constants.py
+          python3 scripts/check_inline_constants.py --self-test
+          python3 scripts/check_no_index_identity.py
+          python3 scripts/check_no_index_identity.py --self-test
+          python3 scripts/check_threshold_integrity.py
+          python3 scripts/check_threshold_integrity.py --self-test
+          python3 scripts/check_world_privacy.py
+          python3 scripts/check_world_privacy.py --self-test
+          python3 scripts/check_engine_state_groups.py
+          python3 scripts/check_engine_state_groups.py --self-test
+          python3 scripts/check_ball_state_writes.py
+          python3 scripts/check_ball_state_writes.py --self-test
+          python3 scripts/check_docs.py
+          python3 scripts/check_max_source_lines.py
+          python3 scripts/check_max_source_lines.py --self-test
+          python3 scripts/check_disk_budget.py --report
 
   clippy:
     needs: change_detection
@@ -160,14 +189,12 @@ jobs:
       max-parallel: 256
       matrix:
         include:
+          # play_spec 与 playbook_data 不单列：`cargo test -p nba-domain`
+          # 全包已覆盖，重复跑只是多付一份固定开销。
           - name: nba-domain
             command: cargo test -p nba-domain
           - name: nba-invariants
             command: cargo test -p nba-invariants
-          - name: play-schema
-            command: cargo test -p nba-domain --test play_spec
-          - name: playbook-data
-            command: cargo test -p nba-domain --test playbook_data
           - name: world-state-equivalence
             command: cargo test -p nba-engine --test world_state_equivalence
           - name: engine-snapshot
@@ -200,40 +227,27 @@ jobs:
       max-parallel: 256
       matrix:
         include:
-          - name: defense-responsibility-chain
+          # 按包合并：每个测试单列一个 job 时，固定开销（checkout + 工具链
+          # + 缓存恢复 + 编译链接）比测试本身还贵。decision 全包一个 job；
+          # engine 的短测试集中一个 job（长测试 stats_baseline 与
+          # defense_rotation_response 仍是独立的 Tier 3 / D26 独占环节）。
+          - name: nba-decision
+            command: cargo test -p nba-decision
+          - name: nba-engine-core
             command: >-
-              cargo test -p nba-decision --test
-              defense_responsibility_chain
-          - name: attribute-perturbation
-            command: cargo test -p nba-engine --test attribute_perturbation
-          - name: block
-            command: cargo test -p nba-engine --test block
-          - name: decision-wiring
-            command: cargo test -p nba-engine --test decision_wiring
-          - name: defense
-            command: cargo test -p nba-engine --test defense
-          - name: rules-complete-wiring
-            command: cargo test -p nba-engine --test rules_complete_wiring
-          - name: wiring-proof
-            command: cargo test -p nba-engine --test wiring_proof
-          - name: defense-effect
-            command: cargo test -p nba-engine --test defense_effect
-          - name: fiba-scenarios
-            command: cargo test -p nba-engine --test fiba_scenarios
-          - name: play-selector
-            command: cargo test -p nba-decision --test play_selector
-          - name: play-actions
-            command: cargo test -p nba-decision --test play_actions
-          - name: play-decision
-            command: cargo test -p nba-decision --test play_decision
-          - name: playbook-setup
-            command: cargo test -p nba-engine --test playbook_setup
-          - name: action-phase-projection
-            command: cargo test -p nba-engine --test action_phase_projection
-          - name: shot-release-timing
-            command: cargo test -p nba-engine --test shot_release_timing
-          - name: identity-projection
-            command: cargo test -p nba-engine --test identity_projection
+              cargo test -p nba-engine
+              --test attribute_perturbation
+              --test block
+              --test decision_wiring
+              --test defense
+              --test rules_complete_wiring
+              --test wiring_proof
+              --test defense_effect
+              --test fiba_scenarios
+              --test playbook_setup
+              --test action_phase_projection
+              --test shot_release_timing
+              --test identity_projection
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -353,7 +367,7 @@ jobs:
        needs.full_gate.result == 'skipped') &&
       (needs.d26_test.result == 'success' ||
        needs.d26_test.result == 'skipped') &&
-      github.ref == 'refs/heads/main'
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

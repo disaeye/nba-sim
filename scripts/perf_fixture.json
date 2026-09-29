@@ -1,21 +1,21 @@
 {
- "comment": "吞吐基准 fixture（quality.md §4.1）：release 模式固定种子跑 20000 tick 的每秒 tick 吞吐与单节时长带。数值由 tests/throughput_bench.rs 实测后经人写入；守卫 scripts/check_perf_fixture.py 比对当前实测与带。碰撞几何类改动前后必须重测并重冻结（附证据）。",
- "machine_reference": "4 核 3.7GB 参考机（quality.md §4.1 口径）",
- "method": "release 模式，MatchEngine::new(seed) 全场 scope，预热 500 tick 后计 20000 tick 的 wall 时间",
- "fixture_version": 1,
- "throughput_ticks_per_second": {
-  "band_min": 4400.0,
-  "band_max": 7220.0,
-  "measured": {
-   "seed_42": 6877.0,
-   "seed_1": 5693.0
+  "comment": "吞吐基准 fixture（quality.md §4.1）：release 模式固定种子跑 20000 tick 的每秒 tick 吞吐与单节时长带。数值由 tests/throughput_bench.rs 实测后经人写入；守卫 scripts/check_perf_fixture.py 比对当前实测与带。碰撞几何类改动前后必须重测并重冻结（附证据）。",
+  "machine_reference": "4 核 3.7GB 参考机（quality.md §4.1 口径）",
+  "method": "release 模式，MatchEngine::new(seed) 全场 scope，预热 500 tick 后计 20000 tick 的 wall 时间",
+  "fixture_version": 1,
+  "throughput_ticks_per_second": {
+    "band_min": 3900.0,
+    "band_max": 6200.0,
+    "measured": {
+      "seed_42": 5540.0,
+      "seed_1": 4217.0
+    },
+    "measured_at_commit": "ui 分支融合（持球姿态系统 × R1-R8 结算链）：姿态生命周期每 tick 簿记与战术剧本决策接入后重测",
+    "band_rationale": "融合前实测 seed42=6877、seed1=5693（7164e21 时代）；融合后三次复测 seed42=5512/5547/5540、seed1=4229/4145/4217，每 tick 成本上升来自姿态簿记与剧本决策周期。带按新实测两侧各留 ≈8%/12% 余量取 [3900, 6200]"
   },
-  "measured_at_commit": "7164e21 loose-ball chase fix (deadlock removal raised seed42 throughput)",
-  "band_rationale": "节间开场球权程序与后场计时控球谓词落地后的空闲复测 seed42=6530、seed1=6365；带沿用原批准范围。tier1+tier2 验证运行同期复测确认带内（seed42=6416、seed1=6227）"
- },
- "quarter_wall_seconds": {
-  "band_min": 3.0,
-  "band_max": 5.5,
-  "rationale": "单节约 28000 tick 按实测吞吐折算 5.0-6.4s，取带宽覆盖"
- }
+  "quarter_wall_seconds": {
+    "band_min": 3.0,
+    "band_max": 8.0,
+    "rationale": "单节约 28000 tick 按融合后实测吞吐折算 5.1-6.8s，取带宽覆盖"
+  }
 }

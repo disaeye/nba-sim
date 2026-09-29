@@ -1,0 +1,64 @@
+{
+  "id": "off_spain_pnr",
+  "name_zh": "西班牙双掩护战术 (Spain Pick and Roll)",
+  "spacing_style": "SpreadStack",
+  "slots": [
+    {
+      "id": "top",
+      "name_zh": "持球发起控卫",
+      "base_offset_x": 28.0,
+      "base_offset_y": 25.0,
+      "requirements": [
+        { "attribute": "BallHandling", "weight": 1.0 },
+        { "attribute": "DecisionIq", "weight": 0.8 },
+        { "attribute": "Passing", "weight": 0.7 }
+      ],
+      "behaviour": "DribbleTop"
+    },
+    {
+      "id": "screener",
+      "name_zh": "高位持球掩护中锋",
+      "base_offset_x": 19.0,
+      "base_offset_y": 25.0,
+      "requirements": [
+        { "attribute": "Strength", "weight": 0.9 },
+        { "attribute": "Finishing", "weight": 0.8 }
+      ],
+      "behaviour": "HighScreenRoll"
+    },
+    {
+      "id": "stack_screener",
+      "name_zh": "背掩护外弹射手",
+      "base_offset_x": 13.0,
+      "base_offset_y": 25.0,
+      "requirements": [
+        { "attribute": "ShootingThree", "weight": 1.0 },
+        { "attribute": "OffBallSense", "weight": 0.8 },
+        { "attribute": "Strength", "weight": 0.4 }
+      ],
+      "behaviour": "BackScreenPop"
+    },
+    {
+      "id": "left_corner",
+      "name_zh": "左底角定点射手",
+      "base_offset_x": 4.0,
+      "base_offset_y": 2.5,
+      "requirements": [
+        { "attribute": "ShootingThree", "weight": 1.0 },
+        { "attribute": "OffBallSense", "weight": 0.4 }
+      ],
+      "behaviour": "SpotUp"
+    },
+    {
+      "id": "right_corner",
+      "name_zh": "右底角定点射手",
+      "base_offset_x": 4.0,
+      "base_offset_y": 47.5,
+      "requirements": [
+        { "attribute": "ShootingThree", "weight": 1.0 },
+        { "attribute": "OffBallSense", "weight": 0.4 }
+      ],
+      "behaviour": "SpotUp"
+    }
+  ]
+}

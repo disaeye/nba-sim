@@ -439,6 +439,9 @@ pub(crate) struct PossessionContext {
     /// 最近一次回合总结的 index（`complete_possession` 兜底发射的判据，
     /// M8 验收"回合零遗漏"：任何结束路径都必须有总结）。
     pub(crate) last_possession_summary_index: Option<u64>,
+    /// 当前持球人已评估的持球姿态（面框/背身）与持球人 id。
+    /// 持球人变化时失效并重新评估；回合结束随 `begin` 重置。
+    pub(crate) ball_orientation: Option<(String, nba_domain::action_window::BallOrientation)>,
 }
 
 impl PossessionContext {
@@ -461,6 +464,7 @@ impl PossessionContext {
             last_pass_received_time: None,
             pass_receiver_decision_player: None,
             last_possession_summary_index: None,
+            ball_orientation: None,
         }
     }
 
@@ -482,6 +486,7 @@ impl PossessionContext {
         self.last_cut_reception_event_parent = None;
         self.last_pass_received_time = None;
         self.pass_receiver_decision_player = None;
+        self.ball_orientation = None;
     }
 
     pub(crate) fn take_pass_receiver_decision(&mut self, current_t: f32, carrier_id: &str) -> bool {

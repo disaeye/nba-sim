@@ -212,6 +212,12 @@ impl MatchEngine {
             return self.build_tick();
         }
 
+        // 帧锚点：上一 tick 的最终球位（帧间连续性的比对基准）。
+        // 必须在决策阶段之前捕获：决策里的球位写入（如突破起手拉回
+        // from_pos）与随后的采样写入各自不超限，但同一 tick 内叠加
+        // 可击穿帧间包络（实测姿态确立帧 89.6 ft/s）。
+        let frame_anchor_ball_pos = self.ball.ball_pos_3d;
+
         let decision_output = self.decision_phase(current_t);
 
         // 执行重校验与应用动作（architecture.md §5.2）。
@@ -221,7 +227,7 @@ impl MatchEngine {
         }
         // 物理步进与弹道采样。写入状态组：ball, systems。
         let sampled_from_ball_state = self.ball.ball_state.clone();
-        let previous_ball_position = self.ball.ball_pos_3d;
+        let previous_ball_position = frame_anchor_ball_pos;
         // Step the physical world before sampling the ball at this tick.
         self.systems
             .physics
@@ -237,21 +243,21 @@ impl MatchEngine {
         // 弹道裁决与拦截检查（阶段实现见 `ball_flight.rs`）。
         // 写入状态组：ball, observations。
         let outcome = self.resolve_ball_flight(current_t, is_home, dt);
-        let held_continues = matches!(
-            (&sampled_from_ball_state, &self.ball.ball_state),
-            (
-                nba_physics::ballistics::BallTrajectoryKind::Held { carrier_id: previous },
-                nba_physics::ballistics::BallTrajectoryKind::Held { carrier_id: current }
-            ) if previous == current
-        );
-        let drive_continues = matches!(
-            (&sampled_from_ball_state, &self.ball.ball_state),
-            (
-                nba_physics::ballistics::BallTrajectoryKind::Drive { driver_id: previous, .. },
-                nba_physics::ballistics::BallTrajectoryKind::Drive { driver_id: current, .. }
-            ) if previous == current
-        );
-        if held_continues {
+        // 持球族连续性（R1）：同一持球人在 Held/Drive 内延续或转换时，
+        // 球位相邻帧位移不得超过球速包络。姿态确立便 facing 单帧翻转，
+        // 持球偏移参考系换轴（Held→Drive 转换 tick 实测 89.6 ft/s > 86.5），
+        // 转换 tick 同样在锥制范围内。
+        let ball_carrier_id = |state: &nba_physics::ballistics::BallTrajectoryKind| match state {
+            nba_physics::ballistics::BallTrajectoryKind::Held { carrier_id }
+            | nba_physics::ballistics::BallTrajectoryKind::Drive { driver_id: carrier_id, .. } => {
+                Some(carrier_id.clone())
+            }
+            _ => None,
+        };
+        let held_family_continues =
+            ball_carrier_id(&sampled_from_ball_state).is_some()
+                && ball_carrier_id(&sampled_from_ball_state) == ball_carrier_id(&self.ball.ball_state);
+        if held_family_continues {
             let previous_3d = glam::Vec3::new(
                 previous_ball_position.0.x,
                 previous_ball_position.0.y,
@@ -267,16 +273,6 @@ impl MatchEngine {
             if displacement.length() > max_displacement {
                 let bounded = previous_3d + displacement.normalize_or_zero() * max_displacement;
                 self.ball.ball_pos_3d = (glam::Vec2::new(bounded.x, bounded.y), bounded.z);
-            }
-        }
-        if drive_continues {
-            let current_position = self.ball.ball_pos_3d.0;
-            let displacement = (current_position - previous_ball_position.0).length();
-            let max_displacement = self.config.rules.ball_max_speed_ftps * dt;
-            if displacement > max_displacement {
-                self.ball.ball_pos_3d.0 = previous_ball_position.0
-                    + (current_position - previous_ball_position.0).normalize_or_zero()
-                        * max_displacement;
             }
         }
         // 弹道结果消费：出界/抢断/松球/新球态。

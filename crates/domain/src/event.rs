@@ -396,6 +396,13 @@ pub enum GameEvent {
         play_id: String,
         possession: Possession,
     },
+    /// 持球姿态技术选择：新持球人确立时面框或背身的决策事实。
+    /// 这是可观测性事件：帧投影的 `orientation` 字段与本事件同 tick 对应，
+    /// 消费方据此重建「谁在何时选择了什么姿态」的技术选择时间线。
+    BallOrientationChosen {
+        player_id: String,
+        back_to_basket: bool,
+    },
 }
 
 /// 回合终结的显式归因（dev 方案 §3.2 D0.1）。
@@ -547,6 +554,7 @@ impl GameEvent {
             GameEvent::BallPlacementApplied { .. } => "BALL_PLACEMENT_APPLIED",
             GameEvent::PlacementApplied { .. } => "PLACEMENT_APPLIED",
             GameEvent::PlayActivated { .. } => "PLAY_ACTIVATED",
+            GameEvent::BallOrientationChosen { .. } => "BALL_ORIENTATION",
         }
     }
 }

@@ -151,6 +151,8 @@ pub enum SlotBehaviour {
     /// 下沉禁区：外线球员沿边线下沉到篮下区域争抢内线落位
     /// （G6a 链 4，五外站位不再把全部无球人固定在外线）。
     DipToRim,
+    /// 西班牙背掩护外弹：在罚球线为顺下人架设背掩护后反弹外线三分。
+    BackScreenPop,
 }
 
 impl SlotBehaviour {
@@ -188,6 +190,13 @@ impl SlotBehaviour {
                     "SPOT_UP_3PT"
                 } else {
                     "DIP_TO_RIM"
+                }
+            }
+            Self::BackScreenPop => {
+                if initiating {
+                    "BACK_SCREEN"
+                } else {
+                    "SCREEN_POP"
                 }
             }
         }
@@ -254,6 +263,9 @@ pub struct TacticalSetSpec {
     pub name_zh: String,
     pub spacing_style: String,
     pub slots: Vec<TacticalSlotSpec>,
+    /// 该体系专属的战术剧本 ID（随档案分发，前端与后端共用同一份选择）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub play_ids: Vec<String>,
 }
 
 impl TacticalSetSpec {
@@ -301,7 +313,11 @@ impl TacticalSetSpec {
 
     pub fn high_pick_and_roll() -> Self {
         const JSON: &str = include_str!("../../../data/tactics/high_pick_and_roll.json");
-        let spec = Self::from_json(JSON).expect("内置 high_pick_and_roll.json 必须合法");
+        let mut spec = Self::from_json(JSON).expect("内置 high_pick_and_roll.json 必须合法");
+        spec.play_ids = vec![
+            "high_pnr_roll_v1".to_string(),
+            "horns_flare_pop_v1".to_string(),
+        ];
         spec.validate()
             .expect("内置 high_pick_and_roll.json 必须自洽");
         spec
@@ -309,15 +325,65 @@ impl TacticalSetSpec {
 
     pub fn five_out_motion() -> Self {
         const JSON: &str = include_str!("../../../data/tactics/five_out_motion.json");
-        let spec = Self::from_json(JSON).expect("内置 five_out_motion.json 必须合法");
+        let mut spec = Self::from_json(JSON).expect("内置 five_out_motion.json 必须合法");
+        spec.play_ids = vec![
+            "corner_backdoor_v1".to_string(),
+            "weak_side_lift_v1".to_string(),
+        ];
         spec.validate().expect("内置 five_out_motion.json 必须自洽");
+        spec
+    }
+
+    pub fn spain_pick_and_roll() -> Self {
+        const JSON: &str = include_str!("../../../data/tactics/spain_pick_and_roll.json");
+        let mut spec = Self::from_json(JSON).expect("内置 spain_pick_and_roll.json 必须合法");
+        spec.play_ids = vec!["spain_pnr_stack_v1".to_string()];
+        spec.validate()
+            .expect("内置 spain_pick_and_roll.json 必须自洽");
+        spec
+    }
+
+    pub fn delay_attack() -> Self {
+        const JSON: &str = include_str!("../../../data/tactics/delay_attack.json");
+        let mut spec = Self::from_json(JSON).expect("内置 delay_attack.json 必须合法");
+        spec.play_ids = vec!["delay_dho_handoff_v1".to_string()];
+        spec.validate().expect("内置 delay_attack.json 必须自洽");
+        spec
+    }
+
+    pub fn post_split() -> Self {
+        const JSON: &str = include_str!("../../../data/tactics/post_split.json");
+        let mut spec = Self::from_json(JSON).expect("内置 post_split.json 必须合法");
+        spec.play_ids = vec!["post_split_cut_v1".to_string()];
+        spec.validate().expect("内置 post_split.json 必须自洽");
+        spec
+    }
+
+    pub fn drag_screen() -> Self {
+        const JSON: &str = include_str!("../../../data/tactics/drag_screen.json");
+        let mut spec = Self::from_json(JSON).expect("内置 drag_screen.json 必须合法");
+        spec.play_ids = vec!["drag_screen_drive_kick_v1".to_string()];
+        spec.validate().expect("内置 drag_screen.json 必须自洽");
+        spec
+    }
+
+    pub fn transition_push() -> Self {
+        const JSON: &str = include_str!("../../../data/tactics/transition_push.json");
+        let mut spec = Self::from_json(JSON).expect("内置 transition_push.json 必须合法");
+        spec.play_ids = vec!["transition_rim_runner_v1".to_string()];
+        spec.validate().expect("内置 transition_push.json 必须自洽");
         spec
     }
 
     pub fn builtin(id: &str) -> Option<Self> {
         match id {
             "off_horns_pnr" | "high_pick_and_roll" => Some(Self::high_pick_and_roll()),
+            "off_spain_pnr" | "spain_pick_and_roll" => Some(Self::spain_pick_and_roll()),
             "off_motion_spacing" | "five_out_motion" => Some(Self::five_out_motion()),
+            "off_delay_attack" | "delay_attack" => Some(Self::delay_attack()),
+            "off_post_split" | "post_split" => Some(Self::post_split()),
+            "off_drag_screen" | "drag_screen" => Some(Self::drag_screen()),
+            "off_transition_push" | "transition_push" => Some(Self::transition_push()),
             _ => None,
         }
     }

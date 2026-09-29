@@ -13,7 +13,7 @@
 //! [`MatchEngine::mark_receiver`] 维护的是物理层接球派生态，它必须与权威球态
 //! 同一步更新，否则物理会按上一 tick 的接球标志执行。
 
-use glam::Vec2;
+use glam::{Vec2, Vec3};
 use nba_domain::{court::Court, GameEvent, GameFlowState, SubPhase};
 use nba_physics::ballistics::{BallTrajectoryKind, BallisticsEngine};
 
@@ -78,6 +78,41 @@ impl MatchEngine {
         outcome.new_ball_state = Some(self.dead_state(pos, z));
         true
     }
+    /// 持球族（Held/Drive）球位连续性锥制：姿态确立时 facing 单帧翻转，
+    /// 持球偏移的参考系随之换轴，采样点单帧跳变会击穿球速包络（实测
+    /// 背身确立帧 89.6 ft/s > 86.5）。以「包络步长」与「持球绳长」两
+    /// 圆盘交集锥制：先回到绳长内（球在人手），再锥回包络步长内
+    /// （相邻帧连续），球随人连续移动。
+    pub(crate) fn clamp_held_family_ball_pos(
+        &self,
+        prev: (Vec2, f32),
+        sampled: (Vec2, f32),
+        carrier_pos: Option<Vec2>,
+        dt: f32,
+    ) -> (Vec2, f32) {
+        let carrier = match carrier_pos {
+            Some(carrier) => carrier,
+            None => return sampled,
+        };
+        let step = (self.config.rules.ball_max_speed_ftps
+            + self.config.rules.invariant_speed_tolerance_ftps)
+            * dt
+            * 0.98;
+        let leash = self.config.rules.invariant_holder_leash_ft;
+        let mut p = sampled.0;
+        let off = p - carrier;
+        if off.length() > leash {
+            p = carrier + off.normalize_or_zero() * leash;
+        }
+        let prev_3d = Vec3::new(prev.0.x, prev.0.y, prev.1);
+        let delta = Vec3::new(p.x, p.y, sampled.1) - prev_3d;
+        if delta.length() > step {
+            let clamped = prev_3d + delta / delta.length() * step;
+            p = Vec2::new(clamped.x, clamped.y);
+        }
+        (p, sampled.1)
+    }
+
     pub(crate) fn resolve_ball_flight(
         &mut self,
         current_t: f32,
@@ -225,12 +260,17 @@ impl MatchEngine {
         match &self.ball.ball_state {
             BallTrajectoryKind::Held { carrier_id } => {
                 let cid = carrier_id.clone();
-                self.ball.ball_pos_3d = BallisticsEngine::sample_ball_position(
+                let prev = self.ball.ball_pos_3d;
+                let (sampled_pos, sampled_z) = BallisticsEngine::sample_ball_position(
                     &self.ball.ball_state,
                     current_t,
                     self.systems.physics.get_players(),
                     &self.config.rules,
                 );
+                let carrier_pos = self.systems.physics.get_player(&cid).map(|p| p.pos_ft);
+                let (pos, z) =
+                    self.clamp_held_family_ball_pos(prev, (sampled_pos, sampled_z), carrier_pos, dt);
+                self.ball.ball_pos_3d = (pos, z);
                 if self.systems.physics.get_player(&cid).is_none() {
                     self.ball.ball_pos_3d = (
                         Vec2::new(

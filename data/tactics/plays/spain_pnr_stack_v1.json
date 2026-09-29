@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "spain_pnr_stack_v1",
+  "name_zh": "西班牙背掩护与外弹空位",
+  "kind": "play",
+  "rules": [
+    {
+      "id": "stack_screen_and_pop",
+      "when": [
+        { "predicate": "carrier_possed" },
+        { "predicate": "halfcourt_possession" }
+      ],
+      "then": { "verb": "ScreenPop", "slot": "stack_screener" },
+      "carrier_preferences": [
+        { "action_family": "Pass", "bonus": 0.4 }
+      ]
+    }
+  ],
+  "triggers": [
+    {
+      "when": [
+        { "predicate": "carrier_possed" },
+        { "predicate": "halfcourt_possession" }
+      ],
+      "window_seconds": 6.0,
+      "cooldown_seconds": 8.0
+    }
+  ]
+}

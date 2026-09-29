@@ -23,6 +23,7 @@ use rapier2d::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+use nba_domain::action_window::BallOrientation;
 use nba_domain::{FixedDt, GameRules};
 
 use crate::spatial::{OpennessMetric, PassCorridorStatus, SpatialGeometry};
@@ -91,6 +92,9 @@ pub struct PlayerPhysicsState {
     pub foul_count: u8,
     pub locomotion: LocomotionState,
     pub facing_dir: Vec2,
+    /// 持球姿态（面框/背身）：新持球确立时由决策层评估的技术选择，
+    /// 失去球权即重置为面框。非持球人恒为面框。
+    pub ball_orientation: BallOrientation,
     pub turn_decel_timer: f32,
     pub is_locked_kinematics: bool,
     /// 显式 placement 豁免（gap.md §4.3）：发球程序中的发球员允许被
@@ -180,6 +184,8 @@ pub trait SpatialPhysics {
     fn get_player(&self, id: &str) -> Option<&PlayerPhysicsState>;
     fn get_player_mut(&mut self, id: &str) -> Option<&mut PlayerPhysicsState>;
     fn teleport_player(&mut self, id: &str, pos: Vec2);
+    /// 持球权变更边界：重置失去球权球员的持球姿态（面框基准）。
+    fn set_ball_holder(&mut self, holder_id: Option<&str>);
     fn query_nearby(&self, center: Vec2, radius: f32, filter: &EntityFilter) -> Vec<String>;
     fn overlap_circle(&self, center: Vec2, radius: f32) -> Vec<String>;
     fn cast_capsule(
@@ -342,6 +348,10 @@ impl PhysicsWorld {
         self.backend.teleport_player(id, pos);
     }
 
+    pub fn set_ball_holder(&mut self, holder_id: Option<&str>) {
+        self.backend.set_ball_holder(holder_id);
+    }
+
     pub fn query_nearby(&self, center: Vec2, radius: f32, filter: &EntityFilter) -> Vec<String> {
         self.backend.query_nearby(center, radius, filter)
     }
@@ -434,6 +444,9 @@ impl SpatialPhysics for PhysicsWorld {
     }
     fn teleport_player(&mut self, id: &str, pos: Vec2) {
         self.backend.teleport_player(id, pos);
+    }
+    fn set_ball_holder(&mut self, holder_id: Option<&str>) {
+        self.backend.set_ball_holder(holder_id);
     }
     fn query_nearby(&self, center: Vec2, radius: f32, filter: &EntityFilter) -> Vec<String> {
         self.backend.query_nearby(center, radius, filter)
@@ -740,6 +753,15 @@ impl SpatialPhysics for RapierSpatialPhysics {
             }
         }
     }
+    fn set_ball_holder(&mut self, holder_id: Option<&str>) {
+        // 持球权变更是姿态生命周期边界：失去球权的球员回到面框基准，
+        // 新持球人的姿态由决策层评估后写入。
+        for (id, player) in &mut self.players {
+            if player.on_court && holder_id != Some(id.as_str()) {
+                player.ball_orientation = BallOrientation::FaceUp;
+            }
+        }
+    }
 
     fn query_nearby(&self, center: Vec2, radius: f32, filter: &EntityFilter) -> Vec<String> {
         query_nearby_players(&self.players, center, radius, filter)
@@ -901,6 +923,15 @@ impl SpatialPhysics for SimpleCirclePhysics {
             player.pos_ft = pos;
             player.target_pos_ft = pos;
             player.vel_ft = Vec2::ZERO;
+        }
+    }
+
+    fn set_ball_holder(&mut self, holder_id: Option<&str>) {
+        // 与 Rapier 后端同步：姿态生命周期随持球权重置。
+        for (id, player) in &mut self.players {
+            if player.on_court && holder_id != Some(id.as_str()) {
+                player.ball_orientation = BallOrientation::FaceUp;
+            }
         }
     }
 

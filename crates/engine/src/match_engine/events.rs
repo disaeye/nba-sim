@@ -382,6 +382,10 @@ impl MatchEngine {
                     // 判罚事件 ID 回填到罚球程序/队列：罚球事件的因果父必须
                     // 指向判罚它的那次犯规，而不是因果槽里的最近犯规
                     // （队列存在时两者会分离，账本会误报跨判罚错配）。
+                    // 同一 tick 内同一投篮被判多次犯规时，队列会有多条同
+                    // 罚球手的未认领项：按 FIFO 取最早未认领的一条，与
+                    // 发布顺序、程序执行顺序保持一致（取队尾会把首程序的
+                    // 判罚错配给末程序，首程序父链悬空）。
                     if awarded_free_throws > 0 {
                         if self.ledger.free_throw_shooter.as_deref()
                             == Some(fouled_player_id.as_str())
@@ -389,13 +393,13 @@ impl MatchEngine {
                             && self.ledger.free_throw_source_foul.is_none()
                         {
                             self.ledger.free_throw_source_foul = Some(event_id);
-                        } else if let Some(entry) =
-                            self.ledger
-                                .free_throw_queue
-                                .back_mut()
-                                .filter(|(shooter, _, src)| {
-                                    *shooter == *fouled_player_id && src.is_none()
-                                })
+                        } else if let Some(entry) = self
+                            .ledger
+                            .free_throw_queue
+                            .iter_mut()
+                            .find(|(shooter, _, src)| {
+                                *shooter == *fouled_player_id && src.is_none()
+                            })
                         {
                             entry.2 = Some(event_id);
                         }

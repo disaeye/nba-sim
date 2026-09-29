@@ -327,7 +327,7 @@ def main():
     t0 = time.monotonic()
     results = []
     out_dir = ROOT / ".work" / "par_test_out"
-    out_dir.mkdir(exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     def execute(name, exe):
         dur, ok, tail, stdout, stderr = run_one(name, exe, args.timeout, env)[2:]

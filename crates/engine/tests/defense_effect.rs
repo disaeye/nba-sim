@@ -139,7 +139,9 @@ fn profile(scheme: &str, seed: u64) -> DefenseProfile {
 
 #[test]
 fn defensive_scheme_changes_defensive_geometry() {
-    let seeds: [u64; 4] = [42, 1, 7, 100];
+    // 判据种子集（ADR-016 先例）：方向门比较方案均值，4 种子下单种子
+    // 离群（实测 ±4ft）即可翻转方向；扩到 8 种子使均值稳定。
+    let seeds: [u64; 8] = [42, 1, 7, 100, 999, 31337, 5, 13];
     let schemes = ["def_man_conservative", "def_zone_23", "def_drop_coverage"];
 
     // （方案 × seed）组合间并行：12 场 1q 模拟互不共享状态。
@@ -158,9 +160,14 @@ fn defensive_scheme_changes_defensive_geometry() {
     for (s, v) in &by_scheme {
         let mean = v.iter().map(|p| p.mean_defender_dist_to_hoop).sum::<f32>() / v.len() as f32;
         let sp = v.iter().map(|p| p.mean_defender_spacing).sum::<f32>() / v.len() as f32;
+        let per_seed: Vec<String> = v
+            .iter()
+            .map(|p| format!("{:.2}", p.mean_defender_dist_to_hoop))
+            .collect();
         eprintln!(
-            "{s:<22} mean_def_dist_to_hoop={mean:6.2}ft  mean_min_spacing={sp:5.2}ft  \
+            "{s:<22} mean_def_dist_to_hoop={mean:6.2}ft  per_seed=[{}]  mean_min_spacing={sp:5.2}ft  \
              TO={:>3} score={:>3}",
+            per_seed.join(", "),
             v.iter().map(|p| p.turnovers).sum::<u32>(),
             v.iter().map(|p| p.score).sum::<u32>(),
         );

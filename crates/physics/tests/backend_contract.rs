@@ -26,6 +26,7 @@ fn player(id: &str, team: &str, pos: Vec2) -> PlayerPhysicsState {
         foul_count: 0,
         locomotion: LocomotionState::Idle,
         facing_dir: Vec2::X,
+        ball_orientation: nba_domain::action_window::BallOrientation::FaceUp,
         turn_decel_timer: 0.0,
         is_locked_kinematics: false,
         out_of_bounds_placement: false,

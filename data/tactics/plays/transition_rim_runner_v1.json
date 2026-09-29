@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "transition_rim_runner_v1",
+  "name_zh": "快攻长传直冲篮下",
+  "kind": "play",
+  "rules": [
+    {
+      "id": "sprint_to_rim",
+      "when": [
+        { "predicate": "carrier_possed" }
+      ],
+      "then": { "verb": "CutBackdoor", "slot": "left_wing" },
+      "carrier_preferences": [
+        { "action_family": "Pass", "bonus": 0.45 }
+      ]
+    }
+  ],
+  "triggers": [
+    {
+      "when": [
+        { "predicate": "carrier_possed" }
+      ],
+      "window_seconds": 4.0,
+      "cooldown_seconds": 6.0
+    }
+  ]
+}

@@ -12,6 +12,7 @@
 use glam::Vec2;
 use std::collections::{HashMap, HashSet};
 
+use nba_domain::action_window::BallOrientation;
 use nba_domain::{FixedDt, GameRules};
 
 use super::{
@@ -271,7 +272,12 @@ pub(super) fn make_motion_proposals(
                 if target_vec.length() > 0.2 {
                     player.facing_dir = target_vec.normalize_or_zero();
                 }
-            } else if speed > 0.5 {
+            } else if speed > 0.5
+                && !(ball_holder_id == Some(id.as_str())
+                    && player.ball_orientation == BallOrientation::BackToBasket)
+            {
+                // 背身持球人顶人时朝向被姿态锚定（背对篮筐面向传球侧），
+                // 速度方向不得覆盖，否则背身顶进瞬间就「变回」面框。
                 player.facing_dir = next_vel.normalize_or_zero();
             }
 

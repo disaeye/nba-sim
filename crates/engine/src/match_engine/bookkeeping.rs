@@ -4,9 +4,10 @@
 //! `PhysicsFact`，语义层把它们解释为 `SemanticContact` 与配位评估，最后统一
 //! 汇入 `pending_events`。本模块是这条链路的收口，顺序不可调换：
 //!
-//! 1. 按 player id 排序推进体力（含规则通道的消耗曲线）；
-//! 2. 抽取接触事实与配位评估，映射为待发布事件；
-//! 3. 把体力与士气写回物理层球员，供渲染与下一 tick 的决策读取。
+//! 1. 按球态同步持球姿态生命周期（失去球权的球员回到面框基准）；
+//! 2. 按 player id 排序推进体力（含规则通道的消耗曲线）；
+//! 3. 抽取接触事实与配位评估，映射为待发布事件；
+//! 4. 把体力与士气写回物理层球员，供渲染与下一 tick 的决策读取。
 
 use nba_semantics::SemanticEvaluator;
 
@@ -15,6 +16,9 @@ use super::MatchEngine;
 
 impl MatchEngine {
     pub(crate) fn collect_tick_facts(&mut self, dt: f32) {
+        // 球态是持球人的唯一事实源，物理层只接收显式输入：
+        // 持球权变更即姿态生命周期边界。
+        self.systems.physics.set_ball_holder(self.ball.holder_id());
         let player_ids: Vec<String> = {
             let mut ids: Vec<String> = self.systems.physics.get_players().keys().cloned().collect();
             ids.sort();

@@ -53,22 +53,22 @@ def free_bytes(path: Path) -> int:
 def temp_roots() -> list:
     """扫描本项目临时产物的目录。
 
-    首位是项目临时文件专用根目录（不与 /tmp、/dev/shm 混用）；
-    其余为兼容历史残留的旧位置。
+    与 test-support 的解析顺序一致：仓库根下的 `.work/test-tmp`
+    优先，再由 `NBA_TEST_TMP`/`TMPDIR` 环境变量补充，不内置
+    机器特定路径。
     """
-    roots = []
-    project_root = Path("/home/ubuntu/basketball")
-    if project_root.exists():
-        roots.append(project_root)
-    for candidate in ("/tmp", "/dev/shm", "/var/tmp"):
-        p = Path(candidate)
-        if p.exists():
-            roots.append(p)
     import os
 
-    tmpdir = os.environ.get("TMPDIR")
-    if tmpdir and Path(tmpdir).exists() and Path(tmpdir) not in roots:
-        roots.append(Path(tmpdir))
+    roots = []
+    repo_tmp = ROOT / ".work" / "test-tmp"
+    if repo_tmp.exists():
+        roots.append(repo_tmp)
+    for env_name in ("NBA_TEST_TMP", "TMPDIR"):
+        value = os.environ.get(env_name)
+        if value:
+            p = Path(value)
+            if p.exists() and p not in roots:
+                roots.append(p)
     return roots
 
 
@@ -134,11 +134,12 @@ def find_leftovers(include_live: bool = False) -> list:
 
 
 def human(n: int) -> str:
+    size = float(n)
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if n < 1024 or unit == "TiB":
-            return f"{n:.1f} {unit}" if unit != "B" else f"{n} B"
-        n /= 1024.0
-    return f"{n:.1f} TiB"
+        if size < 1024 or unit == "TiB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{n} B"
+        size /= 1024.0
+    return f"{size:.1f} TiB"
 
 
 def clean_leftovers(leftovers) -> int:
@@ -227,7 +228,7 @@ def main() -> int:
 
 def self_test() -> int:
     """负面对照：制造一个泄漏，断言守卫会失败；清理后断言通过。"""
-    probe_root = Path("/home/ubuntu/basketball")
+    probe_root = ROOT / ".work" / "test-tmp"
     probe_root.mkdir(parents=True, exist_ok=True)
     probe_dir = probe_root / f"{TEMP_PREFIX}test_888888"
     probe_dir.mkdir(parents=True, exist_ok=True)

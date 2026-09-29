@@ -236,13 +236,19 @@ impl DecisionSystem {
                     move_kind,
                 });
             }
+            let carrier_back = carrier.ball_orientation
+                == nba_domain::action_window::BallOrientation::BackToBasket;
+            let post_zone = ctx.rules.decision.orientation_post_zone_ft;
             let jumper_kind = if is_three {
                 if closest_def_dist < 4.0 && carrier_skill > 0.7 {
                     Some(nba_domain::action_window::JumperKind::StepBack)
                 } else {
                     Some(nba_domain::action_window::JumperKind::CatchAndShoot)
                 }
-            } else if dist_to_hoop > 12.0 {
+            } else if carrier_back && dist_to_hoop <= post_zone {
+                // 背身姿态下的低位出手是转身后仰，而不是面框的接球投。
+                Some(nba_domain::action_window::JumperKind::TurnaroundFadeaway)
+            } else if dist_to_hoop > post_zone {
                 Some(nba_domain::action_window::JumperKind::PullUp)
             } else {
                 Some(nba_domain::action_window::JumperKind::CatchAndShoot)
@@ -255,11 +261,14 @@ impl DecisionSystem {
             });
             let jab_dir = (hoop - carrier_pos).normalize_or_zero();
             if !is_putback_opportunity
+                && !carrier_back
                 && !ctx
                     .rules
                     .court
                     .is_in_lane(carrier_pos, offense_team == "home")
             {
+                // 三威胁试探步是面框专属姿态；背身持球人的对应动作是
+                // 低位背身单打（PostUp），两者互斥。
                 candidates.push(CandidateAction::TripleThreatJab {
                     player_id: carrier_id.to_string(),
                     pivot_pos: carrier_pos,
@@ -281,9 +290,12 @@ impl DecisionSystem {
             }
             // 限制区内的持球人不得生成「停车」类候选（背身要位/原地等待）：
             // 攻方三秒规则下持球停车超过时限即违例，限制区内只保留
-            // 出手/传球/突破三类移动选项。18.0 是背身候选的距离上限（ft）。
+            // 出手/传球/突破三类移动选项。距离上限走决策规则通道。
             let carrier_in_lane = ctx.rules.court.is_in_lane(carrier_pos, attacking_right);
-            if !is_putback_opportunity && !carrier_in_lane && (carrier_pos - hoop).length() < 18.0 {
+            if !is_putback_opportunity
+                && !carrier_in_lane
+                && (carrier_pos - hoop).length() < ctx.rules.decision.orientation_zone_fade_ft
+            {
                 candidates.push(CandidateAction::PostUp {
                     player_id: carrier_id.to_string(),
                     from_pos: carrier_pos,
@@ -583,6 +595,35 @@ impl DecisionSystem {
             CandidateAction::Dwell { .. }
             | CandidateAction::TripleThreatJab { .. }
             | CandidateAction::Advance { .. } => -policy.morale_dwell_affinity,
+        };
+        // ## 姿态耦合：面框/背身是接球时的技术选择，它改变后续动作族的价值
+        //
+        // 已背身：低位单打增益（转身成本已付），面框突破与外线拔起
+        // 都要先转身付出成本；面框姿态下临时选背身单打同样要转身。
+        // 系数全部走 `DecisionRules` 通道。
+        let orientation_mult = {
+            let carrier_back = actor
+                .map(|p| {
+                    p.ball_orientation == nba_domain::action_window::BallOrientation::BackToBasket
+                })
+                .unwrap_or(false);
+            let d = &ctx.rules.decision;
+            match &s.action {
+                CandidateAction::PostUp { .. } => {
+                    if carrier_back {
+                        f32::from(1u8) + d.orientation_post_up_match_bonus
+                    } else {
+                        f32::from(1u8) - d.orientation_face_up_turn_cost
+                    }
+                }
+                CandidateAction::Drive { .. } if carrier_back => {
+                    f32::from(1u8) - d.orientation_back_drive_penalty
+                }
+                CandidateAction::Shoot { is_three, .. } if carrier_back && *is_three => {
+                    f32::from(1u8) - d.orientation_back_perimeter_penalty
+                }
+                _ => f32::from(1u8),
+            }
         };
         let base = match &s.action {
             CandidateAction::Advance { .. } => {
@@ -919,7 +960,7 @@ impl DecisionSystem {
             }
             _ => self.weights.risk_aversion,
         };
-        base * s.feasibility_score * stamina_mult
+        base * orientation_mult * s.feasibility_score * stamina_mult
             + morale_bias * morale_affinity
             + s.constraint_penalty
             - s.risk * risk_aversion

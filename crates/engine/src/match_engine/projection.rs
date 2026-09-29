@@ -171,6 +171,14 @@ impl MatchEngine {
                     } else {
                         None
                     },
+                    orientation: if p.on_court
+                        && p.ball_orientation
+                            == nba_domain::action_window::BallOrientation::BackToBasket
+                    {
+                        Some("back_to_basket".to_string())
+                    } else {
+                        None
+                    },
                     potential_target_x: potential_target_norm.map(|target| target.x),
                     potential_target_y: potential_target_norm.map(|target| target.y),
                     potential_action: potential.map(|observation| observation.action.clone()),

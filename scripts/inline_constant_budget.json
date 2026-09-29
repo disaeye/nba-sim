@@ -8,6 +8,7 @@
     "crates/decision/src/constraint/evaluate.rs": 36,
     "crates/decision/src/constraint/mod.rs": 15,
     "crates/decision/src/modulation.rs": 10,
+    "crates/decision/src/orientation.rs": 0,
     "crates/decision/src/pipeline.rs": 90,
     "crates/decision/src/play_actions.rs": 6,
     "crates/decision/src/play_selector.rs": 1,
@@ -110,6 +111,7 @@
     "crates/decision/src/constraint/evaluate.rs": 37,
     "crates/decision/src/constraint/mod.rs": 15,
     "crates/decision/src/modulation.rs": 10,
+    "crates/decision/src/orientation.rs": 0,
     "crates/decision/src/pipeline.rs": 90,
     "crates/decision/src/play_actions.rs": 6,
     "crates/decision/src/play_selector.rs": 1,
@@ -124,7 +126,7 @@
     "crates/domain/src/projectile.rs": 8,
     "crates/domain/src/resolve.rs": 126,
     "crates/domain/src/rules.rs": 370,
-    "crates/domain/src/rules/policies.rs": 179,
+    "crates/domain/src/rules/policies.rs": 151,
     "crates/domain/src/tactics.rs": 2,
     "crates/engine/src/match_engine/ball_flight/arms.rs": 31,
     "crates/engine/src/match_engine/ball_flight/mod.rs": 11,
@@ -164,11 +166,13 @@
     "crates/physics/src/movement/mod.rs": 29,
     "crates/physics/src/spatial.rs": 30,
     "crates/protocol/src/frame.rs": 17,
-    "crates/semantics/src/lib.rs": 48
+    "crates/semantics/src/lib.rs": 48,
+    "crates/domain/src/rules/policies/defense.rs": 40
   },
   "test_files": {
     "crates/bball-wasm/src/lib.rs": 2,
     "crates/debug-server/src/main.rs": 2,
+    "crates/decision/src/orientation.rs": 27,
     "crates/decision/src/tactics.rs": 2,
     "crates/domain/src/capability.rs": 108,
     "crates/domain/src/rules.rs": 20,
@@ -181,6 +185,7 @@
   "test_floats": {
     "crates/bball-wasm/src/lib.rs": 2,
     "crates/debug-server/src/main.rs": 2,
+    "crates/decision/src/orientation.rs": 27,
     "crates/decision/src/tactics.rs": 2,
     "crates/domain/src/capability.rs": 108,
     "crates/domain/src/rules.rs": 20,

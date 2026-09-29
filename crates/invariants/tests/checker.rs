@@ -30,6 +30,7 @@ fn base_player(id: &str, team: &str, x: f32, y: f32, on_court: bool) -> RenderPl
         potential_action: None,
         potential_threat_ratio: None,
         potential_void_ratio: None,
+        orientation: None,
     }
 }
 

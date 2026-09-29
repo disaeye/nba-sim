@@ -112,7 +112,15 @@ impl MatchEngine {
             start_time: current_t,
             duration: drive_duration,
         });
-        self.ball.ball_pos_3d = (from_pos, self.config.rules.ball_holder_height_ft);
+        // 持球族连续性：突破起手把球直接拉回 from_pos 会丢弃持球偏移，
+        // 产生单帧跳变（姿态确立帧实测 89.6 ft/s）；与 Held/Drive 采样
+        // 同一锥制（包络步长 ∩ 持球绳长）。
+        self.ball.ball_pos_3d = self.clamp_held_family_ball_pos(
+            self.ball.ball_pos_3d,
+            (from_pos, self.config.rules.ball_holder_height_ft),
+            Some(driver.pos_ft),
+            self.config.rules.tick_seconds,
+        );
         self.transition_phase(SubPhase::ActionExecution);
         self.journal.pending_events.push(GameEvent::DriveInitiated {
             driver_id: driver_id.to_string(),
@@ -596,11 +604,18 @@ impl MatchEngine {
                     .hoop_pos(self.flow.possession == Possession::Home);
                 if let Some(p) = self.systems.physics.get_player_mut(&player_id) {
                     p.action = "PostUp".to_string();
+                    // 背身单打即姿态确立：物理状态与回合缓存同步标记，
+                    // 后续决策 tick 不再重新评估。
+                    p.ball_orientation = nba_domain::action_window::BallOrientation::BackToBasket;
                     let away_from_hoop = (p.pos_ft - hoop).normalize_or_zero();
                     if away_from_hoop.length_squared() > 0.1 {
                         p.facing_dir = away_from_hoop;
                     }
                 }
+                self.possession_ctx.ball_orientation = Some((
+                    player_id.clone(),
+                    nba_domain::action_window::BallOrientation::BackToBasket,
+                ));
                 let player_name = self
                     .systems
                     .physics

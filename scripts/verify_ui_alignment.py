@@ -82,7 +82,7 @@ def main():
         "--remote-debugging-port=9222", f"{SERVER}/"
     ]
     proc = subprocess.Popen(chrome_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(2.5)
+    time.sleep(4.0)
 
     try:
         # 2. Verify Boot and initial alignment at frame 0
@@ -134,7 +134,7 @@ def main():
             // Court canvas verify: check canvas context draw happened
             const canvas = document.getElementById("courtCanvas");
             const ctx = canvas.getContext("2d");
-            const hasCanvas = canvas && canvas.width === 960 && canvas.height === 520;
+            const hasCanvas = canvas && canvas.width === 1000 && canvas.height === 560;
 
             return { dom, expected, hasCanvas, tickCount: state.ticks.length, shotCount: state.shots.length };
         })()
@@ -161,7 +161,7 @@ def main():
         assert dom["tacticalSet"] == exp["tacticalSet"], f"Tactical set mismatch: {dom['tacticalSet']} vs {exp['tacticalSet']}"
         assert dom["fouls"] == exp["fouls"], f"Fouls mismatch: {dom['fouls']} vs {exp['fouls']}"
         assert dom["freeThrows"] == exp["freeThrows"], f"Free throws mismatch: {dom['freeThrows']} vs {exp['freeThrows']}"
-        assert data["hasCanvas"], "Court canvas must be 960x520"
+        assert data["hasCanvas"], "Court canvas must be 1000x560"
         print("✅ Frame 0 Scoreboard, Court HUD, Micro-Cards, and Canvas fully aligned with Tick data.")
 
         # 3. Test Seek to Mid-game frame (Frame 500) and verify instant card alignment

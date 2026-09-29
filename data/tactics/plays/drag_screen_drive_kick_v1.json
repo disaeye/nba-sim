@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "drag_screen_drive_kick_v1",
+  "name_zh": "追身拖尾掩护外弹",
+  "kind": "play",
+  "rules": [
+    {
+      "id": "drag_pick_and_kick",
+      "when": [
+        { "predicate": "carrier_possed" },
+        { "predicate": "screen_established" }
+      ],
+      "then": { "verb": "Lift", "slot": "weak_wing" },
+      "carrier_preferences": [
+        { "action_family": "Pass", "bonus": 0.3 }
+      ]
+    }
+  ],
+  "triggers": [
+    {
+      "when": [
+        { "predicate": "carrier_possed" },
+        { "predicate": "screen_established" }
+      ],
+      "window_seconds": 5.0,
+      "cooldown_seconds": 8.0
+    }
+  ]
+}
