@@ -468,6 +468,7 @@ body {
 .team-tactic-tag {
   color: var(--text-muted);
   font-weight: 500;
+  white-space: nowrap;
 }
 .team-fouls-indicator {
   color: var(--text-muted);
@@ -561,7 +562,12 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  /* 状态胶囊文字长短随球权/战术切换变化，wrap 会让行数在临界区
+     来回跳变，记分牌高度随之波动并挤压球场容器（球场反复缩放）。
+     强制单行 + 溢出截断，高度恒定。 */
+  flex-wrap: nowrap;
+  overflow: hidden;
+  min-width: 0;
   justify-content: center;
 }
 
@@ -574,6 +580,8 @@ body {
   background: #f1f5f9;
   color: var(--text-muted);
   font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .match-flow-pill {
   color: var(--color-home);
