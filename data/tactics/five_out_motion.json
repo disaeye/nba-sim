@@ -6,7 +6,7 @@
     {
       "id": "top",
       "name_zh": "弧顶组织者",
-      "base_offset_x": 29.0,
+      "base_offset_x": 31.0,
       "base_offset_y": 25.0,
       "requirements": [
         {
@@ -27,7 +27,7 @@
     {
       "id": "left_wing",
       "name_zh": "左侧 45° 侧翼",
-      "base_offset_x": 24.0,
+      "base_offset_x": 28.0,
       "base_offset_y": 11.0,
       "requirements": [
         {
@@ -44,7 +44,7 @@
     {
       "id": "right_wing",
       "name_zh": "右侧 45° 侧翼",
-      "base_offset_x": 24.0,
+      "base_offset_x": 28.0,
       "base_offset_y": 39.0,
       "requirements": [
         {

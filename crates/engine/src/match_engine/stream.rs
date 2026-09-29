@@ -102,6 +102,8 @@ pub fn frame_rules_from_game_rules(rules: &GameRules) -> FrameRules {
         holder_leash_ft: rules.invariant_holder_leash_ft,
         speed_tolerance_ftps: rules.invariant_speed_tolerance_ftps,
         ball_z_max_ft: rules.ball_z_max_ft,
+        max_personal_fouls: rules.league.max_personal_fouls,
+        bonus_fouls_per_period: rules.league.bonus_fouls_per_period,
     }
 }
 
@@ -339,7 +341,10 @@ impl StreamPipeline {
             ));
         }
         if written_bytes == 0 {
-            let tick = engine.build_tick();
+            // 终局哨兵帧也必须过不变量检查：`step()` 包装器对短路/早退
+            // 路径统一执行 check_tick，不因流式导出的收尾分支绕过校验。
+            let tick = engine.step();
+            all_violations.append(&mut engine.audit.last_tick_violations);
             let payload = serde_json::to_string(&compact_summary_record(&tick, true))?;
             writer.write_all(payload.as_bytes())?;
             writer.write_all(b"\n")?;

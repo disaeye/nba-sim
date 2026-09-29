@@ -6,7 +6,7 @@
     {
       "id": "top",
       "name_zh": "持球发起人",
-      "base_offset_x": 28.0,
+      "base_offset_x": 31.0,
       "base_offset_y": 25.0,
       "requirements": [
         { "attribute": "BallHandling", "weight": 1.0 },
@@ -51,7 +51,7 @@
     {
       "id": "screener",
       "name_zh": "高位掩护中锋",
-      "base_offset_x": 18.0,
+      "base_offset_x": 20.5,
       "base_offset_y": 25.0,
       "requirements": [
         { "attribute": "Strength", "weight": 0.8 },

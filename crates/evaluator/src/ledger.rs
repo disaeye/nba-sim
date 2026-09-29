@@ -10,6 +10,9 @@
 use nba_protocol::StreamTick;
 use serde::{Deserialize, Serialize};
 
+mod foul_ledger;
+use foul_ledger::check_foul_conservation;
+
 /// 时间守恒式的端点容差（秒）：回合时长求和允许超出墙钟的上界，
 /// 覆盖逐 tick 端点取整误差。属账本判定口径常数，随检查器定义集中于此。
 const TIME_SUM_WALL_TOLERANCE_SECONDS: f32 = 2.0;
@@ -125,24 +128,45 @@ fn check_score_conservation(ticks: &[StreamTick], out: &mut Vec<LedgerViolation>
     for tick in ticks {
         for event in &tick.frame.event_log {
             match event.kind.as_str() {
-                "SCORE" => {
+                "SCORE" | "SHOT_MISS" => {
                     let Some(arrival) = event.data.as_ref().and_then(|d| d.get("HoopArrival"))
                     else {
                         let mut v = LedgerViolation::new(
                             "SCORE_CONSERVATION",
                             format!(
-                                "tick {} SCORE fact without HoopArrival payload",
-                                tick.frame.t
+                                "tick {} {} fact without HoopArrival payload",
+                                tick.frame.t, event.kind
                             ),
                         );
                         v.tick = Some(tick.frame.event_sequence);
                         out.push(v);
                         continue;
                     };
-                    let made = arrival
-                        .get("is_made")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
+                    let Some(made) = arrival.get("is_made").and_then(|v| v.as_bool()) else {
+                        let mut v = LedgerViolation::new(
+                            "SCORE_CONSERVATION",
+                            format!(
+                                "tick {} {} fact without boolean is_made outcome",
+                                tick.frame.t, event.kind
+                            ),
+                        );
+                        v.tick = Some(tick.frame.event_sequence);
+                        out.push(v);
+                        continue;
+                    };
+                    let expected_made = event.kind == "SCORE";
+                    if made != expected_made {
+                        let mut v = LedgerViolation::new(
+                            "SCORE_CONSERVATION",
+                            format!(
+                                "tick {} {} fact contradicts HoopArrival.is_made={made}",
+                                tick.frame.t, event.kind
+                            ),
+                        );
+                        v.tick = Some(tick.frame.event_sequence);
+                        out.push(v);
+                        continue;
+                    }
                     if !made {
                         continue;
                     }
@@ -327,32 +351,6 @@ fn check_time_conservation(ticks: &[StreamTick], out: &mut Vec<LedgerViolation>)
     }
 }
 
-/// 犯规守恒：终场球队犯规计数与 FOUL 事件计数一致（容差：非犯规
-/// 导致的团队犯规调整路径若存在，必须在事件流中有对应事实）。
-fn check_foul_conservation(ticks: &[StreamTick], out: &mut Vec<LedgerViolation>) {
-    let mut foul_events = 0u32;
-    let mut max_team_fouls = 0u32;
-    for tick in ticks {
-        for event in &tick.frame.event_log {
-            if event.kind == "FOUL" {
-                foul_events += 1;
-            }
-        }
-        let frame_fouls = tick.frame.team_fouls_home.max(tick.frame.team_fouls_away);
-        max_team_fouls = max_team_fouls.max(frame_fouls);
-    }
-    // 团队犯规计数按节重置，逐 tick 取最大值会低估总犯规数；
-    // 此式只做单调性粗检：FOUL 事件数 ≥ 任何单节的团队犯规峰值。
-    if foul_events < max_team_fouls {
-        out.push(LedgerViolation::new(
-            "FOUL_CONSERVATION",
-            format!(
-                "foul events ({foul_events}) fewer than a single period's team foul peak ({max_team_fouls})"
-            ),
-        ));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,6 +415,460 @@ mod tests {
         }
     }
 
+    /// 犯规账本专用合成 tick：帧计数器与比分可配置（球队累计/得分重建依赖）。
+    fn foul_tick(
+        t: f32,
+        period: u32,
+        home: u32,
+        away: u32,
+        team_fouls_home: u32,
+        team_fouls_away: u32,
+        events: Vec<nba_protocol::FrameEvent>,
+    ) -> StreamTick {
+        let mut tick = synthetic_tick(t, 720.0 - t, home, away, events);
+        tick.frame.period = period;
+        tick.frame.team_fouls_home = team_fouls_home;
+        tick.frame.team_fouls_away = team_fouls_away;
+        tick
+    }
+
+    /// 合成犯规事实：个人/球队累计、bonus 与罚球次数可配置。
+    fn foul_event(
+        seq: u64,
+        fouled: &str,
+        fouler: &str,
+        personal: u64,
+        team: u64,
+        bonus: bool,
+        free_throws: u64,
+    ) -> nba_protocol::FrameEvent {
+        event(
+            "FOUL",
+            serde_json::json!({
+                "Foul": {
+                    "fouled_player_id": fouled,
+                    "fouler_id": fouler,
+                    "is_shooting": free_throws > 0,
+                    "foul_kind": if free_throws > 0 { "shooting" } else { "personal" },
+                    "personal_foul_count": personal,
+                    "period_team_foul_count": team,
+                    "penalty": {
+                        "free_throw_count": free_throws,
+                        "retains_possession": free_throws > 0,
+                        "is_bonus": bonus
+                    }
+                }
+            }),
+            seq,
+        )
+    }
+
+    /// 合成罚球事实：因果父指向判罚它的犯规事件。
+    fn free_throw_event(
+        seq: u64,
+        parent: u64,
+        shooter: &str,
+        made: bool,
+    ) -> nba_protocol::FrameEvent {
+        let mut e = event(
+            "FREE_THROW",
+            serde_json::json!({
+                "FreeThrowAttempt": {"shooter_id": shooter, "attempt": 1, "made": made}
+            }),
+            seq,
+        );
+        e.parent_event_id = Some(parent);
+        e
+    }
+
+    /// 合成换人事实。
+    fn substitution_event(seq: u64, out_player: &str, in_player: &str) -> nba_protocol::FrameEvent {
+        event(
+            "SUBSTITUTION",
+            serde_json::json!({
+                "Substitution": {
+                    "team": "away",
+                    "out_player": out_player,
+                    "in_player": in_player,
+                    "reason": "FoulTrouble"
+                }
+            }),
+            seq,
+        )
+    }
+
+    /// 正面对照：完整犯规账（个人/球队累计、bonus 罚球、犯满换下）不得报账。
+    #[test]
+    fn foul_ledger_balanced_game_passes() {
+        let possession_summary = |seq: u64| {
+            event(
+                "POSSESSION_SUMMARY",
+                serde_json::json!({"PossessionSummary": {"possession_index": 0, "offense_team": "home", "start_clock": 720.0, "end_clock": 700.0, "duration_seconds": 20.0, "passes_count": 1, "terminal_event": "FREE_THROW", "shooter_id": "H_1"}}),
+                seq,
+            )
+        };
+        let ticks = vec![
+            // 第一节：客队 5 次犯规，第 5 次进入 bonus，两罚完成后回合结束。
+            foul_tick(
+                4.0,
+                1,
+                0,
+                0,
+                0,
+                1,
+                vec![foul_event(1, "H_1", "A_1", 1, 1, false, 0)],
+            ),
+            foul_tick(
+                8.0,
+                1,
+                0,
+                0,
+                0,
+                2,
+                vec![foul_event(2, "H_2", "A_2", 1, 2, false, 0)],
+            ),
+            foul_tick(
+                12.0,
+                1,
+                0,
+                0,
+                0,
+                3,
+                vec![foul_event(3, "H_3", "A_3", 1, 3, false, 0)],
+            ),
+            foul_tick(
+                16.0,
+                1,
+                0,
+                0,
+                0,
+                4,
+                vec![foul_event(4, "H_4", "A_4", 1, 4, false, 0)],
+            ),
+            foul_tick(
+                20.0,
+                1,
+                0,
+                0,
+                0,
+                5,
+                vec![foul_event(5, "H_1", "A_5", 1, 5, true, 2)],
+            ),
+            foul_tick(
+                24.0,
+                1,
+                1,
+                0,
+                0,
+                5,
+                vec![free_throw_event(6, 5, "H_1", true)],
+            ),
+            foul_tick(
+                28.0,
+                1,
+                1,
+                0,
+                0,
+                5,
+                vec![free_throw_event(7, 5, "H_1", false)],
+            ),
+            foul_tick(30.0, 1, 1, 0, 0, 5, vec![possession_summary(8)]),
+            // 第二节：A_1 犯满（累计 6 次），必须被换下。
+            foul_tick(
+                704.0,
+                2,
+                1,
+                0,
+                0,
+                1,
+                vec![foul_event(9, "H_1", "A_1", 2, 1, false, 0)],
+            ),
+            foul_tick(
+                708.0,
+                2,
+                1,
+                0,
+                0,
+                2,
+                vec![foul_event(10, "H_2", "A_1", 3, 2, false, 0)],
+            ),
+            foul_tick(
+                712.0,
+                2,
+                1,
+                0,
+                0,
+                3,
+                vec![foul_event(11, "H_3", "A_1", 4, 3, false, 0)],
+            ),
+            foul_tick(
+                716.0,
+                2,
+                1,
+                0,
+                0,
+                4,
+                vec![foul_event(12, "H_4", "A_1", 5, 4, false, 0)],
+            ),
+            foul_tick(
+                720.0,
+                2,
+                1,
+                0,
+                0,
+                5,
+                vec![
+                    foul_event(13, "H_5", "A_1", 6, 5, true, 0),
+                    substitution_event(14, "A_1", "A_6"),
+                ],
+            ),
+        ];
+        let violations = check_ledger(&ticks);
+        assert!(
+            violations.is_empty(),
+            "balanced foul ledger must not report: {violations:?}"
+        );
+    }
+
+    /// 负面对照：个人累计与事件载荷不一致必须变红。
+    #[test]
+    fn negative_control_personal_foul_count_lie_detected() {
+        let ticks = vec![foul_tick(
+            4.0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            vec![foul_event(1, "H_1", "A_1", 2, 1, false, 0)],
+        )];
+        let violations = check_ledger(&ticks);
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.equation == "FOUL_CONSERVATION"
+                    && v.detail.contains("personal foul count")),
+            "personal count lie must be caught: {violations:?}"
+        );
+    }
+
+    /// 负面对照：单犯规帧的球队计数必须能在帧计数器上观测到。
+    #[test]
+    fn negative_control_team_count_not_visible_in_frame_detected() {
+        let ticks = vec![foul_tick(
+            4.0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            // 声称球队第 3 次犯规，帧计数器却是 1。
+            vec![foul_event(1, "H_1", "A_1", 1, 3, false, 0)],
+        )];
+        let violations = check_ledger(&ticks);
+        assert!(
+            violations.iter().any(|v| v.equation == "FOUL_CONSERVATION"
+                && v.detail.contains("not visible in frame counters")),
+            "invisible team count must be caught: {violations:?}"
+        );
+    }
+
+    /// 负面对照：节内球队累计与帧计数器峰值不一致必须变红。
+    #[test]
+    fn negative_control_team_period_conservation_detected() {
+        let ticks = vec![
+            foul_tick(
+                4.0,
+                1,
+                0,
+                0,
+                0,
+                1,
+                vec![foul_event(1, "H_1", "A_1", 1, 1, false, 0)],
+            ),
+            // 帧计数器声称 3 次球队犯规，事件流只有 1 次。
+            foul_tick(8.0, 1, 0, 0, 0, 3, vec![]),
+        ];
+        let violations = check_ledger(&ticks);
+        assert!(
+            violations.iter().any(|v| v.equation == "FOUL_CONSERVATION"
+                && v.detail.contains("counted from events vs")),
+            "period team conservation lie must be caught: {violations:?}"
+        );
+    }
+
+    /// 负面对照：bonus 标志与球队累计/阈值矛盾必须变红。
+    #[test]
+    fn negative_control_bonus_flag_lie_detected() {
+        let ticks = vec![foul_tick(
+            4.0,
+            1,
+            0,
+            0,
+            0,
+            2,
+            // 球队第 2 次犯规（阈值 5）却声明 bonus。
+            vec![foul_event(1, "H_1", "A_1", 1, 2, true, 0)],
+        )];
+        let violations = check_ledger(&ticks);
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.equation == "FOUL_CONSERVATION" && v.detail.contains("bonus flag")),
+            "bonus flag lie must be caught: {violations:?}"
+        );
+    }
+
+    /// 负面对照：判罚的罚球必须全部完成且罚球人是被侵犯人。
+    #[test]
+    fn negative_control_free_throw_correspondence_detected() {
+        let ticks = vec![
+            foul_tick(
+                4.0,
+                1,
+                0,
+                0,
+                0,
+                5,
+                vec![foul_event(1, "H_1", "A_5", 1, 5, true, 2)],
+            ),
+            // 只执行了一次罚球，回合即告结束：剩余一次被跳过。
+            foul_tick(
+                8.0,
+                1,
+                1,
+                0,
+                0,
+                5,
+                vec![free_throw_event(2, 1, "H_1", true)],
+            ),
+            foul_tick(
+                12.0,
+                1,
+                1,
+                0,
+                0,
+                5,
+                vec![event(
+                    "POSSESSION_SUMMARY",
+                    serde_json::json!({"PossessionSummary": {"possession_index": 0, "offense_team": "home", "start_clock": 720.0, "end_clock": 700.0, "duration_seconds": 20.0, "passes_count": 0, "terminal_event": "FREE_THROW", "shooter_id": "H_1"}}),
+                    3,
+                )],
+            ),
+        ];
+        let violations = check_ledger(&ticks);
+        assert!(
+            violations.iter().any(|v| v.equation == "FOUL_CONSERVATION"
+                && v.detail.contains("unresolved before possession end")),
+            "skipped free throw must be caught: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn negative_control_free_throw_shooter_mismatch_detected() {
+        let ticks = vec![
+            foul_tick(
+                4.0,
+                1,
+                0,
+                0,
+                0,
+                5,
+                vec![foul_event(1, "H_1", "A_5", 1, 5, true, 2)],
+            ),
+            // 罚球人是 H_2，罚则判给被侵犯人 H_1。
+            foul_tick(
+                8.0,
+                1,
+                0,
+                0,
+                0,
+                5,
+                vec![free_throw_event(2, 1, "H_2", true)],
+            ),
+        ];
+        let violations = check_ledger(&ticks);
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.equation == "FOUL_CONSERVATION" && v.detail.contains("shooter mismatch")),
+            "free throw shooter lie must be caught: {violations:?}"
+        );
+    }
+
+    /// 负面对照：犯满球员必须被换下。
+    #[test]
+    fn negative_control_foul_out_requires_substitution_detected() {
+        // A_1 连续 6 次犯规（个人累计 1..6，球队累计同步），事后没有换人事实。
+        let mut ticks = Vec::new();
+        for i in 1u64..=6 {
+            ticks.push(foul_tick(
+                i as f32 * 4.0,
+                1,
+                0,
+                0,
+                0,
+                i as u32,
+                vec![foul_event(i, "H_1", "A_1", i, i, i >= 5, 0)],
+            ));
+        }
+        let violations = check_ledger(&ticks);
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.equation == "FOUL_CONSERVATION"
+                    && v.detail.contains("never left the court")),
+            "missing foul-out substitution must be caught: {violations:?}"
+        );
+    }
+
+    /// 负面对照：犯满球员不得再犯规，也不得再被换上。
+    #[test]
+    fn negative_control_fouled_out_player_cannot_return_detected() {
+        // A_1 连续 6 次犯规后被换下，随后又被换上并再次犯规。
+        let mut ticks = Vec::new();
+        for i in 1u64..=6 {
+            let mut events = vec![foul_event(i, "H_1", "A_1", i, i, i >= 5, 0)];
+            if i == 6 {
+                events.push(substitution_event(7, "A_1", "A_6"));
+            }
+            ticks.push(foul_tick(i as f32 * 4.0, 1, 0, 0, 0, i as u32, events));
+        }
+        // 已犯满的 A_1 再被换上场。
+        ticks.push(foul_tick(
+            28.0,
+            1,
+            0,
+            0,
+            0,
+            6,
+            vec![substitution_event(8, "A_6", "A_1")],
+        ));
+        // 已犯满的 A_1 又犯规（个人累计 7）。
+        ticks.push(foul_tick(
+            32.0,
+            1,
+            0,
+            0,
+            0,
+            7,
+            vec![foul_event(9, "H_2", "A_1", 7, 7, true, 0)],
+        ));
+        let violations = check_ledger(&ticks);
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.equation == "FOUL_CONSERVATION"
+                    && v.detail.contains("re-entered the game")),
+            "fouled-out re-entry must be caught: {violations:?}"
+        );
+        assert!(
+            violations.iter().any(|v| v.equation == "FOUL_CONSERVATION"
+                && v.detail.contains("committed another foul")),
+            "fouled-out extra foul must be caught: {violations:?}"
+        );
+    }
+
     /// 正面对照：比分与事件一致的流不得报账。
     #[test]
     fn balanced_ledger_passes() {
@@ -469,6 +921,37 @@ mod tests {
     }
 
     /// 负面对照：回合索引跳变（缺回合）必须被球权守恒捕获。
+    #[test]
+    fn negative_control_shot_outcome_kind_must_match_arrival_fact() {
+        let ticks = vec![synthetic_tick(
+            0.0,
+            720.0,
+            0,
+            0,
+            vec![
+                event(
+                    "SCORE",
+                    serde_json::json!({"HoopArrival": {"shooter_id": "H_1", "is_made": false, "is_three": false}}),
+                    0,
+                ),
+                event(
+                    "SHOT_MISS",
+                    serde_json::json!({"HoopArrival": {"shooter_id": "A_1", "is_made": true, "is_three": false}}),
+                    1,
+                ),
+            ],
+        )];
+        let violations = check_ledger(&ticks);
+        assert_eq!(
+            violations
+                .iter()
+                .filter(|violation| violation.equation == "SCORE_CONSERVATION")
+                .count(),
+            2,
+            "SCORE and SHOT_MISS kinds must agree with HoopArrival.is_made"
+        );
+    }
+
     #[test]
     fn negative_control_possession_gap_detected() {
         let summary = |idx: u64| {

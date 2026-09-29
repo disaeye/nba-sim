@@ -191,9 +191,6 @@ pub enum BallState {
         target_pos: Vec2,
         start_time: f32,
         duration: f32,
-        successful: bool,
-        finish_made: bool,
-        fouler_id: Option<String>,
         move_kind: Option<crate::action_window::DribbleMoveKind>,
     },
     /// 控球交接 / 发球递交的短飞行。
@@ -208,38 +205,33 @@ pub enum BallState {
         duration: f32,
     },
     /// 传球飞行（含界外发球传球，inbound = true）。
+    /// `from_z` 是释放时刻的球高：传球从球的实际高度出发上升到接球人
+    /// 胸口，避免地板球直接跳到胸口高度的单帧位移。
     Pass {
         from_pos: Vec2,
+        from_z: f32,
         to_pos: Vec2,
         target_id: String,
         start_time: f32,
         duration: f32,
         peak_z: f32,
         inbound: bool,
-        /// 出手时刻裁定、到达时刻回放。
-        receive_success: bool,
     },
     /// 投篮飞行。
     Shot {
         shooter_id: String,
         from_pos: Vec2,
         hoop_pos: Vec2,
+        /// 实际瞄准点；释放时按命中概率输入抽取。
+        aim_pos: Vec2,
         start_time: f32,
         duration: f32,
-        is_made: bool,
         is_three: bool,
         peak_z: f32,
-        /// 本次出手是否造成投篮犯规（含三分犯规）。
-        ///
-        /// 为什么是事实的一部分（evidence/problem.md §23.9）：全仓
-        /// `shooting_foul` 原本只在 `DriveResolution` 产生，即**只有突破能被
-        /// 犯规**，跳投在被干扰时没有任何造犯规可能（实测 seed42 全场
-        /// 仅 12 次犯规，真实 NBA 约 40）。犯规与出手是否命中是**两个独立
-        /// 事实**：真实篮球里 and-one（犯规且命中）与投篮犯规（犯规且不中）
-        /// 都存在，因此不能在球触地时从一个布尔反推。
-        fouled: bool,
-        /// 犯规者（`fouled == true` 时存在）。
-        fouler_id: Option<String>,
+        /// 释放时刻的命中概率输入。命中在触筐结算时决定。
+        make_probability: f32,
+        /// 释放时刻可见的干扰强度。投篮犯规在出手窗口内的接触事实出现时发布。
+        contest_intensity: f32,
     },
     /// 松球（传球脱手/篮板弹地）。`last_touch_team` 记录最后触球方
     /// （architecture：InFlight/Loose→最后触球队），是飞行期
@@ -256,6 +248,29 @@ pub enum BallState {
         vel_z: f32,
         last_touch_team: Possession,
         last_touch_player: Option<String>,
+    },
+    /// 罚球从当前球位移动到罚球线的准备过程。
+    FreeThrowSetup {
+        shooter_id: String,
+        from_pos: Vec2,
+        from_z: f32,
+        to_pos: Vec2,
+        to_z: f32,
+        start_time: f32,
+        duration: f32,
+        forced_result: Option<bool>,
+        is_final: bool,
+    },
+    /// 罚球飞向篮筐的飞行。不中后由实际到达位置生成篮板飞行。
+    FreeThrow {
+        shooter_id: String,
+        from_pos: Vec2,
+        hoop_pos: Vec2,
+        aim_pos: Vec2,
+        start_time: f32,
+        duration: f32,
+        peak_z: f32,
+        is_final: bool,
     },
     /// 打铁触筐后的篮板飞行。`last_touch_team` 为出手方（触筐不改 Team control）。
     /// `last_touch_player` 为出手人，与 `LooseBall` 同一归因用途。
@@ -336,7 +351,9 @@ impl BallState {
             } => Some(carrier_id.as_str()),
             BallState::ControlTransfer { .. } => None,
             BallState::Pass { target_id, .. } => Some(target_id.as_str()),
-            BallState::Shot { shooter_id, .. } => Some(shooter_id.as_str()),
+            BallState::Shot { shooter_id, .. }
+            | BallState::FreeThrowSetup { shooter_id, .. }
+            | BallState::FreeThrow { shooter_id, .. } => Some(shooter_id.as_str()),
             BallState::InboundTransfer { inbounder_id, .. }
             | BallState::InboundReady { inbounder_id, .. } => Some(inbounder_id.as_str()),
             BallState::LooseBall {
@@ -372,6 +389,8 @@ impl BallState {
             | BallState::ControlTransfer { .. }
             | BallState::Pass { .. }
             | BallState::Shot { .. }
+            | BallState::FreeThrowSetup { .. }
+            | BallState::FreeThrow { .. }
             | BallState::InboundTransfer { .. }
             | BallState::InboundReady { .. } => None,
             BallState::LooseBall {
@@ -396,7 +415,8 @@ impl BallState {
             }
             BallState::Pass { .. } => BallPhase::PassFlight,
             BallState::Drive { .. } => BallPhase::Drive,
-            BallState::Shot { .. } => BallPhase::ShotFlight,
+            BallState::Shot { .. } | BallState::FreeThrow { .. } => BallPhase::ShotFlight,
+            BallState::FreeThrowSetup { .. } => BallPhase::Dead,
             BallState::LooseBall { .. } => BallPhase::Loose,
             BallState::RimRebound { .. } => BallPhase::Rebound,
             BallState::Dead { .. } => BallPhase::Dead,
@@ -436,10 +456,10 @@ fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
             | (B::Held { .. }, B::LooseBall { .. })
             | (B::Held { .. }, B::Dead { .. })
             | (B::Held { .. }, B::InboundTransfer { .. })
-        // 罚球特殊路径：罚球出手为瞬时结算，不中直接进入罚球篮板
-        // （architecture 的 InFlight{FreeThrow}→Loose 语义）。
-        // 罚球程序内两次尝试之间球为死球，不中同样直接进篮板。
+        // 罚球出手在飞行结束时结算，并按下一罚、命中结束或不中篮板转移。
             | (B::Held { .. }, B::RimRebound { .. })
+            | (B::Dead { .. }, B::FreeThrowSetup { .. })
+            | (B::Dead { .. }, B::FreeThrow { .. })
             | (B::Dead { .. }, B::RimRebound { .. })
         // 突破：结算为持球 / 突分传球 / 急停投篮 / 攻框命中后的发球转移（合并建模，同上）/
         // 篮板飞行 / 松球 / 死球。
@@ -465,6 +485,14 @@ fn edge_allowed(cur: &BallState, next: &BallState) -> bool {
             | (B::Shot { .. }, B::Dead { .. })
             | (B::Shot { .. }, B::RimRebound { .. })
             | (B::Shot { .. }, B::LooseBall { .. })
+            | (B::FreeThrowSetup { .. }, B::FreeThrow { .. })
+            | (B::FreeThrowSetup { .. }, B::Dead { .. })
+            | (B::FreeThrowSetup { .. }, B::FreeThrowSetup { .. })
+            | (B::FreeThrow { .. }, B::FreeThrowSetup { .. })
+            | (B::FreeThrow { .. }, B::Dead { .. })
+            | (B::FreeThrow { .. }, B::RimRebound { .. })
+            | (B::FreeThrow { .. }, B::LooseBall { .. })
+            | (B::FreeThrow { .. }, B::FreeThrow { .. })
         // 篮板飞行：被收下（持球）/ 直接一传（outlet，收下即传的原子转移）
         // / 弹出界 / 过渡交接给抢板人（ControlTransfer 合球平滑）。
             | (B::RimRebound { .. }, B::Held { .. })

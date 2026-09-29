@@ -31,7 +31,6 @@ pub fn make_player(id: &str, team: &str, x: f32, y: f32) -> PlayerPhysicsState {
         max_speed_ftps: 22.0,
         max_accel_ftps2: 35.0,
         target_speed_ftps: 0.0,
-        has_ball: false,
         on_court: true,
         action: "Idle".to_string(),
         slot: "PG".to_string(),
@@ -85,12 +84,23 @@ pub fn base_ctx<'a>(physics: &'a nba_physics::PhysicsWorld) -> ConstraintContext
         phase: PhaseType::SetPlay,
         game_flow: nba_domain::GameFlowState::LiveBall,
         ball_phase: nba_domain::BallPhase::Held,
+        ball_holder_id: physics
+            .get_players()
+            .values()
+            .find(|player| player.team == "home")
+            .map(|player| player.id.as_str()),
         inbound_elapsed: 0.0,
         backcourt_elapsed: 0.0,
         rules,
         team_traits: &TEAM_TRAITS,
         possession_had_shot: false,
+        putback_rebounder_id: None,
         possession_elapsed_seconds: f32::from(0u8),
+        lane_dwell_seconds: f32::from(0u8),
+        lane_dwell_player_id: None,
+        frontcourt_established: false,
+        last_touch_player_id: None,
+        pass_target_pos: None,
     }
 }
 

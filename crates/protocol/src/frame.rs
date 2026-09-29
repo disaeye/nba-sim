@@ -282,6 +282,12 @@ pub struct FrameRules {
     /// 球高度上限（BALL_HEIGHT_BOUNDS）。
     #[serde(default = "default_ball_z_max")]
     pub ball_z_max_ft: f32,
+    /// 个人犯满离场阈值（犯规账本 FOUL_CONSERVATION 的唯一限值来源）。
+    #[serde(default = "default_max_personal_fouls")]
+    pub max_personal_fouls: u8,
+    /// 单节球队犯规进入 bonus 的阈值（犯规账本 FOUL_CONSERVATION 的唯一限值来源）。
+    #[serde(default = "default_bonus_fouls_per_period")]
+    pub bonus_fouls_per_period: u32,
 }
 
 fn default_shot_clock() -> f32 {
@@ -295,6 +301,12 @@ fn default_speed_tolerance() -> f32 {
 }
 fn default_ball_z_max() -> f32 {
     35.0
+}
+fn default_max_personal_fouls() -> u8 {
+    6
+}
+fn default_bonus_fouls_per_period() -> u32 {
+    5
 }
 
 impl FrameRules {
@@ -331,6 +343,8 @@ impl Default for FrameRules {
             holder_leash_ft: default_holder_leash(),
             speed_tolerance_ftps: default_speed_tolerance(),
             ball_z_max_ft: default_ball_z_max(),
+            max_personal_fouls: default_max_personal_fouls(),
+            bonus_fouls_per_period: default_bonus_fouls_per_period(),
         }
     }
 }

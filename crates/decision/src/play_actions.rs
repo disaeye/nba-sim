@@ -36,8 +36,6 @@ use crate::potential_field::StableFieldOutput;
 const SCREEN_ROLL_DEPTH_FT: f32 = 8.0;
 /// ScreenPop 外弹目标：沿「篮筐 → 掩护点」射线补齐到三分线半径
 /// （缺口 = `three_point_distance_ft` − 当前距篮距离），不引入独立步长。
-/// SpotUp 就地微调步长（ft）：朝篮筐方向的小步站位修正。
-const SPOT_UP_NUDGE_FT: f32 = 2.0;
 /// Relocate 弱侧转移步长上限（ft）：朝弱侧空档锚点方向，至多移动该距离。
 const RELOCATE_STEP_FT: f32 = 10.0;
 /// CutBackdoor 背切步长（ft）：朝篮筐并偏向对位防守人远侧。
@@ -113,9 +111,18 @@ pub fn resolve_verb(verb: PlayVerb, ctx: &VerbContext) -> VerbResolution {
     let resolution = match verb {
         PlayVerb::ScreenRoll => {
             // 顺下：从掩护点朝篮筐方向跟进。冲筐移动，不预置出手窗口。
+            // 进-出语义（攻方三秒）：已深入限制区的顺下者下一步撤向
+            // 限制区外——顺下是穿越，不停留（charter §6.2）。
+            let attacking_right = ctx.hoop_pos.x > ctx.court.width_ft / f32::from(2u8);
             let to_hoop = (ctx.hoop_pos - ctx.actor_pos).normalize_or_zero();
+            let target_offset = if ctx.court.is_in_lane(ctx.actor_pos, attacking_right) {
+                // 沿「筐 → 当前位置」方向撤出限制区（反向于顺下路径）。
+                -(to_hoop) * SCREEN_ROLL_DEPTH_FT
+            } else {
+                to_hoop * SCREEN_ROLL_DEPTH_FT
+            };
             VerbResolution {
-                target_offset: to_hoop * SCREEN_ROLL_DEPTH_FT,
+                target_offset,
                 window_action: None,
             }
         }
@@ -131,15 +138,10 @@ pub fn resolve_verb(verb: PlayVerb, ctx: &VerbContext) -> VerbResolution {
                 window_action: Some(ActionType::JumpShot),
             }
         }
-        PlayVerb::SpotUp => {
-            // 定点落位：就地微调——朝篮筐方向的小步站位修正（站定等
-            // 接球出手，窗口语义与外弹相同）。
-            let to_hoop = (ctx.hoop_pos - ctx.actor_pos).normalize_or_zero();
-            VerbResolution {
-                target_offset: to_hoop * SPOT_UP_NUDGE_FT,
-                window_action: Some(ActionType::JumpShot),
-            }
-        }
+        PlayVerb::SpotUp => VerbResolution {
+            target_offset: Vec2::ZERO,
+            window_action: Some(ActionType::JumpShot),
+        },
         PlayVerb::Relocate => {
             // 弱侧转移：朝弱侧空档锚点方向移动（空档 = 翼位接球跳投位）。
             let to_anchor = weak_side_anchor(ctx) - ctx.actor_pos;
@@ -152,22 +154,32 @@ pub fn resolve_verb(verb: PlayVerb, ctx: &VerbContext) -> VerbResolution {
         PlayVerb::CutBackdoor => {
             // 背切：朝篮筐切入，同时偏向对位防守人的远侧（把防守人挡在
             // 身后）；无对位信息时直指篮筐。冲筐移动，不预置出手窗口。
+            // 进-出语义（攻方三秒）：已深入限制区的背切者下一步撤向
+            // 限制区外——切入是穿越，不停留（charter §6.2）。
+            let attacking_right = ctx.hoop_pos.x > ctx.court.width_ft / f32::from(2u8);
             let to_hoop = (ctx.hoop_pos - ctx.actor_pos).normalize_or_zero();
-            let lane = match ctx.defender_pos {
-                Some(defender_pos) => {
-                    let perp = Vec2::new(-to_hoop.y, to_hoop.x);
-                    let away = if perp.dot(defender_pos - ctx.actor_pos) > f32::from(0u8) {
-                        -perp
-                    } else {
-                        perp
-                    };
-                    (to_hoop + away).normalize_or_zero()
+            if ctx.court.is_in_lane(ctx.actor_pos, attacking_right) {
+                VerbResolution {
+                    target_offset: -(to_hoop) * BACKDOOR_DEPTH_FT,
+                    window_action: None,
                 }
-                None => to_hoop,
-            };
-            VerbResolution {
-                target_offset: lane * BACKDOOR_DEPTH_FT,
-                window_action: None,
+            } else {
+                let lane = match ctx.defender_pos {
+                    Some(defender_pos) => {
+                        let perp = Vec2::new(-to_hoop.y, to_hoop.x);
+                        let away = if perp.dot(defender_pos - ctx.actor_pos) > f32::from(0u8) {
+                            -perp
+                        } else {
+                            perp
+                        };
+                        (to_hoop + away).normalize_or_zero()
+                    }
+                    None => to_hoop,
+                };
+                VerbResolution {
+                    target_offset: lane * BACKDOOR_DEPTH_FT,
+                    window_action: None,
+                }
             }
         }
         PlayVerb::Lift => {

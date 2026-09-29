@@ -14,13 +14,13 @@ fn legal_edges_are_accepted() {
             held(),
             BallState::Pass {
                 from_pos: Vec2::ZERO,
+                from_z: 4.0,
                 to_pos: Vec2::ONE,
                 target_id: "H_02".into(),
                 start_time: 0.0,
                 duration: 0.5,
                 peak_z: 6.0,
                 inbound: false,
-                receive_success: true,
             },
         ),
         (
@@ -31,9 +31,6 @@ fn legal_edges_are_accepted() {
                 target_pos: Vec2::ONE,
                 start_time: 0.0,
                 duration: 1.0,
-                successful: true,
-                finish_made: false,
-                fouler_id: None,
                 move_kind: None,
             },
         ),
@@ -43,13 +40,13 @@ fn legal_edges_are_accepted() {
                 shooter_id: "H_01".into(),
                 from_pos: Vec2::ZERO,
                 hoop_pos: Vec2::ONE,
+                aim_pos: Vec2::ONE,
                 start_time: 0.0,
                 duration: 1.2,
-                is_made: true,
                 is_three: false,
                 peak_z: 14.0,
-                fouled: false,
-                fouler_id: None,
+                make_probability: 0.5,
+                contest_intensity: 0.0,
             },
         ),
         (
@@ -87,26 +84,26 @@ fn legal_edges_are_accepted() {
         (
             BallState::Pass {
                 from_pos: Vec2::ZERO,
+                from_z: 4.0,
                 to_pos: Vec2::ONE,
                 target_id: "H_02".into(),
                 start_time: 0.0,
                 duration: 0.5,
                 peak_z: 6.0,
                 inbound: false,
-                receive_success: true,
             },
             held(),
         ),
         (
             BallState::Pass {
                 from_pos: Vec2::ZERO,
+                from_z: 4.0,
                 to_pos: Vec2::ONE,
                 target_id: "H_02".into(),
                 start_time: 0.0,
                 duration: 0.5,
                 peak_z: 6.0,
                 inbound: false,
-                receive_success: false,
             },
             BallState::LooseBall {
                 pos: Vec2::ZERO,
@@ -122,13 +119,13 @@ fn legal_edges_are_accepted() {
                 shooter_id: "H_01".into(),
                 from_pos: Vec2::ZERO,
                 hoop_pos: Vec2::ONE,
+                aim_pos: Vec2::ONE,
                 start_time: 0.0,
                 duration: 1.2,
-                is_made: false,
                 is_three: false,
                 peak_z: 14.0,
-                fouled: false,
-                fouler_id: None,
+                make_probability: 0.5,
+                contest_intensity: 0.0,
             },
             BallState::RimRebound {
                 from_pos: Vec2::ZERO,
@@ -200,6 +197,71 @@ fn legal_edges_are_accepted() {
         (
             BallState::Dead {
                 pos: Vec2::ZERO,
+                z: 4.0,
+                last_touch_team: Possession::Home,
+                last_touch_player: Some("H_01".into()),
+            },
+            BallState::FreeThrowSetup {
+                shooter_id: "H_01".into(),
+                from_pos: Vec2::ZERO,
+                from_z: 0.0,
+                to_pos: Vec2::ONE,
+                to_z: 4.0,
+                start_time: 0.0,
+                duration: 1.0,
+                forced_result: None,
+                is_final: false,
+            },
+        ),
+        (
+            BallState::FreeThrowSetup {
+                shooter_id: "H_01".into(),
+                from_pos: Vec2::ZERO,
+                from_z: 4.0,
+                to_pos: Vec2::ONE,
+                to_z: 4.0,
+                start_time: 0.0,
+                duration: 1.0,
+                forced_result: None,
+                is_final: false,
+            },
+            BallState::FreeThrow {
+                shooter_id: "H_01".into(),
+                from_pos: Vec2::ONE,
+                hoop_pos: Vec2::new(2.0, 1.0),
+                aim_pos: Vec2::new(2.0, 1.0),
+                start_time: 1.0,
+                duration: 1.0,
+                peak_z: 14.0,
+                is_final: false,
+            },
+        ),
+        (
+            BallState::FreeThrow {
+                shooter_id: "H_01".into(),
+                from_pos: Vec2::ZERO,
+                hoop_pos: Vec2::ONE,
+                aim_pos: Vec2::ONE,
+                start_time: 0.0,
+                duration: 1.0,
+                peak_z: 14.0,
+                is_final: true,
+            },
+            BallState::RimRebound {
+                from_pos: Vec2::ONE,
+                from_z: 10.0,
+                hoop_pos: Vec2::ONE,
+                target_landing: Vec2::ZERO,
+                start_time: 1.0,
+                duration: 1.0,
+                peak_z: 12.0,
+                last_touch_team: Possession::Home,
+                last_touch_player: Some("H_01".into()),
+            },
+        ),
+        (
+            BallState::Dead {
+                pos: Vec2::ZERO,
                 z: 0.0,
                 last_touch_team: Possession::Home,
                 last_touch_player: None,
@@ -234,13 +296,13 @@ fn legal_edges_are_accepted() {
             },
             BallState::Pass {
                 from_pos: Vec2::ZERO,
+                from_z: 4.0,
                 to_pos: Vec2::ONE,
                 target_id: "H_01".into(),
                 start_time: 0.0,
                 duration: 0.6,
                 peak_z: 8.0,
                 inbound: true,
-                receive_success: true,
             },
         ),
         (
@@ -250,9 +312,6 @@ fn legal_edges_are_accepted() {
                 target_pos: Vec2::ONE,
                 start_time: 0.0,
                 duration: 1.0,
-                successful: false,
-                finish_made: false,
-                fouler_id: None,
                 move_kind: None,
             },
             held(),
@@ -276,13 +335,13 @@ fn illegal_edges_are_rejected() {
         shooter_id: "H_01".into(),
         from_pos: Vec2::ZERO,
         hoop_pos: Vec2::ONE,
+        aim_pos: Vec2::ONE,
         start_time: 0.0,
         duration: 1.2,
-        is_made: false,
         is_three: false,
         peak_z: 14.0,
-        fouled: false,
-        fouler_id: None,
+        make_probability: 0.5,
+        contest_intensity: 0.0,
     };
     assert!(transition_ball_state(&shot, held()).is_err());
     assert!(transition_ball_state(&shot, held()).is_err());
@@ -297,13 +356,13 @@ fn illegal_edges_are_rejected() {
         &dead,
         BallState::Pass {
             from_pos: Vec2::ZERO,
+            from_z: 4.0,
             to_pos: Vec2::ONE,
             target_id: "H_01".into(),
             start_time: 0.0,
             duration: 0.5,
             peak_z: 6.0,
             inbound: false,
-            receive_success: true
         }
     )
     .is_err());
@@ -313,13 +372,13 @@ fn illegal_edges_are_rejected() {
             shooter_id: "H_01".into(),
             from_pos: Vec2::ZERO,
             hoop_pos: Vec2::ONE,
+            aim_pos: Vec2::ONE,
             start_time: 0.0,
             duration: 1.0,
-            is_made: true,
             is_three: false,
             peak_z: 10.0,
-            fouled: false,
-            fouler_id: None,
+            make_probability: 0.5,
+            contest_intensity: 0.0,
         }
     )
     .is_err());
@@ -341,26 +400,26 @@ fn illegal_edges_are_rejected() {
             shooter_id: "H_01".into(),
             from_pos: Vec2::ZERO,
             hoop_pos: Vec2::ONE,
+            aim_pos: Vec2::ONE,
             start_time: 0.0,
             duration: 1.0,
-            is_made: false,
             is_three: false,
             peak_z: 10.0,
-            fouled: false,
-            fouler_id: None,
+            make_probability: 0.5,
+            contest_intensity: 0.0,
         }
     )
     .is_err());
     // 传球飞行不能二次出手。
     let pass = BallState::Pass {
         from_pos: Vec2::ZERO,
+        from_z: 4.0,
         to_pos: Vec2::ONE,
         target_id: "H_02".into(),
         start_time: 0.0,
         duration: 0.5,
         peak_z: 6.0,
         inbound: false,
-        receive_success: true,
     };
     assert!(transition_ball_state(
         &pass,
@@ -368,13 +427,13 @@ fn illegal_edges_are_rejected() {
             shooter_id: "H_02".into(),
             from_pos: Vec2::ONE,
             hoop_pos: Vec2::ONE,
+            aim_pos: Vec2::ONE,
             start_time: 0.0,
             duration: 1.0,
-            is_made: false,
             is_three: false,
             peak_z: 10.0,
-            fouled: false,
-            fouler_id: None,
+            make_probability: 0.5,
+            contest_intensity: 0.0,
         }
     )
     .is_err());
@@ -387,17 +446,16 @@ fn illegal_edges_are_rejected() {
 //
 // 上面的 `legal_edges_are_accepted` / `illegal_edges_are_rejected` 是**样例**
 // 测试：它们挑选了若干代表性边，因而无法回答「声明表是否被完整执行」。
-// 实测差距：`edge_allowed` 声明 **49** 条合法边（10 个球态变体共 100 种
-// 组合），而样例测试只覆盖其中一部分。
+// 状态边测试使用 11 个球态变体，样例测试只覆盖其中一部分组合。
 //
 // `gap.md` §5.3 要求「状态机必须列出合法边、非法边和每条边的责任事件」。
-// 本测试用**穷举矩阵**兑现该要求：对全部 10×10 = 100 种组合断言
+// 本测试用**穷举矩阵**兑现该要求：对全部 11×11 = 121 种组合断言
 // `transition_ball_state` 的接受/拒绝与声明表**逐一一致**。
 //
 // 这样任何一处边增删都会让矩阵失配，而不是悄悄通过样例测试。
 // ============================================================================
 
-/// 构造 10 个球态变体各一个代表实例（字段取合法占位值）。
+/// 构造除罚球准备外的 11 个球态变体代表实例。
 fn all_variants() -> Vec<(&'static str, BallState)> {
     vec![
         (
@@ -414,9 +472,6 @@ fn all_variants() -> Vec<(&'static str, BallState)> {
                 target_pos: Vec2::ONE,
                 start_time: 0.0,
                 duration: 1.0,
-                successful: true,
-                finish_made: false,
-                fouler_id: None,
                 move_kind: None,
             },
         ),
@@ -424,13 +479,13 @@ fn all_variants() -> Vec<(&'static str, BallState)> {
             "Pass",
             BallState::Pass {
                 from_pos: Vec2::ZERO,
+                from_z: 4.0,
                 to_pos: Vec2::ONE,
                 target_id: "H_02".into(),
                 start_time: 0.0,
                 duration: 0.5,
                 peak_z: 8.0,
                 inbound: false,
-                receive_success: true,
             },
         ),
         (
@@ -439,13 +494,26 @@ fn all_variants() -> Vec<(&'static str, BallState)> {
                 shooter_id: "H_01".into(),
                 from_pos: Vec2::ZERO,
                 hoop_pos: Vec2::ONE,
+                aim_pos: Vec2::ONE,
                 start_time: 0.0,
                 duration: 1.2,
-                is_made: false,
                 is_three: false,
                 peak_z: 14.0,
-                fouled: false,
-                fouler_id: None,
+                make_probability: 0.5,
+                contest_intensity: 0.0,
+            },
+        ),
+        (
+            "FreeThrow",
+            BallState::FreeThrow {
+                shooter_id: "H_01".into(),
+                from_pos: Vec2::ZERO,
+                hoop_pos: Vec2::ONE,
+                aim_pos: Vec2::ONE,
+                start_time: 0.0,
+                duration: 1.0,
+                peak_z: 14.0,
+                is_final: false,
             },
         ),
         (
@@ -550,6 +618,16 @@ const DECLARED_LEGAL: &[(&str, &str)] = &[
     ("Shot", "Dead"),
     ("Shot", "RimRebound"),
     ("Shot", "LooseBall"),
+    // FreeThrowSetup
+    ("FreeThrowSetup", "FreeThrow"),
+    ("FreeThrowSetup", "Dead"),
+    ("FreeThrowSetup", "FreeThrowSetup"),
+    // FreeThrow
+    ("FreeThrow", "FreeThrowSetup"),
+    ("FreeThrow", "RimRebound"),
+    ("FreeThrow", "LooseBall"),
+    ("FreeThrow", "Dead"),
+    ("FreeThrow", "FreeThrow"),
     // RimRebound
     ("RimRebound", "Held"),
     ("RimRebound", "ControlTransfer"),
@@ -569,8 +647,10 @@ const DECLARED_LEGAL: &[(&str, &str)] = &[
     ("ControlTransfer", "Dead"),
     ("ControlTransfer", "InboundTransfer"),
     // Dead
+    ("Dead", "FreeThrowSetup"),
     ("Dead", "RimRebound"),
     ("Dead", "InboundTransfer"),
+    ("Dead", "FreeThrow"),
     ("Dead", "Dead"),
     // InboundTransfer
     ("InboundTransfer", "InboundReady"),
@@ -584,11 +664,25 @@ const DECLARED_LEGAL: &[(&str, &str)] = &[
 
 #[test]
 fn every_state_edge_matches_the_declared_table() {
-    let variants = all_variants();
+    let mut variants = all_variants();
+    variants.push((
+        "FreeThrowSetup",
+        BallState::FreeThrowSetup {
+            shooter_id: "H_01".into(),
+            from_pos: Vec2::ZERO,
+            from_z: 4.0,
+            to_pos: Vec2::ONE,
+            to_z: 4.0,
+            start_time: 0.0,
+            duration: 1.0,
+            forced_result: None,
+            is_final: false,
+        },
+    ));
     assert_eq!(
         variants.len(),
-        10,
-        "expected 10 ball-state variants; update DECLARED_LEGAL when adding one"
+        12,
+        "expected 12 ball-state variants; update DECLARED_LEGAL when adding one"
     );
 
     let legal: std::collections::HashSet<(&str, &str)> = DECLARED_LEGAL.iter().copied().collect();
@@ -620,14 +714,14 @@ fn every_state_edge_matches_the_declared_table() {
         mismatches.join("\n  ")
     );
 
-    // 完整性自检：100 种组合必须被分类为 50 合法 + 50 非法。
+    // 完整性自检：144 种组合必须全部分类。
     // 数字变化说明声明表被改动——此时应显式更新本测试与 DECLARED_LEGAL，
     // 而不是让它静默通过。
     let total = variants.len() * variants.len();
-    assert_eq!(legal.len(), 50, "declared legal edge count changed");
+    assert_eq!(legal.len(), 60, "declared legal edge count changed");
     assert_eq!(
         total - legal.len(),
-        50,
+        84,
         "declared illegal edge count changed"
     );
 }

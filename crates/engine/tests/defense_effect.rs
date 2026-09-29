@@ -65,21 +65,27 @@ fn profile(scheme: &str, seed: u64) -> DefenseProfile {
     while !engine.is_finished() && ticks < 300_000 {
         let tick = engine.step();
         let offenders = tick.frame.possession_team.clone();
-        // 仅采样活球阶段：死球/发球/罚球的站位由程序决定，不反映防守体系。
+        // 仅采样活球阶段：死球/发球/罚球的站位由程序决定，不反映防守体系；
+        // 且仅采样落位后的阵地防守（球已进入攻击篮筐 30ft 邻域）——
+        // 全场均值会被后场推进/转换跑动主导（实测均值 ~40ft，方案间的
+        // 真实收缩差不足 1ft，会被序列漂移淹没而翻转）。
         let live = tick.frame.game_flow == "LiveBall";
-        if live {
-            let (hoop_x, hoop_y) = {
-                let c = &rules.court;
-                // 防守方保护的是**进攻方正在攻击的那个篮筐**。
-                // 引擎口径：`attacking_right = (possession == Possession::Home)`
-                // （见 match_engine.rs 的 `is_backcourt` 调用点）。
-                // 因此 home 进攻时攻右篮，away 进攻时攻左篮。
-                if offenders == "home" {
-                    (c.hoop_right_x_ft, c.hoop_y_ft)
-                } else {
-                    (c.hoop_left_x_ft, c.hoop_y_ft)
-                }
-            };
+        let ball_x = tick.frame.ball.x * rules.court.width_ft;
+        let ball_y = tick.frame.ball.y * rules.court.height_ft;
+        let (hoop_x, hoop_y) = {
+            let c = &rules.court;
+            // 防守方保护的是**进攻方正在攻击的那个篮筐**。
+            // 引擎口径：`attacking_right = (possession == Possession::Home)`
+            // （见 match_engine.rs 的 `is_backcourt` 调用点）。
+            // 因此 home 进攻时攻右篮，away 进攻时攻左篮。
+            if offenders == "home" {
+                (c.hoop_right_x_ft, c.hoop_y_ft)
+            } else {
+                (c.hoop_left_x_ft, c.hoop_y_ft)
+            }
+        };
+        let settled = ((ball_x - hoop_x).powi(2) + (ball_y - hoop_y).powi(2)).sqrt() <= 30.0;
+        if live && settled {
             let defenders: Vec<(f32, f32)> = tick
                 .frame
                 .players

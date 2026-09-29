@@ -12,6 +12,9 @@ use nba_physics::ballistics::BallTrajectoryKind;
 
 use super::MatchEngine;
 
+/// 转换跑动倾向缺省值（球员档案未携带倾向时的中性个体）。
+const DEFAULT_TRANSITION_SPRINT: f32 = 0.5;
+
 impl MatchEngine {
     pub(crate) fn plan_tactics_and_navigation(&mut self, current_t: f32) {
         // ============================================================
@@ -76,13 +79,27 @@ impl MatchEngine {
                 }
             }
         }
-        let mut off_targets = TacticalPlanner::plan_offense_from_spec(
+        // 槽位倾向（attributes.md §2.6 项 4/5）：按 slot fill 的绑定结果
+        // （`filled_ids` 与 `spec.slots` 同序）传入，无球切入与掩护顺下
+        // 的深度由占据该槽位的球员倾向调制。
+        let slot_tendencies: Vec<nba_domain::PlayerTendencies> = filled_ids
+            .iter()
+            .filter_map(|id| {
+                self.systems
+                    .physics
+                    .get_player(id)
+                    .map(|p| p.tendencies.clone())
+            })
+            .collect();
+        let mut off_targets = TacticalPlanner::plan_offense_from_spec_with_tendencies(
             off_spec,
             self.clock.sub_phase,
             self.flow.possession,
             carrier_slot,
             self.clock.sub_phase_timer,
+            self.clock.frontcourt_seconds,
             &self.config.rules,
+            Some(&slot_tendencies),
         );
         TacticalPlanner::bind_targets(&mut off_targets, &filled_ids);
 
@@ -108,18 +125,45 @@ impl MatchEngine {
         // 防守目标沿用对位/协防逻辑（含 D5.2 的执行器）。
         // D26：突破球态传入弱侧激励——突破时弱侧防守人向篮筐收缩。
         let drive_active = matches!(&self.ball.ball_state, BallTrajectoryKind::Drive { .. });
+        // 转换窗口：转换开始后的有限秒数内（与 `transition_finish_window`
+        // 同一口径），进攻人的跑动速度受 `transition_sprint` 倾向调制。
+        let in_transition = self
+            .possession_ctx
+            .transition_context_event(
+                current_t,
+                self.config.rules.tactics.transition_sprint_window_seconds,
+            )
+            .is_some();
+        // 防守方倾向按名册顺序传入（与 `bind_targets_with_matchups` 的
+        // 绑定口径一致）：协防触发阈值由个体倾向调制
+        // （attributes.md §2.6 项 9）。
+        let defending_roster = match self.flow.possession {
+            Possession::Home => &self.config.away_roster_order,
+            Possession::Away => &self.config.home_roster_order,
+        };
+        let defending_tendencies: Vec<nba_domain::PlayerTendencies> = defending_roster
+            .iter()
+            .filter_map(|id| {
+                self.systems
+                    .physics
+                    .get_player(id)
+                    .map(|p| p.tendencies.clone())
+            })
+            .collect();
         let (mut home_targets, mut away_targets) =
-            TacticalPlanner::plan_possession_targets_with_rules(
+            TacticalPlanner::plan_possession_targets_with_rules_and_tendencies(
                 self.config.tactical_set,
                 self.clock.sub_phase,
                 self.flow.possession,
                 self.ball.ball_pos_3d.0,
                 carrier_idx,
                 self.clock.sub_phase_timer,
+                self.clock.frontcourt_seconds,
                 &mut self.systems.rng,
                 &self.config.rules,
                 Some(&live_off_positions),
                 drive_active,
+                Some(&defending_tendencies),
             );
         let home_roster = self.config.home_roster_order.clone();
         let away_roster = self.config.away_roster_order.clone();
@@ -130,10 +174,18 @@ impl MatchEngine {
         // （本轮实测 116 条 PLAYER_SEPARATION：替补 A_7 与在场球员重叠 1.19ft）。
         if self.flow.possession == Possession::Home {
             home_targets = off_targets;
-            TacticalPlanner::bind_targets(&mut away_targets, &away_roster);
+            TacticalPlanner::bind_targets_with_matchups(
+                &mut away_targets,
+                &away_roster,
+                &home_roster,
+            );
         } else {
             away_targets = off_targets;
-            TacticalPlanner::bind_targets(&mut home_targets, &home_roster);
+            TacticalPlanner::bind_targets_with_matchups(
+                &mut home_targets,
+                &home_roster,
+                &away_roster,
+            );
         }
         let defending_targets = if self.flow.possession == Possession::Home {
             &away_targets
@@ -141,6 +193,7 @@ impl MatchEngine {
             &home_targets
         };
         self.capture_potential_field_observations(defending_targets);
+        self.track_defense_responsibilities(defending_targets);
         // 取为 owned String，避免与后续 `&mut self` 调用（接球人估计）冲突。
         let active_driver_id = match &self.ball.ball_state {
             BallTrajectoryKind::Drive { driver_id, .. } => Some(driver_id.clone()),
@@ -179,8 +232,8 @@ impl MatchEngine {
         };
         let pass_receiver_override = if let Some((rid, frozen)) = pass_fields {
             let est = self.estimate_receiver_landing(&rid, frozen);
-            // 接球人标记已在 `transition_ball_state`（唯一写入口）设置，
-            // 确保物理步进先于战术规划时也能生效。
+            // 接球人标记已在 `transition_ball_state` 设置；估计点用于接球判定，
+            // 跑位目标仍由战术系统生成。
             Some((rid, est))
         } else {
             match &self.ball.ball_state {
@@ -200,10 +253,68 @@ impl MatchEngine {
         };
         let home_jumper = self.select_jumper_id(Possession::Home);
         let away_jumper = self.select_jumper_id(Possession::Away);
+        // 活球松球争抢优先（charter §6.2 松球事实）：最近代表必须在一切
+        // 战术微操（切割路线残留、被过恢复）之前被派向球点——否则切割
+        // 残留者的物理动作标签永远是切割类，`still_cutting` 检查永远
+        // 通过，连最近的争抢代表也被 continue 跳过，球静躺在地上无人
+        // 问津直到节末（实测 seed 11 p123 停滞 42 秒）。选择排除运动学
+        // 锁定者（投篮/传球窗口内的人无法移动），每队各保证至少一人。
+        let loose_chase_primary: Option<(Vec2, std::collections::HashSet<String>)> =
+            if let BallTrajectoryKind::LooseBall { pos, z, .. } = &self.ball.ball_state {
+                let spot = *pos;
+                let ball_z = *z;
+                let mut eligible: Vec<(f32, String, String)> = self
+                    .systems
+                    .physics
+                    .get_players()
+                    .values()
+                    .filter(|p| p.on_court && !p.is_locked_kinematics)
+                    .filter(|p| !(ball_z > 0.5 && (p.id == home_jumper || p.id == away_jumper)))
+                    .map(|p| ((p.pos_ft - spot).length(), p.id.clone(), p.team.clone()))
+                    .collect();
+                eligible.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                let intercept = self.config.rules.intercept_lane_radius_ft;
+                let mut primary: std::collections::HashSet<String> = eligible
+                    .iter()
+                    .filter(|(dist, _, _)| *dist <= intercept)
+                    .map(|(_, id, _)| id.clone())
+                    .collect();
+                let mut seen_teams: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                for (_, id, team) in &eligible {
+                    if seen_teams.insert(team.clone()) {
+                        primary.insert(id.clone());
+                    }
+                }
+                if primary.is_empty() {
+                    None
+                } else {
+                    Some((spot, primary))
+                }
+            } else {
+                None
+            };
         for target in home_targets.into_iter().chain(away_targets) {
             if let Some(player_id) = target.player_id {
                 if active_driver_id.as_deref() == Some(player_id.as_str()) {
                     continue;
+                }
+                // 活球松球争抢优先于一切战术微操：最近代表（循环前算好）
+                // 直接奔赴球点，切割残留/被过恢复都不适用。
+                if let Some((spot, primary)) = &loose_chase_primary {
+                    if primary.contains(&player_id) {
+                        let chase_base = self.config.rules.max_player_speed_ftps
+                            * self.config.rules.tactics.rebound_chase_speed_ratio;
+                        self.systems.physics.set_player_target(
+                            &player_id,
+                            *spot,
+                            target.speed.max(chase_base),
+                            "REBOUND_CRASH",
+                            &target.slot,
+                            &target.morale,
+                        );
+                        continue;
+                    }
                 }
                 // 被过恢复窗口（round-19）：被过掉的防守人正扑向回追位，
                 // 战术层不得立即把他派回原位（否则让位形同虚设）。
@@ -227,6 +338,7 @@ impl MatchEngine {
                     &self.ball.ball_state,
                     BallTrajectoryKind::Held { .. } | BallTrajectoryKind::Drive { .. }
                 );
+                let is_cut_route = self.observations.cut_route_players.contains(&player_id);
                 let is_action_locked = ball_in_hands_for_lock
                     && self
                         .systems
@@ -243,7 +355,26 @@ impl MatchEngine {
                         })
                         .unwrap_or(false);
 
-                if in_active_window || is_action_locked {
+                if in_active_window || is_action_locked || is_cut_route {
+                    if !in_active_window && !is_action_locked {
+                        let still_cutting = self
+                            .systems
+                            .physics
+                            .get_player(&player_id)
+                            .is_some_and(|player| {
+                                matches!(
+                                    player.action.as_str(),
+                                    "BACKDOOR_CUT"
+                                        | "DIP_TO_RIM"
+                                        | "ROLL_TO_RIM"
+                                        | "PLAY_CutBackdoor"
+                                        | "PLAY_ScreenRoll"
+                                )
+                            });
+                        if !still_cutting {
+                            self.observations.cut_route_players.remove(&player_id);
+                        }
+                    }
                     continue;
                 }
 
@@ -257,9 +388,11 @@ impl MatchEngine {
                     && !self.observations.active_windows.contains_key(&player_id)
                     && has_carrier
                 {
-                    self.observations.active_windows.insert(
-                        player_id.clone(),
+                    self.start_action_window(
+                        &player_id,
                         ActionTimeWindow::new_screen_set(&player_id, current_t, &self.config.rules),
+                        None,
+                        Some((target.target_pos.x, target.target_pos.y)),
                     );
                 }
 
@@ -283,25 +416,31 @@ impl MatchEngine {
                 if is_carrier_advancing {
                     continue;
                 }
+                let cut_action = matches!(
+                    target.action.as_str(),
+                    "BACKDOOR_CUT"
+                        | "DIP_TO_RIM"
+                        | "ROLL_TO_RIM"
+                        | "PLAY_CutBackdoor"
+                        | "PLAY_ScreenRoll"
+                );
+                if cut_action {
+                    self.observations
+                        .cut_route_players
+                        .insert(player_id.clone());
+                }
                 let (target_pos, speed, action) = if let Some((inb_id, inb_pos)) =
                     &inbounder_override
                 {
                     if inb_id == &player_id {
                         (*inb_pos, 15.0, "INBOUND_SETUP".to_string())
-                    } else if let Some((rx_id, rx_pos)) = &pass_receiver_override {
-                        if rx_id == &player_id {
-                            let (aim, spd) = self.receive_approach(*rx_pos, &player_id);
-                            (aim, spd, "RECEIVE_CUT".to_string())
-                        } else {
-                            (target.target_pos, target.speed, target.action)
-                        }
                     } else {
                         (target.target_pos, target.speed, target.action)
                     }
-                } else if let Some((rx_id, rx_pos)) = &pass_receiver_override {
-                    if rx_id == &player_id {
-                        let (aim, spd) = self.receive_approach(*rx_pos, &player_id);
-                        (aim, spd, "RECEIVE_CUT".to_string())
+                } else if let Some((receiver_id, estimate)) = &pass_receiver_override {
+                    if receiver_id == &player_id {
+                        let (aim, speed) = self.receive_approach(*estimate, &player_id);
+                        (aim, speed, "RECEIVE_CUT".to_string())
                     } else {
                         (target.target_pos, target.speed, target.action)
                     }
@@ -314,36 +453,12 @@ impl MatchEngine {
                         .unwrap_or(99.0);
                     let is_tipoff_jumper = matches!(&self.ball.ball_state, BallTrajectoryKind::LooseBall { z, .. } if *z > 0.5)
                         && (player_id == home_jumper || player_id == away_jumper);
-                    let is_live_loose_ball =
-                        matches!(self.ball.ball_state, BallTrajectoryKind::LooseBall { .. });
 
-                    // 规则与空间驱动的分工机制：
-                    // 1. 若为松球，主客双方各由离球最近的争抢代表奔赴球点，
-                    //    处于近身拦截半径内的球员也可参与争抢；
-                    // 2. 其余非争抢球员保持战术空间展开或者防守回退站位；
-                    // 3. 速度由规则上限与战术系数计算，不使用内置固定常量。
-                    let is_primary_chaser = if is_live_loose_ball && !is_tipoff_jumper {
-                        let player_team = self
-                            .systems
-                            .physics
-                            .get_player(&player_id)
-                            .map(|p| p.team.clone())
-                            .unwrap_or_default();
-                        let is_closest_on_team = self
-                            .systems
-                            .physics
-                            .get_players()
-                            .values()
-                            .filter(|p| p.on_court && p.team == player_team)
-                            .min_by(|a, b| {
-                                (a.pos_ft - reb_spot)
-                                    .length()
-                                    .partial_cmp(&(b.pos_ft - reb_spot).length())
-                                    .unwrap_or(std::cmp::Ordering::Equal)
-                            })
-                            .map(|p| p.id == player_id)
-                            .unwrap_or(false);
-                        is_closest_on_team || cur_dist <= self.config.rules.intercept_lane_radius_ft
+                    // 篮板反弹（RimRebound）：近身者可加入冲抢；松球的最近
+                    // 代表已在循环前直接派发（loose_chase_primary），这里
+                    // 只处理篮板与残余近身拦截。
+                    let is_primary_chaser = if is_tipoff_jumper {
+                        false
                     } else {
                         cur_dist <= 25.0
                     };
@@ -351,11 +466,7 @@ impl MatchEngine {
                     if is_primary_chaser && !is_tipoff_jumper {
                         let chase_base = self.config.rules.max_player_speed_ftps
                             * self.config.rules.tactics.rebound_chase_speed_ratio;
-                        let chase_speed = if is_live_loose_ball {
-                            target.speed.max(chase_base)
-                        } else {
-                            chase_base
-                        };
+                        let chase_speed = chase_base.max(0.0);
                         (reb_spot, chase_speed, "REBOUND_CRASH".to_string())
                     } else {
                         (target.target_pos, target.speed, target.action)
@@ -381,6 +492,58 @@ impl MatchEngine {
                     speed * (0.95 + awareness * 0.15)
                 } else {
                     speed
+                };
+                // 转换跑动倾向（attributes.md §2.6 项 11）：转换窗口内
+                // 进攻人按 `transition_sprint` 缩放跑动速度——快的人冲得
+                // 更快，慢的人在后面跑。速度比走 `tactics.transition_sprint_ratio`
+                // 通道（团队基准），倾向是个体修正。
+                let effective_speed = if in_transition
+                    && self
+                        .systems
+                        .physics
+                        .get_player(&player_id)
+                        .is_some_and(|p| {
+                            p.team
+                                == match self.flow.possession {
+                                    Possession::Home => "home",
+                                    Possession::Away => "away",
+                                }
+                        }) {
+                    let sprint_tendency = self
+                        .systems
+                        .physics
+                        .get_player(&player_id)
+                        .map(|p| p.tendencies.transition_sprint)
+                        .unwrap_or(DEFAULT_TRANSITION_SPRINT);
+                    let sprint_scale = self.config.rules.tactics.transition_sprint_floor
+                        + sprint_tendency * self.config.rules.tactics.transition_sprint_span;
+                    effective_speed * sprint_scale
+                } else {
+                    effective_speed
+                };
+                // 回场条款的运动层体现（charter §6.2）：前场已建立时，持球人
+                // 的战术目标不得指向后场——真实球员知道规则，不会把球
+                // 带回后场。只改目标不做位置钳制，避免制造速度瞬移。
+                let target_pos = if self.clock.frontcourt_established
+                    && self.flow.game_flow.allows_live_ball_actions()
+                    && matches!(
+                        &self.ball.ball_state,
+                        BallTrajectoryKind::Held { carrier_id }
+                            | BallTrajectoryKind::Drive { driver_id: carrier_id, .. }
+                            if carrier_id == &player_id
+                    )
+                    && self
+                        .config
+                        .rules
+                        .court
+                        .is_backcourt(target_pos, self.flow.possession == Possession::Home)
+                {
+                    let midcourt = self.config.rules.court.width_ft * 0.5;
+                    // 中线本身不属于后场（两侧 `is_backcourt` 均为假），
+                    // 把目标钳到中线即回到合法前场。
+                    glam::Vec2::new(midcourt, target_pos.y)
+                } else {
+                    target_pos
                 };
                 self.systems.physics.set_player_target(
                     &player_id,
@@ -418,20 +581,26 @@ impl MatchEngine {
         let Some(selection_context) = self.build_play_selection_context(carrier_id) else {
             return;
         };
-        let active = match possession {
-            Possession::Home => self.observations.home_active_play.as_ref(),
-            Possession::Away => self.observations.away_active_play.as_ref(),
+        let (play_id, actions) = {
+            let active = match possession {
+                Possession::Home => self.observations.home_active_play.as_ref(),
+                Possession::Away => self.observations.away_active_play.as_ref(),
+            };
+            let Some(active) = active else {
+                return;
+            };
+            (
+                active.spec.id.clone(),
+                nba_decision::evaluate_active_play(&active.spec, &selection_context)
+                    .matched_rule_actions()
+                    .to_vec(),
+            )
         };
-        let Some(active) = active else {
-            return;
-        };
-        let actions = nba_decision::evaluate_active_play(&active.spec, &selection_context)
-            .matched_rule_actions()
-            .to_vec();
         let offense_targets = match possession {
             Possession::Home => home_targets,
             Possession::Away => away_targets,
         };
+        let mut windows_to_start = Vec::new();
         for action in actions {
             let target = offense_targets
                 .iter_mut()
@@ -439,7 +608,7 @@ impl MatchEngine {
                 .unwrap_or_else(|| {
                     panic!(
                         "play `{}` rule `{}` references missing slot `{}` in active System",
-                        active.spec.id, action.rule_id, action.slot
+                        play_id, action.rule_id, action.slot
                     )
                 });
             let player_id = target
@@ -517,8 +686,8 @@ impl MatchEngine {
                 &target_morale,
             );
             if should_start_window {
-                if let Some(action_type) = resolution.window_action {
-                    let window = match action_type {
+                let window = if let Some(action_type) = resolution.window_action {
+                    match action_type {
                         nba_domain::action_window::ActionType::JumpShot => {
                             Some(nba_domain::action_window::ActionTimeWindow::new_jump_shot(
                                 &player_id,
@@ -540,22 +709,103 @@ impl MatchEngine {
                                 &self.config.rules,
                             ))
                         }
-                        nba_domain::action_window::ActionType::Layup
-                        | nba_domain::action_window::ActionType::Dunk
-                        | nba_domain::action_window::ActionType::CloseoutContest
-                        | nba_domain::action_window::ActionType::ReboundJump => {
-                            panic!(
-                                "Play verb `{}` resolved unsupported action window {action_type:?}",
-                                action.verb.as_str()
-                            )
+                        nba_domain::action_window::ActionType::ScreenRoll => Some(
+                            nba_domain::action_window::ActionTimeWindow::new_screen_roll(
+                                &player_id,
+                                current_t,
+                                &self.config.rules,
+                            ),
+                        ),
+                        nba_domain::action_window::ActionType::ScreenPop => {
+                            Some(nba_domain::action_window::ActionTimeWindow::new_screen_pop(
+                                &player_id,
+                                current_t,
+                                &self.config.rules,
+                            ))
                         }
-                    };
-                    self.observations.active_windows.insert(
-                        player_id.clone(),
-                        window.expect("play verb resolved a window"),
-                    );
+                        nba_domain::action_window::ActionType::CutBackdoor => Some(
+                            nba_domain::action_window::ActionTimeWindow::new_cut_backdoor(
+                                &player_id,
+                                current_t,
+                                &self.config.rules,
+                            ),
+                        ),
+                        nba_domain::action_window::ActionType::Cut => {
+                            Some(nba_domain::action_window::ActionTimeWindow::new_cut(
+                                &player_id,
+                                current_t,
+                                &self.config.rules,
+                            ))
+                        }
+                        nba_domain::action_window::ActionType::BoxOut => {
+                            Some(nba_domain::action_window::ActionTimeWindow::new_box_out(
+                                &player_id,
+                                current_t,
+                                &self.config.rules,
+                            ))
+                        }
+                        nba_domain::action_window::ActionType::Putback => {
+                            Some(nba_domain::action_window::ActionTimeWindow::new_putback(
+                                &player_id,
+                                current_t,
+                                &self.config.rules,
+                            ))
+                        }
+                        nba_domain::action_window::ActionType::Layup => {
+                            Some(nba_domain::action_window::ActionTimeWindow::new_layup(
+                                &player_id,
+                                current_t,
+                                &self.config.rules,
+                            ))
+                        }
+                        nba_domain::action_window::ActionType::Dunk => {
+                            Some(nba_domain::action_window::ActionTimeWindow::new_dunk(
+                                &player_id,
+                                current_t,
+                                &self.config.rules,
+                            ))
+                        }
+                        nba_domain::action_window::ActionType::CloseoutContest => Some(
+                            nba_domain::action_window::ActionTimeWindow::new_closeout_contest(
+                                &player_id,
+                                current_t,
+                                &self.config.rules,
+                            ),
+                        ),
+                        nba_domain::action_window::ActionType::ReboundJump => Some(
+                            nba_domain::action_window::ActionTimeWindow::new_rebound_jump(
+                                &player_id,
+                                current_t,
+                                &self.config.rules,
+                            ),
+                        ),
+                    }
+                } else {
+                    match action.verb {
+                        nba_domain::play::PlayVerb::ScreenRoll => Some(
+                            nba_domain::action_window::ActionTimeWindow::new_screen_roll(
+                                &player_id,
+                                current_t,
+                                &self.config.rules,
+                            ),
+                        ),
+                        nba_domain::play::PlayVerb::CutBackdoor => Some(
+                            nba_domain::action_window::ActionTimeWindow::new_cut_backdoor(
+                                &player_id,
+                                current_t,
+                                &self.config.rules,
+                            ),
+                        ),
+                        _ => None,
+                    }
+                };
+                if let Some(w) = window {
+                    windows_to_start.push((player_id, w, next_target));
                 }
             }
+        }
+        for (pid, w, next_target) in windows_to_start {
+            self.start_action_window(&pid, w, None, Some((next_target.x, next_target.y)));
         }
     }
 
@@ -600,5 +850,41 @@ impl MatchEngine {
                     void_ratio: potential.void_ratio,
                 });
         }
+    }
+
+    fn track_defense_responsibilities(
+        &mut self,
+        defending_targets: &[nba_decision::tactics::TargetAssignment],
+    ) {
+        let mut events = Vec::new();
+        for target in defending_targets {
+            let Some(player_id) = &target.player_id else {
+                continue;
+            };
+            let Some(new_resp) = target.responsibility else {
+                continue;
+            };
+            let old_resp = self
+                .observations
+                .defense_responsibilities
+                .get(player_id)
+                .copied()
+                .unwrap_or(nba_domain::DefenseResponsibility::PrimaryMatchup);
+            if old_resp != new_resp {
+                self.observations
+                    .defense_responsibilities
+                    .insert(player_id.clone(), new_resp);
+                let off_id = target.offensive_player_id.clone().unwrap_or_default();
+                events.push(nba_domain::GameEvent::DefenseResponsibilityChanged {
+                    defender_id: player_id.clone(),
+                    old_responsibility: old_resp,
+                    new_responsibility: new_resp,
+                    offensive_player_id: off_id,
+                    prior_defender_id: None,
+                    trigger: Some(target.action.clone()),
+                });
+            }
+        }
+        self.journal.pending_events.extend(events);
     }
 }

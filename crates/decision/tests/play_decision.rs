@@ -73,7 +73,6 @@ fn player_state(rules: &GameRules) -> PlayerPhysicsState {
         target_speed_ftps: f32::from(0u8),
         max_speed_ftps: rules.max_player_speed_ftps,
         max_accel_ftps2: rules.max_player_accel_ftps2,
-        has_ball: true,
         on_court: true,
         action: "Idle".to_string(),
         slot: "PG".to_string(),
@@ -119,12 +118,19 @@ fn decision_probabilities(
         phase: PhaseType::SetPlay,
         game_flow: GameFlowState::LiveBall,
         ball_phase: BallPhase::Held,
+        ball_holder_id: Some("carrier"),
         inbound_elapsed: f32::from(0u8),
         backcourt_elapsed: f32::from(0u8),
         rules: &rules,
         team_traits: &team_traits,
         possession_had_shot: false,
+        putback_rebounder_id: None,
         possession_elapsed_seconds: f32::from(0u8),
+        lane_dwell_seconds: f32::from(0u8),
+        lane_dwell_player_id: None,
+        frontcourt_established: false,
+        last_touch_player_id: None,
+        pass_target_pos: None,
     };
     let play = evaluate_active_play(spec, play_context);
     let decision = OnBallDecisionContext {
@@ -149,6 +155,66 @@ fn decision_probabilities(
             .expect("decision trace must include requested action family")
     };
     (probability("DRIVE("), probability("SHOOT("))
+}
+
+#[test]
+fn putback_rebounder_has_no_non_shooting_dwell_candidate() {
+    let rules = GameRules::default();
+    let mut player = player_state(&rules);
+    player.pos_ft = rules.court.hoop_pos(true);
+    player.target_pos_ft = player.pos_ft;
+    let mut physics = PhysicsWorld::with_backend(&rules, PhysicsBackend::SimpleCircle);
+    physics.register_player(player);
+    let team_traits = HashMap::from([
+        ("home".to_string(), TeamTraits::default()),
+        ("away".to_string(), TeamTraits::default()),
+    ]);
+    let context = ConstraintContext {
+        physics: &physics,
+        ball_pos: rules.court.hoop_pos(true),
+        possession_team: "home",
+        shot_clock: rules.league.offensive_rebound_shot_clock_seconds,
+        game_clock: rules.league.period_duration_seconds,
+        phase: PhaseType::SetPlay,
+        game_flow: GameFlowState::LiveBall,
+        ball_phase: BallPhase::Held,
+        ball_holder_id: Some("carrier"),
+        inbound_elapsed: 0.0,
+        backcourt_elapsed: 0.0,
+        rules: &rules,
+        team_traits: &team_traits,
+        possession_had_shot: true,
+        putback_rebounder_id: Some("carrier"),
+        possession_elapsed_seconds: 5.0,
+        lane_dwell_seconds: f32::from(0u8),
+        lane_dwell_player_id: None,
+        frontcourt_established: false,
+        last_touch_player_id: None,
+        pass_target_pos: None,
+    };
+    let decision = OnBallDecisionContext {
+        constraint_context: &context,
+        carrier_id: "carrier",
+        stamina: 1.0,
+        morale_bias: 0.0,
+        coach: &CoachStrategy::default(),
+        active_play: None,
+    };
+    let mut rng = StdRng::seed_from_u64(9);
+    let output = DecisionSystem::new()
+        .decide_on_ball_with_play(&decision, &mut rng)
+        .expect("putback decision must retain a feasible shot candidate");
+    assert!(matches!(
+        output.action,
+        nba_decision::constraint::CandidateAction::Shoot { .. }
+    ));
+    assert!(output.trace.probabilities.iter().all(|(label, _)| {
+        !label.starts_with("DWELL(")
+            && !label.starts_with("DRIVE(")
+            && !label.starts_with("PASS(")
+            && !label.starts_with("TRIPLE_THREAT_JAB(")
+            && !label.starts_with("POST_UP(")
+    }));
 }
 
 #[test]

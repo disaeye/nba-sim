@@ -4,6 +4,9 @@ use nba_domain::{GameRules, Possession, SubPhase};
 use crate::potential_field::EmergentDefenseTarget;
 use rand::Rng;
 
+/// 防守倾向缺省值（档案未提供时的中性个体）。
+const DEFAULT_HELP_AGGRESSIVENESS: f32 = 0.5;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TacticalSet {
     HighPickAndRoll,
@@ -172,6 +175,8 @@ pub struct TargetAssignment {
     pub morale: String,
     /// Solver output exists only when this target came from the potential-field branch.
     pub potential_field: Option<EmergentDefenseTarget>,
+    pub responsibility: Option<nba_domain::DefenseResponsibility>,
+    pub offensive_player_id: Option<String>,
 }
 impl TargetAssignment {
     pub fn off_ball_kind(&self) -> Option<nba_domain::action_window::OffBallActionKind> {
@@ -186,6 +191,33 @@ impl TargetAssignment {
 }
 
 pub struct TacticalPlanner;
+
+/// 冲筐类槽位行为的「进-出」深度曲线：以前场控制建立后的秒数计时
+/// （不随子阶段计时器重置而重置），前段线性冲向峰值深度，折返后
+/// 线性回到基础位，之后保持基础位（攻方三秒规则下进攻人在限制区
+/// 只做穿越，不停留）。
+///
+/// - `frontcourt_seconds`：前场控制建立后的秒数；
+/// - `peak`：峰值深度（占槽位到筐距离的比例）；
+/// - `start`/`peak_at`/`exit`：发起、到达峰值与回到基础位的时点（秒）。
+fn rim_approach_depth(
+    frontcourt_seconds: f32,
+    peak: f32,
+    start: f32,
+    peak_at: f32,
+    exit: f32,
+) -> f32 {
+    if frontcourt_seconds <= start {
+        f32::from(0u8)
+    } else if frontcourt_seconds <= peak_at {
+        peak * ((frontcourt_seconds - start) / (peak_at - start).max(f32::EPSILON))
+    } else if frontcourt_seconds <= exit {
+        peak * (f32::from(1u8)
+            - (frontcourt_seconds - peak_at) / (exit - peak_at).max(f32::EPSILON))
+    } else {
+        f32::from(0u8)
+    }
+}
 
 impl TacticalPlanner {
     /// 档案槽位的标准权重：按该档案的**持球槽位**能力需求打分。
@@ -231,10 +263,12 @@ impl TacticalPlanner {
             ball_pos,
             carrier_idx,
             progress_sec,
+            f32::from(0u8),
             rng,
             &GameRules::default(),
             None,
             false,
+            None,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -245,10 +279,45 @@ impl TacticalPlanner {
         ball_pos: Vec2,
         carrier_idx: usize,
         progress_sec: f32,
+        frontcourt_seconds: f32,
         rng: &mut impl Rng,
         rules: &GameRules,
         live_off_positions: Option<&[Vec2]>,
         drive_active: bool,
+    ) -> (Vec<TargetAssignment>, Vec<TargetAssignment>) {
+        Self::plan_possession_targets_with_rules_and_tendencies(
+            tactical_set,
+            sub_phase,
+            possession,
+            ball_pos,
+            carrier_idx,
+            progress_sec,
+            frontcourt_seconds,
+            rng,
+            rules,
+            live_off_positions,
+            drive_active,
+            None,
+        )
+    }
+
+    /// 防守方倾向入口：`defender_tendencies` 与防守方名册顺序对齐
+    /// （与 `bind_targets_with_matchups` 的绑定口径一致——第 i 个防守
+    /// 目标属于名册第 i 人），用于协防触发阈值的个体调制。
+    #[allow(clippy::too_many_arguments)]
+    pub fn plan_possession_targets_with_rules_and_tendencies(
+        tactical_set: TacticalSet,
+        sub_phase: SubPhase,
+        possession: Possession,
+        ball_pos: Vec2,
+        carrier_idx: usize,
+        progress_sec: f32,
+        frontcourt_seconds: f32,
+        rng: &mut impl Rng,
+        rules: &GameRules,
+        live_off_positions: Option<&[Vec2]>,
+        drive_active: bool,
+        defender_tendencies: Option<&[nba_domain::PlayerTendencies]>,
     ) -> (Vec<TargetAssignment>, Vec<TargetAssignment>) {
         Self::plan_possession_targets_with_geometry(
             tactical_set,
@@ -257,10 +326,12 @@ impl TacticalPlanner {
             ball_pos,
             carrier_idx,
             progress_sec,
+            frontcourt_seconds,
             rng,
             rules,
             live_off_positions,
             drive_active,
+            defender_tendencies,
         )
     }
     /// D5.1b：以战术档案（slot 元数据）为准生成进攻目标。
@@ -278,7 +349,35 @@ impl TacticalPlanner {
         possession: Possession,
         carrier_slot_index: usize,
         progress_sec: f32,
+        frontcourt_seconds: f32,
         rules: &GameRules,
+    ) -> Vec<TargetAssignment> {
+        Self::plan_offense_from_spec_with_tendencies(
+            spec,
+            sub_phase,
+            possession,
+            carrier_slot_index,
+            progress_sec,
+            frontcourt_seconds,
+            rules,
+            None,
+        )
+    }
+
+    /// 槽位倾向入口：`slot_tendencies` 与 `spec.slots` 顺序对齐（调用方
+    /// 按 slot fill 的绑定结果提供），用于无球切入（`cut_frequency`）与
+    /// 掩护顺下（`screen_frequency`）的个体调制
+    /// （attributes.md §2.6 项 4、项 5）。
+    #[allow(clippy::too_many_arguments)]
+    pub fn plan_offense_from_spec_with_tendencies(
+        spec: &nba_domain::TacticalSetSpec,
+        sub_phase: SubPhase,
+        possession: Possession,
+        carrier_slot_index: usize,
+        progress_sec: f32,
+        frontcourt_seconds: f32,
+        rules: &GameRules,
+        slot_tendencies: Option<&[nba_domain::PlayerTendencies]>,
     ) -> Vec<TargetAssignment> {
         let court = rules.court;
         let policy = &rules.tactics;
@@ -294,9 +393,11 @@ impl TacticalPlanner {
             carrier_slot_index,
             sub_phase,
             action_t,
+            frontcourt_seconds,
             hoop,
             dir,
             rules,
+            slot_tendencies,
         )
     }
 
@@ -410,10 +511,12 @@ impl TacticalPlanner {
         _ball_pos: Vec2,
         carrier_idx: usize,
         progress_sec: f32,
+        _frontcourt_seconds: f32,
         _rng: &mut impl Rng,
         rules: &GameRules,
         live_off_positions: Option<&[Vec2]>,
         drive_active: bool,
+        defender_tendencies: Option<&[nba_domain::PlayerTendencies]>,
     ) -> (Vec<TargetAssignment>, Vec<TargetAssignment>) {
         let court = rules.court;
         let policy = &rules.tactics;
@@ -462,6 +565,8 @@ impl TacticalPlanner {
                 slot: slot.to_string(),
                 morale: "Normal".to_string(),
                 potential_field: None,
+                responsibility: None,
+                offensive_player_id: None,
             });
         }
         let carrier_pos = live_off_positions
@@ -483,6 +588,10 @@ impl TacticalPlanner {
             && screener_idx != carrier_idx;
         let is_hedge_scheme = screen_rules.hedge_distance_ft > 0.0;
         let is_drop_scheme = screen_rules.drop_depth_ft > 0.0;
+        let is_fight_through = is_screening_action
+            && screen_rules.strategy == nba_domain::OnBallScreenDefenseStrategy::FightThrough;
+        let is_go_under = is_screening_action
+            && screen_rules.strategy == nba_domain::OnBallScreenDefenseStrategy::GoUnder;
         let should_switch = is_screening_action
             && !is_hedge_scheme
             && !is_drop_scheme
@@ -520,7 +629,7 @@ impl TacticalPlanner {
             } else {
                 Vec2::X
             };
-            let (def_pos, action, slot, potential_field) =
+            let (def_pos, action, slot, potential_field, responsibility) =
                 if should_switch && (is_guarding_carrier || is_guarding_screener) {
                     if is_guarding_carrier {
                         let to_screener_hoop = (hoop - screener_pos).normalize_or_zero();
@@ -529,6 +638,7 @@ impl TacticalPlanner {
                             "SWITCH_ASSIGNMENT",
                             "SwitchAnchor",
                             None,
+                            Some(nba_domain::DefenseResponsibility::SwitchedMatchup),
                         )
                     } else {
                         let to_carrier_hoop = (hoop - carrier_pos).normalize_or_zero();
@@ -537,6 +647,7 @@ impl TacticalPlanner {
                             "SWITCH_ASSIGNMENT",
                             "SwitchDefender",
                             None,
+                            Some(nba_domain::DefenseResponsibility::SwitchedMatchup),
                         )
                     }
                 } else if is_guarding_screener
@@ -549,6 +660,7 @@ impl TacticalPlanner {
                         "DROP_CONTAIN",
                         "DropAnchor",
                         None,
+                        Some(nba_domain::DefenseResponsibility::Drop),
                     )
                 } else if is_guarding_screener
                     && is_screening_action
@@ -560,6 +672,7 @@ impl TacticalPlanner {
                         "HEDGE_AND_RECOVER",
                         "HedgeDefender",
                         None,
+                        Some(nba_domain::DefenseResponsibility::Hedge),
                     )
                 } else if is_guarding_carrier {
                     // 领防人：建立紧逼与滑步阻截线 (Pursuit Contest)。
@@ -567,12 +680,31 @@ impl TacticalPlanner {
                     let gap = (policy.defensive_gap_ft * policy.defense.on_ball_gap_multiplier)
                         .min(dist_to_hoop * field_rules.on_ball_gap_hoop_ratio)
                         .max(field_rules.on_ball_gap_min_ft);
-                    (
-                        off_pos + to_hoop_dir * gap,
-                        "ON_BALL_CONTEST",
-                        "PointDefender",
-                        None,
-                    )
+                    if is_fight_through {
+                        (
+                            off_pos + to_hoop_dir * gap,
+                            "FIGHT_THROUGH",
+                            "PointDefender",
+                            None,
+                            Some(nba_domain::DefenseResponsibility::FightThrough),
+                        )
+                    } else if is_go_under {
+                        (
+                            off_pos + to_hoop_dir * gap,
+                            "GO_UNDER",
+                            "PointDefender",
+                            None,
+                            Some(nba_domain::DefenseResponsibility::GoUnder),
+                        )
+                    } else {
+                        (
+                            off_pos + to_hoop_dir * gap,
+                            "ON_BALL_CONTEST",
+                            "PointDefender",
+                            None,
+                            Some(nba_domain::DefenseResponsibility::PrimaryMatchup),
+                        )
+                    }
                 } else {
                     // 弱侧协防人与轮转体系：完全由连续多体势能场梯度与能量极小值求解驱动
                     // 绝不依赖硬编码 if-else 判定，自然涌现出 ROTATE_RIM_HELP、X_OUT_CLOSEOUT 或 HELP_SIDE_SHELL
@@ -586,12 +718,22 @@ impl TacticalPlanner {
                         rules,
                         1.0,
                         drive_active,
+                        defender_tendencies
+                            .and_then(|tendencies| tendencies.get(i).map(|t| t.help_aggressiveness))
+                            .unwrap_or(DEFAULT_HELP_AGGRESSIVENESS),
                     );
+                    let resp = match emergent.action {
+                        "ROTATE_RIM_HELP" => nba_domain::DefenseResponsibility::Help,
+                        "X_OUT_CLOSEOUT" => nba_domain::DefenseResponsibility::Rotate,
+                        "HELP_SIDE_SHELL" => nba_domain::DefenseResponsibility::Recover,
+                        _ => nba_domain::DefenseResponsibility::PrimaryMatchup,
+                    };
                     (
                         emergent.target_pos,
                         emergent.action,
                         emergent.slot,
                         Some(emergent),
+                        Some(resp),
                     )
                 };
             def_targets.push(TargetAssignment {
@@ -602,6 +744,8 @@ impl TacticalPlanner {
                 slot: slot.to_string(),
                 morale: "Normal".to_string(),
                 potential_field,
+                responsibility,
+                offensive_player_id: None,
             });
         }
         if is_home {
@@ -660,9 +804,11 @@ impl TacticalPlanner {
         carrier_slot_index: usize,
         sub_phase: SubPhase,
         action_t: f32,
+        frontcourt_seconds: f32,
         hoop: Vec2,
         dir: f32,
         rules: &GameRules,
+        slot_tendencies: Option<&[nba_domain::PlayerTendencies]>,
     ) -> Vec<TargetAssignment> {
         let speed = |ratio: f32| rules.max_player_speed_ftps * ratio;
         spec.slots
@@ -672,26 +818,57 @@ impl TacticalPlanner {
                 let base = Self::spec_slot_world_pos(slot, is_home, court, rules);
                 let is_carrier = i == carrier_slot_index;
                 let initiating = sub_phase == SubPhase::Initiation;
+                // 槽位倾向（attributes.md §2.6 项 4/5）：切入/顺下类槽位
+                // 按该球员的倾向调制切入行为——低于阈值者根本不做这个
+                // 跑动（保持站位），高于阈值者切入并按倾向缩放深度，
+                // 上界为槽位自身峰值深度（不得越过篮筐）。
+                let slot_tendency = slot_tendencies.and_then(|t| t.get(i));
+                let cut_ratio = slot_tendency
+                    .map(|t| {
+                        if t.cut_frequency < policy.cut_tendency_threshold {
+                            f32::from(0u8)
+                        } else {
+                            (policy.cut_tendency_floor + t.cut_frequency * policy.cut_tendency_span)
+                                .min(f32::from(1u8))
+                        }
+                    })
+                    .unwrap_or(f32::from(1u8));
+                let screen_ratio = slot_tendency
+                    .map(|t| {
+                        if t.screen_frequency < policy.screen_tendency_threshold {
+                            f32::from(0u8)
+                        } else {
+                            (policy.screen_tendency_floor
+                                + t.screen_frequency * policy.screen_tendency_span)
+                                .min(f32::from(1u8))
+                        }
+                    })
+                    .unwrap_or(f32::from(1u8));
                 // 持球人在执行阶段向篮筐压迫；其余槽位按档案声明的行为移动。
                 let (target_pos, speed_ratio, action) = match slot.behaviour {
-                    nba_domain::SlotBehaviour::DribbleTop => {
-                        let pressed = if initiating {
-                            base
-                        } else {
-                            base + (hoop - base) * (action_t * policy.drive_distance_ratio)
-                        };
-                        (
-                            pressed,
-                            policy.carrier_speed_ratio,
-                            slot.behaviour.action_label(initiating),
-                        )
-                    }
+                    nba_domain::SlotBehaviour::DribbleTop => (
+                        base,
+                        policy.carrier_speed_ratio,
+                        slot.behaviour.action_label(initiating),
+                    ),
                     nba_domain::SlotBehaviour::HighScreenRoll => {
-                        let rolled = if initiating {
-                            base
+                        // 进-出顺下（攻方三秒规则下的合法顺下形态）：前段
+                        // 冲向最大顺下深度，折返后回到基础位，不在限制区停留。
+                        // 掩护倾向（attributes.md §2.6 项 5）缩放顺下深度：
+                        // 高倾向的掩护人吃球后顺下更深（保留进攻机会），
+                        // 低倾向的只到罚球线附近就折返（优先稳住掩护）。
+                        let depth = if initiating {
+                            f32::from(0u8)
                         } else {
-                            base + (hoop - base) * action_t * 0.5
+                            rim_approach_depth(
+                                frontcourt_seconds,
+                                rules.tactics.screen_roll_peak_depth,
+                                rules.tactics.rim_cut_start_seconds,
+                                rules.tactics.rim_cut_peak_seconds,
+                                rules.tactics.rim_cut_exit_seconds,
+                            ) * screen_ratio
                         };
+                        let rolled = base + (hoop - base) * depth;
                         (
                             rolled,
                             policy.screener_speed_ratio,
@@ -714,9 +891,21 @@ impl TacticalPlanner {
                     }
                     nba_domain::SlotBehaviour::BackdoorCut => {
                         // G6a 链 1：弱侧背切。执行期从翼位沿「篮筐方向」切入，
-                        // 切入深度随进攻进度推进（action_t 0..1），目标是篮下
-                        // 接球攻框位置；发起期保持原翼位站位（与 SpotUp 同）。
-                        let cut = (hoop - base) * action_t * policy.backdoor_cut_depth_ratio;
+                        // 切入深度走进-出曲线：到达折返点后回到翼位，不在
+                        // 限制区停留（攻方三秒）；发起期保持原翼位站位。
+                        // 切入倾向（attributes.md §2.6 项 4）缩放切入深度。
+                        let cut_depth = if initiating {
+                            f32::from(0u8)
+                        } else {
+                            rim_approach_depth(
+                                frontcourt_seconds,
+                                policy.backdoor_cut_depth_ratio,
+                                rules.tactics.rim_cut_start_seconds,
+                                rules.tactics.rim_cut_peak_seconds,
+                                rules.tactics.rim_cut_exit_seconds,
+                            ) * cut_ratio
+                        };
+                        let cut = (hoop - base) * cut_depth;
                         (
                             base + cut,
                             policy.carrier_speed_ratio,
@@ -725,9 +914,20 @@ impl TacticalPlanner {
                     }
                     nba_domain::SlotBehaviour::DipToRim => {
                         // G6a 链 4：下沉禁区。底角/翼位球员沿「篮筐方向」下沉
-                        // 到篮下边缘争抢内线落位，为持球突破提供传球终点与
-                        // 篮板位置；发起期保持原站位拉开空间。
-                        let dip = (hoop - base) * action_t * policy.dip_to_rim_depth_ratio;
+                        // 到篮下边缘争抢内线落位；深度走进-出曲线，折返后
+                        // 回到原站位（攻方三秒）；发起期保持原站位拉开空间。
+                        let dip_depth = if initiating {
+                            f32::from(0u8)
+                        } else {
+                            rim_approach_depth(
+                                frontcourt_seconds,
+                                policy.dip_to_rim_depth_ratio,
+                                rules.tactics.rim_cut_start_seconds,
+                                rules.tactics.rim_cut_peak_seconds,
+                                rules.tactics.rim_cut_exit_seconds,
+                            ) * cut_ratio
+                        };
+                        let dip = (hoop - base) * dip_depth;
                         (
                             base + dip,
                             policy.support_speed_ratio,
@@ -744,6 +944,8 @@ impl TacticalPlanner {
                     slot: slot.id.clone(),
                     morale: "Normal".to_string(),
                     potential_field: None,
+                    responsibility: None,
+                    offensive_player_id: None,
                 }
             })
             .collect()
@@ -753,6 +955,20 @@ impl TacticalPlanner {
     pub fn bind_targets(targets: &mut [TargetAssignment], roster_ids: &[String]) {
         for (target, player_id) in targets.iter_mut().zip(roster_ids.iter()) {
             target.player_id = Some(player_id.clone());
+        }
+    }
+
+    /// Assign generated targets to the ordered roster along with defensive matchups.
+    pub fn bind_targets_with_matchups(
+        targets: &mut [TargetAssignment],
+        roster_ids: &[String],
+        opp_roster_ids: &[String],
+    ) {
+        for (i, (target, player_id)) in targets.iter_mut().zip(roster_ids.iter()).enumerate() {
+            target.player_id = Some(player_id.clone());
+            if let Some(opp_id) = opp_roster_ids.get(i) {
+                target.offensive_player_id = Some(opp_id.clone());
+            }
         }
     }
 }
@@ -811,6 +1027,7 @@ mod tests {
                 Possession::Home,
                 Vec2::ZERO,
                 0,
+                0.0,
                 0.0,
                 &mut rng,
                 &rules,

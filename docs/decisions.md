@@ -100,13 +100,22 @@ G/M/D/L/F/Round 是不同层级的计划或执行编号，不是完成度。任�
 
 ### ADR-007 · 是否完成 BallControl × BallMotion 的内部迁移
 
-**状态：proposed**
+**状态：accepted（2026-09-29 修订：以不变量形态验收，见文末注记）**
 
 目标方案已在 `docs/dev/gap.md` §5 定义。接受前必须证明：
 
 - 外部 `BallState` API 不发生无授权行为漂移；
 - 所有归属、最后触球和死球责任信息仍可从一个权威状态派生；
 - 迁移后不存在旧旁路字段继续承载真相。
+
+验收证据（2026-09-29）：
+
+1. 物理层旁路已删除：`PlayerPhysicsState.has_ball`、`SpatialPhysics::set_ball_holder` 与两个后端的逐球员旗标同步全部移除；运动学（APF 队友排斥）与接触语义改为接收 `ball_holder_id` 显式输入（`step_with_ball_holder` / `ConstraintContext.ball_holder_id` / `SemanticEvaluator::contact`），物理层不再存储任何归属镜像。
+2. 归属单一派生：`holder`（`BallRuntime::holder_id`）、`possessing_team`、`is_live`、球位置均为权威球态的派生视图；`gap.md` §5.1 的可检判据（轨迹字段不承担归属真相、四项读取均为派生）成立。
+3. 写入纪律机械化：`scripts/check_ball_state_writes.py`（含负对照，接入 CI guards matrix 与 `run-tests.sh`）断言 `ball_state` 的赋值、字面量初始化与 `set_ball_state` 调用只出现在 `state.rs`（实现）、`ball_flight/write_entry.rs`（唯一生产写通道 `transition_ball_state`）与 `test_hooks.rs`（显式命名的测试后门）。
+4. 行为等价：黄金哈希 seed42 × 2000 逐位不变，聚焦回归（球态、传球连续性、罚球、生命周期、不变量、违例/犯规程序）全部通过。
+
+> **修订注记（2026-09-29）**：本条裁定不采用 `gap.md` §5.1 示例中的 `BallControl`/`BallMotion` 双枚举字面重构。`gap.md` §5.1 明确「外部可以保留稳定的 `BallState` 接口」，其可检判据是轨迹字段不承担归属真相、四项读取均为派生视图；该判据已由上述证据满足并由守卫维持。双枚举重构本身会波及全仓约 200 处模式匹配，收益仅是字面形状对齐，代价与风险不成比例。
 
 ### ADR-008 · 完整防守责任图的范围
 
@@ -119,6 +128,10 @@ G/M/D/L/F/Round 是不同层级的计划或执行编号，不是完成度。任�
 **状态：proposed**
 
 构成准则、证据覆盖和机制守卫稳定前，旧的真实度目标线不能直接继承。重标定必须基于新 fixture 版本、固定分母和盲区登记，不得用当前模拟输出反推参考带。
+
+R7 当前已锁定 ismayc/shot-quality-study 的公开 NBA Stats ShotChartDetail 归档：`shotdetail_2023.tar.xz`，提交 `f4001f944d4aba1ba63e3d70edb3d6135ba576fe`，SHA-256 `303e71f967c199568b345cd73a75e595f1f99532cca3e6ce59afb286b63f840d`。该数据实际覆盖 2023-24 常规赛（2023-10-24 至 2024-04-14），共 1,230 场与 218,701 次出手；NBA.com 公布的 2023-24 3PA/FGA 为 39.5%，坐标几何实测为 39.4845%。R7 区域带现按 `CourtGeometry::shot_zone` 规则由 `LOC_X/LOC_Y` 重算。坐标采用十分之一英尺、进攻篮筐原点，转换为 `x = 88.75 - LOC_Y/10`、`y = 25 + LOC_X/10`；归档验证核对坐标距离、样本数、事件唯一性、四区逐场分位数及 Q4 分母。
+
+ADR-009 仍为 proposed。正式采用 `nba.v3` 并登记真实性目标线前，还需完成分区基准的独立审阅、归档下载与转换管线审计、模拟全场证据接线审阅，以及盲区和目标线适用范围确认；NBA 默认继续使用 `nba.v2`。
 
 ### ADR-010 · 无持球人球态下的归属语义
 

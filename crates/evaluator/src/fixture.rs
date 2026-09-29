@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 pub const NBA_FIXTURE_JSON: &str = include_str!("../fixtures/nba.v1.json");
 pub const NBA_V2_FIXTURE_JSON: &str = include_str!("../fixtures/nba.v2.json");
+pub const NBA_V3_FIXTURE_JSON: &str = include_str!("../fixtures/nba.v3.json");
 pub const FIBA_FIXTURE_JSON: &str = include_str!("../fixtures/fiba.v1.json");
 
 /// 闭区间带（fixture 以 [min, max] 表达）。
@@ -57,6 +58,61 @@ pub struct ReferenceDistributions {
     /// 缺省时构成准则判 `InsufficientEvidence` 而非 pass。
     #[serde(default)]
     pub composition_bands: Option<CompositionBands>,
+    /// v3 已登记来源与统计口径的联合和情境参考带。
+    #[serde(default)]
+    pub joint_situational_bands: Option<JointSituationalBands>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JointSituationalBands {
+    pub provenance: ReferenceMetadata,
+    pub shot_zone_make: ZoneMakeBands,
+    pub q4_late_three_attempt_share: ClutchThreeAttemptBands,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReferenceMetadata {
+    pub source: String,
+    pub source_version: String,
+    pub season: String,
+    pub games: usize,
+    pub attempts: usize,
+    pub calculation: String,
+    pub source_url: String,
+    pub source_sha256: String,
+    #[serde(default)]
+    pub external_check: Option<ExternalCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalCheck {
+    pub source: String,
+    pub source_url: String,
+    pub metric: String,
+    pub value: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZoneMakeBands {
+    pub minimum_attempts_per_zone: usize,
+    pub source_minimum_attempts_per_zone: usize,
+    pub source_season: String,
+    pub three_point_distance_ft: f32,
+    pub corner_three_distance_ft: f32,
+    pub rim: Band,
+    pub near: Band,
+    pub mid: Band,
+    pub three: Band,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClutchThreeAttemptBands {
+    pub late_window_seconds: f32,
+    pub minimum_attempts_per_window: usize,
+    pub source_minimum_late_attempts: usize,
+    pub source_minimum_early_attempts: usize,
+    pub delta: Band,
+    pub interval_method: String,
 }
 
 /// 比赛级动作构成参考带（dev 方案 §5.1）。
@@ -107,6 +163,13 @@ impl ReferenceDistributions {
         serde_json::from_str(NBA_V2_FIXTURE_JSON).expect("embedded nba.v2 fixture must parse")
     }
 
+    pub fn nba_v3() -> Self {
+        let fixture: Self =
+            serde_json::from_str(NBA_V3_FIXTURE_JSON).expect("embedded nba.v3 fixture must parse");
+        fixture.validate_joint_situational_bands();
+        fixture
+    }
+
     pub fn fiba_v1() -> Self {
         serde_json::from_str(FIBA_FIXTURE_JSON).expect("embedded fiba.v1 fixture must parse")
     }
@@ -114,9 +177,140 @@ impl ReferenceDistributions {
     pub fn for_league(league_name: &str) -> Self {
         match league_name.to_ascii_uppercase().as_str() {
             "FIBA" => Self::fiba_v1(),
-            // D2：NBA 默认消费带构成准则参考带的 v2 档案。
+            // NBA 默认档案仍为 nba.v2，待 ADR-009 验收后再切换。
             _ => Self::nba_v2(),
         }
+    }
+
+    fn validate_joint_situational_bands(&self) {
+        let Some(bands) = &self.joint_situational_bands else {
+            return;
+        };
+        assert_eq!(
+            self.version, "nba.v3",
+            "joint reference fixture version mismatch"
+        );
+        assert_eq!(
+            self.league, "NBA",
+            "joint reference fixture league mismatch"
+        );
+        assert_eq!(
+            bands.provenance.games, 1230,
+            "reference game count must match archive manifest"
+        );
+        assert_eq!(
+            bands.provenance.season, "2023-24 NBA regular season",
+            "reference season must match official independent benchmark"
+        );
+        assert_eq!(
+            bands.provenance.attempts, 218701,
+            "reference attempt count must match archive manifest"
+        );
+        assert!(
+            !bands.provenance.source.is_empty(),
+            "reference source is required"
+        );
+        assert!(
+            !bands.provenance.source_version.is_empty(),
+            "source version is required"
+        );
+        assert!(
+            !bands.provenance.season.is_empty(),
+            "reference season is required"
+        );
+        assert!(
+            bands.provenance.games > 0,
+            "reference game count must be positive"
+        );
+        assert!(
+            bands.provenance.attempts > 0,
+            "reference attempt count must be positive"
+        );
+        assert!(
+            !bands.provenance.calculation.is_empty(),
+            "reference calculation is required"
+        );
+        let benchmark = bands
+            .provenance
+            .external_check
+            .as_ref()
+            .expect("independent benchmark metadata is required");
+        assert!(
+            benchmark.source_url.starts_with("https://"),
+            "independent benchmark URL must be HTTPS"
+        );
+        assert!(
+            !benchmark.source.is_empty()
+                && !benchmark.metric.is_empty()
+                && benchmark.value.is_finite()
+                && (0.0..=1.0).contains(&benchmark.value),
+            "independent benchmark metadata is required"
+        );
+        assert!(
+            bands.provenance.source_url.starts_with("https://"),
+            "reference URL must be HTTPS"
+        );
+        assert_eq!(
+            bands.provenance.source_sha256.len(),
+            64,
+            "source SHA-256 must be complete"
+        );
+        let zone = &bands.shot_zone_make;
+        assert!(
+            zone.minimum_attempts_per_zone > 0
+                && zone.source_minimum_attempts_per_zone > 0
+                && zone.minimum_attempts_per_zone <= zone.source_minimum_attempts_per_zone
+                && zone.source_season == bands.provenance.season
+                && bands
+                    .provenance
+                    .source_version
+                    .contains("shotdetail_2023.tar.xz"),
+            "zone source sample coverage must support the evaluator threshold"
+        );
+        assert!(
+            zone.source_minimum_attempts_per_zone <= bands.provenance.attempts,
+            "zone source minimum exceeds total reference attempts"
+        );
+        assert!(
+            zone.three_point_distance_ft > 0.0,
+            "three-point distance must be positive"
+        );
+        assert!(
+            zone.corner_three_distance_ft > 0.0
+                && zone.corner_three_distance_ft < zone.three_point_distance_ft,
+            "corner three distance must be valid"
+        );
+        for band in [&zone.rim, &zone.near, &zone.mid, &zone.three] {
+            assert!(
+                band.min >= 0.0 && band.max <= 1.0 && band.min < band.max,
+                "invalid shot make-rate band"
+            );
+        }
+        let clutch = &bands.q4_late_three_attempt_share;
+        assert!(
+            !clutch.interval_method.is_empty(),
+            "clutch interval method is required"
+        );
+        assert!(
+            clutch.late_window_seconds > 0.0,
+            "late-game window must be positive"
+        );
+        assert!(
+            clutch.minimum_attempts_per_window > 0
+                && clutch.source_minimum_late_attempts > 0
+                && clutch.source_minimum_early_attempts > 0
+                && clutch.minimum_attempts_per_window <= clutch.source_minimum_late_attempts
+                && clutch.minimum_attempts_per_window <= clutch.source_minimum_early_attempts
+                && clutch.source_minimum_late_attempts <= bands.provenance.attempts
+                && clutch.source_minimum_early_attempts <= bands.provenance.attempts,
+            "Q4 source sample coverage must support the evaluator threshold"
+        );
+        assert!(
+            clutch.delta.min >= -1.0
+                && clutch.delta.max <= 1.0
+                && clutch.delta.min < clutch.delta.max,
+            "invalid clutch shot-rate difference band"
+        );
     }
 
     /// 终端事件 → 结果类（score/rebound/turnover）。

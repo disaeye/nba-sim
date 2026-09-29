@@ -137,6 +137,9 @@ fi
 if [ "$STATUS" -eq 0 ]; then
     python3 scripts/check_inline_constants.py || STATUS=$?
 fi
+if [ "$STATUS" -eq 0 ]; then
+    python3 scripts/check_ball_state_writes.py || STATUS=$?
+fi
 
 # 4. 性能基准带（quality.md §4.1）：fixture 冻结的吞吐带由守卫比对。
 # 计入退出码：接在测试后面但 `|| true` 会让它等于没接——性能退化与

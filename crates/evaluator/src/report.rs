@@ -80,7 +80,9 @@ pub fn criterion_severity(criterion: &str) -> &'static str {
         | "PHASE_DWELL_TIME"
         | "TURNOVER_RATE"
         | "THREE_ATTEMPT_RATE"
-        | "INTENT_DOWNGRADE_RATE" => "soft",
+        | "INTENT_DOWNGRADE_RATE"
+        | "SHOT_ZONE_MAKE_JOINT"
+        | "LATE_Q4_SHOT_PROFILE" => "soft",
 
         _ => "hard",
     }
@@ -195,8 +197,6 @@ pub struct CriterionRow {
 const W_HARD: f32 = 1.0;
 const W_SOFT: f32 = 0.25;
 
-/// 篮筐距端线的距离（ft）：NBA 篮筐距端线 5.25ft， hoop_x = court_width - offset。
-pub(crate) const RIM_OFFSET_FT: f32 = 5.25;
 /// 48 分钟等效的标准比赛秒数（NBA 4×12min）。
 pub(crate) const REGULATION_SECONDS_48MIN: f32 = 2880.0;
 

@@ -28,6 +28,7 @@ impl MatchEngine {
             from_pos,
             is_three,
             None,
+            nba_domain::ShotCreationSource::SetPlay,
             self.clock.current_time,
         );
     }
@@ -111,7 +112,7 @@ impl MatchEngine {
         } else {
             self.mark_receiver(None);
         }
-        self.ball.ball_state = state;
+        self.ball.set_ball_state(state);
     }
 
     #[doc(hidden)]
@@ -132,6 +133,11 @@ impl MatchEngine {
     #[doc(hidden)]
     pub fn set_current_time_for_test(&mut self, seconds: f32) {
         self.clock.current_time = seconds;
+    }
+
+    #[doc(hidden)]
+    pub fn set_last_decision_time_for_test(&mut self, seconds: f32) {
+        self.clock.last_decision_time = seconds;
     }
 
     #[doc(hidden)]
@@ -157,6 +163,30 @@ impl MatchEngine {
     #[doc(hidden)]
     pub fn set_backcourt_elapsed_for_test(&mut self, seconds: f32) {
         self.clock.backcourt_elapsed = seconds;
+    }
+
+    /// 攻方三秒诊断：指定球员在限制区的连续停留时间（测试用）。
+    pub fn lane_dwell_for_test(&self, player_id: &str) -> f32 {
+        self.clock
+            .lane_dwell
+            .get(player_id)
+            .copied()
+            .unwrap_or(f32::from(0u8))
+    }
+
+    /// 回场违例诊断：前场控制是否已建立（测试用）。
+    pub fn frontcourt_established_for_test(&self) -> bool {
+        self.clock.frontcourt_established
+    }
+
+    /// 罚球程序诊断：当前罚球人（测试用）。
+    pub fn free_throw_shooter_for_test(&self) -> Option<String> {
+        self.ledger.free_throw_shooter.clone()
+    }
+
+    /// 罚球程序诊断：待执行队列长度（测试用）。
+    pub fn free_throw_queue_len_for_test(&self) -> usize {
+        self.ledger.free_throw_queue.len()
     }
 
     #[doc(hidden)]
@@ -245,5 +275,85 @@ impl MatchEngine {
             .pending_shot_release
             .as_ref()
             .map(|pending| pending.shooter_id.clone())
+    }
+
+    #[doc(hidden)]
+    pub fn start_action_window_for_test(
+        &mut self,
+        player_id: &str,
+        window: nba_domain::action_window::ActionTimeWindow,
+        target_id: Option<String>,
+        target_pos: Option<(f32, f32)>,
+    ) {
+        self.start_action_window(player_id, window, target_id, target_pos);
+    }
+
+    #[doc(hidden)]
+    pub fn cancel_action_window_for_test(
+        &mut self,
+        player_id: &str,
+        reason: nba_domain::event::ActionCancellationReason,
+    ) -> bool {
+        self.cancel_action_window(player_id, reason)
+    }
+
+    #[doc(hidden)]
+    pub fn fail_action_window_for_test(
+        &mut self,
+        player_id: &str,
+        reason: nba_domain::event::ActionFailureReason,
+    ) -> bool {
+        self.fail_action_window(player_id, reason)
+    }
+
+    #[doc(hidden)]
+    pub fn advance_action_windows_for_test(&mut self, current_t: f32) {
+        self.advance_action_windows(current_t);
+    }
+
+    #[doc(hidden)]
+    pub fn active_windows_count_for_test(&self) -> usize {
+        self.observations.active_windows.len()
+    }
+
+    #[doc(hidden)]
+    pub fn is_player_locked_for_test(&self, player_id: &str) -> bool {
+        self.systems
+            .physics
+            .get_player(player_id)
+            .map(|p| p.is_locked_kinematics)
+            .unwrap_or(false)
+    }
+
+    #[doc(hidden)]
+    pub fn publish_events_for_test(&mut self) -> Vec<nba_protocol::FrameEvent> {
+        let before_count = self.journal.current_event_log.len();
+        self.publish_events();
+        self.journal.current_event_log[before_count..].to_vec()
+    }
+
+    #[doc(hidden)]
+    pub fn current_event_log_for_test(&self) -> &[nba_protocol::FrameEvent] {
+        &self.journal.current_event_log
+    }
+
+    #[doc(hidden)]
+    pub fn ball_state_for_test(&self) -> nba_physics::ballistics::BallTrajectoryKind {
+        self.ball.ball_state.clone()
+    }
+
+    #[doc(hidden)]
+    pub fn advancing_player_for_test(&self) -> Option<String> {
+        self.observations.advancing_player.clone()
+    }
+
+    /// 不变量检查器累计检查的帧数（仅测试）：短路路径绕过校验的探针。
+    pub fn invariant_checks_run_for_test(&self) -> u64 {
+        self.audit.invariant_checker.tick_index()
+    }
+
+    #[doc(hidden)]
+    pub fn pending_pass_inbound_for_test(&self) -> bool {
+        self.ball.pending_pass_inbound
     }
 }

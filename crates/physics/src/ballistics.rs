@@ -20,6 +20,16 @@ pub struct ReboundLandingSpot {
     pub rebounder_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShotArrivalOutcome {
+    Made,
+    RimContact {
+        ball_position: Vec2,
+        contact_position: Vec2,
+    },
+    Miss,
+}
+
 // 重力抛体纯数学住在 domain（projectile.rs），physics 直接复用同一实现：
 // `GameRules::pass_duration` 与 `BallisticsEngine::shot_duration` 必须同源，
 // 两处各写一份必然漂移。
@@ -27,6 +37,104 @@ pub use nba_domain::projectile::ProjectileArc;
 
 pub struct BallisticsEngine;
 impl BallisticsEngine {
+    /// 用命中概率输入生成投篮释放方向，命中结果由到筐几何决定。
+    pub fn sample_shot_aim(
+        shot_origin: Vec2,
+        hoop_pos: Vec2,
+        make_probability: f32,
+        rng: &mut impl Rng,
+        rules: &GameRules,
+    ) -> Vec2 {
+        assert!(
+            make_probability.is_finite()
+                && !make_probability.is_sign_negative()
+                && make_probability <= f32::from(1u8),
+            "shot make probability must be finite and within [0, 1]"
+        );
+        let probability = make_probability;
+        if probability >= f32::from(1u8) {
+            return hoop_pos;
+        }
+        let approach = (hoop_pos - shot_origin).normalize_or_zero();
+        let forward = if approach.length_squared() > f32::EPSILON {
+            approach
+        } else {
+            Vec2::X
+        };
+        let lateral = Vec2::new(-forward.y, forward.x);
+        let clear_radius = (rules.rim_radius_ft - rules.ball_radius_ft).max(f32::EPSILON);
+        let aim_error = if probability <= f32::EPSILON {
+            clear_radius + rules.ball_radius_ft + f32::from(1u8)
+        } else {
+            let two = f32::from(2u8);
+            let one = f32::from(1u8);
+            let denominator = (-two * (one - probability).ln()).sqrt();
+            let sigma = clear_radius / denominator.max(f32::EPSILON);
+            let radial_sample = rng.gen::<f32>().clamp(f32::EPSILON, one - f32::EPSILON);
+            let radius = sigma * (-two * (one - radial_sample).ln()).sqrt();
+            let sign = if rng.gen::<bool>() { one } else { -one };
+            radius * sign
+        };
+        hoop_pos + lateral * aim_error
+    }
+
+    /// 按罚球概率输入或指定结果生成罚球瞄准点。
+    pub fn sample_free_throw_aim(
+        from_pos: Vec2,
+        hoop_pos: Vec2,
+        make_probability: f32,
+        forced_result: Option<bool>,
+        rng: &mut impl Rng,
+        rules: &GameRules,
+    ) -> Vec2 {
+        assert!(
+            make_probability.is_finite()
+                && !make_probability.is_sign_negative()
+                && make_probability <= f32::from(1u8),
+            "free-throw probability must be finite and within [0, 1]"
+        );
+        match forced_result {
+            Some(true) => hoop_pos,
+            Some(false) => {
+                let approach = (hoop_pos - from_pos).normalize_or_zero();
+                let forward = if approach.length_squared() > f32::EPSILON {
+                    approach
+                } else {
+                    Vec2::X
+                };
+                hoop_pos + Vec2::new(-forward.y, forward.x) * rules.rim_radius_ft
+            }
+            None => Self::sample_shot_aim(from_pos, hoop_pos, make_probability, rng, rules),
+        }
+    }
+
+    /// 以球心通过篮筐平面的位置判定入筐、筐环接触或偏出。
+    pub fn classify_shot_arrival(
+        ball_position: Vec2,
+        hoop_pos: Vec2,
+        rules: &GameRules,
+    ) -> ShotArrivalOutcome {
+        let radial = ball_position - hoop_pos;
+        let distance = radial.length();
+        let clear_radius = (rules.rim_radius_ft - rules.ball_radius_ft).max(0.0);
+        if distance < clear_radius {
+            return ShotArrivalOutcome::Made;
+        }
+        if distance <= rules.rim_radius_ft + rules.ball_radius_ft {
+            let direction = radial.normalize_or_zero();
+            let direction = if direction.length_squared() > f32::EPSILON {
+                direction
+            } else {
+                Vec2::X
+            };
+            return ShotArrivalOutcome::RimContact {
+                ball_position,
+                contact_position: hoop_pos + direction * rules.rim_radius_ft,
+            };
+        }
+        ShotArrivalOutcome::Miss
+    }
+
     /// Computes a shot flight duration from the projectile physics.
     ///
     /// 第一步飞行抛体化：时长由「请求弧顶 + 两端高度」闭式解出
@@ -37,7 +145,20 @@ impl BallisticsEngine {
     /// 实测量级（默认规则）：25 ft 三分、弧顶 15 ft → T ≈ 1.19 s，
     /// 出手速度 ≈ 37 ft/s（真实 NBA 三分出手 36-40 ft/s）。
     pub fn shot_duration(distance_ft: f32, peak_z: f32, rules: &GameRules) -> f32 {
-        let distance = distance_ft.max(0.0);
+        assert!(
+            distance_ft.is_finite() && peak_z.is_finite() && rules.ball_gravity_ftps2.is_finite(),
+            "shot trajectory inputs must be finite"
+        );
+        assert!(
+            distance_ft >= 0.0
+                && peak_z >= rules.chest_height_ft.max(rules.rim_height_ft)
+                && rules.ball_gravity_ftps2 > 0.0
+                && rules.ball_max_speed_ftps > 0.0
+                && rules.min_shot_duration_seconds > 0.0
+                && rules.max_shot_duration_seconds >= rules.min_shot_duration_seconds,
+            "shot trajectory rules are invalid"
+        );
+        let distance = distance_ft;
         let g = rules.ball_gravity_ftps2;
         let chest = rules.chest_height_ft;
         let rim = rules.rim_height_ft;
@@ -48,10 +169,10 @@ impl BallisticsEngine {
         // 速度包络下限（与 pass_duration 同源）：水平速度不得超过球速包络，
         // 唯一手段是延长时长（实测回归：远距离出手在 clamp 上限内也可能超速）。
         let t_envelope = distance / rules.ball_max_speed_ftps.max(f32::EPSILON);
-        t_projectile.max(t_envelope).clamp(
-            rules.min_shot_duration_seconds,
-            rules.max_shot_duration_seconds,
-        )
+        let t_required = t_projectile.max(t_envelope);
+        let minimum_duration = rules.min_shot_duration_seconds;
+        let maximum_duration = rules.max_shot_duration_seconds.max(minimum_duration);
+        t_required.clamp(minimum_duration, maximum_duration)
     }
 
     /// Extrapolates a receiver within the configured playable court.
@@ -177,6 +298,80 @@ impl BallisticsEngine {
         players: &HashMap<String, PlayerPhysicsState>,
         rules: &GameRules,
     ) -> glam::Vec3 {
+        if let BallTrajectoryKind::FreeThrowSetup {
+            from_pos,
+            from_z,
+            to_pos,
+            to_z,
+            start_time,
+            duration,
+            ..
+        } = state
+        {
+            if current_time < *start_time || current_time >= *start_time + *duration {
+                return glam::Vec3::ZERO;
+            }
+            return Self::sample_linear_setup_velocity(
+                *from_pos, *from_z, *to_pos, *to_z, *duration,
+            );
+        }
+        if let BallTrajectoryKind::FreeThrow {
+            from_pos,
+            hoop_pos,
+            aim_pos,
+            start_time,
+            duration,
+            ..
+        } = state
+        {
+            let flight_time = duration.max(f32::EPSILON);
+            let elapsed = (current_time - start_time).clamp(0.0, flight_time);
+            let arc = ProjectileArc::solve(
+                rules.chest_height_ft,
+                rules.rim_height_ft,
+                flight_time,
+                rules.ball_gravity_ftps2,
+            );
+            let direction = (*hoop_pos - *from_pos).normalize_or_zero();
+            let lateral = Vec2::new(-direction.y, direction.x);
+            let lateral_offset = (*aim_pos - *hoop_pos).dot(lateral);
+            let horizontal_velocity = direction * ((*hoop_pos - *from_pos).length() / flight_time)
+                + lateral * (lateral_offset / flight_time);
+            return glam::Vec3::new(
+                horizontal_velocity.x,
+                horizontal_velocity.y,
+                arc.vz0 - rules.ball_gravity_ftps2 * elapsed,
+            );
+        }
+        if let BallTrajectoryKind::Shot {
+            aim_pos,
+            hoop_pos,
+            from_pos,
+            start_time,
+            duration,
+            ..
+        } = state
+        {
+            let flight_time = duration.max(f32::EPSILON);
+            let elapsed = (current_time - start_time).clamp(0.0, flight_time);
+            let arc = ProjectileArc::solve(
+                rules.chest_height_ft,
+                rules.rim_height_ft,
+                flight_time,
+                rules.ball_gravity_ftps2,
+            );
+            let direction = (*hoop_pos - *from_pos).normalize_or_zero();
+            let lateral = Vec2::new(-direction.y, direction.x);
+            let lateral_offset = (*aim_pos - *hoop_pos).dot(lateral);
+            let lateral_speed = lateral_offset / flight_time;
+            let horizontal_velocity = direction * ((*hoop_pos - *from_pos).length() / flight_time)
+                + lateral * lateral_speed;
+            return glam::Vec3::new(
+                horizontal_velocity.x,
+                horizontal_velocity.y,
+                arc.vz0 - rules.ball_gravity_ftps2 * elapsed,
+            );
+        }
         let (carrier_id, lateral_multiplier, height_multiplier) = match state {
             BallTrajectoryKind::Held { carrier_id } => (carrier_id, 0.45, 1.0),
             BallTrajectoryKind::Drive {
@@ -227,6 +422,34 @@ impl BallisticsEngine {
         )
     }
 
+    fn sample_linear_setup_velocity(
+        from_pos: Vec2,
+        from_z: f32,
+        to_pos: Vec2,
+        to_z: f32,
+        duration: f32,
+    ) -> glam::Vec3 {
+        let duration = duration.max(f32::EPSILON);
+        let horizontal = (to_pos - from_pos) / duration;
+        glam::Vec3::new(horizontal.x, horizontal.y, (to_z - from_z) / duration)
+    }
+
+    fn sample_linear_setup_position(
+        from_pos: Vec2,
+        from_z: f32,
+        to_pos: Vec2,
+        to_z: f32,
+        start_time: f32,
+        duration: f32,
+        current_time: f32,
+    ) -> (Vec2, f32) {
+        let progress = ((current_time - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
+        (
+            from_pos.lerp(to_pos, progress),
+            from_z + (to_z - from_z) * progress,
+        )
+    }
+
     pub fn sample_ball_position(
         state: &BallTrajectoryKind,
         current_time: f32,
@@ -240,7 +463,7 @@ impl BallisticsEngine {
                     let forward = if speed > 0.5 {
                         carrier.vel_ft / speed
                     } else {
-                        Vec2::X
+                        carrier.facing_dir
                     };
                     let lateral = Vec2::new(-forward.y, forward.x);
                     let freq = if speed > 0.5 {
@@ -284,10 +507,10 @@ impl BallisticsEngine {
                 // moving carrier makes the trajectory non-deterministic and can make
                 // the endpoint move faster than the configured ball envelope.
                 let target = (*target_pos, *target_z);
-                let tau = if *duration > 0.0 {
-                    ((current_time - start_time) / duration).clamp(0.0, 1.0)
+                let tau = if *duration > f32::EPSILON {
+                    ((current_time - start_time) / duration).clamp(f32::from(0u8), f32::from(1u8))
                 } else {
-                    1.0
+                    f32::from(1u8)
                 };
                 (
                     from_pos.lerp(target.0, tau),
@@ -302,8 +525,8 @@ impl BallisticsEngine {
                 duration,
                 ..
             } => {
-                let progress =
-                    ((current_time - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
+                let progress = ((current_time - start_time) / duration.max(f32::EPSILON))
+                    .clamp(f32::from(0u8), f32::from(1u8));
                 let xy = from_pos.lerp(*baseline_pos, progress);
                 let z = from_z + (rules.chest_height_ft - *from_z) * progress;
                 (xy, z)
@@ -328,7 +551,7 @@ impl BallisticsEngine {
                     let forward = if speed > 0.5 {
                         driver.vel_ft / speed
                     } else {
-                        Vec2::X
+                        driver.facing_dir
                     };
                     let lateral = Vec2::new(-forward.y, forward.x);
                     let freq = rules.ball_bounce_frequency_hz
@@ -365,40 +588,48 @@ impl BallisticsEngine {
             }
             BallTrajectoryKind::Pass {
                 from_pos,
+                from_z,
                 to_pos,
                 start_time,
                 duration,
                 ..
             } => {
                 let t_flight = duration.max(f32::EPSILON);
-                let elapsed = (current_time - start_time).clamp(0.0, t_flight);
+                let elapsed = (current_time - start_time).clamp(f32::from(0u8), t_flight);
                 let progress = elapsed / t_flight;
-                let xy = from_pos.lerp(*to_pos, progress);
-                // 重力抛体：z(0)=出手胸口高，z(T)=接球胸口高，vz0 闭式反解。
-                // 弧顶不再由载荷 peak_z 直接采样，而由抛物线自然产生；
-                // peak_z 只在时长推导侧参与（solve_pass_landing 链路）。
                 let arc = ProjectileArc::solve(
-                    rules.chest_height_ft,
+                    *from_z,
                     rules.chest_height_ft,
                     t_flight,
                     rules.ball_gravity_ftps2,
                 );
-                let z = arc.z_at(elapsed, rules.chest_height_ft, rules.ball_gravity_ftps2);
-                (xy, z.max(0.0))
+                let xy = from_pos.lerp(*to_pos, progress);
+                let z = arc.z_at(elapsed, *from_z, rules.ball_gravity_ftps2);
+                (xy, z.max(f32::from(0u8)))
             }
             BallTrajectoryKind::Shot {
                 from_pos,
+                aim_pos,
                 hoop_pos,
                 start_time,
                 duration,
                 ..
             } => {
-                let t_flight = duration.max(f32::EPSILON);
-                let elapsed = (current_time - start_time).clamp(0.0, t_flight);
+                assert!(
+                    current_time.is_finite()
+                        && start_time.is_finite()
+                        && duration.is_finite()
+                        && *duration > f32::EPSILON,
+                    "shot trajectory time parameters must be finite and positive"
+                );
+                let t_flight = *duration;
+                let elapsed = (current_time - start_time).clamp(f32::from(0u8), t_flight);
                 let progress = elapsed / t_flight;
-                let xy = from_pos.lerp(*hoop_pos, progress);
-                // 重力抛体：z(0)=出手胸口高，z(T)=筐高；vz0 闭式反解。
-                // 采样弧顶由抛物线自然产生，服从 g。
+                let offset = *aim_pos - *hoop_pos;
+                let direction = (*hoop_pos - *from_pos).normalize_or_zero();
+                let lateral = Vec2::new(-direction.y, direction.x);
+                let lateral_offset = offset.dot(lateral);
+                let xy = from_pos.lerp(*hoop_pos, progress) + lateral * lateral_offset * progress;
                 let arc = ProjectileArc::solve(
                     rules.chest_height_ft,
                     rules.rim_height_ft,
@@ -406,10 +637,37 @@ impl BallisticsEngine {
                     rules.ball_gravity_ftps2,
                 );
                 let z = arc.z_at(elapsed, rules.chest_height_ft, rules.ball_gravity_ftps2);
-                (xy, z.max(0.0))
+                (xy, z.max(f32::from(0u8)))
             }
             BallTrajectoryKind::LooseBall { pos, z, .. } => {
-                (*pos, (*z).clamp(0.0, rules.ball_max_speed_ftps))
+                (*pos, (*z).clamp(f32::from(0u8), rules.ball_max_speed_ftps))
+            }
+            BallTrajectoryKind::FreeThrow {
+                from_pos,
+                hoop_pos,
+                aim_pos,
+                start_time,
+                duration,
+                ..
+            } => {
+                assert!(
+                    duration.is_finite() && *duration > f32::EPSILON,
+                    "free-throw trajectory duration must be finite and positive"
+                );
+                let elapsed = (current_time - start_time).clamp(f32::from(0u8), *duration);
+                let progress = elapsed / *duration;
+                let direction = (*hoop_pos - *from_pos).normalize_or_zero();
+                let lateral = Vec2::new(-direction.y, direction.x);
+                let lateral_offset = (*aim_pos - *hoop_pos).dot(lateral);
+                let xy = from_pos.lerp(*hoop_pos, progress) + lateral * lateral_offset * progress;
+                let arc = ProjectileArc::solve(
+                    rules.chest_height_ft,
+                    rules.rim_height_ft,
+                    *duration,
+                    rules.ball_gravity_ftps2,
+                );
+                let z = arc.z_at(elapsed, rules.chest_height_ft, rules.ball_gravity_ftps2);
+                (xy, z.max(f32::from(0u8)))
             }
             BallTrajectoryKind::RimRebound {
                 from_pos,
@@ -420,20 +678,37 @@ impl BallisticsEngine {
                 ..
             } => {
                 let t_flight = duration.max(f32::EPSILON);
-                let elapsed = (current_time - start_time).clamp(0.0, t_flight);
+                let elapsed = (current_time - start_time).clamp(f32::from(0u8), t_flight);
                 let progress = elapsed / t_flight;
                 // The explicit contact point keeps the trajectory continuous;
                 // hoop_pos remains metadata for semantic consumers.
                 let xy = from_pos.lerp(*target_landing, progress);
                 // 重力抛体：z(0)=触筐高度，z(T)=地面 0（球的触地点）。
                 // 触点反弹初速推导在第二步（触筐物理）；本步先服从重力。
-                let landing_z = 0.0f32;
+                let landing_z = f32::from(0u8);
                 let arc =
                     ProjectileArc::solve(*from_z, landing_z, t_flight, rules.ball_gravity_ftps2);
                 let z = arc.z_at(elapsed, *from_z, rules.ball_gravity_ftps2);
-                (xy, z.max(0.0))
+                (xy, z.max(f32::from(0u8)))
             }
             BallTrajectoryKind::Dead { pos, z, .. } => (*pos, *z),
+            BallTrajectoryKind::FreeThrowSetup {
+                from_pos,
+                from_z,
+                to_pos,
+                to_z,
+                start_time,
+                duration,
+                ..
+            } => Self::sample_linear_setup_position(
+                *from_pos,
+                *from_z,
+                *to_pos,
+                *to_z,
+                *start_time,
+                *duration,
+                current_time,
+            ),
         }
     }
 
@@ -490,9 +765,7 @@ impl BallisticsEngine {
         (*player_pos - ball_pos).length() <= radius && ball_bottom_z <= reach_ft.max(0.0)
     }
 
-    /// 触筐反弹（ADR-017 第二步）：接触点、反弹初速、落点全部由入射物理
-    /// 推导。命中/打铁的统计裁定仍在出手时刻（校准架构不动），本函数只
-    /// 负责「打铁之后球怎么弹」：
+    /// 使用已观测的筐环接触点推导反弹落点，避免事后另选触点。
     ///
     /// 1. 入射速度：水平 = (筐-出手点)/飞行时长；竖直 = 出手抛体在筐高的
     ///    到达速度 vz0 − g·T（下落，负值）。跳投与上篮的飞行时长不同，
@@ -510,18 +783,7 @@ impl BallisticsEngine {
         rng: &mut impl Rng,
         rules: &GameRules,
     ) -> ReboundLandingSpot {
-        let g = rules.ball_gravity_ftps2.max(f32::EPSILON);
-        let shot_vec = hoop_pos - shot_origin;
-        let shot_dist = shot_vec.length();
-        let shot_dir = shot_vec.normalize_or_zero();
-        let t_flight = shot_flight_seconds.max(f32::EPSILON);
-        // 入射水平速度（矢量）：沿出手方向匀速逼近筐。
-        let v_in_h = shot_dir * (shot_dist / t_flight);
-        // 入射竖直速度：出手抛体在到达时刻的速度，负值（下落）。
-        let shot_arc =
-            ProjectileArc::solve(rules.chest_height_ft, rules.rim_height_ft, t_flight, g);
-        let vz_in = shot_arc.vz0 - g * t_flight;
-        // 接触点：筐环上以「从筐指向出手点」为中心的受控扇形。
+        let shot_dir = (hoop_pos - shot_origin).normalize_or_zero();
         let to_shooter = -shot_dir;
         let contact_angle = rng.gen_range(
             -rules.rim_contact_angle_spread_radians..rules.rim_contact_angle_spread_radians,
@@ -531,6 +793,103 @@ impl BallisticsEngine {
             to_shooter.x * contact_angle.sin() + to_shooter.y * contact_angle.cos(),
         );
         let contact_pos = hoop_pos + contact_dir * rules.rim_radius_ft;
+        let incoming_velocity =
+            Self::sample_incoming_shot_velocity(shot_origin, hoop_pos, shot_flight_seconds, rules);
+        Self::compute_rebound_landing_at_contact_velocity(
+            shot_origin,
+            hoop_pos,
+            shot_flight_seconds,
+            incoming_velocity,
+            contact_pos,
+            rng,
+            rules,
+        )
+    }
+
+    pub fn compute_rebound_landing_from_contact_velocity(
+        shot_origin: Vec2,
+        hoop_pos: Vec2,
+        incoming_velocity: glam::Vec3,
+        contact_pos: Vec2,
+        rng: &mut impl Rng,
+        rules: &GameRules,
+    ) -> ReboundLandingSpot {
+        let distance = (hoop_pos - shot_origin).length();
+        let horizontal_speed = incoming_velocity.truncate().length();
+        let flight_seconds = distance / horizontal_speed.max(f32::EPSILON);
+        Self::compute_rebound_landing_at_contact_velocity(
+            shot_origin,
+            hoop_pos,
+            flight_seconds,
+            incoming_velocity,
+            contact_pos,
+            rng,
+            rules,
+        )
+    }
+
+    pub fn compute_rebound_landing_from_contact(
+        shot_origin: Vec2,
+        hoop_pos: Vec2,
+        shot_flight_seconds: f32,
+        contact_pos: Vec2,
+        rng: &mut impl Rng,
+        rules: &GameRules,
+    ) -> ReboundLandingSpot {
+        let incoming_velocity =
+            Self::sample_incoming_shot_velocity(shot_origin, hoop_pos, shot_flight_seconds, rules);
+        Self::compute_rebound_landing_at_contact_velocity(
+            shot_origin,
+            hoop_pos,
+            shot_flight_seconds,
+            incoming_velocity,
+            contact_pos,
+            rng,
+            rules,
+        )
+    }
+
+    fn sample_incoming_shot_velocity(
+        shot_origin: Vec2,
+        hoop_pos: Vec2,
+        shot_flight_seconds: f32,
+        rules: &GameRules,
+    ) -> glam::Vec3 {
+        let duration = shot_flight_seconds.max(f32::EPSILON);
+        let arc = ProjectileArc::solve(
+            rules.chest_height_ft,
+            rules.rim_height_ft,
+            duration,
+            rules.ball_gravity_ftps2,
+        );
+        let direction = (hoop_pos - shot_origin).normalize_or_zero();
+        let horizontal = direction * ((hoop_pos - shot_origin).length() / duration);
+        glam::Vec3::new(
+            horizontal.x,
+            horizontal.y,
+            arc.vz0 - rules.ball_gravity_ftps2 * duration,
+        )
+    }
+
+    fn compute_rebound_landing_at_contact_velocity(
+        shot_origin: Vec2,
+        hoop_pos: Vec2,
+        _shot_flight_seconds: f32,
+        incoming_velocity: glam::Vec3,
+        contact_pos: Vec2,
+        rng: &mut impl Rng,
+        rules: &GameRules,
+    ) -> ReboundLandingSpot {
+        let g = rules.ball_gravity_ftps2.max(f32::EPSILON);
+        let to_shooter = (shot_origin - hoop_pos).normalize_or_zero();
+        let contact_dir = (contact_pos - hoop_pos).normalize_or_zero();
+        let contact_angle = to_shooter
+            .perp_dot(contact_dir)
+            .atan2(to_shooter.dot(contact_dir));
+        // 入射水平速度（矢量）：沿出手方向匀速逼近筐。
+        let v_in_h = incoming_velocity.truncate();
+        let vz_in = incoming_velocity.z;
+        let contact_dir = (contact_pos - hoop_pos).normalize_or_zero();
         // 法线：从接触点指向筐心（水平）。镜像反射只翻转法向分量，
         // 入射速度大小不变、方向按接触角重定向。
         let normal = -contact_dir;
@@ -712,185 +1071,5 @@ impl BallisticsEngine {
 }
 
 #[cfg(test)]
-mod landing_tests {
-    use super::*;
-    use nba_domain::GameRules;
-
-    fn receiver(pos: Vec2, vel: Vec2) -> PlayerPhysicsState {
-        PlayerPhysicsState {
-            id: "T_1".to_string(),
-            jersey: "1".to_string(),
-            team: "home".to_string(),
-            pos_ft: pos,
-            vel_ft: vel,
-            accel_ft: Vec2::ZERO,
-            target_pos_ft: pos,
-            target_speed_ftps: 0.0,
-            max_speed_ftps: 20.0,
-            max_accel_ftps2: 35.0,
-            has_ball: false,
-            on_court: true,
-            action: "Run".to_string(),
-            slot: "S".to_string(),
-            morale: "Normal".to_string(),
-            stamina: 100.0,
-            max_stamina: 100.0,
-            foul_count: 0,
-            locomotion: crate::movement::LocomotionState::Idle,
-            facing_dir: Vec2::X,
-            turn_decel_timer: 0.0,
-            is_locked_kinematics: false,
-            out_of_bounds_placement: false,
-            is_receiving_pass: false,
-            is_driving_to_rim: false,
-            boundary_cross_latched: false,
-            attributes: nba_domain::PlayerAttributes::default(),
-            tendencies: nba_domains_tendencies(),
-        }
-    }
-
-    fn nba_domains_tendencies() -> nba_domain::PlayerTendencies {
-        nba_domain::PlayerTendencies::default()
-    }
-
-    /// 不动点必须自洽：接球点所处距离对应的飞行时长 == 解出的飞行时长。
-    #[test]
-    fn solve_landing_is_a_fixed_point() {
-        let rules = GameRules::default();
-        for (pos, vel) in [
-            (Vec2::new(50.0, 25.0), Vec2::new(-13.0, 0.1)),
-            (Vec2::new(64.0, 40.0), Vec2::new(-8.0, 6.0)),
-            (Vec2::new(30.0, 20.0), Vec2::new(6.0, -4.0)),
-        ] {
-            let passer = Vec2::new(97.0, 25.0);
-            let r = receiver(pos, vel);
-            let (landing, t) = BallisticsEngine::solve_pass_landing(passer, &r, &rules);
-            let t_from_landing = rules.pass_duration((landing - passer).length(), false);
-            assert!(
-                (t_from_landing - t).abs() < 1e-3,
-                "fixed point must hold: t={t} vs duration(|L-p|)={t_from_landing}"
-            );
-        }
-    }
-
-    /// 领传量不得超过接球人 T 秒内的制动可达距离（否则接球点不可达）。
-    #[test]
-    fn lead_never_exceeds_braking_reach() {
-        let rules = GameRules::default();
-        let v0 = 18.0f32;
-        let r = receiver(Vec2::new(60.0, 25.0), Vec2::new(-v0, 0.0));
-        let passer = Vec2::new(97.0, 25.0);
-        let (landing, t) = BallisticsEngine::solve_pass_landing(passer, &r, &rules);
-        let led = (landing - r.pos_ft).length();
-        let accel = rules.max_player_accel_ftps2;
-        let t_brake = v0 / accel;
-        let reachable = if t <= t_brake {
-            v0 * t - 0.5 * accel * t * t
-        } else {
-            v0 * t_brake - 0.5 * accel * t_brake * t_brake
-        };
-        assert!(
-            led <= reachable + 1e-3,
-            "lead {led:.3} must not exceed braking reach {reachable:.3}"
-        );
-        // 且必须为正（有提前量），否则接球人永远追不上球。
-        assert!(led > 0.0, "a moving receiver must get a positive lead");
-    }
-
-    /// 静止接球人不得被领（接球点 = 自身位置）。
-    #[test]
-    fn stationary_receiver_gets_no_lead() {
-        let rules = GameRules::default();
-        let r = receiver(Vec2::new(60.0, 25.0), Vec2::ZERO);
-        let passer = Vec2::new(97.0, 25.0);
-        let (landing, t) = BallisticsEngine::solve_pass_landing(passer, &r, &rules);
-        assert!((landing - r.pos_ft).length() < 1e-4);
-        assert!((t - rules.pass_duration((r.pos_ft - passer).length(), false)).abs() < 1e-4);
-    }
-
-    /// 旧固定时长（0.65s）与真实飞行时长的误差必须被本函数消除。
-    #[test]
-    fn lead_time_tracks_distance_not_a_constant() {
-        let rules = GameRules::default();
-        let passer = Vec2::new(10.0, 25.0);
-        let mut times = Vec::new();
-        for d in [10.0f32, 25.0, 40.0, 55.0] {
-            let r = receiver(Vec2::new(10.0 + d, 25.0), Vec2::new(-14.0, 0.0));
-            let (_landing, t) = BallisticsEngine::solve_pass_landing(passer, &r, &rules);
-            times.push(t);
-        }
-        // 距离越远，解出的飞行时长必须非递减（真实关系），而不是恒定 0.65。
-        assert!(
-            times.windows(2).all(|w| w[1] >= w[0] - 1e-4),
-            "flight time must grow with distance: {times:?}"
-        );
-        assert!(
-            times.last().unwrap() - times.first().unwrap() > 0.3,
-            "flight time must vary materially with distance (not a constant): {times:?}"
-        );
-    }
-
-    /// 自由球-人接触（ADR-017 第三步）：水平半径、摸高门、最近者与
-    /// 确定性、板凳豁免。
-    #[test]
-    fn free_ball_contact_respects_radius_reach_and_priority() {
-        let rules = GameRules::default();
-        let at = |id: &str, cm: u16, vertical: f32, pos: Vec2, on_court: bool| {
-            (id.to_string(), cm, vertical, pos, on_court)
-        };
-        // 默认规则：人体半径 1.0 ft 加篮球半径 0.4 ft；200cm/0.5 摸高
-        // = (200/30.48)*0.5 + 0.25 ≈ 3.53 ft。
-        let nearby = vec![at("H_01", 200, 0.5, Vec2::new(95.0 + 1.2, 25.0), true)];
-        let hit =
-            BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 3.0, &nearby, &rules);
-        assert!(hit.is_some(), "ball inside radius and below reach must hit");
-
-        // 摸高门：球高于摸高时不命中。
-        let hit_high =
-            BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 4.0, &nearby, &rules);
-        assert!(
-            hit_high.is_none(),
-            "ball above the reach ceiling must pass over"
-        );
-
-        // 半径门：球在接触半径之外不命中。
-        let hit_far = BallisticsEngine::free_ball_player_contact(
-            Vec2::new(95.0, 25.0),
-            3.0,
-            &[at("H_01", 200, 0.5, Vec2::new(95.0 + 2.0, 25.0), true)],
-            &rules,
-        );
-        assert!(
-            hit_far.is_none(),
-            "ball outside the horizontal radius must miss"
-        );
-
-        // 最近者胜；距离相同按 id 字典序取小（确定性）。
-        let two = vec![
-            at("H_02", 200, 0.5, Vec2::new(95.0 + 0.8, 25.0), true),
-            at("H_01", 200, 0.5, Vec2::new(95.0 + 1.2, 25.0), true),
-        ];
-        let (nearest, _) =
-            BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 3.0, &two, &rules)
-                .expect("two candidates must hit");
-        assert_eq!(nearest, "H_02", "closer candidate must win");
-
-        let tied = vec![
-            at("H_02", 200, 0.5, Vec2::new(95.0 - 1.2, 25.0), true),
-            at("H_01", 200, 0.5, Vec2::new(95.0 + 1.2, 25.0), true),
-        ];
-        let (tied_id, _) =
-            BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 3.0, &tied, &rules)
-                .expect("tied candidates must hit");
-        assert_eq!(tied_id, "H_01", "equal distance must tie-break by id order");
-
-        // 板凳球员不参与身体碰撞。
-        let bench = vec![at("H_01", 200, 0.5, Vec2::new(95.0, 25.0), false)];
-        let hit_bench =
-            BallisticsEngine::free_ball_player_contact(Vec2::new(95.0, 25.0), 3.0, &bench, &rules);
-        assert!(
-            hit_bench.is_none(),
-            "bench players must not collide with the ball"
-        );
-    }
-}
+#[path = "ballistics/landing_tests.rs"]
+mod landing_tests;

@@ -357,6 +357,7 @@ dependencies = [
 name = "nba-evaluator"
 version = "0.1.0"
 dependencies = [
+ "glam",
  "nba-domain",
  "nba-engine",
  "nba-protocol",

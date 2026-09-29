@@ -6,7 +6,6 @@
 
 use glam::Vec2;
 use nba_domain::{GameEvent, Possession};
-
 use nba_physics::ballistics::BallTrajectoryKind;
 
 use super::MatchEngine;
@@ -18,11 +17,67 @@ impl MatchEngine {
     /// 翻转在场标志并交接场上位置。候选按 id 字典序取最小者（确定性）。
     /// 若替补全部不可用，则保留原球员（保持 5v5 不变量优先）。
     pub fn forced_substitution(&mut self, out_player_id: &str) {
+        // 犯满离场不得被死球归因载荷阻塞：哨响时持球人即归因人，若不
+        // 先清除，替补在整个死球窗口都无法执行（charter §5.3 要求个人
+        // 犯满后必须退出在场名单；实测 seed 2：第 6 犯后 2.3s 才换下，
+        // 期间又犯第 7 次）。清除后帧投影不再引用离场者，与 round-18
+        // BALL_HOLDER_ON_COURT 防护同源。
+        if let BallTrajectoryKind::Dead {
+            last_touch_player, ..
+        } = &mut self.ball.ball_state
+        {
+            if last_touch_player.as_deref() == Some(out_player_id) {
+                *last_touch_player = None;
+            }
+        }
         self.substitute(
             out_player_id,
             nba_domain::SubstitutionReason::FoulTrouble,
             None,
         );
+        // 犯满离场是强制事实，不允许被持球状态无限期阻塞：换人被拒时
+        // 登记待换下，由每 tick 的重试机制在阻塞解除后立即执行
+        // （charter §5.3：个人累计达上限后必须退出在场名单）。
+        let still_on_court_fouled_out =
+            self.systems
+                .physics
+                .get_player(out_player_id)
+                .is_some_and(|p| {
+                    p.on_court && p.foul_count >= self.config.rules.league.max_personal_fouls
+                });
+        if still_on_court_fouled_out {
+            // 板凳耗尽是流内事实：候选（同队不在场且未犯满）为空时，
+            // 真实规则允许犯满者继续留在场上，评判器据此豁免。
+            let max_fouls = self.config.rules.league.max_personal_fouls;
+            let team = self
+                .systems
+                .physics
+                .get_player(out_player_id)
+                .map(|p| p.team.clone())
+                .unwrap_or_default();
+            let bench_available = self
+                .systems
+                .physics
+                .get_players()
+                .values()
+                .any(|p| p.team == team && !p.on_court && p.foul_count < max_fouls);
+            if !bench_available
+                && self
+                    .observations
+                    .bench_depleted_reported
+                    .insert(out_player_id.to_string())
+            {
+                self.journal
+                    .pending_events
+                    .push(GameEvent::EnforcementApplied {
+                        constraint_id: "BENCH_DEPLETED".to_string(),
+                        action: format!("retain:{out_player_id}"),
+                    });
+            }
+            self.observations.pending_foulout_sub = Some(out_player_id.to_string());
+        } else if self.observations.pending_foulout_sub.as_deref() == Some(out_player_id) {
+            self.observations.pending_foulout_sub = None;
+        }
     }
 
     /// 一次换人（gap.md G6）：把 `out_player_id` 换下，同队替补登场。
@@ -32,14 +87,13 @@ impl MatchEngine {
     /// 候选 = 同队不在场且个人犯规未达上限的球员，按 id 字典序取最小者。
     /// 原因仅影响**谁被换下**（由各轮换评估器决定），不影响替补顺序。
     ///
-    /// ## holder 引用必须按球态投影判定（round-18 修复，适用于所有原因）
+    /// ## holder 引用必须按权威球态判定（round-18 修复，适用于所有原因）
     //
-    // 只查 `has_ball` 旗标不够：进攻犯规时球先进 `Dead` 态（旗标已清），
-    // 但 `Dead.last_touch_player` 仍指向犯规的持球人——把他换下场后，
-    // 帧投影的 holder 引用一个不在场的人，触发
+    // 进攻犯规时球会先进入 `Dead` 态，`Dead.last_touch_player` 仍指向犯规持球人；
+    // 把他换下场后，帧投影的 holder 引用一个不在场的人，触发
     // `BALL_HOLDER_ON_COURT` Hard（实测 seed 31337：190 次/场）。
-    // 改为：`has_ball` **或** 球态投影（`current_turnover_player_id`）
-    // 命中任一即拒绝。飞行中的传球目标同理（被已下场的人接住）。
+    // 依据球态持球人和 `current_turnover_player_id` 拦截相关换人；飞行中的传球目标
+    // 同理（被已下场的人接住）。
     pub(crate) fn substitute(
         &mut self,
         out_player_id: &str,
@@ -50,11 +104,19 @@ impl MatchEngine {
             Some(p) => p.team.clone(),
             None => return,
         };
-        if self
+        // 离场者必须**当前在场**：同一 tick 内可能已经发生一次换人
+        // （例如死球轮换先把体力枯竭者换下，而同 tick 的犯满强制换人又
+        // 指向同一人）。再对已下场者执行换人会多加一名上场球员，使
+        // 场上人数变成 6（实测 seed 8 第 3 节 away 6 人上场）。
+        if !self
             .systems
             .physics
             .get_player(out_player_id)
-            .is_some_and(|p| p.has_ball)
+            .is_some_and(|p| p.on_court)
+        {
+            return;
+        }
+        if self.ball_holder_id() == Some(out_player_id)
             || self.current_turnover_player_id().as_deref() == Some(out_player_id)
             || self.ball.pending_pass_receiver.as_deref() == Some(out_player_id)
             || matches!(&self.ball.ball_state,
@@ -63,8 +125,10 @@ impl MatchEngine {
             return;
         }
         let max_fouls = self.config.rules.league.max_personal_fouls;
+        // 犯满强制换人的替补体能地板（规则通道）。
+        let entry_floor = self.config.rules.rotation.foul_trouble_entry_stamina;
         // 登场者：调用方指定（evaluate 已按体力/休息时间过滤），否则取
-        // 字典序首位（forced_substitution 的历史行为，犯满路径别无选择）。
+        // 体能达标者优先的确定性首位（犯满路径）。
         let in_player_id = match in_player_id {
             Some(id) => {
                 // 指定者必须确实可登场：不在场、未犯满。异常指定按字典序回退。
@@ -80,16 +144,27 @@ impl MatchEngine {
                 }
             }
             None => {
-                let mut candidates: Vec<String> = self
+                // 犯满强制换人：优先选**体能达标**的替补（避免把已经跑
+                // 空的球员再推上场），全部不达标时退回「未犯满即可」——
+                // 犯满离场是强制事实，不能因为替补疲劳而拖延（替补池
+                // 枯竭时也必须能执行）。
+                let mut candidates: Vec<(f32, String)> = self
                     .systems
                     .physics
                     .get_players()
                     .values()
                     .filter(|p| p.team == team && !p.on_court && p.foul_count < max_fouls)
-                    .map(|p| p.id.clone())
+                    .map(|p| {
+                        let norm = p.stamina / p.max_stamina.max(1.0);
+                        (norm, p.id.clone())
+                    })
                     .collect();
-                candidates.sort();
-                let Some(first) = candidates.first().cloned() else {
+                candidates.sort_by(|a, b| {
+                    let left = a.0 < entry_floor;
+                    let right = b.0 < entry_floor;
+                    left.cmp(&right).then_with(|| a.1.cmp(&b.1))
+                });
+                let Some((_, first)) = candidates.first().cloned() else {
                     return;
                 };
                 first
@@ -106,7 +181,6 @@ impl MatchEngine {
         );
         if let Some(p) = self.systems.physics.get_player_mut(out_player_id) {
             p.on_court = false;
-            p.has_ball = false;
             p.action = "Bench".to_string();
             p.pos_ft = bench_spot;
             p.target_pos_ft = bench_spot;
@@ -280,11 +354,7 @@ impl MatchEngine {
             }
             // 换下者不能是当前持球/发球相关者（`substitute` 内部也有守卫，
             // 此处提前过滤避免白耗窗口配额）。
-            let is_holder = self
-                .systems
-                .physics
-                .get_player(&out_id)
-                .is_some_and(|p| p.has_ball)
+            let is_holder = self.ball_holder_id() == Some(out_id.as_str())
                 || self.current_turnover_player_id().as_deref() == Some(out_id.as_str());
             if is_holder {
                 continue;

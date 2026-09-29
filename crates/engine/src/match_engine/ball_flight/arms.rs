@@ -16,9 +16,9 @@ use glam::Vec2;
 use nba_domain::action_window::ActionTimeWindow;
 use nba_domain::court::Court;
 use nba_domain::{GameEvent, GameFlowState, Possession, SubPhase};
-use nba_officiating::resolution::{ResolutionLayer, ResolutionOutcome};
 use nba_physics::ballistics::{BallTrajectoryKind, BallisticsEngine};
 use nba_semantics::SemanticEvaluator;
+use rand::Rng;
 
 use super::BallFlightOutcome;
 use super::MatchEngine;
@@ -34,6 +34,10 @@ pub(crate) struct FlightContext {
     pub dt: f32,
 }
 
+fn clamp_unit(value: f32) -> f32 {
+    value.clamp(f32::from(0u8), f32::from(1u8))
+}
+
 impl MatchEngine {
     /// `Pass` 臂：接触检测、接球/点掉/坠地裁决。
     #[allow(clippy::too_many_arguments)]
@@ -45,12 +49,10 @@ impl MatchEngine {
         from_pos: Vec2,
         to_pos: Vec2,
         inbound: bool,
-        receive_success: bool,
         ctx: FlightContext,
         out: &mut BallFlightOutcome,
     ) {
         let is_inbound_pass = inbound;
-        let will_receive = receive_success;
         let tau = ((ctx.current_t - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
         let segment = to_pos - from_pos;
         let horizontal_speed_ftps = self
@@ -109,10 +111,8 @@ impl MatchEngine {
                 // 要求球与持球人一致（否则 BALL_WITH_HOLDER）。
                 // 拦截点与抢断者的距离可能达 reach（1.8+ 可达 ft），
                 // 直接沿用球坐标会造成球人分离（实测 3.86 ft）。
-                if let Some(defender) = self.systems.physics.get_player(&defender_id) {
-                    self.ball.ball_pos_3d =
-                        (defender.pos_ft, self.config.rules.ball_holder_height_ft);
-                }
+                self.ball.ball_pos_3d = (position, self.config.rules.ball_holder_height_ft);
+
                 out.steal_triggered_defender = Some(defender_id);
             } else {
                 let tipped_by = defender_id.clone();
@@ -182,8 +182,17 @@ impl MatchEngine {
                 .get_player(&receiver_id)
                 .map(|r| (r.pos_ft - self.ball.ball_pos_3d.0).length())
                 .unwrap_or(f32::MAX);
-            // 层 A：物理可达（确定性）；层 B：接稳（概率）。
-            let receiver_ready = ball_to_receiver <= catch_radius && will_receive;
+            // 层 A：物理可达（确定性）；层 B：接稳（概率，在到达时判定）。
+            let estimated_landing = self.estimate_receiver_landing(&receiver_id, frozen_to_pos);
+            let passer_id_for_catch = self.ball.last_passer_id.clone().unwrap_or_default();
+            let catch_secure = ball_to_receiver <= catch_radius
+                && self.resolve_pass_success(
+                    &passer_id_for_catch,
+                    &receiver_id,
+                    from_pos,
+                    estimated_landing,
+                );
+            let receiver_ready = catch_secure;
             if receiver_ready {
                 // 接球事实的位置必须是**冻结的传球终点**，而不是接球人
                 // 当时的身体位置。
@@ -201,13 +210,18 @@ impl MatchEngine {
                 //
                 // 正确做法：接球成功时把球**收到接球人身上**（持球锚点），
                 // 位置即接球人当前位置——这才是物理事实，也天然满足 leash。
-                let catch_spot = self
-                    .systems
-                    .physics
-                    .get_player(&receiver_id)
-                    .map(|r| r.pos_ft)
-                    .unwrap_or(frozen_to_pos);
-                self.ball.ball_pos_3d = (catch_spot, self.config.rules.ball_holder_height_ft);
+                let catch_spot = self.ball.ball_pos_3d.0;
+                let catch_height = self.ball.ball_pos_3d.1;
+                assert!(
+                    (self
+                        .systems
+                        .physics
+                        .get_player(&receiver_id)
+                        .map(|receiver| (receiver.pos_ft - catch_spot).length())
+                        .unwrap_or(f32::MAX))
+                        <= catch_radius,
+                    "successful pass catch must occur within the catch radius"
+                );
                 // 发布接球点修正事实（层 A，P-1）：当实际到达位置与
                 // 传球人冻结的意图不同时，把差异登记为事实，使
                 // 事实账本自洽（不允许下游各自解释同一传球）。
@@ -222,10 +236,17 @@ impl MatchEngine {
                             divergence_ft: divergence,
                         });
                 }
+                let is_cut_reception =
+                    self.is_cut_reception(&receiver_id, catch_spot, ctx.current_t);
                 self.journal.pending_events.push(GameEvent::PassReceived {
                     receiver_id: receiver_id.clone(),
                     position: (catch_spot.x, catch_spot.y),
+                    is_cut_reception,
                 });
+                if is_cut_reception {
+                    self.possession_ctx.last_cut_reception_time = Some(ctx.current_t);
+                    self.possession_ctx.last_cut_reception_player = Some(receiver_id.clone());
+                }
                 self.ball.pending_pass_inbound = false;
                 if is_inbound_pass {
                     self.transition_phase(SubPhase::Initiation);
@@ -233,13 +254,37 @@ impl MatchEngine {
                     self.clock.sub_phase_timer = 0.0;
                     self.clock.last_decision_time = -self.config.rules.decision_interval_seconds;
                 }
-                // The pass trajectory already ends at the frozen
-                // target. The receiver's body must not teleport the
-                // ball at catch.
-                out.new_ball_state = Some(BallTrajectoryKind::Held {
-                    carrier_id: receiver_id,
-                });
+                let carrier_id = receiver_id.clone();
+                let held_target = BallisticsEngine::sample_ball_position(
+                    &BallTrajectoryKind::Held {
+                        carrier_id: carrier_id.clone(),
+                    },
+                    ctx.current_t,
+                    self.systems.physics.get_players(),
+                    &self.config.rules,
+                );
+                let vertical_distance = (held_target.1 - catch_height).abs();
+                let lateral_distance = (held_target.0 - catch_spot).length();
+                let speed_budget = (self.config.rules.ball_max_speed_ftps
+                    - self.config.rules.invariant_speed_tolerance_ftps)
+                    .max(self.config.rules.invariant_speed_tolerance_ftps);
+                let horizontal_distance = lateral_distance
+                    + self.config.rules.ball_max_speed_ftps
+                        * (self.config.rules.tick_seconds - f32::EPSILON);
+                let transfer_duration = ((horizontal_distance.hypot(vertical_distance)
+                    / speed_budget)
+                    .max(self.config.rules.min_pass_duration_seconds))
+                .max(self.config.rules.tick_seconds);
                 self.ball.last_passer_id = None;
+                out.new_ball_state = Some(BallTrajectoryKind::ControlTransfer {
+                    from_pos: catch_spot,
+                    from_z: catch_height,
+                    target_pos: held_target.0,
+                    target_z: held_target.1,
+                    carrier_id,
+                    start_time: ctx.current_t,
+                    duration: transfer_duration,
+                });
             } else {
                 // 层 A/层 B 不通过：球到达它**实际到达的位置**。
                 // 层 A 不可达 → 球在人之外；层 B 未接稳 → 球在人身旁。
@@ -483,9 +528,6 @@ impl MatchEngine {
         target_pos: Vec2,
         start_time: f32,
         duration: f32,
-        successful: bool,
-        finish_made: bool,
-        fouler_id: Option<String>,
         ctx: FlightContext,
         out: &mut BallFlightOutcome,
     ) {
@@ -574,6 +616,14 @@ impl MatchEngine {
                     if teammate.on_court
                         && teammate.team == off_team_str
                         && teammate.id != driver_id
+                        // 回场条款（charter §6.2）：前场已建立时不得把球分回
+                        // 后场的队友——这类传球是白送球权的违例。
+                        && !(self.clock.frontcourt_established
+                            && self
+                                .config
+                                .rules
+                                .court
+                                .is_backcourt(teammate.pos_ft, self.flow.possession == Possession::Home))
                     {
                         let dist_to_team_hoop = (teammate.pos_ft - hoop_pos).length();
                         if dist_to_team_hoop >= self.config.rules.tactics.drive_kickout_pass_dist_ft
@@ -636,48 +686,56 @@ impl MatchEngine {
             // DRIVE_SCORE 中 80%（场均 52.7 次）未变成出手，事件流与
             // 记分簿自相矛盾（事实账目违规）。
             let stall_hoop_pos = self.config.rules.court.hoop_pos(ctx.is_home);
-            let stall_no_finish = successful && ((driver_pos - stall_hoop_pos).length() > 16.0_f32);
+            let driver_now = self.systems.physics.get_player(&driver_id).cloned();
+            let openness = self.systems.physics.openness(&driver_id);
+            let reached = driver_now.as_ref().is_some_and(|player| {
+                let stamina = clamp_unit(player.stamina / player.max_stamina.max(f32::EPSILON));
+                let lane_density = SemanticEvaluator::spacing(
+                    self.flow.possession,
+                    driver_pos,
+                    &self.systems.physics,
+                    &self.config.rules,
+                )
+                .paint_crowding;
+                let policy = &self.config.rules.resolve.drive;
+                let skill_delta = (player.attributes.finishing - f32::from(1u8) / f32::from(2u8))
+                    * self.config.rules.resolve.player_skill.finishing_weight
+                    * policy.skill_delta_scale;
+                let fatigue_delta = (stamina - f32::from(1u8))
+                    * self.config.rules.resolve.player_skill.finishing_weight;
+                let reach_probability = clamp_unit(
+                    self.config.rules.resolve.base_rates.drive_success
+                        + skill_delta
+                        + fatigue_delta
+                        - lane_density * policy.lane_density_penalty
+                        - openness.contest_intensity * policy.contest_penalty,
+                );
+                self.systems.rng.gen_bool(reach_probability as f64)
+            });
+            let dist_now = (driver_pos - stall_hoop_pos).length();
+            let stall_no_finish =
+                reached && dist_now > self.config.rules.tactics.drive_finish_range_ft;
+            let successful = reached && !stall_no_finish;
             self.journal.pending_events.push(GameEvent::DriveOutcome {
                 driver_id: driver_id.clone(),
-                successful: successful && !stall_no_finish,
-                finish_made: finish_made && !stall_no_finish,
+                successful,
             });
 
-            if let Some(fouler_id) = fouler_id {
-                self.journal.pending_events.push(GameEvent::Foul {
-                    fouled_player_id: driver_id.clone(),
-                    fouler_id,
-                    is_shooting: true,
-                });
-                self.ball.ball_pos_3d = (driver_pos, holder_height);
-                out.new_ball_state = Some(self.dead_state(driver_pos, holder_height));
-                self.transition_phase(SubPhase::DeadBallReset);
-                self.journal.current_event = Some("DRIVE_FOUL".to_string());
-                self.journal.current_callout =
-                    Some(format!("{} 突破造成投篮犯规，获得罚球机会", driver_id));
-            } else if successful {
+            if successful {
                 let hoop_pos = self.config.rules.court.hoop_pos(ctx.is_home);
-                // 起跳延伸：最后一步腾空后出手点在停点与篮筐之间（规则通道
-                // drive_finish_extend_ft，不超过到筐距离）。分离投影把接触
-                // 停点推离篮筐的位移不再直接吞噬 rim 出手分布。
-                let to_hoop_finish = hoop_pos - driver_pos;
-                let finish_dist = to_hoop_finish.length();
-                let extend = self
-                    .config
-                    .rules
-                    .tactics
-                    .drive_finish_extend_ft
-                    .min(finish_dist);
-                let finish_pos = if finish_dist > f32::EPSILON {
-                    driver_pos + to_hoop_finish * (extend / finish_dist)
-                } else {
-                    driver_pos
-                };
-                let dist_to_hoop = finish_dist - extend;
+                let finish_pos = driver_pos;
+                let drive_distance = (driver_pos - target_pos).length();
+                let early_finish = drive_distance
+                    <= self.config.rules.tactics.drive_early_finish_dist_ft
+                    && elapsed <= self.config.rules.tactics.drive_min_duration_seconds;
+                let dist_to_hoop = (hoop_pos - finish_pos).length();
                 // Spatial gate: if driver is still outside the paint / perimeter,
                 // this drive was stalled before reaching finishing position.
                 let finish_range = self.config.rules.tactics.drive_finish_range_ft;
-                if dist_to_hoop > finish_range {
+                if dist_to_hoop > finish_range
+                    && drive_distance > self.config.rules.tactics.drive_early_finish_dist_ft
+                    && !early_finish
+                {
                     self.ball.ball_pos_3d = (driver_pos, holder_height);
                     out.new_ball_state = Some(BallTrajectoryKind::Held {
                         carrier_id: driver_id.clone(),
@@ -708,63 +766,129 @@ impl MatchEngine {
                         &self.config.rules,
                     )
                     .paint_crowding;
-                    let (finish_kind, action_name, callout_action) =
-                        if dist_to_hoop < 4.0 && finishing_skill > 0.7 && lane_density < 0.35 {
-                            (
-                                nba_domain::action_window::RimFinishKind::Dunk,
-                                "Dunk",
-                                "腾空暴扣！单臂炸筐！",
-                            )
-                        } else if dist_to_hoop > 7.0 {
-                            (
-                                nba_domain::action_window::RimFinishKind::Floater,
-                                "Floater",
-                                "行进间柔和抛投！",
-                            )
-                        } else {
-                            (
-                                nba_domain::action_window::RimFinishKind::Layup,
-                                "Layup",
-                                "三步并两步，低手上篮！",
-                            )
-                        };
-                    let shot_dur = BallisticsEngine::shot_duration(
-                        dist_to_hoop,
-                        self.config.rules.rim_height_ft,
-                        &self.config.rules,
-                    )
-                    .max(0.4);
+                    let takeoff = (hoop_pos - finish_pos).normalize_or_zero()
+                        * drive_distance.min(self.config.rules.tactics.drive_finish_extend_ft);
+                    let finish_pos = self
+                        .config
+                        .rules
+                        .court
+                        .clamp_playable(finish_pos + takeoff, self.config.rules.player_radius_ft);
+                    let dist_to_hoop = (hoop_pos - finish_pos).length();
+                    let (finish_kind, action_name, callout_action) = if dist_to_hoop
+                        < self.config.rules.tactics.drive_dunk_max_dist_ft
+                        && finishing_skill > self.config.rules.tactics.drive_dunk_min_finishing
+                        && lane_density < self.config.rules.tactics.drive_dunk_max_lane_density
+                    {
+                        (
+                            nba_domain::action_window::RimFinishKind::Dunk,
+                            "Dunk",
+                            "腾空暴扣！单臂炸筐！",
+                        )
+                    } else if dist_to_hoop > self.config.rules.tactics.drive_floater_min_dist_ft {
+                        (
+                            nba_domain::action_window::RimFinishKind::Floater,
+                            "Floater",
+                            "行进间柔和抛投！",
+                        )
+                    } else {
+                        (
+                            nba_domain::action_window::RimFinishKind::Layup,
+                            "Layup",
+                            "三步并两步，低手上篮！",
+                        )
+                    };
                     self.transition_phase(SubPhase::ShotAttempt);
+                    let contest_val = openness.contest_intensity;
+                    let finish_zone = self.config.rules.court.shot_zone(
+                        finish_pos,
+                        ctx.is_home,
+                        self.config.rules.league.three_point_distance_ft,
+                        self.config.rules.league.corner_three_distance_ft,
+                    );
+                    let finish_skill = clamp_unit(
+                        driver_p
+                            .as_ref()
+                            .map(|player| match finish_zone {
+                                nba_domain::ShotZone::Rim => {
+                                    let contest = clamp_unit(contest_val);
+                                    player.attributes.shooting_close * (f32::from(1u8) - contest)
+                                        + player.attributes.finishing * contest
+                                }
+                                nba_domain::ShotZone::Near => player.attributes.shooting_near,
+                                nba_domain::ShotZone::Mid => player.attributes.shooting_mid,
+                                nba_domain::ShotZone::Three => player.attributes.shooting_three,
+                            })
+                            .unwrap_or(f32::from(1u8) / f32::from(2u8)),
+                    );
+                    let base_fg = match finish_zone {
+                        nba_domain::ShotZone::Rim => {
+                            self.config.rules.resolve.base_rates.shot_make_rim
+                        }
+                        nba_domain::ShotZone::Near => {
+                            self.config.rules.resolve.base_rates.shot_make_near
+                        }
+                        nba_domain::ShotZone::Mid => {
+                            self.config.rules.resolve.base_rates.shot_make_mid
+                        }
+                        nba_domain::ShotZone::Three => {
+                            self.config.rules.resolve.base_rates.shot_make_3pt
+                        }
+                    };
+                    let skill_adjustment = (finish_skill - f32::from(1u8) / f32::from(2u8))
+                        * self.config.rules.resolve.player_skill.shooting_weight
+                        * f32::from(2u8);
+                    let make_probability = (base_fg + skill_adjustment
+                        - contest_val * self.config.rules.shot_contest_sensitivity)
+                        .clamp(
+                            self.config.rules.shot_pct_floor,
+                            self.config.rules.shot_pct_ceiling,
+                        );
+                    let transition_event_id = self.possession_ctx.transition_context_event(
+                        ctx.current_t,
+                        self.config.rules.tactics.transition_finish_window_seconds,
+                    );
+                    let transition_context =
+                        transition_event_id.is_some() && dist_to_hoop <= finish_range;
+                    // 转换语境下的攻框按转换终结归类（描述回合创建语境，
+                    // 优先于动作路径）：突破只是到达篮下的手段。
+                    let creation_source = if transition_context {
+                        nba_domain::ShotCreationSource::TransitionFinish
+                    } else {
+                        nba_domain::ShotCreationSource::DriveFinish
+                    };
+                    let source_event_id = if transition_context {
+                        transition_event_id
+                    } else {
+                        None
+                    };
                     self.journal.pending_events.push(GameEvent::ShotRelease {
                         shooter_id: driver_id.clone(),
                         pos: (finish_pos.x, finish_pos.y),
-                        is_three: false,
-                        contest_level: 0.2,
-                        make_probability: if finish_made { 1.0 } else { 0.0 },
+                        creation_source,
+                        transition_context,
+                        transition_event_id: transition_context
+                            .then_some(transition_event_id)
+                            .flatten(),
+                        source_event_id,
+                        is_three: finish_zone == nba_domain::ShotZone::Three,
+                        contest_level: contest_val,
+                        make_probability,
                     });
                     self.possession_ctx.current_possession_shooter = Some(driver_id.clone());
-                    let contest_val = if finish_made { 0.35 } else { 0.65 };
                     self.possession_ctx.current_possession_contest = Some(contest_val);
                     self.journal.current_event = Some("SHOT_RELEASE".to_string());
-                    if finish_kind == nba_domain::action_window::RimFinishKind::Dunk {
-                        self.observations.active_windows.insert(
-                            driver_id.clone(),
-                            ActionTimeWindow::new_dunk(
-                                &driver_id,
-                                ctx.current_t,
-                                &self.config.rules,
-                            ),
-                        );
+                    self.clear_recent_shot_creation_context();
+                    let window = if finish_kind == nba_domain::action_window::RimFinishKind::Dunk {
+                        ActionTimeWindow::new_dunk(&driver_id, ctx.current_t, &self.config.rules)
                     } else {
-                        self.observations.active_windows.insert(
-                            driver_id.clone(),
-                            ActionTimeWindow::new_layup(
-                                &driver_id,
-                                ctx.current_t,
-                                &self.config.rules,
-                            ),
-                        );
-                    }
+                        ActionTimeWindow::new_layup(&driver_id, ctx.current_t, &self.config.rules)
+                    };
+                    self.start_action_window(
+                        &driver_id,
+                        window,
+                        None,
+                        Some((hoop_pos.x, hoop_pos.y)),
+                    );
                     if let Some(p) = self.systems.physics.get_player_mut(&driver_id) {
                         p.action = action_name.to_string();
                         let hoop_dir = (hoop_pos - p.pos_ft).normalize_or_zero();
@@ -780,23 +904,38 @@ impl MatchEngine {
                         .unwrap_or_else(|| driver_id.clone());
                     self.journal.current_callout =
                         Some(format!("{} {}", driver_display, callout_action));
+                    let aim_pos = BallisticsEngine::sample_shot_aim(
+                        finish_pos,
+                        hoop_pos,
+                        make_probability,
+                        &mut self.systems.rng,
+                        &self.config.rules,
+                    );
+                    // 释放起点 = 球的实际位置（末次运球采样点）：出手事件与
+                    // 终结分区仍按向篮筐延伸的 finish_pos 统计，但球的飞行
+                    // 必须从球所在处连续出发，否则单帧向篮筐瞬移
+                    // drive_finish_extend_ft，越出球速包络（实测 90–156 ft/s）。
+                    let release_origin = self.ball.ball_pos_3d.0;
+                    let shot_dur = BallisticsEngine::shot_duration(
+                        (aim_pos - release_origin).length(),
+                        self.config.rules.rim_height_ft + 1.5,
+                        &self.config.rules,
+                    );
                     out.new_ball_state = Some(BallTrajectoryKind::Shot {
                         shooter_id: driver_id.clone(),
-                        from_pos: driver_pos,
+                        from_pos: release_origin,
                         hoop_pos,
+                        aim_pos,
                         start_time: ctx.current_t,
                         duration: shot_dur,
-                        is_made: finish_made,
-                        is_three: false,
+                        is_three: finish_zone == nba_domain::ShotZone::Three,
                         peak_z: if finish_kind == nba_domain::action_window::RimFinishKind::Dunk {
                             self.config.rules.rim_height_ft + 0.5
                         } else {
                             self.config.rules.rim_height_ft + 1.5
                         },
-                        // 突破犯规已在上面单独分支处理（直接进罚球、
-                        // 不创建 Shot 状态），因此本路径的出手必定无犯规。
-                        fouled: false,
-                        fouler_id: None,
+                        make_probability,
+                        contest_intensity: contest_val,
                     });
                 }
             } else {
@@ -822,177 +961,108 @@ impl MatchEngine {
         hoop_pos: Vec2,
         start_time: f32,
         duration: f32,
-        is_made: bool,
         is_three: bool,
         from_pos: Vec2,
-        fouled: bool,
-        fouler_id: Option<String>,
+        aim_pos: Vec2,
+        _make_probability: f32,
+        contest_intensity: f32,
         ctx: FlightContext,
         out: &mut BallFlightOutcome,
     ) {
+        let sid = shooter_id.clone();
         let tau = ((ctx.current_t - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
-        let _ = tau;
         if tau < 1.0 {
             return;
         }
-        let sid = shooter_id;
-        let h_pos = hoop_pos;
-        let s_pos = from_pos;
-        let made = is_made;
-        let three = is_three;
-        let was_fouled = fouled;
-        let fouler = fouler_id;
-        self.shot_arrival_settlement(
-            sid, h_pos, s_pos, made, three, was_fouled, fouler, duration, ctx, out,
+        let (ball_position, ball_height) = BallisticsEngine::sample_ball_position(
+            &self.ball.ball_state,
+            ctx.current_t,
+            self.systems.physics.get_players(),
+            &self.config.rules,
         );
-    }
-
-    /// 到筐结算：事实发布、得分/篮板分流与打铁双通道路由。
-    ///
-    /// 从 `Shot` 臂搬出（原样保真）；`is_home` 由 [`FlightContext`] 携带。
-    #[allow(clippy::too_many_arguments)]
-    fn shot_arrival_settlement(
-        &mut self,
-        sid: String,
-        h_pos: Vec2,
-        s_pos: Vec2,
-        made: bool,
-        three: bool,
-        was_fouled: bool,
-        fouler: Option<String>,
-        shot_flight_seconds: f32,
-        ctx: FlightContext,
-        out: &mut BallFlightOutcome,
-    ) {
-        let is_home = ctx.is_home;
-        self.journal.pending_events.push(GameEvent::HoopArrival {
-            shooter_id: sid.clone(),
-            shot_origin: (s_pos.x, s_pos.y),
-            is_made: made,
-            is_three: three,
-            contest_intensity: 0.0,
-        });
-        // ## 投篮犯规是独立事实（evidence/problem.md §23.9）
-        //
-        // 与 `HoopArrival` 并列发出，而不是用命中与否反推：
-        // and-one（犯规且命中）与投篮犯规（犯规且不中）都要能表达，
-        // 且犯规的后果（罚球、个人/团队犯规计数、犯满离场）
-        // 必须走与突破犯规同一条处理链，避免第二套口径。
-        if was_fouled {
-            if let Some(ref fid) = fouler {
-                self.journal.pending_events.push(GameEvent::Foul {
-                    fouled_player_id: sid.clone(),
-                    fouler_id: fid.clone(),
-                    is_shooting: true,
-                });
-            }
-        }
-        if three {
-            self.ledger.box_score.fg3_attempts += 1;
-            if made {
-                self.ledger.box_score.fg3_made += 1;
-            }
-        } else {
-            self.ledger.box_score.fg2_attempts += 1;
-            if made {
-                self.ledger.box_score.fg2_made += 1;
-            }
-        }
-        // ## 投篮结果回写到士气状态机（D27 修复不可达分支）
-        //
-        // `PlayerModulationState::record_shot` 先前在生产代码与测试中
-        // 零调用，因此 `consecutive_makes` 恒为 0，
-        // `update_stamina_with_rules` 的 `HotHand` 分支
-        // （阈值 `hot_hand_makes`）永远不可达——`hot_hand_bias` 无效。
-        // 每次出手结算（进或不进）都在此立即回写，使连中/连铁
-        // 真正累积。
-        if let Some(state) = self.observations.modulation.get_mut(&sid) {
-            state.record_shot(made);
-        }
-        match ResolutionLayer::resolve_shot_arrival(made, three, &sid) {
-            ResolutionOutcome::Score { points, .. } => {
-                if is_home {
-                    self.ledger.home_score += points;
-                } else {
-                    self.ledger.away_score += points;
-                }
-                let baseline =
-                    Court::nearest_boundary_with_geometry(h_pos, self.config.rules.court);
-                self.ball.ball_pos_3d = (h_pos, self.config.rules.rim_height_ft);
-                self.emit_possession_summary(
-                    nba_domain::PossessionEndCause::Score,
+        let arrival_event = GameEvent::ShotTrajectoryArrival {
+            shooter_id: shooter_id.clone(),
+            ball_position: (ball_position.x, ball_position.y, ball_height),
+        };
+        match BallisticsEngine::classify_shot_arrival(ball_position, hoop_pos, &self.config.rules) {
+            nba_physics::ballistics::ShotArrivalOutcome::Made => {
+                self.journal.pending_events.push(arrival_event);
+                self.shot_arrival_settlement(
+                    shooter_id,
+                    hoop_pos,
+                    from_pos,
+                    aim_pos,
                     None,
-                    None,
-                    None,
+                    true,
+                    is_three,
+                    contest_intensity,
+                    duration,
+                    ctx,
+                    out,
                 );
-                self.transition_phase(SubPhase::DeadBallReset);
-                self.start_inbound_transition(baseline, (h_pos, self.config.rules.rim_height_ft));
             }
-            ResolutionOutcome::Miss { .. } => {
-                let shooter_name = self
-                    .systems
-                    .physics
-                    .get_player(&sid)
-                    .map(|p| p.jersey.clone())
-                    .unwrap_or_else(|| sid.clone());
-                self.journal.current_event = Some("SHOT_MISSED".to_string());
-                self.journal.current_callout =
-                    Some(format!("砸框而出！{} 投篮不中，争抢篮板！", shooter_name));
-                let shooter_for_payload = sid.clone();
-                self.transition_phase(SubPhase::FlightAndRebound);
-                // 双通道路由（ADR-017 第三步）：探针判「力度过大
-                // 越过筐」——出手 → 筐延长线穿过板面且弦外推 z
-                // 处于板高内 → 走打板路径（瞄准点为筐心，散射
-                // 由弦几何承载）；不足量仍是近筐沿反射。
-                let landing_spot = if BallisticsEngine::compute_backboard_contact_probe(
-                    s_pos,
-                    h_pos,
-                    &self.config.rules,
-                ) {
-                    BallisticsEngine::compute_rebound_landing_bank(
-                        s_pos,
-                        h_pos,
-                        shot_flight_seconds,
-                        &mut self.systems.rng,
-                        &self.config.rules,
-                    )
-                } else {
-                    BallisticsEngine::compute_rebound_landing(
-                        s_pos,
-                        h_pos,
-                        shot_flight_seconds,
-                        &mut self.systems.rng,
-                        &self.config.rules,
-                    )
-                };
-                // 反弹起点 = 触点（近筐沿或板面，第三步双通道）。
-                let rebound_from = (landing_spot.contact_pos, landing_spot.contact_z);
-                out.new_ball_state = Some(BallTrajectoryKind::RimRebound {
-                    from_pos: rebound_from.0,
-                    from_z: rebound_from.1,
-                    hoop_pos: h_pos,
-                    target_landing: landing_spot.landing_pos,
-                    start_time: ctx.current_t,
-                    duration: landing_spot.flight_duration,
-                    peak_z: landing_spot.peak_z,
-                    last_touch_team: self.flow.possession,
-                    // 物理最后触球人是出手人（触筐不改球权归属）。
-                    last_touch_player: Some(shooter_for_payload),
+            nba_physics::ballistics::ShotArrivalOutcome::RimContact {
+                ball_position: _,
+                contact_position,
+            } => {
+                self.journal.pending_events.push(arrival_event);
+                self.journal.pending_events.push(GameEvent::ShotContact {
+                    shooter_id: shooter_id.clone(),
+                    surface: "Rim".to_string(),
+                    position: (
+                        contact_position.x,
+                        contact_position.y,
+                        self.config.rules.rim_height_ft,
+                    ),
                 });
-                // ## 篮板冲抢指派（evidence/problem.md §23.8）
-                //
-                // 实测：球在空中时守方朝球靠近的速率是攻方的**约 42 倍**
-                // （0.0042 vs 0.0001 ft/tick），且两者绝对值都极小——
-                // 即双方都几乎没有抢篮板行为，攻方几乎为零。后果是
-                // ORB% 仅 0.07–0.13（真实 0.245），每次不中直接换手，
-                // 回合被压成「一次性进攻」并与节奏过快同向。
-                //
-                // 此处显式指派：双方球员向球的落点邻域移动（守方优先，
-                // 攻方按 offensive_rebound 属性加权），使篮板真的被争抢，
-                // 而不是靠判定公式凭空产生归属。
-                self.assign_rebound_pursuit(landing_spot.landing_pos, ctx.current_t);
+                self.shot_arrival_settlement(
+                    shooter_id,
+                    hoop_pos,
+                    from_pos,
+                    aim_pos,
+                    Some(contact_position),
+                    false,
+                    is_three,
+                    contest_intensity,
+                    duration,
+                    ctx,
+                    out,
+                );
             }
-            _ => {}
+            nba_physics::ballistics::ShotArrivalOutcome::Miss => {
+                let velocity = BallisticsEngine::sample_ball_velocity(
+                    &self.ball.ball_state,
+                    ctx.current_t,
+                    self.systems.physics.get_players(),
+                    &self.config.rules,
+                );
+                self.journal.pending_events.push(arrival_event);
+                self.journal.pending_events.push(GameEvent::HoopArrival {
+                    shooter_id: shooter_id.clone(),
+                    shot_origin: (from_pos.x, from_pos.y),
+                    is_made: false,
+                    is_three,
+                    contest_intensity,
+                });
+                if let Some(state) = self.observations.modulation.get_mut(&sid) {
+                    state.record_shot(false);
+                }
+                // 偏筐无接触不中，且哨已在飞行中响起：无松球，罚球接管
+                // （阶段直接进入 DeadBallReset，不经 FlightAndRebound）。
+                if !self.ledger.free_throw_queue.is_empty() {
+                    self.try_start_next_free_throw_program(out);
+                    return;
+                }
+                self.transition_phase(SubPhase::FlightAndRebound);
+                out.new_ball_state = Some(BallTrajectoryKind::LooseBall {
+                    pos: ball_position,
+                    vel: glam::Vec2::new(velocity.x, velocity.y),
+                    z: ball_height,
+                    vel_z: velocity.z,
+                    last_touch_team: self.flow.possession,
+                    last_touch_player: Some(shooter_id.clone()),
+                });
+            }
         }
     }
 }

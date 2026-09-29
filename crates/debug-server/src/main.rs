@@ -709,7 +709,10 @@ mod tests {
     }
     #[test]
     fn studio_catalog_round_trips_into_simulation() {
-        let (status, _, body) = route(&request("GET", "/api/studio", Vec::new()), &session_unused());
+        let (status, _, body) = route(
+            &request("GET", "/api/studio", Vec::new()),
+            &session_unused(),
+        );
         assert_eq!(status, "200 OK");
         let catalog: Value = serde_json::from_slice(&body).expect("studio catalog should be JSON");
         let setup = catalog["default_setup"].clone();

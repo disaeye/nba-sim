@@ -9,8 +9,9 @@
 //! 引擎不为本评判器改变任何行为（宪章 C2：评判是观测，不是干预）。
 
 use nba_protocol::{FrameEvent, RenderFrame, StreamTick};
-use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
+
+use nba_domain::court::ShotZone;
 
 pub mod fixture;
 pub use fixture::ReferenceDistributions;
@@ -20,7 +21,15 @@ pub mod pbp;
 pub use pbp::{convert_pbp_events_to_fixture, PbpEvent};
 
 mod composition;
+mod individual;
+mod joint_situational;
+mod shot_facts;
 pub(crate) use composition::{evaluate_composition_criteria, CompositionEvidence};
+pub(crate) use shot_facts::{
+    q4_count_shot, resolve_shot_outcome, shot_zone, zone_index, FreeThrowData,
+    LooseBallSecuredData, PassInterceptedData, PassReceivedData, PassReleaseData,
+    PossessionSummaryData, ShotReleaseData,
+};
 mod parse;
 pub use parse::{parse_stream, parse_stream_lenient, try_parse_stream};
 mod report;
@@ -29,9 +38,8 @@ pub use report::{
 };
 // 评判口径常数由准则函数（本文件）与报表聚合（`report.rs`）共用：
 // 公开给子模块而不重复定义，避免两处口径漂移。
-pub(crate) use report::{REGULATION_SECONDS_48MIN, RIM_OFFSET_FT};
-// 统一出手分区阈值与 domain 同源（charter C1：常数不游离于规则体系）。
-pub(crate) use nba_domain::court::{NEAR_ZONE_MAX_DIST_FT, RIM_ZONE_MAX_DIST_FT};
+pub(crate) use report::REGULATION_SECONDS_48MIN;
+// 统一出手分区由 `CourtGeometry::shot_zone` 提供。
 
 /// 单回合上下文：从上一 POSSESSION_SUMMARY 到本条之间的全部事件。
 /// 一次传球释放：`(sequence, passer, receiver, from, to, 是否已终结)`。
@@ -294,7 +302,7 @@ fn evaluate_possessions(ticks: &[StreamTick], fixture: &ReferenceDistributions) 
                         window.offensive_rebounds += 1;
                     }
                 }
-                "VIOLATION" | "RULE_VIOLATION" | "ENFORCEMENT_APPLIED" => {
+                "VIOLATION" | "RULE_VIOLATION" | "ENFORCEMENT_APPLIED" | "OUT_OF_BOUNDS" => {
                     window.violations += 1;
                 }
                 _ => {}
@@ -761,6 +769,18 @@ fn evaluate_game_level(ticks: &[StreamTick], fixture: &ReferenceDistributions) -
     let mut fga_mid = 0usize;
     let mut fga_near = 0usize;
     let mut fga_rim = 0usize;
+    let mut zone_fgm = [0usize; 4];
+    let mut zone_fga = [0usize; 4];
+    let mut shot_events = HashMap::<u64, (usize, bool)>::new();
+    let mut shot_arrival_to_release = HashMap::<u64, u64>::new();
+    let mut shot_event_duplicates = HashSet::<u64>::new();
+    let mut pending_shot_outcomes = HashMap::<u64, bool>::new();
+    let mut shot_evidence_complete = true;
+    let mut q4_late_fga = 0usize;
+    let mut q4_late_three = 0usize;
+    let mut q4_early_fga = 0usize;
+    let mut q4_early_three = 0usize;
+    let mut q4_events_complete = true;
     let mut fta = 0usize;
     // 比赛时长（秒，墙钟 t 单调），用于 48 分钟等效回合数。
     let mut wall_start: Option<f32> = None;
@@ -791,46 +811,177 @@ fn evaluate_game_level(ticks: &[StreamTick], fixture: &ReferenceDistributions) -
             let Some(raw) = &entry.data else { continue };
             match entry.kind.as_str() {
                 "SHOT_RELEASE" => {
-                    if let Some(s) = raw.get("ShotRelease") {
-                        let is_three = s.get("is_three").and_then(|v| v.as_bool()).unwrap_or(false);
-                        if is_three {
-                            fga_three += 1;
-                        } else {
-                            fga_two += 1;
-                            // 区域区分：出手点与进攻篮筐距离（ft）。
-                            let pos = s.get("pos").and_then(|v| v.as_array());
-                            let hoop_x = if tick.frame.possession_team == "home" {
-                                fixture.court_width_ft - RIM_OFFSET_FT
-                            } else {
-                                RIM_OFFSET_FT
-                            };
-                            let hoop_y = fixture.court_height_ft / 2.0;
-                            if let Some(p) = pos {
-                                let x = p.first().and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                                let y = p.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                                let dist = ((x - hoop_x).powi(2) + (y - hoop_y).powi(2)).sqrt();
-                                // 统一四区（attributes.md §2.3a）：Rim < 5、
-                                // Near 5–14、Mid ≥ 14。三分已单独计数。
-                                if dist < RIM_ZONE_MAX_DIST_FT {
-                                    fga_rim += 1;
-                                } else if dist < NEAR_ZONE_MAX_DIST_FT {
-                                    fga_near += 1;
-                                } else {
-                                    fga_mid += 1;
-                                }
-                            }
-                        }
+                    let has_q4_clock = tick.frame.period != 4
+                        || (tick.game_clock.is_finite()
+                            && (0.0..=720.0).contains(&tick.game_clock));
+                    q4_events_complete &= has_q4_clock;
+                    let mut normalized = raw.get("ShotRelease").cloned().unwrap_or_default();
+                    if let Some(value) = normalized.as_object_mut() {
+                        value.insert(
+                            "team".to_string(),
+                            serde_json::Value::String(tick.frame.possession_team.clone()),
+                        );
                     }
-                }
-                "SCORE" => {
-                    if let Some(a) = raw.get("HoopArrival") {
-                        if a.get("is_made").and_then(|v| v.as_bool()).unwrap_or(false) {
-                            if a.get("is_three").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    let data = Some(&normalized);
+                    let pos = data
+                        .and_then(|shot| shot.get("pos"))
+                        .and_then(|value| value.as_array());
+                    let is_three = data
+                        .and_then(|shot| shot.get("is_three"))
+                        .and_then(|value| value.as_bool());
+                    if pos.is_none() || is_three.is_none() {
+                        shot_evidence_complete = false;
+                        continue;
+                    }
+                    if entry.event_id == 0 {
+                        shot_evidence_complete = false;
+                    }
+                    let pos = pos.expect("validated shot position");
+                    let (Some(x), Some(y)) = (
+                        pos.first().and_then(|value| value.as_f64()),
+                        pos.get(1).and_then(|value| value.as_f64()),
+                    ) else {
+                        shot_evidence_complete = false;
+                        continue;
+                    };
+                    let zone = shot_zone(
+                        x as f32,
+                        y as f32,
+                        tick.frame.possession_team.as_str(),
+                        is_three.expect("validated shot type"),
+                        tick,
+                        fixture,
+                    );
+                    let zone_index = zone_index(zone);
+                    zone_fga[zone_index] += 1;
+                    match zone {
+                        ShotZone::Rim => fga_rim += 1,
+                        ShotZone::Near => fga_near += 1,
+                        ShotZone::Mid => fga_mid += 1,
+                        ShotZone::Three => fga_three += 1,
+                    }
+                    if zone == ShotZone::Three {
+                        q4_count_shot(
+                            tick,
+                            fixture,
+                            true,
+                            &mut q4_late_fga,
+                            &mut q4_late_three,
+                            &mut q4_early_fga,
+                            &mut q4_early_three,
+                        );
+                    } else {
+                        fga_two += 1;
+                        q4_count_shot(
+                            tick,
+                            fixture,
+                            false,
+                            &mut q4_late_fga,
+                            &mut q4_late_three,
+                            &mut q4_early_fga,
+                            &mut q4_early_three,
+                        );
+                    }
+                    if entry.event_id == 0 {
+                        continue;
+                    }
+                    if shot_events
+                        .insert(entry.event_id, (zone_index, false))
+                        .is_some()
+                    {
+                        shot_event_duplicates.insert(entry.event_id);
+                    }
+                    if let Some(made) = pending_shot_outcomes.remove(&entry.event_id) {
+                        if made {
+                            zone_fgm[zone_index] += 1;
+                            if zone_index == 3 {
                                 fgm_three += 1;
                             } else {
                                 fgm_two += 1;
                             }
                         }
+                        if let Some((_, resolved)) = shot_events.get_mut(&entry.event_id) {
+                            *resolved = true;
+                        }
+                    }
+                }
+                "SHOT_TRAJECTORY_ARRIVAL" => {
+                    if entry.parent_event_id.is_none() {
+                        shot_evidence_complete = false;
+                    }
+                    let parent_id = entry.parent_event_id.or_else(|| {
+                        shot_events
+                            .keys()
+                            .filter(|release_id| {
+                                !shot_arrival_to_release
+                                    .values()
+                                    .any(|known| known == *release_id)
+                            })
+                            .max()
+                            .copied()
+                    });
+                    let parent_id = parent_id.or_else(|| shot_events.keys().max().copied());
+                    if entry.event_id == 0 || parent_id.is_none() {
+                        shot_evidence_complete = false;
+                        continue;
+                    }
+                    shot_arrival_to_release
+                        .insert(entry.event_id, parent_id.expect("validated shot parent"));
+                }
+                "BLOCKED_SHOT" => {
+                    let Some(parent_id) = entry.parent_event_id else {
+                        shot_evidence_complete = false;
+                        continue;
+                    };
+                    let release_id = shot_arrival_to_release
+                        .get(&parent_id)
+                        .copied()
+                        .unwrap_or(parent_id);
+                    resolve_shot_outcome(
+                        release_id,
+                        &mut shot_events,
+                        &shot_event_duplicates,
+                        &mut shot_evidence_complete,
+                    );
+                }
+                "SCORE" | "SHOT_MISS" => {
+                    let parent_id = entry
+                        .parent_event_id
+                        .or_else(|| shot_arrival_to_release.keys().max().copied());
+                    let Some(parent_id) = parent_id else {
+                        shot_evidence_complete = false;
+                        continue;
+                    };
+                    let Some(release_id) = shot_arrival_to_release
+                        .get(&parent_id)
+                        .copied()
+                        .or_else(|| shot_events.contains_key(&parent_id).then_some(parent_id))
+                    else {
+                        shot_evidence_complete = false;
+                        continue;
+                    };
+                    let made = entry.kind == "SCORE"
+                        && raw
+                            .get("HoopArrival")
+                            .and_then(|value| value.get("is_made"))
+                            .and_then(|value| value.as_bool())
+                            == Some(true);
+                    if let Some((zone_index, resolved)) = shot_events.get_mut(&release_id) {
+                        if *resolved || shot_event_duplicates.contains(&release_id) {
+                            shot_evidence_complete = false;
+                            continue;
+                        }
+                        *resolved = true;
+                        if made {
+                            zone_fgm[*zone_index] += 1;
+                            if *zone_index == 3 {
+                                fgm_three += 1;
+                            } else {
+                                fgm_two += 1;
+                            }
+                        }
+                    } else {
+                        pending_shot_outcomes.insert(release_id, made);
                     }
                 }
                 "FREE_THROW" => {
@@ -852,7 +1003,6 @@ fn evaluate_game_level(ticks: &[StreamTick], fixture: &ReferenceDistributions) -
     }
     let shot_attempts = fga_two + fga_three;
     let three_attempts = fga_three;
-
     if possessions >= 10 {
         let to_rate = turnovers as f32 / possessions as f32;
         if !fixture.turnover_rate_band.contains(&to_rate) {
@@ -923,6 +1073,24 @@ fn evaluate_game_level(ticks: &[StreamTick], fixture: &ReferenceDistributions) -
 
     // ---- D2 比赛级构成准则簇（dev 方案 §5.1）----
     // 定位：必要条件的回归网——进带不庆祝，出带必报警。不构成"真实"的证明。
+    joint_situational::evaluate(
+        &mut out,
+        fixture,
+        idx.unwrap_or(0),
+        joint_situational::JointSituationalEvidence {
+            zone_attempts: zone_fga,
+            zone_makes: zone_fgm,
+            late_q4_attempts: q4_late_fga,
+            late_q4_three_attempts: q4_late_three,
+            early_q4_attempts: q4_early_fga,
+            early_q4_three_attempts: q4_early_three,
+            shot_facts_complete: shot_evidence_complete
+                && shot_events.values().all(|(_, resolved)| *resolved),
+            q4_attempt_facts_complete: q4_events_complete
+                && shot_events.values().all(|(_, resolved)| *resolved),
+        },
+    );
+
     evaluate_composition_criteria(
         &mut out,
         fixture,
@@ -943,6 +1111,15 @@ fn evaluate_game_level(ticks: &[StreamTick], fixture: &ReferenceDistributions) -
                 .map(|(s, e)| (e - s).abs())
                 .unwrap_or(0.0),
         },
+    );
+
+    // ---- R6 个体评判准则簇（attributes.md §2.6）----
+    // 四条准则：使用率集中度、助攻父链、防守责任闭合、末节体能。
+    // 证据不足时保持 InsufficientEvidence（不编造结论）。
+    individual::evaluate_individual_criteria(
+        &mut out,
+        idx.unwrap_or(0),
+        individual::collect_individual_evidence(ticks),
     );
 
     // ---- 覆盖性（M8 验收：回合零遗漏）----
@@ -974,55 +1151,6 @@ fn bands_turnover(fixture: &ReferenceDistributions) -> fixture::Band {
     fixture.turnover_rate_band
 }
 
-// ---- 流内事件载荷的松散镜像（只取评判所需字段）----
-#[derive(Deserialize)]
-struct PassReleaseData {
-    passer_id: String,
-    receiver_id: String,
-    from_pos: (f32, f32),
-    to_pos: (f32, f32),
-}
-#[derive(Deserialize)]
-struct PassReceivedData {
-    receiver_id: String,
-    position: (f32, f32),
-}
-#[derive(Deserialize)]
-struct LooseBallSecuredData {
-    player_id: String,
-}
-#[derive(Deserialize)]
-struct PassInterceptedData {
-    passer_id: String,
-    receiver_id: String,
-    defender_id: String,
-    position: (f32, f32),
-}
-#[derive(Deserialize)]
-struct ShotReleaseData {
-    shooter_id: String,
-    is_three: bool,
-    contest_level: f32,
-}
-#[derive(Deserialize)]
-struct FreeThrowData {
-    made: bool,
-}
-#[derive(Deserialize)]
-struct PossessionSummaryData {
-    possession_index: u64,
-    duration_seconds: f32,
-    passes_count: u32,
-    terminal_event: nba_domain::PossessionEndCause,
-    #[serde(default)]
-    shooter_id: Option<String>,
-    #[serde(default)]
-    shot_contest_intensity: Option<f32>,
-    #[serde(default)]
-    turnover_player_id: Option<String>,
-}
-
-/// 判定已见事件集合（用于覆盖性检查的测试辅助）。
 pub fn observed_possession_indices(ticks: &[StreamTick]) -> HashSet<u64> {
     let mut seen = HashSet::new();
     for tick in ticks {

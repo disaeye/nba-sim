@@ -175,21 +175,13 @@ impl MatchEngine {
         );
         self.sync_game_flow();
         self.journal.current_event_log.clear();
-        // D4.1：因果槽位跨 tick 存活（动作释放与结果发生常不同 tick：
-        // 实测 PASS@t24 → PASS_RECEIVED@t29、FOUL@t84 → FREE_THROW@t86），
-        // 因此不在每 tick 清空；槽位在对应动作窗口关闭/被新触发覆盖时
-        // 自然失效，保证父指向最近的同槽位触发事件。
         self.sync_team_tactics();
 
-        // Tip-off is a configurable dead-ball presentation phase. A zero
-        // duration transitions in this same fixed step so the default policy
-        // retains the historical first-tick behavior.
-        if was_tip_off && self.tip_off_phase(dt) == PhaseOutcome::ShortCircuit {
-            return self.build_tick();
-        }
-        if self.dead_flow_phase(dt, was_period_break) == PhaseOutcome::ShortCircuit {
-            return self.build_tick();
-        }
+        // 阶段序列依据 docs/architecture.md §4.1：时钟与生命周期先于一切
+        // 约束求值；跳球与死球流程是条件激活分支，位于罚球/节末之后。
+        // `was_tip_off` 期间时钟不推进（跳球表现阶段自行推进时间，保持
+        // 跳球期的时间语义不变）。
+        // 写入状态组：clock。
         self.clock_advance_phase(dt, was_tip_off);
         let current_t = self.clock.current_time;
         let is_home = self.flow.possession == Possession::Home;
@@ -198,27 +190,42 @@ impl MatchEngine {
         self.observations.last_decision_trace = None;
 
         // 贴身切球（on-ball poke check）：为「带球丢球」提供事实路径；
-        // 实现见 `runtime_phase.rs`。
+        // 实现见 `runtime_phase.rs`。写入状态组：ball, journal。
         self.on_ball_poke_phase(dt);
 
         if self.runtime_constraint_phase(dt, is_home) == PhaseOutcome::ShortCircuit {
             return self.build_tick();
         }
-        // Advance action windows in stable player-id order.
+        // 动作窗口推进。写入状态组：ball, observations, systems, journal。
         self.advance_action_windows(current_t);
         if self.free_throw_and_period_phase(dt) == PhaseOutcome::ShortCircuit {
             return self.build_tick();
         }
 
+        // Tip-off is a configurable dead-ball presentation phase. A zero
+        // duration transitions in this same fixed step so the default policy
+        // retains the historical first-tick behavior.
+        if was_tip_off && self.tip_off_phase(dt) == PhaseOutcome::ShortCircuit {
+            return self.build_tick();
+        }
+        if self.dead_flow_phase(was_period_break) == PhaseOutcome::ShortCircuit {
+            return self.build_tick();
+        }
+
         let decision_output = self.decision_phase(current_t);
 
-        // ============================================================
-        // 2. 执行决策输出（意图执行重校验，architecture.md §5.2）
+        // 执行重校验与应用动作（architecture.md §5.2）。
+        // 写入状态组：ball, observations, systems, journal。
         if let Some(out) = decision_output {
             self.apply_decision_output(out, current_t);
         }
+        // 物理步进与弹道采样。写入状态组：ball, systems。
+        let sampled_from_ball_state = self.ball.ball_state.clone();
+        let previous_ball_position = self.ball.ball_pos_3d;
         // Step the physical world before sampling the ball at this tick.
-        self.systems.physics.step(nba_domain::FixedDt(dt));
+        self.systems
+            .physics
+            .step_with_ball_holder(nba_domain::FixedDt(dt), self.ball.holder_id());
         let sample_3d = BallisticsEngine::sample_ball_position(
             &self.ball.ball_state,
             current_t,
@@ -227,16 +234,59 @@ impl MatchEngine {
         );
         self.ball.ball_pos_3d = sample_3d;
 
-        // ============================================================
-        // 3. 球弹道状态更新与拦截检查（阶段实现见 `ball_flight.rs`）
+        // 弹道裁决与拦截检查（阶段实现见 `ball_flight.rs`）。
+        // 写入状态组：ball, observations。
         let outcome = self.resolve_ball_flight(current_t, is_home, dt);
+        let held_continues = matches!(
+            (&sampled_from_ball_state, &self.ball.ball_state),
+            (
+                nba_physics::ballistics::BallTrajectoryKind::Held { carrier_id: previous },
+                nba_physics::ballistics::BallTrajectoryKind::Held { carrier_id: current }
+            ) if previous == current
+        );
+        let drive_continues = matches!(
+            (&sampled_from_ball_state, &self.ball.ball_state),
+            (
+                nba_physics::ballistics::BallTrajectoryKind::Drive { driver_id: previous, .. },
+                nba_physics::ballistics::BallTrajectoryKind::Drive { driver_id: current, .. }
+            ) if previous == current
+        );
+        if held_continues {
+            let previous_3d = glam::Vec3::new(
+                previous_ball_position.0.x,
+                previous_ball_position.0.y,
+                previous_ball_position.1,
+            );
+            let current_3d = glam::Vec3::new(
+                self.ball.ball_pos_3d.0.x,
+                self.ball.ball_pos_3d.0.y,
+                self.ball.ball_pos_3d.1,
+            );
+            let displacement = current_3d - previous_3d;
+            let max_displacement = self.config.rules.ball_max_speed_ftps * dt;
+            if displacement.length() > max_displacement {
+                let bounded = previous_3d + displacement.normalize_or_zero() * max_displacement;
+                self.ball.ball_pos_3d = (glam::Vec2::new(bounded.x, bounded.y), bounded.z);
+            }
+        }
+        if drive_continues {
+            let current_position = self.ball.ball_pos_3d.0;
+            let displacement = (current_position - previous_ball_position.0).length();
+            let max_displacement = self.config.rules.ball_max_speed_ftps * dt;
+            if displacement > max_displacement {
+                self.ball.ball_pos_3d.0 = previous_ball_position.0
+                    + (current_position - previous_ball_position.0).normalize_or_zero()
+                        * max_displacement;
+            }
+        }
+        // 弹道结果消费：出界/抢断/松球/新球态。
+        // 写入状态组：flow, ball, ledger, possession_ctx, observations, journal, systems。
         if self.apply_ball_flight_outcome(outcome, current_t) == PhaseOutcome::ShortCircuit {
             return self.build_tick();
         }
 
-        // ============================================================
-        // 4. 战术目标生成 & 移动导航（每 tick）
-        // ============================================================
+        // 战术目标生成 & 移动导航（每 tick）。
+        // 写入状态组：systems, observations。
         self.plan_tactics_and_navigation(current_t);
         self.collect_tick_facts(dt);
 

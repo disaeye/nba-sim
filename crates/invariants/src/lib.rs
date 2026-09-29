@@ -54,6 +54,7 @@ pub struct InvariantChecker {
     /// （死球换人允许站位重置，quality 不变量阶段语义）。
     prev_on_court: HashMap<String, bool>,
     prev_ball: Option<(f32, f32, f32)>,
+    last_possession_id: Option<u32>,
     prev_score: Option<(u32, u32)>,
     prev_game_clock: Option<f32>,
     pub causal_graph: CausalEventGraph,
@@ -66,6 +67,7 @@ impl InvariantChecker {
             prev_positions: HashMap::new(),
             prev_on_court: HashMap::new(),
             prev_ball: None,
+            last_possession_id: None,
             prev_score: None,
             prev_game_clock: None,
             causal_graph: CausalEventGraph::new(),
@@ -322,15 +324,34 @@ impl InvariantChecker {
                 }
             }
         } else if let Some(prev) = self.prev_ball {
+            let ball_placed = frame
+                .events
+                .iter()
+                .any(|event| event == "BALL_PLACEMENT_APPLIED");
             let is_dead_ball = frame.ball.status == "DEAD"
                 || frame.phase == "FreeThrow"
                 || frame.phase == "DeadBallReset"
                 || frame.game_flow == "DeadBall";
             let was_rebound_start = frame.events.iter().any(|e| {
-                e == "FREE_THROW" || e == "REBOUND" || e == "SHOT_MISS" || e == "TIPOFF_SECURED"
+                e == "FREE_THROW"
+                    || e == "REBOUND"
+                    || e == "SHOT_MISS"
+                    || e == "SHOT_TRAJECTORY_ARRIVAL"
+                    || e == "TIPOFF_SECURED"
             });
-            if is_dead_ball || was_rebound_start {
-                // 死球、罚球准备、发球、篮板或跳球点拍争夺时不计算速度跳变
+            let possession_changed = self
+                .last_possession_id
+                .is_some_and(|previous_id| previous_id != frame.possession_id);
+            let received_pass = frame.events.iter().any(|event| event == "PASS_RECEIVED");
+            let released_shot = frame.events.iter().any(|event| event == "SHOT_RELEASE");
+            if ball_placed
+                || is_dead_ball
+                || was_rebound_start
+                || possession_changed
+                || received_pass
+                || released_shot
+            {
+                // 死球、回合、接球或出手边界不用于跨状态差分速度判定
             } else {
                 let dx = ball_ft.0 - prev.0;
                 let dy = ball_ft.1 - prev.1;
@@ -350,6 +371,7 @@ impl InvariantChecker {
             }
         }
         self.prev_ball = Some(ball_ft);
+        self.last_possession_id = Some(frame.possession_id);
 
         // --------------------------------------------------------------
         // 5. 球的三维高度界限：严禁掉入地下 (z < 0) 或飞出球馆。

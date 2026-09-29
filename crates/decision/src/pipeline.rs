@@ -227,12 +227,15 @@ impl DecisionSystem {
             } else {
                 Some(nba_domain::action_window::DribbleMoveKind::DirectDrive)
             };
-            candidates.push(CandidateAction::Drive {
-                driver_id: carrier_id.to_string(),
-                from_pos: carrier_pos,
-                target_pos: drive_target,
-                move_kind,
-            });
+            let is_putback_opportunity = ctx.putback_rebounder_id == Some(carrier_id);
+            if !is_putback_opportunity {
+                candidates.push(CandidateAction::Drive {
+                    driver_id: carrier_id.to_string(),
+                    from_pos: carrier_pos,
+                    target_pos: drive_target,
+                    move_kind,
+                });
+            }
             let jumper_kind = if is_three {
                 if closest_def_dist < 4.0 && carrier_skill > 0.7 {
                     Some(nba_domain::action_window::JumperKind::StepBack)
@@ -251,13 +254,36 @@ impl DecisionSystem {
                 jumper_kind,
             });
             let jab_dir = (hoop - carrier_pos).normalize_or_zero();
-            candidates.push(CandidateAction::TripleThreatJab {
-                player_id: carrier_id.to_string(),
-                pivot_pos: carrier_pos,
-                jab_dir,
-            });
-            let post_target = hoop + (carrier_pos - hoop).normalize_or_zero() * 8.0;
-            if (carrier_pos - hoop).length() < 18.0 {
+            if !is_putback_opportunity
+                && !ctx
+                    .rules
+                    .court
+                    .is_in_lane(carrier_pos, offense_team == "home")
+            {
+                candidates.push(CandidateAction::TripleThreatJab {
+                    player_id: carrier_id.to_string(),
+                    pivot_pos: carrier_pos,
+                    jab_dir,
+                });
+            }
+            // 背身落位目标必须落在限制区外（charter §6.2 攻方三秒）：
+            // 真实低位在限制区边缘外要位。目标落在限制区内时沿径向外推。
+            let attacking_right = offense_team == "home";
+            let base_post_dist = f32::from(8u8);
+            let mut post_target = hoop + (carrier_pos - hoop).normalize_or_zero() * base_post_dist;
+            let outward = (post_target - hoop).normalize_or_zero();
+            let mut push_dist = f32::from(0u8);
+            while ctx.rules.court.is_in_lane(post_target, attacking_right)
+                && push_dist < base_post_dist + base_post_dist
+            {
+                push_dist += f32::from(1u8);
+                post_target = hoop + outward * (base_post_dist + push_dist);
+            }
+            // 限制区内的持球人不得生成「停车」类候选（背身要位/原地等待）：
+            // 攻方三秒规则下持球停车超过时限即违例，限制区内只保留
+            // 出手/传球/突破三类移动选项。18.0 是背身候选的距离上限（ft）。
+            let carrier_in_lane = ctx.rules.court.is_in_lane(carrier_pos, attacking_right);
+            if !is_putback_opportunity && !carrier_in_lane && (carrier_pos - hoop).length() < 18.0 {
                 candidates.push(CandidateAction::PostUp {
                     player_id: carrier_id.to_string(),
                     from_pos: carrier_pos,
@@ -273,6 +299,9 @@ impl DecisionSystem {
                 .collect();
             ordered_teammates.sort_by(|left, right| left.id.cmp(&right.id));
             for p in ordered_teammates {
+                if is_putback_opportunity {
+                    break;
+                }
                 // 球的落点与飞行时长一起求解（不动点），不采用固定领传时长。
                 let to_pos = nba_physics::ballistics::BallisticsEngine::solve_pass_landing(
                     carrier_pos,
@@ -302,9 +331,16 @@ impl DecisionSystem {
                 });
             }
         }
-        candidates.push(CandidateAction::Dwell {
-            player_id: carrier_id.to_string(),
-        });
+        if ctx.putback_rebounder_id != Some(carrier_id)
+            && !ctx
+                .rules
+                .court
+                .is_in_lane(ctx.ball_pos, offense_team == "home")
+        {
+            candidates.push(CandidateAction::Dwell {
+                player_id: carrier_id.to_string(),
+            });
+        }
 
         let label_of = |c: &CandidateAction| -> String {
             match c {
@@ -566,6 +602,19 @@ impl DecisionSystem {
                 let distance_factor = 1.0
                     - (dist_to_hoop / ctx.rules.shot_distance_reference_ft.max(1.0))
                         .clamp(0.0, 1.0);
+                let shot_zone = ctx.rules.court.shot_zone(
+                    match &s.action {
+                        CandidateAction::Shoot { from_pos, .. } => *from_pos,
+                        _ => ctx
+                            .physics
+                            .get_player(s.action.actor_id())
+                            .map(|player| player.pos_ft)
+                            .unwrap_or_default(),
+                    },
+                    ctx.possession_team == "home",
+                    ctx.rules.league.three_point_distance_ft,
+                    ctx.rules.league.corner_three_distance_ft,
+                );
                 let open_bonus = openness.contest_free_score() * self.weights.shot_openness_weight;
                 let shooting_skill = attributes
                     .map(|a| {
@@ -604,6 +653,7 @@ impl DecisionSystem {
                 // 规则字段 `rebound.putback_distance_discount`
                 // 同时把有效距离折扣用于距离因子，保持同一语义通道。
                 let putback_bonus = if ctx.possession_had_shot
+                    && ctx.putback_rebounder_id == Some(shooter_id.as_str())
                     && dist_to_hoop < nba_domain::court::RIM_ZONE_MAX_DIST_FT
                 {
                     attributes
@@ -637,7 +687,13 @@ impl DecisionSystem {
                 let zero = f32::from(0u8);
                 let one = f32::from(1u8);
                 let clock_remaining = ctx.shot_clock.max(zero);
-                let early_shot_cost = if clock_remaining > ctx.rules.shot_clock_urgency_seconds {
+                let in_transition_rim = !*is_three
+                    && dist_to_hoop < nba_domain::court::RIM_ZONE_MAX_DIST_FT
+                    && ctx.possession_elapsed_seconds
+                        < ctx.rules.tactics.transition_finish_window_seconds;
+                let early_shot_cost = if !in_transition_rim
+                    && clock_remaining > ctx.rules.shot_clock_urgency_seconds
+                {
                     let slack = (clock_remaining - ctx.rules.shot_clock_urgency_seconds)
                         / (ctx.rules.league.shot_clock_seconds
                             - ctx.rules.shot_clock_urgency_seconds)
@@ -646,13 +702,31 @@ impl DecisionSystem {
                 } else {
                     zero
                 };
+                let transition_shoot_bonus = if in_transition_rim {
+                    let window = ctx
+                        .rules
+                        .tactics
+                        .transition_finish_window_seconds
+                        .max(f32::EPSILON);
+                    let remaining = (window - ctx.possession_elapsed_seconds) / window;
+                    ctx.rules.tactics.transition_finish_bonus * remaining
+                } else {
+                    zero
+                };
+                let midrange_bonus = if shot_zone == nba_domain::ShotZone::Mid {
+                    ctx.rules.decision.midrange_utility_bonus
+                } else {
+                    f32::from(0u8)
+                };
                 self.weights.shoot_base
                     * three_mult
                     * (0.45 + distance_factor * self.weights.shot_distance_slope + open_bonus)
                     * (1.0 + (shooting_skill - 0.5) * self.weights.tendency_weight)
                     + (shoot_preference - 0.5) * self.weights.tendency_weight
+                    + midrange_bonus
                     + range_bias * self.weights.team_style_weight
                     + putback_bonus
+                    + transition_shoot_bonus
                     - early_shot_cost
             }
             CandidateAction::Drive {

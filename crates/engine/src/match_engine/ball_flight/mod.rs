@@ -10,18 +10,18 @@
 //! 这样做的原因是该阶段夹在「执行」与「战术导航」之间，其结果可能短路本 tick
 //! （松球出界即结束），而短路必须由调度器统一处理以跳过账本提交与不变量检查之外的路径。
 //!
-//! [`MatchEngine::sync_ball_holder`] 与 [`MatchEngine::mark_receiver`] 维护的是
-//! 物理层的派生态（`has_ball` / `is_receiving_pass` / 界外豁免），它们必须与
-//! 权威球态同一步更新，否则物理会按上一 tick 的旧标志执行。
+//! [`MatchEngine::mark_receiver`] 维护的是物理层接球派生态，它必须与权威球态
+//! 同一步更新，否则物理会按上一 tick 的接球标志执行。
 
 use glam::Vec2;
-use nba_domain::{GameEvent, GameFlowState, SubPhase};
+use nba_domain::{court::Court, GameEvent, GameFlowState, SubPhase};
 use nba_physics::ballistics::{BallTrajectoryKind, BallisticsEngine};
 
 use super::MatchEngine;
 
 mod arms;
 mod outcome;
+mod settlement;
 mod write_entry;
 
 use arms::FlightContext;
@@ -34,6 +34,10 @@ use arms::FlightContext;
 pub(crate) struct BallFlightOutcome {
     /// 裁决后的新球态（无变更时为 `None`）。
     pub new_ball_state: Option<BallTrajectoryKind>,
+    pub new_ball_position: Option<(Vec2, f32)>,
+    pub pending_events: Vec<GameEvent>,
+    pub final_free_throw_resolution: Option<(String, bool, bool, (Vec2, f32))>,
+    pub free_throw_attempts: Vec<GameEvent>,
     /// 传球被抢断时触发的防守者 id。
     pub steal_triggered_defender: Option<String>,
     /// 松球被掌控时触发的（球员 id, 球位置, 高度）。
@@ -51,6 +55,29 @@ pub(crate) struct BallFlightOutcome {
 }
 
 impl MatchEngine {
+    /// 队列驱动的下一罚球程序启动（charter §5.3 逐次罚球）。
+    ///
+    /// 返回 `false` 表示队列已空，调用方按原路径结算末罚（活球篮板或
+    /// 对方发球）；返回 `true` 时已为队列中的下一位罚球人重建死球与
+    /// 罚球程序状态，本 tick 不产生回合转换。
+    pub(crate) fn try_start_next_free_throw_program(
+        &mut self,
+        outcome: &mut BallFlightOutcome,
+    ) -> bool {
+        let Some((shooter_id, count, source_foul)) = self.ledger.free_throw_queue.pop_front()
+        else {
+            return false;
+        };
+        self.ledger.free_throw_shooter = Some(shooter_id);
+        self.ledger.free_throws_remaining = count;
+        self.ledger.free_throw_attempt = 0;
+        self.ledger.free_throw_source_foul = source_foul;
+        self.set_game_flow(GameFlowState::FreeThrow);
+        self.transition_phase(SubPhase::DeadBallReset);
+        let (pos, z) = self.ball.ball_pos_3d;
+        outcome.new_ball_state = Some(self.dead_state(pos, z));
+        true
+    }
     pub(crate) fn resolve_ball_flight(
         &mut self,
         current_t: f32,
@@ -91,60 +118,15 @@ impl MatchEngine {
                     self.ball.ball_pos_3d.0,
                     pending.release_time,
                     pending.flight_time,
-                    pending.is_made,
                     pending.is_three,
                 )
             })
         } else {
-            match &self.ball.ball_state {
-                BallTrajectoryKind::Shot {
-                    shooter_id,
-                    from_pos,
-                    start_time,
-                    duration,
-                    is_made,
-                    is_three,
-                    ..
-                } => {
-                    let tau =
-                        ((current_t - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
-                    let _ = tau;
-                    // 只在**刚进入 `Execution` 阶段**的那一个 tick 上掷一次。
-                    //
-                    // 掷骰是“这一发会不会被封”的一次判定，不是逐 tick 重复的抽样：
-                    // 若每个飞行 tick 都掷，0.95s 的飞行有 24 次机会，单次概率会被
-                    // 放大成几乎必然（实测逐 tick 掷得到 36.6% 的出手被封）。
-                    //
-                    // 触发点是**阶段刚变为 `Execution`**，而不是窗口起点：
-                    // 后者的 `interference_start` 位于合球阶段（`Preparation`），
-                    // 那个窗口属于切球（Strip），与封盖是两个不同的判定口径。
-                    let window = self.observations.active_windows.get(shooter_id);
-                    let just_entered_execution = window
-                        .map(|w| {
-                            let elapsed = current_t - w.start_time;
-                            let prev = elapsed - self.config.rules.tick_seconds;
-                            elapsed >= w.prep_duration && prev < w.prep_duration
-                        })
-                        .unwrap_or(false);
-                    just_entered_execution.then(|| {
-                        (
-                            shooter_id.clone(),
-                            *from_pos,
-                            *start_time,
-                            *duration,
-                            *is_made,
-                            *is_three,
-                        )
-                    })
-                }
-                _ => None,
-            }
+            None
         };
-        if let Some((shooter_id, from_pos, _start_time, _duration, is_made, is_three)) =
-            block_candidate
-        {
+        if let Some((shooter_id, from_pos, _start_time, _duration, is_three)) = block_candidate {
             if let Some(block) =
-                self.try_resolve_shot_block(&shooter_id, &from_pos, current_t, is_made, is_three)
+                self.try_resolve_shot_block(&shooter_id, &from_pos, current_t, is_three)
             {
                 outcome.new_ball_state = Some(block.next_state);
                 outcome.blocked_shot_event = Some(block.event);
@@ -164,7 +146,8 @@ impl MatchEngine {
                 // 出手在真实统计中计为一次出手，且箱体在封盖分支已补记
                 // fg*_attempts。因此作废挂起前必须补发 ShotRelease 事实，
                 // 事件流与箱体才能对平（box_score 逐字段守卫）。
-                if let Some(pending) = self.observations.pending_shot_release.take() {
+                let pending = self.observations.pending_shot_release.take();
+                if let Some(pending) = pending {
                     assert_eq!(
                         pending.shooter_id, shooter_id,
                         "blocked shot release belongs to a different shooter"
@@ -172,12 +155,26 @@ impl MatchEngine {
                     self.journal.pending_events.push(GameEvent::ShotRelease {
                         shooter_id: pending.shooter_id,
                         pos: (from_pos.x, from_pos.y),
+                        creation_source: pending.creation_source,
+                        transition_context: pending.transition_context,
+                        transition_event_id: pending.transition_event_id,
+                        source_event_id: pending.source_event_id,
                         is_three: pending.is_three,
                         contest_level: pending.contest_intensity,
                         make_probability: pending.make_probability,
                     });
                 }
                 self.observations.pending_shot_release = None;
+                // 哨已在飞行中响起的出手被封盖：封盖事实照发（出手成立，
+                // 箱体已补记），但球不落成松球——犯规罚球接管（真实规则：
+                // 被犯规的出手被封盖仍是犯规罚球，无活球争抢）。
+                if !self.ledger.free_throw_queue.is_empty()
+                    && self.ledger.free_throws_remaining == 0
+                    && self.ledger.free_throw_shooter.is_none()
+                {
+                    self.ball.pending_loose_ball_terminal = None;
+                    self.try_start_next_free_throw_program(&mut outcome);
+                }
             }
         }
         // 自由球-人接触（ADR-017 第三步）：与封盖判定同一借用纪律——
@@ -313,10 +310,18 @@ impl MatchEngine {
                         //   → `position = 球的实际位置`（接球事实）。
                         // 评判器因此可以区分「终点」与「接球」，不再需要第三个解释
                         // （gap.md §9.5）。
+                        let catch_position = self.ball.ball_pos_3d.0;
+                        let is_cut_reception =
+                            self.is_cut_reception(&cid, catch_position, current_t);
                         self.journal.pending_events.push(GameEvent::PassReceived {
                             receiver_id: cid.clone(),
-                            position: (self.ball.ball_pos_3d.0.x, self.ball.ball_pos_3d.0.y),
+                            position: (catch_position.x, catch_position.y),
+                            is_cut_reception,
                         });
+                        if is_cut_reception {
+                            self.possession_ctx.last_cut_reception_time = Some(current_t);
+                            self.possession_ctx.last_cut_reception_player = Some(cid.clone());
+                        }
                         self.ball.pending_pass_receiver = None;
                         // 传球结束：丢弃本回合的接球人估计（下一回合重新形成预判）。
                         self.ball.receiver_estimate = None;
@@ -430,7 +435,6 @@ impl MatchEngine {
                 from_pos,
                 to_pos,
                 inbound,
-                receive_success,
                 ..
             } => {
                 // 臂体见 arms.rs（D29 划分）：接触检测、接球/点掉/坠地裁决。
@@ -441,7 +445,6 @@ impl MatchEngine {
                     *from_pos,
                     *to_pos,
                     *inbound,
-                    *receive_success,
                     ctx,
                     &mut outcome,
                 );
@@ -451,9 +454,6 @@ impl MatchEngine {
                 target_pos,
                 start_time,
                 duration,
-                successful,
-                finish_made,
-                fouler_id,
                 ..
             } => {
                 // 臂体见 arms.rs（D29 划分）：推进、分流与终结裁定。
@@ -462,37 +462,280 @@ impl MatchEngine {
                     *target_pos,
                     *start_time,
                     *duration,
-                    *successful,
-                    *finish_made,
-                    fouler_id.clone(),
                     ctx,
                     &mut outcome,
                 );
+            }
+            BallTrajectoryKind::FreeThrowSetup {
+                shooter_id,
+                from_pos,
+                from_z,
+                to_pos,
+                to_z,
+                start_time,
+                duration,
+                forced_result,
+                is_final,
+            } => {
+                let shooter_id = shooter_id.clone();
+                let from_pos = *from_pos;
+                let from_z = *from_z;
+                let to_pos = *to_pos;
+                let to_z = *to_z;
+                let start_time = *start_time;
+                let duration = *duration;
+                let forced_result = *forced_result;
+                let is_final = *is_final;
+                let setup_reached = current_t - start_time >= duration;
+                assert!(
+                    self.ledger.free_throws_remaining > 0,
+                    "free-throw setup exists without a remaining attempt"
+                );
+                assert_eq!(
+                    is_final,
+                    self.ledger.free_throws_remaining == 1,
+                    "free-throw setup finality disagrees with the remaining-attempt ledger"
+                );
+                assert_eq!(
+                    self.ledger.free_throw_shooter.as_deref(),
+                    Some(shooter_id.as_str()),
+                    "free-throw setup shooter disagrees with the active foul ledger"
+                );
+                self.ball.ball_pos_3d = BallisticsEngine::sample_ball_position(
+                    &self.ball.ball_state,
+                    current_t,
+                    self.systems.physics.get_players(),
+                    &self.config.rules,
+                );
+                if setup_reached {
+                    let shooter_is_home = self
+                        .systems
+                        .physics
+                        .get_player(&shooter_id)
+                        .map(|player| player.team == "home")
+                        .unwrap_or(ctx.is_home);
+                    self.ball.ball_pos_3d = (to_pos, to_z);
+                    self.transition_ball_state(BallTrajectoryKind::Dead {
+                        pos: to_pos,
+                        z: to_z,
+                        last_touch_team: self.flow.possession,
+                        last_touch_player: Some(shooter_id.clone()),
+                    });
+                    self.journal
+                        .pending_events
+                        .push(GameEvent::BallPlacementApplied {
+                            from: (from_pos.x, from_pos.y, from_z),
+                            to: (to_pos.x, to_pos.y, to_z),
+                            reason: "FREE_THROW_SETUP".to_string(),
+                            phase: format!("{:?}", self.clock.sub_phase),
+                        });
+                    self.begin_free_throw_flight(
+                        &shooter_id,
+                        shooter_is_home,
+                        to_pos,
+                        forced_result,
+                        is_final,
+                    );
+                }
+            }
+            BallTrajectoryKind::FreeThrow {
+                shooter_id,
+                from_pos,
+                hoop_pos,
+                start_time,
+                duration,
+                is_final,
+                ..
+            } => {
+                let shooter_id = shooter_id.clone();
+                let from_pos = *from_pos;
+                let hoop_pos = *hoop_pos;
+                let start_time = *start_time;
+                let duration = *duration;
+                let is_final = *is_final;
+                self.ball.ball_pos_3d = BallisticsEngine::sample_ball_position(
+                    &self.ball.ball_state,
+                    current_t.min(start_time + duration),
+                    self.systems.physics.get_players(),
+                    &self.config.rules,
+                );
+                if current_t - start_time >= duration {
+                    let final_position = self.ball.ball_pos_3d;
+                    assert_eq!(
+                        self.ledger.free_throw_shooter.as_deref(),
+                        Some(shooter_id.as_str()),
+                        "free-throw flight shooter disagrees with the active foul ledger"
+                    );
+                    let shooter_is_home = self
+                        .systems
+                        .physics
+                        .get_player(&shooter_id)
+                        .map(|player| player.team == "home")
+                        .unwrap_or(ctx.is_home);
+                    let arrival = BallisticsEngine::classify_shot_arrival(
+                        self.ball.ball_pos_3d.0,
+                        hoop_pos,
+                        &self.config.rules,
+                    );
+                    let made = matches!(arrival, nba_physics::ballistics::ShotArrivalOutcome::Made);
+                    assert!(
+                        self.ledger.free_throws_remaining > 0,
+                        "free-throw flight arrived without a remaining attempt"
+                    );
+                    assert_eq!(
+                        is_final,
+                        self.ledger.free_throws_remaining == 1,
+                        "free-throw trajectory finality disagrees with the remaining-attempt ledger"
+                    );
+                    let attempt = self
+                        .ledger
+                        .free_throw_attempt
+                        .checked_add(1)
+                        .expect("free-throw attempt index overflowed");
+                    // 冻结本次罚球的因果父（当前程序的判罚事件 ID）：
+                    // 队列切换若发生在同一 tick，发布时读当前 source 会
+                    // 把下一程序的判罚错配给本次罚球。
+                    self.ledger
+                        .free_throw_event_parents
+                        .push_back(self.ledger.free_throw_source_foul.unwrap_or(0));
+                    outcome
+                        .free_throw_attempts
+                        .push(GameEvent::FreeThrowAttempt {
+                            shooter_id: shooter_id.clone(),
+                            attempt,
+                            made,
+                        });
+                    self.ledger.box_score.ft_attempts += 1;
+                    self.ledger.free_throw_attempt = attempt;
+                    self.ledger.free_throws_remaining -= 1;
+                    self.clock.sub_phase_timer = 0.0;
+                    if made {
+                        self.ledger.box_score.ft_made += 1;
+                        if shooter_is_home {
+                            self.ledger.home_score += 1;
+                        } else {
+                            self.ledger.away_score += 1;
+                        }
+                    }
+                    if !made && is_final {
+                        self.ledger.free_throw_shooter = None;
+                        self.ledger.free_throw_attempt = 0;
+                        // 队列中还有待执行的罚球程序时，未中的末罚不进入
+                        // 活球篮板，继续死球执行下一程序（charter §5.3 逐次罚球）。
+                        if !self.try_start_next_free_throw_program(&mut outcome) {
+                            self.set_game_flow(GameFlowState::LiveBall);
+                            let velocity = BallisticsEngine::sample_ball_velocity(
+                                &self.ball.ball_state,
+                                current_t,
+                                self.systems.physics.get_players(),
+                                &self.config.rules,
+                            );
+                            match arrival {
+                                nba_physics::ballistics::ShotArrivalOutcome::RimContact {
+                                    contact_position,
+                                    ..
+                                } => {
+                                    let landing =
+                                    BallisticsEngine::compute_rebound_landing_from_contact_velocity(
+                                        from_pos,
+                                        hoop_pos,
+                                        velocity,
+                                        contact_position,
+                                        &mut self.systems.rng,
+                                        &self.config.rules,
+                                    );
+                                    outcome.new_ball_state = Some(BallTrajectoryKind::RimRebound {
+                                        from_pos: landing.contact_pos,
+                                        from_z: landing.contact_z,
+                                        hoop_pos,
+                                        target_landing: landing.landing_pos,
+                                        start_time: current_t,
+                                        duration: landing.flight_duration,
+                                        peak_z: landing.peak_z,
+                                        last_touch_team: self.flow.possession,
+                                        last_touch_player: Some(shooter_id.clone()),
+                                    });
+                                }
+                                nba_physics::ballistics::ShotArrivalOutcome::Miss => {
+                                    outcome.new_ball_state = Some(BallTrajectoryKind::LooseBall {
+                                        pos: self.ball.ball_pos_3d.0,
+                                        vel: velocity.truncate(),
+                                        z: self.ball.ball_pos_3d.1,
+                                        vel_z: velocity.z,
+                                        last_touch_team: self.flow.possession,
+                                        last_touch_player: Some(shooter_id.clone()),
+                                    });
+                                }
+                                nba_physics::ballistics::ShotArrivalOutcome::Made => {
+                                    unreachable!("a made free throw cannot enter miss settlement");
+                                }
+                            }
+                        }
+                    } else if is_final {
+                        self.ledger.free_throw_shooter = None;
+                        self.ledger.free_throw_attempt = 0;
+                        // 队列中还有待执行的罚球程序时，命中的末罚不触发
+                        // 对方发球（回合转换延迟到队列清空后的真正末罚）。
+                        if !self.try_start_next_free_throw_program(&mut outcome) {
+                            self.set_game_flow(GameFlowState::DeadBall);
+                            self.transition_phase(SubPhase::DeadBallReset);
+                            outcome.new_ball_position = Some(final_position);
+                            outcome.new_ball_state =
+                                Some(self.dead_state(final_position.0, final_position.1));
+                            outcome.final_free_throw_resolution =
+                                Some((shooter_id, shooter_is_home, made, final_position));
+                        }
+                    } else {
+                        let ft_pos = Court::free_throw_pos(shooter_is_home, &self.config.rules);
+                        let ft_height = self.config.rules.ball_holder_height_ft;
+                        let setup_distance = (ft_pos - final_position.0)
+                            .length()
+                            .hypot(ft_height - final_position.1);
+                        let speed_budget = (self.config.rules.ball_max_speed_ftps
+                            - self.config.rules.invariant_speed_tolerance_ftps)
+                            .max(self.config.rules.invariant_speed_tolerance_ftps);
+                        let setup_duration =
+                            (setup_distance / speed_budget).max(self.config.rules.tick_seconds);
+                        outcome.new_ball_state = Some(BallTrajectoryKind::FreeThrowSetup {
+                            shooter_id: shooter_id.clone(),
+                            from_pos: final_position.0,
+                            from_z: final_position.1,
+                            to_pos: ft_pos,
+                            to_z: ft_height,
+                            start_time: current_t,
+                            duration: setup_duration,
+                            forced_result: None,
+                            is_final: self.ledger.free_throws_remaining == 1,
+                        });
+                        self.set_game_flow(GameFlowState::FreeThrow);
+                        self.transition_phase(SubPhase::DeadBallReset);
+                    }
+                }
             }
             BallTrajectoryKind::Shot {
                 shooter_id,
                 hoop_pos,
                 start_time,
                 duration,
-                is_made,
                 is_three,
                 from_pos,
-                fouled,
-                fouler_id,
+                aim_pos,
+                make_probability,
+                contest_intensity,
                 ..
             } => {
                 // 臂体见 arms.rs（D29 划分）：载荷从总 match 借用中取出，
-                // 执行体在独立模块，行为由黄金哈希守卫。
+                // 执行体在独立模块。结果依据到筐位置结算。
                 self.resolve_shot_arm(
                     shooter_id.clone(),
                     *hoop_pos,
                     *start_time,
                     *duration,
-                    *is_made,
                     *is_three,
                     *from_pos,
-                    *fouled,
-                    fouler_id.clone(),
+                    *aim_pos,
+                    *make_probability,
+                    *contest_intensity,
                     ctx,
                     &mut outcome,
                 );

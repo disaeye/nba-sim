@@ -10,7 +10,7 @@ fn fiba_profile_produces_fiba_shapes() {
     let rules = GameRules::with_league(LeagueProfile::fiba());
     assert_eq!(rules.league.period_duration_seconds, 600.0);
     assert_eq!(rules.league.max_personal_fouls, 5);
-    assert_eq!(rules.league.bonus_fouls_per_period, 4);
+    assert_eq!(rules.league.bonus_fouls_per_period, 5);
     assert!((rules.league.three_point_distance_ft - 22.15).abs() < 0.01);
     assert_eq!(rules.league.court.width_ft, 91.86);
     rules.validate().expect("fiba profile must validate");
@@ -92,7 +92,6 @@ fn forced_substitution_preserves_five_on_five() {
 
     let out = engine.physics().get_player(&out_id).unwrap();
     assert!(!out.on_court, "fouled-out player must leave court");
-    assert!(!out.has_ball);
 
     let home_on = engine
         .physics()
@@ -339,14 +338,15 @@ fn scenario_personal_foul_limit_program_differs() {
     );
 }
 
-/// 情景 5：bonus 门槛——进入罚球奖励的团队犯规数按 profile 生效。
+/// 情景 5：bonus 门槛——charter §6.3：NBA 与 FIBA 都从单节第 5 次球队犯规起
+/// 进入罚则（超额罚球），差异不在门槛。门槛按 profile 生效。
 #[test]
 fn scenario_bonus_threshold_program() {
     let nba = GameRules::default();
     let fiba = GameRules::with_league(LeagueProfile::fiba());
     assert_eq!(nba.league.bonus_fouls_per_period, 5);
-    assert_eq!(fiba.league.bonus_fouls_per_period, 4);
-    // 两 profile 的 bonus 罚球数一致（均为 2），差异在**门槛**。
+    assert_eq!(fiba.league.bonus_fouls_per_period, 5);
+    // 两 profile 的 bonus 罚球数一致（均为 2）。
     assert_eq!(nba.league.bonus_free_throws, 2);
     assert_eq!(fiba.league.bonus_free_throws, 2);
 }

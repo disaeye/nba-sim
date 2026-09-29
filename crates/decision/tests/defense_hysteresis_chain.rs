@@ -237,8 +237,17 @@ fn stable_output_derives_from_solve_equilibrium() {
     // 双方都保持退出态。
     let far_carrier = hoop - Vec2::new(34.0, 0.0);
     for _ in 0..4 {
-        let emergent =
-            solver.solve_equilibrium(far_carrier, hoop, &off_positions, 1, 0, &rules, 1.0, false);
+        let emergent = solver.solve_equilibrium(
+            far_carrier,
+            hoop,
+            &off_positions,
+            1,
+            0,
+            &rules,
+            1.0,
+            false,
+            0.5,
+        );
         let out = solver.observe_field(&emergent, &mut low_man_state);
         assert!(!out.help_pulled_off);
         assert!(!out.weak_side_vacant);
@@ -249,8 +258,17 @@ fn stable_output_derives_from_solve_equilibrium() {
     let deep_carrier = hoop - Vec2::new(6.0, 0.0);
     let mut low_man_flipped = false;
     for _ in 0..4 {
-        let emergent =
-            solver.solve_equilibrium(deep_carrier, hoop, &off_positions, 1, 0, &rules, 1.0, false);
+        let emergent = solver.solve_equilibrium(
+            deep_carrier,
+            hoop,
+            &off_positions,
+            1,
+            0,
+            &rules,
+            1.0,
+            false,
+            0.5,
+        );
         let out = solver.observe_field(&emergent, &mut low_man_state);
         low_man_flipped |= out.help_pulled_off;
     }
@@ -262,8 +280,17 @@ fn stable_output_derives_from_solve_equilibrium() {
     // 与持球人对位无关的远端防守人（索引 4）在同一几何下保持自己的稳定态：
     // 逐防守人伴生状态互不串扰。
     for _ in 0..4 {
-        let emergent =
-            solver.solve_equilibrium(deep_carrier, hoop, &off_positions, 4, 0, &rules, 1.0, false);
+        let emergent = solver.solve_equilibrium(
+            deep_carrier,
+            hoop,
+            &off_positions,
+            4,
+            0,
+            &rules,
+            1.0,
+            false,
+            0.5,
+        );
         let out = solver.observe_field(&emergent, &mut far_state);
         assert!(!out.weak_side_vacant);
     }

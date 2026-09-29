@@ -8,7 +8,6 @@ use nba_physics::movement::PlayerPhysicsState;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DriveResolution {
     pub successful: bool,
-    pub finish_made: bool,
     pub shooting_foul: bool,
 }
 impl DriveResolution {
@@ -46,15 +45,10 @@ impl DriveResolution {
             .clamp(0.0, 1.0);
         let shooting_foul = rng.gen_bool(foul_probability as f64);
 
-        let finish_probability = (finish_rate + skill_delta + fatigue_delta
-            - contest_intensity * policy.finish_contest_penalty * finish_block_bias
-            - lane_density * policy.lane_density_penalty * policy.finish_lane_density_scale)
-            .clamp(0.0, 1.0);
-        let finish_made = successful && !shooting_foul && rng.gen_bool(finish_probability as f64);
+        let _ = (finish_rate, finish_block_bias, rng);
 
         Self {
             successful,
-            finish_made,
             shooting_foul,
         }
     }
@@ -91,6 +85,9 @@ pub enum ResolutionOutcome {
 }
 
 pub struct ResolutionLayer;
+
+/// 对抗倾向缺省值（球员档案未携带倾向时的中性个体）。
+const DEFAULT_PHYSICALITY: f32 = 0.5;
 
 impl ResolutionLayer {
     /// Resolve one physical pass-intersection opportunity using the policy
@@ -253,12 +250,42 @@ impl ResolutionLayer {
         contact: &nba_semantics::SemanticContact,
         players: &HashMap<String, PlayerPhysicsState>,
         policy: &nba_domain::resolve::ContactPolicy,
+        drive_policy: &nba_domain::resolve::DrivePolicy,
         rng: &mut impl Rng,
     ) -> ResolutionOutcome {
+        Self::resolve_semantic_contact_in_context(
+            contact,
+            players,
+            policy,
+            drive_policy,
+            rng,
+            false,
+        )
+    }
+
+    /// `is_loose_ball`：活球松球争抢语境（球无主且在场内滚动/弹跳）。
+    /// 争抢对冲按 `ContactPolicy::loose_ball_foul_multiplier` 缩减罚概率。
+    pub fn resolve_semantic_contact_in_context(
+        contact: &nba_semantics::SemanticContact,
+        players: &HashMap<String, PlayerPhysicsState>,
+        policy: &nba_domain::resolve::ContactPolicy,
+        drive_policy: &nba_domain::resolve::DrivePolicy,
+        rng: &mut impl Rng,
+        is_loose_ball: bool,
+    ) -> ResolutionOutcome {
+        let is_shooting_contact = matches!(
+            contact.kind,
+            nba_semantics::ContactKind::ShootingContactCandidate
+        );
         let is_foul_candidate = matches!(
             contact.severity,
             nba_semantics::ContactSeverity::FoulCandidate
-        );
+        ) || is_shooting_contact
+            || (matches!(
+                contact.kind,
+                nba_semantics::ContactKind::BlockingCandidate
+                    | nba_semantics::ContactKind::IllegalScreenCandidate
+            ) && matches!(contact.severity, nba_semantics::ContactSeverity::Positional));
         let is_screen = matches!(
             contact.kind,
             nba_semantics::ContactKind::LegalScreen
@@ -313,15 +340,25 @@ impl ResolutionLayer {
                 },
             ),
             _ => {
+                // 松球语境下兜底分支（Incidental/ReboundContact + FoulCandidate）
+                // 同样按松球乘子缩减：争抢对冲的高速碰撞仍属普通争抢。
+                let scaled_policy = if is_loose_ball {
+                    nba_domain::resolve::ContactPolicy {
+                        foul_rate: policy.foul_rate * policy.loose_ball_foul_multiplier,
+                        ..policy.clone()
+                    }
+                } else {
+                    policy.clone()
+                };
                 return Self::resolve_contact_with_policy(
                     &contact.raw.entity_a,
                     &contact.raw.entity_b,
                     contact.context.relative_speed,
                     is_screen,
                     players,
-                    policy,
+                    &scaled_policy,
                     rng,
-                )
+                );
             }
         };
         let impact_factor = ((contact.context.relative_speed - policy.threshold_speed_ftps)
@@ -332,14 +369,57 @@ impl ResolutionLayer {
             .map(|player| player.attributes.defense_perimeter)
             .unwrap_or(0.5)
             .clamp(0.0, 1.0);
-        let semantic_multiplier = if contact.context.legal_position {
+        let semantic_multiplier = if is_shooting_contact {
+            policy.illegal_position_foul_multiplier
+        } else if contact.context.legal_position {
             policy.legal_position_foul_multiplier
         } else {
             policy.illegal_position_foul_multiplier
         };
+        let is_drive_contact = is_shooting_contact
+            || matches!(contact.kind, nba_semantics::ContactKind::BlockingCandidate);
+        let drive_multiplier = if is_drive_contact {
+            let default_policy = nba_domain::resolve::DrivePolicy::default();
+            let num = drive_policy.foul_base_share
+                + impact_factor
+                    * drive_policy.foul_contest_weight
+                    * drive_policy.foul_contest_scale;
+            let den = (default_policy.foul_base_share
+                + impact_factor
+                    * default_policy.foul_contest_weight
+                    * default_policy.foul_contest_scale)
+                .max(f32::EPSILON);
+            num / den
+        } else {
+            f32::from(1u8)
+        };
+        let loose_multiplier = if is_loose_ball {
+            policy.loose_ball_foul_multiplier
+        } else {
+            f32::from(1u8)
+        };
+        // 对抗倾向（attributes.md §2.6 项 10）只调制非投篮的位置对抗：
+        // 顶防/挤掩护越用力，越容易把对抗打成犯规；投篮接触的对抗倾向
+        // 由封盖倾向通道处理（`block_aggressiveness`）。
+        let is_shooting_kind = matches!(
+            contact.kind,
+            nba_semantics::ContactKind::ShootingContactCandidate
+        );
+        let physicality_multiplier = if is_shooting_kind {
+            f32::from(1u8)
+        } else {
+            let physicality = players
+                .get(&fouler_id)
+                .map(|player| player.tendencies.physicality)
+                .unwrap_or(DEFAULT_PHYSICALITY);
+            policy.physicality_floor + physicality * policy.physicality_span
+        };
         let probability = (policy.foul_rate
             * (0.5 + impact_factor * 0.5)
             * semantic_multiplier
+            * drive_multiplier
+            * loose_multiplier
+            * physicality_multiplier
             * (1.0 + (0.5 - fouler_skill) * policy.defender_skill_foul_scale))
             .clamp(0.0, 1.0);
         if rng.gen::<f32>() < probability {
@@ -470,7 +550,6 @@ mod tests {
             target_speed_ftps: 0.0,
             max_speed_ftps: 22.0,
             max_accel_ftps2: 35.0,
-            has_ball: false,
             on_court: true,
             action: "Idle".to_string(),
             slot: "Guard".to_string(),
@@ -531,12 +610,77 @@ mod tests {
             defender_skill_foul_scale: 1.0,
             legal_position_foul_multiplier: 1.0,
             illegal_position_foul_multiplier: 1.0,
+            loose_ball_foul_multiplier: 1.0,
+            physicality_floor: 1.0,
+            physicality_span: 0.0,
         };
         let mut rng = StdRng::seed_from_u64(12);
         let outcome = ResolutionLayer::resolve_contact_with_policy(
             "attacker", "defender", 1.0, false, &players, &policy, &mut rng,
         );
         assert!(matches!(outcome, ResolutionOutcome::Foul { .. }));
+    }
+
+    #[test]
+    fn shooting_contact_candidates_can_be_adjudicated_below_impact_speed_gate() {
+        use nba_domain::{Possession, SubPhase};
+        use nba_physics::{RawContact, SimpleCirclePhysics, SpatialPhysics};
+        use nba_semantics::{ContactKind, ContactSeverity, SemanticEvaluator};
+
+        let rules = nba_domain::GameRules::default();
+        let mut physics = SimpleCirclePhysics::with_rules(&rules);
+        let zero = f32::from(0u8);
+        let mut shooter = player("shooter", zero, zero, zero);
+        shooter.team = "home".to_string();
+        shooter.action = "Layup".to_string();
+        let mut defender = player("defender", zero, zero, zero);
+        defender.team = "away".to_string();
+        defender.action = "Defend".to_string();
+        defender.vel_ft = Vec2::splat(rules.max_player_speed_ftps);
+        physics.register_player(shooter);
+        physics.register_player(defender);
+
+        let contact = SemanticEvaluator::contact(
+            RawContact {
+                entity_a: "shooter".to_string(),
+                entity_b: "defender".to_string(),
+                point: Vec2::ZERO,
+                normal: Vec2::X,
+                penetration: zero,
+                relative_velocity: Some(Vec2::ZERO),
+                entity_a_action: Some("Layup".to_string()),
+                entity_b_action: Some("Defend".to_string()),
+            },
+            &physics,
+            Possession::Home,
+            SubPhase::ActionExecution,
+            None,
+            Some("shooter"),
+            0,
+            &rules,
+        );
+        assert_eq!(contact.kind, ContactKind::ShootingContactCandidate);
+        assert_ne!(contact.severity, ContactSeverity::FoulCandidate);
+
+        let policy = ContactPolicy {
+            foul_rate: f32::from(1u8),
+            defender_skill_foul_scale: zero,
+            legal_position_foul_multiplier: f32::from(1u8),
+            illegal_position_foul_multiplier: f32::from(1u8),
+            ..Default::default()
+        };
+        let outcome = ResolutionLayer::resolve_semantic_contact(
+            &contact,
+            physics.get_players(),
+            &policy,
+            &nba_domain::resolve::DrivePolicy::default(),
+            &mut StdRng::seed_from_u64(2),
+        );
+        assert!(matches!(
+            outcome,
+            ResolutionOutcome::Foul { fouled_player_id, is_shooting: true, .. }
+                if fouled_player_id == "shooter"
+        ));
     }
 
     #[test]

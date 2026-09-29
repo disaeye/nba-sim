@@ -298,7 +298,6 @@ fn rebound_player(
         max_speed_ftps: 22.0,
         max_accel_ftps2: 35.0,
         target_speed_ftps: 0.0,
-        has_ball: false,
         on_court: true,
         action: "Idle".to_string(),
         slot: "PF".to_string(),

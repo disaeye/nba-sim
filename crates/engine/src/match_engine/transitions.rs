@@ -7,7 +7,7 @@ use glam::Vec2;
 use nba_decision::constraint::{PhaseType, ViolationKind};
 use nba_domain::court::Court;
 use nba_domain::{GameEvent, GameFlowState, Possession, SubPhase};
-use nba_physics::ballistics::BallTrajectoryKind;
+use nba_physics::ballistics::{BallTrajectoryKind, BallisticsEngine};
 
 use super::projection::opposite;
 use super::MatchEngine;
@@ -78,12 +78,18 @@ impl MatchEngine {
             } => last_touch_player
                 .clone()
                 .or_else(|| self.ball.last_passer_id.clone()),
-            BallTrajectoryKind::Shot { shooter_id, .. } => Some(shooter_id.clone()),
+            BallTrajectoryKind::Shot { shooter_id, .. }
+            | BallTrajectoryKind::FreeThrowSetup { shooter_id, .. }
+            | BallTrajectoryKind::FreeThrow { shooter_id, .. } => Some(shooter_id.clone()),
             BallTrajectoryKind::RimRebound { .. } => None,
         }
     }
 
     pub(crate) fn start_violation_turnover(&mut self, _kind: ViolationKind) {
+        // 哨响时传球仍在飞行：球即刻死亡，传球不再有物理结算——
+        // 以哨响位置补发 PASS_DROPPED 终结事实（否则事件流出现无结局的
+        // PASS，传球五分支互斥被破坏）。父级由因果槽自动指向该 PASS。
+        self.emit_whistle_pass_drop();
         // 失误计数已收敛到 `emit_possession_summary` 单一入口
         // （evidence/problem.md §23.10）：此处不再自增，避免重复计数。
         self.emit_possession_summary(
@@ -105,6 +111,20 @@ impl MatchEngine {
         let baseline =
             Court::nearest_boundary_with_geometry(current_ball_3d.0, self.config.rules.court);
         self.start_inbound_transition(baseline, current_ball_3d);
+    }
+
+    /// 哨响（违例或犯规判罚）作废在飞传球时补发 PASS_DROPPED：
+    /// 位置取哨响时球位，接球人取传球目标，父级经因果槽指向 PASS 事件。
+    pub(crate) fn emit_whistle_pass_drop(&mut self) {
+        if let BallTrajectoryKind::Pass { target_id, .. } = &self.ball.ball_state {
+            let passer = self.ball.last_passer_id.clone().unwrap_or_default();
+            let (pos, _) = self.ball.ball_pos_3d;
+            self.journal.pending_events.push(GameEvent::PassDropped {
+                passer_id: passer,
+                receiver_id: target_id.clone(),
+                position: (pos.x, pos.y),
+            });
+        }
     }
 
     pub(crate) fn start_steal_transition(&mut self, stealer_id: String, intercept_pos: Vec2) {
@@ -131,16 +151,49 @@ impl MatchEngine {
             self.settle_scope_ball((intercept_pos, self.config.rules.ball_holder_height_ft));
             return;
         }
-        self.flow.possession = opposite(self.flow.possession);
+        let intercept_height = self.ball.ball_pos_3d.1;
+        let new_offense = opposite(self.flow.possession);
+        self.flow.possession = new_offense;
         self.flow.possession_id += 1;
         self.update_coach_strategy();
         self.sync_team_tactics();
         self.clock.shot_clock = self.config.rules.league.shot_clock_seconds;
         self.clock.sub_phase_timer = 0.0;
+        self.possession_ctx.transition_start_time = Some(self.clock.current_time);
+        self.journal
+            .pending_events
+            .push(nba_domain::GameEvent::TransitionStarted {
+                offense: new_offense,
+                origin: nba_domain::TransitionOrigin::Steal,
+            });
         self.transition_phase(SubPhase::ActionExecution);
         self.set_game_flow(GameFlowState::LiveBall);
-        self.transition_ball_state(BallTrajectoryKind::Held {
+        let held_target = BallisticsEngine::sample_ball_position(
+            &BallTrajectoryKind::Held {
+                carrier_id: stealer_id.clone(),
+            },
+            self.clock.current_time,
+            self.systems.physics.get_players(),
+            &self.config.rules,
+        );
+        let distance = (held_target.0 - intercept_pos)
+            .length()
+            .hypot((held_target.1 - intercept_height).abs());
+        let speed_budget = (self.config.rules.ball_max_speed_ftps
+            + self.config.rules.invariant_speed_tolerance_ftps)
+            .max(self.config.rules.invariant_speed_tolerance_ftps);
+        let duration = (distance / speed_budget)
+            .max(self.config.rules.tick_seconds)
+            .max(self.config.rules.min_pass_duration_seconds);
+        self.ball.ball_pos_3d = (intercept_pos, intercept_height);
+        self.transition_ball_state(BallTrajectoryKind::ControlTransfer {
+            from_pos: intercept_pos,
+            from_z: intercept_height,
+            target_pos: held_target.0,
+            target_z: held_target.1,
             carrier_id: stealer_id,
+            start_time: self.clock.current_time,
+            duration,
         });
     }
 
@@ -162,6 +215,14 @@ impl MatchEngine {
         } else {
             opposite(self.flow.possession)
         };
+        if !is_offensive {
+            self.journal
+                .pending_events
+                .push(nba_domain::GameEvent::TransitionStarted {
+                    offense: self.flow.possession,
+                    origin: nba_domain::TransitionOrigin::DefensiveRebound,
+                });
+        }
         if !is_offensive {
             self.flow.possession_id += 1;
         }
@@ -205,17 +266,25 @@ impl MatchEngine {
         // The rebound sample already ends at `reb_pos`. Do not move the ball
         // to the player's body center before creating the next trajectory:
         // that would insert an instantaneous, unobserved catch displacement.
+        // 高度同理：保留球在深取样时刻的实际高度，后续轨迹（交接/一传）
+        // 从该高度出发，地板球不会单帧跳到胸口。
         let catch_pos = reb_pos;
-        self.ball.ball_pos_3d = (catch_pos, self.config.rules.chest_height_ft);
+        let catch_z = self.ball.ball_pos_3d.1;
+        self.ball.ball_pos_3d = (catch_pos, catch_z);
         if target_id == rebounder_id {
-            let dist = (rebounder_pos - catch_pos).length();
+            // 3D 路径长度决定交接时长（与拾取路径同一判据）：地板球拾起
+            // 的垂直爬升计入时长，避免首帧 3D 速度越出包络。
+            let target_z = self.config.rules.ball_holder_height_ft;
+            let dist = (rebounder_pos - catch_pos)
+                .length()
+                .hypot((target_z - catch_z).abs());
             let speed_budget = (self.config.rules.ball_max_speed_ftps
                 - self.config.rules.invariant_speed_tolerance_ftps)
                 .max(self.config.rules.invariant_speed_tolerance_ftps);
             let transfer_dur = (dist / speed_budget).max(self.config.rules.tick_seconds);
             self.transition_ball_state(BallTrajectoryKind::ControlTransfer {
                 from_pos: catch_pos,
-                from_z: self.config.rules.chest_height_ft,
+                from_z: catch_z,
                 target_pos: rebounder_pos,
                 target_z: self.config.rules.ball_holder_height_ft,
                 carrier_id: rebounder_id,
@@ -299,17 +368,15 @@ impl MatchEngine {
         // 外推一个飞行期内的可达点。
         let target_pos = self.lead_receiver_position(&target_id, target_pos, pass_dist, false);
         let pass_dist = (target_pos - catch_pos).length();
-        let receive_success =
-            self.resolve_pass_success(&rebounder_id, &target_id, catch_pos, target_pos);
         self.transition_ball_state(BallTrajectoryKind::Pass {
             from_pos: catch_pos,
+            from_z: catch_z,
             to_pos: target_pos,
             target_id: target_id.clone(),
             start_time: self.clock.current_time,
             duration: self.config.rules.pass_duration(pass_dist, false),
             peak_z: self.config.rules.pass_peak_ft,
             inbound: false,
-            receive_success,
         });
         self.possession_ctx.current_possession_passes += 1;
         self.journal.pending_events.push(GameEvent::PassRelease {
@@ -365,12 +432,20 @@ impl MatchEngine {
         // 评判器的 ORB 窗口记账（RHYTHM_DURATION / DURATION_BOUNDS 的
         // 自变量）会漏计这个 14s 窗口，把合法的 ~37s 回合误判超带。
         let was_rebound_origin = loose_terminal == nba_domain::PossessionEndCause::DefensiveRebound;
-        if was_rebound_origin && !possession_changed {
+        if was_rebound_origin {
+            let is_offensive = !possession_changed;
             self.journal.pending_events.push(GameEvent::ReboundContest {
                 rebounder_id: player_id.clone(),
                 landing_pos: (position.x, position.y),
-                is_offensive: true,
+                is_offensive,
             });
+            if is_offensive {
+                self.clock.shot_clock = self
+                    .config
+                    .rules
+                    .league
+                    .offensive_rebound_shot_clock_seconds;
+            }
         }
         if possession_changed {
             // 篮板源 + 球权易主 = 防守篮板：归因到收球人（rebounder），
@@ -398,6 +473,12 @@ impl MatchEngine {
             self.flow.possession = secured_possession;
             self.flow.possession_id += 1;
             self.clock.shot_clock = self.config.rules.league.shot_clock_seconds;
+            self.journal
+                .pending_events
+                .push(nba_domain::GameEvent::TransitionStarted {
+                    offense: secured_possession,
+                    origin: nba_domain::TransitionOrigin::LooseBallRecovery,
+                });
         }
         self.update_coach_strategy();
         self.sync_team_tactics();
@@ -634,19 +715,16 @@ impl MatchEngine {
     /// 没有球队控球的伪违例，且责任人派生为空（seed 14 possession 185）。
     /// 因此节间开场必须显式回答「球现在谁能拿」：
     ///
-    /// - 球已由在场球员持有/发球中 → 原样保留（常规节间路径，行为不变）；
-    /// - 其余状态（停球/松球/飞行残留）→ 按节末保留的进攻方进入发球
+    /// - 已有发球准备 → 原样保留；
+    /// - 其余状态（包括节末仍由球员持有的球）→ 按节末保留的进攻方进入发球
     ///   程序：不翻转球权、不重复回合结算（节末的 `PeriodEnd` 总结已
     ///   完成结算），基线取停球位置就近的边线。
     pub(crate) fn start_period_ball_program(&mut self) {
-        let ball_is_possessed = matches!(
+        let inbound_is_active = matches!(
             self.ball.ball_state,
-            BallTrajectoryKind::Held { .. }
-                | BallTrajectoryKind::Drive { .. }
-                | BallTrajectoryKind::InboundReady { .. }
-                | BallTrajectoryKind::InboundTransfer { .. }
+            BallTrajectoryKind::InboundReady { .. } | BallTrajectoryKind::InboundTransfer { .. }
         );
-        if ball_is_possessed {
+        if inbound_is_active {
             return;
         }
         let ball_3d = self.ball.ball_pos_3d;
@@ -664,6 +742,8 @@ impl MatchEngine {
             self.ball.ball_state,
             BallTrajectoryKind::Pass { .. }
                 | BallTrajectoryKind::Shot { .. }
+                | BallTrajectoryKind::FreeThrowSetup { .. }
+                | BallTrajectoryKind::FreeThrow { .. }
                 | BallTrajectoryKind::LooseBall { .. }
                 | BallTrajectoryKind::RimRebound { .. }
                 | BallTrajectoryKind::ControlTransfer { .. }
@@ -755,6 +835,11 @@ impl MatchEngine {
             self.clock.period += 1;
             self.clock.game_clock = self.config.rules.league.overtime_duration_seconds;
             self.clock.shot_clock = self.config.rules.league.shot_clock_seconds;
+            // 加时是独立的球队犯规账期（charter §6.3：加时有独立限额）——
+            // 与常规节一致，进加时清零；否则账本按节重建会与帧计数器失衡
+            // （实测 seed 4/8：Q4 累计带进 OT，账本必报不平）。
+            self.ledger.team_fouls_home = 0;
+            self.ledger.team_fouls_away = 0;
             self.clock.period_break_elapsed = 0.0;
             self.set_game_flow(GameFlowState::Overtime);
             self.transition_phase(SubPhase::Initiation);
@@ -779,5 +864,138 @@ impl MatchEngine {
             ));
         }
         self.update_scope_completion();
+    }
+}
+
+#[cfg(test)]
+mod loose_rebound_tests {
+    use super::MatchEngine;
+    use nba_domain::{GameEvent, GameFlowState};
+    use nba_physics::ballistics::BallTrajectoryKind;
+
+    fn publish_shot_arrival(engine: &mut MatchEngine) -> u64 {
+        let hoop = engine.rules().court.hoop_pos(true);
+        engine
+            .journal
+            .pending_events
+            .push(GameEvent::ShotTrajectoryArrival {
+                shooter_id: "H_01".to_string(),
+                ball_position: (hoop.x, hoop.y, engine.rules().rim_height_ft),
+            });
+        engine.publish_events();
+        let event_id = engine
+            .journal
+            .current_event_log
+            .iter()
+            .find(|event| event.kind == "SHOT_TRAJECTORY_ARRIVAL")
+            .expect("shot arrival fact must be published")
+            .event_id;
+        engine.journal.begin_tick();
+        engine.journal.current_event_log.clear();
+        event_id
+    }
+
+    #[test]
+    fn period_start_rebuilds_inbound_for_held_period_end_ball() {
+        let mut engine = MatchEngine::new(1);
+        engine.set_game_flow_for_test(GameFlowState::DeadBall);
+        engine.set_ball_state_for_test(BallTrajectoryKind::Held {
+            carrier_id: "A_05".to_string(),
+        });
+        let ball_position = engine.ball_pos_3d();
+
+        engine.start_period_ball_program();
+
+        assert_eq!(engine.game_flow(), GameFlowState::DeadBall);
+        assert!(matches!(
+            engine.ball.ball_state,
+            BallTrajectoryKind::InboundTransfer { .. }
+        ));
+        assert_eq!(engine.ball_pos_3d(), ball_position);
+    }
+
+    #[test]
+    fn loose_ball_rebound_publishes_source_and_resets_offensive_clock() {
+        let mut engine = MatchEngine::new(1);
+        let position = engine.rules().court.hoop_pos(true);
+        engine.set_game_flow_for_test(GameFlowState::LiveBall);
+        engine.set_shot_clock_for_test(f32::from(3u8));
+        engine.ball.pending_loose_ball_terminal =
+            Some(nba_domain::PossessionEndCause::DefensiveRebound);
+        let shot_arrival_id = publish_shot_arrival(&mut engine);
+
+        engine.start_loose_ball_transition("H_01".to_string(), position);
+        engine.set_ball_state_for_test(BallTrajectoryKind::ControlTransfer {
+            from_pos: position,
+            from_z: engine.rules().ball_holder_height_ft,
+            target_pos: position,
+            target_z: engine.rules().ball_holder_height_ft,
+            carrier_id: "H_01".to_string(),
+            start_time: engine.current_time(),
+            duration: engine.rules().tick_seconds,
+        });
+        engine.publish_events();
+
+        assert_eq!(
+            engine.shot_clock(),
+            engine.rules().league.offensive_rebound_shot_clock_seconds
+        );
+        let rebound = engine
+            .journal
+            .current_event_log
+            .iter()
+            .find(|event| event.kind == "REBOUND")
+            .expect("loose-ball offensive rebound must publish a REBOUND fact");
+        assert_eq!(rebound.parent_event_id, Some(shot_arrival_id));
+        assert_eq!(
+            engine.possession_ctx.last_offensive_rebound_event_parent,
+            Some(rebound.event_id)
+        );
+        assert_eq!(
+            engine.possession_ctx.recent_offensive_rebounder(
+                engine.current_time(),
+                engine.rules().decision_interval_seconds
+            ),
+            Some("H_01")
+        );
+        assert!(matches!(
+            rebound.data.as_ref().and_then(|data| data.get("ReboundContest")),
+            Some(data) if data.get("is_offensive").and_then(serde_json::Value::as_bool) == Some(true)
+        ));
+    }
+
+    #[test]
+    fn loose_ball_defensive_rebound_publishes_defensive_fact() {
+        let mut engine = MatchEngine::new(2);
+        let position = engine.rules().court.hoop_pos(true);
+        engine.set_game_flow_for_test(GameFlowState::LiveBall);
+        engine.ball.pending_loose_ball_terminal =
+            Some(nba_domain::PossessionEndCause::DefensiveRebound);
+        let shot_arrival_id = publish_shot_arrival(&mut engine);
+
+        engine.start_loose_ball_transition("A_01".to_string(), position);
+        engine.set_ball_state_for_test(BallTrajectoryKind::ControlTransfer {
+            from_pos: position,
+            from_z: engine.rules().ball_holder_height_ft,
+            target_pos: position,
+            target_z: engine.rules().ball_holder_height_ft,
+            carrier_id: "A_01".to_string(),
+            start_time: engine.current_time(),
+            duration: engine.rules().tick_seconds,
+        });
+        engine.publish_events();
+
+        let rebound = engine
+            .journal
+            .current_event_log
+            .iter()
+            .find(|event| event.kind == "REBOUND")
+            .expect("loose-ball defensive rebound must publish a REBOUND fact");
+        assert_eq!(rebound.parent_event_id, Some(shot_arrival_id));
+        assert!(matches!(
+            rebound.data.as_ref().and_then(|data| data.get("ReboundContest")),
+            Some(data) if data.get("is_offensive").and_then(serde_json::Value::as_bool) == Some(false)
+        ));
+        assert_eq!(engine.possession(), nba_domain::Possession::Away);
     }
 }

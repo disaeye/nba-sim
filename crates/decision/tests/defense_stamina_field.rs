@@ -50,8 +50,17 @@ fn neutral_at_full_stamina_matches_pre_decay_bit_pattern() {
     let solver = solver();
     let carrier_pos = hoop - Vec2::new(6.0, 0.0);
 
-    let emergent =
-        solver.solve_equilibrium(carrier_pos, hoop, &off_positions, 1, 0, &rules, 1.0, false);
+    let emergent = solver.solve_equilibrium(
+        carrier_pos,
+        hoop,
+        &off_positions,
+        1,
+        0,
+        &rules,
+        1.0,
+        false,
+        0.5,
+    );
 
     // 旧常量路径（衰减系数恒 1，逐表达式复刻 `solve_equilibrium`）：
     let config = &rules.tactics.defense.potential_field;
@@ -138,6 +147,7 @@ fn lower_stamina_does_not_increase_threat_or_void_ratio() {
             &rules,
             stamina,
             false,
+            0.5,
         );
         assert!(
             emergent.threat_ratio <= prev_threat,
@@ -164,6 +174,7 @@ fn lower_stamina_does_not_increase_threat_or_void_ratio() {
         &rules,
         1.0,
         false,
+        0.5,
     );
     assert!(
         prev_threat < fresh.threat_ratio,
@@ -204,6 +215,7 @@ fn parameter_perturbation_changes_output() {
         &rules,
         0.4,
         false,
+        0.5,
     );
 
     let mut floor_perturbed = rules.clone();
@@ -221,6 +233,7 @@ fn parameter_perturbation_changes_output() {
         &floor_perturbed,
         0.4,
         false,
+        0.5,
     );
     assert_ne!(
         (baseline.target_pos, baseline.threat_ratio),
@@ -239,6 +252,7 @@ fn parameter_perturbation_changes_output() {
         &gain_perturbed,
         0.4,
         false,
+        0.5,
     );
     assert_ne!(
         (baseline.target_pos, baseline.threat_ratio),
@@ -253,5 +267,5 @@ fn out_of_range_stamina_fails_fast() {
     let (hoop, off_positions) = stamina_geometry();
     let rules = GameRules::default();
     let solver = solver();
-    let _ = solver.solve_equilibrium(hoop, hoop, &off_positions, 1, 0, &rules, 1.5, false);
+    let _ = solver.solve_equilibrium(hoop, hoop, &off_positions, 1, 0, &rules, 1.5, false, 0.5);
 }

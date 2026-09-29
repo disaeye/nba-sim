@@ -84,7 +84,7 @@ impl LeagueProfile {
             max_personal_fouls: 5,
             shooting_foul_free_throws: 2,
             bonus_free_throws: 2,
-            bonus_fouls_per_period: 4,
+            bonus_fouls_per_period: 5,
             // 6.75 m ≈ 22.15 ft；FIBA 场地 28m × 15m ≈ 91.86 × 49.21 ft。
             three_point_distance_ft: 22.15,
             corner_three_distance_ft: 0.0,

@@ -141,9 +141,9 @@ fn capability_boxout_bonus_gain_reaches_behaviour() {
 
 #[test]
 fn capability_putback_bias_gain_reaches_behaviour() {
-    assert_rule_coefficient_reaches_behaviour("capability.putback_bias_gain", |r| {
-        r.capability.putback_bias_base = 0.5;
-        r.capability.putback_bias_gain = 0.5;
+    assert_rule_coefficient_reaches_behaviour_extended("capability.putback_bias_gain", |r| {
+        r.capability.putback_bias_base = 1.0;
+        r.capability.putback_bias_gain = 1.0;
     });
 }
 
@@ -157,10 +157,16 @@ fn capability_help_awareness_gain_reaches_behaviour() {
 
 #[test]
 fn capability_post_defense_physicality_gain_reaches_behaviour() {
-    assert_rule_coefficient_reaches_behaviour("capability.post_defense_primary_gain", |r| {
-        r.capability.post_defense_primary_gain = 1.0;
-        r.capability.post_defense_secondary_gain = 1.0;
-    });
+    // 扩展判据（ADR-016）：该系数只经低位背身候选的对抗项传导，行为触达
+    // 随决策景观处于边缘（4 种子 ≥3/4 的强杠杆判据对小效应系数过紧），
+    // 与 putback_bias_gain、morale_shoot_affinity 同属小效应系数。
+    assert_rule_coefficient_reaches_behaviour_extended(
+        "capability.post_defense_primary_gain",
+        |r| {
+            r.capability.post_defense_primary_gain = 1.0;
+            r.capability.post_defense_secondary_gain = 1.0;
+        },
+    );
 }
 
 /// 快下阈值：基线阈值 0.36，而内置阵容的最大快下机会约 0.46，因此基线**会**
@@ -180,11 +186,11 @@ fn intercept_risk_factor_reaches_behaviour() {
     perturbed_rules
         .resolve
         .base_rates
-        .intercept_risk_factor_floor = 0.0;
+        .intercept_risk_factor_floor = 0.5;
     perturbed_rules
         .resolve
         .base_rates
-        .intercept_risk_factor_gain = 4.0;
+        .intercept_risk_factor_gain = 8.0;
     let perturbed = fingerprint_for_setup(perturbed_rules, &EXTENDED_SEEDS, RULE_WIRING_TICKS);
     assert_wiring_changed(
         "resolve.base_rates.intercept_risk_factor",

@@ -63,12 +63,81 @@ pub(super) fn eval_backcourt_clock_world(ctx: &ConstraintContext) -> ConstraintR
     }
 }
 
+pub(super) fn eval_three_second_lane_world(ctx: &ConstraintContext) -> ConstraintResult {
+    // 规则语义（charter §6.2）：前场控制时进攻人在限制区连续停留超过
+    // 时限。计时器在时钟层按同一控球谓词累加，控球结束自动清零——
+    // 此处只需验证判据与责任人在场。
+    if ctx.lane_dwell_seconds >= ctx.rules.three_second_lane_seconds
+        && ctx.lane_dwell_player_id.is_some()
+        && ctx.is_in_frontcourt()
+        && ctx.is_live_ball()
+        && ctx.offense_has_possession()
+    {
+        ConstraintResult::violate("THREE_SECOND_LANE")
+    } else {
+        ConstraintResult::pass()
+    }
+}
+
+pub(super) fn eval_over_and_back_world(ctx: &ConstraintContext) -> ConstraintResult {
+    // 规则语义（charter §6.2）：前场控制建立后，球回到后场即违例。
+    // 判据与后场计时同一口径：控球延续（持球/运球/交接/传球飞行）期间
+    // 球在后场且前场已建立 → 违例，责任人是最近触球者。
+    //
+    // 传球飞行中必须再看**目标点**：向前场推进的传球在飞行前半段球
+    // 仍采样在中线后（合法推进），只有目标点本身在后场的传球才是
+    // 「把球带回」（实测：过场传球曾被误判为回场，30 tick 内无人接到球）。
+    let pass_returns_to_backcourt = match ctx.pass_target_pos {
+        Some(target) => {
+            let midcourt = ctx.rules.court.width_ft / 2.0;
+            match ctx.possession_team {
+                "home" => target.x < midcourt,
+                "away" => target.x > midcourt,
+                _ => false,
+            }
+        }
+        // 非传球飞行（或无目标点）：球的位置就是事实。
+        None => true,
+    };
+    if ctx.frontcourt_established
+        && !ctx.is_in_frontcourt()
+        && pass_returns_to_backcourt
+        && ctx.is_live_ball()
+        && ctx.offense_has_possession()
+        && ctx.last_touch_player_id.is_some()
+    {
+        ConstraintResult::violate("OVER_AND_BACK")
+    } else {
+        ConstraintResult::pass()
+    }
+}
+
 pub(super) fn eval_game_clock_world(ctx: &ConstraintContext) -> ConstraintResult {
     if ctx.game_clock <= 0.0 && !ctx.is_ball_in_flight() && ctx.is_live_ball() {
         ConstraintResult::violate("GAME_CLOCK_EXPIRED")
     } else {
         ConstraintResult::pass()
     }
+}
+
+/// 前场建立后，进攻方不得主动传球回后场（charter §6.2 回场条款的
+/// 事前阻断）：这类传球在真实比赛里不存在，放行只会让运行时违例
+/// 把回合变成白给球权。发球（`InboundPass`）不适用回场条款——
+/// 发球期间无球队控制，球可以传向任何方向。
+pub(super) fn eval_pass_backcourt_action(
+    ctx: &ConstraintContext,
+    action: &CandidateAction,
+) -> ConstraintResult {
+    if let CandidateAction::Pass { to_pos, .. } = action {
+        let attacking_right = ctx.possession_team == "home";
+        if ctx.frontcourt_established
+            && ctx.is_live_ball()
+            && ctx.rules.court.is_backcourt(*to_pos, attacking_right)
+        {
+            return ConstraintResult::violate("PASS_TO_BACKCOURT");
+        }
+    }
+    ConstraintResult::pass()
 }
 pub(super) fn eval_out_of_bounds_action(
     ctx: &ConstraintContext,
@@ -125,23 +194,7 @@ pub(super) fn eval_out_of_bounds_event(
     let (is_ball_carrier, is_inbounding) = match event {
         nba_domain::GameEvent::BoundaryCross { player_id, pos, .. } => {
             let player = ctx.physics.get_player(player_id);
-            // 第一性原理：判定「球员越过边界是否构成出界」必须依据
-            // **球的权威归属**，而不是 physics 逐球员缓存 `has_ball`。
-            //
-            // `has_ball` 由 `sync_ball_holder` 在球态变更后同步；而
-            // `BoundaryCross` 是 physics 在球态变更**之前**产生的物理事实，
-            // 于是该 tick 上的 `has_ball` 可能仍是上一 tick 的旧值——实测
-            // 因此把「已进入发球程序、球已离手」的球员误判为持球出界，
-            // 每场产生 42 次虚假 `TURNOVER:OUT_OF_BOUNDS`。
-            //
-            // 权威来源是 `ctx.ball_phase`（由领域层 `BallState` 派生）：
-            // 只有球处于「有明确持球人」的相位时，该球员才可能是出界的
-            // 持球人。飞行/松球/发球/死球相位下，球员越界不构成球权违例。
-            let ball_held = matches!(
-                ctx.ball_phase,
-                nba_domain::BallPhase::Held | nba_domain::BallPhase::Drive
-            );
-            let has_ball = player.map(|p| p.has_ball).unwrap_or(false) && ball_held;
+            let has_ball = ctx.ball_holder_id == Some(player_id.as_str());
             let is_inbound_action = player
                 .map(|p| p.action == "INBOUND_SETUP" || p.action == "InboundPositioning")
                 .unwrap_or(false);

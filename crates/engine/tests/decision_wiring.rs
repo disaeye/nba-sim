@@ -20,14 +20,15 @@ use glam::Vec2;
 use nba_engine::MatchEngine;
 use support::setup_noise_off;
 
-/// 传球在释放时刻裁定的接收结果必须被到达时刻忠实回放。
+/// 接球人站在落点且接球概率为 1 时，到达事实是接住，并通过连续交接进入持球。
 #[test]
-fn pass_arrival_replays_release_outcome_and_emits_matching_fact() {
+fn pass_arrival_emits_received_when_receiver_controls_the_ball() {
     let mut rules = nba_domain::GameRules::default();
     rules.tick_seconds = 0.1;
     rules.tactical_initiation_seconds = 0.0;
     rules.decision_interval_seconds = 0.1;
     let mut setup = nba_engine::MatchSetup::builtin(rules);
+    setup.rules.decision_interval_seconds = 0.5;
     setup.rules.resolve.base_rates.pass_success = 1.0;
     setup.rules.resolve.pass.openness_weight = 0.0;
     setup.rules.resolve.pass.passer_skill_weight = 0.0;
@@ -36,21 +37,20 @@ fn pass_arrival_replays_release_outcome_and_emits_matching_fact() {
     let mut engine = MatchEngine::with_setup(setup, 1201);
     engine.set_ball_state_for_test(nba_physics::BallTrajectoryKind::Pass {
         from_pos: Vec2::new(40.0, 25.0),
+        from_z: 4.0,
         to_pos: Vec2::new(50.0, 25.0),
         target_id: "H_02".to_string(),
         start_time: 1.0,
         duration: 0.2,
         peak_z: engine.rules().pass_peak_ft,
         inbound: false,
-        receive_success: true,
     });
     engine.set_last_passer_for_test(Some("H_01".to_string()));
     engine.set_game_flow_for_test(nba_domain::GameFlowState::LiveBall);
     engine.set_sub_phase_for_test(nba_domain::SubPhase::ActionExecution);
     engine.set_current_time_for_test(1.0);
-    // 层 A（P-1）修正：接球人不再直读传球人的冻结落点，按**自己的感知**
-    // 预估并跑位，因此可能接不到。本测试验证的是「release 时裁定的接收结果被
-    // 忠实回放」，与位置无关，故关闭预估噪声。
+    // 接球人按自己的感知跑位。本测试把接球人放在落点上，关闭预估噪声，
+    // 检查到达时的控制结果。
     setup_noise_off(&mut engine);
     // 构造「接球人恰好站在落点」的静止场景：引擎初始化赋予的战术跑位初速会因
     // 惯性把他推出落点（实测 1 tick 滑 1.73 ft > catch_radius），以及其余球员的
@@ -105,15 +105,45 @@ fn pass_arrival_replays_release_outcome_and_emits_matching_fact() {
         }
     }
     assert!(saw_receive, "pass arrival did not emit PASS_RECEIVED");
+    engine.set_last_decision_time_for_test(engine.current_time());
+    assert!(matches!(
+        engine.ball_state(),
+        nba_physics::BallTrajectoryKind::ControlTransfer { ref carrier_id, .. } if carrier_id == "H_02"
+    ));
+    for _ in 0..10 {
+        if matches!(
+            engine.ball_state(),
+            nba_physics::BallTrajectoryKind::Held { ref carrier_id } if carrier_id == "H_02"
+        ) {
+            break;
+        }
+        engine.step();
+    }
     assert!(matches!(
         engine.ball_state(),
         nba_physics::BallTrajectoryKind::Held { ref carrier_id } if carrier_id == "H_02"
     ));
+    engine.step();
+    let trace = engine
+        .last_decision_trace_for_test()
+        .expect("pass receiver must receive a decision on the first held-ball tick");
+    assert!(
+        trace
+            .probabilities
+            .iter()
+            .any(|entry| entry.kind.contains("SHOOT") && entry.kind.contains("3PT")),
+        "open receiver must be able to choose an arc three immediately"
+    );
+    engine.step();
+    assert!(
+        engine.last_decision_trace_for_test().is_none(),
+        "a received pass must not trigger another decision before the normal interval"
+    );
 }
 
-/// 传球失败同样必须在释放时刻裁定、到达时刻回放，不得在到达时重新掷骰。
+/// 接球概率为 0 时，球到达后发布掉球。
 #[test]
-fn pass_release_policy_can_emit_drop_without_redeciding_at_arrival() {
+fn pass_arrival_emits_drop_when_control_probability_is_zero() {
     let mut rules = nba_domain::GameRules::default();
     rules.tick_seconds = 0.1;
     rules.tactical_initiation_seconds = 0.0;
@@ -127,13 +157,13 @@ fn pass_release_policy_can_emit_drop_without_redeciding_at_arrival() {
     let mut engine = MatchEngine::with_setup(setup, 1202);
     engine.set_ball_state_for_test(nba_physics::BallTrajectoryKind::Pass {
         from_pos: Vec2::new(40.0, 25.0),
+        from_z: 4.0,
         to_pos: Vec2::new(50.0, 25.0),
         target_id: "H_02".to_string(),
         start_time: 0.0,
         duration: 0.1,
         peak_z: engine.rules().pass_peak_ft,
         inbound: false,
-        receive_success: false,
     });
     engine.set_last_passer_for_test(Some("H_01".to_string()));
     engine.set_current_time_for_test(0.0);
@@ -173,8 +203,7 @@ fn shot_release_uses_configured_skill_and_spacing_inputs() {
         .expect("shooter")
         .pos_ft = Vec2::new(40.0, 25.0);
     engine.execute_shot_for_test("H_01", Vec2::new(40.0, 25.0), false);
-    // D25 出手时序：裁定冻结在入口，球态仍 Held；窗口跨过 prep+exec
-    // 边界（Release）才转 Shot。推进到 Release 后断言冻结的命中结果。
+    // 出手入口只保存概率输入。窗口跨过准备和执行边界后，飞行球态携带该概率。
     let mut released = false;
     for _ in 0..40 {
         let tick = engine.step();
@@ -194,6 +223,11 @@ fn shot_release_uses_configured_skill_and_spacing_inputs() {
     );
     assert!(matches!(
         engine.ball_state(),
-        nba_physics::BallTrajectoryKind::Shot { is_made: true, .. }
+        nba_physics::BallTrajectoryKind::Shot {
+            make_probability,
+            aim_pos,
+            hoop_pos,
+            ..
+        } if (*make_probability - 1.0).abs() < 1.0e-4 && *aim_pos == *hoop_pos
     ));
 }

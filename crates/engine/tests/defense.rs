@@ -138,3 +138,79 @@ fn potential_field_coefficients_survive_the_defensive_scheme_sync() {
          and the `--rules` channel is silently dead"
     );
 }
+
+#[test]
+fn defense_responsibility_emits_events_and_distinguishes_schemes() {
+    let count_responsibilities = |scheme: &str| -> (usize, usize, usize, usize) {
+        let rules = GameRules::default();
+        let mut setup = nba_engine::MatchSetup::builtin(rules);
+        setup.home_lineup.defense_tactic = scheme.to_string();
+        setup.away_lineup.defense_tactic = scheme.to_string();
+        let mut engine = MatchEngine::with_setup(setup, 42);
+        engine.set_scope("1q").expect("valid scope");
+        let mut switches = 0;
+        let mut drops = 0;
+        let mut hedges = 0;
+        let mut total = 0;
+        while !engine.is_finished() {
+            let _ = engine.step();
+            for ev in engine.current_event_log_for_test() {
+                if ev.kind == "DEFENSE_RESPONSIBILITY_CHANGED" {
+                    total += 1;
+                    if let Some(data) = ev.data.as_ref() {
+                        let payload = data.get("DefenseResponsibilityChanged").unwrap_or(data);
+                        let resp = payload.get("new_responsibility").and_then(|v| v.as_str());
+                        match resp {
+                            Some("switched_matchup") => switches += 1,
+                            Some("drop") => drops += 1,
+                            Some("hedge") => hedges += 1,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        (total, switches, drops, hedges)
+    };
+
+    let (switch_total, switches, _, _) = count_responsibilities("def_switch_heavy");
+    assert!(
+        switch_total > 0,
+        "switch scheme must emit responsibility events"
+    );
+    assert!(
+        switches > 0,
+        "def_switch_heavy must produce switched_matchup responsibilities"
+    );
+
+    let (drop_total, _, drops, _) = count_responsibilities("def_drop_coverage");
+    assert!(
+        drop_total > 0,
+        "drop scheme must emit responsibility events"
+    );
+    assert!(
+        drops > 0,
+        "def_drop_coverage must produce drop responsibilities"
+    );
+
+    let (hedge_total, _, _, hedges) = count_responsibilities("def_hedge_recover");
+    assert!(
+        hedge_total > 0,
+        "hedge scheme must emit responsibility events"
+    );
+    assert!(
+        hedges > 0,
+        "def_hedge_recover must produce hedge responsibilities"
+    );
+
+    let (conservative_total, cons_switches, cons_drops, cons_hedges) =
+        count_responsibilities("def_man_conservative");
+    assert!(
+        cons_switches == 0 && cons_drops == 0 && cons_hedges == 0,
+        "conservative scheme must not produce switch, drop, or hedge responsibilities"
+    );
+    assert!(
+        conservative_total > 0,
+        "conservative scheme still produces baseline primary/help transitions"
+    );
+}

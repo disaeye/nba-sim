@@ -50,12 +50,12 @@ impl MatchEngine {
         match &self.ball.ball_state {
             BallTrajectoryKind::Shot {
                 from_pos,
-                hoop_pos,
+                aim_pos,
                 duration,
                 shooter_id: state_shooter,
                 ..
             } if state_shooter == shooter_id => {
-                (*hoop_pos - *from_pos).length() / duration.max(f32::EPSILON)
+                (*aim_pos - *from_pos).length() / duration.max(f32::EPSILON)
             }
             _ => 0.0,
         }
@@ -70,7 +70,6 @@ impl MatchEngine {
         shooter_id: &str,
         from_pos: &Vec2,
         current_t: f32,
-        would_have_made: bool,
         is_three: bool,
     ) -> Option<BlockOutcome> {
         // 1. 出手者的动作阶段必须是合法的封盖窗口。
@@ -163,7 +162,12 @@ impl MatchEngine {
             + reach * policy.blocker_reach_weight;
         // 出手点越高越难封：用出手者在飞行中的球高度作为参考。
         let release_height = self.ball.ball_pos_3d.1;
-        let probability = (skill - release_height * policy.release_height_penalty_per_ft)
+        // 封盖倾向只调制起跳意愿（attributes.md §2.6 项 8），手感仍由
+        // `block`/`vertical` 能力主导。
+        let block_tendency_scale = policy.block_tendency_floor
+            + blocker.tendencies.block_aggressiveness * policy.block_tendency_span;
+        let probability = ((skill - release_height * policy.release_height_penalty_per_ft)
+            * block_tendency_scale)
             .clamp(f32::EPSILON, policy.probability_ceiling);
         let blocked = self.systems.rng.gen_bool(f64::from(probability));
         if !blocked {
@@ -208,7 +212,6 @@ impl MatchEngine {
                 ball_pos: (ball_pos.0.x, ball_pos.0.y, contact_height_ft),
                 contact_height_ft,
                 phase,
-                would_have_made,
                 is_three,
             },
         })

@@ -80,7 +80,6 @@ pub struct PlayerPhysicsState {
     pub target_speed_ftps: f32,
     pub max_speed_ftps: f32,
     pub max_accel_ftps2: f32,
-    pub has_ball: bool,
     /// Whether this selected roster member participates in court physics.
     pub on_court: bool,
     pub action: String,
@@ -174,13 +173,12 @@ pub trait SpatialPhysics {
     );
     fn set_player_locked(&mut self, id: &str, locked: bool, locomotion: Option<LocomotionState>);
     fn reset_motion(&mut self);
-    fn step(&mut self, dt: FixedDt);
+    fn step(&mut self, dt: FixedDt, ball_holder_id: Option<&str>);
     fn drain_contacts(&mut self) -> Vec<RawContact>;
     fn drain_facts(&mut self) -> Vec<PhysicsFact>;
     fn get_players(&self) -> &HashMap<String, PlayerPhysicsState>;
     fn get_player(&self, id: &str) -> Option<&PlayerPhysicsState>;
     fn get_player_mut(&mut self, id: &str) -> Option<&mut PlayerPhysicsState>;
-    fn set_ball_holder(&mut self, holder_id: Option<&str>);
     fn teleport_player(&mut self, id: &str, pos: Vec2);
     fn query_nearby(&self, center: Vec2, radius: f32, filter: &EntityFilter) -> Vec<String>;
     fn overlap_circle(&self, center: Vec2, radius: f32) -> Vec<String>;
@@ -313,7 +311,11 @@ impl PhysicsWorld {
     }
 
     pub fn step(&mut self, dt: FixedDt) {
-        self.backend.step(dt);
+        self.backend.step(dt, None);
+    }
+
+    pub fn step_with_ball_holder(&mut self, dt: FixedDt, ball_holder_id: Option<&str>) {
+        self.backend.step(dt, ball_holder_id);
     }
 
     pub fn drain_contacts(&mut self) -> Vec<RawContact> {
@@ -336,9 +338,6 @@ impl PhysicsWorld {
         self.backend.get_player_mut(id)
     }
 
-    pub fn set_ball_holder(&mut self, holder_id: Option<&str>) {
-        self.backend.set_ball_holder(holder_id);
-    }
     pub fn teleport_player(&mut self, id: &str, pos: Vec2) {
         self.backend.teleport_player(id, pos);
     }
@@ -415,8 +414,8 @@ impl SpatialPhysics for PhysicsWorld {
     fn reset_motion(&mut self) {
         self.backend.reset_motion();
     }
-    fn step(&mut self, dt: FixedDt) {
-        self.backend.step(dt);
+    fn step(&mut self, dt: FixedDt, ball_holder_id: Option<&str>) {
+        self.backend.step(dt, ball_holder_id);
     }
     fn drain_contacts(&mut self) -> Vec<RawContact> {
         self.backend.drain_contacts()
@@ -435,9 +434,6 @@ impl SpatialPhysics for PhysicsWorld {
     }
     fn teleport_player(&mut self, id: &str, pos: Vec2) {
         self.backend.teleport_player(id, pos);
-    }
-    fn set_ball_holder(&mut self, holder_id: Option<&str>) {
-        self.backend.set_ball_holder(holder_id);
     }
     fn query_nearby(&self, center: Vec2, radius: f32, filter: &EntityFilter) -> Vec<String> {
         self.backend.query_nearby(center, radius, filter)
@@ -663,10 +659,11 @@ impl SpatialPhysics for RapierSpatialPhysics {
         }
     }
 
-    fn step(&mut self, dt: FixedDt) {
+    fn step(&mut self, dt: FixedDt, ball_holder_id: Option<&str>) {
         let dt = dt.0.max(f32::EPSILON);
         let fixed_dt = FixedDt(dt);
-        let mut proposals = make_motion_proposals(&mut self.players, &self.rules, fixed_dt);
+        let mut proposals =
+            make_motion_proposals(&mut self.players, &self.rules, fixed_dt, ball_holder_id);
         resolve_motion_collisions(&mut proposals, &self.rules, fixed_dt);
         apply_motion_proposals(
             &mut self.players,
@@ -741,12 +738,6 @@ impl SpatialPhysics for RapierSpatialPhysics {
                 body.set_translation(vector![pos.x, pos.y], true);
                 body.set_next_kinematic_translation(vector![pos.x, pos.y]);
             }
-        }
-    }
-    fn set_ball_holder(&mut self, holder_id: Option<&str>) {
-        for (id, player) in &mut self.players {
-            player.has_ball =
-                player.on_court && holder_id.map(|holder| holder == id).unwrap_or(false);
         }
     }
 
@@ -866,9 +857,10 @@ impl SpatialPhysics for SimpleCirclePhysics {
         }
     }
 
-    fn step(&mut self, dt: FixedDt) {
+    fn step(&mut self, dt: FixedDt, ball_holder_id: Option<&str>) {
         let dt = FixedDt(dt.0.max(f32::EPSILON));
-        let mut proposals = make_motion_proposals(&mut self.players, &self.rules, dt);
+        let mut proposals =
+            make_motion_proposals(&mut self.players, &self.rules, dt, ball_holder_id);
         resolve_motion_collisions(&mut proposals, &self.rules, dt);
         apply_motion_proposals(
             &mut self.players,
@@ -909,13 +901,6 @@ impl SpatialPhysics for SimpleCirclePhysics {
             player.pos_ft = pos;
             player.target_pos_ft = pos;
             player.vel_ft = Vec2::ZERO;
-        }
-    }
-
-    fn set_ball_holder(&mut self, holder_id: Option<&str>) {
-        for (id, player) in &mut self.players {
-            player.has_ball =
-                player.on_court && holder_id.map(|holder| holder == id).unwrap_or(false);
         }
     }
 

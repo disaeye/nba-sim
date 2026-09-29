@@ -98,10 +98,7 @@ fn open_direct_route_succeeds_without_a_probability_draw() {
     execute_drive(&mut engine, from_pos, target_pos);
     assert!(matches!(
         engine.ball_state(),
-        BallTrajectoryKind::Drive {
-            successful: true,
-            ..
-        }
+        BallTrajectoryKind::Drive { .. }
     ));
 }
 
@@ -111,10 +108,7 @@ fn close_route_blocker_requires_a_successful_bypass_path() {
     execute_drive(&mut engine, from_pos, target_pos);
     assert!(matches!(
         engine.ball_state(),
-        BallTrajectoryKind::Drive {
-            successful: true,
-            ..
-        }
+        BallTrajectoryKind::Drive { .. }
     ));
     assert_ne!(initiated_target(&engine), target_pos);
 }
@@ -126,11 +120,7 @@ fn two_sided_blockers_break_every_reachable_route() {
     execute_drive(&mut engine, from_pos, target_pos);
     assert!(matches!(
         engine.ball_state(),
-        BallTrajectoryKind::Drive {
-            successful: false,
-            finish_made: false,
-            ..
-        }
+        BallTrajectoryKind::Drive { .. }
     ));
     assert_eq!(initiated_target(&engine), target_pos);
 }
@@ -155,24 +145,42 @@ fn contact_advantage_changes_route_adjudication() {
     let positions = [(35.0, 25.0), (34.0, 19.2)];
     let (mut strong_driver, from_pos, target_pos) = configured_drive(&positions, 0.95, 0.2, 23);
     execute_drive(&mut strong_driver, from_pos, target_pos);
-    let strong_outcome = matches!(
-        strong_driver.ball_state(),
-        BallTrajectoryKind::Drive {
-            successful: true,
-            ..
-        }
-    );
+    assert_ne!(initiated_target(&strong_driver), target_pos);
 
     let (mut strong_defender, from_pos, target_pos) = configured_drive(&positions, 0.2, 0.95, 29);
     execute_drive(&mut strong_defender, from_pos, target_pos);
-    let strong_defender_outcome = matches!(
-        strong_defender.ball_state(),
-        BallTrajectoryKind::Drive {
-            successful: true,
-            ..
-        }
-    );
+    assert_eq!(initiated_target(&strong_defender), target_pos);
+}
 
-    assert!(strong_outcome);
-    assert!(!strong_defender_outcome);
+#[test]
+fn drive_outcome_chains_to_drive_initiated_parent_event() {
+    let (mut engine, from_pos, target_pos) = configured_drive(&[], 0.95, 0.1, 42);
+    execute_drive(&mut engine, from_pos, target_pos);
+
+    let mut initiated_id = None;
+    let mut outcome_parent_id = None;
+    let mut saw_outcome = false;
+
+    for _ in 0..40 {
+        let tick = engine.step();
+        for event in &tick.frame.event_log {
+            if event.kind == "DRIVE_INITIATED" {
+                initiated_id = Some(event.event_id);
+            }
+            if event.kind == "DRIVE_REACHED" || event.kind == "DRIVE_STOPPED" {
+                saw_outcome = true;
+                outcome_parent_id = event.parent_event_id;
+            }
+        }
+        if saw_outcome {
+            break;
+        }
+    }
+
+    assert!(saw_outcome, "drive must conclude with an outcome event");
+    assert!(initiated_id.is_some(), "drive must publish DRIVE_INITIATED");
+    assert_eq!(
+        outcome_parent_id, initiated_id,
+        "drive outcome must chain to DRIVE_INITIATED parent event"
+    );
 }

@@ -242,4 +242,9 @@ fn frame_rules_default_matches_game_rules_default_projection() {
         fallback.speed_tolerance_ftps
     );
     assert_eq!(projected.ball_z_max_ft, fallback.ball_z_max_ft);
+    assert_eq!(projected.max_personal_fouls, fallback.max_personal_fouls);
+    assert_eq!(
+        projected.bonus_fouls_per_period,
+        fallback.bonus_fouls_per_period
+    );
 }

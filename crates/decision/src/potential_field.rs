@@ -134,6 +134,7 @@ impl DefensePotentialFieldSolver {
         rules: &GameRules,
         stamina: f32,
         drive_active: bool,
+        help_aggressiveness: f32,
     ) -> EmergentDefenseTarget {
         // 系数从规则档案读取（`DefenseRules` 经防守方案实例化，`potential_field`
         // 随方案一起进入规则通道）。
@@ -232,12 +233,18 @@ impl DefensePotentialFieldSolver {
             role_gain
         };
         let sag_factor = if is_high_man { 1.0 } else { sag_mult };
+        // 协防倾向（attributes.md §2.6 项 9）只调制「愿不愿意离开对位」：
+        // 护筐引力被该倾向缩放，threat_ratio 随之上/下移动，越过
+        // rim_help_threat_ratio 的时机随之提前/推迟。
+        let help_tendency_scale =
+            config.help_tendency_floor + help_aggressiveness * config.help_tendency_span;
         let w_threat = stamina_mult
             * config.k_threat_base
             * global_threat
             * local_rim_proximity
             * effective_gain
-            * sag_factor;
+            * sag_factor
+            * help_tendency_scale;
 
         // 6. 势能分量三：弱侧外线空间真空吸力 (Voronoi Space Deficit Pull)
         // 物理因果律：只有当持球人突破深入且弱侧低位人 (Low-man) 产生显著下沉护筐时，

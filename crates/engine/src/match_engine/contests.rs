@@ -14,6 +14,14 @@ use rand::Rng;
 
 use super::MatchEngine;
 
+/// 前板冲抢意愿排序里，能力与倾向的权重（attributes.md §2.6 项 6）。
+///
+/// 能力（`offensive_rebound`）决定抢到球的可能性，倾向
+/// （`offensive_rebound_frequency`）决定他会不会去冲——两者相加后排序，
+/// 缺一不可：光有能力的球员未必愿意满场飞，光有意愿的球员抢不到也白跑。
+const CRASH_WILLINGNESS_FLOOR: f32 = 0.6;
+const CRASH_WILLINGNESS_SPAN: f32 = 0.4;
+
 #[allow(clippy::too_many_arguments)]
 fn pass_contact_event_probability(
     dt: f32,
@@ -362,7 +370,17 @@ impl MatchEngine {
             );
             let proximity =
                 nba_domain::capability::poke_pressure_factor(&self.config.rules, distance);
-            let hazard = policy.poke_attempt_rate_per_sec * proximity * per_try;
+            // 抢断倾向（attributes.md §2.6 项 7）只调制**尝试触发**，
+            // 不进入单次成功率：伸手多快是风格，伸手后能不能摸到是能力。
+            let steal_tendency = self
+                .systems
+                .physics
+                .get_player(&defender_id)
+                .map(|p| p.tendencies.gamble_steal)
+                .unwrap_or(0.5);
+            let attempt_scale =
+                policy.poke_steal_tendency_floor + steal_tendency * policy.poke_steal_tendency_span;
+            let hazard = policy.poke_attempt_rate_per_sec * proximity * per_try * attempt_scale;
             let hit_chance = 1.0 - (-hazard * dt).exp();
             if self.systems.rng.gen::<f32>() < hit_chance {
                 return Some(defender_id);
@@ -510,6 +528,17 @@ impl MatchEngine {
         let Some((defensive_id, defensive_distance)) = defensive_candidates.first() else {
             return Some(offensive_id.clone());
         };
+        if offensive_id == defensive_id {
+            unreachable!("offensive and defensive rebound candidates must be disjoint");
+        }
+        if *offensive_distance + self.config.rules.invariant_speed_tolerance_ftps
+            < *defensive_distance
+        {
+            let one_candidate_margin = self.config.rules.min_player_separation_ft;
+            if *defensive_distance - *offensive_distance > one_candidate_margin {
+                return Some(offensive_id.clone());
+            }
+        }
         let Some(offensive_player) = self.systems.physics.get_player(offensive_id).cloned() else {
             return Some(defensive_id.clone());
         };
@@ -582,6 +611,7 @@ impl MatchEngine {
                 self.systems
                     .physics
                     .get_player(&id)
+                    .filter(|player| player.on_court)
                     .map(|player| (id, (player.pos_ft - landing).length()))
             })
             .collect()
@@ -626,6 +656,10 @@ impl MatchEngine {
             // 候选：在场上球员，按（攻方：篮板属性降序 / 守方：距球落点升序）
             // 排序后取前若干名。攻方用属性是为了让 `offensive_rebound` 真正
             // 决定“谁去冲抢”（能力→行为链），而非全员无差别跑动。
+            //
+            // 冲抢意愿（attributes.md §2.6 项 6）也进入排序：能力决定
+            // “抢不抢得到”，倾向决定“想不想去抢”——两者都高才是前板
+            // 机器，轻碰不得分只靠别人抢。
             let mut squad: Vec<(String, Vec2, f32, String, String, f32)> = self
                 .systems
                 .physics
@@ -639,7 +673,12 @@ impl MatchEngine {
                         p.max_speed_ftps,
                         p.slot.clone(),
                         p.morale.clone(),
-                        p.attributes.offensive_rebound,
+                        if is_offense {
+                            p.attributes.offensive_rebound * CRASH_WILLINGNESS_FLOOR
+                                + p.tendencies.offensive_rebound_frequency * CRASH_WILLINGNESS_SPAN
+                        } else {
+                            f32::from(0u8)
+                        },
                     )
                 })
                 .collect();
@@ -693,10 +732,12 @@ impl MatchEngine {
                     .physics
                     .set_player_target(&id, target, speed, action, &slot, &morale);
                 // 动作窗口：篮板起跳准备（复用既有规则字段）。
-                self.observations.active_windows.insert(
-                    id.clone(),
-                    ActionTimeWindow::new_rebound_jump(&id, current_t, &self.config.rules),
-                );
+                let window = if is_offense {
+                    ActionTimeWindow::new_rebound_jump(&id, current_t, &self.config.rules)
+                } else {
+                    ActionTimeWindow::new_box_out(&id, current_t, &self.config.rules)
+                };
+                self.start_action_window(&id, window, None, Some((target.x, target.y)));
             }
         }
     }

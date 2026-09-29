@@ -23,7 +23,7 @@ use nba_domain::{GameFlowState, Possession, SubPhase};
 use nba_protocol::DecisionDebug;
 use nba_semantics::{SemanticContact, SpacingEvaluation};
 use rand_chacha::ChaCha8Rng;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use nba_physics::ballistics::BallTrajectoryKind;
 use nba_physics::movement::PhysicsWorld;
@@ -49,6 +49,7 @@ pub(crate) struct Systems {
 /// （`active_windows` 与 `beaten_recovery_until` 跨 tick，其余逐 tick 重算）。
 pub(crate) struct RuntimeObservations {
     pub(crate) active_windows: HashMap<String, ActionTimeWindow>,
+    pub(crate) defense_responsibilities: HashMap<String, nba_domain::DefenseResponsibility>,
     /// 主客队各自的激活 Play；比赛选板规则要求每队至多一个。
     pub(crate) home_active_play: Option<ActivePlay>,
     pub(crate) away_active_play: Option<ActivePlay>,
@@ -60,6 +61,7 @@ pub(crate) struct RuntimeObservations {
     /// 当前回合已推进的仿真 tick 数。
     pub(crate) possession_ticks: u32,
     pub(crate) last_decision_trace: Option<Box<DecisionDebug>>,
+    pub(crate) cut_route_players: HashSet<String>,
     pub(crate) latest_spacing: Option<SpacingEvaluation>,
     pub(crate) potential_field: Vec<PotentialFieldObservation>,
     /// 逐防守人维护的场输出滞回状态，供下一决策 tick 的 Play 谓词读取。
@@ -77,8 +79,13 @@ pub(crate) struct RuntimeObservations {
     pub(crate) substitutions_this_window: (u32, u32),
     /// 当前死球窗口是否已评估过轮换：同一窗口只评估一次。
     pub(crate) rotation_window_done: bool,
-    /// 已裁定、待释放的投篮（plan.md §6.2 四阶段时序）：`execute_shot`
-    /// 在入口完成全部裁定（is_made/fouled/peak_z/flight_time），但球态
+    /// 犯满离场待换下球员（charter §5.3）：`forced_substitution` 因球员
+    /// 持球/待传球被延迟时登记，每 tick 重试直到该球员离场。
+    pub(crate) pending_foulout_sub: Option<String>,
+    /// 已发布过板凳耗尽事实的球员（避免每 tick 重试重复发布同一事实）。
+    pub(crate) bench_depleted_reported: std::collections::HashSet<String>,
+    /// 待释放的投篮（plan.md §6.2 四阶段时序）：`execute_shot`
+    /// 在入口保存概率输入、干扰、弧顶和飞行时长，不保存命中和犯规。球态
     /// 仍为 `Held`；等动作窗口走到 `Preparation+Execution` 边界（真正的
     /// Release 时刻）才由 [`MatchEngine::consume_pending_shot_release`]
     /// 转成 `Shot` 球态并发 `ShotRelease` 事件。
@@ -89,10 +96,10 @@ pub(crate) struct RuntimeObservations {
     pub(crate) pending_shot_release: Option<PendingShotRelease>,
 }
 
-/// 一次已裁定、待释放的投篮快照（plan.md §6.2）。
+/// 一次待释放的投篮快照（plan.md §6.2）。
 ///
-/// 载荷在 `execute_shot` 入口冻结；`release_time` 之后的字段只被原样
-/// 回放，不做二次裁定，保证「裁定一次、回放一致」的释放语义。
+/// 载荷在 `execute_shot` 入口保存出手人、窗口和概率输入。命中在触筐结算，
+/// 投篮犯规在出手窗口内的接触事实出现时发布。
 #[derive(Debug, Clone)]
 pub(crate) struct PendingShotRelease {
     pub(crate) shooter_id: String,
@@ -100,14 +107,14 @@ pub(crate) struct PendingShotRelease {
     /// Release 发生的单调仿真时刻：窗口 `start_time + prep + exec`。
     pub(crate) release_time: f32,
     pub(crate) flight_time: f32,
-    pub(crate) is_made: bool,
     pub(crate) is_three: bool,
-    pub(crate) peak_z: f32,
-    pub(crate) fouled: bool,
-    pub(crate) fouler_id: Option<String>,
     pub(crate) contest_intensity: f32,
-    /// 发布 `ShotRelease` 时回放的命中概率（入口裁定的 `final_fg_pct`）。
+    /// 发布 `ShotRelease` 时记录的命中概率输入。
     pub(crate) make_probability: f32,
+    pub(crate) creation_source: nba_domain::ShotCreationSource,
+    pub(crate) transition_context: bool,
+    pub(crate) transition_event_id: Option<u64>,
+    pub(crate) source_event_id: Option<u64>,
 }
 
 /// 一名球员的轮换时刻记录。
@@ -142,6 +149,7 @@ impl RuntimeObservations {
     ) -> Self {
         Self {
             active_windows,
+            defense_responsibilities: HashMap::new(),
             home_active_play: None,
             away_active_play: None,
             home_play_activation_book: nba_decision::play_selector::PlayActivationBook::new(),
@@ -150,6 +158,7 @@ impl RuntimeObservations {
             away_play_cooldowns: BTreeMap::new(),
             possession_ticks: 0,
             last_decision_trace: None,
+            cut_route_players: HashSet::new(),
             latest_spacing: None,
             potential_field: Vec::new(),
             field_hysteresis: HashMap::new(),
@@ -160,6 +169,8 @@ impl RuntimeObservations {
             rotation_clock: HashMap::new(),
             substitutions_this_window: (0, 0),
             rotation_window_done: false,
+            pending_foulout_sub: None,
+            bench_depleted_reported: std::collections::HashSet::new(),
             pending_shot_release: None,
         }
     }
@@ -178,6 +189,17 @@ pub(crate) struct ScoreLedger {
     pub(crate) free_throws_remaining: u8,
     pub(crate) free_throw_attempt: u8,
     pub(crate) free_throw_shooter: Option<String>,
+    /// 当前罚球程序的判罚事件 ID（罚球事件的因果父指向它，而不是
+    /// 最近一次犯规的因果槽——队列存在时两者会分离）。
+    pub(crate) free_throw_source_foul: Option<u64>,
+    /// 待执行的罚球程序队列（charter §5.3 逐次罚球）：死球期间的新犯规
+    /// 在当前程序完成后按顺序执行，不再覆写进行中的程序。
+    /// 载荷：(被侵犯人, 判罚次数, 判罚事件 ID)。
+    pub(crate) free_throw_queue: std::collections::VecDeque<(String, u8, Option<u64>)>,
+    /// 罚球事件的因果父快照（FIFO，与罚球事件一一对应）：结算时冻结
+    /// 当时程序的判罚事件 ID。直接读当前 source 会在「末罚结算与队列
+    /// 切换同 tick」时把下一程序的判罚错配给本次罚球事件。
+    pub(crate) free_throw_event_parents: std::collections::VecDeque<u64>,
     /// 投篮与比赛统计分解（2P/3P/FT 命中率与出手数、失误、犯规）。
     pub(crate) box_score: MatchBoxScore,
 }
@@ -192,6 +214,9 @@ impl ScoreLedger {
             free_throws_remaining: 0,
             free_throw_attempt: 0,
             free_throw_shooter: None,
+            free_throw_source_foul: None,
+            free_throw_queue: std::collections::VecDeque::new(),
+            free_throw_event_parents: std::collections::VecDeque::new(),
             box_score: MatchBoxScore::default(),
         }
     }
@@ -343,6 +368,15 @@ pub(crate) struct MatchClock {
     pub(crate) inbound_elapsed: f32,
     /// 后场连续持球时间（秒，8 秒违例判据）。
     pub(crate) backcourt_elapsed: f32,
+    /// 进攻方每位场上球员在限制区的连续停留时间（攻方三秒判据，
+    /// charter §6.2：仅前场控制时累加，回合/控球结束清零）。
+    pub(crate) lane_dwell: std::collections::HashMap<String, f32>,
+    /// 进攻方已在前场建立控制（回场违例判据：此后球回后场即违例）。
+    pub(crate) frontcourt_established: bool,
+    /// 前场控制建立后的连续秒数：冲筐类槽位行为（顺下/背切/下沉）
+    /// 的「进-出」曲线时钟。不以子阶段计时器为钟（它随阶段切换重置，
+    /// 会把冲筐曲线卡在峰值上，造成限制区驻留）。
+    pub(crate) frontcourt_seconds: f32,
     /// 节间休息已用时间（秒）。
     pub(crate) period_break_elapsed: f32,
     /// 上一次决策的时刻（用于决策间隔）。
@@ -366,6 +400,9 @@ impl MatchClock {
             sub_phase_timer: 0.0,
             inbound_elapsed: 0.0,
             backcourt_elapsed: 0.0,
+            lane_dwell: std::collections::HashMap::new(),
+            frontcourt_established: false,
+            frontcourt_seconds: f32::from(0u8),
             period_break_elapsed: 0.0,
             last_decision_time,
         }
@@ -389,6 +426,16 @@ pub(crate) struct PossessionContext {
     pub(crate) current_possession_contest: Option<f32>,
     /// Offensive player responsible for the active possession's last action.
     pub(crate) current_possession_turnover_player: Option<String>,
+    pub(crate) transition_start_time: Option<f32>,
+    pub(crate) last_transition_event_parent: Option<u64>,
+    pub(crate) last_offensive_rebound_time: Option<f32>,
+    pub(crate) last_offensive_rebound_player: Option<String>,
+    pub(crate) last_offensive_rebound_event_parent: Option<u64>,
+    pub(crate) last_cut_reception_time: Option<f32>,
+    pub(crate) last_cut_reception_player: Option<String>,
+    pub(crate) last_cut_reception_event_parent: Option<u64>,
+    pub(crate) last_pass_received_time: Option<f32>,
+    pub(crate) pass_receiver_decision_player: Option<String>,
     /// 最近一次回合总结的 index（`complete_possession` 兜底发射的判据，
     /// M8 验收"回合零遗漏"：任何结束路径都必须有总结）。
     pub(crate) last_possession_summary_index: Option<u64>,
@@ -403,6 +450,16 @@ impl PossessionContext {
             current_possession_shooter: None,
             current_possession_contest: None,
             current_possession_turnover_player: None,
+            transition_start_time: None,
+            last_transition_event_parent: None,
+            last_offensive_rebound_time: None,
+            last_offensive_rebound_player: None,
+            last_offensive_rebound_event_parent: None,
+            last_cut_reception_time: None,
+            last_cut_reception_player: None,
+            last_cut_reception_event_parent: None,
+            last_pass_received_time: None,
+            pass_receiver_decision_player: None,
             last_possession_summary_index: None,
         }
     }
@@ -415,6 +472,48 @@ impl PossessionContext {
         self.current_possession_shooter = None;
         self.current_possession_contest = None;
         self.current_possession_turnover_player = None;
+        self.transition_start_time = None;
+        self.last_transition_event_parent = None;
+        self.last_offensive_rebound_time = None;
+        self.last_offensive_rebound_player = None;
+        self.last_offensive_rebound_event_parent = None;
+        self.last_cut_reception_time = None;
+        self.last_cut_reception_player = None;
+        self.last_cut_reception_event_parent = None;
+        self.last_pass_received_time = None;
+        self.pass_receiver_decision_player = None;
+    }
+
+    pub(crate) fn take_pass_receiver_decision(&mut self, current_t: f32, carrier_id: &str) -> bool {
+        let received_at = self.last_pass_received_time;
+        let received_by_carrier = received_at.is_some_and(|received_at| current_t >= received_at)
+            && self.pass_receiver_decision_player.as_deref() == Some(carrier_id);
+        self.last_pass_received_time = None;
+        self.pass_receiver_decision_player = None;
+        received_by_carrier
+    }
+
+    pub(crate) fn recent_offensive_rebounder(
+        &self,
+        current_t: f32,
+        window_seconds: f32,
+    ) -> Option<&str> {
+        let rebound_time = self.last_offensive_rebound_time?;
+        if current_t < rebound_time || current_t - rebound_time > window_seconds {
+            return None;
+        }
+        self.last_offensive_rebound_event_parent?;
+        self.last_offensive_rebound_player.as_deref()
+    }
+
+    pub(crate) fn transition_context_event(
+        &self,
+        current_t: f32,
+        window_seconds: f32,
+    ) -> Option<u64> {
+        self.transition_start_time
+            .filter(|start| current_t >= *start && current_t - *start <= window_seconds)
+            .and(self.last_transition_event_parent)
     }
 }
 
@@ -472,6 +571,23 @@ pub(crate) struct BallRuntime {
 }
 
 impl BallRuntime {
+    pub(crate) fn set_ball_state(&mut self, ball_state: BallTrajectoryKind) {
+        self.ball_state = ball_state;
+    }
+
+    /// 由权威球态派生的当前持球人（仅持球族与发球就绪状态有值）。
+    pub(crate) fn holder_id(&self) -> Option<&str> {
+        match &self.ball_state {
+            BallTrajectoryKind::Held { carrier_id }
+            | BallTrajectoryKind::InboundReady {
+                inbounder_id: carrier_id,
+                ..
+            } => Some(carrier_id),
+            BallTrajectoryKind::Drive { driver_id, .. } => Some(driver_id),
+            _ => None,
+        }
+    }
+
     pub(crate) fn new(ball_pos_3d: (glam::Vec2, f32), ball_state: BallTrajectoryKind) -> Self {
         Self {
             ball_pos_3d,

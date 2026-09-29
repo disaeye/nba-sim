@@ -24,6 +24,31 @@ fn for_each_seed<T: Send>(seeds: &[u64], f: impl Fn(u64) -> T + Send + Sync) -> 
 }
 
 // ============================================================================
+// L0：不变量检查不可绕过
+// ============================================================================
+
+/// R8 验收：`step()` 包装器对每个输出帧都执行不变量检查，包括跳球表现、
+/// 节间休息与死球短路 tick。判据：检查器累计的检查帧数与实际推进的
+/// step 数严格相等——任何绕过 `step()` 的路径都会让两者分叉。
+#[test]
+fn invariant_checker_runs_on_every_step_including_short_circuits() {
+    let mut engine = MatchEngine::new(42);
+    let mut steps = 0u64;
+    // 覆盖跳球表现阶段、若干次球权转换与至少一次节间休息（默认节长
+    // 720s / 0.04s = 18000 tick）。取 22000 tick 保证跨过第一节末。
+    while !engine.is_finished() && steps < 22000 {
+        let _tick = engine.step();
+        steps += 1;
+    }
+    let checked = engine.invariant_checks_run_for_test();
+    assert_eq!(
+        checked, steps,
+        "invariant checker ran {checked} times for {steps} steps; a step path bypassed check_tick"
+    );
+    assert!(steps > 0, "engine must advance at least one step");
+}
+
+// ============================================================================
 // L1：引擎每 tick 自检
 // ============================================================================
 

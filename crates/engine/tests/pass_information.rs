@@ -78,8 +78,13 @@ fn receiver_must_estimate_not_know_the_frozen_landing() {
 fn trace(seed: u64, receiver_sense: f32) -> Vec<i64> {
     let rules = GameRules::default();
     let mut setup = MatchSetup::builtin(rules.clone());
-    for p in setup.away_team.players.iter_mut() {
-        p.attributes.off_ball_sense = receiver_sense;
+    for player in setup
+        .home_team
+        .players
+        .iter_mut()
+        .chain(setup.away_team.players.iter_mut())
+    {
+        player.attributes.off_ball_sense = receiver_sense;
     }
     let mut e = MatchEngine::with_setup(setup, seed);
     e.set_scope("1q").unwrap();
@@ -89,16 +94,24 @@ fn trace(seed: u64, receiver_sense: f32) -> Vec<i64> {
         let t = e.step();
         let frame = &t.frame;
         if frame.event_log.iter().any(|ev| ev.kind == "PASS_RECEIVED") {
-            if let Some(holder) = &frame.ball.holder_id {
-                if let Some(p) = frame.players.iter().find(|p| &p.id == holder) {
-                    let bx = frame.ball.x * rules.court.width_ft;
-                    let by = frame.ball.y * rules.court.height_ft;
-                    let px = p.x * rules.court.width_ft;
-                    let py = p.y * rules.court.height_ft;
-                    let gap = ((bx - px).powi(2) + (by - py).powi(2)).sqrt();
-                    out.push((gap * 1000.0).round() as i64);
-                }
-            }
+            let received_by = frame
+                .event_log
+                .iter()
+                .find(|event| event.kind == "PASS_RECEIVED")
+                .and_then(|event| event.data.as_ref())
+                .and_then(|data| data.get("PassReceived"))
+                .and_then(|payload| payload.get("receiver_id"))
+                .and_then(|id| id.as_str())
+                .expect("PASS_RECEIVED must identify its receiver");
+            let receiver = frame
+                .players
+                .iter()
+                .find(|player| player.id == received_by)
+                .expect("received player must exist in the frame");
+            out.push((receiver.x * 1_000_000.0).round() as i64);
+            out.push((receiver.y * 1_000_000.0).round() as i64);
+            out.push((frame.ball.x * 1_000_000.0).round() as i64);
+            out.push((frame.ball.y * 1_000_000.0).round() as i64);
         }
         ticks += 1;
     }
@@ -107,16 +120,10 @@ fn trace(seed: u64, receiver_sense: f32) -> Vec<i64> {
 
 /// 第二道门：接球人的**落点估计**必须与传球人的意图不同（层 A 生效的证据）。
 ///
-/// ## 与第一版的口径更正
-///
-/// 第一版用「球位置 vs 接球人位置」的到达差判定，期望它非恒定。但在
-/// round-10 的实现里，接球成功时球会被**收到接球人身上**（持球锚点，这是
-/// 物理事实，也满足 `BALL_WITH_HOLDER ≤ leash`），因此该差值恒为 0 ——
-/// 门的判据本身失效了。
-///
-/// 正确的判据是引擎发布的 `PASS_LANDING_CORRECTED` 事实：它记录
-/// 「传球人冻结意图 vs 接球人实际到达」的差异。该差异 > 0 即证明
-/// 接球人**没有**直读传球人的意图，按自己的估计跑位。
+/// 接球事实记录球到达接球人的接触位置；后续球位通过连续 ControlTransfer
+/// 收敛到 Held 投影，因此到达时球人间距用于验证接触半径，不能代替预估误差审计。
+/// `PASS_LANDING_CORRECTED` 记录传球人冻结意图与接球人实际到达之间的差异，
+/// 可用于核验接球人按自身信息估算落点。
 #[test]
 fn receiver_landing_estimate_diverges_from_passer_intent() {
     let seeds: [u64; 4] = [42, 1, 7, 100];
@@ -229,13 +236,13 @@ fn run_pass_with_lane_defender(seed: u64, duration: f32) -> Vec<String> {
     // 高于最高在场球员的摸高（211cm ≈ 7.0 ft）→ 不可及。
     engine.set_ball_state_for_test(BallTrajectoryKind::Pass {
         from_pos: Vec2::new(35.0, 25.0),
+        from_z: 4.0,
         to_pos: Vec2::new(55.0, 25.0),
         target_id: "H_02".to_string(),
         start_time: 1.0,
         duration,
         peak_z: engine.rules().pass_peak_ft,
         inbound: false,
-        receive_success: true,
     });
     engine.set_last_passer_for_test(Some("H_01".to_string()));
     engine.set_game_flow_for_test(nba_domain::GameFlowState::LiveBall);

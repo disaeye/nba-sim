@@ -82,14 +82,6 @@ fn blocked_shot_is_distinct_from_a_miss() {
                 "blocks may only be recorded during the Execution phase \
                  (Preparation belongs to strip attempts, FollowThrough means the ball is gone)"
             );
-            // 封盖前的命中裁定必须随事实一起留档：没有它就无法判断封盖是否改变了结果。
-            assert!(
-                payload
-                    .get("would_have_made")
-                    .and_then(|v| v.as_bool())
-                    .is_some(),
-                "a block must record whether the shot would have gone in"
-            );
         }
     }
     assert!(

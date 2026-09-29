@@ -13,6 +13,7 @@ mod support;
 
 use std::collections::HashMap;
 
+use nba_domain::GameRules;
 use nba_engine::{MatchEngine, StreamMode};
 use rayon::prelude::*;
 
@@ -24,6 +25,7 @@ struct WindowKinds {
     tipped: usize,
     steal: usize,
     loose_secured: usize,
+    out_of_bounds: usize,
     made: usize,
     shot_release: usize,
     /// 该窗口是否跨越了节边界（period 变化）。
@@ -37,7 +39,7 @@ fn classify_mismatch(terminal: &str, w: &WindowKinds) -> Option<String> {
         "TURNOVER_STEAL" => w.steal > 0,
         "TURNOVER_PASS_TIPPED" => w.tipped > 0,
         "TURNOVER_PASS_DROPPED" => w.dropped > 0,
-        "TURNOVER_VIOLATION" => w.violation > 0,
+        "TURNOVER_VIOLATION" => w.violation > 0 || w.out_of_bounds > 0,
         "TURNOVER_LOOSE_BALL" => w.loose_secured > 0,
         _ => true,
     };
@@ -46,8 +48,8 @@ fn classify_mismatch(terminal: &str, w: &WindowKinds) -> Option<String> {
     } else {
         Some(format!(
             "terminal {terminal} but window facts are \
-             {{violation:{}, dropped:{}, tipped:{}, steal:{}, loose:{}}}",
-            w.violation, w.dropped, w.tipped, w.steal, w.loose_secured
+             {{violation:{}, dropped:{}, tipped:{}, steal:{}, loose:{}, out_of_bounds:{}}}",
+            w.violation, w.dropped, w.tipped, w.steal, w.loose_secured, w.out_of_bounds
         ))
     }
 }
@@ -60,6 +62,9 @@ struct SeedAudit {
     mismatches: Vec<(u64, String)>,
     spanning: usize,
     box_failures: Vec<String>,
+    shot_result_failures: Vec<String>,
+    ball_speed_failures: Vec<String>,
+    drive_foul_speed_failures: Vec<String>,
 }
 
 fn shared_seed_audits() -> &'static Vec<SeedAudit> {
@@ -70,6 +75,7 @@ fn shared_seed_audits() -> &'static Vec<SeedAudit> {
             .par_iter()
             .copied()
             .map(|seed| {
+                let rules = GameRules::default();
                 let mut engine = MatchEngine::new(seed);
                 engine.set_scope("1q").expect("1q scope is valid");
 
@@ -91,9 +97,77 @@ fn shared_seed_audits() -> &'static Vec<SeedAudit> {
                 let mut ft_made = 0u32;
                 let mut fouls = 0u32;
                 let mut turnover_terminals = 0u32;
+                let mut shot_result_failures = Vec::new();
+                let mut ball_speed_failures = Vec::new();
+                let mut drive_foul_speed_failures = Vec::new();
+                let mut shot_results = 0u32;
+                let mut shot_arrivals = 0u32;
+                let mut blocked_shots = 0u32;
+                let mut previous_ball: Option<(f32, f32, f32, String, f32)> = None;
+                // 诊断：未得到结果事实的出手身份（event_id / tick / 位置 / 类型）。
+                let mut release_records: Vec<(u64, u64, f32, f32, bool)> = Vec::new();
+                let mut arrival_parents: std::collections::HashSet<u64> =
+                    std::collections::HashSet::new();
+                let mut blocked_parents: std::collections::HashSet<u64> =
+                    std::collections::HashSet::new();
 
                 while !engine.is_finished() && ticks < 300_000 {
                     let tick = engine.step();
+                    let ball_position = engine.ball_pos_3d();
+                    let current_time = engine.current_time();
+                    if let Some((px, py, pz, previous_status, previous_t)) = previous_ball {
+                        let dx = ball_position.0.x - px;
+                        let dy = ball_position.0.y - py;
+                        let dz = ball_position.1 - pz;
+                        let dt = current_time - previous_t;
+                        assert!(
+                            dt.is_finite() && dt > 0.0,
+                            "non-positive frame interval from t={previous_t} to t={current_time}"
+                        );
+                        let speed = (dx * dx + dy * dy + dz * dz).sqrt() / dt;
+                        if speed > rules.ball_max_speed_ftps
+                            + rules.invariant_speed_tolerance_ftps
+                        {
+                            ball_speed_failures.push(format!(
+                                "seed {seed}: frame {} {:?} ball speed {speed:.2} ft/s exceeds {:.2}; status={previous_status}→{}, dt={:.5}, from=({px:.5},{py:.5},{pz:.2}), to=({:.5},{:.5},{:.2})",
+                                tick.frame.event_sequence,
+                                tick.frame.events,
+                                rules.ball_max_speed_ftps
+                                    + rules.invariant_speed_tolerance_ftps,
+                                tick.frame.ball.status,
+                                dt,
+                                ball_position.0.x,
+                                ball_position.0.y,
+                                ball_position.1,
+                            ));
+                        }
+                        if previous_status == "DRIVE"
+                            && tick.frame.ball.status == "DEAD"
+                            && tick.frame.events.iter().any(|event| event == "FOUL")
+                            && speed
+                                > rules.ball_max_speed_ftps
+                                    + rules.invariant_speed_tolerance_ftps
+                        {
+                            drive_foul_speed_failures.push(format!(
+                                "seed {seed}: frame {} {:?} ball speed {speed:.2} ft/s exceeds {:.2}; dt={:.5}, from=({px:.5},{py:.5},{pz:.2}), to=({:.5},{:.5},{:.2})",
+                                tick.frame.event_sequence,
+                                tick.frame.events,
+                                rules.ball_max_speed_ftps
+                                    + rules.invariant_speed_tolerance_ftps,
+                                dt,
+                                ball_position.0.x,
+                                ball_position.0.y,
+                                ball_position.1,
+                            ));
+                        }
+                    }
+                    previous_ball = Some((
+                        ball_position.0.x,
+                        ball_position.0.y,
+                        ball_position.1,
+                        tick.frame.ball.status.clone(),
+                        current_time,
+                    ));
                     let period = tick.frame.period;
                     if prev_period != 0 && period != prev_period {
                         w.crossed_period = true;
@@ -114,6 +188,7 @@ fn shared_seed_audits() -> &'static Vec<SeedAudit> {
                             "STEAL" => w.steal += 1,
                             "LOOSE_BALL_SECURED" => w.loose_secured += 1,
                             "BALL_POKED_LOOSE" => w.loose_secured += 1,
+                            "OUT_OF_BOUNDS" => w.out_of_bounds += 1,
                             "SHOT_RELEASE" => {
                                 w.shot_release += 1;
                                 let is_three = payload()
@@ -121,23 +196,49 @@ fn shared_seed_audits() -> &'static Vec<SeedAudit> {
                                     .and_then(|s| s.get("is_three"))
                                     .and_then(|v| v.as_bool())
                                     .unwrap_or(false);
+                                let pos = payload()
+                                    .and_then(|d| d.get("ShotRelease"))
+                                    .and_then(|s| s.get("pos"))
+                                    .and_then(|v| v.as_array())
+                                    .map(|a| {
+                                        (
+                                            a.first().and_then(|x| x.as_f64()).unwrap_or(0.0)
+                                                as f32,
+                                            a.get(1).and_then(|y| y.as_f64()).unwrap_or(0.0)
+                                                as f32,
+                                        )
+                                    })
+                                    .unwrap_or((0.0, 0.0));
+                                release_records.push((
+                                    ev.event_id,
+                                    tick.frame.event_sequence,
+                                    pos.0,
+                                    pos.1,
+                                    is_three,
+                                ));
                                 if is_three {
                                     shot_rel_3 += 1;
                                 } else {
                                     shot_rel_2 += 1;
                                 }
                             }
-                            // `SCORE` 与 `SHOT_MISS` 都是 `HoopArrival` 载荷，
-                            // 按 `is_made` 区分命中；`SCORE` 同时关闭回合窗口。
+                            // 得分或投失事实必须与 HoopArrival 结果标记一致。
                             "SCORE" | "SHOT_MISS" => {
+                                shot_results += 1;
                                 if ev.kind == "SCORE" {
                                     w.made += 1;
                                 }
                                 let arrival = payload().and_then(|d| d.get("HoopArrival"));
                                 let is_made = arrival
                                     .and_then(|a| a.get("is_made"))
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
+                                    .and_then(|v| v.as_bool());
+                                if is_made != Some(ev.kind == "SCORE") {
+                                    shot_result_failures.push(format!(
+                                        "seed {seed}: {} outcome contradicts HoopArrival.is_made={is_made:?}",
+                                        ev.kind
+                                    ));
+                                }
+                                let is_made = is_made.unwrap_or(false);
                                 let is_three = arrival
                                     .and_then(|a| a.get("is_three"))
                                     .and_then(|v| v.as_bool())
@@ -159,6 +260,18 @@ fn shared_seed_audits() -> &'static Vec<SeedAudit> {
                                     .unwrap_or(false);
                                 if made {
                                     ft_made += 1;
+                                }
+                            }
+                            "SHOT_TRAJECTORY_ARRIVAL" => {
+                                shot_arrivals += 1;
+                                if let Some(parent) = ev.parent_event_id {
+                                    arrival_parents.insert(parent);
+                                }
+                            }
+                            "BLOCKED_SHOT" => {
+                                blocked_shots += 1;
+                                if let Some(parent) = ev.parent_event_id {
+                                    blocked_parents.insert(parent);
                                 }
                             }
                             "FOUL" | "SHOOTING_FOUL" => fouls += 1,
@@ -189,6 +302,32 @@ fn shared_seed_audits() -> &'static Vec<SeedAudit> {
                     ticks += 1;
                 }
 
+                if shot_results != shot_arrivals {
+                    shot_result_failures.push(format!(
+                        "seed {seed}: {} score/miss facts vs {} trajectory-arrival facts",
+                        shot_results, shot_arrivals
+                    ));
+                }
+                if shot_rel_2 + shot_rel_3 != shot_results + blocked_shots {
+                    shot_result_failures.push(format!(
+                        "seed {seed}: {} shot releases vs {} result facts + {} blocks",
+                        shot_rel_2 + shot_rel_3, shot_results, blocked_shots
+                    ));
+                    let unresolved: Vec<String> = release_records
+                        .iter()
+                        .filter(|(id, ..)| {
+                            !arrival_parents.contains(id) && !blocked_parents.contains(id)
+                        })
+                        .map(|(id, frame, x, y, is_three)| {
+                            format!(
+                                "release id={id} frame={frame} pos=({x:.1},{y:.1}) three={is_three}"
+                            )
+                        })
+                        .collect();
+                    shot_result_failures.push(format!(
+                        "seed {seed}: unresolved releases: {unresolved:?}"
+                    ));
+                }
                 let b = engine.box_score();
                 let mut box_failures = Vec::new();
                 let check = |what: &str, expected: u32, actual: u32,
@@ -253,6 +392,9 @@ fn shared_seed_audits() -> &'static Vec<SeedAudit> {
                     mismatches,
                     spanning,
                     box_failures,
+                    shot_result_failures,
+                    ball_speed_failures,
+                    drive_foul_speed_failures,
                 }
             })
             .collect()
@@ -317,6 +459,42 @@ fn possession_windows_do_not_span_period_boundaries() {
 /// 本测试把 `MatchBoxScore` 的 8 个字段逐个与从事件流独立重建的值对平，
 /// 对**未来新增的终结路径**同样有效。
 /// 模拟来自 shared_seed_audits 共享矩阵（8 种子全矩阵覆盖）。
+#[test]
+fn shot_result_facts_reconcile_with_release_and_arrival_events() {
+    let failures: Vec<String> = shared_seed_audits()
+        .iter()
+        .flat_map(|audit| audit.shot_result_failures.clone())
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "every shot release must resolve to one consistent score/miss or block fact: {failures:?}"
+    );
+}
+
+#[test]
+fn all_adjacent_frames_respect_ball_speed_envelope() {
+    let violations: Vec<String> = shared_seed_audits()
+        .iter()
+        .flat_map(|audit| audit.ball_speed_failures.clone())
+        .collect();
+    assert!(
+        violations.is_empty(),
+        "every adjacent production frame must remain within the configured ball-speed envelope: {violations:?}"
+    );
+}
+
+#[test]
+fn drive_foul_transition_keeps_the_ball_at_the_observed_drive_position() {
+    let failures: Vec<String> = shared_seed_audits()
+        .iter()
+        .flat_map(|audit| audit.drive_foul_speed_failures.clone())
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "a drive-ending foul must not reposition the ball beyond one tick of the speed envelope: {failures:?}"
+    );
+}
+
 #[test]
 fn box_score_fields_reconcile_with_event_stream() {
     let failures: Vec<String> = shared_seed_audits()
@@ -512,9 +690,13 @@ fn event_ids_and_semantic_causal_links_hold() {
                 let parent_kind = kind_of.get(&pid).map(String::as_str).unwrap_or("");
                 linked += 1;
                 match kind {
-                    "SCORE" | "SHOT_MISS" | "REBOUND" => assert_eq!(
+                    "SHOT_TRAJECTORY_ARRIVAL" => assert_eq!(
                         parent_kind, "SHOT_RELEASE",
-                        "{kind} must chain to SHOT_RELEASE, got {parent_kind}"
+                        "SHOT_TRAJECTORY_ARRIVAL must chain to SHOT_RELEASE, got {parent_kind}"
+                    ),
+                    "SHOT_CONTACT" | "SCORE" | "SHOT_MISS" | "REBOUND" => assert_eq!(
+                        parent_kind, "SHOT_TRAJECTORY_ARRIVAL",
+                        "{kind} must chain to SHOT_TRAJECTORY_ARRIVAL, got {parent_kind}"
                     ),
                     "PASS_RECEIVED" | "PASS_TIPPED" | "PASS_DROPPED" | "STEAL" => assert_eq!(
                         parent_kind, "PASS",

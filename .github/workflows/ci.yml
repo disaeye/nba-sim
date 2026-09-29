@@ -97,6 +97,9 @@ jobs:
           - name: engine-state-groups
             script: scripts/check_engine_state_groups.py
             self_test: true
+          - name: ball-state-writes
+            script: scripts/check_ball_state_writes.py
+            self_test: true
           - name: docs
             script: scripts/check_docs.py
             self_test: false

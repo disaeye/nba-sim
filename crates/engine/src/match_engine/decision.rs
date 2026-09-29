@@ -237,6 +237,13 @@ impl MatchEngine {
         let mut decision_output: Option<DecisionOutput> = None;
         match self.clock.sub_phase {
             SubPhase::Initiation => {
+                let offensive_rebounder = self
+                    .possession_ctx
+                    .recent_offensive_rebounder(
+                        current_t,
+                        self.config.rules.decision_interval_seconds,
+                    )
+                    .map(str::to_owned);
                 if self.flow.game_flow == GameFlowState::DeadBall {
                     // 发球阶段使用专用（更短）决策间隔：发球受 5 秒规则约束，
                     // 套用阵地节奏会与之竞速（实测 37% 发球被判五秒违例）。
@@ -261,6 +268,19 @@ impl MatchEngine {
                         decision_output = outcome;
                         self.systems.rng = rng;
                     }
+                } else if self.flow.game_flow == GameFlowState::LiveBall
+                    && matches!(
+                        self.ball.ball_state,
+                        BallTrajectoryKind::Held { .. }
+                            | BallTrajectoryKind::ControlTransfer { .. }
+                    )
+                    && offensive_rebounder.as_deref() == Some(self.carrier_id().as_str())
+                {
+                    self.transition_phase(SubPhase::ActionExecution);
+                    self.clock.last_decision_time =
+                        current_t - self.config.rules.decision_interval_seconds;
+                    self.clock.sub_phase_timer = f32::from(0u8);
+                    self.journal.current_event = Some("OFFENSIVE_REBOUND_PUTBACK".to_string());
                 } else {
                     // 第一性原理：后场推进不受「战术发起」延迟约束。
                     //
@@ -292,6 +312,14 @@ impl MatchEngine {
                 }
             }
             SubPhase::ActionExecution => {
+                if matches!(self.ball.ball_state, BallTrajectoryKind::Held { .. })
+                    && self
+                        .possession_ctx
+                        .take_pass_receiver_decision(current_t, &self.carrier_id())
+                {
+                    self.clock.last_decision_time =
+                        current_t - self.config.rules.decision_interval_seconds;
+                }
                 // 挂起的投篮释放（已裁定、球在手、窗口执行段）期间禁止
                 // 新的持球决策：出手者正在执行已冻结的投篮，再决策会
                 // 重复出手或让窗口与球态分叉。

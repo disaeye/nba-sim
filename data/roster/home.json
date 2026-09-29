@@ -45,6 +45,10 @@
         "cut_frequency": 0.5,
         "screen_frequency": 0.5,
         "offensive_rebound_frequency": 0.5,
+        "gamble_steal": 0.74,
+        "block_aggressiveness": 0.34,
+        "help_aggressiveness": 0.52,
+        "physicality": 0.36,
         "risk_tolerance": 0.64,
         "transition_sprint": 0.5
       },
@@ -96,6 +100,10 @@
         "cut_frequency": 0.72,
         "screen_frequency": 0.5,
         "offensive_rebound_frequency": 0.5,
+        "gamble_steal": 0.72,
+        "block_aggressiveness": 0.38,
+        "help_aggressiveness": 0.44,
+        "physicality": 0.36,
         "risk_tolerance": 0.5,
         "transition_sprint": 0.5
       },
@@ -147,8 +155,12 @@
         "cut_frequency": 0.66,
         "screen_frequency": 0.5,
         "offensive_rebound_frequency": 0.5,
+        "gamble_steal": 0.34,
+        "block_aggressiveness": 0.52,
+        "help_aggressiveness": 0.36,
+        "physicality": 0.48,
         "risk_tolerance": 0.5,
-        "transition_sprint": 0.7
+        "transition_sprint": 0.64
       },
       "initial_position_ft": [
         35.0,
@@ -198,6 +210,10 @@
         "cut_frequency": 0.5,
         "screen_frequency": 0.82,
         "offensive_rebound_frequency": 0.78,
+        "gamble_steal": 0.42,
+        "block_aggressiveness": 0.5,
+        "help_aggressiveness": 0.6,
+        "physicality": 0.46,
         "risk_tolerance": 0.5,
         "transition_sprint": 0.5
       },
@@ -249,6 +265,10 @@
         "cut_frequency": 0.5,
         "screen_frequency": 0.82,
         "offensive_rebound_frequency": 0.78,
+        "gamble_steal": 0.36,
+        "block_aggressiveness": 0.46,
+        "help_aggressiveness": 0.54,
+        "physicality": 0.68,
         "risk_tolerance": 0.5,
         "transition_sprint": 0.5
       },
@@ -300,6 +320,10 @@
         "cut_frequency": 0.5,
         "screen_frequency": 0.5,
         "offensive_rebound_frequency": 0.5,
+        "gamble_steal": 0.66,
+        "block_aggressiveness": 0.44,
+        "help_aggressiveness": 0.4,
+        "physicality": 0.42,
         "risk_tolerance": 0.5,
         "transition_sprint": 0.5
       },
@@ -351,8 +375,12 @@
         "cut_frequency": 0.84,
         "screen_frequency": 0.5,
         "offensive_rebound_frequency": 0.5,
+        "gamble_steal": 0.52,
+        "block_aggressiveness": 0.6,
+        "help_aggressiveness": 0.74,
+        "physicality": 0.52,
         "risk_tolerance": 0.5,
-        "transition_sprint": 0.9
+        "transition_sprint": 0.84
       },
       "initial_position_ft": [
         24.800001,
@@ -402,8 +430,12 @@
         "cut_frequency": 0.5,
         "screen_frequency": 0.5,
         "offensive_rebound_frequency": 0.82,
+        "gamble_steal": 0.3,
+        "block_aggressiveness": 0.8,
+        "help_aggressiveness": 0.46,
+        "physicality": 0.7,
         "risk_tolerance": 0.5,
-        "transition_sprint": 0.42
+        "transition_sprint": 0.36
       },
       "initial_position_ft": [
         30.800001,

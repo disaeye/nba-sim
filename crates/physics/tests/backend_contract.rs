@@ -17,7 +17,6 @@ fn player(id: &str, team: &str, pos: Vec2) -> PlayerPhysicsState {
         target_speed_ftps: 0.0,
         max_speed_ftps: 22.0,
         max_accel_ftps2: 35.0,
-        has_ball: false,
         on_court: true,
         action: "Idle".to_string(),
         slot: "PG".to_string(),
@@ -137,6 +136,46 @@ fn inbound_transfer_duration_uses_inbound_speed_policy() {
 }
 
 #[test]
+fn pass_samples_stay_within_configured_speed_envelope() {
+    let rules = GameRules::default();
+    for distance in [8.0, 25.0, 50.0, 75.0, 90.0, 95.0] {
+        let from = Vec2::new(3.0, 25.0);
+        let to = from + Vec2::new(distance * 0.8, distance * 0.6);
+        let duration = rules.pass_duration(distance, false);
+        let state = nba_physics::BallTrajectoryKind::Pass {
+            from_pos: from,
+            from_z: 4.0,
+            to_pos: to,
+            target_id: "H_02".to_string(),
+            start_time: 0.0,
+            duration,
+            peak_z: rules.pass_peak_ft + distance * rules.pass_peak_distance_factor,
+            inbound: false,
+        };
+        let players = std::collections::HashMap::new();
+        let mut previous =
+            nba_physics::BallisticsEngine::sample_ball_position(&state, 0.0, &players, &rules);
+        let samples = (duration / rules.tick_seconds).ceil() as usize;
+        let mut max_speed: f32 = 0.0;
+        for index in 1..=samples {
+            let time = index as f32 * rules.tick_seconds;
+            let current =
+                nba_physics::BallisticsEngine::sample_ball_position(&state, time, &players, &rules);
+            let speed = ((current.0 - previous.0).length_squared()
+                + (current.1 - previous.1).powi(2))
+            .sqrt()
+                / rules.tick_seconds;
+            max_speed = max_speed.max(speed);
+            previous = current;
+        }
+        assert!(
+            max_speed <= rules.ball_max_speed_ftps + rules.invariant_speed_tolerance_ftps,
+            "pass distance {distance:.1} ft had speed {max_speed:.2} ft/s at duration {duration:.3}s"
+        );
+    }
+}
+
+#[test]
 fn shot_samples_stay_within_configured_speed_envelope() {
     let rules = GameRules::default();
     let from = Vec2::new(15.4, 25.0);
@@ -148,14 +187,13 @@ fn shot_samples_stay_within_configured_speed_envelope() {
         shooter_id: "H_01".to_string(),
         from_pos: from,
         hoop_pos: hoop,
+        aim_pos: hoop,
         start_time: 0.0,
         duration,
-        is_made: true,
         is_three: true,
         peak_z,
-        // 本测试只关心弹道采样，不涉及犯规事实。
-        fouled: false,
-        fouler_id: None,
+        make_probability: 0.5,
+        contest_intensity: 0.0,
     };
     let players = std::collections::HashMap::new();
     let mut previous =
@@ -177,6 +215,111 @@ fn shot_samples_stay_within_configured_speed_envelope() {
         "shot speed {max_speed} exceeded {}",
         rules.ball_max_speed_ftps
     );
+}
+
+#[test]
+fn free_throw_setup_samples_the_full_three_dimensional_position_and_velocity() {
+    let rules = GameRules::default();
+    let from_pos = Vec2::new(20.0, 25.0);
+    let to_pos = Vec2::new(75.0, 25.0);
+    let from_z = 3.0;
+    let to_z = rules.ball_holder_height_ft;
+    let distance = (to_pos - from_pos).length().hypot(to_z - from_z);
+    let speed_budget = rules.ball_max_speed_ftps - rules.invariant_speed_tolerance_ftps;
+    let duration = (distance / speed_budget).max(rules.tick_seconds);
+    let state = nba_physics::BallTrajectoryKind::FreeThrowSetup {
+        shooter_id: "H_01".to_string(),
+        from_pos,
+        from_z,
+        to_pos,
+        to_z,
+        start_time: 2.0,
+        duration,
+        forced_result: None,
+        is_final: false,
+    };
+    let players = std::collections::HashMap::new();
+    let start = nba_physics::BallisticsEngine::sample_ball_position(&state, 2.0, &players, &rules);
+    let end = nba_physics::BallisticsEngine::sample_ball_position(
+        &state,
+        2.0 + duration,
+        &players,
+        &rules,
+    );
+    assert_eq!(start, (from_pos, from_z));
+    assert_eq!(end, (to_pos, to_z));
+
+    let velocity = nba_physics::BallisticsEngine::sample_ball_velocity(
+        &state,
+        2.0 + duration * 0.5,
+        &players,
+        &rules,
+    );
+    let speed = velocity.length();
+    assert!(
+        speed <= speed_budget + 1e-4,
+        "setup speed {speed:.2} ft/s exceeds budget {speed_budget:.2}"
+    );
+    assert_eq!(
+        nba_physics::BallisticsEngine::sample_ball_velocity(
+            &state,
+            2.0 + duration,
+            &players,
+            &rules,
+        ),
+        glam::Vec3::ZERO
+    );
+}
+
+#[test]
+fn free_throw_samples_share_position_and_velocity_within_speed_envelope() {
+    let rules = GameRules::default();
+    let from = Vec2::new(73.75, 25.0);
+    let hoop = Vec2::new(88.75, 25.0);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(19);
+    let aim = nba_physics::BallisticsEngine::sample_free_throw_aim(
+        from, hoop, 0.65, None, &mut rng, &rules,
+    );
+    let peak_z = (rules.shot_peak_base_ft
+        + (hoop - from).length() * rules.shot_peak_distance_factor)
+        .min(rules.ball_z_max_ft);
+    let duration =
+        nba_physics::BallisticsEngine::shot_duration((aim - from).length(), peak_z, &rules);
+    let state = nba_physics::BallTrajectoryKind::FreeThrow {
+        shooter_id: "H_01".to_string(),
+        from_pos: from,
+        hoop_pos: hoop,
+        aim_pos: aim,
+        start_time: 0.0,
+        duration,
+        peak_z,
+        is_final: true,
+    };
+    let players = std::collections::HashMap::new();
+    let samples = (duration / rules.tick_seconds).ceil() as usize;
+    let mut previous =
+        nba_physics::BallisticsEngine::sample_ball_position(&state, 0.0, &players, &rules);
+    for index in 1..=samples {
+        let time = (index as f32 * rules.tick_seconds).min(duration);
+        let current =
+            nba_physics::BallisticsEngine::sample_ball_position(&state, time, &players, &rules);
+        let elapsed = time - ((index - 1) as f32 * rules.tick_seconds).min(duration);
+        let speed = ((current.0 - previous.0).length_squared() + (current.1 - previous.1).powi(2))
+            .sqrt()
+            / elapsed.max(f32::EPSILON);
+        let velocity =
+            nba_physics::BallisticsEngine::sample_ball_velocity(&state, time, &players, &rules);
+        assert!(
+            speed <= rules.ball_max_speed_ftps + rules.invariant_speed_tolerance_ftps,
+            "free-throw speed {speed:.2} ft/s exceeds envelope at t={time:.3}"
+        );
+        assert!(
+            velocity.length() <= rules.ball_max_speed_ftps + rules.invariant_speed_tolerance_ftps,
+            "free-throw velocity {:.2} ft/s exceeds envelope at t={time:.3}",
+            velocity.length()
+        );
+        previous = current;
+    }
 }
 
 #[test]

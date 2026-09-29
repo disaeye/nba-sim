@@ -46,6 +46,7 @@ fn solve_low_man(
         rules,
         1.0,
         false,
+        0.5,
     )
 }
 

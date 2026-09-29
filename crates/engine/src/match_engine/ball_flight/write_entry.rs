@@ -2,8 +2,7 @@
 //!
 //! 本模块是 `ball_state` 的**唯一写通道**（`architecture.md` §3.2/§3.3）：
 //! 经领域层纯函数转换表校验，非法边被拒绝并记入强制项。它同时维护物理层的
-//! 派生态（`has_ball` / `is_receiving_pass` / `is_driving_to_rim` /
-//! `out_of_bounds_placement`），这些标志必须与权威球态同一步更新，
+//! 接球、攻框和发球界外许可派生态，这些标志必须与权威球态同一步更新，
 //! 否则物理会按上一 tick 的旧标志执行。
 //!
 //! 与 `resolve.rs` 的分工：这里**写**球态，那里**裁决**球态在飞行中的接球点
@@ -17,11 +16,9 @@ use super::super::projection::is_inbound_role_action;
 use crate::match_engine::MatchEngine;
 
 impl MatchEngine {
-    /// 球弹道状态的唯一写入口（BallState Consolidation 的第一步）。
+    /// 球弹道状态的唯一写入口。
     ///
-    /// 所有 `ball_state` 变更都必须经过此方法，保证：
-    /// - 归属派生（physics 层的 `has_ball`）随状态同步，不出现"两人持球"；
-    /// - 未来可在此插入状态转换合法性校验与领域事件，无需改各调用点。
+    /// 所有 `ball_state` 变更都必须经过此方法，并由领域层转换表校验。
     ///
     /// `current_t` 用于同步持有/受控状态的持球人参考；非持有状态传当前时间即可。
     /// 标记/清除本 tick 的接球人（round-10）。
@@ -42,6 +39,14 @@ impl MatchEngine {
     pub(crate) fn transition_ball_state(&mut self, next: BallTrajectoryKind) {
         // M2：经领域层纯函数转换表校验，非法边被拒绝并记入强制项
         // （architecture.md §3.2 唯一写入口 + §3.3 转换表穷举）。
+        let pass_receiver_exiting = match (&self.ball.ball_state, &next) {
+            (BallTrajectoryKind::Pass { target_id, .. }, next)
+                if !matches!(next, BallTrajectoryKind::Pass { .. }) =>
+            {
+                Some(target_id.clone())
+            }
+            _ => None,
+        };
         let next_transfer_id = match &next {
             BallTrajectoryKind::ControlTransfer { carrier_id, .. } => Some(carrier_id.clone()),
             _ => None,
@@ -103,14 +108,26 @@ impl MatchEngine {
                 // 球态进入 `Pass` 时，接球人的身份已确定（`target_id`），
                 // 在唯一写入口立即标记，保证下一 tick 的物理就生效。
                 if let BallTrajectoryKind::Pass { target_id, .. } = &next {
-                    let rid = target_id.clone();
-                    self.mark_receiver(Some(&rid));
+                    let receiver_id = target_id.clone();
+                    self.mark_receiver(Some(&receiver_id));
+                    // 接球人的跑位完全由有限信息估计与运动学决定；球只在到达时
+                    // 检查实际接近度，不向接球人施加对冻结终点的强制跑位。
                     // 新的一次传球出手：清空上一段传球的连续接触状态。
                     self.ball.pass_contact_states.clear();
                 }
-                self.ball.ball_state = next;
-                self.sync_ball_holder();
-
+                self.ball.set_ball_state(next);
+                if let Some(receiver_id) = &pass_receiver_exiting {
+                    if !matches!(
+                        self.ball.ball_state,
+                        BallTrajectoryKind::ControlTransfer { .. }
+                    ) {
+                        self.mark_receiver(None);
+                        self.systems
+                            .physics
+                            .set_player_locked(receiver_id, false, None);
+                    }
+                }
+                self.sync_ball_state_derivations();
                 // During the frozen control-transfer flight the receiving body
                 // must not move away from the endpoint. Otherwise the state
                 // would end with a Held label at a stale ball coordinate.
@@ -142,23 +159,8 @@ impl MatchEngine {
         }
     }
 
-    /// 将 physics 层的逐球员 `has_ball` 与 `ball_state` 的归属保持一致。
-    /// Held / Drive / ControlTransfer 视为"有明确持球人"，其余状态清空持球标志。
-    pub(crate) fn sync_ball_holder(&mut self) {
-        let holder: Option<&str> = match &self.ball.ball_state {
-            BallTrajectoryKind::Held { carrier_id }
-            | BallTrajectoryKind::InboundReady {
-                inbounder_id: carrier_id,
-                ..
-            }
-            | BallTrajectoryKind::Drive {
-                driver_id: carrier_id,
-                ..
-            } => Some(carrier_id.as_str()),
-            _ => None,
-        };
-        self.systems.physics.set_ball_holder(holder);
-
+    /// 同步由球态派生的发球界外许可与球员动作标记。
+    pub(crate) fn sync_ball_state_derivations(&mut self) {
         // F1.3：player.out_of_bounds_placement 是派生态：只有“当前权威球态
         // 处于发球程序”（InboundTransfer/InboundReady）时才允许界外豁免。
         // 一旦球进入其他状态（传球飞行、被断、死球等），发球员必须恢复

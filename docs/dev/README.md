@@ -25,7 +25,7 @@
 - **blocked**：有明确依赖或失败证据；
 - **unknown**：尚未运行或证据不足。
 
-“有实现”不等于“已验证”，“某个 seed 通过”不等于“全矩阵通过”，“历史周期通过”不等于“当前工作区通过”。状态表必须把范围写出来。
+“有实现”不等于“已验证”，“某个 seed 通过”不等于“全矩阵通过”，“历史周期通过”不等于“当前工作区通过”。状态表必须把范围写出来。2026-09-27 的当前复核见 [`status.md`](status.md) 与 [`current/implementation.md`](current/implementation.md)：弹框松球篮板修复、投篮来源结构化事实与接球决策时序已验证，seed 1 来源与构成审计 `rim_attempt_composition` 与全量 16 种子 `stats_baseline` 全场矩阵已全部通过，R2 篮下出手分布闭合。
 
 ### 1.2 计划不是历史
 
@@ -44,7 +44,9 @@ docs/dev/
 ├── gap.md
 ├── roadmap.md
 ├── current/
-│   └── plan.md
+│   ├── plan.md
+│   ├── implementation.md
+│   └── spec_gap.md
 ├── evidence/
 │   ├── problem.md
 │   └── impact_assessment.md
@@ -57,7 +59,7 @@ docs/dev/
 | 层级 | 唯一职责 | 完成后的动作 |
 | --- | --- | --- |
 | `status.md` | 当前快照和开放门 | 持续更新，不复制历史正文 |
-| `current/` | 尚未完成的执行任务（当前仅 `plan.md`） | 任务结束即归档到当前周期目录 |
+| `current/` | 尚未完成的执行任务：`plan.md` 是队列，`implementation.md` 是步骤，`spec_gap.md` 是核对结果 | 任务结束即归档到当前周期目录 |
 | `gap.md` | 跨周期差距地图 | 程序整体闭合后归档快照 |
 | `roadmap.md` | 里程碑顺序 | 下一轮路线取代旧路线 |
 | `evidence/` | 原始事实和口径 | 只追加，不用新状态覆盖旧事实 |

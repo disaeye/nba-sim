@@ -10,6 +10,82 @@ pub struct TimedGameEvent {
     pub event: GameEvent,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShotCreationSource {
+    DriveFinish,
+    DrivePullUp,
+    CutReception,
+    OffensiveReboundPutback,
+    TransitionFinish,
+    #[default]
+    SetPlay,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransitionOrigin {
+    DefensiveRebound,
+    Steal,
+    LooseBallRecovery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DefenseResponsibility {
+    PrimaryMatchup,
+    Hedge,
+    FightThrough,
+    GoUnder,
+    SwitchedMatchup,
+    Help,
+    Drop,
+    Rotate,
+    Recover,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionCancellationReason {
+    RevalidationFailed,
+    PreemptedByFoul,
+    PreemptedByViolation,
+    PossessionLost,
+    Superseded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionFailureReason {
+    Blocked,
+    BallStripped,
+    IllegalScreen,
+    Timeout,
+    Contested,
+    Interrupted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FoulKind {
+    Personal,
+    Shooting,
+    Offensive,
+    LooseBall,
+    Double,
+    Technical,
+    Flagrant,
+    TransitionTake,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct FoulPenalty {
+    pub free_throw_count: u8,
+    pub retains_possession: bool,
+    pub is_bonus: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GameEvent {
     Contact {
@@ -30,7 +106,18 @@ pub enum GameEvent {
         clearance_dist: f32,
         flight_time: f32,
     },
-    /// Ball arrives at hoop cylinder
+    /// A released shot physically contacts the rim or backboard.
+    ShotContact {
+        shooter_id: String,
+        surface: String,
+        position: (f32, f32, f32),
+    },
+    /// The shot trajectory reaches the vertical plane through the hoop.
+    ShotTrajectoryArrival {
+        shooter_id: String,
+        ball_position: (f32, f32, f32),
+    },
+    /// The shot reaches the rim plane and settles as a make or miss.
     HoopArrival {
         shooter_id: String,
         shot_origin: (f32, f32),
@@ -58,8 +145,6 @@ pub enum GameEvent {
         contact_height_ft: f32,
         /// 出手被终止时，出手者所处的动作阶段。
         phase: ActionPhase,
-        /// 该次出手是否原本会命中（封盖前的裁定）。
-        would_have_made: bool,
         is_three: bool,
     },
     /// Player crosses boundary line
@@ -74,6 +159,56 @@ pub enum GameEvent {
         action_type: ActionType,
         new_phase: ActionPhase,
     },
+    /// An action window enters the competition
+    ActionStarted {
+        player_id: String,
+        action_type: ActionType,
+        #[serde(default)]
+        target_id: Option<String>,
+        #[serde(default)]
+        target_pos: Option<(f32, f32)>,
+    },
+    /// Action time-window phase changes between Preparation, Execution, and FollowThrough
+    ActionPhaseChanged {
+        player_id: String,
+        action_type: ActionType,
+        old_phase: ActionPhase,
+        new_phase: ActionPhase,
+    },
+    /// Action window finishes its complete duration successfully
+    ActionCompleted {
+        player_id: String,
+        action_type: ActionType,
+    },
+    /// Action window is cancelled prior to completion
+    ActionCancelled {
+        player_id: String,
+        action_type: ActionType,
+        reason: ActionCancellationReason,
+    },
+    /// Action window fails due to an explicit interrupting failure fact
+    ActionFailed {
+        player_id: String,
+        action_type: ActionType,
+        reason: ActionFailureReason,
+    },
+    /// A defender's primary defensive responsibility transitions to a new state
+    DefenseResponsibilityChanged {
+        defender_id: String,
+        old_responsibility: DefenseResponsibility,
+        new_responsibility: DefenseResponsibility,
+        offensive_player_id: String,
+        #[serde(default)]
+        prior_defender_id: Option<String>,
+        #[serde(default)]
+        trigger: Option<String>,
+    },
+    /// A defensive scheme breakdown resulting in open coverage or mismatch
+    DefenseBreakdown {
+        defender_id: String,
+        offensive_player_id: String,
+        kind: String,
+    },
     /// Pass release and arrival are explicit facts, not direct state mutation.
     PassRelease {
         passer_id: String,
@@ -85,6 +220,8 @@ pub enum GameEvent {
         receiver_id: String,
         /// Frozen physical position where the receiver secured the pass.
         position: (f32, f32),
+        #[serde(default)]
+        is_cut_reception: bool,
     },
     /// Pass arrives without being secured by the receiver.
     PassDropped {
@@ -123,8 +260,12 @@ pub enum GameEvent {
     /// A drive reaches its resolution boundary and records the outcome.
     DriveOutcome {
         driver_id: String,
+        /// 路线形成了终结窗口。进球由随后的触筐事实决定。
         successful: bool,
-        finish_made: bool,
+    },
+    TransitionStarted {
+        offense: Possession,
+        origin: TransitionOrigin,
     },
     /// A loose ball was secured after a failed pass or tip.
     LooseBallSecured {
@@ -137,10 +278,18 @@ pub enum GameEvent {
         attempt: u8,
         made: bool,
     },
-    /// Shot release fact; the semantic result is resolved before flight.
+    /// 球离手。载荷是概率输入和分区，不是命中结果。
     ShotRelease {
         shooter_id: String,
         pos: (f32, f32),
+        #[serde(default)]
+        creation_source: ShotCreationSource,
+        #[serde(default)]
+        transition_context: bool,
+        #[serde(default)]
+        transition_event_id: Option<u64>,
+        #[serde(default)]
+        source_event_id: Option<u64>,
         is_three: bool,
         contest_level: f32,
         make_probability: f32,
@@ -158,6 +307,14 @@ pub enum GameEvent {
         fouled_player_id: String,
         fouler_id: String,
         is_shooting: bool,
+        #[serde(default)]
+        foul_kind: Option<FoulKind>,
+        #[serde(default)]
+        personal_foul_count: Option<u8>,
+        #[serde(default)]
+        period_team_foul_count: Option<u8>,
+        #[serde(default)]
+        penalty: Option<FoulPenalty>,
     },
     /// A semantic rule was violated after constraint evaluation.
     RuleViolation {
@@ -215,6 +372,13 @@ pub enum GameEvent {
     JumpBallTriggered {
         player_a_id: String,
         player_b_id: String,
+    },
+    /// 球因规则程序进行离散放置；该位置变化是裁定事实，不属于普通运动。
+    BallPlacementApplied {
+        from: (f32, f32, f32),
+        to: (f32, f32, f32),
+        reason: String,
+        phase: String,
     },
     /// 离散位置重置（gap.md 第四节第三小节）：发球人从界外 placement 到场内合法位置。
     /// 这是显式生命周期事实，不属于普通运动，检查器据此豁免瞬移判定。
@@ -311,6 +475,18 @@ pub struct PossessionSummary {
 }
 
 impl GameEvent {
+    pub fn new_foul(fouled_player_id: &str, fouler_id: &str, is_shooting: bool) -> Self {
+        GameEvent::Foul {
+            fouled_player_id: fouled_player_id.to_string(),
+            fouler_id: fouler_id.to_string(),
+            is_shooting,
+            foul_kind: None,
+            personal_foul_count: None,
+            period_team_foul_count: None,
+            penalty: None,
+        }
+    }
+
     pub fn event_type_str(&self) -> &'static str {
         match self {
             GameEvent::Contact { is_screen, .. } => {
@@ -329,8 +505,17 @@ impl GameEvent {
                 }
             }
             GameEvent::BlockedShot { .. } => "BLOCKED_SHOT",
+            GameEvent::ShotContact { .. } => "SHOT_CONTACT",
+            GameEvent::ShotTrajectoryArrival { .. } => "SHOT_TRAJECTORY_ARRIVAL",
             GameEvent::BoundaryCross { .. } => "OUT_OF_BOUNDS",
             GameEvent::WindowTransition { .. } => "ACTION_WINDOW_SHIFT",
+            GameEvent::ActionStarted { .. } => "ACTION_STARTED",
+            GameEvent::ActionPhaseChanged { .. } => "ACTION_PHASE_CHANGED",
+            GameEvent::ActionCompleted { .. } => "ACTION_COMPLETED",
+            GameEvent::ActionCancelled { .. } => "ACTION_CANCELLED",
+            GameEvent::ActionFailed { .. } => "ACTION_FAILED",
+            GameEvent::DefenseResponsibilityChanged { .. } => "DEFENSE_RESPONSIBILITY_CHANGED",
+            GameEvent::DefenseBreakdown { .. } => "DEFENSE_BREAKDOWN",
             GameEvent::PassRelease { .. } => "PASS",
             GameEvent::PassReceived { .. } => "PASS_RECEIVED",
             GameEvent::PassLandingCorrected { .. } => "PASS_LANDING_CORRECTED",
@@ -339,19 +524,14 @@ impl GameEvent {
             GameEvent::BallPokedLoose { .. } => "BALL_POKED_LOOSE",
             GameEvent::PassIntercepted { .. } => "STEAL",
             GameEvent::DriveInitiated { .. } => "DRIVE_INITIATED",
-            GameEvent::DriveOutcome {
-                successful,
-                finish_made,
-                ..
-            } => {
-                if *finish_made {
-                    "DRIVE_SCORE"
-                } else if *successful {
-                    "DRIVE_MISS"
+            GameEvent::DriveOutcome { successful, .. } => {
+                if *successful {
+                    "DRIVE_REACHED"
                 } else {
                     "DRIVE_STOPPED"
                 }
             }
+            GameEvent::TransitionStarted { .. } => "TRANSITION_STARTED",
             GameEvent::LooseBallSecured { .. } => "LOOSE_BALL_SECURED",
             GameEvent::FreeThrowAttempt { .. } => "FREE_THROW",
             GameEvent::ShotRelease { .. } => "SHOT_RELEASE",
@@ -364,6 +544,7 @@ impl GameEvent {
             GameEvent::PossessionSummary(_) => "POSSESSION_SUMMARY",
             GameEvent::Substitution { .. } => "SUBSTITUTION",
             GameEvent::JumpBallTriggered { .. } => "JUMP_BALL_TRIGGERED",
+            GameEvent::BallPlacementApplied { .. } => "BALL_PLACEMENT_APPLIED",
             GameEvent::PlacementApplied { .. } => "PLACEMENT_APPLIED",
             GameEvent::PlayActivated { .. } => "PLAY_ACTIVATED",
         }

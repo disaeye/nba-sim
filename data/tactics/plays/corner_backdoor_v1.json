@@ -19,7 +19,7 @@
         { "predicate": "corner_occupied", "side": "left" },
         { "predicate": "halfcourt_possession" }
       ],
-      "window_seconds": 4.0,
+      "window_seconds": 2.5,
       "cooldown_seconds": 7.0
     }
   ]

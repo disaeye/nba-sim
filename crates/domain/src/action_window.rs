@@ -17,6 +17,12 @@ pub enum ActionType {
     ScreenSet,
     CloseoutContest,
     ReboundJump,
+    ScreenRoll,
+    ScreenPop,
+    Cut,
+    CutBackdoor,
+    BoxOut,
+    Putback,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DribbleMoveKind {
@@ -162,7 +168,85 @@ impl ActionTimeWindow {
             rules.contest_exec_seconds,
             rules.contest_follow_seconds,
             false,
-            0.0,
+            f32::from(0u8),
+        )
+    }
+
+    pub fn new_screen_roll(player_id: &str, start_time: f32, rules: &GameRules) -> Self {
+        Self::new(
+            player_id,
+            ActionType::ScreenRoll,
+            start_time,
+            rules.screen_prep_seconds,
+            rules.screen_exec_seconds,
+            rules.screen_follow_seconds,
+            false,
+            f32::from(0u8),
+        )
+    }
+
+    pub fn new_screen_pop(player_id: &str, start_time: f32, rules: &GameRules) -> Self {
+        Self::new(
+            player_id,
+            ActionType::ScreenPop,
+            start_time,
+            rules.screen_prep_seconds,
+            rules.screen_exec_seconds,
+            rules.screen_follow_seconds,
+            false,
+            f32::from(0u8),
+        )
+    }
+
+    pub fn new_cut_backdoor(player_id: &str, start_time: f32, rules: &GameRules) -> Self {
+        Self::new(
+            player_id,
+            ActionType::CutBackdoor,
+            start_time,
+            rules.pass_prep_seconds,
+            rules.tactics.drive_min_duration_seconds,
+            rules.pass_follow_seconds,
+            false,
+            f32::from(0u8),
+        )
+    }
+
+    pub fn new_cut(player_id: &str, start_time: f32, rules: &GameRules) -> Self {
+        Self::new(
+            player_id,
+            ActionType::Cut,
+            start_time,
+            rules.pass_prep_seconds,
+            rules.tactics.drive_min_duration_seconds,
+            rules.pass_follow_seconds,
+            false,
+            f32::from(0u8),
+        )
+    }
+
+    pub fn new_box_out(player_id: &str, start_time: f32, rules: &GameRules) -> Self {
+        Self::new(
+            player_id,
+            ActionType::BoxOut,
+            start_time,
+            rules.rebound_prep_seconds,
+            rules.rebound_exec_seconds,
+            rules.rebound_follow_seconds,
+            true,
+            rules.rebound_prep_seconds,
+        )
+    }
+
+    pub fn new_putback(player_id: &str, start_time: f32, rules: &GameRules) -> Self {
+        Self::new(
+            player_id,
+            ActionType::Putback,
+            start_time,
+            rules.layup_prep_seconds,
+            rules.layup_exec_seconds,
+            rules.layup_follow_seconds,
+            true,
+            f32::from(0u8),
         )
     }
     #[allow(clippy::too_many_arguments)]

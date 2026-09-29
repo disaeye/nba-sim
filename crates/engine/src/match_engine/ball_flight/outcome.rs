@@ -4,7 +4,7 @@
 //! 本模块**消费**事实并触发球权转移、犯规与罚球程序。分开是因为消费路径
 //! 需要按优先级短路本 tick（松球出界即结束），而短路的处理权属调度器。
 
-use nba_domain::{GameFlowState, SubPhase};
+use nba_domain::{court::Court, GameFlowState, SubPhase};
 use nba_physics::ballistics::{BallTrajectoryKind, BallisticsEngine};
 
 use super::BallFlightOutcome;
@@ -23,6 +23,10 @@ impl MatchEngine {
     ) -> PhaseOutcome {
         let BallFlightOutcome {
             new_ball_state,
+            new_ball_position,
+            pending_events,
+            final_free_throw_resolution,
+            free_throw_attempts,
             steal_triggered_defender,
             loose_ball_secured_player,
             live_ball_triggered,
@@ -31,6 +35,8 @@ impl MatchEngine {
             drive_pullup_action,
             blocked_shot_event,
         } = outcome;
+        self.journal.pending_events.extend(pending_events);
+        self.journal.pending_events.extend(free_throw_attempts);
         // 封盖事实：先把事件入队，后续平新的球态（松球）照常转移。
         //
         // 与发球次序无关：封盖本身不终结回合（球仍活，双方争夺松球），
@@ -40,23 +46,14 @@ impl MatchEngine {
             if let nba_domain::GameEvent::BlockedShot {
                 blocker_id,
                 shooter_id,
-                is_three,
                 ..
             } = &event
             {
-                // ## 出手数在释放时刻已经发生，因此要在这里记账
-                //
-                // 出手数的自增点在“到达篮筐”分支；封盖把球打向别处，
-                // 那一分支永远不会执行。若不在此补记，被封的出手会同时
-                // 出现在事件流里（`SHOT_RELEASE`）而消失在箱体里，
-                // 使“箱体逐字段与事件流对平”的守卫失败。
-                //
-                // 口径真实：真实 NBA 统计中，被封的出手**计为**一次出手。
-                if *is_three {
-                    self.ledger.box_score.fg3_attempts += 1;
-                } else {
-                    self.ledger.box_score.fg2_attempts += 1;
-                }
+                self.fail_action_window(
+                    shooter_id,
+                    nba_domain::event::ActionFailureReason::Blocked,
+                );
+                // SHOT_RELEASE 是 FGA 的唯一入账点，封盖分支不重复计数。
                 let display = self
                     .systems
                     .physics
@@ -131,6 +128,7 @@ impl MatchEngine {
                 driver_pos,
                 false,
                 Some(nba_domain::action_window::JumperKind::PullUp),
+                nba_domain::ShotCreationSource::DrivePullUp,
                 start_t,
             );
         } else if let Some(def_id) = steal_triggered_defender {
@@ -158,7 +156,12 @@ impl MatchEngine {
             self.start_loose_ball_transition(player_id.clone(), from_pos);
             if !self.flow.simulation_complete {
                 let target_z = self.config.rules.ball_holder_height_ft;
-                let distance = (target_pos - from_pos).length();
+                // 3D 路径长度决定交接时长：地板球拾起时垂直爬升与水平
+                // 位移叠加，只按水平距离计时会让首帧 3D 速度越出包络
+                // （实测 96–125 ft/s）。
+                let distance = (target_pos - from_pos)
+                    .length()
+                    .hypot((target_z - from_z).abs());
                 let speed_budget = (self.config.rules.ball_max_speed_ftps
                     - self.config.rules.invariant_speed_tolerance_ftps)
                     .max(self.config.rules.invariant_speed_tolerance_ftps);
@@ -177,13 +180,32 @@ impl MatchEngine {
                 self.ball.ball_pos_3d = (from_pos, from_z);
             }
         } else if let Some(nbs) = new_ball_state {
+            let is_free_throw = matches!(nbs, BallTrajectoryKind::FreeThrow { .. });
             self.transition_ball_state(nbs);
+            if let Some(position) = new_ball_position {
+                self.ball.ball_pos_3d = position;
+            }
+            if let Some((shooter_id, shooter_is_home, made, final_position)) =
+                final_free_throw_resolution
+            {
+                self.possession_ctx.current_possession_shooter = Some(shooter_id);
+                if made {
+                    self.emit_possession_summary(
+                        nba_domain::PossessionEndCause::Score,
+                        None,
+                        None,
+                        None,
+                    );
+                    let inbound_pos = Court::hoop_pos(shooter_is_home);
+                    self.start_inbound_transition(inbound_pos, final_position);
+                }
+            }
             if live_ball_triggered {
                 self.transition_phase(SubPhase::Initiation);
                 self.set_game_flow(GameFlowState::LiveBall);
                 self.clock.last_decision_time = -self.config.rules.decision_interval_seconds;
             }
-            if !matches!(self.ball.ball_state, BallTrajectoryKind::Held { .. }) {
+            if !is_free_throw && !matches!(self.ball.ball_state, BallTrajectoryKind::Held { .. }) {
                 self.ball.ball_pos_3d = BallisticsEngine::sample_ball_position(
                     &self.ball.ball_state,
                     current_t,

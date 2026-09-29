@@ -95,6 +95,15 @@ pub struct BallSecurityPolicy {
     /// 切球弹出速度占 `本次球速上限` 的比例（保底用，使不同规则档案下
     /// 仍不越过不变量）。
     pub poke_ball_speed_ratio: f32,
+    /// 抢断倾向对**尝试触发**的调制跨度：`尝试速率 ×
+    /// (poke_steal_tendency_floor + gamble_steal × 本值)`。
+    ///
+    /// 倾向是风格不是能力（attributes.md §2.6 项 7）：它只决定防守人
+    /// 多常伸手，不改变伸手后成功率。地板值使最保守的防守人也保留
+    /// 基础抢断。
+    pub poke_steal_tendency_floor: f32,
+    /// 抢断倾向的调制跨度（见 `poke_steal_tendency_floor`）。
+    pub poke_steal_tendency_span: f32,
 }
 
 /// 封盖裁定策略（`attributes.md` §2.4 的 `block` 与 `vertical` 消费链）。
@@ -123,6 +132,14 @@ pub struct BlockPolicy {
     /// 从入射中来：远投飞行快则扇得远，近投飞行慢则弹得近，与接触
     /// 几何同源。
     pub block_restitution: f32,
+    /// 封盖倾向对**起跳触发**的调制：`概率 × (block_tendency_floor +
+    /// block_aggressiveness × 本值)`（attributes.md §2.6 项 8）。
+    ///
+    /// 倾向是风格：它决定防守人多敢跳，不改变跳到之后的手感（`block`
+    /// 能力仍是主导项）。地板值保证最保守的防守人也仍会封盖。
+    pub block_tendency_floor: f32,
+    /// 封盖倾向的调制跨度（见 `block_tendency_floor`）。
+    pub block_tendency_span: f32,
 }
 
 impl Default for BlockPolicy {
@@ -145,6 +162,8 @@ impl Default for BlockPolicy {
             // × 0.45 ≈ 4–9 ft/s 的松球初速，与真实封盖后球的余速同量级，
             // 远低于球速包络。
             block_restitution: 0.45,
+            block_tendency_floor: 0.6,
+            block_tendency_span: 0.8,
         }
     }
 }
@@ -174,6 +193,8 @@ impl Default for BallSecurityPolicy {
             poke_deflection_spread_rad: 0.9,
             poke_ball_speed_ftps: 14.0,
             poke_ball_speed_ratio: 0.18,
+            poke_steal_tendency_floor: 0.55,
+            poke_steal_tendency_span: 0.9,
         }
     }
 }
@@ -334,18 +355,36 @@ pub struct ContactPolicy {
     pub defender_skill_foul_scale: f32,
     pub legal_position_foul_multiplier: f32,
     pub illegal_position_foul_multiplier: f32,
+    /// 松球争抢语境的犯规乘子：活球松球期间双方代表对冲碰搌频繁，
+    /// 若按常规接触基准裁决会把大量普通争抢吹成犯规（实测修复松球
+    /// 停滞后 FTA 43→54、总分中位 +20）。真实规则里 loose ball foul
+    /// 每场约 1-2 次，争抢中的身体对抗默认合法。
+    pub loose_ball_foul_multiplier: f32,
+    /// 对抗倾向对**位置对抗犯规**的调制：`概率 ×
+    /// (physicality_floor + physicality × 本值)`（attributes.md §2.6 项 10）。
+    ///
+    /// 对抗强度是风格：它决定防守人顶防/挤掩护时下手多重，犯规风险随之
+    /// 上升；对抗本身的压制收益由 `defense_interior`/`strength` 能力承担。
+    /// 只作用于非投篮的位置对抗（投篮犯规由 `illegal_position` 通道处理），
+    /// 避免与封盖/投篮接触的倾向重复计价。
+    pub physicality_floor: f32,
+    /// 对抗倾向的调制跨度（见 `physicality_floor`）。
+    pub physicality_span: f32,
 }
 
 impl Default for ContactPolicy {
     fn default() -> Self {
         Self {
-            foul_rate: 0.12,
-            threshold_speed_ftps: 9.0,
+            foul_rate: 0.80,
+            threshold_speed_ftps: 0.0,
             impact_scale_ftps: 16.0,
             screen_foul_multiplier: 1.0,
             defender_skill_foul_scale: 0.35,
             legal_position_foul_multiplier: 0.15,
             illegal_position_foul_multiplier: 1.0,
+            loose_ball_foul_multiplier: 0.15,
+            physicality_floor: 0.7,
+            physicality_span: 0.6,
         }
     }
 }
@@ -472,15 +511,15 @@ impl Default for BaseRates {
             // Near（5–14 ft 非篮下两分）≈ 0.45、Mid（≥ 14 ft 两分）≈ 0.42、
             // 3P ≈ 0.36。旧口径以 8 ft 分 Rim/Mid 且 4 ft 统计篮下，
             // 同一次出手在不同环节分类不一致；统一四区后基准重新锚定。
-            shot_make_rim: 0.63,
-            shot_make_near: 0.45,
-            shot_make_mid: 0.40,
+            shot_make_rim: 0.32,
+            shot_make_near: 0.29,
+            shot_make_mid: 0.265,
             // 三分基准 0.34→0.36（ADR-017 第三步校准）：身体碰撞与传球
             // 接触进入后，乱战出手增多，三分出手时平均 make_probability
             // 0.308→0.294（实测 8 seed、n=463）；降低干扰灵敏度
             // （contest 0.32→0.28）反而更差（非单调，与 G6a 记录一致），
             // 因此基准上调回带（3P% 中位 31.0，total_p50 161）。
-            shot_make_3pt: 0.36,
+            shot_make_3pt: 0.33,
             ft_make: 0.77,
             foul_on_drive_rate: 0.12,
             // 跳投犯规基准：真实 NBA 每场约 40 次犯规，其中相当部分来自

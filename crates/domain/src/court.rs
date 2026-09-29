@@ -9,6 +9,10 @@ pub const COURT_HEIGHT_FT: f32 = 50.0;
 pub const CORNER_ZONE_DEPTH_FT: f32 = 3.0;
 pub const HOOP_LEFT_FT: Vec2 = Vec2::new(5.25, 25.0);
 pub const HOOP_RIGHT_FT: Vec2 = Vec2::new(88.75, 25.0);
+/// 三秒限制区长度（篮板底线至罚球线，ft，NBA 标准 19）。
+pub const LANE_LENGTH_FROM_BASELINE_FT: f32 = 19.0;
+/// 三秒限制区半宽（ft，NBA 标准宽 16，半宽 8）。
+pub const LANE_HALF_WIDTH_FT: f32 = 8.0;
 
 /// Competition court geometry shared by every subsystem that interprets a
 /// position.  The constants above are compatibility defaults only; runtime
@@ -214,6 +218,23 @@ impl CourtGeometry {
         } else {
             pos.x > midcourt
         }
+    }
+
+    /// 进攻三秒限制区（charter §6.2 攻方三秒的空间边界）。
+    ///
+    /// 限制区 = 篮板底线至罚球线的矩形（NBA 长 19 ft、宽 16 ft），
+    /// 按场地几何比例缩放。与出手分区用的 `region()` 是两套判定：
+    /// 那里是「离筐距离带」启发式，这里是规则条款的字面矩形。
+    pub fn is_in_lane(self, pos: Vec2, attacking_right: bool) -> bool {
+        let baseline_x = if attacking_right {
+            self.width_ft
+        } else {
+            f32::from(0u8)
+        };
+        let lane_length_ft = LANE_LENGTH_FROM_BASELINE_FT * (self.width_ft / COURT_WIDTH_FT);
+        let lane_half_width_ft = LANE_HALF_WIDTH_FT * (self.height_ft / COURT_HEIGHT_FT);
+        (pos.x - baseline_x).abs() <= lane_length_ft
+            && (pos.y - self.hoop_y_ft).abs() <= lane_half_width_ft
     }
 }
 

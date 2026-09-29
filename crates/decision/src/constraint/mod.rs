@@ -93,6 +93,8 @@ pub enum ViolationKind {
     DeadBallAction,
     IllegalAction,
     Contact,
+    ThreeSecondLane,
+    OverAndBack,
 }
 
 impl ViolationKind {
@@ -106,6 +108,8 @@ impl ViolationKind {
             Self::DeadBallAction => "DEAD_BALL_ACTION",
             Self::IllegalAction => "ILLEGAL_ACTION",
             Self::Contact => "CONTACT_VIOLATION",
+            Self::ThreeSecondLane => "THREE_SECOND_LANE",
+            Self::OverAndBack => "OVER_AND_BACK",
         }
     }
 }
@@ -220,6 +224,7 @@ pub struct ConstraintContext<'a> {
     pub phase: PhaseType,
     pub game_flow: GameFlowState,
     pub ball_phase: BallPhase,
+    pub ball_holder_id: Option<&'a str>,
     /// Elapsed time on the active semantic clock (inbound/backcourt).
     pub inbound_elapsed: f32,
     pub backcourt_elapsed: f32,
@@ -229,9 +234,26 @@ pub struct ConstraintContext<'a> {
     /// 本回合内已发生过出手（前场篮板语境的判据，G6a 链 2）：
     /// 持球人抢到前场板后近筐的二次攻框（putback）效用由此开启。
     pub possession_had_shot: bool,
+    /// 最近一次进攻篮板的 rebounder；只有同一球员控制球时获得补篮偏好。
+    pub putback_rebounder_id: Option<&'a str>,
     /// 回合已进行秒数（转换进攻语境的判据，G6a 链 3）：
     /// 防守未落位的早期回合，篮下终结候选的效用由此开启。
     pub possession_elapsed_seconds: f32,
+    /// 进攻方场上球员在限制区的最长连续停留（攻方三秒判据，
+    /// charter §6.2）。时钟层仅在前场控制时累加（phases.rs）。
+    pub lane_dwell_seconds: f32,
+    /// 上述最长停留的球员（违例责任人）。
+    pub lane_dwell_player_id: Option<&'a str>,
+    /// 进攻方已在前场建立控制（回场违例判据）。
+    pub frontcourt_established: bool,
+    /// 最近触球球员（回场违例责任人）。
+    pub last_touch_player_id: Option<&'a str>,
+    /// 传球飞行中球的**目标点**（非传球飞行时为 `None`）。
+    ///
+    /// 回场违例需要它区分两种「球在中线后」：向前场推进的传球在飞行
+    /// 前半段球仍采样在后场（合法），而目标点就在后场的传球才是把球
+    /// 带回（违例）。没有目标点就无法区分这两者。
+    pub pass_target_pos: Option<Vec2>,
 }
 
 impl<'a> ConstraintContext<'a> {
@@ -424,6 +446,40 @@ constraint!(
     }
 );
 constraint!(
+    THREE_SECOND_LANE_CONSTRAINT,
+    "three_second_lane",
+    ConstraintDomain::Semantic,
+    Severity::Hard,
+    14,
+    ConstraintScope::Player,
+    ConstraintTiming::Runtime,
+    &[PhaseType::Transition, PhaseType::SetPlay],
+    |ctx| ctx.is_live_ball(),
+    pass_action,
+    eval_three_second_lane_world,
+    pass_event,
+    |_ctx| EnforcementAction::Violation {
+        kind: ViolationKind::ThreeSecondLane
+    }
+);
+constraint!(
+    OVER_AND_BACK_CONSTRAINT,
+    "over_and_back",
+    ConstraintDomain::Semantic,
+    Severity::Hard,
+    13,
+    ConstraintScope::Ball,
+    ConstraintTiming::Runtime,
+    &[PhaseType::Transition, PhaseType::SetPlay],
+    |ctx| ctx.is_live_ball(),
+    pass_action,
+    eval_over_and_back_world,
+    pass_event,
+    |_ctx| EnforcementAction::Violation {
+        kind: ViolationKind::OverAndBack
+    }
+);
+constraint!(
     GAME_CLOCK_RUNTIME_CONSTRAINT,
     "game_clock_runtime",
     ConstraintDomain::Semantic,
@@ -469,6 +525,21 @@ constraint!(
     |_ctx| EnforcementAction::Violation {
         kind: ViolationKind::OutOfBounds
     }
+);
+constraint!(
+    PASS_BACKCOURT_CONSTRAINT,
+    "pass_backcourt",
+    ConstraintDomain::Semantic,
+    Severity::Hard,
+    18,
+    ConstraintScope::Ball,
+    ConstraintTiming::Pre,
+    &[PhaseType::Transition, PhaseType::SetPlay],
+    |ctx| ctx.is_live_ball(),
+    eval_pass_backcourt_action,
+    pass_world,
+    pass_event,
+    |_ctx| EnforcementAction::BlockAction
 );
 constraint!(
     OUT_OF_BOUNDS_POST_CONSTRAINT,
@@ -703,6 +774,9 @@ impl ConstraintRegistry {
                 &SHOT_CLOCK_CONSTRAINT,
                 &INBOUND_CLOCK_CONSTRAINT,
                 &BACKCOURT_CLOCK_CONSTRAINT,
+                &THREE_SECOND_LANE_CONSTRAINT,
+                &OVER_AND_BACK_CONSTRAINT,
+                &PASS_BACKCOURT_CONSTRAINT,
                 &GAME_CLOCK_RUNTIME_CONSTRAINT,
                 &OUT_OF_BOUNDS_PRE_CONSTRAINT,
                 &OUT_OF_BOUNDS_POST_CONSTRAINT,

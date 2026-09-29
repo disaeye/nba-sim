@@ -97,13 +97,10 @@ fn screen_pop_at_arc_already_has_zero_offset() {
 }
 
 #[test]
-fn spot_up_offset_is_near_zero_nudge() {
+fn spot_up_keeps_the_declared_shooting_location() {
     let ctx = verb_ctx();
     let r = resolve_verb(PlayVerb::SpotUp, &ctx);
-    // 就地微调：偏置量级远小于场上移动尺度，方向朝篮筐。
-    assert!(r.target_offset.length() < 5.0, "定点落位只做近零微调");
-    let to_hoop = (ctx.hoop_pos - ctx.actor_pos).normalize();
-    assert!(r.target_offset.dot(to_hoop) > 0.0);
+    assert_eq!(r.target_offset, Vec2::ZERO);
     assert_eq!(r.window_action, Some(ActionType::JumpShot));
 }
 

@@ -81,7 +81,6 @@ impl MatchEngine {
                     // M9/attributes T2：属性→物理量经 capability 映射层（曲线下限走规则通道）。
                     max_speed_ftps: nba_domain::effective_max_speed(&rules, &player.attributes),
                     max_accel_ftps2: nba_domain::effective_max_accel(&rules, &player.attributes),
-                    has_ball: is_home && player.id == home_initial_handler,
                     on_court: starter_ids.contains(&&player.id),
                     action: if is_home && player.id == home_initial_handler {
                         "Initiate".to_string()

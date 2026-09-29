@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 mod policies;
 
 pub use policies::{
-    CapabilityCurveRules, DecisionRules, DefenseRules, ModulationRules, PotentialFieldRules,
-    RotationRules, ScreenDefenseRules, SemanticRules, TacticalRules,
+    CapabilityCurveRules, DecisionRules, DefenseRules, ModulationRules,
+    OnBallScreenDefenseStrategy, PotentialFieldRules, RotationRules, ScreenDefenseRules,
+    SemanticRules, TacticalRules,
 };
 
 /// Match rules and timing policy shared by the simulation subsystems.
@@ -26,6 +27,9 @@ pub struct GameRules {
     pub inbound_seconds: f32,
     pub inbound_setup_seconds: f32,
     pub backcourt_seconds: f32,
+    /// 攻方三秒时限（charter §6.2）：前场控制时进攻人在限制区连续停留超过
+    /// 该时限判违例。NBA 与 FIBA 同为 3 秒。
+    pub three_second_lane_seconds: f32,
     pub period_break_seconds: f32,
     pub tactical_initiation_seconds: f32,
     pub decision_interval_seconds: f32,
@@ -190,6 +194,7 @@ pub struct GameRules {
     pub rebound_outlet_fallback_distance_ft: f32,
     pub ball_holder_offset_ft: f32,
     pub ball_holder_height_ft: f32,
+    pub max_ball_carrier_turn_rate_rad_per_sec: f32,
     /// 属性响应曲线下限（映射层 capability 的规则参数，attributes.md T2）。
     pub attribute_response_floor: f32,
     /// 能力映射层曲线系数（D27 六个维度，`capability.rs` 读取）。
@@ -292,10 +297,11 @@ impl Default for TacticalRules {
             drive_kickout_pass_dist_ft: 22.0,
             drive_lane_offset_ft: 4.0,
             // 冲框走廊折扣：congestion 是全防守人的走廊投影和（篮下走廊
-            // 通常 2–3），原 1.2 的折扣不足以让篮筐候选胜出 —— 实测 88%
-            // 突破停在 14–18ft，篮下出手仅 1–2%（真实 30%）。提到 3.0
-            // 使终结强者面对一般拥堵仍会攻框。
-            drive_rim_attack_bias: 1.2,
+            // 通常 2–3），折扣按终结能力加权，使终结强者面对一般拥堵
+            // 仍会攻框。基准 1.3 同时守住两条逐种子带：篮下占比下限
+            // 0.25（折扣 1.2 时低攻框名单会击穿）与中距离占比下限
+            // 0.08（折扣 ≥1.4 时中距离出手被攻框吞并）。
+            drive_rim_attack_bias: 1.3,
             drive_finish_extend_ft: 6.0,
             drive_beaten_recovery_seconds: 0.6,
             // 突破停滞线（finish_range）：16ft 时实测 78 次/场的突破停滞在
@@ -330,6 +336,9 @@ impl Default for TacticalRules {
             apf_opponent_repulsion_accel: 10.0,
             transition_defense_threshold_ratio: 0.38,
             transition_sprint_ratio: 0.88,
+            transition_sprint_floor: 0.7,
+            transition_sprint_span: 0.6,
+            transition_sprint_window_seconds: 8.0,
             // 转换进攻篮下终结窗口（秒，G6a 链 3）：回合前段防守未落位，
             // 突破攻框的效用加成只在此窗口内生效，避免把阵地战的攻框
             // 比例一并抬高（此前校准迭代 4 的教训：强抬攻框砸穿 3P% 带）。
@@ -338,6 +347,22 @@ impl Default for TacticalRules {
             transition_finish_bonus: 0.35,
             screen_hold_separation_ft: 6.0,
             screen_roll_separation_ft: 8.0,
+            cut_tendency_floor: 0.75,
+            cut_tendency_span: 0.5,
+            cut_tendency_threshold: 0.3,
+            screen_tendency_floor: 0.75,
+            screen_tendency_span: 0.5,
+            screen_tendency_threshold: 0.3,
+            // 冲筐类槽位行为（掩护顺下/背切/下沉）的「进-出」曲线：
+            // 攻方三秒规则下，进攻人在限制区只做穿越——前场建立后
+            // 依次发起、到达、折返，不在限制区停留。窗口收紧到 ≈2 秒
+            // （含球员追踪滞后 ≈2.5 秒在限制区内），给接球后的决策
+            // 间隔留出三秒余量。
+            rim_cut_start_seconds: 0.5,
+            rim_cut_peak_seconds: 1.5,
+            rim_cut_exit_seconds: 2.4,
+            // 高位掩护顺下的最大顺下深度（占槽位到筐距离的比例）。
+            screen_roll_peak_depth: 0.55,
             backdoor_cut_depth_ratio: 0.85,
             dip_to_rim_depth_ratio: 0.7,
             drop_coverage_depth_ft: 14.0,
@@ -359,9 +384,10 @@ impl Default for GameRules {
             inbound_seconds: 5.0,
             inbound_setup_seconds: 2.2,
             backcourt_seconds: 8.0,
+            three_second_lane_seconds: 3.0,
             period_break_seconds: 15.0,
             tactical_initiation_seconds: 6.5,
-            decision_interval_seconds: 2.4,
+            decision_interval_seconds: 3.0,
             inbound_decision_interval_seconds: 0.4,
             free_throw_interval_seconds: 2.2,
             ball_max_speed_ftps: 85.0,
@@ -469,6 +495,7 @@ impl Default for GameRules {
             rebound_outlet_fallback_distance_ft: 10.0,
             ball_holder_offset_ft: 0.8,
             ball_holder_height_ft: 4.0,
+            max_ball_carrier_turn_rate_rad_per_sec: f32::from(2u8),
             attribute_response_floor: 0.5,
             capability: CapabilityCurveRules::default(),
             invariant_holder_leash_ft: 3.0,
@@ -539,32 +566,58 @@ impl GameRules {
         }
     }
 
-    /// 传球飞行时长由抛体解出（第一步飞行抛体化）：
-    /// 弧顶 = `pass_peak_ft + dist × pass_peak_distance_factor`，
-    /// 时长 = 升段 + 降段闭式解，再夹在动作窗口区间。
-    /// 速度包络（`ball_max_speed_ftps`）作为校验上限：超限时削峰重解。
+    /// 传球飞行时长由抛体解出，并约束三维速度不超过配置上限。
+    /// 常规传球按弧顶求解时长，并在可行速度区间内调整；发球平快轨迹
+    /// 按起终点三维距离计算最短时长。长距离传球允许超过偏好时长上限，
+    /// 以满足球速上限。
     pub fn pass_duration(&self, distance_ft: f32, inbound: bool) -> f32 {
-        let distance = distance_ft.max(0.0);
-        let g = self.ball_gravity_ftps2;
+        assert!(
+            distance_ft.is_finite() && self.ball_max_speed_ftps.is_finite(),
+            "pass trajectory inputs must be finite"
+        );
+        assert!(
+            !distance_ft.is_sign_negative() && self.ball_max_speed_ftps > f32::EPSILON,
+            "pass distance and speed limit must be valid"
+        );
+        let distance = distance_ft;
+        let max_speed = (self.ball_max_speed_ftps - self.invariant_speed_tolerance_ftps)
+            .max(self.invariant_speed_tolerance_ftps);
+        assert!(
+            max_speed > f32::EPSILON,
+            "pass speed envelope must remain positive"
+        );
+        let minimum_window = self.min_pass_duration_seconds;
+        if inbound {
+            let vertical_distance = self.rim_height_ft - self.chest_height_ft;
+            let path_length = distance.hypot(vertical_distance);
+            return (path_length / max_speed).max(minimum_window);
+        }
+        let gravity = self.ball_gravity_ftps2;
+        let speed_squared = max_speed * max_speed;
+        let discriminant = speed_squared * speed_squared - gravity * gravity * distance * distance;
+        assert!(
+            gravity > f32::EPSILON && !discriminant.is_sign_negative(),
+            "pass distance cannot fit the configured three-dimensional ball-speed envelope"
+        );
+        let root = discriminant.sqrt();
+        let two = f32::from(2u8);
+        let minimum_speed_duration = (two * distance * distance / (speed_squared + root)).sqrt();
+        let maximum_speed_duration = (two * (speed_squared + root) / (gravity * gravity)).sqrt();
+        assert!(
+            minimum_window <= maximum_speed_duration,
+            "minimum pass duration exceeds the ball-speed envelope"
+        );
         let chest = self.chest_height_ft;
-        // 速度包络下限：水平速度 = dist/T 不得超过球速包络。
-        // 这条下限优先于弧顶解（实测回归：95 ft 发球长传在平抛 T=0.45 s 下
-        // 水平速度 213 ft/s，是 BALL_SPEED Hard 的直接来源）；抬高弧顶只能
-        // 减垂直分量，唯一能压水平速度的是延长时长。
-        let t_envelope = distance / self.ball_max_speed_ftps.max(f32::EPSILON);
-        let peak_base = if inbound {
-            // 发球平快：弧顶贴胸口（入场传球不挑高弧），时长由包络下限抬。
-            chest
-        } else {
-            (self.pass_peak_ft + distance * self.pass_peak_distance_factor).max(chest)
-        };
-        let peak = peak_base.max(chest + f32::EPSILON);
-        let t_projectile = ProjectileArc::time_for_peak(chest, chest, peak, g);
-        let t = t_projectile.max(t_envelope);
-        t.clamp(
-            self.min_pass_duration_seconds,
-            self.max_pass_duration_seconds,
-        )
+        let peak = (self.pass_peak_ft + distance * self.pass_peak_distance_factor)
+            .max(chest + f32::EPSILON);
+        let projectile_duration = ProjectileArc::time_for_peak(chest, chest, peak, gravity);
+        let preferred_duration = projectile_duration.clamp(
+            minimum_window,
+            self.max_pass_duration_seconds.max(minimum_window),
+        );
+        preferred_duration
+            .max(minimum_speed_duration)
+            .min(maximum_speed_duration)
     }
 
     pub fn inbound_expired(&self, elapsed: f32) -> bool {
@@ -664,6 +717,7 @@ impl GameRules {
             self.league.three_point_distance_ft,
             self.ball_holder_offset_ft,
             self.ball_holder_height_ft,
+            self.max_ball_carrier_turn_rate_rad_per_sec,
             self.stamina_sprint_speed_ftps,
             self.stamina_recovery_speed_ftps,
             self.stamina_drain_per_second,
@@ -724,6 +778,7 @@ impl GameRules {
             || self.inbound_seconds <= 0.0
             || self.inbound_setup_seconds < 0.0
             || self.backcourt_seconds <= 0.0
+            || self.three_second_lane_seconds <= 0.0
             || self.period_break_seconds < 0.0
             || self.tactical_initiation_seconds < 0.0
             || self.decision_interval_seconds <= 0.0
@@ -930,6 +985,7 @@ impl GameRules {
             || self.ball_bounce_frequency_hz < 0.0
             || self.ball_holder_offset_ft < 0.0
             || self.ball_holder_height_ft < 0.0
+            || self.max_ball_carrier_turn_rate_rad_per_sec <= f32::EPSILON
             || self.jump_shot_prep_seconds < 0.0
             || self.jump_shot_exec_seconds < 0.0
             || self.jump_shot_follow_seconds < 0.0
@@ -960,6 +1016,36 @@ mod tests {
     #[test]
     fn defaults_are_valid() {
         assert!(GameRules::default().validate().is_ok());
+    }
+
+    #[test]
+    fn pass_duration_keeps_long_passes_inside_the_3d_speed_envelope() {
+        let rules = GameRules::default();
+        for distance in [8.0_f32, 25.0, 50.0, 75.0, 90.0, 95.0] {
+            let duration = rules.pass_duration(distance, false);
+            let arc = crate::projectile::ProjectileArc::solve(
+                rules.chest_height_ft,
+                rules.chest_height_ft,
+                duration,
+                rules.ball_gravity_ftps2,
+            );
+            let horizontal_speed = distance / duration;
+            let vertical_speed = arc.vz0.abs();
+            let landing_vertical_speed = (arc.vz0 - rules.ball_gravity_ftps2 * duration).abs();
+            let maximum_speed = horizontal_speed
+                .hypot(vertical_speed)
+                .max(horizontal_speed.hypot(landing_vertical_speed));
+            assert!(
+                maximum_speed <= rules.ball_max_speed_ftps,
+                "pass distance {distance:.1} ft requires {duration:.3}s but reaches {maximum_speed:.2} ft/s"
+            );
+            assert!(duration >= rules.min_pass_duration_seconds);
+        }
+        let capped_rules = GameRules {
+            max_pass_duration_seconds: 1.0,
+            ..rules
+        };
+        assert!(capped_rules.pass_duration(95.0, false) > 1.0);
     }
 
     #[test]

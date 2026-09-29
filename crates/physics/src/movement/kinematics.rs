@@ -44,6 +44,7 @@ pub(super) fn make_motion_proposals(
     players: &mut HashMap<String, PlayerPhysicsState>,
     rules: &GameRules,
     dt: FixedDt,
+    ball_holder_id: Option<&str>,
 ) -> Vec<MotionProposal> {
     let dt = dt.0;
     assert!(
@@ -62,12 +63,12 @@ pub(super) fn make_motion_proposals(
     ids.sort();
 
     // 预收集场上球员物理状态快照，用于人造势能场（APF）多体排斥合力计算
-    let on_court_snapshots: Vec<(String, String, Vec2, bool)> = ids
+    let on_court_snapshots: Vec<(String, String, Vec2)> = ids
         .iter()
         .filter_map(|id| {
             let p = players.get(id)?;
             if p.on_court {
-                Some((p.id.clone(), p.team.clone(), p.pos_ft, p.has_ball))
+                Some((p.id.clone(), p.team.clone(), p.pos_ft))
             } else {
                 None
             }
@@ -207,7 +208,7 @@ pub(super) fn make_motion_proposals(
                 && !player.is_receiving_pass
                 && !player.is_driving_to_rim
             {
-                for (other_id, other_team, other_pos, other_has_ball) in &on_court_snapshots {
+                for (other_id, other_team, other_pos) in &on_court_snapshots {
                     if other_id == &player.id {
                         continue;
                     }
@@ -219,7 +220,7 @@ pub(super) fn make_motion_proposals(
                         let decay = (1.0 - dist / rep_radius).powi(2);
                         let base_accel = if is_teammate {
                             // 队友间：若对方持球，自身必须让出进攻走廊，增加额外斥力
-                            if *other_has_ball {
+                            if ball_holder_id == Some(other_id.as_str()) {
                                 rules.tactics.apf_teammate_repulsion_accel * 1.5
                             } else {
                                 rules.tactics.apf_teammate_repulsion_accel

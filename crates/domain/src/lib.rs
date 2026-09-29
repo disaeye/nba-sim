@@ -32,7 +32,11 @@ pub use data::{
     PlayerData, PlayerPosition, PlayerSlotFitness, PlayerTendencies, SubstitutionEvent,
     SubstitutionReason, TeamData, TeamTraits,
 };
-pub use event::{GameEvent, PossessionEndCause, PossessionSummary, TimedGameEvent};
+pub use event::{
+    ActionCancellationReason, ActionFailureReason, DefenseResponsibility, FoulKind, FoulPenalty,
+    GameEvent, PossessionEndCause, PossessionSummary, ShotCreationSource, TimedGameEvent,
+    TransitionOrigin,
+};
 pub use flow::{transition_ball_state, BallPhase, BallState, GameFlowState, PhaseType};
 pub use league::{LeagueId, LeagueProfile};
 pub use play::{
@@ -46,8 +50,9 @@ pub use resolve::{
     PassPolicy, ReboundPolicy, ResolveConfig, ShotTypeBlockBias, ShotTypeRates,
 };
 pub use rules::{
-    DecisionRules, DefenseRules, GameRules, ModulationRules, PotentialFieldRules, SemanticRules,
-    TacticalRules, UNIMPLEMENTED_RULE_FIELDS,
+    DecisionRules, DefenseRules, GameRules, ModulationRules, OnBallScreenDefenseStrategy,
+    PotentialFieldRules, ScreenDefenseRules, SemanticRules, TacticalRules,
+    UNIMPLEMENTED_RULE_FIELDS,
 };
 pub use tactics::{
     DefensiveSystem, HelpDefenseConfig, MatchupRule, OffensiveSystem, OnBallDefenseConfig,

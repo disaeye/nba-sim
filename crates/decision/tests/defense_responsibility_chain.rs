@@ -27,6 +27,7 @@ fn test_drop_coverage_structure_difference() {
         carrier_pos,
         0,
         2.0,
+        0.0,
         &mut rng,
         &rules,
         Some(&off_positions),
@@ -36,6 +37,10 @@ fn test_drop_coverage_structure_difference() {
     let screener_def = &def[3];
     assert_eq!(screener_def.action, "DROP_CONTAIN");
     assert_eq!(screener_def.slot, "DropAnchor");
+    assert_eq!(
+        screener_def.responsibility,
+        Some(nba_domain::DefenseResponsibility::Drop)
+    );
 }
 
 #[test]
@@ -62,6 +67,7 @@ fn test_switch_assignment_structure_difference() {
         carrier_pos,
         0,
         2.0,
+        0.0,
         &mut rng,
         &rules,
         Some(&off_positions),
@@ -70,6 +76,14 @@ fn test_switch_assignment_structure_difference() {
 
     assert_eq!(def[0].action, "SWITCH_ASSIGNMENT");
     assert_eq!(def[3].action, "SWITCH_ASSIGNMENT");
+    assert_eq!(
+        def[0].responsibility,
+        Some(nba_domain::DefenseResponsibility::SwitchedMatchup)
+    );
+    assert_eq!(
+        def[3].responsibility,
+        Some(nba_domain::DefenseResponsibility::SwitchedMatchup)
+    );
 }
 
 #[test]
@@ -96,6 +110,7 @@ fn test_hedge_and_recover_structure_difference() {
         carrier_pos,
         0,
         2.0,
+        0.0,
         &mut rng,
         &rules,
         Some(&off_positions),
@@ -105,6 +120,10 @@ fn test_hedge_and_recover_structure_difference() {
     let screener_def = &def[3];
     assert_eq!(screener_def.action, "HEDGE_AND_RECOVER");
     assert_eq!(screener_def.slot, "HedgeDefender");
+    assert_eq!(
+        screener_def.responsibility,
+        Some(nba_domain::DefenseResponsibility::Hedge)
+    );
 }
 
 #[test]
@@ -130,6 +149,7 @@ fn test_conservative_baseline_no_screen_mutation() {
         carrier_pos,
         0,
         2.0,
+        0.0,
         &mut rng,
         &rules,
         Some(&off_positions),
@@ -138,6 +158,14 @@ fn test_conservative_baseline_no_screen_mutation() {
 
     assert_eq!(def[0].action, "ON_BALL_CONTEST");
     assert_eq!(def[3].action, "HELP_SIDE_SHELL");
+    assert_eq!(
+        def[0].responsibility,
+        Some(nba_domain::DefenseResponsibility::PrimaryMatchup)
+    );
+    assert_eq!(
+        def[3].responsibility,
+        Some(nba_domain::DefenseResponsibility::Recover)
+    );
 }
 
 #[test]
@@ -163,8 +191,17 @@ fn test_potential_field_continuity_and_threat_monotonicity() {
 
     for &dist in &distances {
         let carrier_pos = hoop - Vec2::new(dist, 0.0);
-        let low_man =
-            solver.solve_equilibrium(carrier_pos, hoop, &off_positions, 1, 0, &rules, 1.0, false);
+        let low_man = solver.solve_equilibrium(
+            carrier_pos,
+            hoop,
+            &off_positions,
+            1,
+            0,
+            &rules,
+            1.0,
+            false,
+            0.5,
+        );
 
         // 威胁占比必须随着突破深入严格单调递增！
         assert!(

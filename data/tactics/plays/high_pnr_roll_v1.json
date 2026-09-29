@@ -24,7 +24,7 @@
         { "predicate": "screen_established" },
         { "predicate": "help_shading_off" }
       ],
-      "window_seconds": 5.0,
+      "window_seconds": 2.5,
       "cooldown_seconds": 10.0
     }
   ]

@@ -191,6 +191,8 @@ impl MatchEngine {
             BallTrajectoryKind::Pass { .. } => "PASS",
             BallTrajectoryKind::Drive { .. } => "DRIVE",
             BallTrajectoryKind::Shot { .. } => "SHOT",
+            BallTrajectoryKind::FreeThrowSetup { .. } => "DEAD",
+            BallTrajectoryKind::FreeThrow { .. } => "FREE_THROW",
             BallTrajectoryKind::RimRebound { .. } => "REBOUND",
             BallTrajectoryKind::LooseBall { .. } => "LOOSE_BALL",
             BallTrajectoryKind::Dead { .. } => "DEAD",

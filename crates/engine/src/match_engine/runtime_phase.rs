@@ -5,7 +5,7 @@
 //! 每个分支在本 tick 需要提前结束时返回 [`PhaseOutcome::ShortCircuit`]，
 //! 由调度器统一发布事件与输出帧——阶段函数自身不做帧输出，也不吞掉事件。
 
-use nba_decision::constraint::EnforcementAction;
+use nba_decision::constraint::{EnforcementAction, ViolationKind};
 use nba_domain::{GameEvent, GameFlowState};
 use nba_physics::ballistics::BallTrajectoryKind;
 
@@ -14,6 +14,8 @@ use super::{MatchEngine, PhaseOutcome};
 
 impl MatchEngine {
     /// 运行时约束求值：违例即终结本 tick 的推进，交由调度器收尾。
+    /// 写入状态组：flow, ball, ledger, possession_ctx, journal, systems
+    /// （违例短路路径里步进物理并发布事件）。
     pub(crate) fn runtime_constraint_phase(&mut self, dt: f32, is_home: bool) -> PhaseOutcome {
         // Runtime constraints observe the current snapshot before execution.
         let ctx = self.constraint_ctx();
@@ -36,6 +38,24 @@ impl MatchEngine {
             self.journal
                 .current_enforcements
                 .push(format!("{}:{}", constraint_id, kind.as_str()));
+            // 违例责任人（TURNOVER_ACTOR_CONSISTENCY 硬门的输入）：
+            // 三秒取限制区停留者，回场取当前触球人；其余违例沿用回合
+            // 归因链（持球人/最后传球人）。
+            if kind == ViolationKind::ThreeSecondLane {
+                if let Some(dweller) = self
+                    .clock
+                    .lane_dwell
+                    .iter()
+                    .max_by(|a, b| a.1.total_cmp(b.1))
+                    .map(|(id, _)| id.clone())
+                {
+                    self.possession_ctx.current_possession_turnover_player = Some(dweller);
+                }
+            } else if kind == ViolationKind::OverAndBack {
+                if let Some(toucher) = self.current_ball_toucher_id().map(str::to_string) {
+                    self.possession_ctx.current_possession_turnover_player = Some(toucher);
+                }
+            }
             self.journal.pending_events.push(GameEvent::RuleViolation {
                 constraint_id: constraint_id.to_string(),
                 reason: kind.as_str().to_string(),
@@ -50,7 +70,9 @@ impl MatchEngine {
             // 确保违例判定帧忠实呈现哨响违例事实，不被随后的发球准备覆写
             self.journal.current_callout = Some(violation_callout);
             self.journal.current_event = Some("VIOLATION".to_string());
-            self.systems.physics.step(nba_domain::FixedDt(dt));
+            self.systems
+                .physics
+                .step_with_ball_holder(nba_domain::FixedDt(dt), self.ball.holder_id());
             self.publish_events();
             return PhaseOutcome::ShortCircuit;
         }
@@ -58,7 +80,22 @@ impl MatchEngine {
     }
 
     /// 罚球结算与节末判定；两者都可能终结本 tick。
+    /// 写入状态组：flow, ball, ledger, possession_ctx, observations, journal, systems。
     pub(crate) fn free_throw_and_period_phase(&mut self, dt: f32) -> PhaseOutcome {
+        // 犯满离场重试：被持球状态阻塞的强制换人在阻塞解除后尽快执行。
+        if let Some(out_id) = self.observations.pending_foulout_sub.clone() {
+            let resolved = self
+                .systems
+                .physics
+                .get_player(&out_id)
+                .map(|p| !p.on_court || p.foul_count < self.config.rules.league.max_personal_fouls)
+                .unwrap_or(true);
+            if resolved {
+                self.observations.pending_foulout_sub = None;
+            } else {
+                self.forced_substitution(&out_id);
+            }
+        }
         let facts = self.systems.physics.drain_facts();
         if !facts.is_empty() {
             self.journal
@@ -67,10 +104,16 @@ impl MatchEngine {
         }
         if self.ledger.free_throws_remaining > 0
             && self.flow.game_flow == GameFlowState::FreeThrow
+            && matches!(self.ball.ball_state, BallTrajectoryKind::Dead { .. })
             && self.clock.sub_phase_timer >= self.config.rules.free_throw_interval_seconds
         {
+            if self.clock.sub_phase == nba_domain::SubPhase::FlightAndRebound {
+                self.transition_phase(nba_domain::SubPhase::DeadBallReset);
+            }
             self.resolve_free_throw();
-            self.systems.physics.step(nba_domain::FixedDt(dt));
+            self.systems
+                .physics
+                .step_with_ball_holder(nba_domain::FixedDt(dt), self.ball.holder_id());
             self.publish_events();
             return PhaseOutcome::ShortCircuit;
         }
@@ -82,11 +125,16 @@ impl MatchEngine {
         {
             let ball_live = matches!(
                 self.ball.ball_state,
-                BallTrajectoryKind::Shot { .. } | BallTrajectoryKind::RimRebound { .. }
+                BallTrajectoryKind::Shot { .. }
+                    | BallTrajectoryKind::FreeThrowSetup { .. }
+                    | BallTrajectoryKind::FreeThrow { .. }
+                    | BallTrajectoryKind::RimRebound { .. }
             );
             if !ball_live {
                 self.finish_period();
-                self.systems.physics.step(nba_domain::FixedDt(dt));
+                self.systems
+                    .physics
+                    .step_with_ball_holder(nba_domain::FixedDt(dt), self.ball.holder_id());
                 self.publish_events();
                 return PhaseOutcome::ShortCircuit;
             }
@@ -99,6 +147,7 @@ impl MatchEngine {
     }
 
     /// 贴身切球（on-ball poke check）：为「带球丢球」提供事实路径。
+    /// 写入状态组：ball, journal。
     ///
     /// 真实 NBA 失误构成中带球丢球占 53.6%（82games 2024-25 IND），
     /// 是占比最大的一类；此前引擎只有传球失败一条失误路径。

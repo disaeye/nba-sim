@@ -13,6 +13,7 @@
 // 沿），守住两通道并存后的总体分布。
 use glam::Vec2;
 use nba_domain::GameRules;
+use nba_physics::ballistics::ShotArrivalOutcome;
 use nba_physics::BallisticsEngine;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -60,6 +61,137 @@ fn sample_dual(
 fn median(v: &mut [f32]) -> f32 {
     v.sort_by(|a, b| a.partial_cmp(b).unwrap());
     v[v.len() / 2]
+}
+
+#[test]
+fn shot_arrival_uses_geometric_clearance_and_rim_contact() {
+    let rules = GameRules::default();
+    let hoop = Vec2::new(88.75, 25.0);
+    let clear_radius = rules.rim_radius_ft - rules.ball_radius_ft;
+
+    assert_eq!(
+        BallisticsEngine::classify_shot_arrival(hoop, hoop, &rules),
+        ShotArrivalOutcome::Made
+    );
+    assert!(matches!(
+        BallisticsEngine::classify_shot_arrival(
+            hoop + Vec2::X * (clear_radius + 0.1),
+            hoop,
+            &rules,
+        ),
+        ShotArrivalOutcome::RimContact { .. }
+    ));
+    assert_eq!(
+        BallisticsEngine::classify_shot_arrival(
+            hoop + Vec2::X * (rules.rim_radius_ft + rules.ball_radius_ft + 0.1),
+            hoop,
+            &rules,
+        ),
+        ShotArrivalOutcome::Miss
+    );
+}
+
+#[test]
+fn forced_free_throw_aim_places_make_and_miss_on_expected_geometries() {
+    let rules = GameRules::default();
+    let hoop = Vec2::new(88.75, 25.0);
+    let origin = Vec2::new(84.0, 25.0);
+    let mut rng = StdRng::seed_from_u64(29);
+    let made_aim =
+        BallisticsEngine::sample_free_throw_aim(origin, hoop, 0.5, Some(true), &mut rng, &rules);
+    let missed_aim =
+        BallisticsEngine::sample_free_throw_aim(origin, hoop, 0.5, Some(false), &mut rng, &rules);
+    assert_eq!(
+        BallisticsEngine::classify_shot_arrival(made_aim, hoop, &rules),
+        ShotArrivalOutcome::Made
+    );
+    assert!(matches!(
+        BallisticsEngine::classify_shot_arrival(missed_aim, hoop, &rules),
+        ShotArrivalOutcome::RimContact { .. }
+    ));
+}
+
+#[test]
+fn shot_make_probability_changes_aim_error_distribution() {
+    let rules = GameRules::default();
+    let hoop = Vec2::new(88.75, 25.0);
+    let origin = Vec2::new(63.75, 25.0);
+    let mut high_rng = StdRng::seed_from_u64(314);
+    let mut low_rng = StdRng::seed_from_u64(314);
+    let high_makes = (0..2000)
+        .filter(|_| {
+            let aim = BallisticsEngine::sample_shot_aim(origin, hoop, 0.8, &mut high_rng, &rules);
+            matches!(
+                BallisticsEngine::classify_shot_arrival(aim, hoop, &rules),
+                ShotArrivalOutcome::Made
+            )
+        })
+        .count();
+    let low_makes = (0..2000)
+        .filter(|_| {
+            let aim = BallisticsEngine::sample_shot_aim(origin, hoop, 0.2, &mut low_rng, &rules);
+            matches!(
+                BallisticsEngine::classify_shot_arrival(aim, hoop, &rules),
+                ShotArrivalOutcome::Made
+            )
+        })
+        .count();
+    assert!(
+        high_makes > low_makes,
+        "aim accuracy must affect geometric makes"
+    );
+    assert!(high_makes > 1500 && low_makes < 1200);
+}
+
+#[test]
+fn shot_position_and_velocity_share_the_same_trajectory() {
+    let rules = GameRules::default();
+    let hoop = Vec2::new(88.75, 25.0);
+    let origin = Vec2::new(63.75, 25.0);
+    let mut rng = StdRng::seed_from_u64(28);
+    let aim = BallisticsEngine::sample_shot_aim(origin, hoop, 0.2, &mut rng, &rules);
+    let peak_z = 15.0;
+    let duration = BallisticsEngine::shot_duration((aim - origin).length(), peak_z, &rules);
+    let state = nba_physics::BallTrajectoryKind::Shot {
+        shooter_id: "H_01".to_string(),
+        from_pos: origin,
+        hoop_pos: hoop,
+        aim_pos: aim,
+        start_time: 0.0,
+        duration,
+        is_three: true,
+        peak_z,
+        make_probability: 0.2,
+        contest_intensity: 0.0,
+    };
+    let players = std::collections::HashMap::new();
+    let (arrival, _) = BallisticsEngine::sample_ball_position(&state, duration, &players, &rules);
+    assert!((arrival - aim).length() < 1.0e-4);
+
+    let time = duration * 0.5;
+    let step = 1.0e-4;
+    let (before_xy, before_z) =
+        BallisticsEngine::sample_ball_position(&state, time - step, &players, &rules);
+    let (after_xy, after_z) =
+        BallisticsEngine::sample_ball_position(&state, time + step, &players, &rules);
+    let velocity = BallisticsEngine::sample_ball_velocity(&state, time, &players, &rules);
+    let measured_xy = (after_xy - before_xy) / (2.0 * step);
+    let measured_z = (after_z - before_z) / (2.0 * step);
+    assert!((measured_xy.x - velocity.x).abs() < 0.05);
+    assert!((measured_xy.y - velocity.y).abs() < 0.05);
+    assert!((measured_z - velocity.z).abs() < 0.05);
+}
+
+#[test]
+fn shot_aim_radius_is_distance_limited_by_speed_envelope() {
+    let rules = GameRules::default();
+    let hoop = Vec2::new(88.75, 25.0);
+    let origin = Vec2::new(63.75, 25.0);
+    let mut rng = StdRng::seed_from_u64(7);
+    let aim = BallisticsEngine::sample_shot_aim(origin, hoop, 0.001, &mut rng, &rules);
+    let duration = BallisticsEngine::shot_duration((aim - origin).length(), 25.0, &rules);
+    let speed = (aim - origin).length() / duration;
+    assert!(speed <= rules.ball_max_speed_ftps + rules.invariant_speed_tolerance_ftps);
 }
 
 #[test]

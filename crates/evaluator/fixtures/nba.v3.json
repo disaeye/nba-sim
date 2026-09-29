@@ -1,0 +1,90 @@
+{
+  "version": "nba.v3",
+  "league": "NBA",
+  "court_width_ft": 94.0,
+  "court_height_ft": 50.0,
+  "pass_corridor_radius_ft": 4.0,
+  "offensive_rebound_shot_clock_seconds": 14.0,
+  "duration_tolerance_seconds": 15.0,
+  "duration_bands": {
+    "score": { "min": 2.0, "max": 26.0 },
+    "rebound": { "min": 2.0, "max": 56.0 },
+    "turnover": { "min": 0.0, "max": 29.0 }
+  },
+  "passes_bands": {
+    "score": { "min": 0.0, "max": 9.0 },
+    "rebound": { "min": 0.0, "max": 10.0 },
+    "turnover": { "min": 0.0, "max": 10.0 }
+  },
+  "turnover_rate_band": { "min": 0.05, "max": 0.35 },
+  "three_attempt_rate_band": { "min": 0.15, "max": 0.65 },
+  "heavy_contest_threshold": 0.75,
+  "phase_dwell_max_seconds": {
+    "Initiation": 6.5,
+    "ActionExecution": 20.0,
+    "ShotAttempt": 2.5,
+    "FlightAndRebound": 3.5,
+    "DeadBallReset": 6.0,
+    "FreeThrow": 15.0,
+    "Rebound": 3.5
+  },
+  "phase_transitions": {
+    "Initiation": ["ActionExecution", "DeadBallReset", "ShotAttempt"],
+    "ActionExecution": ["Initiation", "ShotAttempt", "FlightAndRebound", "DeadBallReset"],
+    "ShotAttempt": ["FlightAndRebound", "Initiation", "DeadBallReset"],
+    "FlightAndRebound": ["Initiation", "ActionExecution", "DeadBallReset", "ShotAttempt"],
+    "DeadBallReset": ["Initiation", "ActionExecution", "FreeThrow", "FlightAndRebound", "ShotAttempt"],
+    "FreeThrow": ["DeadBallReset", "Initiation", "FlightAndRebound"]
+  },
+  "composition_bands": {
+    "provenance": "prior",
+    "note": "先验带宽（原 nba.v2 值），不可用于 R7 联合和情境准则；新准则单独依据 nba.v3 joint_situational_bands。",
+    "three_attempt_rate": { "min": 0.3, "max": 0.45 },
+    "two_attempt_rate": { "min": 0.55, "max": 0.7 },
+    "mid_range_share_of_fga": { "min": 0.08, "max": 0.3 },
+    "near_range_share_of_fga": { "min": 0.08, "max": 0.28 },
+    "rim_share_of_fga": { "min": 0.25, "max": 0.5 },
+    "free_throw_rate": { "min": 0.2, "max": 0.35 },
+    "pace_possessions_per_48min": { "min": 185.0, "max": 220.0 },
+    "three_make_pct": { "min": 0.3, "max": 0.4 },
+    "two_make_pct": { "min": 0.48, "max": 0.58 },
+    "assist_rate": { "min": 0.55, "max": 0.75 }
+  },
+  "joint_situational_bands": {
+    "provenance": {
+      "source": "ismayc/shot-quality-study data/shotdetail_2023.tar.xz; underlying NBA Stats ShotChartDetail archive",
+      "source_version": "ismayc/shot-quality-study commit f4001f944d4aba1ba63e3d70edb3d6135ba576fe, files/data/shotdetail_2023.tar.xz; 2023-24 dataset; archive SHA-256 303e71f967c199568b345cd73a75e595f1f99532cca3e6ce59afb286b63f840d",
+      "season": "2023-24 NBA regular season",
+      "games": 1230,
+      "attempts": 218701,
+      "calculation": "Per-game FG% per zone; ShotChartDetail LOC_X/LOC_Y are tenths of a foot with the origin at the attacking hoop, LOC_X lateral and LOC_Y away from the baseline. Map to the canonical right-attacking CourtGeometry frame as x = 88.75 - LOC_Y/10 and y = 25 + LOC_X/10; the lateral reflection choice does not change these four symmetric shot zones. Coordinate radius reproduces floor(SHOT_DISTANCE) for all 218,701 attempts. Then evaluate NBA three-point geometry (23.75 ft arc, 22 ft corner, 3 ft sideline depth) with the production CourtGeometry::shot_zone boundaries: rim <5 ft, near [5,14) ft, mid >=14 ft inside the arc, three outside. For zone assignment, preserve a three-point label when either court geometry or NBA ShotChartDetail SHOT_TYPE marks it three-point; the classifications disagree on 22 of 218,701 attempts. Report the coordinate-geometry rate independently against the official 3PA/FGA benchmark, and use the union only to avoid assigning ambiguous attempts to the mid zone. Bands are empirical game-level 5th-95th percentiles using linear interpolation (pandas quantile default). Q4 final 300 seconds is compared with Q4 earlier than 300 seconds, both teams pooled per game; all 1,230 games are retained and the statistic is late-window 3PA/FGA minus early-window 3PA/FGA. The 1,230-game mean delta is +0.02132 and median is +0.01711; the reference band is the empirical 5th-95th percentile. Overtime excluded. No simulation outputs used.",
+      "source_url": "https://github.com/ismayc/shot-quality-study/tree/f4001f944d4aba1ba63e3d70edb3d6135ba576fe",
+      "source_sha256": "303e71f967c199568b345cd73a75e595f1f99532cca3e6ce59afb286b63f840d",
+      "external_check": {
+        "source": "NBA.com 2023-24 league-wide three-point rate table",
+        "source_url": "https://www.nba.com/news/2023-24-nba-stats-survey-league-scoring-averages",
+        "metric": "league 3PA/FGA",
+        "value": 0.395
+      }
+    },
+    "shot_zone_make": {
+      "minimum_attempts_per_zone": 1,
+      "source_minimum_attempts_per_zone": 3,
+      "source_season": "2023-24 NBA regular season",
+      "three_point_distance_ft": 23.75,
+      "corner_three_distance_ft": 22.0,
+      "rim": { "min": 0.5285130718954248, "max": 0.7586206896551724 },
+      "near": { "min": 0.278359173126615, "max": 0.5833333333333334 },
+      "mid": { "min": 0.2, "max": 0.625 },
+      "three": { "min": 0.2682169509594883, "max": 0.4671428571428571 }
+    },
+    "q4_late_three_attempt_share": {
+      "late_window_seconds": 300.0,
+      "minimum_attempts_per_window": 9,
+      "source_minimum_late_attempts": 9,
+      "source_minimum_early_attempts": 15,
+      "delta": { "min": -0.24022556390977445, "max": 0.2916666666666667 },
+      "interval_method": "Empirical per-game 5th-95th percentiles by linear interpolation; 1230 regular-season games; both teams pooled; minimum 9 FGA in each window; OT excluded."
+    }
+  }
+}

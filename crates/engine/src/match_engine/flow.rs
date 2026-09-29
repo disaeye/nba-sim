@@ -48,14 +48,65 @@ impl MatchEngine {
             phase: self.phase_type(),
             game_flow: self.flow.game_flow,
             ball_phase: self.ball_phase(),
+            ball_holder_id: self.ball_holder_id(),
+            pass_target_pos: match &self.ball.ball_state {
+                nba_physics::ballistics::BallTrajectoryKind::Pass { to_pos, .. } => Some(*to_pos),
+                _ => None,
+            },
             inbound_elapsed: self.clock.inbound_elapsed,
             backcourt_elapsed: self.clock.backcourt_elapsed,
             rules: &self.config.rules,
             team_traits: &self.config.team_traits,
             possession_had_shot: self.possession_ctx.current_possession_shooter.is_some(),
+            putback_rebounder_id: self.possession_ctx.recent_offensive_rebounder(
+                self.clock.current_time,
+                self.config.rules.decision_interval_seconds,
+            ),
             possession_elapsed_seconds: (self.clock.current_time
                 - self.possession_ctx.current_possession_start_time)
                 .max(f32::from(0u8)),
+            lane_dwell_seconds: self
+                .clock
+                .lane_dwell
+                .values()
+                .copied()
+                .fold(f32::from(0u8), f32::max),
+            lane_dwell_player_id: self
+                .clock
+                .lane_dwell
+                .iter()
+                .max_by(|a, b| a.1.total_cmp(b.1))
+                .map(|(id, _)| id.as_str()),
+            frontcourt_established: self.clock.frontcourt_established,
+            last_touch_player_id: self.current_ball_toucher_id(),
+        }
+    }
+
+    /// 由权威球态派生的当前球权持有人。
+    pub(crate) fn ball_holder_id(&self) -> Option<&str> {
+        self.ball.holder_id()
+    }
+
+    /// 当前控球延续状态下的触球责任人（回场/违例归因用）：
+    /// 持球族取载体，传球飞行取传球人；无控球时 None。
+    pub(crate) fn current_ball_toucher_id(&self) -> Option<&str> {
+        match &self.ball.ball_state {
+            BallTrajectoryKind::Held { carrier_id }
+            | BallTrajectoryKind::Drive {
+                driver_id: carrier_id,
+                ..
+            }
+            | BallTrajectoryKind::InboundReady {
+                inbounder_id: carrier_id,
+                ..
+            }
+            | BallTrajectoryKind::InboundTransfer {
+                inbounder_id: carrier_id,
+                ..
+            }
+            | BallTrajectoryKind::ControlTransfer { carrier_id, .. } => Some(carrier_id.as_str()),
+            BallTrajectoryKind::Pass { .. } => self.ball.last_passer_id.as_deref(),
+            _ => None,
         }
     }
     /// 球的宏观相位（由领域层 BallState 派生，M2：标签不再是独立状态）。
@@ -84,7 +135,9 @@ impl MatchEngine {
             }
             | BallTrajectoryKind::ControlTransfer { carrier_id, .. } => carrier_id.clone(),
             BallTrajectoryKind::Pass { target_id, .. } => target_id.clone(),
-            BallTrajectoryKind::Shot { shooter_id, .. } => shooter_id.clone(),
+            BallTrajectoryKind::Shot { shooter_id, .. }
+            | BallTrajectoryKind::FreeThrowSetup { shooter_id, .. }
+            | BallTrajectoryKind::FreeThrow { shooter_id, .. } => shooter_id.clone(),
             _ => self
                 .current_turnover_player_id()
                 .unwrap_or_else(|| self.new_possession_pg()),
@@ -185,11 +238,9 @@ impl MatchEngine {
             self.ledger.team_fouls_home = 0;
             self.ledger.team_fouls_away = 0;
             self.clock.period_break_elapsed = 0.0;
-            self.set_game_flow(GameFlowState::LiveBall);
+            self.set_game_flow(GameFlowState::DeadBall);
             self.transition_phase(SubPhase::Initiation);
-            // 节间开场必须显式重建球的可取性（architecture §3 球态规范）：
-            // 节末结算可能把在飞的球留成停球状态，若直接以活球流程运行，
-            // 会出现「流程活球、球不可取」的停滞（seed 14 第 4 节开场实测）。
+            // 节间开场必须显式重建球的可取性，并保持死球程序直到发球建立控球。
             self.start_period_ball_program();
             self.clock.last_decision_time = -self.config.rules.decision_interval_seconds;
             self.journal.current_event = Some("PERIOD_START".to_string());
@@ -280,6 +331,10 @@ impl MatchEngine {
         // 重置下一个回合的上下文
         self.possession_ctx
             .begin(self.clock.game_clock, self.clock.current_time);
+        // 回合级规则状态同点重置：前场建立与三秒计数不跨回合存活——
+        // 否则下一回合的防守方（控球谓词换向）会被回溯误判回场。
+        self.clock.frontcourt_established = false;
+        self.clock.lane_dwell.clear();
         self.observations.possession_ticks = 0;
         self.end_active_play(self.flow.possession);
         self.journal.current_callout = None;

@@ -6,6 +6,16 @@
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnBallScreenDefenseStrategy {
+    #[default]
+    StandardContest,
+    FightThrough,
+    GoUnder,
+    Switch,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ScreenDefenseRules {
@@ -13,6 +23,7 @@ pub struct ScreenDefenseRules {
     pub hedge_distance_ft: f32,
     pub switch_trigger_distance_ft: f32,
     pub recover_timeout_seconds: f32,
+    pub strategy: OnBallScreenDefenseStrategy,
 }
 
 impl Default for ScreenDefenseRules {
@@ -22,6 +33,7 @@ impl Default for ScreenDefenseRules {
             hedge_distance_ft: 0.0,
             switch_trigger_distance_ft: 5.0,
             recover_timeout_seconds: 1.2,
+            strategy: OnBallScreenDefenseStrategy::StandardContest,
         }
     }
 }
@@ -334,7 +346,7 @@ impl Default for SemanticRules {
         Self {
             contact_minor_speed_ratio: 0.25,
             contact_positional_speed_ratio: 0.50,
-            contact_foul_candidate_speed_ratio: 0.58,
+            contact_foul_candidate_speed_ratio: 0.64,
             screen_stationary_speed_ratio: 0.20,
             // D3.1 校准（dev 方案 §6.2）：spacing_bonus 三项权重原和为 1.0，
             // 空位时直接叠加近 +1.0 命中率（3P 64% 主因）。下调至和 0.16，
@@ -467,6 +479,15 @@ pub struct PotentialFieldRules {
     /// rim_help_threat_ratio 而涌现 ROTATE_RIM_HELP——NBA 语义里突破
     /// 时弱侧收缩是协防铁律，此前只有 low-man 被激励（实测响应率 64-70%）。
     pub drive_help_threat_gain: f32,
+    /// 协防倾向对护筐引力 `w_threat` 的调制地板：
+    /// `w_threat × (help_tendency_floor + help_aggressiveness × 本值)`。
+    ///
+    /// 协防倾向是风格不是能力（attributes.md §2.6 项 9）：它决定防守人
+    /// 多早离开自己对位去护筐，感知威胁的能力仍由 `decision_iq` 与
+    /// `defense_interior` 决定。地板值保证最保守的防守人仍会协防。
+    pub help_tendency_floor: f32,
+    /// 协防倾向的调制跨度（见 `help_tendency_floor`）。
+    pub help_tendency_span: f32,
     /// 涌现为「X-Out 补位」的真空占比阈值。
     pub x_out_void_ratio: f32,
     /// 判定为「已在护筐位置」的距篮距离（ft）。
@@ -664,6 +685,8 @@ impl Default for PotentialFieldRules {
             void_gain: 4.0,
             rim_help_threat_ratio: 0.40,
             drive_help_threat_gain: 3.0,
+            help_tendency_floor: 0.6,
+            help_tendency_span: 0.8,
             x_out_void_ratio: 0.32,
             rim_help_radius_ft: 12.0,
             weak_side_lateral_ft: 12.0,
@@ -784,6 +807,17 @@ pub struct TacticalRules {
     pub transition_defense_threshold_ratio: f32,
     /// 转换推进期间前场空间拉开速度系数（全速冲刺拉开）
     pub transition_sprint_ratio: f32,
+    /// 转换跑动倾向的调制地板：`速度 × (transition_sprint_floor +
+    /// transition_sprint × transition_sprint_span)`
+    /// （attributes.md §2.6 项 11）。
+    ///
+    /// 团队基准是 `transition_sprint_ratio`；倾向只决定**谁冲得快**，
+    /// 不改变全队的转换强度。地板值保证最慢的球员也参与转换。
+    pub transition_sprint_floor: f32,
+    /// 转换跑动倾向的调制跨度（见 `transition_sprint_floor`）。
+    pub transition_sprint_span: f32,
+    /// 转换跑动倾向的调制窗口（秒）：转换开始后多久内适用。
+    pub transition_sprint_window_seconds: f32,
     /// 转换进攻篮下终结窗口（秒，G6a 链 3）：回合前段防守未落位，
     /// 突破攻框的效用加成只在此窗口内生效，避免把阵地战的攻框比例
     /// 一并抬高（此前校准迭代 4 的教训：强抬攻框砸穿 3P% 带）。
@@ -794,6 +828,36 @@ pub struct TacticalRules {
     pub screen_hold_separation_ft: f32,
     /// 掩护人顺下触发的持球人纵向摆脱距离（ft）：持球人越过掩护人此距离后触发顺下
     pub screen_roll_separation_ft: f32,
+    /// 切入倾向对切入深度的调制地板：`深度 × (cut_tendency_floor +
+    /// cut_frequency × cut_tendency_span)`，上界为槽位自身的峰值深度
+    /// （attributes.md §2.6 项 4）。
+    ///
+    /// 切入是风格：它决定无球人往篮下切多深（高倾向切到限制区边缘接球
+    /// 攻框，低倾向只在三分线外虚晃），接球后的处理仍由持球倾向决定。
+    /// 取 `floor + 0.5 × span = 1.0` 保证档案缺字段的中性个体行为不变。
+    pub cut_tendency_floor: f32,
+    /// 切入倾向的调制跨度（见 `cut_tendency_floor`）。
+    pub cut_tendency_span: f32,
+    /// 切入倾向阈值：低于本值不做切入（保持投射位点），高于阈值切入
+    /// 并按 `cut_tendency_floor/span` 缩放深度。
+    pub cut_tendency_threshold: f32,
+    /// 掩护倾向对顺下深度的调制地板（同 `cut_tendency_floor` 的口径）。
+    pub screen_tendency_floor: f32,
+    /// 掩护倾向的调制跨度。
+    pub screen_tendency_span: f32,
+    /// 掩护倾向阈值：低于本值不顺势下（保持站位）。
+    pub screen_tendency_threshold: f32,
+    /// 冲筐类槽位行为（掩护顺下/背切/下沉）的「进-出」曲线：进攻人在
+    /// 限制区只做穿越——前段冲向目标深度，到达折返点后回到槽位基础位。
+    /// 以下三项以前场控制建立后的秒数计（不随子阶段计时器重置而重置），
+    /// 本值是切入发起时点。
+    pub rim_cut_start_seconds: f32,
+    /// 冲筐类槽位行为到达最大深度的时点（前场秒）。
+    pub rim_cut_peak_seconds: f32,
+    /// 冲筐类槽位行为回到基础位的时点（前场秒）。
+    pub rim_cut_exit_seconds: f32,
+    /// 高位掩护顺下的最大顺下深度（占槽位到筐距离的比例）。
+    pub screen_roll_peak_depth: f32,
     /// 弱侧背切的切入深度比例（G6a 链 1）：翼位到篮筐向量按此比例乘以
     /// 进攻进度，决定无球切入的终点深度。
     pub backdoor_cut_depth_ratio: f32,
@@ -862,6 +926,8 @@ pub struct DecisionRules {
     pub tendency_weight: f32,
     /// Influence of team style traits on utility.
     pub team_style_weight: f32,
+    /// 中距离投篮候选的效用补偿，用于参考区间校准。
+    pub midrange_utility_bonus: f32,
     /// 三分投篮效用折损系数（反映三分球相对近距离攻框的期望难度）。
     pub three_point_utility_multiplier: f32,
     /// 突破攻框基础效用权重。
@@ -875,7 +941,9 @@ pub struct DecisionRules {
     /// 在距篮 8 ft 处 Drive 得 ≈0.65（其距离因子按全场宽度归一），
     /// PostUp 只得 ≈0.20，因此 PostUp 进入候选 15 次、被选中 **0** 次
     /// （seed 42、20000 tick 的决策追踪实测）。
-    /// 低位背身是独立的动作族，需要自己的量级与错位收益项。
+    /// 低位背身是独立的动作族，需要自己的量级与错位收益项：基准 3.6 使
+    /// 背身仅在错位（strength 优势对抗对位身体对抗）时胜出，对位均衡时
+    /// 仍让位给突破与出手。
     pub post_up_base: f32,
     /// 低位背身的**错位收益**权重：以背身者的 `strength` 优势对抗
     /// 对位防守人的 `effective_post_defense_physicality`。
@@ -924,7 +992,7 @@ impl Default for DecisionRules {
     fn default() -> Self {
         Self {
             shoot_base: 0.60,
-            early_shot_penalty: 0.35,
+            early_shot_penalty: 0.42,
             // 出手效用形状（G6a 三次校准迭代的结论，负结果全记录）：
             // 原值 (0.5, 0.7)；激进 (0.25, 1.2) → 3P% 23.5 跳带；
             // 折中 (0.45, 0.8) → 29.8 仍跳带；微调 (0.5, 0.75) → 25.9 更糟。
@@ -941,17 +1009,19 @@ impl Default for DecisionRules {
             // 代价 e 0.180→0.231，需配合拦截率标定（intercept_* 斜率）
             // 联合收敛到 e≈0.145。
             pass_base: 1.15,
-            dwell_base: 0.82,
+            dwell_base: 1.05,
             stamina_sensitivity: 0.5,
             temperature: 0.30,
             pass_lead_time_seconds: 0.65,
             risk_aversion: 0.8,
             tendency_weight: 0.35,
             team_style_weight: 0.25,
-            three_point_utility_multiplier: 0.68,
+            midrange_utility_bonus: 0.15,
+            // 三分球效用折损，控制三分出手倾向。
+            three_point_utility_multiplier: 0.65,
             drive_base: 0.85,
             // 低位背身的量级：与 Drive 同阶，使两者在距篮较近时真正竞争。
-            post_up_base: 2.2,
+            post_up_base: 3.0,
             post_up_mismatch_weight: 0.9,
             play_effect_weight: f32::from(1u8),
             dwell_decay_max: 0.85,
@@ -996,6 +1066,7 @@ impl DecisionRules {
             self.risk_aversion,
             self.tendency_weight,
             self.team_style_weight,
+            self.midrange_utility_bonus,
             self.three_point_utility_multiplier,
             self.drive_base,
             self.post_up_base,
@@ -1076,6 +1147,9 @@ pub struct RotationRules {
     /// 领先方垃圾时间的体力换人阈值放宽量：垃圾时间里领先方更愿意
     /// 让主力休息，枯竭阈值按此值上浮。
     pub garbage_time_fatigue_relief: f32,
+    /// 犯满强制换人时选用替补的体能地板（归一化）：达到地板的替补优先
+    /// 被选用；没有达标替补时退回「未犯满即可」——犯满离场必须立即执行。
+    pub foul_trouble_entry_stamina: f32,
 }
 
 impl Default for RotationRules {
@@ -1087,6 +1161,7 @@ impl Default for RotationRules {
             min_rest_seconds: 240.0,
             max_substitutions_per_window: 2,
             garbage_time_fatigue_relief: 0.15,
+            foul_trouble_entry_stamina: 0.55,
         }
     }
 }

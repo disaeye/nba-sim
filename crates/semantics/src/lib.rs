@@ -218,11 +218,14 @@ impl SemanticEvaluator {
     }
     /// Converts a raw contact into a contextual semantic fact. No foul, score,
     /// turnover, or possession mutation occurs here.
+    #[allow(clippy::too_many_arguments)]
     pub fn contact(
         raw: RawContact,
         physics: &dyn SpatialPhysics,
         _possession: Possession,
         phase: SubPhase,
+        shot_shooter: Option<&str>,
+        ball_holder_id: Option<&str>,
         tick: u64,
         rules: &GameRules,
     ) -> SemanticContact {
@@ -242,12 +245,11 @@ impl SemanticEvaluator {
         let relative_speed = raw.relative_velocity.map(|v| v.length()).unwrap_or(0.0);
         let screen_a = is_screen_action(&action_a);
         let screen_b = is_screen_action(&action_b);
-        let possessor = players
-            .values()
-            .filter(|p| p.has_ball && p.on_court)
-            .map(|p| p.id.as_str())
-            .min()
-            .map(str::to_string);
+        let possessor = if phase == SubPhase::ShotAttempt {
+            shot_shooter.map(str::to_string)
+        } else {
+            ball_holder_id.map(str::to_string)
+        };
         let screen = screen_a || screen_b;
         let possessor_is_a = possessor.as_deref() == Some(raw.entity_a.as_str());
         let possessor_is_b = possessor.as_deref() == Some(raw.entity_b.as_str());
@@ -276,13 +278,21 @@ impl SemanticEvaluator {
             }
         } else if phase == SubPhase::FlightAndRebound {
             ContactKind::ReboundContact
-        } else if phase == SubPhase::ActionExecution && (possessor_is_a || possessor_is_b) {
-            // A stationary defender has established position and the moving
-            // ball handler is the likely initiator of a charge. A defender
-            // still moving through the contact is instead a blocking-foul
-            // candidate. The participant roles, not entity ordering, are
-            // authoritative for the later officiating decision.
-            if defender_established {
+        } else if (phase == SubPhase::ActionExecution || phase == SubPhase::ShotAttempt)
+            && (possessor_is_a || possessor_is_b)
+        {
+            let possessor_player = if possessor_is_a { a } else { b };
+            let is_shooting_act = phase == SubPhase::ShotAttempt
+                || possessor_player.is_some_and(|p| {
+                    p.is_driving_to_rim
+                        || p.action.contains("Layup")
+                        || p.action.contains("Dunk")
+                        || p.action.contains("Floater")
+                        || p.action.contains("Shot")
+                });
+            if is_shooting_act && !defender_established {
+                ContactKind::ShootingContactCandidate
+            } else if defender_established {
                 ContactKind::ChargingCandidate
             } else {
                 ContactKind::BlockingCandidate
@@ -321,16 +331,30 @@ impl SemanticEvaluator {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn event_facts(
         raws: impl IntoIterator<Item = RawContact>,
         physics: &dyn SpatialPhysics,
         possession: Possession,
         phase: SubPhase,
+        shot_shooter: Option<&str>,
+        ball_holder_id: Option<&str>,
         tick: u64,
         rules: &GameRules,
     ) -> Vec<SemanticContact> {
         raws.into_iter()
-            .map(|raw| Self::contact(raw, physics, possession, phase, tick, rules))
+            .map(|raw| {
+                Self::contact(
+                    raw,
+                    physics,
+                    possession,
+                    phase,
+                    shot_shooter,
+                    ball_holder_id,
+                    tick,
+                    rules,
+                )
+            })
             .collect()
     }
 }

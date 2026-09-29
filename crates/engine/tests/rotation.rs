@@ -24,6 +24,8 @@ struct SubStats {
     total: u32,
     stamina: u32,
     low_stamina_entries: u32,
+    /// 犯满强制换人导致的低体能登场次数（替补池已无达标者）。
+    low_stamina_foul_trouble_entries: u32,
 }
 
 fn observe_substitutions(rules: GameRules, seed: u64) -> SubStats {
@@ -33,15 +35,42 @@ fn observe_substitutions(rules: GameRules, seed: u64) -> SubStats {
     let mut stamina = 0u32;
     let mut seen: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
     let mut low_stamina_entries = 0u32;
+    let mut low_stamina_foul_trouble_entries = 0u32;
+    let mut pending_reason: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     while !engine.is_finished() {
         let tick = engine.step();
+        for ev in &tick.frame.event_log {
+            if ev.kind != "SUBSTITUTION" {
+                continue;
+            }
+            if let Some(data) = ev.data.as_ref().and_then(|d| d.get("Substitution")) {
+                if let Some(in_player) = data.get("in_player").and_then(|v| v.as_str()) {
+                    pending_reason.insert(
+                        in_player.to_string(),
+                        data.get("reason")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?")
+                            .to_string(),
+                    );
+                }
+            }
+        }
         // 登场时刻的体力必须高于换下阈值 + 裕量（0.42 + 0.15 = 0.57）。
         // 实测的帧回写值有舍入，放宽到 0.55。
         for p in &tick.frame.players {
             let prev = seen.insert(p.id.clone(), p.on_court);
             if prev != Some(p.on_court) && p.on_court && p.stm_max > 0.0 && p.stm / p.stm_max < 0.55
             {
-                low_stamina_entries += 1;
+                // 体力枯竭换人是**可选**的（教练可以不换），因此它必须
+                // 永远不拿体能已到线的球员上场；犯满强制换人是**硬性**
+                // 的（charter §5.3：达到上限必须退出在场名单），当替补
+                // 池里已无体能达标者时只能把耗尽的球员推上去，因此这条
+                // 路径只做频次上界约束，不做零容忍。
+                match pending_reason.get(&p.id).map(String::as_str) {
+                    Some("FoulTrouble") => low_stamina_foul_trouble_entries += 1,
+                    _ => low_stamina_entries += 1,
+                }
             }
         }
         for ev in &tick.frame.event_log {
@@ -65,6 +94,7 @@ fn observe_substitutions(rules: GameRules, seed: u64) -> SubStats {
         total,
         stamina,
         low_stamina_entries,
+        low_stamina_foul_trouble_entries,
     }
 }
 
@@ -77,6 +107,10 @@ fn fatigue_substitutions_occur_and_entries_are_fit() {
     let total: u32 = stats.iter().map(|s| s.total).sum();
     let stamina: u32 = stats.iter().map(|s| s.stamina).sum();
     let low_entries: u32 = stats.iter().map(|s| s.low_stamina_entries).sum();
+    let low_foul_trouble: u32 = stats
+        .iter()
+        .map(|s| s.low_stamina_foul_trouble_entries)
+        .sum();
     assert!(
         stamina > 0,
         "stamina-driven substitutions never fired across 3 full games; \
@@ -86,6 +120,15 @@ fn fatigue_substitutions_occur_and_entries_are_fit() {
         low_entries, 0,
         "{low_entries} players entered the court with stamina below the entry floor; \
          the bench filter (rest + entry stamina) is not actually applied"
+    );
+    // 犯满强制换人的低体能登场：仅当替补池已无体能达标者时才会发生
+    //（犯满离场是硬性要求，不能挑人）。它必须罕见（替补耗尽是例外），
+    // 频繁出现说明强制换人的替补选取退化成字典序首位。
+    assert!(
+        low_foul_trouble <= 3,
+        "{low_foul_trouble} foul-trouble entries across 3 games came on below-floor stamina; \
+         the forced-substitute path should prefer fit bench players \
+         (see RotationRules::foul_trouble_entry_stamina)"
     );
     // 3 场合计实测 78（每场 24–28）。真实 NBA 每队 30–40 次、双方 60–80。
     // 下界防「换人退化为永不发生」，上界防「横跳回归」

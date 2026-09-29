@@ -126,6 +126,10 @@ impl PlayerTendencies {
             self.cut_frequency,
             self.screen_frequency,
             self.offensive_rebound_frequency,
+            self.gamble_steal,
+            self.block_aggressiveness,
+            self.help_aggressiveness,
+            self.physicality,
             self.risk_tolerance,
             self.transition_sprint,
         ];
@@ -169,6 +173,17 @@ pub struct PlayerTendencies {
     pub cut_frequency: f32,
     pub screen_frequency: f32,
     pub offensive_rebound_frequency: f32,
+    /// 抢断尝试触发倾向（attributes.md §2.6 项 7）：越高越倾向贴身
+    /// 伸手掏球，代价是被过风险上升。
+    pub gamble_steal: f32,
+    /// 封盖起跳倾向（项 8）：越高越愿意起跳干扰，代价是犯规与被假动
+    /// 作晃起。
+    pub block_aggressiveness: f32,
+    /// 协防触发倾向（项 9）：越高越早离开自己对位去协防，代价是外线
+    /// 空位。
+    pub help_aggressiveness: f32,
+    /// 对抗强度倾向（项 10）：越高顶防/挤掩护越用力，代价是犯规风险。
+    pub physicality: f32,
     pub risk_tolerance: f32,
     pub transition_sprint: f32,
 }
@@ -182,6 +197,10 @@ impl Default for PlayerTendencies {
             cut_frequency: 0.5,
             screen_frequency: 0.5,
             offensive_rebound_frequency: 0.5,
+            gamble_steal: 0.5,
+            block_aggressiveness: 0.5,
+            help_aggressiveness: 0.5,
+            physicality: 0.5,
             risk_tolerance: 0.5,
             transition_sprint: 0.5,
         }
