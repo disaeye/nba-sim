@@ -215,7 +215,10 @@
     <aside class="deck-column">
       <div class="deck-card">
         <div class="deck-nav">
-          <button class="deck-tab-button active" type="button" data-deck-tab="timeline">
+          <button class="deck-tab-button active" type="button" data-deck-tab="overview">
+            <span>比赛总览</span>
+          </button>
+          <button class="deck-tab-button" type="button" data-deck-tab="timeline">
             <span>文字直播</span>
             <span id="timelineCount" class="deck-tab-badge">0</span>
           </button>
@@ -238,8 +241,38 @@
 
         <div class="deck-content">
 
+          <!-- Tab: 比赛总览（回合流水线 + 校验与判罚汇总） -->
+          <div id="deck-overview" class="deck-pane active">
+            <div class="overview-section">
+              <div class="overview-section-title">
+                <strong>校验与判罚汇总</strong>
+                <span>引擎不变量 · 犯规 · 失误 · 回合效率</span>
+              </div>
+              <div id="validationSummary" class="validation-summary-box">
+                <span class="muted-label">等待推演开始…</span>
+              </div>
+            </div>
+            <div class="overview-section overview-section-grow">
+              <div class="overview-section-title">
+                <strong>回合流水线</strong>
+                <span>按时间顺序展示每个攻防回合，点击行可跳到回合起点</span>
+              </div>
+              <div class="match-flow-header">
+                <span>回合</span>
+                <span>进攻方</span>
+                <span>发起</span>
+                <span>过程</span>
+                <span>结果</span>
+                <span>比分</span>
+              </div>
+              <div id="matchFlowList" class="match-flow-list">
+                <div class="empty-state">等待推演开始…</div>
+              </div>
+            </div>
+          </div>
+
           <!-- Tab: 文字直播流 -->
-          <div id="deck-timeline" class="deck-pane active">
+          <div id="deck-timeline" class="deck-pane">
             <div class="feed-header-toolbar">
               <div id="eventFilters" class="filter-pill-row"></div>
               <div id="eventReadout" class="event-readout-label">共 0 条事件</div>

@@ -1104,7 +1104,189 @@ body {
   overflow: hidden;
 }
 
-/* Deck Tab 1: 文字直播流 */
+/* ----------------- 比赛总览（回合流水线 + 校验汇总） ----------------- */
+.overview-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.overview-section-grow {
+  flex: 1;
+  min-height: 0;
+}
+.overview-section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.overview-section-title strong {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+.overview-section-title span {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.validation-summary-box {
+  min-height: 0;
+}
+.validation-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.validation-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.validation-card.tone-good {
+  border-left: 3px solid var(--color-home);
+}
+.validation-card.tone-warn {
+  border-left: 3px solid #f59e0b;
+}
+.validation-card.tone-bad {
+  border-left: 3px solid var(--color-urgent);
+}
+.validation-card.tone-neutral {
+  border-left: 3px solid var(--border-medium);
+}
+.validation-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.validation-value {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.validation-hint {
+  font-size: 11px;
+  color: var(--text-subtle);
+}
+
+/* 回合流水线表头与列表 */
+.match-flow-header {
+  display: grid;
+  grid-template-columns: 52px 86px 92px 1fr 88px 52px;
+  gap: 8px;
+  padding: 0 12px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.match-flow-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 2px;
+}
+.match-flow-row {
+  display: grid;
+  grid-template-columns: 52px 86px 92px 1fr 88px 52px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: var(--text-secondary);
+}
+.match-flow-row:hover {
+  border-color: var(--border-medium);
+  background: #f8fafc;
+}
+.match-flow-row.flow-current {
+  border-color: #2563eb;
+  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.15);
+}
+.match-flow-row.flow-past:not(.flow-current) {
+  opacity: 0.72;
+}
+.flow-id {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.flow-offense {
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.flow-offense.home-dot-text::before,
+.flow-offense.away-dot-text::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.flow-offense.home-dot-text::before {
+  background: var(--color-home);
+}
+.flow-offense.away-dot-text::before {
+  background: var(--color-away);
+}
+.flow-origin {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.flow-stat {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.flow-result {
+  font-weight: 700;
+  white-space: nowrap;
+}
+.flow-result.result-scored {
+  color: var(--color-home);
+}
+.flow-result.result-turnover {
+  color: var(--color-urgent);
+}
+.flow-result.result-missed {
+  color: var(--text-muted);
+}
+.flow-score {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  text-align: right;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----------------- 文字直播流 ----------------- */
 .feed-header-toolbar {
   display: flex;
   flex-direction: column;
@@ -2081,17 +2263,35 @@ body {
   color: var(--text-muted);
   text-align: right;
 }
+.stat-name {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
 .stat-indicator {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   margin-left: auto;
 }
-.stat-indicator.pass {
+.stat-indicator.stat-good {
   background: var(--color-home);
 }
-.stat-indicator.warn {
+.stat-indicator.stat-warn {
+  background: #f59e0b;
+}
+.stat-indicator.stat-bad {
   background: var(--color-urgent);
+}
+.stats-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  background: var(--bg-surface-elevated);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 /* ----------------- 规则状态行 ----------------- */
@@ -2912,8 +3112,21 @@ body {
   }
   .feed-timeline-stream,
   .decision-panel-stream,
-  .anomaly-panel-wrap {
+  .anomaly-panel-wrap,
+  .match-flow-list {
     max-height: 380px;
+  }
+  .validation-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* 移动端回合流水线隐藏过程列，保留核心五列 */
+  .match-flow-header,
+  .match-flow-row {
+    grid-template-columns: 44px 74px 74px 74px 44px;
+  }
+  .match-flow-header span:nth-child(4),
+  .match-flow-row .flow-stat {
+    display: none;
   }
   .deck-nav {
     display: flex;

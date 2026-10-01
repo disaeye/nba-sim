@@ -178,15 +178,19 @@
     CONTACT_BUMP: "身体对抗",
     ACTION_WINDOW_SHIFT: "战术推进",
     PHASE_TRANSITION: "战术流转",
-    PASS: "传球配合",
+    BALL_ORIENTATION: "球位调整",
+    PASS: "传球",
     PASS_RECEIVED: "接球就绪",
+    PASS_LANDING_CORRECTED: "传球落点修正",
     PASS_DROPPED: "传球脱手",
-    BALL_POKED_LOOSE: "防守破坏球权",
+    PASS_INTERCEPT_OPPORTUNITY: "断球机会",
+    BALL_POKED_LOOSE: "防守拍掉球权",
     LOOSE_BALL_SECURED: "控制活球",
     SHOT_RELEASE: "投篮出手",
     SCORE: "进球得分",
     DRIVE_SCORE: "突破上篮得分",
     DRIVE_MISS: "突破终结未中",
+    DRIVE_INITIATED: "持球突破",
     DRIVE_STOPPED: "突破被阻截",
     SHOT_MADE: "投篮命中",
     SHOT_MISS: "投篮打铁",
@@ -203,9 +207,72 @@
     FREE_THROW_MISSED: "罚球未中",
     INBOUND_PASS: "发球入界",
     CONTROL_TRANSFER: "球权争夺",
+    PLAY_ACTIVATED: "战术启动",
+    PLACEMENT_APPLIED: "落位调整",
+    LOOSE_BALL: "地板球争夺",
+    ADVANCE: "持球推进",
+    HELD: "持球控制",
+    DRIVE: "突破推进",
+    SHOT: "投篮飞行",
+    DEAD: "死球",
+    INBOUND_TRANSFER: "发球传递",
+    INBOUND_READY: "发球就位",
+    CONTROL_TRANSFER: "球权争夺",
+    TRIPLE_THREAT_JAB: "三威胁试探步",
+    POST_UP: "低位背身要位",
+    TACTICAL_EXECUTION: "战术执行",
+    INBOUND_SETUP: "发球落位",
+    BLOCKED_SHOT: "盖帽封盖",
+    DRIVE_FOUL: "突破道犯规",
+    DRIVE_KICKOUT: "突破分球",
+    DRIVE_PULLUP: "突破急停跳投",
+    OUTLET_PASS: "一传发动",
+    SHOT_MISSED: "投篮未中",
+    GAME_END: "比赛结束",
+    OVERTIME_START: "加时开始",
+    PERIOD_START: "节间开始",
+    PERIOD_END: "节间结束",
+    PASS_TIPPED: "传球被拨",
+    JUMP_BALL_TRIGGERED: "争球判罚",
+    ENFORCEMENT_APPLIED: "规则修正执行",
+    FREE_THROW: "执行罚球",
+    SUBSTITUTION: "换人",
   };
   function getEventNameZh(name) {
     return EVENT_NAME_ZH[name] || name;
+  }
+
+  // 决策 kind 实际为复合串：基名(槽位) 或 基名→球员ID。
+  // 解析为「中文动作 · 球员名」可读形式。
+  function describeDecisionKind(kind) {
+    if (!kind) return "—";
+    const arrowMatch = kind.match(/^([A-Z_]+)\s*→\s*(\S+)$/);
+    if (arrowMatch) {
+      const target = playerNameFromId(arrowMatch[2]);
+      return `${getDecisionKindZh(arrowMatch[1])} → ${target}`;
+    }
+    const parenMatch = kind.match(/^([A-Z_]+)\s*\(([^)]+)\)$/);
+    if (parenMatch) {
+      const target = playerNameFromId(parenMatch[2]);
+      return target ? `${getDecisionKindZh(parenMatch[1])} · ${target}` : `${getDecisionKindZh(parenMatch[1])} · ${parenMatch[2]}`;
+    }
+    return getDecisionKindZh(kind);
+  }
+
+  // 球员内部 ID（H_01/A_03）转「号码 · 中文名」；未知 ID 原样返回
+  function playerNameFromId(id) {
+    if (!id) return "";
+    for (const tick of [state.ticks[state.idx], state.ticks[0]]) {
+      const player = (tick?.players || []).find((p) => p.id === id);
+      if (player) return `#${player.jersey} ${getPlayerNameZh(player.name || id)}`;
+    }
+    const roster = studio?.default_setup;
+    if (roster) {
+      const all = [...(roster.home_team?.players || []), ...(roster.away_team?.players || [])];
+      const found = all.find((p) => p.id === id);
+      if (found) return `#${found.jersey} ${getPlayerNameZh(found.name)}`;
+    }
+    return id;
   }
 
   const ACTION_ZH = {
@@ -460,15 +527,38 @@
 
   const DECISION_KIND_ZH = {
     Shoot: "投篮出手",
-    Pass: "传球配合",
+    Pass: "传球",
     Drive: "持球突破",
     Dwell: "持球观察",
     Reset: "重置战术",
     Cut: "空切跑位",
     Screen: "设立掩护",
+    JAB: "试探步",
+    ADVANCE: "向前推进",
   };
   function getDecisionKindZh(kind) {
     return DECISION_KIND_ZH[kind] || kind || "—";
+  }
+
+  // 引擎约束/规则标识符的中文释义（决策面板的约束列表、阻截列表用）
+  const CONSTRAINT_ZH = {
+    backcourt_clock: "八秒未过半场计时",
+    out_of_bounds: "边线界外限制",
+    out_of_bounds_event: "出界事件后续",
+    action_eligibility: "动作可用性",
+    dead_ball_action: "死球动作限制",
+    contact_fact: "接触事实登记",
+    risky_pass: "高风险传球惩罚",
+    contested_shot: "强干扰出手惩罚",
+    crowded_receiver: "接球人被贴防惩罚",
+    shot_clock_urgency: "进攻时间紧迫惩罚",
+    shot_clock: "二十四秒进攻计时",
+    inbound_clock: "发球五秒计时",
+    inbound_constraint: "发球限制",
+    shooting_ft: "罚球流程",
+  };
+  function getConstraintZh(name) {
+    return CONSTRAINT_ZH[name] || name;
   }
 
   const ANOMALY_KIND_ZH = {
@@ -1543,6 +1633,7 @@
     renderTimeline();
     renderAnomalies();
     renderShotMap();
+    renderMatchOverview();
     updateReadouts(source);
     $("progressInput").max = String(Math.max(0, parsed.length - 1));
     $("progressInput").value = "0";
@@ -1723,6 +1814,61 @@
           possession.retainedRebound = true;
         }
       }
+      // 回合叙事字段：进攻方、发起点、结果、得分归属与净胜分变化
+      const startTick = ticks[possession.start];
+      const endTick = ticks[possession.end];
+      possession.offenseTeam =
+        possessionTeams.get(possession.id) || startTick.possession_team || "home";
+      possession.period = startTick.period || 1;
+      const startNames = eventNames(startTick);
+      const allNames = possession.events;
+      if (startNames.includes("TIPOFF")) possession.origin = "tipoff";
+      else if (allNames.includes("STEAL")) possession.origin = "steal";
+      else if (allNames.includes("BLOCK")) possession.origin = "block";
+      else if (
+        allNames.includes("REBOUND") &&
+        !possession.retainedRebound
+      )
+        possession.origin = "defensive_rebound";
+      else if (possession.retainedRebound) possession.origin = "offensive_rebound";
+      else if (allNames.includes("OUT_OF_BOUNDS")) possession.origin = "inbound";
+      else possession.origin = "inbound";
+      const scoreBefore = possession.start > 0
+        ? ticks[possession.start - 1].score
+        : { home: 0, away: 0 };
+      possession.scoreBefore = {
+        home: finite(scoreBefore?.home),
+        away: finite(scoreBefore?.away),
+      };
+      possession.scoreAfter = {
+        home: finite(endTick.score?.home),
+        away: finite(endTick.score?.away),
+      };
+      const homeDelta = possession.scoreAfter.home - possession.scoreBefore.home;
+      const awayDelta = possession.scoreAfter.away - possession.scoreBefore.away;
+      possession.pointsScored =
+        possession.offenseTeam === "home" ? homeDelta : awayDelta;
+      const turnoverish = allNames.some((name) =>
+        /TURNOVER|STEAL|VIOLATION|OUT_OF_BOUNDS/.test(name) &&
+        name !== "OUT_OF_BOUNDS" ||
+        (name === "OUT_OF_BOUNDS" &&
+          ticks[possession.end].callout?.includes("出界")),
+      );
+      const shotAttempted = possession.shots > 0 || possession.driveScores > 0;
+      if (possession.pointsScored > 0) {
+        possession.result = "scored";
+      } else if (turnoverish) {
+        possession.result = "turnover";
+      } else if (shotAttempted) {
+        possession.result = "missed";
+      } else if (allNames.includes("FOUL")) {
+        possession.result = "foul";
+      } else {
+        possession.result = "other";
+      }
+      possession.turnovers = allNames.filter((name) =>
+        /TURNOVER|STEAL/.test(name),
+      ).length;
     }
 
     const resolvedShots = shots.filter((shot) => shot.resolved);
@@ -2099,6 +2245,7 @@
     updateHud(tick);
     drawCourt(tick);
     updateTimelineCursor();
+    updateMatchFlowCursor();
     $("progressInput").value = String(state.idx);
     $("jumpInput").value = String(state.idx);
     $("tickReadout").textContent =
@@ -2242,6 +2389,102 @@
     if (state.lastFrameJson === state.idx) return;
     $("frameJson").textContent = JSON.stringify(tick, null, 2);
     state.lastFrameJson = state.idx;
+  }
+
+  // ========================================================
+  // 比赛总览：回合流水线 + 校验与判罚汇总
+  // ========================================================
+  const ORIGIN_ZH = {
+    tipoff: "跳球",
+    inbound: "发球",
+    steal: "抢断",
+    block: "盖帽",
+    defensive_rebound: "防守篮板",
+    offensive_rebound: "补篮二次进攻",
+  };
+  const RESULT_ZH = {
+    scored: "得分",
+    missed: "出手未中",
+    turnover: "球权转换",
+    foul: "犯规终止",
+    other: "结束",
+  };
+  function renderMatchOverview() {
+    const list = $("matchFlowList");
+    if (!list) return;
+    const possessions = state.possessions || [];
+    if (!possessions.length) {
+      list.replaceChildren(el("div", "empty-state", "等待推演开始…"));
+      renderValidationSummary();
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    for (const possession of possessions) {
+      const row = el("button", `match-flow-row ${possession.result === "scored" ? "flow-scored" : possession.result === "turnover" ? "flow-turnover" : ""}`);
+      row.type = "button";
+      row.dataset.index = String(possession.start);
+      row.addEventListener("click", () => seek(possession.start));
+
+      const offenseTeam = possession.offenseTeam === "home"
+        ? $("homeTeamName")?.textContent || "主队"
+        : $("awayTeamName")?.textContent || "客队";
+      const offenseSide = el("span", `flow-offense ${possession.offenseTeam === "home" ? "home-dot-text" : "away-dot-text"}`, offenseTeam);
+
+      const idEl = el("span", "flow-id", `#${possession.id}`);
+      const originEl = el("span", "flow-origin", ORIGIN_ZH[possession.origin] || possession.origin);
+      const statEl = el("span", "flow-stat", `${possession.passes} 传 · ${possession.shots} 投 · ${one(possession.duration)} 秒`);
+      const resultEl = el("span", `flow-result result-${possession.result}`,
+        possession.pointsScored > 0 ? `${RESULT_ZH.scored} +${possession.pointsScored}` : RESULT_ZH[possession.result] || "结束");
+      const scoreEl = el("span", "flow-score",
+        `${possession.scoreAfter.away}:${possession.scoreAfter.home}`);
+
+      row.append(idEl, offenseSide, originEl, statEl, resultEl, scoreEl);
+      fragment.append(row);
+    }
+    list.replaceChildren(fragment);
+    updateMatchFlowCursor();
+    renderValidationSummary();
+  }
+  function updateMatchFlowCursor() {
+    const rows = $("matchFlowList")?.querySelectorAll(".match-flow-row") || [];
+    let current = null;
+    for (const row of rows) {
+      const active = Number(row.dataset.index) <= state.idx;
+      row.classList.toggle("flow-past", active);
+      row.classList.remove("flow-current");
+      if (active) current = row;
+    }
+    if (current) current.classList.add("flow-current");
+  }
+  function renderValidationSummary() {
+    const box = $("validationSummary");
+    if (!box) return;
+    const stats = state.analytics?.stats;
+    const anomalies = state.anomalies || [];
+    const possessions = state.possessions || [];
+    if (!stats || !possessions.length) {
+      box.replaceChildren(el("span", "muted-label", "等待推演开始…"));
+      return;
+    }
+    const turnoverCount = possessions.filter((p) => p.result === "turnover").length;
+    const scoredCount = possessions.filter((p) => p.result === "scored").length;
+    const cards = [
+      { label: "引擎不变量违规", value: anomalies.length, tone: anomalies.length ? "bad" : "good", hint: anomalies.length ? "点击违规监测查看详情" : "本轮推演全部校验通过" },
+      { label: "犯规", value: stats.fouls, tone: stats.fouls > 0 ? "warn" : "good", hint: `每回合 ${two(stats.foulRate)} 次` },
+      { label: "失误与违例", value: stats.turnovers ?? turnoverCount, tone: "neutral", hint: `占回合 ${pct(stats.turnoverRate)}` },
+      { label: "回合成功率", value: possessions.length ? pct(scoredCount / possessions.length) : "—", tone: "good", hint: `${scoredCount}/${possessions.length} 回合得分` },
+    ];
+    const grid = el("div", "validation-grid");
+    for (const card of cards) {
+      const item = el("div", `validation-card tone-${card.tone}`);
+      item.append(
+        el("span", "validation-label", card.label),
+        el("strong", "validation-value", String(card.value)),
+        el("span", "validation-hint", card.hint),
+      );
+      grid.append(item);
+    }
+    box.replaceChildren(grid);
   }
 
   // ========================================================
@@ -3917,7 +4160,7 @@
         fill.style.width = `${clamp(Math.abs(number) * scale, 1, 100)}%`;
         track.append(fill);
         row.append(
-          el("span", "score-bar-label", getDecisionKindZh(item.kind)),
+          el("span", "score-bar-label", describeDecisionKind(item.kind)),
           track,
           el("span", "score-bar-value", number.toFixed(3)),
         );
@@ -3931,7 +4174,7 @@
       for (const flag of flags) {
         const row = el("div", "flag-row");
         row.append(
-          el("span", null, flag.constraint),
+          el("span", null, getConstraintZh(flag.constraint)),
           el("span", null, flag.reason),
           el("b", null, two(finite(flag.penalty))),
         );
@@ -3939,11 +4182,19 @@
       }
       return box;
     };
+    // 阻截串形如 "ADVANCE(H_05) ✗ action_eligibility"，解析为中文
+    const describeBlocked = (entry) => {
+      const match = String(entry).match(/^(.*?)\s*✗\s*(\S+)$/);
+      if (!match) return String(entry);
+      return `${describeDecisionKind(match[1])} · 被${getConstraintZh(match[2])}阻拦`;
+    };
     const chips = (items, className, emptyText) => {
       const box = el("div", "chips");
       if (items?.length) {
         for (const item of items)
-          box.append(el("span", `chip ${className}`, item));
+          box.append(
+            el("span", `chip ${className}`, className === "bad" ? describeBlocked(item) : getConstraintZh(item)),
+          );
       } else {
         box.append(el("span", "muted-label", emptyText));
       }
@@ -3951,25 +4202,25 @@
     };
     const head = el("div", "decision-head");
     head.append(
-      el("strong", null, getDecisionKindZh(chosen) || "—"),
-      el("span", null, `${getPlayerNameZh(debug.player) || "—"} · 第 ${decisionIndex} 帧`),
+      el("strong", null, describeDecisionKind(chosen)),
+      el("span", null, `${playerNameFromId(debug.player)} · 第 ${decisionIndex} 帧`),
     );
     panel.append(
       head,
       section(
-        "效用评分排序 (Utility)",
+        "候选动作效用评分",
         scoreRows(utilities, (item) => item.utility, 100 / maxUtility),
       ),
       section(
-        "决策概率分布 (Softmax)",
+        "候选动作最终概率",
         scoreRows(probabilities, (item) => item.prob, 100),
       ),
       section(
-        "硬性约束阻截 (Blockers)",
+        "被规则直接拦下的动作",
         chips(debug.blocked, "bad", "没有被硬约束剔除的候选"),
       ),
-      section("约束惩罚标记 (Flags)", flagSection(debug.flags || [])),
-      section("当前激活约束条件", chips(debug.active_constraints, "", "—")),
+      section("约束惩罚标记", flagSection(debug.flags || [])),
+      section("本帧生效中的规则", chips(debug.active_constraints, "", "—")),
       section(
         "执行阻碍反馈",
         chips(debug.enforcement, "warn", "本帧没有执行意图"),
