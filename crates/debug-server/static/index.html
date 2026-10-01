@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>NBA-Sim · 战术推演调测工作台</title>
-  <link rel="stylesheet" href="/style.css?v=20260924_workbench">
+  <link rel="stylesheet" href="/style.css?v=20260925_workbench">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <!-- 顶栏：战术指挥中枢 (Tactical Command Header) -->
+  <!-- 顶栏：运行状态、违规监测、推演参数与入口 -->
   <header class="app-nav">
     <div class="nav-brand-section">
       <div class="brand-logo">NBA<span>·</span>SIM</div>
@@ -22,7 +22,6 @@
       </button>
     </div>
 
-    <!-- 顶部快速推演参数面板 (无需打断弹窗，即改即推) -->
     <div class="nav-control-section">
       <div class="control-cluster">
         <div class="input-seed-wrap" title="随机数种子">
@@ -49,10 +48,7 @@
       </div>
     </div>
 
-    <!-- 顶栏右侧辅助状态与操作 -->
     <div class="nav-right-section">
-      <div id="streamSummary" class="stream-summary-pill" title="推演数据流摘要">就绪</div>
-      
       <input id="fileInput" type="file" accept=".ndjson" style="display:none">
       <button id="uploadTriggerBtn" class="btn-nav-icon" type="button" title="导入本地轨迹文件 (.ndjson)">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -67,19 +63,19 @@
           <circle cx="12" cy="12" r="3"></circle>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
         </svg>
-        <span class="btn-settings-label">设置中枢</span>
+        <span class="btn-settings-label">设置</span>
       </button>
     </div>
   </header>
 
-  <!-- 工作台主体网格 (Pro Tactical Workbench Layout) -->
+  <!-- 工作台主体：左栏球场舞台 + 右栏分析面板 -->
   <main class="workbench-layout">
-    
-    <!-- 左栏：主视口工作区 (Court & Broadcast Stage) -->
+
+    <!-- 左栏：球场舞台 -->
     <div class="stage-column">
       <div class="broadcast-stage-card">
-        
-        <!-- 专业赛事转播记分牌 (Broadcast Scoreboard) -->
+
+        <!-- 单行紧凑记分牌：队名 · 战术 · 犯规 | 比分 + 时钟行 | 队名 · 战术 · 犯规 -->
         <div class="match-scoreboard">
           <div class="team-block away-team-block away-side">
             <div class="team-badge-pill away-pill">
@@ -87,30 +83,26 @@
               <span id="awayTeamName" class="team-title">南湾水手</span>
             </div>
             <div class="team-extra-meta">
-              <span id="awayTacticTag" class="team-tactic-tag">高位挡拆体系</span>
-              <span class="team-fouls-indicator">犯规: <b id="foulsReadout">0 / 0</b></span>
+              <span id="awayTacticTag" class="team-tactic-tag">攻 · —</span>
+              <span class="team-def-tag" id="awayDefTag">守 · —</span>
+              <span class="team-fouls-indicator">犯规 <b id="awayFouls">0</b></span>
             </div>
           </div>
 
           <div class="score-center-cluster">
-            <div class="clock-capsule">
+            <div class="clock-line">
               <span id="periodLabel" class="period-indicator">第 1 节</span>
               <span class="clock-sep">·</span>
               <span id="gameClock" class="clock-time">12:00</span>
               <span id="shotClock" class="shot-clock-badge">24</span>
+              <span class="clock-sep">·</span>
+              <span id="possessionLabel" class="possession-indicator">第 1 回合</span>
+              <span id="freeThrowChip" class="free-throw-chip" hidden>罚球 0</span>
             </div>
             <div class="score-display-row">
               <span id="awayScore" class="score-num away-score-color">0</span>
               <span class="score-divider-colon">:</span>
               <span id="homeScore" class="score-num home-score-color">0</span>
-            </div>
-            <div class="match-status-sub-row">
-              <span id="tacticalSet" class="match-meta-pill">高位挡拆体系</span>
-              <span id="flowLabel" class="match-flow-pill">活球推进</span>
-              <span id="possessionLabel" class="match-meta-pill">第 1 回合</span>
-              <span id="phaseLabel" class="match-meta-pill">阵地战</span>
-              <span id="intensityReadout" class="match-meta-pill">中度对抗</span>
-              <span class="free-throw-pill">罚球剩余: <b id="freeThrows">0</b></span>
             </div>
           </div>
 
@@ -120,62 +112,45 @@
               <span class="team-glow-dot home-dot"></span>
             </div>
             <div class="team-extra-meta">
-              <span id="homeTacticTag" class="team-tactic-tag">沉退护筐体系</span>
-              <span class="team-badge-sub">主场</span>
+              <span id="homeTacticTag" class="team-tactic-tag">攻 · —</span>
+              <span class="team-def-tag" id="homeDefTag">守 · —</span>
+              <span class="team-fouls-indicator">犯规 <b id="homeFouls">0</b></span>
             </div>
           </div>
         </div>
 
-        <!-- 球场主视口画布与 HUD 工具层 -->
+        <!-- 球场画布与 HUD -->
         <div class="court-stage-wrap">
           <canvas id="courtCanvas" width="1000" height="560"></canvas>
-          
-          <!-- 悬浮在右上角的专业图层 HUD 控制栏 -->
+
           <div class="court-hud-toolbar">
             <button id="potentialFieldToggle" class="hud-pill-btn active" type="button" aria-pressed="true" title="切换全场空间势能控制图层 (快捷键: P)">
               <span class="hud-indicator-dot emerald"></span>
               <span>势能场</span>
             </button>
-
-            <div class="hud-key-hints" title="键盘快捷操作: Space 播放/暂停, [ / ] 切换回合, ← / → 单帧微调, R 重新推演">
-              <span>快捷说明</span>
-            </div>
           </div>
 
-          <!-- 浮动动态岛标签 (实时事件弹出徽章) -->
           <div id="eventOverlayChip" class="floating-event-pill"></div>
-
-          <!-- 球员触摸卡片 (Player HUD Inspector) -->
           <div id="playerTooltip" class="player-hud-card" hidden></div>
         </div>
 
-        <!-- 战术呼叫与战况单行解说字幕条 -->
+        <!-- 字幕条：比赛状态词 + 实时解说 -->
         <div class="subtitle-bar">
-          <div class="subtitle-left-meta">
-            <span class="subtitle-badge">实时战况</span>
-            <span id="eventChip" class="event-inline-chip">常规组织</span>
-          </div>
+          <span id="flowStateLabel" class="subtitle-state">就绪</span>
           <div id="calloutText" class="subtitle-content">等待推演开始…</div>
-          <div class="subtitle-right-meta">
-            <span id="frameLabel" class="subtitle-frame">第 0 帧</span>
-          </div>
         </div>
 
-        <!-- 广播级媒体传输控制台 (Master Transport Controller) -->
+        <!-- 播放控制台 -->
         <div class="stage-controller">
-          <!-- 进度条与刻度 -->
           <div class="timeline-bar-wrap">
             <input id="progressInput" type="range" min="0" max="0" value="0" step="1" aria-label="推演播放进度">
             <div class="timeline-ticks-layer">
               <span id="progressTime" class="progress-time-label">00:00.0</span>
-              <span id="progressPossession" class="progress-possession-label">第 1 回合</span>
               <span id="progressEnd" class="progress-time-label">00:00.0</span>
             </div>
           </div>
 
-          <!-- 按钮动作栏与传输核心群 -->
           <div class="controller-actions">
-            <!-- 左侧：帧与刻度信息 -->
             <div class="time-readout-box">
               <svg class="readout-icon-svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="10"></circle>
@@ -184,7 +159,6 @@
               <span id="tickReadout">0 / 0 帧</span>
             </div>
 
-            <!-- 中间：核心播放与跳转按钮组 -->
             <div class="transport-btns">
               <button id="prevPossessionButton" class="btn-media" type="button" title="上一回合 (快捷键: [ )">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
@@ -192,7 +166,7 @@
                   <line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="3"></line>
                 </svg>
               </button>
-              
+
               <button id="stepBackButton" class="btn-media" type="button" title="后退一帧 (快捷键: ← )">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="15 18 9 12 15 6"></polyline>
@@ -219,7 +193,6 @@
               </button>
             </div>
 
-            <!-- 右侧：倍速与帧精确跳转 -->
             <div class="speed-and-jump-box">
               <div class="speed-group" role="group" aria-label="播放速度">
                 <button type="button" data-speed="0.5" class="speed-btn">0.5x</button>
@@ -238,11 +211,9 @@
       </div>
     </div>
 
-    <!-- 右栏：多维战术情报与深度分析中枢 (Live Tactical Intel Deck & Studio Column) -->
+    <!-- 右栏：分析面板（6 个标签页共用一个导航） -->
     <aside class="deck-column">
-      <!-- 上半部：伴随式实时透视台 (Live Tactical Intel Deck) -->
-      <div class="tactical-deck-card">
-        <!-- 伴随式选项卡导航 -->
+      <div class="deck-card">
         <div class="deck-nav">
           <button class="deck-tab-button active" type="button" data-deck-tab="timeline">
             <span>文字直播</span>
@@ -254,12 +225,20 @@
           <button class="deck-tab-button" type="button" data-deck-tab="anomalies">
             <span>违规监测</span>
           </button>
+          <button class="deck-tab-button" type="button" data-deck-tab="shots">
+            <span>投篮热区</span>
+          </button>
+          <button class="deck-tab-button" type="button" data-deck-tab="stats">
+            <span>高阶数据</span>
+          </button>
+          <button class="deck-tab-button" type="button" data-deck-tab="frame">
+            <span>原始帧</span>
+          </button>
         </div>
 
-        <!-- 伴随式内容面板 -->
         <div class="deck-content">
-          
-          <!-- Deck Tab 1: 文字直播流 -->
+
+          <!-- Tab: 文字直播流 -->
           <div id="deck-timeline" class="deck-pane active">
             <div class="feed-header-toolbar">
               <div id="eventFilters" class="filter-pill-row"></div>
@@ -268,23 +247,17 @@
             <div id="timeline" class="feed-timeline-stream"></div>
           </div>
 
-          <!-- Deck Tab 2: 决策透视 (AI Utility & Softmax & Blockers) -->
+          <!-- Tab: 决策透视 -->
           <div id="deck-decisions" class="deck-pane">
             <div id="decisionPanel" class="decision-panel-stream">
               <div class="empty-state">
-                <svg class="empty-icon-svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
-                </svg>
                 <span>等待推演或选择特定决策帧…</span>
                 <small>点击事件流中的出手/传球事件可直接追踪决策</small>
               </div>
             </div>
-            <div id="decisionList" style="display:none"></div>
           </div>
 
-          <!-- Deck Tab 3: 引擎违规监测 (Violations & Anomalies) -->
+          <!-- Tab: 引擎违规监测 -->
           <div id="deck-anomalies" class="deck-pane">
             <div class="anomalies-header">
               <span class="anomalies-title">引擎不变量检测结果</span>
@@ -297,147 +270,56 @@
             </div>
           </div>
 
+          <!-- Tab: 投篮热区分布 -->
+          <div id="deck-shots" class="deck-pane">
+            <div class="shots-studio-wrap">
+              <div class="shots-canvas-column">
+                <div class="shots-canvas-header">
+                  <strong>全场投篮落点分布</strong>
+                  <span class="shot-legend">
+                    <span class="dot made"></span> 命中
+                    <span class="dot missed"></span> 未中
+                    <span class="dot three"></span> 三分大点
+                  </span>
+                </div>
+                <div class="shot-canvas-container">
+                  <canvas id="shotCanvas" width="560" height="300"></canvas>
+                </div>
+              </div>
+              <div class="shots-table-column">
+                <div class="shots-table-header">
+                  <strong>分区投篮效率统计</strong>
+                  <span class="shots-sub-hint">基于当前模拟样本分析</span>
+                </div>
+                <div id="zoneTable" class="zone-table-container"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab: 球队高阶数据 -->
+          <div id="deck-stats" class="deck-pane">
+            <div id="statsTable" class="stats-grid-wrap"></div>
+          </div>
+
+          <!-- Tab: 原始帧数据检视 -->
+          <div id="deck-frame" class="deck-pane">
+            <div class="frame-inspector-wrapper">
+              <div class="frame-inspector-toolbar">
+                <span class="frame-inspector-hint">当前播放帧的完整状态快照</span>
+                <button id="copyFrameButton" class="btn-secondary-sm" type="button">复制当前帧</button>
+              </div>
+              <pre id="frameJson" class="frame-json-display">{ "status": "等待推演..." }</pre>
+            </div>
+          </div>
+
         </div>
       </div>
-
-      <!-- 下半部：战术研讨舱与深度分析 (Tactical Studio & Deep Analytics) -->
-      <section class="workbench-bottom-studio">
-        <div class="studio-card">
-          <!-- 底部高级分段导航栏 (按人机交互功能聚合理念区分为【设置中枢】与【实战分析】) -->
-          <div class="segmented-nav">
-            <div class="nav-group-cluster nav-group-setup">
-              <span class="nav-group-badge">设置中枢</span>
-              <button class="tab-button active" type="button" data-tab="board">
-                <span>战术体系板</span>
-              </button>
-              <button class="tab-button" type="button" data-tab="roster">
-                <span>球员资料库</span>
-              </button>
-              <button class="tab-button" type="button" data-tab="rules">
-                <span>规则物理调测</span>
-              </button>
-            </div>
-            <div class="nav-group-divider"></div>
-            <div class="nav-group-cluster nav-group-analytics">
-              <span class="nav-group-badge">实战分析</span>
-              <button class="tab-button" type="button" data-tab="shots">
-                <span>投篮热区分布</span>
-              </button>
-              <button class="tab-button" type="button" data-tab="stats">
-                <span>球队高阶数据</span>
-              </button>
-              <button class="tab-button" type="button" data-tab="frame">
-                <span>原始帧数据</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- 球队执教视角切换栏 (仅配置与查看当前所选队伍内部机密信息) -->
-          <div id="teamPerspectiveBar" class="team-perspective-bar">
-            <div class="perspective-left">
-              <span class="perspective-badge">执教视角</span>
-              <div class="team-perspective-tabs" role="tablist">
-                <button id="perspectiveHomeBtn" class="perspective-btn active" type="button" data-team="home">
-                  <span class="perspective-dot home-dot"></span>
-                  <span id="perspectiveHomeText">北城老鹰 (主队)</span>
-                </button>
-                <button id="perspectiveAwayBtn" class="perspective-btn" type="button" data-team="away">
-                  <span class="perspective-dot away-dot"></span>
-                  <span id="perspectiveAwayText">南湾水手 (客队)</span>
-                </button>
-              </div>
-            </div>
-            <div class="perspective-right">
-              <span class="perspective-privacy-hint">仅展示与配置本队内部战术剧本与球员档案</span>
-            </div>
-          </div>
-
-          <div class="tab-content-card">
-            <!-- Tab 1: 战术体系板 -->
-            <div id="tab-board" class="tab-pane active">
-              <div id="tacticBoard" class="studio-board"></div>
-            </div>
-
-            <!-- Tab 2: 球员资料库 -->
-            <div id="tab-roster" class="tab-pane">
-              <div id="rosterStudio" class="roster-studio"></div>
-            </div>
-
-            <!-- Tab 3: 投篮热区分布 (Shot Map & Zones) -->
-            <div id="tab-shots" class="tab-pane">
-              <div class="shots-studio-wrap">
-                <div class="shots-canvas-column">
-                  <div class="shots-canvas-header">
-                    <strong>全场投篮落点分布</strong>
-                    <span class="shot-legend">
-                      <span class="dot made"></span> 命中
-                      <span class="dot missed"></span> 未中
-                      <span class="dot three"></span> 三分大点
-                    </span>
-                  </div>
-                  <div class="shot-canvas-container">
-                    <canvas id="shotCanvas" width="560" height="300"></canvas>
-                  </div>
-                </div>
-                <div class="shots-table-column">
-                  <div class="shots-table-header">
-                    <strong>分区投篮效率统计</strong>
-                    <span class="shots-sub-hint">基于当前模拟样本分析</span>
-                  </div>
-                  <div id="zoneTable" class="zone-table-container"></div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Tab 4: 球队高阶统计数据 -->
-            <div id="tab-stats" class="tab-pane">
-              <div id="statsTable" class="stats-grid-wrap"></div>
-            </div>
-
-            <!-- Tab 5: 规则与物理调测 -->
-            <div id="tab-rules" class="tab-pane">
-              <div class="rules-editor-wrapper">
-                <div class="rules-toolbar">
-                  <div class="rules-toolbar-left">
-                    <span class="rules-hint">修改 GameRules JSON 参数后应用并重新推演</span>
-                    <div class="rules-preset-chips">
-                      <span class="preset-label">预设:</span>
-                      <button class="preset-chip" type="button" data-preset="default">默认基准</button>
-                      <button class="preset-chip" type="button" data-preset="fast">极速对决</button>
-                      <button class="preset-chip" type="button" data-preset="contest">高强度对抗</button>
-                    </div>
-                  </div>
-                  <div class="rules-btns">
-                    <span id="rulesStatus" class="rules-status-badge">默认规则已加载</span>
-                    <button id="loadRulesButton" class="btn-secondary-sm" type="button">重置默认</button>
-                    <button id="runRulesButton" class="btn-primary-sm" type="button">应用并推演</button>
-                  </div>
-                </div>
-                <textarea id="rulesEditor" spellcheck="false" placeholder="规则配置 (JSON)..."></textarea>
-              </div>
-            </div>
-
-            <!-- Tab 6: 原始帧数据检视 (Frame JSON Inspector) -->
-            <div id="tab-frame" class="tab-pane">
-              <div class="frame-inspector-wrapper">
-                <div class="frame-inspector-toolbar">
-                  <span class="frame-inspector-hint">当前播放帧的完整实时物理与状态快照数据</span>
-                  <button id="copyFrameButton" class="btn-secondary-sm" type="button">复制当前帧</button>
-                </div>
-                <pre id="frameJson" class="frame-json-display">{ "status": "等待推演..." }</pre>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      </section>
     </aside>
   </main>
 
-  <!-- 全维战术推演与比赛设置中心 (Unified Tactical & Match Settings Center) -->
+  <!-- 设置中心：推演环境 / 球队战术 / 阵容档案 / 规则物理 -->
   <div id="settingsSheet" class="modal-sheet-backdrop" hidden>
     <div class="modal-settings-dialog">
-      <!-- 头部：标题与关闭 -->
       <div class="settings-dialog-header">
         <div class="settings-header-left">
           <div class="settings-header-icon">
@@ -447,38 +329,31 @@
             </svg>
           </div>
           <div>
-            <h3 class="settings-title">推演与比赛统一设置中心</h3>
+            <h3 class="settings-title">推演与比赛设置中心</h3>
             <span class="settings-subtitle">集中配置推演环境、球队战术、球员名单与引擎规则</span>
           </div>
         </div>
         <button id="closeSettingsBtn" class="btn-close-sheet" type="button" title="关闭设置">✕</button>
       </div>
 
-      <!-- 主体：侧边分类导航 + 配置内容区域 -->
       <div class="settings-dialog-body">
-        <!-- 侧边导航栏 -->
         <nav class="settings-sidebar">
           <button class="settings-nav-item active" type="button" data-pane="env">
-            <span class="nav-item-icon">⚙️</span>
             <span class="nav-item-text">推演环境参数</span>
           </button>
           <button class="settings-nav-item" type="button" data-pane="tactics">
-            <span class="nav-item-icon">📋</span>
             <span class="nav-item-text">球队战术体系</span>
           </button>
           <button class="settings-nav-item" type="button" data-pane="roster">
-            <span class="nav-item-icon">👤</span>
             <span class="nav-item-text">阵容球员档案</span>
           </button>
           <button class="settings-nav-item" type="button" data-pane="rules">
-            <span class="nav-item-icon">⚖️</span>
             <span class="nav-item-text">比赛规则物理</span>
           </button>
         </nav>
 
-        <!-- 内容区域 -->
         <div class="settings-content-wrapper">
-          <!-- Pane 1: 推演环境参数 -->
+          <!-- Pane: 推演环境参数 -->
           <div id="pane-env" class="settings-pane active">
             <div class="settings-group">
               <div class="group-title">随机数种子</div>
@@ -529,11 +404,11 @@
             </div>
           </div>
 
-          <!-- Pane 2: 球队战术体系 -->
+          <!-- Pane: 球队战术体系（配置 + 战术沙盘与百科） -->
           <div id="pane-tactics" class="settings-pane">
             <div class="settings-group">
               <div class="group-title">执教球队视角</div>
-              <div class="group-desc">选择要查看和调配战术的单方队伍（严密隔离对手内部战术机密）</div>
+              <div class="group-desc">选择要查看和调配战术的单方队伍</div>
               <div class="sheet-team-selector">
                 <button id="sheetTeamHomeBtn" class="sheet-team-btn active" type="button">
                   <span class="perspective-dot home-dot"></span>
@@ -547,34 +422,37 @@
             </div>
 
             <div class="settings-group">
-              <div class="group-title">进攻战术体系</div>
-              <div class="group-desc">决定本队在阵地战中的核心空间落位与配合构型</div>
-              <div id="sheetOffenseChoiceRow" class="sheet-choice-grid"></div>
-            </div>
-
-            <div class="settings-group">
-              <div class="group-title">防守战术策略</div>
-              <div class="group-desc">配置面对挡拆与持球突破时的协同防守原则</div>
-              <div id="sheetDefenseChoiceRow" class="sheet-choice-grid"></div>
+              <div class="group-title">战术研讨与沙盘手册</div>
+              <div class="group-desc">当前执教队伍的战术配置、路线沙盘与执行手册</div>
+              <div id="tacticBoard" class="sheet-tactic-board"></div>
             </div>
           </div>
 
-          <!-- Pane 3: 阵容球员档案 -->
+          <!-- Pane: 阵容球员档案 -->
           <div id="pane-roster" class="settings-pane">
             <div class="settings-group">
-              <div class="group-title">当前球队主力首发阵容</div>
-              <div class="group-desc">首发 5 人名单与场上战术角色</div>
-              <div id="sheetStartersList" class="sheet-roster-list"></div>
+              <div class="group-title">执教球队视角</div>
+              <div class="group-desc">切换查看主队或客队的球员档案</div>
+              <div class="sheet-team-selector">
+                <button id="rosterTeamHomeBtn" class="sheet-team-btn active" type="button">
+                  <span class="perspective-dot home-dot"></span>
+                  <span id="rosterHomeTeamName">北城老鹰 (主队)</span>
+                </button>
+                <button id="rosterTeamAwayBtn" class="sheet-team-btn" type="button">
+                  <span class="perspective-dot away-dot"></span>
+                  <span id="rosterAwayTeamName">南湾水手 (客队)</span>
+                </button>
+              </div>
             </div>
 
             <div class="settings-group">
-              <div class="group-title">常规轮换替补阵容</div>
-              <div class="group-desc">替补深度与特定战术特质</div>
-              <div id="sheetBenchList" class="sheet-roster-list"></div>
+              <div class="group-title">球员资料库</div>
+              <div class="group-desc">名单、角色与关键属性</div>
+              <div id="rosterStudio" class="sheet-roster-studio"></div>
             </div>
           </div>
 
-          <!-- Pane 4: 比赛规则物理 -->
+          <!-- Pane: 比赛规则物理 -->
           <div id="pane-rules" class="settings-pane">
             <div class="settings-group">
               <div class="group-title">比赛规则预设方案</div>
@@ -589,13 +467,13 @@
             <div class="settings-group">
               <div class="group-title">GameRules JSON 规则参数编辑</div>
               <div class="group-desc">直接调节物理常量、场地几何与判罚阈值</div>
+              <span id="rulesStatus" class="rules-status">默认规则已加载</span>
               <textarea id="sheetRulesEditor" class="sheet-rules-textarea" spellcheck="false" placeholder="GameRules JSON..."></textarea>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- 底部动作条 -->
       <div class="settings-dialog-footer">
         <div class="footer-summary-hint">
           <span class="hint-dot"></span>
@@ -611,16 +489,6 @@
     </div>
   </div>
 
-  <!-- 隐藏的历史兼容桩 (保留全部原有 JS 句柄安全) -->
-  <div style="display:none" aria-hidden="true">
-    <div id="tab-timeline"></div>
-    <div id="tab-decisions"></div>
-    <div id="tab-export"></div>
-    <div id="tab-advanced"></div>
-    <input id="tickJump" type="number">
-    <select id="playbackSpeed"><option value="1">1x</option></select>
-  </div>
-
-  <script type="module" src="/app.js?v=20260924_workbench"></script>
+  <script type="module" src="/app.js?v=20260925_workbench"></script>
 </body>
 </html>

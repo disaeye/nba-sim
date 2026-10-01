@@ -116,7 +116,6 @@
     rafId: null,
     previousRaf: 0,
     accumulator: 0,
-    currentTab: "timeline",
     teamPerspective: "home",
     courtMode: "full",
     potentialFieldVisible: true,
@@ -367,19 +366,6 @@
     return MORALE_ZH[morale] || morale || "平稳";
   }
 
-  const INTENSITY_ZH = {
-    BuildUp: "战术组织",
-    Climax: "关键攻防",
-    Plateau: "平稳推进",
-    Low: "轻度试探",
-    Medium: "中度对抗",
-    High: "高度焦灼",
-    Physical: "强力肉搏",
-  };
-  function getIntensityZh(intensity) {
-    return INTENSITY_ZH[intensity] || intensity || "常规战况";
-  }
-
   const TEAM_ZH = {
     north_city_hawks: "北城老鹰",
     south_bay_mariners: "南湾水手",
@@ -551,16 +537,21 @@
 
   function updatePerspectiveNav() {
     if (!studio) return;
+    syncRosterTeamButtons();
+  }
+
+  // 阵容 pane 内主客队按钮的名称与激活态同步
+  function syncRosterTeamButtons() {
+    if (!studio) return;
     const homeName = getTeamNameZh(studio.default_setup.home_team.id) || studio.default_setup.home_team.name;
     const awayName = getTeamNameZh(studio.default_setup.away_team.id) || studio.default_setup.away_team.name;
-    const homeText = $("perspectiveHomeText");
-    const awayText = $("perspectiveAwayText");
+    const homeText = $("rosterHomeTeamName");
+    const awayText = $("rosterAwayTeamName");
     if (homeText) homeText.textContent = `${homeName} (主队)`;
     if (awayText) awayText.textContent = `${awayName} (客队)`;
-
-    const homeBtn = $("perspectiveHomeBtn");
-    const awayBtn = $("perspectiveAwayBtn");
     const isHome = state.teamPerspective === "home";
+    const homeBtn = $("rosterTeamHomeBtn");
+    const awayBtn = $("rosterTeamAwayBtn");
     if (homeBtn) homeBtn.classList.toggle("active", isHome);
     if (awayBtn) awayBtn.classList.toggle("active", !isHome);
   }
@@ -572,16 +563,22 @@
     syncScoreboardTactics();
   }
 
+  // 记分牌两侧的默认战术标签（推演开始前无 tick 数据时的静态展示）
   function syncScoreboardTactics() {
     if (!studio) return;
     const setup = studio.default_setup;
     const homeOff = studio.offense.find((item) => item.id === setup.home_lineup.offense_tactic);
     const awayOff = studio.offense.find((item) => item.id === setup.away_lineup.offense_tactic);
-    const homeTag = document.querySelector(".home-side .team-tactic-tag");
-    const awayTag = document.querySelector(".away-side .team-tactic-tag");
-    if (homeTag) homeTag.textContent = `进攻 · ${cleanTacticNameZh(homeOff?.name_zh) || "进攻体系"}`;
-    if (awayTag) awayTag.textContent = `进攻 · ${cleanTacticNameZh(awayOff?.name_zh) || "进攻体系"}`;
-    if ($("tacticalSet") && homeOff) $("tacticalSet").textContent = cleanTacticNameZh(homeOff.name_zh);
+    const homeTag = $("homeTacticTag");
+    const awayTag = $("awayTacticTag");
+    const homeDef = $("homeDefTag");
+    const awayDef = $("awayDefTag");
+    const homeDefTactic = studio.defense.find((d) => d.id === setup.home_lineup?.defense_tactic);
+    const awayDefTactic = studio.defense.find((d) => d.id === setup.away_lineup?.defense_tactic);
+    if (homeTag) homeTag.textContent = `攻 · ${cleanTacticNameZh(homeOff?.name_zh) || "—"}`;
+    if (awayTag) awayTag.textContent = `攻 · ${cleanTacticNameZh(awayOff?.name_zh) || "—"}`;
+    if (homeDef) homeDef.textContent = `守 · ${cleanTacticNameZh(homeDefTactic?.name_zh) || "—"}`;
+    if (awayDef) awayDef.textContent = `守 · ${cleanTacticNameZh(awayDefTactic?.name_zh) || "—"}`;
   }
 
   function renderBoard() {
@@ -1420,7 +1417,10 @@
     }
     state.rules = rules;
     state.rulesLoaded = true;
-    if (updateEditor) $("rulesEditor").value = JSON.stringify(rules, null, 2);
+    if (updateEditor) {
+      const editor = $("rulesEditor");
+      if (editor) editor.value = JSON.stringify(rules, null, 2);
+    }
     return rules;
   }
 
@@ -1484,8 +1484,7 @@
       }
       return true;
     } catch (error) {
-      setRunStatus("运行失败", true);
-      $("streamSummary").textContent = error.message;
+      setRunStatus(`运行失败：${error.message}`, true);
       console.error(error);
       return false;
     } finally {
@@ -1867,7 +1866,7 @@
     headerRow.className = "stat-row stat-header";
     headerRow.style.fontWeight = "700";
     headerRow.style.color = "var(--text-muted)";
-    headerRow.style.fontSize = "10.5px";
+    headerRow.style.fontSize = "11px";
     headerRow.style.textTransform = "uppercase";
     headerRow.style.letterSpacing = "0.5px";
     headerRow.innerHTML =
@@ -2088,19 +2087,10 @@
   }
   function updateReadouts(source) {
     $("eventReadout").textContent = `共 ${state.events.length} 条事件`;
-    const normalizedSource = String(source || "")
-      .replace("seed", "种子")
-      .replace("5p", "5 回合")
-      .replace("1p", "1 回合")
-      .replace("10p", "10 回合")
-      .replace("1q", "1 单节")
-      .replace("full", "全场 48 分钟");
-    $("streamSummary").textContent =
-      `${normalizedSource} · ${state.possessions.length} 回合 · ${state.shots.length} 次投篮`;
   }
   function setRunStatus(text, error = false) {
     $("runStatus").textContent = text;
-    $("runStatus").style.color = error ? "var(--red)" : "";
+    $("runStatus").style.color = error ? "var(--color-urgent)" : "";
   }
 
   function renderCurrent(forceJson = false) {
@@ -2111,12 +2101,9 @@
     updateTimelineCursor();
     $("progressInput").value = String(state.idx);
     $("jumpInput").value = String(state.idx);
-    if ($("frameLabel")) $("frameLabel").textContent = `第 ${state.idx} 帧`;
     $("tickReadout").textContent =
       `${state.idx.toLocaleString()} / ${state.ticks.length.toLocaleString()} 帧`;
     $("progressTime").textContent = timeWithTenths(tick.t);
-    $("progressPossession").textContent =
-      `第 ${tick.possession_id ?? "—"} 回合`;
     if (forceJson || !state.playing || state.idx % 3 === 0)
       renderFrameJson(tick);
     renderDecision(tick);
@@ -2124,38 +2111,42 @@
   function updateHud(tick) {
     const homeTeam = tick.home_team || {};
     const awayTeam = tick.away_team || {};
-    if ($("frameLabel")) $("frameLabel").textContent = `第 ${state.idx} 帧`;
     $("homeTeamName").textContent = getTeamNameZh(homeTeam);
     $("awayTeamName").textContent = getTeamNameZh(awayTeam);
     const isHomePossession = tick.possession_team === "home" || tick.possession_id % 2 === 1;
     const currentOffenseTactic = getTacticsZh(tick.tactical_set) || "半场战术体系";
-    if ($("tacticalSet")) $("tacticalSet").textContent = currentOffenseTactic;
-    const homeTacticEl = $("homeTacticTag") || document.querySelector(".home-side .team-tactic-tag");
-    const awayTacticEl = $("awayTacticTag") || document.querySelector(".away-side .team-tactic-tag");
+    // 进攻标签展示持球方战术，防守标签展示对位方的防守策略
+    const homeTacticEl = $("homeTacticTag");
+    const awayTacticEl = $("awayTacticTag");
+    const homeDefEl = $("homeDefTag");
+    const awayDefEl = $("awayDefTag");
+    const defensiveTactic = cleanTacticNameZh(tick.defensive_tactic) || "沉退防守";
     if (homeTacticEl && awayTacticEl) {
       if (isHomePossession) {
-        homeTacticEl.textContent = `进攻 · ${currentOffenseTactic}`;
-        const defTacticId = studio?.default_setup?.away_lineup?.defense_tactic;
-        awayTacticEl.textContent = `防守 · ${defTacticId ? cleanTacticNameZh(studio.defense.find((d) => d.id === defTacticId)?.name_zh || "沉退防守") : "沉退防守"}`;
+        homeTacticEl.textContent = `攻 · ${currentOffenseTactic}`;
+        awayTacticEl.textContent = `攻 · —`;
       } else {
-        awayTacticEl.textContent = `进攻 · ${currentOffenseTactic}`;
-        const defTacticId = studio?.default_setup?.home_lineup?.defense_tactic;
-        homeTacticEl.textContent = `防守 · ${defTacticId ? cleanTacticNameZh(studio.defense.find((d) => d.id === defTacticId)?.name_zh || "沉退防守") : "沉退防守"}`;
+        awayTacticEl.textContent = `攻 · ${currentOffenseTactic}`;
+        homeTacticEl.textContent = `攻 · —`;
       }
     }
-    $("phaseLabel").textContent = getPhaseZh(tick.phase);
+    if (homeDefEl && awayDefEl) {
+      // defensive_tactic 是当前防守方（对方）的战术名，归位到对侧
+      if (isHomePossession) {
+        awayDefEl.textContent = `守 · ${defensiveTactic}`;
+        homeDefEl.textContent = `守 · —`;
+      } else {
+        homeDefEl.textContent = `守 · ${defensiveTactic}`;
+        awayDefEl.textContent = `守 · —`;
+      }
+    }
     const allNames = eventNames(tick);
     const highlightNames = allNames.filter((name) =>
       HIGHLIGHT_EVENTS.has(name),
     );
-    const chip = $("eventChip");
     const overlay = $("eventOverlayChip");
     if (highlightNames.length) {
       const txt = highlightNames.map(getEventNameZh).join(" · ");
-      if (chip) {
-        chip.textContent = txt;
-        chip.classList.add("active");
-      }
       if (overlay) {
         overlay.textContent = txt;
         overlay.classList.add("active");
@@ -2191,14 +2182,16 @@
     const sc = finite(tick.shotClock);
     $("shotClock").textContent = one(tick.shotClock);
     $("shotClock").classList.toggle("urgent-shot-clock", sc <= 5 && sc > 0);
-    const flowText = String(tick.game_flow || "LIVE");
-    $("flowLabel").textContent = /Dead|Free|Quarter|Half|GameEnd/.test(flowText)
-      ? "鸣哨停表"
-      : "活球推进";
-    $("foulsReadout").textContent =
-      `${tick.team_fouls_home ?? 0} / ${tick.team_fouls_away ?? 0}`;
-    $("freeThrows").textContent = String(tick.free_throws_remaining ?? 0);
-    $("intensityReadout").textContent = getIntensityZh(tick.intensity);
+    // 犯规数各归各队块
+    $("homeFouls").textContent = String(tick.team_fouls_home ?? 0);
+    $("awayFouls").textContent = String(tick.team_fouls_away ?? 0);
+    // 罚球提示仅在有剩余罚球时出现
+    const ftChip = $("freeThrowChip");
+    const ftRemaining = Number(tick.free_throws_remaining ?? 0);
+    if (ftChip) {
+      ftChip.hidden = !(ftRemaining > 0);
+      ftChip.textContent = `罚球 ${ftRemaining}`;
+    }
     const callout = formatCalloutZh(tick.callout) || "—";
     if ($("calloutText").textContent !== callout) {
       $("calloutText").textContent = callout;
@@ -2208,8 +2201,41 @@
         $("calloutText").classList.add("callout-flash");
       }
     }
-    const dead = /Dead|Free|Quarter|Half|GameEnd/.test(String(tick.game_flow));
-    $("flowLabel").style.color = dead ? "var(--away)" : "";
+    updateFlowState(tick);
+  }
+
+  const GAME_FLOW_ZH = {
+    Pregame: "赛前",
+    TipOff: "跳球",
+    LiveBall: "活球",
+    DeadBall: "死球",
+    Timeout: "暂停",
+    FreeThrow: "罚球中",
+    QuarterEnd: "节末",
+    Halftime: "半场休息",
+    Overtime: "加时",
+    GameEnd: "全场结束",
+  };
+  const SUB_PHASE_ZH = {
+    Initiation: "回合发起",
+    ActionExecution: "阵地战术",
+    ShotAttempt: "出手飞行",
+    FlightAndRebound: "篮板争抢",
+    DeadBallReset: "死球重置",
+  };
+  // 字幕条状态词：game_flow 非 LiveBall 时显示流程状态，活球时显示回合内子阶段
+  function updateFlowState(tick) {
+    const el = $("flowStateLabel");
+    if (!el) return;
+    const flow = String(tick.game_flow || "LiveBall").replace(/^.*\("?/, "").replace(/"?\).*$/, "");
+    const isDead = flow !== "LiveBall";
+    if (isDead) {
+      el.textContent = GAME_FLOW_ZH[flow] || flow;
+    } else {
+      el.textContent = SUB_PHASE_ZH[tick.phase] || getPhaseZh(tick.phase);
+    }
+    el.classList.toggle("dead", isDead);
+    el.classList.toggle("idle", !state.ticks.length);
   }
 
   function renderFrameJson(tick) {
@@ -4064,14 +4090,6 @@
   function setControlsBusy(busy) {
     $("runButton").disabled = busy;
     $("fileInput").disabled = busy;
-    $("runRulesButton").disabled = busy;
-    $("loadRulesButton").disabled = busy;
-    for (const button of document.querySelectorAll("[data-preset]")) {
-      button.disabled = busy;
-    }
-    for (const button of document.querySelectorAll(".transport-group button")) {
-      button.disabled = busy;
-    }
     for (const button of document.querySelectorAll(".speed-group button")) {
       button.disabled = busy;
     }
@@ -4137,26 +4155,17 @@
     }
   }
   function setRulesStatus(text, error = false) {
-    $("rulesStatus").textContent = text;
-    $("rulesStatus").className = `rules-status ${error ? "error" : "success"}`;
-  }
-  async function runEditedRules() {
-    let rules;
-    try {
-      rules = JSON.parse($("rulesEditor").value);
-    } catch (error) {
-      setRulesStatus(`JSON 错误：${error.message}`, true);
-      return;
-    }
-    setRulesStatus("规则已解析，模拟运行中…");
-    const ok = await runSimulation(rules);
-    if (ok)
-      setRulesStatus(`完成：${state.ticks.length.toLocaleString()} ticks`);
+    const el = $("rulesStatus");
+    if (!el) return;
+    el.textContent = text;
+    el.className = `rules-status ${error ? "error" : "success"}`;
   }
   function applyPreset(name) {
+    const editor = $("rulesEditor") || $("sheetRulesEditor");
+    if (!editor) return;
     let rules;
     try {
-      rules = JSON.parse($("rulesEditor").value || "{}");
+      rules = JSON.parse(editor.value || "{}");
     } catch {
       rules = { ...state.rules };
     }
@@ -4178,7 +4187,7 @@
         finite(rules.contact_margin_ft, 0.6) * 1.5,
       );
     }
-    $("rulesEditor").value = JSON.stringify(rules, null, 2);
+    editor.value = JSON.stringify(rules, null, 2);
     setRulesStatus(`已载入 ${name.toUpperCase()} 预设，点击应用并重跑`);
   }
 
@@ -4316,18 +4325,8 @@
     // 规则预设按钮
     for (const btn of document.querySelectorAll(".sheet-preset-btn")) {
       btn.addEventListener("click", () => {
-        const preset = btn.dataset.rulesPreset;
-        applyPreset(preset);
-        if ($("sheetRulesEditor")) $("sheetRulesEditor").value = $("rulesEditor").value;
+        applyPreset(btn.dataset.rulesPreset);
         updateSettingsSummaryHint();
-      });
-    }
-
-    // 规则编辑框同步
-    const sheetRulesEditor = $("sheetRulesEditor");
-    if (sheetRulesEditor) {
-      sheetRulesEditor.addEventListener("input", () => {
-        if ($("rulesEditor")) $("rulesEditor").value = sheetRulesEditor.value;
       });
     }
 
@@ -4337,11 +4336,11 @@
       applyBtn.addEventListener("click", async () => {
         closeSettings();
         if (seedInput && sheetSeedInput) seedInput.value = sheetSeedInput.value;
-        if (sheetRulesEditor && $("rulesEditor")) $("rulesEditor").value = sheetRulesEditor.value;
         let rules = null;
+        const editor = $("sheetRulesEditor");
         try {
-          if ($("rulesEditor").value.trim()) {
-            rules = JSON.parse($("rulesEditor").value);
+          if (editor && editor.value.trim()) {
+            rules = JSON.parse(editor.value);
           }
         } catch (e) {
           console.warn("规则解析异常", e);
@@ -4355,10 +4354,7 @@
     if (!studio) return;
     const isHome = state.teamPerspective === "home";
     const setup = studio.default_setup;
-    const homeTeam = setup.home_team;
-    const awayTeam = setup.away_team;
-    const lineup = isHome ? setup.home_lineup : setup.away_lineup;
-    const currentTeam = isHome ? homeTeam : awayTeam;
+    const currentTeam = isHome ? setup.home_team : setup.away_team;
 
     // 同步种子与范围
     if ($("sheetSeedInput") && $("seedInput")) $("sheetSeedInput").value = $("seedInput").value;
@@ -4368,88 +4364,27 @@
     }
 
     // 同步规则编辑器内容
-    if ($("sheetRulesEditor") && $("rulesEditor")) {
-      $("sheetRulesEditor").value = $("rulesEditor").value;
+    if ($("sheetRulesEditor")) {
+      $("sheetRulesEditor").value = state.rules ? JSON.stringify(state.rules, null, 2) : "";
     }
 
-    // 同步队伍按钮
+    // 同步队伍按钮（战术 pane）
     const homeBtn = $("sheetTeamHomeBtn");
     const awayBtn = $("sheetTeamAwayBtn");
     if (homeBtn) homeBtn.classList.toggle("active", isHome);
     if (awayBtn) awayBtn.classList.toggle("active", !isHome);
-    const homeName = getTeamNameZh(homeTeam.id) || homeTeam.name;
-    const awayName = getTeamNameZh(awayTeam.id) || awayTeam.name;
+    const homeName = getTeamNameZh(setup.home_team.id) || setup.home_team.name;
+    const awayName = getTeamNameZh(setup.away_team.id) || setup.away_team.name;
     if ($("sheetHomeTeamName")) $("sheetHomeTeamName").textContent = `${homeName} (主队)`;
     if ($("sheetAwayTeamName")) $("sheetAwayTeamName").textContent = `${awayName} (客队)`;
 
-    // 渲染战术选项卡
-    renderSheetTactics(isHome ? "home" : "away", lineup);
-
-    // 渲染阵容列表
-    renderSheetRoster(currentTeam);
+    // 渲染战术板与阵容列表
+    renderBoard();
+    renderRoster();
+    syncRosterTeamButtons();
 
     // 更新底部简报
     updateSettingsSummaryHint();
-  }
-
-  function renderSheetTactics(side, lineup) {
-    const offContainer = $("sheetOffenseChoiceRow");
-    const defContainer = $("sheetDefenseChoiceRow");
-    if (!offContainer || !defContainer || !studio) return;
-
-    offContainer.replaceChildren(
-      ...studio.offense.map((item) => {
-        const btn = el(
-          "button",
-          `choice-card${item.id === lineup.offense_tactic ? " active" : ""}`,
-          el("strong", null, cleanTacticNameZh(item.name_zh)),
-          el("span", "choice-meta", getTacticDescZh(item.id))
-        );
-        btn.type = "button";
-        btn.addEventListener("click", async () => {
-          lineup.offense_tactic = item.id;
-          const next = studio.offense.find((t) => t.id === item.id);
-          const compatible = playsForTactic(next?.spec);
-          if (side === "home") studio.default_setup.home_playbook = compatible;
-          else studio.default_setup.away_playbook = compatible;
-          renderStudio();
-          syncSettingsCenter();
-          await runSimulation(null, true);
-        });
-        return btn;
-      })
-    );
-
-    defContainer.replaceChildren(
-      defenseGroupedRow(studio.defense, lineup.defense_tactic, async (id) => {
-        lineup.defense_tactic = id;
-        renderStudio();
-        syncSettingsCenter();
-        await runSimulation(null, true);
-      })
-    );
-  }
-
-  function renderSheetRoster(team) {
-    const startersBox = $("sheetStartersList");
-    const benchBox = $("sheetBenchList");
-    if (!startersBox || !benchBox || !team) return;
-
-    const players = team.players || [];
-    const starters = players.filter((p) => p.starter);
-    const bench = players.filter((p) => !p.starter);
-
-    const makeItem = (p) => {
-      const row = el("div", "sheet-roster-item");
-      row.append(
-        el("strong", null, `#${p.jersey} ${getPlayerNameZh(p.name)}`),
-        el("span", null, `${getPositionZh(p.position)} · ${getOffensiveRoleZh(p.offensive_role)}`)
-      );
-      return row;
-    };
-
-    startersBox.replaceChildren(...starters.map(makeItem));
-    benchBox.replaceChildren(...bench.map(makeItem));
   }
 
   function updateSettingsSummaryHint() {
@@ -4471,12 +4406,11 @@
         loadStream(await file.text(), file.name);
         setRunStatus(`${state.ticks.length.toLocaleString()} ticks`);
       } catch (error) {
-        setRunStatus("文件读取失败", true);
-        $("streamSummary").textContent = error.message;
+        setRunStatus(`文件读取失败：${error.message}`, true);
       }
     });
 
-    // 伴随式实时透视台选项卡 (Deck Tabs)
+    // 右栏分析面板选项卡 (Deck Tabs)
     for (const button of document.querySelectorAll(".deck-tab-button")) {
       button.addEventListener("click", () => {
         const tab = button.dataset.deckTab;
@@ -4493,54 +4427,37 @@
         if (tab === "anomalies") {
           renderAnomalies();
         }
+        if (tab === "shots") {
+          renderShotMap();
+        }
+        if (tab === "stats" && state.analytics) {
+          renderStats(state.analytics.stats);
+        }
+        if (tab === "frame" && state.ticks[state.idx]) {
+          renderFrameJson(state.ticks[state.idx]);
+        }
       });
     }
 
     $("anomalyBadge").addEventListener("click", () => {
       const anomaliesBtn = document.querySelector('.deck-tab-button[data-deck-tab="anomalies"]');
       if (anomaliesBtn) anomaliesBtn.click();
-      const panel = $("anomalyPanel");
-      if (panel) {
-        const open = panel.hidden;
-        panel.hidden = !open;
-        $("anomalyBadge").setAttribute("aria-expanded", String(open));
-      }
     });
 
-    // 底部研讨舱选项卡 (Studio Tabs)
-    for (const button of document.querySelectorAll(".tab-button")) {
-      button.addEventListener("click", () => {
-        state.currentTab = button.dataset.tab;
-        for (const item of document.querySelectorAll(".tab-button")) {
-          item.classList.toggle("active", item === button);
-        }
-        for (const pane of document.querySelectorAll(".tab-pane")) {
-          const active = pane.id === `tab-${state.currentTab}`;
-          pane.hidden = !active;
-          pane.classList.toggle("active", active);
-        }
-        const isTeamConfigTab = state.currentTab === "board" || state.currentTab === "roster";
-        const perspectiveBar = $("teamPerspectiveBar");
-        if (perspectiveBar) {
-          perspectiveBar.style.display = isTeamConfigTab ? "flex" : "none";
-        }
-        if (state.currentTab === "shots") renderShotMap();
-        if (state.currentTab === "stats" && state.analytics) renderStats(state.analytics.stats);
-        if (state.currentTab === "board") renderStudio();
-        if (state.currentTab === "frame" && state.ticks[state.idx]) {
-          renderFrameJson(state.ticks[state.idx]);
-        }
+    // 设置中心内阵容 pane 的球队切换按钮
+    const rosterHomeBtn = $("rosterTeamHomeBtn");
+    const rosterAwayBtn = $("rosterTeamAwayBtn");
+    if (rosterHomeBtn) {
+      rosterHomeBtn.addEventListener("click", () => {
+        setTeamPerspective("home");
+        syncRosterTeamButtons();
       });
     }
-
-    // 球队执教视角切换按钮 (主队 / 客队)
-    const perspectiveHomeBtn = $("perspectiveHomeBtn");
-    const perspectiveAwayBtn = $("perspectiveAwayBtn");
-    if (perspectiveHomeBtn) {
-      perspectiveHomeBtn.addEventListener("click", () => setTeamPerspective("home"));
-    }
-    if (perspectiveAwayBtn) {
-      perspectiveAwayBtn.addEventListener("click", () => setTeamPerspective("away"));
+    if (rosterAwayBtn) {
+      rosterAwayBtn.addEventListener("click", () => {
+        setTeamPerspective("away");
+        syncRosterTeamButtons();
+      });
     }
     $("prevPossessionButton").addEventListener("click", () =>
       possessionJump(-1),
@@ -4569,11 +4486,6 @@
           item.classList.toggle("active", item === button);
         }
       });
-    }
-    $("loadRulesButton").addEventListener("click", loadDefaultRules);
-    $("runRulesButton").addEventListener("click", runEditedRules);
-    for (const button of document.querySelectorAll("[data-preset]")) {
-      button.addEventListener("click", () => applyPreset(button.dataset.preset));
     }
     $("copyFrameButton").addEventListener("click", async () => {
       try {
@@ -4614,16 +4526,6 @@
     const uploadTrigger = $("uploadTriggerBtn");
     if (uploadTrigger) {
       uploadTrigger.addEventListener("click", () => $("fileInput").click());
-    }
-
-    for (const chip of document.querySelectorAll(".scope-chip")) {
-      chip.addEventListener("click", () => {
-        for (const c of document.querySelectorAll(".scope-chip")) {
-          c.classList.remove("active");
-        }
-        chip.classList.add("active");
-        $("scopeInput").value = chip.dataset.scope;
-      });
     }
     function handlePointer(clientX, clientY, canvas) {
       const rect = canvas.getBoundingClientRect();
@@ -4769,8 +4671,7 @@
     },
   };
   boot().catch((error) => {
-    setRunStatus("启动失败", true);
-    $("streamSummary").textContent = error.message;
+    setRunStatus(`启动失败：${error.message}`, true);
     console.error(error);
   });
 })();

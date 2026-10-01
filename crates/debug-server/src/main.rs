@@ -157,6 +157,16 @@ fn route(req: &Request, session: &SharedSession) -> Response {
             "application/javascript; charset=utf-8",
             static_page::JS.as_bytes().to_vec(),
         ),
+        ("GET", "/wasm/nba_wasm.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            static_page::WASM_JS.as_bytes().to_vec(),
+        ),
+        ("GET", "/wasm/nba_wasm_bg.wasm") => (
+            "200 OK",
+            "application/wasm",
+            static_page::WASM_BIN.to_vec(),
+        ),
         ("GET", "/api/rules") => match serde_json::to_vec_pretty(&GameRules::default()) {
             Ok(json) => ("200 OK", "application/json; charset=utf-8", json),
             Err(e) => internal_error(e.to_string()),

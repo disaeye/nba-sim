@@ -35,3 +35,9 @@ __pycache__/
 *.pyc
 .vercel
 .env*
+
+# UI 调试中间产物（本地验证脚本、样本轨迹、服务日志）
+/.uitest/
+/.debug-server.log
+/.sim-*.ndjson
+/.rules*.json

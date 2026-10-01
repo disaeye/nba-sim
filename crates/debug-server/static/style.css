@@ -58,12 +58,13 @@
   padding: 0;
 }
 
+/* 字号体系：基准 14px，最小 11px；数据类文本统一等宽对齐 */
 html,
 body {
   background-color: var(--bg-app);
   color: var(--text-primary);
   font-family: var(--font-body);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -317,17 +318,6 @@ body {
   flex-shrink: 0;
 }
 
-.stream-summary-pill {
-  padding: 4px 10px;
-  border-radius: var(--radius-full);
-  background: #f1f5f9;
-  border: 1px solid var(--border-subtle);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
 .btn-nav-icon {
   display: inline-flex;
   align-items: center;
@@ -403,23 +393,25 @@ body {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  padding: 8px 16px;
+  padding: 10px 18px;
   background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border-bottom: 1px solid var(--border-subtle);
-  gap: 10px;
+  gap: 12px;
   flex-shrink: 0;
 }
 
 .team-block {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
+  min-width: 0;
 }
 .team-block.away-team-block {
   align-items: flex-start;
 }
 .team-block.home-team-block {
   align-items: flex-end;
+  text-align: right;
 }
 
 .team-badge-pill {
@@ -453,7 +445,7 @@ body {
 
 .team-title {
   font-family: var(--font-display);
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 800;
   letter-spacing: 0.4px;
   color: var(--text-primary);
@@ -462,47 +454,44 @@ body {
 .team-extra-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-size: 11px;
 }
-.team-tactic-tag {
+.team-tactic-tag,
+.team-def-tag {
   color: var(--text-muted);
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
+}
+.team-def-tag {
+  color: var(--text-subtle);
 }
 .team-fouls-indicator {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 .team-fouls-indicator b {
   color: var(--text-secondary);
-}
-.team-badge-sub {
-  font-size: 9.5px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: rgba(148, 163, 184, 0.12);
-  color: var(--text-muted);
+  font-family: var(--font-mono);
 }
 
-/* 记分板居中时钟与比分群 */
+/* 记分牌中央：比分与时钟行 */
 .score-center-cluster {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
 }
 
-.clock-capsule {
+.clock-line {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px 10px;
-  border-radius: var(--radius-full);
-  background: #f1f5f9;
-  border: 1px solid var(--border-subtle);
+  gap: 7px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .period-indicator {
@@ -510,22 +499,37 @@ body {
   color: var(--text-secondary);
 }
 .clock-sep {
-  color: var(--text-muted);
+  color: var(--text-subtle);
 }
 .clock-time {
   font-weight: 700;
   color: var(--text-primary);
 }
+.possession-indicator {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
 .shot-clock-badge {
   font-weight: 800;
   color: var(--color-ball);
-  padding: 1px 6px;
+  padding: 0 6px;
   border-radius: 4px;
   background: rgba(234, 88, 12, 0.1);
 }
 .shot-clock-badge.urgent-shot-clock {
   color: #ffffff;
   background: var(--color-urgent);
+}
+
+/* 罚球提示：仅在剩余罚球 > 0 时渲染 */
+.free-throw-chip {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-ball);
+  padding: 0 7px;
+  border-radius: var(--radius-full);
+  background: rgba(234, 88, 12, 0.1);
+  font-variant-numeric: tabular-nums;
 }
 
 .score-display-row {
@@ -556,40 +560,6 @@ body {
   font-weight: 700;
   color: var(--text-muted);
   opacity: 0.5;
-}
-
-.match-status-sub-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  /* 状态胶囊文字长短随球权/战术切换变化，wrap 会让行数在临界区
-     来回跳变，记分牌高度随之波动并挤压球场容器（球场反复缩放）。
-     强制单行 + 溢出截断，高度恒定。 */
-  flex-wrap: nowrap;
-  overflow: hidden;
-  min-width: 0;
-  justify-content: center;
-}
-
-.match-flow-pill,
-.match-meta-pill,
-.free-throw-pill {
-  font-size: 10px;
-  padding: 2px 7px;
-  border-radius: var(--radius-full);
-  background: #f1f5f9;
-  color: var(--text-muted);
-  font-weight: 600;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.match-flow-pill {
-  color: var(--color-home);
-  background: var(--color-home-subtle);
-  border: 1px solid rgba(5, 150, 105, 0.25);
-}
-.free-throw-pill b {
-  color: var(--color-ball);
 }
 
 /* ==========================================================================
@@ -666,19 +636,6 @@ body {
 }
 .hud-indicator-dot.emerald {
   background: var(--color-home);
-}
-
-.hud-key-hints {
-  display: inline-flex;
-  align-items: center;
-  padding: 5px 9px;
-  border-radius: var(--radius-full);
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-muted);
-  font-size: 10.5px;
-  font-weight: 600;
-  user-select: none;
 }
 
 /* 浮动动态岛标签 */
@@ -759,43 +716,46 @@ body {
   color: var(--text-secondary);
 }
 
-/* 实时战况解说字幕条 */
+/* 实时战况解说字幕条：状态词 + 解说文字 */
 .subtitle-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 14px;
+  gap: 12px;
+  padding: 7px 16px;
   background: #f8fafc;
   border-top: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
-  font-size: 11.5px;
-  gap: 10px;
+  font-size: 12.5px;
   flex-shrink: 0;
+  min-height: 32px;
 }
 
-.subtitle-left-meta {
-  display: flex;
+/* 比赛状态词：game_flow / sub_phase 的中文映射，色点 + 文字 */
+.subtitle-state {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
-}
-.subtitle-badge {
-  font-size: 10px;
+  font-size: 11.5px;
   font-weight: 700;
-  padding: 2.5px 8px;
-  border-radius: var(--radius-xs);
-  background: rgba(37, 99, 235, 0.08);
-  border: 1px solid rgba(37, 99, 235, 0.2);
-  color: #2563eb;
-  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
-.event-inline-chip {
-  font-size: 11px;
-  font-weight: 600;
+.subtitle-state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-home);
+}
+.subtitle-state.dead::before {
+  background: var(--color-away);
+}
+.subtitle-state.idle {
   color: var(--text-muted);
 }
-.event-inline-chip.active {
-  color: var(--color-away);
+.subtitle-state.idle::before {
+  background: var(--text-subtle);
 }
 
 .subtitle-content {
@@ -812,15 +772,6 @@ body {
 @keyframes textFlash {
   0% { color: #2563eb; }
   100% { color: var(--text-secondary); }
-}
-
-.subtitle-right-meta {
-  flex-shrink: 0;
-}
-.subtitle-frame {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 /* ==========================================================================
@@ -888,14 +839,11 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 .progress-time-label {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-muted);
-}
-.progress-possession-label {
-  font-size: 10.5px;
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -921,11 +869,6 @@ body {
 .readout-icon-svg {
   color: var(--text-muted);
   flex-shrink: 0;
-}
-
-.empty-icon-svg {
-  color: var(--text-muted);
-  margin-bottom: 6px;
 }
 
 .transport-btns {
@@ -1045,7 +988,7 @@ body {
   background: #ffffff;
   border: 1px solid var(--border-subtle);
   color: var(--text-secondary);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -1069,7 +1012,7 @@ body {
   overflow: hidden;
 }
 
-.tactical-deck-card {
+.deck-card {
   background: var(--bg-surface);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-workbench);
@@ -1077,11 +1020,11 @@ body {
   border: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
-  flex: 0 0 310px;
+  flex: 1;
   min-height: 0;
 }
 
-/* 顶部伴随式选项卡导航 */
+/* 顶部选项卡导航：右栏唯一分组导航 */
 .deck-nav {
   display: flex;
   align-items: center;
@@ -1092,6 +1035,11 @@ body {
   border: 1px solid var(--border-subtle);
   gap: 3px;
   flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.deck-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .deck-tab-button {
@@ -1100,15 +1048,16 @@ body {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  padding: 5px 0;
+  padding: 6px 0;
   background: transparent;
   border: none;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   -webkit-tap-highlight-color: transparent;
 }
@@ -1123,7 +1072,7 @@ body {
 }
 
 .deck-tab-badge {
-  font-size: 10px;
+  font-size: 11px;
   padding: 1px 6px;
   border-radius: var(--radius-full);
   background: rgba(148, 163, 184, 0.18);
@@ -1251,13 +1200,13 @@ body {
 
 .event-clock-badge {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   color: #0f172a;
 }
 
 .event-possession-badge {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 4px;
@@ -1267,7 +1216,7 @@ body {
 }
 
 .event-tag {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   padding: 2px 7px;
   border-radius: var(--radius-full);
@@ -1391,7 +1340,7 @@ body {
 }
 .score-bar-value {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-muted);
   text-align: right;
 }
@@ -1414,7 +1363,7 @@ body {
 .chip {
   padding: 2px 7px;
   border-radius: var(--radius-full);
-  font-size: 10.5px;
+  font-size: 11px;
   background: #f1f5f9;
   color: var(--text-secondary);
 }
@@ -1493,117 +1442,8 @@ body {
 }
 
 /* ==========================================================================
-   7. 下半部：战术研讨舱与深度分析 (Tactical Studio & Deep Analytics)
+   7. 战术板内容样式 (供设置中心 pane-tactics 复用)
    ========================================================================== */
-
-.workbench-bottom-studio {
-  width: 100%;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.studio-card {
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-workbench);
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-/* 底部标签导航 */
-.segmented-nav {
-  display: flex;
-  align-items: center;
-  padding: 3px;
-  margin: 8px 10px 0;
-  background: var(--bg-surface-elevated);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  gap: 3px;
-  overflow-x: auto;
-  flex-shrink: 0;
-}
-
-/* 球队执教视角切换栏 (仅本队内部机密战术与专属资料) */
-.team-perspective-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 10px;
-  margin: 6px 10px 4px;
-  background: #f8fafc;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.perspective-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.perspective-badge {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 2px 7px;
-  border-radius: var(--radius-xs);
-  background: rgba(37, 99, 235, 0.08);
-  border: 1px solid rgba(37, 99, 235, 0.2);
-  color: #2563eb;
-  letter-spacing: 0.4px;
-}
-
-.team-perspective-tabs {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: #f1f5f9;
-  padding: 2px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--border-subtle);
-}
-
-.perspective-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-full);
-  font-family: var(--font-display);
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  -webkit-tap-highlight-color: transparent;
-}
-.perspective-btn:hover {
-  color: var(--text-primary);
-}
-.perspective-btn.active {
-  background: #ffffff;
-  color: var(--text-primary);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-}
-.perspective-btn[data-team="home"].active {
-  border: 1px solid rgba(5, 150, 105, 0.35);
-  color: #065f46;
-}
-.perspective-btn[data-team="away"].active {
-  border: 1px solid rgba(217, 119, 6, 0.35);
-  color: #92400e;
-}
 
 .perspective-dot {
   width: 7px;
@@ -1616,61 +1456,6 @@ body {
 }
 .perspective-dot.away-dot {
   background: var(--color-away);
-}
-
-.perspective-right {
-  display: flex;
-  align-items: center;
-}
-.perspective-privacy-hint {
-  font-size: 10.5px;
-  color: var(--text-muted);
-}
-
-.tab-button {
-  flex: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 5px 8px;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  font-family: var(--font-display);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  -webkit-tap-highlight-color: transparent;
-  white-space: nowrap;
-}
-.tab-button:hover {
-  color: var(--text-secondary);
-}
-.tab-button.active {
-  background: #ffffff;
-  color: #0284c7;
-  font-weight: 800;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
-}
-.tab-icon {
-  font-size: 13px;
-}
-
-.tab-content-card {
-  padding: 10px 12px;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.tab-pane {
-  display: none;
-}
-.tab-pane.active {
-  display: block;
 }
 
 /* ----------------- 战术板 (Tactic Board) ----------------- */
@@ -1701,7 +1486,7 @@ body {
   color: var(--text-primary);
 }
 .banner-team-tag {
-  font-size: 10.5px;
+  font-size: 11px;
   padding: 2px 7px;
   border-radius: var(--radius-full);
   background: #f1f5f9;
@@ -1719,7 +1504,7 @@ body {
   border: 1px solid rgba(217, 119, 6, 0.25);
 }
 .banner-privacy-badge {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-muted);
   display: flex;
   align-items: center;
@@ -1754,7 +1539,7 @@ body {
   padding-bottom: 6px;
 }
 .tactic-panel-title span {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
 }
@@ -1822,7 +1607,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 9.5px;
+  font-size: 11px;
   color: #94a3b8;
 }
 .chalkboard-legend span {
@@ -1836,7 +1621,7 @@ body {
   border: 1px solid rgba(37, 99, 235, 0.5);
   border-radius: var(--radius-xs);
   color: #60a5fa;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.18s ease;
@@ -1868,7 +1653,7 @@ body {
   gap: 6px;
 }
 .progression-rank {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 800;
   padding: 1px 5px;
   border-radius: var(--radius-xs);
@@ -1880,7 +1665,7 @@ body {
   color: var(--text-primary);
 }
 .progression-desc {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-muted);
   line-height: 1.35;
 }
@@ -1903,7 +1688,7 @@ body {
   line-height: 1.35;
 }
 .intel-tag {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 800;
   padding: 1px 5px;
   border-radius: var(--radius-xs);
@@ -1953,7 +1738,7 @@ body {
   border-radius: var(--radius-xs);
   background: #ffffff;
   border: 1px solid var(--border-subtle);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
   cursor: pointer;
@@ -1969,32 +1754,6 @@ body {
   border-color: #2563eb;
 }
 
-.studio-side {
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface-elevated);
-}
-.studio-side.home {
-  box-shadow: inset 3px 0 0 var(--color-home);
-}
-.studio-side.away {
-  box-shadow: inset 3px 0 0 var(--color-away);
-}
-
-.studio-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  align-items: baseline;
-}
-.studio-head strong {
-  font-size: 14px;
-  color: var(--text-primary);
-}
-.studio-head span,
 .choice-meta,
 .play-note {
   color: var(--text-muted);
@@ -2037,60 +1796,11 @@ body {
   font-size: 12px;
 }
 
-.court-mini {
-  position: relative;
-  height: 180px;
-  border-radius: var(--radius-sm);
-  background: linear-gradient(rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.06)), #0e2017;
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-}
-.court-mini::before {
-  content: "";
-  position: absolute;
-  inset: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 4px;
-}
-
-.slot-pin {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  min-width: 64px;
-  max-width: 92px;
-  padding: 3px 6px;
-  border-radius: var(--radius-full);
-  background: rgba(8, 10, 15, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: white;
-  font-size: 10px;
-  text-align: center;
-  transition: all 0.2s ease;
-}
-.slot-pin.slot-handler {
-  border-color: #f59e0b;
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
-}
-
-.court-mini-tag {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  padding: 2px 7px;
-  border-radius: var(--radius-xs);
-  background: rgba(15, 23, 42, 0.7);
-  color: #94a3b8;
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  z-index: 2;
-}
-
 .play-trigger-tag {
-  font-size: 9.5px;
+  font-size: 11px;
   color: #0284c7;
   background: rgba(2, 132, 199, 0.08);
-  padding: 1px 5px;
+  padding: 1px 6px;
   border-radius: var(--radius-xs);
   align-self: start;
   margin-top: 2px;
@@ -2114,7 +1824,7 @@ body {
   align-content: start;
 }
 .roster-group-label {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -2367,7 +2077,7 @@ body {
 }
 .stat-baseline {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-muted);
   text-align: right;
 }
@@ -2384,69 +2094,16 @@ body {
   background: var(--color-urgent);
 }
 
-/* ----------------- 规则与物理调测 ----------------- */
-.rules-editor-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.rules-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.rules-toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.rules-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.rules-preset-chips {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.preset-label {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.preset-chip {
-  padding: 3px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface-elevated);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.preset-chip:hover {
-  background: #f1f5f9;
-  color: var(--text-primary);
-  border-color: var(--border-medium);
-}
-
-.rules-btns {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.rules-status-badge {
+/* ----------------- 规则状态行 ----------------- */
+.rules-status {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
 }
-.rules-status-badge.error {
+.rules-status.error {
   color: var(--color-urgent);
 }
-.rules-status-badge.success {
+.rules-status.success {
   color: var(--color-home);
 }
 
@@ -2483,25 +2140,6 @@ body {
   background: #1d4ed8;
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
   transform: translateY(-1px);
-}
-
-#rulesEditor {
-  width: 100%;
-  height: 320px;
-  background: #ffffff;
-  color: #0f172a;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 14px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  resize: vertical;
-  outline: none;
-}
-#rulesEditor:focus {
-  border-color: var(--border-highlight);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
 }
 
 /* ----------------- 原始帧数据检视 ----------------- */
@@ -2766,7 +2404,7 @@ body {
   color: var(--text-primary);
 }
 .preset-mode-card span {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-muted);
   line-height: 1.3;
 }
@@ -2927,39 +2565,19 @@ body {
   display: inline-block;
 }
 
-/* 导航栏分组呈现 */
-.nav-group-cluster {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex: 1;
+/* 设置中心内嵌战术板容器 */
+.sheet-tactic-board {
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 12px;
 }
-.nav-group-badge {
-  font-size: 9.5px;
-  font-weight: 800;
-  padding: 1px 6px;
-  border-radius: var(--radius-xs);
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  flex-shrink: 0;
-  margin-right: 2px;
-}
-.nav-group-setup .nav-group-badge {
-  background: rgba(37, 99, 235, 0.08);
-  color: #2563eb;
-  border: 1px solid rgba(37, 99, 235, 0.18);
-}
-.nav-group-analytics .nav-group-badge {
-  background: rgba(100, 116, 139, 0.08);
-  color: #64748b;
-  border: 1px solid rgba(100, 116, 139, 0.18);
-}
-.nav-group-divider {
-  width: 1px;
-  height: 16px;
-  background: var(--border-medium);
-  margin: 0 4px;
-  flex-shrink: 0;
+
+.sheet-roster-studio {
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 12px;
 }
 
 .input-with-actions {
@@ -3002,11 +2620,6 @@ body {
   border-color: var(--border-highlight);
   color: var(--text-primary);
 }
-}
-.btn-full-primary:hover {
-  background: #1d4ed8;
-  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
-}
 
 /* ==========================================================================
    9. 响应式布局自适应 (Responsive Layout & Mobile Support)
@@ -3028,9 +2641,7 @@ body {
   .stage-column,
   .deck-column,
   .broadcast-stage-card,
-  .tactical-deck-card,
-  .workbench-bottom-studio,
-  .studio-card {
+  .deck-card {
     height: auto;
     overflow: visible;
   }
@@ -3039,7 +2650,7 @@ body {
     width: 100%;
     height: auto;
   }
-  .tactical-deck-card {
+  .deck-card {
     flex: none;
     min-height: 280px;
   }
@@ -3047,10 +2658,6 @@ body {
   .decision-panel-stream,
   .anomaly-panel-wrap {
     max-height: 380px;
-  }
-  .tab-content-card {
-    min-height: 320px;
-    overflow: visible;
   }
   .shots-studio-wrap {
     grid-template-columns: 1fr;
@@ -3088,20 +2695,17 @@ body {
     font-size: 15px;
   }
   .brand-badge {
-    font-size: 10px;
+    font-size: 11px;
     padding: 2px 7px;
   }
   .anomaly-pill-badge {
-    font-size: 10px;
+    font-size: 11px;
     padding: 2px 7px;
   }
   .nav-right-section {
     display: flex;
     align-items: center;
     gap: 6px;
-  }
-  .stream-summary-pill {
-    display: none; /* 移动端隐藏过长的桌面端推演摘要文字，由状态徽章承载 */
   }
   .btn-nav-icon {
     width: 32px;
@@ -3134,7 +2738,7 @@ body {
     font-size: 11px;
   }
   .cluster-label {
-    font-size: 10px;
+    font-size: 11px;
   }
   .btn-primary-action {
     padding: 5px 10px;
@@ -3150,10 +2754,8 @@ body {
     padding: 6px 8px;
     gap: 6px;
   }
-  .team-tactic-tag,
-  .team-badge-sub,
-  .match-status-sub-row {
-    display: none !important; /* 移动端彻底隐藏花哨冗余标签，回归极简纯粹转播画面 */
+  .team-def-tag {
+    display: none; /* 移动端隐藏防守标签，保留进攻与犯规 */
   }
   .team-block.away-team-block {
     align-items: flex-start;
@@ -3171,12 +2773,18 @@ body {
     letter-spacing: 0;
   }
   .team-fouls-indicator {
-    font-size: 9px;
+    font-size: 11px;
   }
-  .clock-capsule {
-    padding: 2px 8px;
-    font-size: 10px;
+  .clock-line {
+    font-size: 11px;
     gap: 4px;
+  }
+  .free-throw-chip {
+    font-size: 11px;
+    padding: 0 5px;
+  }
+  .possession-indicator {
+    font-size: 11px;
   }
   .score-display-row {
     gap: 8px;
@@ -3220,19 +2828,11 @@ body {
   /* 4. 战况字幕条 */
   .subtitle-bar {
     padding: 6px 10px;
-    gap: 6px;
+    gap: 8px;
+    font-size: 11.5px;
+  }
+  .subtitle-state {
     font-size: 11px;
-  }
-  .subtitle-badge {
-    font-size: 9.5px;
-    padding: 1px 5px;
-  }
-  .event-inline-chip {
-    font-size: 9.5px;
-    padding: 1px 5px;
-  }
-  .subtitle-frame {
-    font-size: 10px;
   }
 
   /* 5. 传输控制台触控尺寸达标 */
@@ -3244,7 +2844,7 @@ body {
     height: 18px; /* 加大触控操作槽 */
   }
   .timeline-ticks-layer {
-    font-size: 10px;
+    font-size: 11px;
   }
   .controller-actions {
     display: flex;
@@ -3287,7 +2887,7 @@ body {
   }
   .speed-btn {
     padding: 4px 6px;
-    font-size: 10px;
+    font-size: 11px;
     min-width: 28px;
   }
   .jump-frame-group {
@@ -3303,11 +2903,11 @@ body {
   .btn-jump-action {
     height: 28px;
     padding: 0 8px;
-    font-size: 10.5px;
+    font-size: 11px;
   }
 
-  /* 6. 伴随式透视台选项卡 */
-  .tactical-deck-card {
+  /* 6. 右栏分析面板选项卡 */
+  .deck-card {
     min-height: 280px;
   }
   .feed-timeline-stream,
@@ -3337,40 +2937,16 @@ body {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
   }
-  .feed-filter-btn {
+  .filter-chip {
     white-space: nowrap;
     flex-shrink: 0;
-    padding: 2px 7px;
-    font-size: 10px;
   }
-  .feed-item {
+  .event-row {
     padding: 6px 8px;
     gap: 6px;
-    font-size: 11.5px;
   }
 
-  /* 7. 底部分段导航栏：平滑横向滚动与防溢出 */
-  .segmented-nav {
-    display: flex;
-    flex-wrap: nowrap !important;
-    overflow-x: auto !important;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none; /* Firefox 隐藏滚动条 */
-    padding: 4px;
-    gap: 4px;
-    width: 100%;
-  }
-  .segmented-nav::-webkit-scrollbar {
-    display: none; /* WebKit 隐藏滚动条 */
-  }
-  .tab-button {
-    flex-shrink: 0 !important;
-    white-space: nowrap !important;
-    padding: 6px 12px;
-    font-size: 11.5px;
-  }
-
-  /* 8. 战术板与沙盘移动端单列自适应与防形变 */
+  /* 7. 战术板沙盘移动端单列自适应与防形变 */
   .tactic-three-grid {
     grid-template-columns: 1fr !important;
     gap: 12px;
@@ -3437,16 +3013,6 @@ body {
   }
   .trait-grid {
     grid-template-columns: repeat(2, 1fr);
-  }
-  .team-stats-grid {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-  .rule-group-grid {
-    grid-template-columns: 1fr;
-  }
-  .rules-editor-layout {
-    grid-template-columns: 1fr;
   }
 
   /* 10. 全维设置中心移动端自适应 */
