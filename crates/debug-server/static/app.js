@@ -259,18 +259,19 @@
     return getDecisionKindZh(kind);
   }
 
-  // 球员内部 ID（H_01/A_03）转「号码 · 中文名」；未知 ID 原样返回
+  // 球员内部 ID（H_01/A_03）转「号码 · 中文名」。studio 名单是名字的
+  // 权威来源；帧 players 不携带 name，仅能提供 jersey 兜底。
   function playerNameFromId(id) {
     if (!id) return "";
-    for (const tick of [state.ticks[state.idx], state.ticks[0]]) {
-      const player = (tick?.players || []).find((p) => p.id === id);
-      if (player) return `#${player.jersey} ${getPlayerNameZh(player.name || id)}`;
-    }
     const roster = studio?.default_setup;
     if (roster) {
       const all = [...(roster.home_team?.players || []), ...(roster.away_team?.players || [])];
       const found = all.find((p) => p.id === id);
       if (found) return `#${found.jersey} ${getPlayerNameZh(found.name)}`;
+    }
+    for (const tick of [state.ticks[state.idx], state.ticks[0]]) {
+      const player = (tick?.players || []).find((p) => p.id === id);
+      if (player) return `#${player.jersey} ${player.name || id}`;
     }
     return id;
   }
@@ -1687,12 +1688,26 @@
           violations: 0,
           fouls: 0,
           events: [],
+          eventDetails: [],
           retainedRebound: false,
         };
         possessionMap.set(id, possession);
       }
       possession.end = index;
       possession.events.push(...names);
+      // 回合内事件时间轴素材：本 tick 新增的领域事件（含参与者 payload）
+      if (Array.isArray(tick.event_log)) {
+        for (const entry of tick.event_log) {
+          possession.eventDetails.push({
+            index,
+            sequence: entry.sequence ?? 0,
+            time: finite(entry.time),
+            kind: entry.kind,
+            data: entry.data || null,
+          });
+        }
+        possession.eventDetails.sort((a, b) => a.sequence - b.sequence);
+      }
       possession.passes += names.filter((name) => name === "PASS").length;
       possession.shots += names.filter(
         (name) => name === "SHOT_RELEASE",
@@ -2409,6 +2424,83 @@
     foul: "犯规终止",
     other: "结束",
   };
+  // 回合内事件时间轴：按 event_log payload 生成可读描述
+  function describeFlowEvent(entry) {
+    const payload = entry.data ? entry.data[Object.keys(entry.data)[0]] : null;
+    const name = (id) => playerNameFromId(id);
+    switch (entry.kind) {
+      case "TIPOFF": return "中圈跳球";
+      case "TIPOFF_SECURED": return "跳球获得球权";
+      case "PLAY_ACTIVATED": {
+        const playId = payload?.play_id || "";
+        const play = studio?.plays?.find((p) => p.id === playId);
+        return `启动战术 · ${cleanTacticNameZh(play?.name_zh) || playId}`;
+      }
+      case "PASS": return `${name(payload?.passer_id)} 传给 ${name(payload?.receiver_id)}`;
+      case "PASS_RECEIVED": return `${name(payload?.receiver_id)} 接球`;
+      case "PASS_DROPPED": return `${name(payload?.receiver_id)} 没接住 ${name(payload?.passer_id)} 的传球`;
+      case "PASS_LANDING_CORRECTED": return `传球落点修正 · 偏差 ${one(finite(payload?.divergence_ft))} 英尺`;
+      case "SHOT_RELEASE": {
+        const three = payload?.is_three ? "三分出手" : "出手";
+        return `${name(payload?.shooter_id)} ${three} · 命中率 ${pct(finite(payload?.make_probability))}`;
+      }
+      case "SCORE": {
+        const three = payload?.is_three ? "三分命中" : "命中";
+        return `${name(payload?.shooter_id)} ${three}`;
+      }
+      case "SHOT_MISS": return `${name(payload?.shooter_id)} 出手未中`;
+      case "REBOUND": return `${name(payload?.rebounder_id)} 抢下${payload?.is_offensive ? "进攻" : "防守"}篮板`;
+      case "DRIVE_INITIATED": return `${name(payload?.driver_id)} 持球突破`;
+      case "DRIVE_SCORE": return `${name(payload?.driver_id)} 突破得分`;
+      case "DRIVE_STOPPED": return `${name(payload?.driver_id)} 突破被阻截`;
+      case "FOUL": return `${name(payload?.fouler_id)} 犯规 · ${name(payload?.fouled_player_id)} 被犯${payload?.is_shooting ? "（投篮动作）" : ""}`;
+      case "BALL_POKED_LOOSE": return `${name(payload?.defender_id)} 拍掉 ${name(payload?.handler_id)} 的球`;
+      case "LOOSE_BALL_SECURED": return `${name(payload?.player_id)} 控制活球`;
+      case "OUT_OF_BOUNDS": return `球出界 · ${name(payload?.responsible_player_id)} 责任`;
+      case "SCREEN_CONTACT": {
+        const legal = payload?.legal_position ? "合法掩护" : "掩护接触";
+        return `${name(payload?.player_a)} 与 ${name(payload?.player_b)} ${legal}`;
+      }
+      case "CONTACT_BUMP": return `${name(payload?.player_a)} 与 ${name(payload?.player_b)} 身体对抗`;
+      case "BALL_ORIENTATION": return `${name(payload?.player_id)} 调整背身朝向`;
+      case "ACTION_WINDOW_SHIFT": return `${name(payload?.player_id)} ${getActionZh(payload?.action_type)}`;
+      case "PHASE_TRANSITION": return `阶段流转：${FLOW_PHASE_ZH[payload?.from] || payload?.from} → ${FLOW_PHASE_ZH[payload?.to] || payload?.to}`;
+      case "PLACEMENT_APPLIED": return `${name(payload?.player_id)} 落位调整（${FLOW_PHASE_ZH[payload?.phase] || payload?.phase}）`;
+      case "POSSESSION_SUMMARY": {
+        const parts = [`回合结束 · ${one(finite(payload?.duration_seconds))} 秒`];
+        if (payload?.shooter_id) parts.push(`最后出手 ${name(payload.shooter_id)}`);
+        if (payload?.turnover_player_id) parts.push(`失误 ${name(payload.turnover_player_id)}`);
+        return parts.join(" · ");
+      }
+      default: return getEventNameZh(entry.kind) || entry.kind;
+    }
+  }
+  const FLOW_PHASE_ZH = {
+    SetPlay: "阵地战术",
+    Transition: "转换进攻",
+    DeadBall: "死球",
+    Inbound: "发球",
+    FreeThrow: "罚球",
+    SetPlayExecution: "战术执行",
+    DeadBallReset: "死球重置",
+    Initiation: "回合发起",
+    ActionExecution: "阵地战术",
+    ShotAttempt: "出手飞行",
+    FlightAndRebound: "篮板争抢",
+  };
+  // 回合内事件重要性分级：核心事件始终展示，底层物理事件折叠
+  const FLOW_EVENT_MAJOR = new Set([
+    "TIPOFF", "TIPOFF_SECURED", "PLAY_ACTIVATED", "PASS", "PASS_DROPPED",
+    "SHOT_RELEASE", "SCORE", "SHOT_MISS", "REBOUND", "DRIVE_INITIATED",
+    "DRIVE_SCORE", "DRIVE_STOPPED", "FOUL", "BALL_POKED_LOOSE",
+    "LOOSE_BALL_SECURED", "OUT_OF_BOUNDS", "POSSESSION_SUMMARY",
+  ]);
+  const expandedPossessions = new Set();
+  function togglePossessionExpand(possessionId) {
+    if (expandedPossessions.has(possessionId)) expandedPossessions.delete(possessionId);
+    else expandedPossessions.add(possessionId);
+    renderMatchOverview();
+  }
   function renderMatchOverview() {
     const list = $("matchFlowList");
     if (!list) return;
@@ -2420,10 +2512,11 @@
     }
     const fragment = document.createDocumentFragment();
     for (const possession of possessions) {
-      const row = el("button", `match-flow-row ${possession.result === "scored" ? "flow-scored" : possession.result === "turnover" ? "flow-turnover" : ""}`);
+      const row = el("button", `match-flow-row ${possession.result === "scored" ? "flow-scored" : possession.result === "turnover" ? "flow-turnover" : ""} ${expandedPossessions.has(possession.id) ? "flow-expanded" : ""}`);
       row.type = "button";
+      row.dataset.possessionId = String(possession.id);
       row.dataset.index = String(possession.start);
-      row.addEventListener("click", () => seek(possession.start));
+      row.addEventListener("click", () => togglePossessionExpand(possession.id));
 
       const offenseTeam = possession.offenseTeam === "home"
         ? $("homeTeamName")?.textContent || "主队"
@@ -2440,10 +2533,66 @@
 
       row.append(idEl, offenseSide, originEl, statEl, resultEl, scoreEl);
       fragment.append(row);
+
+      // 展开态：回合内事件时间轴
+      if (expandedPossessions.has(possession.id)) {
+        fragment.append(buildPossessionTimeline(possession));
+      }
     }
     list.replaceChildren(fragment);
     updateMatchFlowCursor();
     renderValidationSummary();
+  }
+  function buildPossessionTimeline(possession) {
+    const wrap = el("div", "flow-timeline");
+    const details = possession.eventDetails || [];
+    if (!details.length) {
+      wrap.append(el("div", "flow-timeline-empty muted-label", "该回合没有记录到领域事件"));
+      return wrap;
+    }
+    const majors = details.filter((entry) => FLOW_EVENT_MAJOR.has(entry.kind));
+    const minors = details.filter((entry) => !FLOW_EVENT_MAJOR.has(entry.kind));
+    const visible = expandedPossessions.has(`details:${possession.id}`) ? details : majors;
+
+    const line = el("div", "flow-timeline-list");
+    let lastTime = null;
+    for (const entry of visible) {
+      const item = el("button", `flow-event kind-${entry.kind.toLowerCase().replaceAll("_", "-")}`);
+      item.type = "button";
+      item.dataset.index = String(entry.index);
+      item.title = "点击跳到该事件所在帧";
+      // 时刻列：与上一事件同秒则留空避免重复
+      const clock = String(Math.floor(entry.time));
+      const timeEl = el("span", "flow-event-time", clock === String(lastTime) ? "" : `${clock}s`);
+      lastTime = Math.floor(entry.time);
+      item.append(
+        timeEl,
+        el("span", `flow-event-dot major-${FLOW_EVENT_MAJOR.has(entry.kind)}`),
+        el("span", "flow-event-text", describeFlowEvent(entry)),
+      );
+      item.addEventListener("click", (event) => {
+        event.stopPropagation();
+        seek(entry.index);
+      });
+      line.append(item);
+    }
+    wrap.append(line);
+
+    if (minors.length) {
+      const detailOpen = expandedPossessions.has(`details:${possession.id}`);
+      const toggle = el("button", "flow-timeline-toggle", detailOpen
+        ? `收起 ${minors.length} 条底层物理事件`
+        : `展开 ${minors.length} 条底层物理事件（接触/球位/落位调整）`);
+      toggle.type = "button";
+      toggle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (detailOpen) expandedPossessions.delete(`details:${possession.id}`);
+        else expandedPossessions.add(`details:${possession.id}`);
+        renderMatchOverview();
+      });
+      wrap.append(toggle);
+    }
+    return wrap;
   }
   function updateMatchFlowCursor() {
     const rows = $("matchFlowList")?.querySelectorAll(".match-flow-row") || [];
@@ -2455,6 +2604,18 @@
       if (active) current = row;
     }
     if (current) current.classList.add("flow-current");
+    // 展开的时间轴内：当前帧所在事件及之前的事件标为已发生，当前帧命中行高亮
+    const events = $("matchFlowList")?.querySelectorAll(".flow-event") || [];
+    for (const item of events) {
+      const entryIdx = Number(item.dataset.index);
+      item.classList.toggle("flow-event-past", entryIdx <= state.idx);
+      item.classList.remove("flow-event-current");
+    }
+    let currentEvent = null;
+    for (const item of events) {
+      if (Number(item.dataset.index) <= state.idx) currentEvent = item;
+    }
+    if (currentEvent) currentEvent.classList.add("flow-event-current");
   }
   function renderValidationSummary() {
     const box = $("validationSummary");

@@ -1223,6 +1223,112 @@ body {
 .match-flow-row.flow-past:not(.flow-current) {
   opacity: 0.72;
 }
+.match-flow-row.flow-expanded {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.match-flow-row .flow-origin::after {
+  content: "▸";
+  margin-left: 5px;
+  font-size: 10px;
+  color: var(--text-subtle);
+  transition: transform 0.15s ease;
+  display: inline-block;
+}
+.match-flow-row.flow-expanded .flow-origin::after {
+  transform: rotate(90deg);
+}
+
+/* 回合内事件时间轴（展开态） */
+.flow-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: -1px;
+  padding: 6px 12px 8px 26px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-top: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+.flow-timeline-list {
+  display: flex;
+  flex-direction: column;
+}
+.flow-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid var(--border-medium);
+  border-radius: 0;
+  font-size: 11.5px;
+  text-align: left;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s ease;
+  line-height: 1.4;
+}
+.flow-event:hover {
+  background: rgba(37, 99, 235, 0.06);
+  color: var(--text-primary);
+}
+.flow-event.flow-event-past {
+  border-left-color: #93c5fd;
+}
+.flow-event.flow-event-current {
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.flow-event-time {
+  width: 34px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.flow-event-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--border-medium);
+}
+.flow-event-dot.major-true {
+  background: #2563eb;
+}
+.flow-event-dot.major-false {
+  background: var(--border-medium);
+  opacity: 0.6;
+}
+.flow-event-text {
+  flex: 1;
+  min-width: 0;
+}
+.flow-timeline-empty {
+  padding: 8px 6px;
+  font-size: 11.5px;
+}
+.flow-timeline-toggle {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px dashed var(--border-medium);
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.flow-timeline-toggle:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
 .flow-id {
   font-family: var(--font-mono);
   font-weight: 700;
