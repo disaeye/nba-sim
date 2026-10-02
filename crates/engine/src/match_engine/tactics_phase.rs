@@ -159,6 +159,55 @@ impl MatchEngine {
             } => Some((inbounder_id.clone(), *baseline_pos)),
             _ => None,
         };
+        // 发球接应位（safety）：真实篮球发球必有接应人回到发球员身边。
+        // 人选按能力通道（handler_score 次高者，发球员本身是最高者），
+        // 落位点在发球点沿场地内侧方向 `inbound_safety_distance_ft`。
+        // 无状态推导（确定性、幂等，charter C4）；`inbound_safety_distance_ft
+        // = 0` 关闭机制。
+        let inbound_safety = inbounder_override.as_ref().and_then(|(inb_id, inb_pos)| {
+            let dist = self.config.rules.inbound_safety_distance_ft;
+            if dist <= f32::EPSILON {
+                return None;
+            }
+            let is_home_possession = self.flow.possession == Possession::Home;
+            // 场内侧方向：从界外发球点指向场内最近点的单位向量。
+            // 发球点在界外（depth>0），clamped 与 inb_pos 不重合，
+            // 归一化必然成功。
+            let court = self.config.rules.court;
+            let clamped = court.clamp_playable(*inb_pos, 0.0);
+            let inward = (clamped - *inb_pos)
+                .try_normalize()
+                .expect("inbounder release pos is out of bounds, direction to court is nonzero");
+            let spot = clamped + inward * dist;
+            // 接应人：进攻方除发球员外 handler_score 最高者。
+            let attacking_team = if is_home_possession { "home" } else { "away" };
+            let spec = if is_home_possession {
+                &self.config.home_offense_spec
+            } else {
+                &self.config.away_offense_spec
+            };
+            let safety_id = self
+                .systems
+                .physics
+                .get_players()
+                .values()
+                .filter(|p| p.on_court && p.team == attacking_team && p.id != *inb_id)
+                .max_by(|a, b| {
+                    let sa = nba_decision::tactics::TacticalPlanner::handler_score(
+                        spec,
+                        &a.attributes,
+                    );
+                    let sb = nba_decision::tactics::TacticalPlanner::handler_score(
+                        spec,
+                        &b.attributes,
+                    );
+                    sa.partial_cmp(&sb)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| b.id.cmp(&a.id))
+                })
+                .map(|p| p.id.clone())?;
+            Some((safety_id, spot))
+        });
         // 层 A（P-1 有限信息）：接球人**不得**直读传球人的冻结接球点。
         //
         // 旧实现把 `BallState::Pass.to_pos`（传球人的私有意图）直接注入接球人的
@@ -288,6 +337,14 @@ impl MatchEngine {
                 {
                     if inb_id == &player_id {
                         (*inb_pos, 15.0, "INBOUND_SETUP".to_string())
+                    } else if inbound_safety.as_ref().is_some_and(|(sid, _)| sid == &player_id) {
+                        let (_, spot) = inbound_safety.as_ref().unwrap();
+                        (
+                            *spot,
+                            self.config.rules.max_player_speed_ftps
+                                * self.config.rules.tactics.support_speed_ratio,
+                            "INBOUND_SAFETY".to_string(),
+                        )
                     } else if let Some((rx_id, rx_pos)) = &pass_receiver_override {
                         if rx_id == &player_id {
                             let (aim, spd) = self.receive_approach(*rx_pos, &player_id);

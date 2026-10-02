@@ -131,9 +131,10 @@ fn golden_baseline_seed42() {
 #[test]
 fn golden_window_covers_scoring_behaviour() {
     let mut engine = MatchEngine::new(42);
-    // v82 温度 0.12 后实测：首次 2 分 tick 474，首次 3 分 tick 4564，
-    // 取 5000 tick 留约 10% 余量覆盖两类出手。
-    let ticks = 5000usize;
+    // v82 温度 0.12 后实测：首次 2 分 tick 474，首次 3 分 tick 4564；
+    // v83 发球接应位后决策序列整体重排，首次三分推迟至 tick 7541，
+    // 取 8500 tick 留约 12% 余量覆盖两类出手。
+    let ticks = 8500usize;
     for _ in 0..ticks {
         engine.step();
     }
@@ -705,7 +706,11 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       0.30→0.12）：明显优势局面（效用差 ≥0.6）的选择命中率
 //       73%→99%，全场最高效用动作命中率 58.9%→80.8%；统计基线门
 //       全绿（回合节奏/得分结构在容差带内）。
-const GOLDEN_SEED42_2000: u64 = 0xd58e4eb28c1c6cb3;
+// v83 0x979efe0eefff2703 - 发球接应位（inbound_safety_distance_ft 8.0）：
+//       底线/边线发球时 handler_score 次高者回到发球员身边接球，
+//       23/23 发球窗口出现接应、17/17 完成短传（<15ft）；
+//       PASS_DROPPED 4→2，PASS_RECEIVED 51→66（seed42 1q）。
+const GOLDEN_SEED42_2000: u64 = 0x979efe0eefff2703;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

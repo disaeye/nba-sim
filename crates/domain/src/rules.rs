@@ -25,6 +25,11 @@ pub struct GameRules {
     pub estimated_possessions_per_period: u32,
     pub inbound_seconds: f32,
     pub inbound_setup_seconds: f32,
+    /// 底线/边线发球时接应人（safety）落位点距发球员的距离（ft）。
+    /// 真实篮球发球必有球队安排一名球员回到发球员身边接球：没有
+    /// 接应位时全队背对发球员拉开前场落位，发球只能选择 20~60ft
+    /// 的高风险长传。0 关闭接应机制。
+    pub inbound_safety_distance_ft: f32,
     pub backcourt_seconds: f32,
     pub period_break_seconds: f32,
     pub tactical_initiation_seconds: f32,
@@ -367,6 +372,7 @@ impl Default for GameRules {
             estimated_possessions_per_period: 35,
             inbound_seconds: 5.0,
             inbound_setup_seconds: 2.2,
+            inbound_safety_distance_ft: 8.0,
             backcourt_seconds: 8.0,
             period_break_seconds: 15.0,
             tactical_initiation_seconds: 6.5,
