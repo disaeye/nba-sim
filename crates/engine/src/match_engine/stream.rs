@@ -92,6 +92,7 @@ pub fn frame_rules_from_game_rules(rules: &GameRules) -> FrameRules {
         hoop_right_x_ft: rules.court.hoop_right_x_ft,
         hoop_y_ft: rules.court.hoop_y_ft,
         player_radius_ft: rules.player_radius_ft,
+        body_contact_radius_ft: rules.body_contact_radius_ft,
         min_player_separation_ft: rules.min_player_separation_ft,
         separation_safety_margin_ft: rules.separation_safety_margin_ft,
         max_player_speed_ftps: rules.max_player_speed_ftps,

@@ -267,6 +267,10 @@ pub struct FrameRules {
     pub hoop_right_x_ft: f32,
     pub hoop_y_ft: f32,
     pub player_radius_ft: f32,
+    /// 真实人体躯干半径（ft）：渲染层的「躯干内圆」半径来源，与
+    /// `player_radius_ft`（含臂展的碰撞包络）分属两个口径。
+    #[serde(default = "default_body_contact_radius")]
+    pub body_contact_radius_ft: f32,
     pub min_player_separation_ft: f32,
     #[serde(default)]
     pub separation_safety_margin_ft: f32,
@@ -288,6 +292,9 @@ pub struct FrameRules {
     pub ball_z_max_ft: f32,
 }
 
+fn default_body_contact_radius() -> f32 {
+    1.0
+}
 fn default_shot_clock() -> f32 {
     24.0
 }
@@ -323,6 +330,7 @@ impl Default for FrameRules {
             // C6.4：取 GameRules::default().player_radius_ft (1.8) 同源值。
             // 原值 1.0 是手抄漂移；全字段一致性测试在 engine/tests 守卫。
             player_radius_ft: 1.8,
+            body_contact_radius_ft: 1.0,
             min_player_separation_ft: 3.6,
             // C6.4：取 GameRules::default() (0.05) 同源值——第二个手抄漂移点，
             // 由 engine/tests 的全字段一致性测试抓出。

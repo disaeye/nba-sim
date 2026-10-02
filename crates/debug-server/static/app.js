@@ -21,6 +21,7 @@
     max_player_speed_ftps: 22,
     max_player_accel_ftps2: 35,
     player_radius_ft: 1.8,
+    body_contact_radius_ft: 1.0,
     min_player_separation_ft: 3.6,
     ball_max_speed_ftps: 85,
     rim_shot_distance_ft: 5,
@@ -65,6 +66,10 @@
       playerRadius: finite(
         rules.player_radius_ft,
         DEFAULT_RULES.player_radius_ft,
+      ),
+      bodyContactRadius: finite(
+        rules.body_contact_radius_ft,
+        DEFAULT_RULES.body_contact_radius_ft,
       ),
       minPlayerSeparation: finite(
         rules.min_player_separation_ft,
@@ -3214,9 +3219,11 @@
       const isHome = player.team === "home";
       const px = playerPoint.x;
       const py = playerPoint.y;
-      // 圆盘半径严格取引擎碰撞半径（player_radius_ft 默认 1.8ft，含臂展）。
-      // 10px = 1ft 的画布比例下 1.8ft → 18px：两名球员到达引擎最小分离
-      // 距离（3.6ft 圆心距）时圆盘恰好相切，视觉接触与物理接触对齐。
+      // 双圆物理对齐（10px = 1ft 画布比例）：
+      // 内圆 = body_contact_radius_ft（真实躯干半宽，默认 1ft → 10px），「人」；
+      // 外圈 = player_radius_ft（含臂展的碰撞包络，默认 1.8ft → 18px），「判定范围」。
+      // 两名球员到达引擎最小分离距离 3.6ft 圆心距时外圈恰好相切。
+      const contactRadius = rules.bodyContactRadius * 10;
       let radius = rules.playerRadius * 10;
 
       // 提取动作意图与动作窗口阶段
@@ -3297,8 +3304,9 @@
       const isJumpAction = isDunk || isLayup || isJumpShot || isBlock || isReboundJump || isStealLunge;
 
       let jumpHeight = 0; // 0.0 ~ 1.0 相对腾空高度
+      let maxLift = 0; // 各动作的腾空峰值（同时决定垂直位移量级）
       if (isJumpAction) {
-        let maxLift = 0.85;
+        // NBA 弹跳峰值 3~4ft：扣篮最高，抢断飞扑是低平扑救
         if (isDunk) maxLift = 1.0;
         else if (isBlock) maxLift = 0.95;
         else if (isReboundJump) maxLift = 0.9;
@@ -3307,7 +3315,7 @@
         else if (isStealLunge) maxLift = 0.65;
 
         if (actionPhase === "Preparation") {
-          // 起跳准备：屈膝蓄力，身体下沉（阴影略缩小，圆盘不变形）
+          // 起跳准备：屈膝蓄力，圆盘轻微下蹲压缩（阴影随之缩小）
           jumpHeight = 0;
           radius *= 0.92;
         } else if (actionPhase === "Execution") {
@@ -3321,18 +3329,20 @@
         }
       }
 
-      // 透视垂直位移与体量尺寸透视放大：位移量级必须达到「一个身位」
-      // （全场视角下 11px 无感知，30px ≈ 1.8 倍圆盘半径才显著）
-      const verticalLift = jumpHeight * 30;
+      // 腾空表达：影子不动，人动。俯视视角下高度靠空地分离 +
+      // 投影收缩（离天顶越远投影越小），位移为主信号。
+      // 位移量级与动作绑定：扣篮 36px、盖帽 34px、跳投 30px、飞扑 20px。
+      const jumpLiftPx = maxLift * 36;
+      const verticalLift = jumpHeight * jumpLiftPx;
       const renderPx = px;
       const renderPy = py - verticalLift; // 腾空后的圆盘中心
-      if (jumpHeight > 0) {
-        // 腾空透视：整体等比放大（保持正圆），落点由地面阴影与锚环表达
-        radius *= 1.0 + jumpHeight * 0.45;
-      }
+      // 腾空时圆盘等比缩小（最高 ×0.82），保持正圆；落地恢复原尺寸
+      const airShrink = 1.0 - jumpHeight * 0.18;
+      radius *= airShrink;
+      const isLanding = isJumpAction && actionPhase === "FollowThrough" && jumpHeight <= maxLift * 0.4;
 
-      // 2. 地面自然接触阴影 (椭圆透视 + 速度方向拉伸：动态效果全部留给阴影，
-      // 圆盘主体保持正圆物理对齐)
+      // 2. 地面自然接触阴影：椭圆透视 + 速度方向拉伸，留在地面不动。
+      // 腾空时阴影随高度扩散变淡（空地分离的关键参照）。
       ctx.beginPath();
       const shadowSpread = 1.0 + jumpHeight * 1.1;
       const shadowStretch = Math.min(1.25, 1.0 + curSpeed * 0.04);
@@ -3361,10 +3371,10 @@
         ctx.lineTo(renderPx, renderPy);
         ctx.stroke();
 
-        // 地面起跳落点锚环 (清晰指示起跳位置与身体落点)
+        // 地面起跳落点锚环：固定尺寸，作为「地面不动」的参照系
         ctx.setLineDash([]);
         ctx.beginPath();
-        ctx.ellipse(px, py + 2, 7.5 * shadowSpread, 3.8 * shadowSpread, 0, 0, Math.PI * 2);
+        ctx.ellipse(px, py + 2, 8.5, 4.3, 0, 0, Math.PI * 2);
         ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.65)" : "rgba(245, 158, 11, 0.65)";
         ctx.lineWidth = 1.3;
         ctx.stroke();
@@ -3593,23 +3603,30 @@
         ctx.restore();
       }
 
-      // 8. 圆盘主体（物理对齐：半径 = 引擎碰撞半径 player_radius_ft × 画布比例）
-      // 圆盘与背号不做任何非均匀缩放，跑动/起跳时始终保持正圆。
+      // 8. 双圆结构（全部物理对齐，正圆无拉伸）：
+      // 外圈 = 碰撞包络（radius，含臂展），细描边；
+      // 内圆 = 躯干（contactRadius），队色实心，「人」的本体。
       ctx.save();
       ctx.translate(renderPx, renderPy);
 
-      // 9. 战术圆盘主体：正圆，无拉伸
+      // 外圈：碰撞包络细描边（半透明，判定范围的视觉证据）
       ctx.beginPath();
       ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.fillStyle = isHome ? "#059669" : "#d97706";
-      ctx.fill();
-
-      // 队色边框 (持球人加粗至 3.2px 醒目标识)
-      ctx.strokeStyle = isHome ? "#10b981" : "#f59e0b";
-      ctx.lineWidth = player.hasBall ? 3.2 : 2.0;
+      ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.5)" : "rgba(245, 158, 11, 0.5)";
+      ctx.lineWidth = player.hasBall ? 2.4 : 1.4;
       ctx.stroke();
 
-      // 朝向指示微标：等腰三角，钉在圆盘边缘指向朝向
+      // 内圆：躯干本体，队色实心
+      ctx.beginPath();
+      ctx.arc(0, 0, contactRadius, 0, Math.PI * 2);
+      ctx.fillStyle = isHome ? "#059669" : "#d97706";
+      ctx.fill();
+      // 内圆描边（持球人加粗醒目）
+      ctx.strokeStyle = isHome ? "#10b981" : "#f59e0b";
+      ctx.lineWidth = player.hasBall ? 2.6 : 1.6;
+      ctx.stroke();
+
+      // 朝向指示微标：等腰三角，钉在碰撞包络边缘指向朝向
       ctx.save();
       ctx.rotate(facingAngle);
       ctx.beginPath();
@@ -3621,7 +3638,7 @@
       ctx.fill();
       ctx.restore();
 
-      // 持球人外围极细微自然提示环
+      // 持球提示环（超出碰撞包络 2.5px，与外圈区分）
       if (player.hasBall) {
         ctx.beginPath();
         ctx.arc(0, 0, radius + 3.5, 0, Math.PI * 2);
@@ -3630,8 +3647,7 @@
         ctx.stroke();
       }
 
-      // 背身姿态视觉：圆盘两侧张肘卡位短弧 + 盘下「背身」姿态标签
-      // （与面框三威胁的朝向三角形成直接的视觉对立语言）
+      // 背身姿态视觉：躯干两侧张肘卡位短弧 + 盘下「背身」姿态标签
       if (isBackToBasket) {
         const elbowColor = isHome ? "rgba(6, 95, 70, 0.85)" : "rgba(146, 64, 14, 0.85)";
         ctx.strokeStyle = elbowColor;
@@ -3656,8 +3672,8 @@
         ctx.fillText("面框", 0, radius + 6.5);
       }
 
-      // 纯白清晰数字背号 (居中，高对比度)
-      ctx.font = "700 11.5px monospace";
+      // 纯白清晰数字背号（居中于躯干内圆，高对比度）
+      ctx.font = "800 10px monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       const num =
@@ -3669,6 +3685,19 @@
       ctx.fillText(num, 0.5, 1.0);
       ctx.fillStyle = "#ffffff";
       ctx.fillText(num, 0, 0.5);
+
+      // 落地涟漪：FollowThrough 阶段一次性触发，从躯干扩到包络外圈
+      if (isLanding && jumpLiftPx > 0) {
+        const rippleProgress = 1 - jumpHeight / (maxLift * 0.35); // 0→1 随落地推进
+        const rippleR = contactRadius + (radius - contactRadius + 10) * rippleProgress;
+        ctx.beginPath();
+        ctx.arc(0, 0, rippleR, 0, Math.PI * 2);
+        ctx.strokeStyle = isHome
+          ? `rgba(16, 185, 129, ${(0.5 * (1 - rippleProgress)).toFixed(2)})`
+          : `rgba(245, 158, 11, ${(0.5 * (1 - rippleProgress)).toFixed(2)})`;
+        ctx.lineWidth = 2.0;
+        ctx.stroke();
+      }
 
       ctx.restore(); // 还原 translate(renderPx, renderPy)
 
@@ -4943,7 +4972,7 @@
       const x = ((clientX - rect.left) * canvas.width) / rect.width;
       const y = ((clientY - rect.top) * canvas.height) / rect.height;
       const hit = state.hitPlayers.find(
-        (item) => Math.hypot(item.x - x, item.y - y) < 26,
+        (item) => Math.hypot(item.x - x, item.y - y) < 20,
       );
       const tooltip = $("playerTooltip");
       if (!hit) {

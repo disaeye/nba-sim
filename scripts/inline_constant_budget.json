@@ -163,7 +163,7 @@
     "crates/physics/src/movement/kinematics.rs": 61,
     "crates/physics/src/movement/mod.rs": 29,
     "crates/physics/src/spatial.rs": 30,
-    "crates/protocol/src/frame.rs": 17,
+    "crates/protocol/src/frame.rs": 19,
     "crates/semantics/src/lib.rs": 48
   },
   "test_files": {
