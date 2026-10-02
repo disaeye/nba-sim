@@ -235,7 +235,28 @@ pub(super) fn make_motion_proposals(
             }
 
             // 将 APF 斥力加速度叠加进速度积分，再按纵向制动与横向抓地限制更新。
-            let apf_steered_vel = next_vel + apf_repulsion_accel * dt;
+            //
+            // ## 侧向偏转投影（发球回合实测缺陷修复）
+            //
+            // 斥力若原样叠加，其中与目标方向共线的逆向分量会直接对冲
+            // 速度幅值：贴防者以 min_separation 3.6ft 恒定贴住时，斥力
+            // 恒为 ~4.8 ft/s²，与 seek 的每帧修正量（total_limit =
+            // max_accel×dt ≈ 0.7 ft/s）形成稳态对抗，实测把落位跑动
+            // 压到 0.2~0.5 ft/s（seed42 Q1 11:04，SPOT_UP_3PT 目标在
+            // 75ft 外却全场钉死在后场）——「贴防」变成了「运动压制」。
+            //
+            // 真实行为是绕行：速度幅值不损失，方向避开障碍。因此把
+            // 斥力投影到目标方向的垂直平面后再叠加（切向逃逸），速度
+            // 幅值由 seek 保持，方向自然绕开。分离硬约束仍由
+            // resolve_motion_collisions 保证，不依赖斥力减速。
+            let apf_lateral = if next_vel.length_squared() > f32::EPSILON {
+                let dir = next_vel.normalize_or_zero();
+                let along = apf_repulsion_accel.dot(dir);
+                apf_repulsion_accel - dir * along
+            } else {
+                apf_repulsion_accel
+            };
+            let apf_steered_vel = next_vel + apf_lateral * dt;
             next_vel = traction_limited_velocity(
                 current_vel,
                 apf_steered_vel,

@@ -296,6 +296,24 @@ impl MatchEngine {
                     continue;
                 }
 
+                // 发球接应指派重置残留窗口：接应人与发球员是发球程序的
+                // 角色指派（placement 级别），若他们身上还挂着上一回合
+                // 的动作窗口（如篮板起跳准备），运动学锁会让他钉在原地
+                // ——实测 seed42 Q1 11:04 接应人被锁 48 tick 后又被
+                // APF 推到底线角，球过半场时全队 4 人滞留后场。
+                let is_inbound_program = matches!(
+                    &self.ball.ball_state,
+                    BallTrajectoryKind::InboundReady { .. }
+                        | BallTrajectoryKind::InboundTransfer { .. }
+                );
+                if is_inbound_program && self.observations.active_windows.contains_key(&player_id)
+                {
+                    self.observations.active_windows.remove(&player_id);
+                    self.systems
+                        .physics
+                        .set_player_locked(&player_id, false, None);
+                }
+
                 // If tactical assignment is setting a high screen, initialize a ScreenSet action window.
                 // 仅在已确立持球人时进入定点掩护，避免在争球或者无持球人阶段产生原地停摆。
                 let has_carrier = matches!(

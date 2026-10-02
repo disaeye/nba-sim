@@ -132,9 +132,10 @@ fn golden_baseline_seed42() {
 fn golden_window_covers_scoring_behaviour() {
     let mut engine = MatchEngine::new(42);
     // v82 温度 0.12 后实测：首次 2 分 tick 474，首次 3 分 tick 4564；
-    // v83 发球接应位后决策序列整体重排，首次三分推迟至 tick 7541，
-    // 取 8500 tick 留约 12% 余量覆盖两类出手。
-    let ticks = 8500usize;
+    // v83 发球接应位后决策序列整体重排，首次三分推迟至 tick 7541；
+    // v84 APF 侧向偏转 + 发球程序窗口重置后节奏再变：首次 2 分
+    // tick 693，首次三分 tick 9021，取 10000 tick 留约 10% 余量。
+    let ticks = 10000usize;
     for _ in 0..ticks {
         engine.step();
     }
@@ -710,7 +711,11 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       底线/边线发球时 handler_score 次高者回到发球员身边接球，
 //       23/23 发球窗口出现接应、17/17 完成短传（<15ft）；
 //       PASS_DROPPED 4→2，PASS_RECEIVED 51→66（seed42 1q）。
-const GOLDEN_SEED42_2000: u64 = 0x979efe0eefff2703;
+// v84 0x0eb2375cab44b264 - APF 斥力侧向偏转投影（贴防只偏转不减速，
+//       消除「贴防=运动压制」的稳态对抗：球前场+后场≥3人
+//       63帧→4帧）+ 发球程序窗口重置（接应人不再被上一回合
+//       动作窗口锁住运动学 48 tick）。
+const GOLDEN_SEED42_2000: u64 = 0x0eb2375cab44b264;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。
