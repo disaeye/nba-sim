@@ -173,7 +173,7 @@
     "crates/decision/src/tactics.rs": 1,
     "crates/domain/src/capability.rs": 108,
     "crates/domain/src/rules.rs": 12,
-    "crates/engine/src/match_engine/contests.rs": 77,
+    "crates/engine/src/match_engine/contests.rs": 78,
     "crates/evaluator/src/ledger.rs": 28,
     "crates/officiating/src/resolution.rs": 48,
     "crates/physics/src/ballistics.rs": 87
@@ -185,7 +185,7 @@
     "crates/decision/src/tactics.rs": 1,
     "crates/domain/src/capability.rs": 108,
     "crates/domain/src/rules.rs": 12,
-    "crates/engine/src/match_engine/contests.rs": 77,
+    "crates/engine/src/match_engine/contests.rs": 78,
     "crates/evaluator/src/ledger.rs": 28,
     "crates/officiating/src/resolution.rs": 48,
     "crates/physics/src/ballistics.rs": 87

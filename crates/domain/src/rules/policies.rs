@@ -964,7 +964,7 @@ impl Default for DecisionRules {
             pass_base: 1.15,
             dwell_base: 0.82,
             stamina_sensitivity: 0.5,
-            temperature: 0.30,
+            temperature: 0.12,
             pass_lead_time_seconds: 0.65,
             risk_aversion: 0.8,
             tendency_weight: 0.35,

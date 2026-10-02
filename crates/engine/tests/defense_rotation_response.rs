@@ -22,8 +22,13 @@ const RESPONSE_DISTANCE_FT: f32 = 0.5;
 /// 「已在护筐位置」口径（ft）：候选起点距篮筐小于此值时，他已经在协防位。
 /// 量级参考引擎 rim_help_radius_ft (12) 的内圈：真实篮下协防位。
 const ALREADY_AT_RIM_FT: f32 = 6.0;
-/// 引擎势能场唯一主动收缩动作（potential_field.rs 第 8 节动作涌现）。
+/// 引擎势能场的主动收缩动作族：轮转护筐（主动下沉）与弱侧协防
+/// （HelpAnchor 锚点收缩）。两者都是「向禁区收缩」的护筐语义
+/// （potential_field.rs 第 8 节动作涌现；tactics_phase 把两者并列
+/// 调速）。温度校准后防守分布在这两个标签间的占比变化属正常行为，
+/// 响应判定认语义（收缩量）不认单一标签。
 const ROTATE_RIM_HELP_ACTION: &str = "ROTATE_RIM_HELP";
+const HELP_SIDE_SHELL_ACTION: &str = "HELP_SIDE_SHELL";
 /// 防守落位判据：全部协防候选起点距篮筐超过三分线时，防守仍在退防途中，
 /// 阵地战弱侧协防语义不成立（转换段突破不考察收缩）。
 const SETTLED_DEFENSE_MAX_DISTANCE_FT: f32 = 30.0;
@@ -479,7 +484,9 @@ fn observe_game(seed: u64, rules: &GameRules) -> GameObservation {
                 .iter()
                 .any(|candidate| candidate.start_distance <= ALREADY_AT_RIM_FT);
             let rotated = drive.help_candidates.iter().any(|candidate| {
-                candidate.action.as_deref() == Some(ROTATE_RIM_HELP_ACTION)
+                let is_help_action = candidate.action.as_deref() == Some(ROTATE_RIM_HELP_ACTION)
+                    || candidate.action.as_deref() == Some(HELP_SIDE_SHELL_ACTION);
+                is_help_action
                     && candidate.start_distance > ALREADY_AT_RIM_FT
                     && candidate
                         .last_distance

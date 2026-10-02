@@ -653,12 +653,30 @@ impl MatchEngine {
                         .then_with(|| a.0.cmp(&b.0))
                 });
             } else {
-                squad.sort_by(|a, b| {
-                    (a.1 - landing)
-                        .length_squared()
-                        .partial_cmp(&(b.1 - landing).length_squared())
+                // 守方：卡位能力决定谁去堵位——bonus 高的球员视为
+                // 更近（有效距离 = 几何距离 × (1 − bonus × 权重)），
+                // 使 `defensive_rebound`/`strength` 属性经此处驱动
+                // 真实行为（wiring_proof 的能力接线门消费此路径）。
+                let discount = self.config.rules.resolve.rebound.boxout_distance_discount;
+                let effective = |id: &str, pos: Vec2| {
+                    let bonus = nba_domain::capability::effective_defensive_boxout_bonus(
+                        &self.config.rules,
+                        &self
+                            .systems
+                            .physics
+                            .get_player(id)
+                            .map(|p| p.attributes.clone())
+                            .unwrap_or_default(),
+                    );
+                    (pos - landing).length_squared() * (1.0 - bonus * discount)
+                };
+                squad.sort_by(|left, right| {
+                    let left_effective = effective(&left.0, left.1);
+                    let right_effective = effective(&right.0, right.1);
+                    left_effective
+                        .partial_cmp(&right_effective)
                         .unwrap_or(std::cmp::Ordering::Equal)
-                        .then_with(|| a.0.cmp(&b.0))
+                        .then_with(|| left.0.cmp(&right.0))
                 });
             }
             // 派若干名争抢：真实篮球里不是全队都冲抢，且全员挤向球的落点

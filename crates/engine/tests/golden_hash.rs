@@ -131,8 +131,9 @@ fn golden_baseline_seed42() {
 #[test]
 fn golden_window_covers_scoring_behaviour() {
     let mut engine = MatchEngine::new(42);
-    // 实测首个 3 分出手在 tick 3588，取 4000 tick 留约 10% 余量覆盖首个 2 分与 3 分
-    let ticks = 4000usize;
+    // v82 温度 0.12 后实测：首次 2 分 tick 474，首次 3 分 tick 4564，
+    // 取 5000 tick 留约 10% 余量覆盖两类出手。
+    let ticks = 5000usize;
     for _ in 0..ticks {
         engine.step();
     }
@@ -700,10 +701,11 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       不受残留动作锁阻塞（seed13 死锁 616s 修复）、
 //       defense_rotation_response 判定口径重构（分布带判定归还评判器
 //       与 stats_baseline，本测试保留行为断言）。
-// v81 0x98e328ff86ab7c63 - 打板反弹竖直弹起系数接入（backboard_vertical_
-//       restitution 0.45）：板反弹球触板后向上弹起（滞空 0.38s→1.1s），
-//       篮板回归空中争抢；落点分布随水平反弹距离外移（p50 0.9→4.7ft）。
-const GOLDEN_SEED42_2000: u64 = 0x98e328ff86ab7c63;
+// v82 0xd58e4eb28c1c6cb3 - 决策温度校准（DecisionRules.temperature
+//       0.30→0.12）：明显优势局面（效用差 ≥0.6）的选择命中率
+//       73%→99%，全场最高效用动作命中率 58.9%→80.8%；统计基线门
+//       全绿（回合节奏/得分结构在容差带内）。
+const GOLDEN_SEED42_2000: u64 = 0xd58e4eb28c1c6cb3;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。
