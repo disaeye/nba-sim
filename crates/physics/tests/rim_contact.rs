@@ -108,22 +108,23 @@ fn rim_rebound_mixed_distribution_matches_rebound_structure() {
     // 双通道实测（seed 42，本 mix）：本门出手全部沿 x 轴正对筐，距筐
     // ≥ 2.5 ft 的探针全命中（弦外推 z ∈ [9.5,13]），板通道份额 1.000，
     // 近筐沿通道在本门内份额为 0（其分布特征由分层门与方向门单测）。
-    // 打板反弹物理：竖直保持入射下落、水平 x 镜像 × 0.55，球直落板前，
-    // 实测 within6=1.000、within12=1.000、beyond12=0.000、p50≈0.92——
-    // 与真实打板打铁的篮板位置（Restricted Area 内被收走）一致。
+    // 打板反弹物理（竖直弹起系数 0.45）：球触板后向上弹起，滞空 ≈1.1s，
+    // 水平反弹距离随入射速度增长；实测 within6=0.60、within12=1.000、
+    // p50≈4.7ft——近投篮板仍在筐边收走，中远投打铁把球弹出 3~9ft，
+    // 给球员留出争抢窗口（与真实篮板位置结构一致）。
     assert!(
         (0.97..=1.0).contains(&bank_share),
         "bank share {bank_share} outside measured band"
     );
     assert!(
-        (0.97..=1.0).contains(&within6),
+        (0.45..=0.75).contains(&within6),
         "within-6ft share {within6} outside band"
     );
     assert!(
-        (0.999..=1.0).contains(&within12),
+        (0.95..=1.0).contains(&within12),
         "within-12ft share {within12} outside band"
     );
-    assert!(beyond12 < 0.01, "beyond-12ft share {beyond12} too fat");
+    assert!(beyond12 < 0.05, "beyond-12ft share {beyond12} too fat");
 }
 
 #[test]

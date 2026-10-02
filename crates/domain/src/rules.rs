@@ -88,6 +88,11 @@ pub struct GameRules {
     pub backboard_top_height_ft: f32,
     /// 触板后水平速度法向分量的恢复系数：镜像反射后整体乘该值。
     pub backboard_restitution: f32,
+    /// 触板后竖直方向的弹起系数：入射下落速度 × 此系数为向上弹起
+    /// 初速。真实板反弹球的竖直分量会损失大半但仍向上弹起（板面
+    /// 给球一个离开的冲量），0 意味着球贴板滑落、篮板失去争抢窗口。
+    #[serde(default = "default_backboard_vertical_restitution")]
+    pub backboard_vertical_restitution: f32,
     pub pass_peak_ft: f32,
     /// 传球抛体弧顶随距离的增长率（ft/ft）：胸口短传平快，
     /// 长传弧顶抬高（第一步飞行抛体化）。
@@ -350,6 +355,10 @@ fn default_separation_safety_margin_ft() -> f32 {
     0.05
 }
 
+fn default_backboard_vertical_restitution() -> f32 {
+    0.45
+}
+
 impl Default for GameRules {
     fn default() -> Self {
         Self {
@@ -405,6 +414,7 @@ impl Default for GameRules {
             backboard_bottom_height_ft: 9.5,
             backboard_top_height_ft: 13.0,
             backboard_restitution: 0.55,
+            backboard_vertical_restitution: 0.45,
             pass_peak_ft: 4.0,
             // 传球弧顶随距离增长：30 ft 传球弧顶 7 ft（抛体解出 T ≈ 0.86 s，
             // 球速 ≈ 38 ft/s，真实胸口传球量级）；50 ft 长传弧顶 9 ft。

@@ -671,16 +671,21 @@ impl BallisticsEngine {
             ProjectileArc::solve(rules.chest_height_ft, rules.rim_height_ft, t_flight, g);
         let vz_in = shot_arc.vz0 - g * t_flight;
         // 镜像反射：法向（x）翻转 × 恢复系数，切向（y）保持。
+        // 竖直：入射下落速度 × 板面弹起系数——真实板反弹球会向上弹起
+        // （竖直分量衰减但不归零），滞空 1~2s 给篮板争抢留出窗口；
+        // 保持入射下落速度会让球贴板滑落（滞空 0.4s），篮板全部
+        // 变成落地地板球。
+        let vz_out = -vz_in * rules.backboard_vertical_restitution;
         let v_out = Vec2::new(-v_in_h.x * rules.backboard_restitution, v_in_h.y);
         let contact_pos = Vec2::new(board_x, y_contact);
-        // 落点：从 (触板点, 触板高度) 以 (v_out, vz_in) 的抛体触地时刻解。
-        let discriminant = (vz_in * vz_in + 2.0 * g * z_contact).max(0.0);
-        let t_land = (vz_in + discriminant.sqrt()) / g;
+        // 落点：从 (触板点, 触板高度) 以 (v_out, vz_out) 的抛体触地时刻解。
+        let discriminant = (vz_out * vz_out + 2.0 * g * z_contact).max(0.0);
+        let t_land = (vz_out + discriminant.sqrt()) / g;
         let raw_landing = contact_pos + v_out * t_land;
         let margin = rules.player_radius_ft.max(0.0);
         let landing_pos = rules.court.clamp_playable(raw_landing, margin);
-        let peak_z = if vz_in > 0.0 {
-            z_contact + vz_in * vz_in / (2.0 * g)
+        let peak_z = if vz_out > 0.0 {
+            z_contact + vz_out * vz_out / (2.0 * g)
         } else {
             // 竖直保持下落：反弹后不再升起，弧顶即触板高度。
             z_contact
