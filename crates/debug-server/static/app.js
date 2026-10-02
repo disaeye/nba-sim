@@ -3214,7 +3214,10 @@
       const isHome = player.team === "home";
       const px = playerPoint.x;
       const py = playerPoint.y;
-      let radius = 14.5;
+      // 圆盘半径严格取引擎碰撞半径（player_radius_ft 默认 1.8ft，含臂展）。
+      // 10px = 1ft 的画布比例下 1.8ft → 18px：两名球员到达引擎最小分离
+      // 距离（3.6ft 圆心距）时圆盘恰好相切，视觉接触与物理接触对齐。
+      let radius = rules.playerRadius * 10;
 
       // 提取动作意图与动作窗口阶段
       const actionRaw = String(player.action || "").toUpperCase();
@@ -3225,7 +3228,7 @@
       const isDribbleDrive = isCrossover || actionRaw.includes("DRIVE") || actionRaw.includes("ADVANCE") || actionRaw.includes("INITIATE") || actionRaw.includes("DRIBBLE");
       const isScreen = actionRaw.includes("SCREEN") || actionRaw.includes("SET_HIGH_SCREEN");
       const isContest = actionRaw.includes("CONTEST") || actionRaw.includes("DROP_CONTAIN") || actionRaw.includes("HELP_SIDE") || actionRaw.includes("CLOSEOUT");
-      // 步频周期震荡（支撑高速跑动与运球动感节奏）
+      // 步频周期震荡（运球触地脉冲的节奏源）
       const gaitCycle = curSpeed > 0.4 ? (state.idx * 0.45 + (Number(player.number) || 1) * 1.5) : 0;
       const gaitPulse = Math.sin(gaitCycle);
 
@@ -3304,9 +3307,9 @@
         else if (isStealLunge) maxLift = 0.65;
 
         if (actionPhase === "Preparation") {
-          // 起跳准备：屈膝蓄力，身体下沉
-          radius -= 1.4;
+          // 起跳准备：屈膝蓄力，身体下沉（阴影略缩小，圆盘不变形）
           jumpHeight = 0;
+          radius *= 0.92;
         } else if (actionPhase === "Execution") {
           // 腾空发力：达到起跳峰值高度
           jumpHeight = maxLift;
@@ -3324,10 +3327,12 @@
       const renderPx = px;
       const renderPy = py - verticalLift; // 腾空后的圆盘中心
       if (jumpHeight > 0) {
-        radius = radius * (1.0 + jumpHeight * 0.45); // 透视放大（扈篮是 1.45x）
+        // 腾空透视：整体等比放大（保持正圆），落点由地面阴影与锚环表达
+        radius *= 1.0 + jumpHeight * 0.45;
       }
 
-      // 2. 地面自然接触阴影 (起跳时阴影留在地面原点，并随高度扩散淡化)
+      // 2. 地面自然接触阴影 (椭圆透视 + 速度方向拉伸：动态效果全部留给阴影，
+      // 圆盘主体保持正圆物理对齐)
       ctx.beginPath();
       const shadowSpread = 1.0 + jumpHeight * 1.1;
       const shadowStretch = Math.min(1.25, 1.0 + curSpeed * 0.04);
@@ -3588,17 +3593,23 @@
         ctx.restore();
       }
 
-      // 8. 奔跑动感切向微拉伸 (Locomotion Stretch)
+      // 8. 圆盘主体（物理对齐：半径 = 引擎碰撞半径 player_radius_ft × 画布比例）
+      // 圆盘与背号不做任何非均匀缩放，跑动/起跳时始终保持正圆。
       ctx.save();
       ctx.translate(renderPx, renderPy);
-      if (curSpeed > 0.6) {
-        const moveAng = Math.atan2(curVy, curVx);
-        ctx.rotate(moveAng);
-        ctx.scale(1.0 + Math.min(0.12, curSpeed * 0.015), 1.0 - Math.min(0.06, curSpeed * 0.008));
-        ctx.rotate(-moveAng);
-      }
 
-      // 稳重专业的朝向指示微标 (等腰三角，长 7px，全场视角可辨认)
+      // 9. 战术圆盘主体：正圆，无拉伸
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fillStyle = isHome ? "#059669" : "#d97706";
+      ctx.fill();
+
+      // 队色边框 (持球人加粗至 3.2px 醒目标识)
+      ctx.strokeStyle = isHome ? "#10b981" : "#f59e0b";
+      ctx.lineWidth = player.hasBall ? 3.2 : 2.0;
+      ctx.stroke();
+
+      // 朝向指示微标：等腰三角，钉在圆盘边缘指向朝向
       ctx.save();
       ctx.rotate(facingAngle);
       ctx.beginPath();
@@ -3609,18 +3620,6 @@
       ctx.fillStyle = isHome ? "#059669" : "#d97706";
       ctx.fill();
       ctx.restore();
-
-      // 9. 战术圆盘徽章主体 (Pro Tactical Disc - 清新活力运动风格)
-      // 主队：鲜活薄荷翡翠绿；客队：明媚阳光琥珀金
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.fillStyle = isHome ? "#059669" : "#d97706";
-      ctx.fill();
-
-      // 队色边框 (持球人加粗至 3.2px 醒目标识)
-      ctx.strokeStyle = isHome ? "#10b981" : "#f59e0b";
-      ctx.lineWidth = player.hasBall ? 3.2 : 2.0;
-      ctx.stroke();
 
       // 持球人外围极细微自然提示环
       if (player.hasBall) {
@@ -3643,14 +3642,14 @@
         ctx.beginPath();
         ctx.arc(0, 0, radius + 5.0, 0.0, Math.PI * 0.32);
         ctx.stroke();
-        ctx.font = "800 10.5px system-ui, sans-serif";
+        ctx.font = "800 11px system-ui, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
         ctx.fillStyle = elbowColor;
         ctx.fillText("背身", 0, radius + 6.5);
       } else if (player.hasBall && !isShooting) {
         // 面框三威胁：盘下细微姿态标签，与背身标签对称
-        ctx.font = "600 9.5px system-ui, sans-serif";
+        ctx.font = "600 11px system-ui, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
         ctx.fillStyle = isHome ? "rgba(6, 95, 70, 0.55)" : "rgba(146, 64, 14, 0.55)";
@@ -3701,7 +3700,7 @@
       const posTagY = renderPy + radius + 9;
       ctx.font = isDynamicAction
         ? "800 11px system-ui, -apple-system, sans-serif"
-        : "700 10.5px system-ui, -apple-system, sans-serif";
+        : "700 11px system-ui, -apple-system, sans-serif";
       const posTagW = ctx.measureText(tagText).width + 10;
       const homeFill = isHome ? "rgba(6, 95, 70, 0.95)" : "rgba(146, 64, 14, 0.95)";
       let tagFill = "rgba(255, 255, 255, 0.92)";
@@ -4032,7 +4031,7 @@
     // 中间标签
     ctx.fillStyle = "#64748b";
     ctx.textAlign = "center";
-    ctx.font = "600 9.5px system-ui, -apple-system, sans-serif";
+    ctx.font = "600 11px system-ui, -apple-system, sans-serif";
     ctx.fillText("空间控制", 500, hudY + 9);
 
     // 主队控制率 (右侧，薄荷翡翠绿)
