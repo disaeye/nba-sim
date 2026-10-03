@@ -3180,7 +3180,14 @@
         ctx.restore();
       }
 
-      if (player.target_x !== undefined && player.target_y !== undefined) {
+      // 跑位目标虚线：与势能场共用显幁开关。全体球员逐帧画目标线
+      // 在默认视角下是纯噪音（球场除人球外最多余的元素），只有
+      // 打开「势能场」才展示战术意图层。
+      if (
+        state.potentialFieldVisible &&
+        player.target_x !== undefined &&
+        player.target_y !== undefined
+      ) {
         const targetPt = point(
           finite(player.target_x) * rules.courtWidth,
           finite(player.target_y) * rules.courtHeight,
@@ -3226,15 +3233,27 @@
       const contactRadius = rules.bodyContactRadius * 10;
       let radius = rules.playerRadius * 10;
 
-      // 提取动作意图与动作窗口阶段
+      // 提取动作意图与动作窗口阶段。
+      // action_phase 是引擎动作窗口的权威信号：球员在 JumpShot/Block/
+      // ReboundJump 等窗口内时才有值，无窗口时字段缺失。腾空/封盖等
+      // 动力学渲染只允许由它触发——用 action 字符串猜测会把
+      // SPOT_UP_3PT（含 "3PT"）误判成干拔跳投、把 HELP_SIDE_SHELL
+      // （含 "HELP"）误判成封盖，无球站位球员被画成腾空 + 错误标签
+      // （seed42 Q1 11:34 实测）。
       const actionRaw = String(player.action || "").toUpperCase();
-      const actionPhase = String(player.action_phase || "Execution");
+      const hasActionWindow = player.action_phase !== undefined && player.action_phase !== null;
+      const actionPhase = String(player.action_phase || "");
 
-      const isShooting = actionRaw.includes("SHOT") || actionRaw.includes("3PT") || actionRaw.includes("LAYUP");
+      // 投篮姿态（朝向锁定、瞄准线）同样只由动作窗口触发；
+      // 含 "3PT" 的站位动作（SPOT_UP_3PT）不是投篮。
+      const isShooting = hasActionWindow && (actionRaw.endsWith("SHOT") || actionRaw.includes("LAYUP"));
       const isCrossover = actionRaw.includes("CROSSOVER") || actionRaw.includes("BETWEENTHELEGS");
       const isDribbleDrive = isCrossover || actionRaw.includes("DRIVE") || actionRaw.includes("ADVANCE") || actionRaw.includes("INITIATE") || actionRaw.includes("DRIBBLE");
-      const isScreen = actionRaw.includes("SCREEN") || actionRaw.includes("SET_HIGH_SCREEN");
-      const isContest = actionRaw.includes("CONTEST") || actionRaw.includes("DROP_CONTAIN") || actionRaw.includes("HELP_SIDE") || actionRaw.includes("CLOSEOUT");
+      const isScreen = hasActionWindow && actionRaw.includes("SCREEN");
+      // 干扰罩只在真实干扰窗口（CloseoutContest / 封堵）内绘制；
+      // HELP_SIDE_SHELL、DROP_CONTAIN 是常驻协防站位，逐帧画弧
+      // 只是视觉噪音（防守人两侧的「横线」来源）。
+      const isContest = hasActionWindow && (actionRaw.includes("CONTEST") || actionRaw.includes("CLOSEOUT") || actionRaw.includes("DROP_CONTAIN"));
       // 步频周期震荡（运球触地脉冲的节奏源）
       const gaitCycle = curSpeed > 0.4 ? (state.idx * 0.45 + (Number(player.number) || 1) * 1.5) : 0;
       const gaitPulse = Math.sin(gaitCycle);
@@ -3295,12 +3314,15 @@
       // 真实三维起跳腾空动力学系统 (Aerial Elevation & Jump Kinetics)
       // 覆盖投篮、上篮、扣篮、抢篮板、盖帽、抢断突扑等核心发力动作
       // ========================================================
-      const isDunk = actionRaw.includes("DUNK");
-      const isLayup = actionRaw.includes("LAYUP") || actionRaw.includes("FLOATER") || actionRaw.includes("HOOK");
-      const isJumpShot = actionRaw.includes("JUMP") || actionRaw.includes("3PT") || actionRaw.includes("SHOT") || actionRaw.includes("PULLUP");
-      const isBlock = actionRaw.includes("BLOCK") || (actionRaw.includes("HELP") && actionPhase === "Execution");
-      const isReboundJump = actionRaw.includes("REBOUND") || actionRaw.includes("CRASH");
-      const isStealLunge = actionRaw.includes("STEAL") || actionRaw.includes("POKE") || actionRaw.includes("LOOSE");
+      const isDunk = hasActionWindow && actionRaw.includes("DUNK");
+      const isLayup = hasActionWindow && (actionRaw.includes("LAYUP") || actionRaw.includes("FLOATER") || actionRaw.includes("HOOK"));
+      // 跳投窗口期的动作名都以 Shot 结尾（JumpShot/ThreePointShot/
+      // StepBackShot/PullUpShot/TurnaroundFadeaway），与引擎自身的
+      // 窗口分类口径一致（action_windows.rs 的 ends_with("Shot")）。
+      const isJumpShot = hasActionWindow && actionRaw.endsWith("SHOT");
+      const isBlock = hasActionWindow && actionRaw.includes("BLOCK");
+      const isReboundJump = hasActionWindow && (actionRaw.includes("REBOUND") || actionRaw.includes("CRASH"));
+      const isStealLunge = hasActionWindow && (actionRaw.includes("STEAL") || actionRaw.includes("POKE") || actionRaw.includes("LOOSE"));
       const isJumpAction = isDunk || isLayup || isJumpShot || isBlock || isReboundJump || isStealLunge;
 
       let jumpHeight = 0; // 0.0 ~ 1.0 相对腾空高度
