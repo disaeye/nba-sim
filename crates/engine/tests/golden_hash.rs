@@ -725,7 +725,12 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 // v86 0x38afa7998fc1399f - 切球不应期（poke_recovery_seconds 1.5s）：
 //       持球人被拍掉球后的短时间内不再评估新切球，消除「松球
 //       滚回被收起的下一秒立即连拍」（实测最小 poke 间隔 1s→2s）。
-const GOLDEN_SEED42_2000: u64 = 0x38afa7998fc1399f;
+// v87 0x9bb6b0a8117f4f8a - 切球率对真实标定（poke_attempt_rate_per_sec
+//       2.2→0.8）：松球物理修正后贴身时间大增，原参数使拍球事件
+//       达每场约 80 次（真实 NBA 全场地板球约 24~30），球落地
+//       场景过密。标定后 1q 6 次（全场约 24），LOOSE_BALL 帧占比
+//       3.0%→1.9%。
+const GOLDEN_SEED42_2000: u64 = 0x9bb6b0a8117f4f8a;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

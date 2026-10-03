@@ -161,7 +161,7 @@ impl Default for BallSecurityPolicy {
             // round-16 标定（A/B 证据 §17.7）：0.55 → 2.2。
             // 失误率取真实值：丢球占比 24%(r1.5)/40%(r3.0) 的插值点，
             // 丢球率 0.078/回合 ≈ 真实 0.0776（82games 53.6% × 0.145）。
-            poke_attempt_rate_per_sec: 2.2,
+            poke_attempt_rate_per_sec: 0.8,
             poke_success_ceiling: 0.16,
             poke_success_floor: 0.008,
             poke_defender_skill_weight: 0.55,
