@@ -411,7 +411,16 @@ impl MatchEngine {
         };
         let mut next_vel_z = vel_z - self.config.rules.ball_gravity_ftps2 * ctx.dt;
         let mut next_z = z + next_vel_z * ctx.dt;
-        let mut next_vel = vel * self.config.rules.ball_velocity_retention;
+        // 滚动摩擦：恒定减速度沿当前速度方向衰减（物理上木地板对
+        // 滚动球近似恒定摩擦力；逐 tick 指数衰减是空气阻力模型，
+        // 会让球 0.3s 内减速到爬行，争抢窗口消失）。
+        let speed = vel.length();
+        let mut next_vel = if speed > f32::EPSILON {
+            let decel = self.config.rules.loose_ball_rolling_decel_ftps2 * ctx.dt;
+            (vel / speed) * (speed - decel).max(0.0)
+        } else {
+            vel
+        };
         if next_z <= 0.0 {
             // 地面碰撞反弹：反弹恢复系数 e = 0.70，地面摩擦衰减
             next_z = 0.0;
@@ -421,15 +430,36 @@ impl MatchEngine {
         let reach = self.config.rules.player_radius_ft + self.config.rules.defender_reach_ft;
         let home_jumper = self.select_jumper_id(Possession::Home);
         let away_jumper = self.select_jumper_id(Possession::Away);
-        let mut candidates =
-            self.systems
-                .physics
-                .query_nearby(pos, reach, &nba_physics::EntityFilter::Any);
+        let mut candidates: Vec<(String, f32)> = self
+            .systems
+            .physics
+            .query_nearby(pos, reach, &nba_physics::EntityFilter::Any)
+            .into_iter()
+            .map(|id| {
+                let dist = self
+                    .systems
+                    .physics
+                    .get_player(&id)
+                    .map(|p| (p.pos_ft - pos).length())
+                    .unwrap_or(f32::INFINITY);
+                (id, dist)
+            })
+            .collect();
         // 真实规则：跳球员在球触地或被其他人触及前，严禁直接控球
         if z > 0.5 {
-            candidates.retain(|id| *id != home_jumper && *id != away_jumper);
+            candidates.retain(|(id, _)| *id != home_jumper && *id != away_jumper);
         }
-        candidates.sort();
+        // 收球竞争按真实距离排序（id 仅作同距的确定性 tie-break，
+        // charter C4）。旧行为按 id 字符串排序取第一个：抢断落球后
+        // 场上 id 最小的球员直接收走球——观感「自动送球到对方手上」，
+        // 且原持球人因 id 序靠前能在球弹回脚边时立即重收，抹掉
+        // 争抢窗口。
+        candidates.sort_by(|left, right| {
+            left.1
+                .partial_cmp(&right.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.0.cmp(&right.0))
+        });
         // 球-人身体接触（ADR-017 第三步）：本 tick 预检已命中时，
         // 弹开优先于捡起——球被弹开而不是被收下，弹开后的
         // 松球态已在函数顶部写入 `new_ball_state`，此处跳过
@@ -450,7 +480,7 @@ impl MatchEngine {
         let secure_candidate = if bounce_active || !controllable {
             None
         } else {
-            candidates.into_iter().next()
+            candidates.into_iter().next().map(|(id, _)| id)
         };
         if bounce_active {
             // 弹开路径：不再覆盖 new_ball_state。

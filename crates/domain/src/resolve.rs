@@ -95,6 +95,11 @@ pub struct BallSecurityPolicy {
     /// 切球弹出速度占 `本次球速上限` 的比例（保底用，使不同规则档案下
     /// 仍不越过不变量）。
     pub poke_ball_speed_ratio: f32,
+    /// 切球不应期（秒）：同一持球人被拍掉球后的这段时间内不再评估
+    /// 新的切球。真实篮球里持球人刚丢球会立即收紧护球，防守人刚
+    /// 完成一次挥臂需要收手再起手；没有不应期时，松球滚回原持球人
+    /// 脚边被收起的下一秒他就再次被拍（实测 1s 连拍）。
+    pub poke_recovery_seconds: f32,
 }
 
 /// 封盖裁定策略（`attributes.md` §2.4 的 `block` 与 `vertical` 消费链）。
@@ -174,6 +179,7 @@ impl Default for BallSecurityPolicy {
             poke_deflection_spread_rad: 0.9,
             poke_ball_speed_ftps: 14.0,
             poke_ball_speed_ratio: 0.18,
+            poke_recovery_seconds: 1.5,
         }
     }
 }

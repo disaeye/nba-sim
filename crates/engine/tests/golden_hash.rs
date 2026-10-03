@@ -134,7 +134,9 @@ fn golden_window_covers_scoring_behaviour() {
     // v82 温度 0.12 后实测：首次 2 分 tick 474，首次 3 分 tick 4564；
     // v83 发球接应位后决策序列整体重排，首次三分推迟至 tick 7541；
     // v84 APF 侧向偏转 + 发球程序窗口重置后节奏再变：首次 2 分
-    // tick 693，首次三分 tick 9021，取 10000 tick 留约 10% 余量。
+    // tick 693，首次三分 tick 9021；
+    // v85 松球滚动摩擦 + 收球距离竞争后：首次三分 tick 346、
+    // 首次 2 分 tick 566，取 10000 tick 窗口仍远超覆盖需求。
     let ticks = 10000usize;
     for _ in 0..ticks {
         engine.step();
@@ -715,7 +717,15 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       消除「贴防=运动压制」的稳态对抗：球前场+后场≥3人
 //       63帧→4帧）+ 发球程序窗口重置（接应人不再被上一回合
 //       动作窗口锁住运动学 48 tick）。
-const GOLDEN_SEED42_2000: u64 = 0x0eb2375cab44b264;
+// v85 0x979b95e978e25f0c - 地板球滚动摩擦（loose_ball_rolling_decel_ftps2
+//       6.0，替换逐 tick 指数衰减）+ 收球距离竞争（松球收下按到球
+//       距离排序，不再按 id 字符串序）：poke 后争抢窗口 0.2s→
+//       0.5~2.1s、球滚 2~10ft，抢断/盖帽的球权转换有了真实的
+//       追逐与争抢表现。
+// v86 0x38afa7998fc1399f - 切球不应期（poke_recovery_seconds 1.5s）：
+//       持球人被拍掉球后的短时间内不再评估新切球，消除「松球
+//       滚回被收起的下一秒立即连拍」（实测最小 poke 间隔 1s→2s）。
+const GOLDEN_SEED42_2000: u64 = 0x38afa7998fc1399f;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

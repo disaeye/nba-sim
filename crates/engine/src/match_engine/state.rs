@@ -68,6 +68,8 @@ pub(crate) struct RuntimeObservations {
     /// 被过防守人的恢复窗口截止时刻（round-19）：窗口内战术层不得重派。
     pub(crate) beaten_recovery_until: HashMap<String, f32>,
     pub(crate) advancing_player: Option<String>,
+    /// 最近一次切球成功的比赛时刻（秒）：poke 不应期判据。
+    pub(crate) last_poke_time: f32,
     pub(crate) modulation: HashMap<String, PlayerModulationState>,
     /// 每名球员最近的出场/离场时刻（比赛时钟秒）：换人体息时间判据
     /// （gap.md G6）。在场者存出场时刻，替补存离场时刻。
@@ -156,6 +158,7 @@ impl RuntimeObservations {
             latest_contacts: Vec::new(),
             beaten_recovery_until: HashMap::new(),
             advancing_player: None,
+            last_poke_time: f32::NEG_INFINITY,
             modulation,
             rotation_clock: HashMap::new(),
             substitutions_this_window: (0, 0),

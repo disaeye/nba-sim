@@ -266,6 +266,17 @@ impl MatchEngine {
         if lock_kinematics {
             return None;
         }
+        // 切球不应期：持球人刚被拍掉球（松球滚回被收起）的短时间内，
+        // 他护球收紧、防守人挥臂后需要收手，不再评估新的切球。
+        let recovery = self
+            .config
+            .rules
+            .resolve
+            .ball_security
+            .poke_recovery_seconds;
+        if self.clock.current_time - self.observations.last_poke_time < recovery {
+            return None;
+        }
         if !matches!(
             self.ball.ball_state,
             BallTrajectoryKind::Held { .. } | BallTrajectoryKind::Drive { .. }
@@ -380,6 +391,7 @@ impl MatchEngine {
     /// 弹出方向：以防守人→持球人方向为基准（切球动作把球从护球位置拨走），
     /// 叠加由 `poke_deflection_spread_rad` 限幅的确定性伪随机偏转。
     pub(crate) fn apply_on_ball_poke(&mut self, carrier_id: &str, defender_id: &str) {
+        self.observations.last_poke_time = self.clock.current_time;
         let Some(carrier_pos) = self
             .systems
             .physics

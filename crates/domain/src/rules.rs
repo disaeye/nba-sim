@@ -166,7 +166,12 @@ pub struct GameRules {
     pub pivot_foot_tolerance_ft: f32,
     /// 地球标准重力加速度（呎/秒^2，用于自由球与弹跳抛物线计算）
     pub ball_gravity_ftps2: f32,
-    pub ball_velocity_retention: f32,
+    /// 地板球滚动减速度（呎/秒^2）：木地板滚动的近似恒定摩擦。
+    /// 旧实现用逐 tick 指数衰减（每 tick × retention），等效于
+    /// 空气阻力模型——球被拍落后 0.3s 内就从 14 ft/s 爬行到
+    /// 可收速度，争抢窗口消失（「自动送球到对方手上」的物理根源）。
+    /// 恒定减速度让球滚 1~3 秒、10+ 呎，多人追抢成为可能。
+    pub loose_ball_rolling_decel_ftps2: f32,
     pub defender_reach_ft: f32,
     pub pass_corridor_radius_ft: f32,
     /// 接球半径基准（ft）：接球人"控制圈"在**无技能加成**时的半径。
@@ -467,7 +472,7 @@ impl Default for GameRules {
             max_player_turn_rate_rad_per_sec: 18.0,
             pivot_foot_tolerance_ft: 0.35,
             ball_gravity_ftps2: 32.17,
-            ball_velocity_retention: 0.85,
+            loose_ball_rolling_decel_ftps2: 6.0,
             defender_reach_ft: 4.0,
             pass_corridor_radius_ft: 3.5,
             catch_radius_base_ft: 2.0,
@@ -791,7 +796,6 @@ impl GameRules {
             || self.max_player_braking_accel_ftps2 <= 0.0
             || self.max_player_lateral_accel_ftps2 <= 0.0
             || self.player_linear_damping < 0.0
-            || !(0.0..=1.0).contains(&self.ball_velocity_retention)
             || self.defender_reach_ft < 0.0
             || self.pass_corridor_radius_ft < 0.0
             || self.catch_radius_base_ft <= 0.0
@@ -1033,15 +1037,6 @@ mod tests {
                 hoop_right_x_ft: GameRules::default().court.width_ft + 1.0,
                 ..GameRules::default().court
             },
-            ..GameRules::default()
-        };
-        assert!(rules.validate().is_err());
-    }
-
-    #[test]
-    fn rejects_invalid_ball_and_rebound_policies() {
-        let rules = GameRules {
-            ball_velocity_retention: 1.1,
             ..GameRules::default()
         };
         assert!(rules.validate().is_err());
