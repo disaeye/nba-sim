@@ -141,9 +141,14 @@ impl MatchEngine {
                 p.target_pos_ft = Vec2::new(center_x + 3.0, center_y);
             }
             let tap_dir = (tap_target - Vec2::new(center_x, center_y)).normalize();
+            // 点拍初速按「跳球接应人能收下」标定：球从 z=5.5 以
+            // vel_z=6 抛出，约 1.3s 后落在接应人身前，落地反弹
+            // 水平速度 ×0.85 后低于收球门，被候在原位的后卫收下。
+            // 旧值 28 ft/s 让球穿过接应人（超出收球速度门被拒绝），
+            // 一路滚到对方底线深处才被偶然收走——开场球直奔后场。
             self.transition_ball_state(BallTrajectoryKind::LooseBall {
                 pos: Vec2::new(center_x, center_y),
-                vel: tap_dir * 28.0,
+                vel: tap_dir * 13.0,
                 z: 5.5,
                 vel_z: 6.0,
                 last_touch_team: if winner_is_home {
@@ -156,7 +161,7 @@ impl MatchEngine {
             });
             self.journal.current_event_types = vec!["TIPOFF_SECURED".to_string()];
             self.journal.current_callout = Some(format!(
-                "{} 起跳率先触球，将球点拍向后场！第一攻展开！",
+                "{} 起跳率先触球，将球点拍给接应队友！第一攻展开！",
                 tapping_player
             ));
             return PhaseOutcome::ShortCircuit;

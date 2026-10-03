@@ -136,7 +136,9 @@ fn golden_window_covers_scoring_behaviour() {
     // v84 APF 侧向偏转 + 发球程序窗口重置后节奏再变：首次 2 分
     // tick 693，首次三分 tick 9021；
     // v85 松球滚动摩擦 + 收球距离竞争后：首次三分 tick 346、
-    // 首次 2 分 tick 566，取 10000 tick 窗口仍远超覆盖需求。
+    // 首次 2 分 tick 566；
+    // v87 切球率标定、v88 跳球点拍轻拨后：首次 2 分 tick 504、
+    // 首次三分 tick 7177，10000 tick 窗口仍留约 40% 余量。
     let ticks = 10000usize;
     for _ in 0..ticks {
         engine.step();
@@ -730,7 +732,12 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       达每场约 80 次（真实 NBA 全场地板球约 24~30），球落地
 //       场景过密。标定后 1q 6 次（全场约 24），LOOSE_BALL 帧占比
 //       3.0%→1.9%。
-const GOLDEN_SEED42_2000: u64 = 0x9bb6b0a8117f4f8a;
+// v88 0xddc4aedb5e3c4613 - 跳球点拍初速 28→13 ft/s：点拍是「轻拨
+//       给接应队友」，28 ft/s 使球超出收球速度门、穿过候在中圈外
+//       的后卫无人能收，一路滚 45 ft 到对方底线深处（开场球直奔
+//       后场的根因）。13 ft/s 下球飞 ~17 ft 在接应人身前落地，
+//       反弹减速后被他收下，第一攻从自家后场从容展开。
+const GOLDEN_SEED42_2000: u64 = 0xddc4aedb5e3c4613;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。
