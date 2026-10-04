@@ -409,6 +409,11 @@ pub struct DefenseRules {
     pub help_hoop_weight_max: f32,
     /// 挡拆/掩护防守行为参数（D17 / schemes.json v2）
     pub screen_defense: ScreenDefenseRules,
+    /// 沉退方案下低位人（弱侧离筐最近的防守人）的护筐引力增益。
+    /// 真实沉退防守的大个子几乎整回合缩在护框纵深内不跟出去；
+    /// 缺省 1.0 = 与盯人无差异。schemes.json 的 `drop_low_man_rim_gain`
+    /// 通道（man 1.0 / drop 2.6 / zone 2.2）。
+    pub drop_low_man_rim_gain: f32,
     /// 多体势能场求解器的参数（`decision::potential_field`）。
     ///
     /// ## 为何进规则通道（charter C1）
@@ -603,6 +608,12 @@ impl DefenseRules {
             switch_aggressiveness: f32,
             #[serde(default)]
             screen_defense: ScreenDefenseRules,
+            #[serde(default = "default_drop_low_man_rim_gain")]
+            drop_low_man_rim_gain: f32,
+        }
+
+        fn default_drop_low_man_rim_gain() -> f32 {
+            1.0
         }
         // 本文件比 `rules.rs` 深一层，因此路径多一个 `../`。
         const RAW: &str = include_str!("../../../../data/defense/schemes.json");
@@ -625,6 +636,7 @@ impl DefenseRules {
                         help_hoop_weight_min: parsed.help_blend.hoop_weight_min,
                         help_hoop_weight_max: parsed.help_blend.hoop_weight_max,
                         screen_defense: e.screen_defense,
+                        drop_low_man_rim_gain: e.drop_low_man_rim_gain,
                         potential_field: PotentialFieldRules::default(),
                     },
                 )

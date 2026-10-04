@@ -49,7 +49,22 @@ impl MatchEngine {
         );
     }
 
-    /// 设置交替拥有箭头（仅测试钩子，D20）。
+    /// 实证探针用：只读快照挂起的投篮释放（shooter_id, release_time）。
+    pub fn peek_pending_shot(&self) -> Option<(String, f32)> {
+        self.observations
+            .pending_shot_release
+            .as_ref()
+            .map(|p| (p.shooter_id.clone(), p.release_time))
+    }
+
+    /// 实证探针用：指定球员的动作窗口相位名（无窗口时 None）。
+    pub fn window_phase(&self, player_id: &str) -> Option<String> {
+        self.observations
+            .active_windows
+            .get(player_id)
+            .map(|w| format!("{:?}", w.phase))
+    }
+
     pub fn set_possession_arrow_for_test(&mut self, arrow: Option<nba_domain::Possession>) {
         self.flow.possession_arrow = arrow;
     }

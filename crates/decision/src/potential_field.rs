@@ -226,11 +226,19 @@ impl DefensePotentialFieldSolver {
         } else {
             config.default_threat_gain
         };
-        let effective_gain = if drive_active {
+        let mut effective_gain = if drive_active {
             role_gain.max(config.drive_help_threat_gain)
         } else {
             role_gain
         };
+        // 沉退方案的护筐锚定：drop coverage 的大个子几乎整回合缩在
+        // 护框纵深内不跟出去（真实篮球的 drop 大个子是「守框中锋」）。
+        // 方案通道 drop_low_man_rim_gain（man 1.0 / drop 2.6 /
+        // zone 2.2）乘在低位人角色的护筐引力上；盯人方案为 1.0，
+        // 行为逐位不变。
+        if is_low_man {
+            effective_gain *= rules.tactics.defense.drop_low_man_rim_gain;
+        }
         let sag_factor = if is_high_man { 1.0 } else { sag_mult };
         let w_threat = stamina_mult
             * config.k_threat_base

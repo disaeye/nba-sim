@@ -312,6 +312,18 @@ impl MatchEngine {
                     self.systems
                         .physics
                         .set_player_locked(&player_id, false, None);
+                    // 窗口被移除后不再推进，挂在其上的投篮释放也必须
+                    // 作废——与回合边界语义一致（回合已死，冻结的出手
+                    // 不可能再起飞）。否则 pending 永挂：下次该球员
+                    // 再度出手时撞上 pending 非空的 fast-fail。
+                    if self
+                        .observations
+                        .pending_shot_release
+                        .as_ref()
+                        .is_some_and(|pending| pending.shooter_id == player_id)
+                    {
+                        self.observations.pending_shot_release = None;
+                    }
                 }
 
                 // If tactical assignment is setting a high screen, initialize a ScreenSet action window.

@@ -306,6 +306,16 @@ impl MatchEngine {
     }
 
     pub(crate) fn decision_phase(&mut self, current_t: f32) -> Option<DecisionOutput> {
+        // 挂起的投篮释放期间禁止一切持球决策——门禁必须挂在
+        // decision_phase 入口而不是 ActionExecution 分支：非投篮
+        // 犯规（events.rs）会把子阶段切回 Initiation，出手者仍持球、
+        // pending 仍挂着，Initiation 分支若无门禁会让同一球员再次
+        // 出手，撞上 pending 非空的 fast-fail（实测 seed100 全量赛
+        // tick ~35994）。pending 只由窗口推进消费或回合边界作废，
+        // 期间球权与球态都冻结在出手者身上，任何新决策都不合法。
+        if self.observations.pending_shot_release.is_some() {
+            return None;
+        }
         // Phase state machine: inbound decisions are evaluated only during the
         // inbound phase; live-ball decisions use the same registry pipeline.
         let mut decision_output: Option<DecisionOutput> = None;

@@ -737,7 +737,12 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       的后卫无人能收，一路滚 45 ft 到对方底线深处（开场球直奔
 //       后场的根因）。13 ft/s 下球飞 ~17 ft 在接应人身前落地，
 //       反弹减速后被他收下，第一攻从自家后场从容展开。
-const GOLDEN_SEED42_2000: u64 = 0xddc4aedb5e3c4613;
+// v89 0xfdf2628c3f45bd5a - 沉退方案护筐锚定（schemes.json 通道
+//       drop_low_man_rim_gain，man 1.0 / drop 2.6 / zone 2.2）：
+//       drop coverage 的低位大个子护筐引力增强、整回合缩在护框
+//       纵深内不跟出去。此前 drop 与盯人的防守几何差仅 0.002 ft
+//       （装饰参数），defense_effect 门 3 抓获。
+const GOLDEN_SEED42_2000: u64 = 0xfdf2628c3f45bd5a;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

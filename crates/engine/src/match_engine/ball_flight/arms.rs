@@ -562,6 +562,16 @@ impl MatchEngine {
         // 1. 中途分流决策（Drive Branching: 突分 Kickout 或急停中投 Pull-up）
         let elapsed = ctx.current_t - start_time;
         let mut branched = false;
+        // 出手冻结期间不得分支：该突破者已有一条挂起的投篮释放
+        // （execute_shot 冻结的裁定）， Drive 球态保持到 release 才转
+        // Shot。分支若在此期间再触发 execute_shot，会撞上 pending
+        // 非空的 fast-fail（实测 seed100 全量赛 tick ~35994：
+        // pending 挂起 + Drive 臂 pullup 分支二次出手）。
+        let frozen_by_pending = self
+            .observations
+            .pending_shot_release
+            .as_ref()
+            .is_some_and(|pending| pending.shooter_id == driver_id);
         if elapsed
             >= self
                 .config
@@ -569,6 +579,7 @@ impl MatchEngine {
                 .tactics
                 .drive_decision_check_interval_seconds
             && tau < 0.85
+            && !frozen_by_pending
         {
             let paint_crowding = SemanticEvaluator::spacing(
                 self.flow.possession,

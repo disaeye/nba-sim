@@ -19,7 +19,8 @@
         "hedge_distance_ft": 0.0,
         "switch_trigger_distance_ft": 5.0,
         "recover_timeout_seconds": 1.2
-      }
+      },
+      "drop_low_man_rim_gain": 1.0
     },
     {
       "id": "def_man_pressure",
@@ -32,7 +33,8 @@
         "hedge_distance_ft": 2.5,
         "switch_trigger_distance_ft": 4.0,
         "recover_timeout_seconds": 0.8
-      }
+      },
+      "drop_low_man_rim_gain": 1.0
     },
     {
       "id": "def_switch_heavy",
@@ -45,7 +47,8 @@
         "hedge_distance_ft": 0.0,
         "switch_trigger_distance_ft": 7.0,
         "recover_timeout_seconds": 0.0
-      }
+      },
+      "drop_low_man_rim_gain": 1.0
     },
     {
       "id": "def_drop_coverage",
@@ -58,7 +61,8 @@
         "hedge_distance_ft": 0.0,
         "switch_trigger_distance_ft": 3.0,
         "recover_timeout_seconds": 1.5
-      }
+      },
+      "drop_low_man_rim_gain": 2.6
     },
     {
       "id": "def_hedge_recover",
@@ -71,7 +75,8 @@
         "hedge_distance_ft": 4.5,
         "switch_trigger_distance_ft": 4.0,
         "recover_timeout_seconds": 1.2
-      }
+      },
+      "drop_low_man_rim_gain": 1.2
     },
     {
       "id": "def_zone_23",
@@ -84,7 +89,8 @@
         "hedge_distance_ft": 0.0,
         "switch_trigger_distance_ft": 3.0,
         "recover_timeout_seconds": 1.5
-      }
+      },
+      "drop_low_man_rim_gain": 2.2
     }
   ]
 }
