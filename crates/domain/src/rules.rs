@@ -123,6 +123,18 @@ pub struct GameRules {
     pub shot_pct_floor: f32,
     pub shot_pct_ceiling: f32,
     pub tip_off_duration_seconds: f32,
+    /// 跳球点拍初速（ft/s）：中锋把球轻拨给接应队友的量级。
+    /// 必须与收球门同源标定：球落到接应人身前反弹（×地面反弹
+    /// 系数）后的水平速度须低于 `loose_ball_control_speed_ftps`，
+    /// 否则球穿过接应人一路滚向底线（实测 28 ft/s 时球滚 45 ft）。
+    pub tip_off_tap_speed_ftps: f32,
+    /// 点拍目标距中圈的距离（ft）：拍向本方后场方向、候在跳球圈
+    /// 外的接应队友（跳球站位中本方除跳球员外离中圈最近者）。
+    pub tip_off_tap_distance_ft: f32,
+    /// 点拍离手高度（ft）：中锋跳到最高点时手的高度量级。
+    pub tip_off_tap_height_ft: f32,
+    /// 点拍出手竖直初速（ft/s）：轻拨带一点上抛弧线。
+    pub tip_off_tap_vel_z_ftps: f32,
     /// Ball presentation policy while a player is dribbling.
     pub ball_bounce_base_ft: f32,
     pub ball_bounce_amplitude_ft: f32,
@@ -449,6 +461,10 @@ impl Default for GameRules {
             shot_pct_floor: 0.10,
             shot_pct_ceiling: 0.85,
             tip_off_duration_seconds: 1.5,
+            tip_off_tap_speed_ftps: 13.0,
+            tip_off_tap_distance_ft: 14.0,
+            tip_off_tap_height_ft: 5.5,
+            tip_off_tap_vel_z_ftps: 6.0,
             ball_bounce_base_ft: 3.25,
             ball_bounce_amplitude_ft: 0.35,
             ball_bounce_frequency_hz: 2.2,
@@ -636,6 +652,10 @@ impl GameRules {
             self.ball_radius_ft,
             self.body_contact_radius_ft,
             self.loose_ball_control_speed_ftps,
+            self.tip_off_tap_speed_ftps,
+            self.tip_off_tap_distance_ft,
+            self.tip_off_tap_height_ft,
+            self.tip_off_tap_vel_z_ftps,
             self.backboard_offset_from_baseline_ft,
             self.backboard_width_ft,
             self.backboard_bottom_height_ft,
@@ -743,6 +763,10 @@ impl GameRules {
             || self.league.shot_clock_seconds <= 0.0
             || self.league.offensive_rebound_shot_clock_seconds <= 0.0
             || self.inbound_seconds <= 0.0
+            || self.tip_off_tap_speed_ftps <= 0.0
+            || self.tip_off_tap_distance_ft <= 0.0
+            || self.tip_off_tap_height_ft <= 0.0
+            || self.tip_off_tap_vel_z_ftps <= 0.0
             || self.inbound_setup_seconds < 0.0
             || self.backcourt_seconds <= 0.0
             || self.period_break_seconds < 0.0

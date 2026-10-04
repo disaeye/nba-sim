@@ -128,11 +128,39 @@ impl MatchEngine {
             };
             let center_x = self.config.rules.court.width_ft * 0.5;
             let center_y = self.config.rules.court.height_ft * 0.5;
-            let tap_target = if winner_is_home {
-                Vec2::new(center_x - 14.0, center_y)
-            } else {
-                Vec2::new(center_x + 14.0, center_y)
+            // 点拍目标是**接应队友本身**（本方除跳球员外离中圈最近
+            // 的球员），不是固定空位：真实跳球是中锋把球拨到自己
+            // 队友候球的位置，球到人身旁即被收下。旧实现拍向
+            // 「中圈向本方后场 14 ft 的坐标」，若队友站位偏移或球速
+            // 超过收球门，球落无人区一路滚向底线（实测 seed42 开场
+            // 球滚 45 ft 到底线的根因之一）。
+            let tap_receiver = {
+                let my_team = if winner_is_home { "home" } else { "away" };
+                let center = Vec2::new(center_x, center_y);
+                let mut best: Option<(&str, f32)> = None;
+                for p in self.systems.physics.get_players().values() {
+                    if p.team != my_team || !p.on_court {
+                        continue;
+                    }
+                    let is_jumper = p.id == *home_jumper_id || p.id == *away_jumper_id;
+                    if is_jumper {
+                        continue;
+                    }
+                    let d = (p.pos_ft - center).length();
+                    if best.is_none_or(|(_, bd)| d < bd) {
+                        best = Some((p.id.as_str(), d));
+                    }
+                }
+                best.expect("tip-off requires an on-court non-jumper teammate")
+                    .0
+                    .to_string()
             };
+            let tap_target = self
+                .systems
+                .physics
+                .get_player(&tap_receiver)
+                .map(|p| p.pos_ft)
+                .unwrap_or_else(|| panic!("tip-off receiver `{tap_receiver}` is absent"));
             self.set_game_flow(GameFlowState::LiveBall);
             if let Some(p) = self.systems.physics.get_player_mut(&home_jumper_id) {
                 p.target_pos_ft = Vec2::new(center_x - 3.0, center_y);
@@ -141,16 +169,16 @@ impl MatchEngine {
                 p.target_pos_ft = Vec2::new(center_x + 3.0, center_y);
             }
             let tap_dir = (tap_target - Vec2::new(center_x, center_y)).normalize();
-            // 点拍初速按「跳球接应人能收下」标定：球从 z=5.5 以
-            // vel_z=6 抛出，约 1.3s 后落在接应人身前，落地反弹
-            // 水平速度 ×0.85 后低于收球门，被候在原位的后卫收下。
-            // 旧值 28 ft/s 让球穿过接应人（超出收球速度门被拒绝），
-            // 一路滚到对方底线深处才被偶然收走——开场球直奔后场。
+            // 初速/高度/竖直分量全部走规则通道
+            // （`tip_off_tap_*`）：初速标定必须与收球门同源——
+            // 球落到接应人身前反弹后的水平速度须低于收球速度门，
+            // 否则球穿过接应人滚向底线。
+            let tap = &self.config.rules;
             self.transition_ball_state(BallTrajectoryKind::LooseBall {
                 pos: Vec2::new(center_x, center_y),
-                vel: tap_dir * 13.0,
-                z: 5.5,
-                vel_z: 6.0,
+                vel: tap_dir * tap.tip_off_tap_speed_ftps,
+                z: tap.tip_off_tap_height_ft,
+                vel_z: tap.tip_off_tap_vel_z_ftps,
                 last_touch_team: if winner_is_home {
                     Possession::Home
                 } else {

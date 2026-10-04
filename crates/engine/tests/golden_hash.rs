@@ -138,8 +138,10 @@ fn golden_window_covers_scoring_behaviour() {
     // v85 松球滚动摩擦 + 收球距离竞争后：首次三分 tick 346、
     // 首次 2 分 tick 566；
     // v87 切球率标定、v88 跳球点拍轻拨后：首次 2 分 tick 504、
-    // 首次三分 tick 7177，10000 tick 窗口仍留约 40% 余量。
-    let ticks = 10000usize;
+    // 首次三分 tick 7177；
+    // v90 点拍目标动态化后：首次 2 分 tick 375、首次三分
+    // tick 13050，窗口 16000 tick 留约 20% 余量。
+    let ticks = 16000usize;
     for _ in 0..ticks {
         engine.step();
     }
@@ -742,7 +744,10 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 //       drop coverage 的低位大个子护筐引力增强、整回合缩在护框
 //       纵深内不跟出去。此前 drop 与盯人的防守几何差仅 0.002 ft
 //       （装饰参数），defense_effect 门 3 抓获。
-const GOLDEN_SEED42_2000: u64 = 0xfdf2628c3f45bd5a;
+// v90 0x566a37f04015a1a5 - 跳球点拍走规则通道（tip_off_tap_speed_ftps
+//       等四字段）+ 点拍目标动态化为「本方除跳球员外离中圈最近的
+//       队友」：不再拍向固定空位坐标，接应人由跳球站位涌现。
+const GOLDEN_SEED42_2000: u64 = 0x566a37f04015a1a5;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。
