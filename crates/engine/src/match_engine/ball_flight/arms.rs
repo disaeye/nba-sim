@@ -581,16 +581,22 @@ impl MatchEngine {
             && tau < 0.85
             && !frozen_by_pending
         {
-            let paint_crowding = SemanticEvaluator::spacing(
+            let spacing = SemanticEvaluator::spacing(
                 self.flow.possession,
                 driver_pos,
                 &self.systems.physics,
                 &self.config.rules,
-            )
-            .paint_crowding;
+            );
+            // 触发度量：突破路线是否被防守封堵（lane_openness 低）。
+            // 旧条件 paint_crowding（以篮筐为圆心的**进攻方**队友密度）
+            // 语义错位——五外战术全员在外线，禁区内没有队友，crowding
+            // 恒低，kickout 在最需要它的战术里永不触发；kickout 的决策
+            // 理由是「突破路线被协防封死、外线有空位」，度量对象是
+            // 持球人周围的防守密度。
+            let lane_blocked = 1.0 - spacing.lane_openness;
 
-            // 当内线极度拥挤且持球人在中远距离时，评估突分（Kickout）给外线空位队友
-            if paint_crowding > self.config.rules.tactics.drive_kickout_max_crowding {
+            // 突破路线被封且持球人在中远距离时，评估突分（Kickout）给外线空位队友
+            if lane_blocked > self.config.rules.tactics.drive_kickout_max_crowding {
                 let mut best_kickout: Option<(String, Vec2)> = None;
                 let mut min_opp_dist = self.config.rules.tactics.drive_kickout_min_defender_dist_ft;
 
@@ -646,7 +652,7 @@ impl MatchEngine {
                         ctx.current_t,
                     ));
                     branched = true;
-                } else if paint_crowding > self.config.rules.tactics.drive_pullup_min_crowding
+                } else if lane_blocked > self.config.rules.tactics.drive_pullup_min_crowding
                     && dist_to_hoop > self.config.rules.tactics.drive_early_finish_dist_ft
                     && dist_to_hoop <= self.config.rules.tactics.drive_mid_range_pullup_dist_ft
                 {

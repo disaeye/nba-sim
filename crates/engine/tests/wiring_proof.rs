@@ -44,8 +44,14 @@ fn rules_wiring_drive_finish_range_changes_simulation() {
     long.tactics.drive_finish_range_ft = 22.0;
 
     let seeds = [42u64, 1, 7, 100, 999, 31337];
-    let a = fingerprint_for_setup(short, &seeds, PROOF_TICKS_MEDIUM);
-    let b = fingerprint_for_setup(long, &seeds, PROOF_TICKS_MEDIUM);
+    // v91 冲框折扣量纲修正后，突破目标更多直指篮筐、被
+    // early_finish（6 ft 门）终结的比例大增——finish_range 的
+    // 停滞分支被绕过，扰动的行为差异面收窄到 2/6（6000 tick）。
+    // 窗口加倍到 12000 tick：停滞判定本身仍是活跃通道，
+    // 样本量恢复后差异重新显形。
+    let proof_ticks = 12000usize;
+    let a = fingerprint_for_setup(short, &seeds, proof_ticks);
+    let b = fingerprint_for_setup(long, &seeds, proof_ticks);
 
     let changed = a
         .iter()

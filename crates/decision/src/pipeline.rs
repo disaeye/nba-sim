@@ -981,16 +981,46 @@ impl DecisionSystem {
                 }
             }
 
-            // ## 冲框价值折扣（round-18）
+            // ## 冲框价值折扣（round-18，v91 量纲修正）
             //
             // 拥堵是成本，但冲框有更高的期望收益（篮下 ~1.3 PPP vs 中距
             // ~0.8）。原实现只比成本，篮筐（防守最密处）几乎永不入选——
             // 实测 88% 突破停在离筐 14-18 ft，篮下出手仅 3%（真实 25-50%）。
-            // 按持球人终结能力给冲框走廊折扣：终结强者应顶着防守攻框。
+            //
+            // ## v91：折扣与拥堵的量纲对齐
+            //
+            // round-18 的折扣是 `bias × finishing ≈ 0.6`（线性因子），
+            // 而走廊拥堵是**所有 12 ft 排斥半径内防守人的平滑因子累计**
+            // ——禁区走廊常年 3~4 人，累计 2~3。0.6 对 2~3，篮筐目标
+            // 必输给肘区目标，折扣形同虚设（停滞率仍 87%）。
+            //
+            // 量纲对齐：冲框的真实成本不是「走廊上有多少人影」（平滑
+            // 因子把远处协防也计入），而是「贴身协防人数」——只有逼近
+            // 到可实际干扰出手（lane_width = 走廊宽 + 最小分离）的防守
+            // 人才构成放弃篮筐的理由，远处协防的轮转时间差正是突破的
+            // 收益窗口。计数制（每贴身防守人计 1）与 bias（1.2×终结）
+            // 同量纲，终结强者顶开 1 名协防后攻框成为理性选择。
             let is_rim_attack =
                 (clamped_target - hoop).length() <= rules.tactics.drive_early_finish_dist_ft;
             let effective = if is_rim_attack {
-                (congestion
+                let lane_width = rules.tactics.drive_lane_offset_ft
+                    + rules.min_player_separation_ft;
+                let rim_congestion = players
+                    .values()
+                    .filter(|p| {
+                        if !p.on_court || p.team == offense_team {
+                            return false;
+                        }
+                        let to_p = p.pos_ft - carrier_pos;
+                        let proj = to_p.dot(seg_norm);
+                        if proj <= 0.0 || proj >= seg_len {
+                            return false;
+                        }
+                        let perp_dist = (to_p - seg_norm * proj).length();
+                        perp_dist < lane_width
+                    })
+                    .count() as f32;
+                (rim_congestion
                     - rules.tactics.drive_rim_attack_bias * driver_finishing.clamp(0.0, 1.0))
                 .max(0.0)
             } else {

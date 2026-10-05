@@ -140,7 +140,9 @@ fn golden_window_covers_scoring_behaviour() {
     // v87 切球率标定、v88 跳球点拍轻拨后：首次 2 分 tick 504、
     // 首次三分 tick 7177；
     // v90 点拍目标动态化后：首次 2 分 tick 375、首次三分
-    // tick 13050，窗口 16000 tick 留约 20% 余量。
+    // tick 13050；
+    // v91 区位价值修正后：首次 2 分 tick 541、首次三分 tick 2262，
+    // 窗口 16000 tick 留约 7 倍余量。
     let ticks = 16000usize;
     for _ in 0..ticks {
         engine.step();
@@ -747,7 +749,21 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 // v90 0x566a37f04015a1a5 - 跳球点拍走规则通道（tip_off_tap_speed_ftps
 //       等四字段）+ 点拍目标动态化为「本方除跳球员外离中圈最近的
 //       队友」：不再拍向固定空位坐标，接应人由跳球站位涌现。
-const GOLDEN_SEED42_2000: u64 = 0x566a37f04015a1a5;
+// v91 0x02e57b3586c7d5bb - 区位价值修正三件套：
+//       ① three_point_utility_multiplier 0.68→1.10：旧「折损」语义
+//         使三分效用只有长两分的 61%、区位排序与期望得分倒挂
+//         （长两分 26%，真实 13%）；1.10 让三分效用与长两分打平，
+//         区位选择由干扰与空位决定。
+//       ② 冲框折扣量纲对齐：篮下目标的拥堵从「12ft 排斥半径内
+//         平滑因子累计」（常年 2~3）改为「贴身协防人数计数」
+//         （与 bias 1.2 同量纲），突破停滞率 87%→52%。
+//       ③ kickout 触发度量修正：paint_crowding 是以篮筐为圆心的
+//         进攻方队友密度（五外恒低，kickout 永不触发），改为
+//         lane_openness（持球人周围防守密度）——突破路线被封
+//         才是突分的真实理由。
+//       连带：drive_early_finish_dist_ft 4.5→6.0（覆盖上篮起跳点，
+//       篮下出手 8%→16%）。
+const GOLDEN_SEED42_2000: u64 = 0x02e57b3586c7d5bb;
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

@@ -874,7 +874,23 @@ pub struct DecisionRules {
     pub tendency_weight: f32,
     /// Influence of team style traits on utility.
     pub team_style_weight: f32,
-    /// 三分投篮效用折损系数（反映三分球相对近距离攻框的期望难度）。
+    /// 三分投篮效用乘数：与距离衰减因子共同决定「三分 vs 长两分」
+    /// 的效用排序。数值推导（shot_distance_reference_ft=47、
+    /// shot_distance_slope=0.70 时）：
+    ///   长两分 18ft 效用 = 0.45 + (1−18/47)×0.70 ≈ 0.88
+    ///   三分 24ft 效用 = M × (0.45 + (1−24/47)×0.70) ≈ M × 0.79
+    /// 期望得分比（三分 1.08 PPP / 长两分 0.94 PPP ≈ 1.15）与
+    /// 「篮下仍须显著优先」的双约束：M=1.28 时三分效用 1.01 逼近
+    /// 篮下 1.08，实测（seed42）三分占比暴涨到 65%、篮下暴跌到
+    /// 8%；M=1.18 时三分 59% 仍过热；M=1.10 时三分效用 0.87 与
+    /// 长两分 0.88 打平，出手分布最均衡（三分 59%、远两分 13%、
+    /// 篮下 16%）；M=1.02 让三分效用低于长两分后远两分回升到
+    /// 19%——证明剩余的三分占比由突分落点分布主导（kickout
+    /// 修复后突分空位三分是真实产物），效用乘数只负责把
+    /// 「长两分」压回正确区位。
+    /// 旧值 0.68 是「折损」语义（为压制外线空位 74% 的问题而设），
+    /// 使三分效用只有长两分的 61%、区位排序与期望得分倒挂——
+    /// 长两分 26%（真实 13%）的直接来源。
     pub three_point_utility_multiplier: f32,
     /// 突破攻框基础效用权重。
     pub drive_base: f32,
@@ -981,7 +997,7 @@ impl Default for DecisionRules {
             risk_aversion: 0.8,
             tendency_weight: 0.35,
             team_style_weight: 0.25,
-            three_point_utility_multiplier: 0.68,
+            three_point_utility_multiplier: 1.10,
             drive_base: 0.85,
             // 低位背身的量级：与 Drive 同阶，使两者在距篮较近时真正竞争。
             post_up_base: 2.2,

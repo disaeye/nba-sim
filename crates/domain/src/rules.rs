@@ -314,7 +314,7 @@ impl Default for TacticalRules {
             // 长.distance 突破需要更长时间才能真实到达（A/B 见 §19.3）。
             drive_max_duration_seconds: 3.2,
             drive_speed_ratio: 1.15,
-            drive_early_finish_dist_ft: 4.5,
+            drive_early_finish_dist_ft: 6.0,
             drive_mid_range_pullup_dist_ft: 14.0,
             drive_kickout_pass_dist_ft: 22.0,
             drive_lane_offset_ft: 4.0,
