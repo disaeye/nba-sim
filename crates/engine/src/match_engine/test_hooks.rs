@@ -49,6 +49,22 @@ impl MatchEngine {
         );
     }
 
+    /// 实证探针用：突破犯规（DRIVE_FOUL）累计计数。
+    pub fn drive_foul_count(&self) -> usize {
+        self.observations.drive_foul_counter
+    }
+
+    /// 实证探针用：突破发起计数。
+    pub fn drive_initiated_count(&self) -> usize {
+        self.observations.drive_initiated_counter
+    }
+
+    /// 实证探针用：指定球员的 openness 采样（最近防守距离、干扰强度）。
+    pub fn openness_probe(&self, player_id: &str) -> (f32, f32) {
+        let o = self.systems.physics.openness(player_id);
+        (o.closest_defender_dist, o.contest_intensity)
+    }
+
     /// 实证探针用：只读快照挂起的投篮释放（shooter_id, release_time）。
     pub fn peek_pending_shot(&self) -> Option<(String, f32)> {
         self.observations

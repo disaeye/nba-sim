@@ -477,6 +477,7 @@ impl MatchEngine {
         });
         self.ball.ball_pos_3d = (from_pos, self.config.rules.ball_holder_height_ft);
         self.transition_phase(SubPhase::ActionExecution);
+        self.observations.drive_initiated_counter += 1;
         self.journal.pending_events.push(GameEvent::DriveInitiated {
             driver_id: driver_id.to_string(),
             from_pos: (from_pos.x, from_pos.y),

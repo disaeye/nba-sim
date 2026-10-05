@@ -70,6 +70,9 @@ pub(crate) struct RuntimeObservations {
     pub(crate) advancing_player: Option<String>,
     /// 最近一次切球成功的比赛时刻（秒）：poke 不应期判据。
     pub(crate) last_poke_time: f32,
+    /// 探针计数器：突破发起与突破犯规（仅实证用）。
+    pub(crate) drive_initiated_counter: usize,
+    pub(crate) drive_foul_counter: usize,
     pub(crate) modulation: HashMap<String, PlayerModulationState>,
     /// 每名球员最近的出场/离场时刻（比赛时钟秒）：换人体息时间判据
     /// （gap.md G6）。在场者存出场时刻，替补存离场时刻。
@@ -159,6 +162,8 @@ impl RuntimeObservations {
             beaten_recovery_until: HashMap::new(),
             advancing_player: None,
             last_poke_time: f32::NEG_INFINITY,
+            drive_initiated_counter: 0,
+            drive_foul_counter: 0,
             modulation,
             rotation_clock: HashMap::new(),
             substitutions_this_window: (0, 0),

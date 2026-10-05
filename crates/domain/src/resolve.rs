@@ -488,7 +488,7 @@ impl Default for BaseRates {
             // 因此基准上调回带（3P% 中位 31.0，total_p50 161）。
             shot_make_3pt: 0.36,
             ft_make: 0.77,
-            foul_on_drive_rate: 0.12,
+            foul_on_drive_rate: 0.44,
             // 跳投犯规基准：真实 NBA 每场约 40 次犯规，其中相当部分来自
             // 跳投犯规（三分犯规 / 中距离投篮犯规 / and-one）。
             // 干扰强度在上层作为自变量乘入，此处为“受到实质干扰时”的基准。

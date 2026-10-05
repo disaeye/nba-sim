@@ -874,6 +874,10 @@ pub struct DecisionRules {
     pub tendency_weight: f32,
     /// Influence of team style traits on utility.
     pub team_style_weight: f32,
+    /// 突破造罚球期望的效用权重：被犯即 2 罚（期望 ~1.5 PPP）且
+    /// 不占出手，纯 2 分模型系统性低估冲框。按目标接近篮筐的
+    /// 程度与终结能力给出加成。
+    pub drive_foul_draw_weight: f32,
     /// 三分投篮效用乘数：与距离衰减因子共同决定「三分 vs 长两分」
     /// 的效用排序。数值推导（shot_distance_reference_ft=47、
     /// shot_distance_slope=0.70 时）：
@@ -997,7 +1001,8 @@ impl Default for DecisionRules {
             risk_aversion: 0.8,
             tendency_weight: 0.35,
             team_style_weight: 0.25,
-            three_point_utility_multiplier: 1.10,
+            drive_foul_draw_weight: 0.35,
+            three_point_utility_multiplier: 1.12,
             drive_base: 0.85,
             // 低位背身的量级：与 Drive 同阶，使两者在距篮较近时真正竞争。
             post_up_base: 2.2,

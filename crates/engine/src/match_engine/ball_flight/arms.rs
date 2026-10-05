@@ -527,6 +527,48 @@ impl MatchEngine {
             &self.config.rules,
         );
 
+        // ## 突破犯规的发布时机（v91 造犯修正）
+        //
+        // 掷骰在突破发起时已完成（`shooting_foul`，fouler_id 随
+        // Drive 载荷携带）。旧实现只在终点 finish 判定块内发布
+        // FOUL——但 141 次突破里 ~40% 被 kickout/pullup 分流、
+        // ~57% 停滞在 16 ft 外，两条路径都跳过 finish 块，掷骰
+        // 结果被静默丢弃：实测一场 141 次突破 0 次突破犯规（罚球
+        // 20 全部来自投篮犯规路径）。真实篮球的突破犯规恰恰多发
+        // 生在缠斗过程中——到达「缠斗时刻」（tau 过 0.6）即发布，
+        // 转死球进罚球程序，不依赖突破是否到达终点。
+        if let Some(fouler) = fouler_id.clone() {
+            // 缠斗时刻取 tau 0.45：kickout/pullup 分流窗口从
+            // elapsed 0.25s 开启（短突 0.8s duration 时 tau 0.31），
+            // 缠斗判定必须在多数分流之前完成，否则掷骰结果被分流
+            // 静默吞掉（实测 tau 0.6 时突破犯规率只有 5%）。
+            let scuffle_reached = tau >= 0.45;
+            let not_yet_published = !self
+                .journal
+                .pending_events
+                .iter()
+                .any(|e| matches!(e, GameEvent::Foul { is_shooting: true, .. }));
+            if scuffle_reached && not_yet_published {
+                let driver_pos = self.ball.ball_pos_3d.0;
+                let holder_height = self.config.rules.ball_holder_height_ft;
+                self.journal.pending_events.push(GameEvent::Foul {
+                    fouled_player_id: driver_id.clone(),
+                    fouler_id: fouler.clone(),
+                    is_shooting: true,
+                });
+                self.ball.ball_pos_3d = (driver_pos, holder_height);
+                out.new_ball_state = Some(self.dead_state(driver_pos, holder_height));
+                self.transition_phase(SubPhase::DeadBallReset);
+                self.journal.current_event = Some("DRIVE_FOUL".to_string());
+                self.journal.current_callout = Some(format!(
+                    "{} 突破造成投篮犯规，获得罚球机会",
+                    driver_id
+                ));
+                self.observations.drive_foul_counter += 1;
+                return;
+            }
+        }
+
         let driver_pos = self
             .systems
             .physics

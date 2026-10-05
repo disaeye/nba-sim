@@ -724,6 +724,17 @@ impl DecisionSystem {
                         f32::from(0u8)
                     }
                 };
+                // 造罚球期望（v91）：突破的收益不止 2 分出手——顶开
+                // 协防冲击篮筐会带来犯规（被犯即 2 罚，期望 ~1.5 PPP
+                // 且不占出手）。效用按「目标越接近篮筐 × 终结能力」
+                // 给出加成，弧顶出发的远距离突破不加成（离筐远时
+                // 造犯需要完整冲到篮下，概率随距离衰减）。
+                let foul_draw_bonus = self.weights.drive_foul_draw_weight
+                    * (1.0
+                        - (dist_to_hoop
+                            / ctx.rules.shot_distance_reference_ft.max(1.0))
+                        .clamp(f32::from(0u8), f32::from(1u8)))
+                    * finishing_skill.clamp(f32::from(0u8), f32::from(1u8));
                 self.weights.drive_base
                     * coach.pace_factor
                     * (0.35 + (1.0 - dist_to_hoop / ctx.rules.court.width_ft.max(1.0)) * 0.45)
@@ -733,6 +744,7 @@ impl DecisionSystem {
                     + centered(style.rim_pressure) * self.weights.team_style_weight
                     + drive_distance.min(ctx.rules.court.width_ft) * 0.001
                     + transition_finish
+                    + foul_draw_bonus
                     - (1.0 - openness.contest_free_score()) * self.weights.team_style_weight * 0.5
             }
             CandidateAction::Pass {
