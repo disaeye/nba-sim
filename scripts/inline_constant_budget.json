@@ -22,8 +22,9 @@
     "crates/domain/src/play.rs": 6,
     "crates/domain/src/projectile.rs": 8,
     "crates/domain/src/resolve.rs": 120,
-    "crates/domain/src/rules.rs": 362,
+    "crates/domain/src/rules.rs": 220,
     "crates/domain/src/rules/policies.rs": 187,
+    "crates/domain/src/rules/validate.rs": 199,
     "crates/domain/src/tactics.rs": 2,
     "crates/engine/src/match_engine/ball_flight/arms.rs": 18,
     "crates/engine/src/match_engine/ball_flight/drive_arm.rs": 11,
@@ -82,6 +83,8 @@
     "crates/decision/src/pipeline.rs",
     "crates/decision/src/potential_field.rs",
     "crates/decision/src/tactics.rs",
+    "crates/domain/src/rules.rs",
+    "crates/domain/src/rules/validate.rs",
     "crates/engine/src/match_engine/accessors.rs",
     "crates/engine/src/match_engine/action_windows.rs",
     "crates/engine/src/match_engine/ball_flight/arms.rs",
@@ -141,9 +144,10 @@
     "crates/domain/src/play.rs": 6,
     "crates/domain/src/projectile.rs": 8,
     "crates/domain/src/resolve.rs": 129,
-    "crates/domain/src/rules.rs": 384,
+    "crates/domain/src/rules.rs": 220,
     "crates/domain/src/rules/policies.rs": 162,
     "crates/domain/src/rules/policies/defense.rs": 41,
+    "crates/domain/src/rules/validate.rs": 199,
     "crates/domain/src/tactics.rs": 2,
     "crates/engine/src/match_engine/ball_flight/arms.rs": 18,
     "crates/engine/src/match_engine/ball_flight/drive_arm.rs": 11,
@@ -212,7 +216,7 @@
     "crates/evaluator/src/individual.rs": 15,
     "crates/evaluator/src/ledger.rs": 65,
     "crates/officiating/src/resolution.rs": 51,
-    "crates/physics/src/ballistics/landing_tests.rs": 87
+    "crates/physics/src/ballistics/landing_tests.rs": 133
   },
   "test_floats": {
     "crates/bball-wasm/src/lib.rs": 2,
@@ -225,6 +229,6 @@
     "crates/evaluator/src/individual.rs": 15,
     "crates/evaluator/src/ledger.rs": 65,
     "crates/officiating/src/resolution.rs": 51,
-    "crates/physics/src/ballistics/landing_tests.rs": 87
+    "crates/physics/src/ballistics/landing_tests.rs": 133
   }
 }

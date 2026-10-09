@@ -716,12 +716,13 @@ fn update_foot_placement(
     use nba_domain::Foot;
 
     let base_stride = rules.gait_stride_length_ft;
+    let sanity_limit = base_stride * rules.gait_stride_sanity_multiple;
     assert!(
         player.left_foot_pos.is_finite() && player.right_foot_pos.is_finite(),
         "foot placement must remain finite"
     );
-    if (player.pos_ft - player.left_foot_pos).length() > base_stride * 4.0
-        || (player.pos_ft - player.right_foot_pos).length() > base_stride * 4.0
+    if (player.pos_ft - player.left_foot_pos).length() > sanity_limit
+        || (player.pos_ft - player.right_foot_pos).length() > sanity_limit
     {
         player.left_foot_pos = player.pos_ft;
         player.right_foot_pos = player.pos_ft;
@@ -731,10 +732,13 @@ fn update_foot_placement(
         return;
     }
     let speed = player.vel_ft.length();
-    if speed <= 0.75 {
+    if speed <= rules.gait_stride_min_speed_ftps {
         return;
     }
-    let stride = base_stride * (0.75 + speed / (rules.max_player_speed_ftps * 1.5)).clamp(1.0, 2.0);
+    let stride = base_stride
+        * (rules.gait_stride_speed_baseline
+            + speed / (rules.max_player_speed_ftps * rules.gait_stride_speed_gain))
+            .clamp(rules.gait_stride_stretch_min, rules.gait_stride_stretch_max);
     let stance_foot = player.swing_foot.opposite();
     let stance_pos = match stance_foot {
         Foot::Left => player.left_foot_pos,
@@ -744,7 +748,8 @@ fn update_foot_placement(
         return;
     }
     let heading = player.vel_ft / speed;
-    let contact_pos = player.pos_ft + heading * (stride * 0.5);
+    let contact_pos =
+        player.pos_ft + heading * (stride * rules.gait_stride_contact_fraction);
     let swing_foot = player.swing_foot;
     match swing_foot {
         Foot::Left => player.left_foot_pos = contact_pos,
