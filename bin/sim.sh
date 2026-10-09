@@ -6,6 +6,11 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PATH="$HOME/.cargo/bin:$PATH"
 
+# 临时根默认为仓库内的 .work/tmp：迁移主机后无需改代码即可工作，
+# 且与 check_disk_budget.py 的「不内置机器特定路径」口径一致。
+# 需要落在其他卷（磁盘紧张时）用 NBA_TEMP_ROOT 覆盖。
+TEMP_ROOT="${NBA_TEMP_ROOT:-$DIR/.work/tmp}"
+
 BIN="$DIR/target/release/nba-sim"
 SCOPE="${3:-1q}"
 STREAM_MODE="${4:-facts}"
@@ -20,7 +25,7 @@ if [ -n "${2:-}" ]; then
     OUT_FILE="$2"
 else
     # 默认写入临时目录并带时间戳，避免覆盖与累积。
-    OUT_FILE="${NBA_TEMP_ROOT:-/home/ubuntu/basketball}/nba_sim_seed${SEED}_$(date +%s).ndjson"
+    OUT_FILE="$TEMP_ROOT/nba_sim_seed${SEED}_$(date +%s).ndjson"
 fi
 
 mkdir -p "$(dirname "$OUT_FILE")"

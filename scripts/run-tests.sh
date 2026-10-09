@@ -15,6 +15,7 @@
 #   ./scripts/run-tests.sh tier2      # CI full-gate 层：机制与因果测试
 #   ./scripts/run-tests.sh tier3      # 8 种子全场统计基线（最重，建议后台任务执行）
 #   ./scripts/run-tests.sh tier2+3    # CI full-gate 等价：tier2 与 tier3 连续执行
+#   ./scripts/run-tests.sh validation # validation 体系：验证器/引擎分叉/扰动 + CLI 快检
 #   ./scripts/run-tests.sh -- ...     # 传统全量 workspace 测试（不受 CI 依赖，最重）
 #
 # 全部模式都经 scripts/par_test.py 并行执行：cargo 自身按目标串行调度，
@@ -32,7 +33,9 @@ cd "$DIR"
 MIN_FREE_MB="${NBA_MIN_FREE_MB:-3072}"
 MAX_TARGET_GB="${NBA_MAX_TARGET_GB:-8}"
 # 临时文件专用根目录（不与 /tmp、/dev/shm 混用）。
-TEMP_ROOT="${NBA_TEMP_ROOT:-/home/ubuntu/basketball}"
+# 默认为仓库内的 .work/tmp：迁移主机后无需改代码，与
+# check_disk_budget.py 的「不内置机器特定路径」口径一致。
+TEMP_ROOT="${NBA_TEMP_ROOT:-$DIR/.work/tmp}"
 mkdir -p "$TEMP_ROOT"
 RUN_TMP="$(mktemp -d "$TEMP_ROOT/nba_testrun_XXXXXX")"
 START_FREE="$(df -Pm "$DIR" | awk 'NR==2{print $4}')"
@@ -51,11 +54,13 @@ fail() {
 # tier1：nba-domain、nba-invariants、快照、投影与 golden hash。
 # tier2：机制与因果目标，加上 Play、D25 action_phase 与 D26 整场测试。
 # tier3：stats_baseline 整场测试。D26 与 stats_baseline 均由 --serial 独占运行。
+# validation：nba-validation 全目标 + 引擎检查点分叉/扰动测试；随后跑
+#   CLI validate 快速档（1q 单场）与认证汇总（工件视图）。
 MODE="${1:-}"
 shift || true
 if [ "$MODE" = "--" ]; then
     MODE_LABEL="full workspace"
-elif [[ "$MODE" =~ ^(tier1|tier2|tier3|tier2\+3)$ ]]; then
+elif [[ "$MODE" =~ ^(tier1|tier2|tier3|validation|tier2\+3)$ ]]; then
     MODE_LABEL="$MODE"
 else
     fail "unknown mode: $MODE (expected tier1 | tier2 | tier3 | tier2+3 | --)"
@@ -106,6 +111,24 @@ else
     python3 scripts/par_test.py --jobs 2 --threads-per-bin 2 --tier "$MODE"
 fi
 STATUS=$?
+
+# validation 模式追加 CLI 快检（1q 单场全层判定 + 认证汇总）。
+# 判定退出码如实传递：缺陷（1）与证据不足（3）都会使本脚本退出非零——
+# validation 红着是引擎侧工作清单的输入，禁止为了让它绿而改判定。
+if [ "$MODE" = "validation" ] && [ "$STATUS" -eq 0 ]; then
+    echo
+    echo "── CLI validate 快速档（seed 42, scope 1q）──"
+    VALIDATE_OUT="$RUN_TMP/validate-quick"
+    NBA_STAT_DELTAS="$DIR/data/reference/stat_deltas.v1.json" \
+        "$DIR/target/debug/nba-sim" validate --seed 42 --scope 1q --out "$VALIDATE_OUT"
+    VALIDATE_STATUS=$?
+    if [ "$VALIDATE_STATUS" -ne 0 ] && [ "$VALIDATE_STATUS" -ne 3 ]; then
+        echo "❌ CLI validate 执行错误（exit $VALIDATE_STATUS）" >&2
+        STATUS=$VALIDATE_STATUS
+    else
+        python3 scripts/certification_summary.py "$VALIDATE_OUT"
+    fi
+fi
 
 # 3. 后置检查与清理
 echo
