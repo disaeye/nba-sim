@@ -47,6 +47,7 @@ impl std::error::Error for Violation {}
 /// 每个 `StreamTick` 调用一次 [`InvariantChecker::check_tick`]，内部维护
 /// 上一 tick 的球员位置 / 球位置 / 比分 / 时钟，以计算速度与单调性。
 /// 引擎导出循环与离线分析脚本都应复用同一实现，保证规则只有一份。
+#[derive(Clone)]
 pub struct InvariantChecker {
     tick_index: u64,
     prev_positions: HashMap<String, (f32, f32)>,

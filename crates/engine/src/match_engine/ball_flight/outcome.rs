@@ -196,6 +196,11 @@ impl MatchEngine {
                         None,
                         None,
                     );
+                    // 罚球命中的发球与投篮命中同为 Score 终结，但回合
+                    // 开始原因必须区分（Q01 转移矩阵 free_throw 行的
+                    // 事实源）——显式覆盖 pending_inbound_origin。
+                    self.flow.pending_inbound_origin =
+                        Some(nba_domain::TransitionOrigin::MadeFreeThrow);
                     let inbound_pos = Court::hoop_pos(shooter_is_home);
                     self.start_inbound_transition(inbound_pos, final_position);
                 }

@@ -45,21 +45,25 @@ docs/dev/
 ├── roadmap.md
 ├── current/
 │   ├── plan.md
-│   ├── implementation.md
-│   └── spec_gap.md
+│   └── implementation.md
 ├── evidence/
 │   ├── problem.md
 │   └── impact_assessment.md
 └── cycles/
     ├── 20260901_historical/
     ├── 20260911_first-principles/
-    └── 20260916_convergence/
+    ├── 20260916_convergence/
+    │   ├── plan.md
+    │   └── spec_gap.md
+    ├── 20260916_systematization/
+    └── 20260917_first_principles_next/
+        └── plan_play.md
 ```
 
 | 层级 | 唯一职责 | 完成后的动作 |
 | --- | --- | --- |
 | `status.md` | 当前快照和开放门 | 持续更新，不复制历史正文 |
-| `current/` | 尚未完成的执行任务：`plan.md` 是队列，`implementation.md` 是步骤，`spec_gap.md` 是核对结果 | 任务结束即归档到当前周期目录 |
+| `current/` | 尚未完成的执行任务：`plan.md` 是队列，`implementation.md` 是步骤 | 任务结束即归档到当前周期目录 |
 | `gap.md` | 跨周期差距地图 | 程序整体闭合后归档快照 |
 | `roadmap.md` | 里程碑顺序 | 下一轮路线取代旧路线 |
 | `evidence/` | 原始事实和口径 | 只追加，不用新状态覆盖旧事实 |
@@ -89,6 +93,7 @@ docs/dev/
 | D0–D6 | `cycles/20260911_first-principles/plan.md` | 已结束周期的任务分解 | 追溯旧证据，不新增 |
 | D7–D13 | `cycles/20260916_convergence/plan.md` | 已结束周期的任务分解（从可运行收敛到可证明） | 追溯旧证据，不新增 |
 | D14– | `current/plan.md` | 当前周期任务分解（体系化实施） | 当前周期未完成工作 |
+| R1–R12 | `current/plan.md` / `current/implementation.md` | 当前周期轮次（R1–R11 引擎能力轮次，R12 验证基础设施） | 当前周期未完成工作 |
 | F1–F7 | 历史周期 | 遗留项编号 | 追溯旧证据，不新增 |
 | Round-N | 周期归档 | 执行顺序 | 历史检索，不代表当前状态 |
 

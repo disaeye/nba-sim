@@ -104,6 +104,11 @@ pub struct BallSecurityPolicy {
     pub poke_steal_tendency_floor: f32,
     /// 抢断倾向的调制跨度（见 `poke_steal_tendency_floor`）。
     pub poke_steal_tendency_span: f32,
+    /// 切球不应期（秒）：同一持球人被拍掉球后的这段时间内不再评估
+    /// 新的切球。真实篮球里持球人刚丢球会立即收紧护球，防守人刚
+    /// 完成一次挥臂需要收手再起手；没有不应期时，松球滚回原持球人
+    /// 脚边被收起的下一秒他就再次被拍（实测 1s 连拍）。
+    pub poke_recovery_seconds: f32,
 }
 
 /// 封盖裁定策略（`attributes.md` §2.4 的 `block` 与 `vertical` 消费链）。
@@ -175,8 +180,16 @@ impl Default for BallSecurityPolicy {
             // round-16 标定（A/B 证据 §17.7）：0.55 → 2.2。
             // 失误率取真实值：丢球占比 24%(r1.5)/40%(r3.0) 的插值点，
             // 丢球率 0.078/回合 ≈ 真实 0.0776（82games 53.6% × 0.145）。
-            poke_attempt_rate_per_sec: 2.2,
-            poke_success_ceiling: 0.16,
+            // r38 校准：poke 尝试频率 2.2→1.2/s、成功上限 0.16→0.11。
+            // 实测（seed42/43 各 1q）poke 丢球回合占 11%，真实 NBA 掏球
+            // 丢权约 2-3%（每场 2-3 次 / 100 回合）；掉球修复（接球范围
+            // 扩大）后 poke 成为失误最大源，按比例回调。
+            // r48 合并注记：ui 分支的标定是 0.8/0.16 + poke_recovery_seconds
+            // 不应期（1.5s）的组合；main 的 1.2/0.11 是 r38 批量校准值。
+            // 保留 main 值 + ui 不应期（两套标定的频率-成功率-不应期三元
+            // 组不能混搭，TOV 批量口径以 main 为准）。
+            poke_attempt_rate_per_sec: 1.2,
+            poke_success_ceiling: 0.11,
             poke_success_floor: 0.008,
             poke_defender_skill_weight: 0.55,
             poke_handler_skill_weight: 0.70,
@@ -195,6 +208,7 @@ impl Default for BallSecurityPolicy {
             poke_ball_speed_ratio: 0.18,
             poke_steal_tendency_floor: 0.55,
             poke_steal_tendency_span: 0.9,
+            poke_recovery_seconds: 1.5,
         }
     }
 }
@@ -414,6 +428,15 @@ pub struct ReboundPolicy {
     /// `eff_off_dist = off_dist × (1 - putback_bias × 此值)`。
     /// 原为内联 0.15，同样把 `effective_putback_bias` 的影响压得过小。
     pub putback_distance_discount: f32,
+    /// 前场板后「传出去重新组织」的效用系数（r43）：乘在 Pass 候选效用上，
+    /// 让 OREB 后的传球选项与补篮在效用层真实竞争（真实 NBA 前场板后约
+    /// 19% 的回合选择传球，引擎 0.91 全选补篮）。
+    pub putback_pass_out_factor: f32,
+    /// 补篮情境开度门（r49）：补篮加成随空位衰减——
+    /// `bonus × (1 - (1-open) × 此值)`。被卡位贴死（open≈0.3）时补篮
+    /// 加成缩水、传出去重新组织反超（真实 NBA 补篮多发生在深位无贴防），
+    /// 开放补篮不受影响。0=关闭情境区分（r43-r48 行为）。
+    pub putback_openness_gate: f32,
 }
 
 impl Default for ReboundPolicy {
@@ -429,6 +452,11 @@ impl Default for ReboundPolicy {
             strength_stamina_weight: 0.10,
             boxout_distance_discount: 0.60,
             putback_distance_discount: 0.60,
+            putback_pass_out_factor: 1.6,
+            // 0.25/0.75 实测均伤 TOV（0.175→0.263）：OREB 后被贴防时
+            // 传出去的组织回合失败率高（单场口径），保持 0 禁用——
+            // C04 差距的归因改判为 OREB possession 的非出手终结。
+            putback_openness_gate: 0.0,
         }
     }
 }
@@ -507,21 +535,19 @@ impl Default for BaseRates {
         Self {
             pass_success: 0.94,
             drive_success: 0.78,
-            // 四区基准（attributes.md §2.3a）：公开赛季口径 Rim ≈ 0.63、
-            // Near（5–14 ft 非篮下两分）≈ 0.45、Mid（≥ 14 ft 两分）≈ 0.42、
-            // 3P ≈ 0.36。旧口径以 8 ft 分 Rim/Mid 且 4 ft 统计篮下，
-            // 同一次出手在不同环节分类不一致；统一四区后基准重新锚定。
-            shot_make_rim: 0.32,
-            shot_make_near: 0.29,
-            shot_make_mid: 0.265,
-            // 三分基准 0.34→0.36（ADR-017 第三步校准）：身体碰撞与传球
-            // 接触进入后，乱战出手增多，三分出手时平均 make_probability
-            // 0.308→0.294（实测 8 seed、n=463）；降低干扰灵敏度
-            // （contest 0.32→0.28）反而更差（非单调，与 G6a 记录一致），
-            // 因此基准上调回带（3P% 中位 31.0，total_p50 161）。
-            shot_make_3pt: 0.33,
+            // 四区基准（attributes.md §2.3a，公开赛季口径 Rim≈0.63/Near≈0.45/
+            // Mid≈0.42/3P≈0.36；统一四区分类后重新锚定）。r38 起按「比赛面
+            // 终值 - 平均净修正」经批量判定迭代收敛——耦合系统，净修正随出手
+            // 构成漂移，迭代史见 golden v83-v89 登记。
+            shot_make_rim: 0.385,
+            shot_make_near: 0.489,
+            shot_make_mid: 0.440,
+            // 三分基准演化：ADR-017 校准 0.33→0.36（contest 灵敏度非单调，
+            // 降反而差）；r38→0.312；r40 pass 提额后空位接球投增多，按
+            // 批量净修正回调到 0.335（出场 3P% 对齐参照 0.366）。
+            shot_make_3pt: 0.335,
             ft_make: 0.77,
-            foul_on_drive_rate: 0.12,
+            foul_on_drive_rate: 0.44,
             // 跳投犯规基准：真实 NBA 每场约 40 次犯规，其中相当部分来自
             // 跳投犯规（三分犯规 / 中距离投篮犯规 / and-one）。
             // 干扰强度在上层作为自变量乘入，此处为“受到实质干扰时”的基准。

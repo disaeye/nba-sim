@@ -7,9 +7,10 @@
 use glam::Vec2;
 use nba_decision::tactics::TacticalPlanner;
 use nba_domain::action_window::ActionTimeWindow;
-use nba_domain::{Possession, SubPhase};
+use nba_domain::{GameEvent, Possession, SubPhase};
 use nba_physics::ballistics::BallTrajectoryKind;
 
+use super::state::MovementIntentRecord;
 use super::MatchEngine;
 
 /// 转换跑动倾向缺省值（球员档案未携带倾向时的中性个体）。
@@ -212,6 +213,10 @@ impl MatchEngine {
             } => Some((inbounder_id.clone(), *baseline_pos)),
             _ => None,
         };
+        // 发球接应位（safety）：推导逻辑在 `inbound_safety` 模块
+        // （人选能力通道 + 落位点，`inbound_safety_distance_ft = 0` 关闭）。
+        let inbound_safety =
+            super::inbound_safety::resolve_inbound_safety(self, inbounder_override.as_ref());
         // 层 A（P-1 有限信息）：接球人**不得**直读传球人的冻结接球点。
         //
         // 旧实现把 `BallState::Pass.to_pos`（传球人的私有意图）直接注入接球人的
@@ -253,12 +258,65 @@ impl MatchEngine {
         };
         let home_jumper = self.select_jumper_id(Possession::Home);
         let away_jumper = self.select_jumper_id(Possession::Away);
-        // 活球松球争抢优先（charter §6.2 松球事实）：最近代表必须在一切
-        // 战术微操（切割路线残留、被过恢复）之前被派向球点——否则切割
-        // 残留者的物理动作标签永远是切割类，`still_cutting` 检查永远
-        // 通过，连最近的争抢代表也被 continue 跳过，球静躺在地上无人
-        // 问津直到节末（实测 seed 11 p123 停滞 42 秒）。选择排除运动学
-        // 锁定者（投篮/传球窗口内的人无法移动），每队各保证至少一人。
+        // 松球争抢优先（charter §6.2）：最近代表必须在一切战术微操之前
+        // 被派向球点——否则切割残留的动作标签使争抢代表被跳过，球静躺
+        // 到节末（seed 11 停滞 42s）。排除运动学锁定者。
+        // r47 接应计算：推进期本队最近的两名队友作为接应人。
+        let backcourt_release_support: Option<(String, Vec2)> = {
+            let midcourt = self.config.rules.court.width_ft / 2.0;
+            let adv = self.observations.advancing_player.clone();
+            match (&self.ball.ball_state, adv) {
+                (
+                    BallTrajectoryKind::Held { carrier_id }
+                    | BallTrajectoryKind::Drive {
+                        driver_id: carrier_id,
+                        ..
+                    },
+                    Some(adv_id),
+                ) if *carrier_id == adv_id => {
+                    let pos = self
+                        .systems
+                        .physics
+                        .get_player(carrier_id)
+                        .map(|p| p.pos_ft)
+                        .unwrap_or_default();
+                    let in_backcourt = if self.flow.possession == Possession::Home {
+                        pos.x < midcourt
+                    } else {
+                        pos.x > midcourt
+                    };
+                    if in_backcourt {
+                        Some((carrier_id.clone(), pos))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        };
+        let support_ids: std::collections::HashSet<String> =
+            if let Some((adv_id, adv_pos)) = &backcourt_release_support {
+                let mut mates: Vec<(f32, String)> = self
+                    .systems
+                    .physics
+                    .get_players()
+                    .values()
+                    .filter(|p| {
+                        p.on_court
+                            && p.id != *adv_id
+                            && p.team
+                                == match self.flow.possession {
+                                    Possession::Home => "home",
+                                    Possession::Away => "away",
+                                }
+                    })
+                    .map(|p| ((p.pos_ft - *adv_pos).length(), p.id.clone()))
+                    .collect();
+                mates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                mates.into_iter().take(2).map(|(_, id)| id).collect()
+            } else {
+                Default::default()
+            };
         let loose_chase_primary: Option<(Vec2, std::collections::HashSet<String>)> =
             if let BallTrajectoryKind::LooseBall { pos, z, .. } = &self.ball.ball_state {
                 let spot = *pos;
@@ -298,6 +356,51 @@ impl MatchEngine {
             if let Some(player_id) = target.player_id {
                 if active_driver_id.as_deref() == Some(player_id.as_str()) {
                     continue;
+                }
+                // r47 推进义务保护：推进期持球人不受槽位重置（槽位可在
+                // 身后，覆盖即 8 秒违例），越线后恢复常规覆盖。
+                let carrier_advancing = matches!(
+                    &self.ball.ball_state,
+                    BallTrajectoryKind::Held { .. } | BallTrajectoryKind::Drive { .. }
+                ) && self.observations.advancing_player.as_deref()
+                    == Some(player_id.as_str());
+                if carrier_advancing {
+                    continue;
+                }
+                // r47 接应（backcourt pressure release）：推进期最近两名
+                // 队友回撤到持球人后方的中路接应点——真实篮球的「8 秒
+                // 警报」行为。没有接应时持球人被追防+边线包夹孤立
+                // （实测推进均速 2.5-6 ft/s），传球无目标只能硬突。
+                if let Some((adv_id, adv_pos)) = &backcourt_release_support {
+                    let policy = &self.config.rules.tactics;
+                    if player_id != *adv_id
+                        && support_ids.len() >= policy.backcourt_support_count
+                        && support_ids.contains(player_id.as_str())
+                    {
+                        let side = if player_id.as_str() < adv_id.as_str() {
+                            -1.0
+                        } else {
+                            1.0
+                        };
+                        let support_y = (adv_pos.y + side * policy.backcourt_support_offset_ft)
+                            .clamp(
+                                policy.backcourt_support_y_min,
+                                policy.backcourt_support_y_max,
+                            );
+                        let support_pos = self.config.rules.court.clamp_playable(
+                            glam::vec2(adv_pos.x, support_y),
+                            self.config.rules.player_radius_ft,
+                        );
+                        self.systems.physics.set_player_target(
+                            &player_id,
+                            support_pos,
+                            target.speed.max(12.0),
+                            "BACKCOURT_SUPPORT",
+                            &target.slot,
+                            &target.morale,
+                        );
+                        continue;
+                    }
                 }
                 // 活球松球争抢优先于一切战术微操：最近代表（循环前算好）
                 // 直接奔赴球点，切割残留/被过恢复都不适用。
@@ -378,6 +481,35 @@ impl MatchEngine {
                     continue;
                 }
 
+                // 发球接应指派重置残留窗口：接应人与发球员是发球程序的
+                // 角色指派（placement 级别），若他们身上还挂着上一回合
+                // 的动作窗口（如篮板起跳准备），运动学锁会让他钉在原地
+                // ——实测 seed42 Q1 11:04 接应人被锁 48 tick 后又被
+                // APF 推到底线角，球过半场时全队 4 人滞留后场。
+                let is_inbound_program = matches!(
+                    &self.ball.ball_state,
+                    BallTrajectoryKind::InboundReady { .. }
+                        | BallTrajectoryKind::InboundTransfer { .. }
+                );
+                if is_inbound_program && self.observations.active_windows.contains_key(&player_id) {
+                    self.observations.active_windows.remove(&player_id);
+                    self.systems
+                        .physics
+                        .set_player_locked(&player_id, false, None);
+                    // 窗口被移除后不再推进，挂在其上的投篮释放也必须
+                    // 作废——与回合边界语义一致（回合已死，冻结的出手
+                    // 不可能再起飞）。否则 pending 永挂：下次该球员
+                    // 再度出手时撞上 pending 非空的 fast-fail。
+                    if self
+                        .observations
+                        .pending_shot_release
+                        .as_ref()
+                        .is_some_and(|pending| pending.shooter_id == player_id)
+                    {
+                        self.observations.pending_shot_release = None;
+                    }
+                }
+
                 // If tactical assignment is setting a high screen, initialize a ScreenSet action window.
                 // 仅在已确立持球人时进入定点掩护，避免在争球或者无持球人阶段产生原地停摆。
                 let has_carrier = matches!(
@@ -396,16 +528,10 @@ impl MatchEngine {
                     );
                 }
 
-                // 第一性原理：后场推进期间不得被战术目标覆盖。
-                //
-                // `set_player_target` 每 tick 都执行；若持球人正在执行
-                // `Advance`（把球推过中线），战术槽位（弧顶 x=66 等）
-                // 会把目标改回半场站位，导致推进速度被反复打断
-                // （实测仅 3.5–3.9 ft/s，而 8 秒规则需要 ≥4.5 ft/s）。
-                // 球已脱手（LooseBall/Pass/Shot 等）时保护对象不存在，
-                // 必须照常接受覆盖——否则被 Poke 松球后原推进者被永久
-                // 跳过，连松球争抢分支也被跳过，实测 seed13 死锁 608s
-                // （球静止在场上无人捡，直到 PERIOD_END 强制收束）。
+                // 推进期持球人不得被静态槽位覆盖（覆盖即推进被打断，
+                // 实测仅 3.5-3.9 ft/s 而 8 秒规则需 ≥4.5）。球已脱手时
+                // 保护对象不存在，必须照常接受覆盖——否则 Poke 松球后
+                // 原推进者被永久跳过（seed13 死锁 608s 教训）。
                 let ball_in_hands = matches!(
                     &self.ball.ball_state,
                     BallTrajectoryKind::Held { .. } | BallTrajectoryKind::Drive { .. }
@@ -434,6 +560,24 @@ impl MatchEngine {
                 {
                     if inb_id == &player_id {
                         (*inb_pos, 15.0, "INBOUND_SETUP".to_string())
+                    } else if inbound_safety
+                        .as_ref()
+                        .is_some_and(|(sid, _)| sid == &player_id)
+                    {
+                        let (_, spot) = inbound_safety.as_ref().unwrap();
+                        (
+                            *spot,
+                            self.config.rules.max_player_speed_ftps
+                                * self.config.rules.tactics.support_speed_ratio,
+                            "INBOUND_SAFETY".to_string(),
+                        )
+                    } else if let Some((rx_id, rx_pos)) = &pass_receiver_override {
+                        if rx_id == &player_id {
+                            let (aim, spd) = self.receive_approach(*rx_pos, &player_id);
+                            (aim, spd, "RECEIVE_CUT".to_string())
+                        } else {
+                            (target.target_pos, target.speed, target.action)
+                        }
                     } else {
                         (target.target_pos, target.speed, target.action)
                     }
@@ -457,10 +601,47 @@ impl MatchEngine {
                     // 篮板反弹（RimRebound）：近身者可加入冲抢；松球的最近
                     // 代表已在循环前直接派发（loose_chase_primary），这里
                     // 只处理篮板与残余近身拦截。
+                    // r45 修正：冲抢人数闸门装在进攻方（offensive_crash_max，
+                    // 走规则通道）——真实的前场板纪律是「外线 2-3 人冲抢、
+                    // 其余退防防快攻」，防守方全员保留 25ft 内的争抢资格
+                    // （卡位是篮板防守的本职，归属由距离与 boxout 自然
+                    // 决定）。此前闸门装在防守方 + 硬编码 2 人，方向错了：
+                    // OREB 偏高的根源是攻方冲抢人数，不是防守参与人数。
                     let is_primary_chaser = if is_tipoff_jumper {
                         false
+                    } else if cur_dist <= 25.0 {
+                        let offensive_team = match self.flow.possession {
+                            Possession::Home => "home",
+                            Possession::Away => "away",
+                        };
+                        let is_offensive = self
+                            .systems
+                            .physics
+                            .get_player(&player_id)
+                            .map(|p| p.team == offensive_team)
+                            .unwrap_or(false);
+                        if is_offensive {
+                            // 进攻方按（距离, id）取最近 offensive_crash_max 人。
+                            let mut chasers: Vec<(f32, String)> = self
+                                .systems
+                                .physics
+                                .get_players()
+                                .values()
+                                .filter(|p| p.on_court && p.team == offensive_team)
+                                .map(|p| ((p.pos_ft - reb_spot).length(), p.id.clone()))
+                                .collect();
+                            chasers.sort_by(|a, b| {
+                                a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+                            });
+                            chasers
+                                .iter()
+                                .take(self.config.rules.tactics.offensive_crash_max)
+                                .any(|(_, id)| id == &player_id)
+                        } else {
+                            true
+                        }
                     } else {
-                        cur_dist <= 25.0
+                        false
                     };
 
                     if is_primary_chaser && !is_tipoff_jumper {
@@ -553,7 +734,144 @@ impl MatchEngine {
                     &target.slot,
                     &target.morale,
                 );
+                // 运动意图事实（validation.md §3.3）：目标、类型与期限
+                // 逐任务登记；跑位结果（到位/超时/被替代）由验证器对照
+                // 几何帧与后续意图核对。每个决策间隔发布一次（同任务同
+                // 目标的连续 tick 不重复登记，避免意图流淹没事实流）。
+                self.record_movement_intent(&player_id, &action, &target.slot, target_pos);
             }
+        }
+    }
+
+    /// 登记（或修订）一条运动意图：同一球员的任务类型与目标不变时
+    /// 续用现有意图，变化时发布替代意图（revision + 1）。
+    /// 意图期限用本引擎的决策间隔折算（任务在下一次目标重算前有效）。
+    pub(crate) fn record_movement_intent(
+        &mut self,
+        player_id: &str,
+        task: &str,
+        target_region: &str,
+        target_pos: Vec2,
+    ) {
+        let key = player_id.to_string();
+        let current_position = self
+            .systems
+            .physics
+            .get_player(player_id)
+            .map(|player| player.pos_ft)
+            .unwrap_or(target_pos);
+        let deadline_ticks = (self.config.rules.decision_interval_seconds
+            / self.config.rules.tick_seconds)
+            .ceil()
+            .max(1.0) as u32;
+        if let Some(existing) = self.observations.movement_intents.get(&key) {
+            if existing.task == task && (existing.target_pos - target_pos).length() < 1.0 {
+                return;
+            }
+            // 任务或目标变化：先登记替代事实，再发布新意图。
+            let revision = existing.revision + 1;
+            self.journal
+                .pending_events
+                .push(GameEvent::MovementOutcome {
+                    player_id: key.clone(),
+                    task: existing.task.clone(),
+                    outcome: "superseded".to_string(),
+                    path_length_ft: 0.0,
+                    evidence_event_id: None,
+                });
+            self.journal.pending_events.push(GameEvent::MovementIntent {
+                player_id: key,
+                cause_event_id: None,
+                task: task.to_string(),
+                target: target_region.to_string(),
+                target_pos: (target_pos.x, target_pos.y),
+                deadline_ticks,
+                revision,
+            });
+            self.observations.movement_intents.insert(
+                player_id.to_string(),
+                MovementIntentRecord {
+                    task: task.to_string(),
+                    target_pos,
+                    started_tick: self.clock.tick_index,
+                    deadline_ticks,
+                    revision,
+                    last_position: current_position,
+                    path_length_ft: 0.0,
+                },
+            );
+            return;
+        }
+        self.journal.pending_events.push(GameEvent::MovementIntent {
+            player_id: key,
+            cause_event_id: None,
+            task: task.to_string(),
+            target: target_region.to_string(),
+            target_pos: (target_pos.x, target_pos.y),
+            deadline_ticks,
+            revision: 0,
+        });
+        self.observations.movement_intents.insert(
+            player_id.to_string(),
+            MovementIntentRecord {
+                task: task.to_string(),
+                target_pos,
+                started_tick: self.clock.tick_index,
+                deadline_ticks,
+                revision: 0,
+                last_position: current_position,
+                path_length_ft: 0.0,
+            },
+        );
+    }
+
+    /// 到位与回位判定（validation.md §4.2）：实际位置进入目标区域
+    /// （半径 `arrival_radius_ft`）即登记完成；任务到期未达成登记
+    /// 超时事实。声明完成却不满足几何是 Integrity 缺陷，超时但如实
+    /// 登记属于行为样本。
+    ///
+    /// 到位判定在意图到期时统一清算：意图到期时刻若球员在目标区域内
+    /// 则登记完成，否则登记超时。不在每个结算点立即结案的原因：驻留
+    /// 型任务（球员已在目标点执行任务）会在登记后立刻满足几何，形成
+    /// 「登记→完成→再登记」的意图流淹没（实测 98% completed 寿命为
+    /// 0 tick）。任务寿命与决策间隔一致，到期清算即真实终态。
+    pub(crate) fn settle_movement_intents(&mut self) {
+        if self.observations.movement_intents.is_empty() {
+            return;
+        }
+        let arrival_radius_ft = self.config.rules.tactics.arrival_radius_ft;
+        let current_tick = self.clock.tick_index;
+        let mut finished: Vec<(String, &'static str)> = Vec::new();
+        for (player_id, intent) in &mut self.observations.movement_intents {
+            let expired = current_tick >= intent.started_tick + intent.deadline_ticks as u64;
+            let Some(player) = self.systems.physics.get_player(player_id) else {
+                finished.push((player_id.clone(), "interrupted"));
+                continue;
+            };
+            intent.path_length_ft += (player.pos_ft - intent.last_position).length();
+            intent.last_position = player.pos_ft;
+            if expired {
+                let arrived = (player.pos_ft - intent.target_pos).length() <= arrival_radius_ft;
+                finished.push((
+                    player_id.clone(),
+                    if arrived { "completed" } else { "timed_out" },
+                ));
+            }
+        }
+        for (player_id, outcome) in finished {
+            let Some(intent) = self.observations.movement_intents.remove(&player_id) else {
+                continue;
+            };
+            let path_length_ft = intent.path_length_ft;
+            self.journal
+                .pending_events
+                .push(GameEvent::MovementOutcome {
+                    player_id,
+                    task: intent.task,
+                    outcome: outcome.to_string(),
+                    path_length_ft,
+                    evidence_event_id: None,
+                });
         }
     }
 
@@ -864,17 +1182,21 @@ impl MatchEngine {
             let Some(new_resp) = target.responsibility else {
                 continue;
             };
-            let old_resp = self
+            let prior_resp = self
                 .observations
                 .defense_responsibilities
                 .get(player_id)
-                .copied()
-                .unwrap_or(nba_domain::DefenseResponsibility::PrimaryMatchup);
+                .copied();
+            let old_resp = prior_resp.unwrap_or(nba_domain::DefenseResponsibility::PrimaryMatchup);
             if old_resp != new_resp {
                 self.observations
                     .defense_responsibilities
                     .insert(player_id.clone(), new_resp);
                 let off_id = target.offensive_player_id.clone().unwrap_or_default();
+                // 责任生命周期事实（validation.md §3.3）：旧责任登记
+                // 结束、新责任登记开始，供责任实例配对与到位回位核对。
+                events
+                    .extend(self.derive_responsibility_lifecycle(player_id, prior_resp, new_resp));
                 events.push(nba_domain::GameEvent::DefenseResponsibilityChanged {
                     defender_id: player_id.clone(),
                     old_responsibility: old_resp,

@@ -21,6 +21,7 @@
     max_player_speed_ftps: 22,
     max_player_accel_ftps2: 35,
     player_radius_ft: 1.8,
+    body_contact_radius_ft: 1.0,
     min_player_separation_ft: 3.6,
     ball_max_speed_ftps: 85,
     rim_shot_distance_ft: 5,
@@ -65,6 +66,10 @@
       playerRadius: finite(
         rules.player_radius_ft,
         DEFAULT_RULES.player_radius_ft,
+      ),
+      bodyContactRadius: finite(
+        rules.body_contact_radius_ft,
+        DEFAULT_RULES.body_contact_radius_ft,
       ),
       minPlayerSeparation: finite(
         rules.min_player_separation_ft,
@@ -116,7 +121,6 @@
     rafId: null,
     previousRaf: 0,
     accumulator: 0,
-    currentTab: "timeline",
     teamPerspective: "home",
     courtMode: "full",
     potentialFieldVisible: true,
@@ -179,15 +183,19 @@
     CONTACT_BUMP: "身体对抗",
     ACTION_WINDOW_SHIFT: "战术推进",
     PHASE_TRANSITION: "战术流转",
-    PASS: "传球配合",
+    BALL_ORIENTATION: "球位调整",
+    PASS: "传球",
     PASS_RECEIVED: "接球就绪",
+    PASS_LANDING_CORRECTED: "传球落点修正",
     PASS_DROPPED: "传球脱手",
-    BALL_POKED_LOOSE: "防守破坏球权",
+    PASS_INTERCEPT_OPPORTUNITY: "断球机会",
+    BALL_POKED_LOOSE: "防守拍掉球权",
     LOOSE_BALL_SECURED: "控制活球",
     SHOT_RELEASE: "投篮出手",
     SCORE: "进球得分",
     DRIVE_SCORE: "突破上篮得分",
     DRIVE_MISS: "突破终结未中",
+    DRIVE_INITIATED: "持球突破",
     DRIVE_STOPPED: "突破被阻截",
     SHOT_MADE: "投篮命中",
     SHOT_MISS: "投篮打铁",
@@ -204,9 +212,73 @@
     FREE_THROW_MISSED: "罚球未中",
     INBOUND_PASS: "发球入界",
     CONTROL_TRANSFER: "球权争夺",
+    PLAY_ACTIVATED: "战术启动",
+    PLACEMENT_APPLIED: "落位调整",
+    LOOSE_BALL: "地板球争夺",
+    ADVANCE: "持球推进",
+    HELD: "持球控制",
+    DRIVE: "突破推进",
+    SHOT: "投篮飞行",
+    DEAD: "死球",
+    INBOUND_TRANSFER: "发球传递",
+    INBOUND_READY: "发球就位",
+    CONTROL_TRANSFER: "球权争夺",
+    TRIPLE_THREAT_JAB: "三威胁试探步",
+    POST_UP: "低位背身要位",
+    TACTICAL_EXECUTION: "战术执行",
+    INBOUND_SETUP: "发球落位",
+    BLOCKED_SHOT: "盖帽封盖",
+    DRIVE_FOUL: "突破道犯规",
+    DRIVE_KICKOUT: "突破分球",
+    DRIVE_PULLUP: "突破急停跳投",
+    OUTLET_PASS: "一传发动",
+    SHOT_MISSED: "投篮未中",
+    GAME_END: "比赛结束",
+    OVERTIME_START: "加时开始",
+    PERIOD_START: "节间开始",
+    PERIOD_END: "节间结束",
+    PASS_TIPPED: "传球被拨",
+    JUMP_BALL_TRIGGERED: "争球判罚",
+    ENFORCEMENT_APPLIED: "规则修正执行",
+    FREE_THROW: "执行罚球",
+    SUBSTITUTION: "换人",
   };
   function getEventNameZh(name) {
     return EVENT_NAME_ZH[name] || name;
+  }
+
+  // 决策 kind 实际为复合串：基名(槽位) 或 基名→球员ID。
+  // 解析为「中文动作 · 球员名」可读形式。
+  function describeDecisionKind(kind) {
+    if (!kind) return "—";
+    const arrowMatch = kind.match(/^([A-Z_]+)\s*→\s*(\S+)$/);
+    if (arrowMatch) {
+      const target = playerNameFromId(arrowMatch[2]);
+      return `${getDecisionKindZh(arrowMatch[1])} → ${target}`;
+    }
+    const parenMatch = kind.match(/^([A-Z_]+)\s*\(([^)]+)\)$/);
+    if (parenMatch) {
+      const target = playerNameFromId(parenMatch[2]);
+      return target ? `${getDecisionKindZh(parenMatch[1])} · ${target}` : `${getDecisionKindZh(parenMatch[1])} · ${parenMatch[2]}`;
+    }
+    return getDecisionKindZh(kind);
+  }
+
+  // 球员内部 ID（H_01/A_03）转「号码 · 中文名」。studio 名单是名字的
+  // 权威来源；帧 players 不携带 name，仅能提供 jersey 兜底。
+  function playerNameFromId(id) {
+    if (!id) return "";
+    const roster = studio?.default_setup;
+    if (roster) {
+      const all = [...(roster.home_team?.players || []), ...(roster.away_team?.players || [])];
+      const found = all.find((p) => p.id === id);
+      if (found) return `#${found.jersey} ${getPlayerNameZh(found.name)}`;
+    }
+    for (const tick of [state.ticks[state.idx], state.ticks[0]]) {
+      const player = (tick?.players || []).find((p) => p.id === id);
+      if (player) return `#${player.jersey} ${player.name || id}`;
+    }
+    return id;
   }
 
   const ACTION_ZH = {
@@ -367,19 +439,6 @@
     return MORALE_ZH[morale] || morale || "平稳";
   }
 
-  const INTENSITY_ZH = {
-    BuildUp: "战术组织",
-    Climax: "关键攻防",
-    Plateau: "平稳推进",
-    Low: "轻度试探",
-    Medium: "中度对抗",
-    High: "高度焦灼",
-    Physical: "强力肉搏",
-  };
-  function getIntensityZh(intensity) {
-    return INTENSITY_ZH[intensity] || intensity || "常规战况";
-  }
-
   const TEAM_ZH = {
     north_city_hawks: "北城老鹰",
     south_bay_mariners: "南湾水手",
@@ -474,15 +533,38 @@
 
   const DECISION_KIND_ZH = {
     Shoot: "投篮出手",
-    Pass: "传球配合",
+    Pass: "传球",
     Drive: "持球突破",
     Dwell: "持球观察",
     Reset: "重置战术",
     Cut: "空切跑位",
     Screen: "设立掩护",
+    JAB: "试探步",
+    ADVANCE: "向前推进",
   };
   function getDecisionKindZh(kind) {
     return DECISION_KIND_ZH[kind] || kind || "—";
+  }
+
+  // 引擎约束/规则标识符的中文释义（决策面板的约束列表、阻截列表用）
+  const CONSTRAINT_ZH = {
+    backcourt_clock: "八秒未过半场计时",
+    out_of_bounds: "边线界外限制",
+    out_of_bounds_event: "出界事件后续",
+    action_eligibility: "动作可用性",
+    dead_ball_action: "死球动作限制",
+    contact_fact: "接触事实登记",
+    risky_pass: "高风险传球惩罚",
+    contested_shot: "强干扰出手惩罚",
+    crowded_receiver: "接球人被贴防惩罚",
+    shot_clock_urgency: "进攻时间紧迫惩罚",
+    shot_clock: "二十四秒进攻计时",
+    inbound_clock: "发球五秒计时",
+    inbound_constraint: "发球限制",
+    shooting_ft: "罚球流程",
+  };
+  function getConstraintZh(name) {
+    return CONSTRAINT_ZH[name] || name;
   }
 
   const ANOMALY_KIND_ZH = {
@@ -551,16 +633,21 @@
 
   function updatePerspectiveNav() {
     if (!studio) return;
+    syncRosterTeamButtons();
+  }
+
+  // 阵容 pane 内主客队按钮的名称与激活态同步
+  function syncRosterTeamButtons() {
+    if (!studio) return;
     const homeName = getTeamNameZh(studio.default_setup.home_team.id) || studio.default_setup.home_team.name;
     const awayName = getTeamNameZh(studio.default_setup.away_team.id) || studio.default_setup.away_team.name;
-    const homeText = $("perspectiveHomeText");
-    const awayText = $("perspectiveAwayText");
+    const homeText = $("rosterHomeTeamName");
+    const awayText = $("rosterAwayTeamName");
     if (homeText) homeText.textContent = `${homeName} (主队)`;
     if (awayText) awayText.textContent = `${awayName} (客队)`;
-
-    const homeBtn = $("perspectiveHomeBtn");
-    const awayBtn = $("perspectiveAwayBtn");
     const isHome = state.teamPerspective === "home";
+    const homeBtn = $("rosterTeamHomeBtn");
+    const awayBtn = $("rosterTeamAwayBtn");
     if (homeBtn) homeBtn.classList.toggle("active", isHome);
     if (awayBtn) awayBtn.classList.toggle("active", !isHome);
   }
@@ -572,16 +659,22 @@
     syncScoreboardTactics();
   }
 
+  // 记分牌两侧的默认战术标签（推演开始前无 tick 数据时的静态展示）
   function syncScoreboardTactics() {
     if (!studio) return;
     const setup = studio.default_setup;
     const homeOff = studio.offense.find((item) => item.id === setup.home_lineup.offense_tactic);
     const awayOff = studio.offense.find((item) => item.id === setup.away_lineup.offense_tactic);
-    const homeTag = document.querySelector(".home-side .team-tactic-tag");
-    const awayTag = document.querySelector(".away-side .team-tactic-tag");
-    if (homeTag) homeTag.textContent = `进攻 · ${cleanTacticNameZh(homeOff?.name_zh) || "进攻体系"}`;
-    if (awayTag) awayTag.textContent = `进攻 · ${cleanTacticNameZh(awayOff?.name_zh) || "进攻体系"}`;
-    if ($("tacticalSet") && homeOff) $("tacticalSet").textContent = cleanTacticNameZh(homeOff.name_zh);
+    const homeTag = $("homeTacticTag");
+    const awayTag = $("awayTacticTag");
+    const homeDef = $("homeDefTag");
+    const awayDef = $("awayDefTag");
+    const homeDefTactic = studio.defense.find((d) => d.id === setup.home_lineup?.defense_tactic);
+    const awayDefTactic = studio.defense.find((d) => d.id === setup.away_lineup?.defense_tactic);
+    if (homeTag) homeTag.textContent = `攻 · ${cleanTacticNameZh(homeOff?.name_zh) || "—"}`;
+    if (awayTag) awayTag.textContent = `攻 · ${cleanTacticNameZh(awayOff?.name_zh) || "—"}`;
+    if (homeDef) homeDef.textContent = `守 · ${cleanTacticNameZh(homeDefTactic?.name_zh) || "—"}`;
+    if (awayDef) awayDef.textContent = `守 · ${cleanTacticNameZh(awayDefTactic?.name_zh) || "—"}`;
   }
 
   function renderBoard() {
@@ -1420,7 +1513,10 @@
     }
     state.rules = rules;
     state.rulesLoaded = true;
-    if (updateEditor) $("rulesEditor").value = JSON.stringify(rules, null, 2);
+    if (updateEditor) {
+      const editor = $("rulesEditor");
+      if (editor) editor.value = JSON.stringify(rules, null, 2);
+    }
     return rules;
   }
 
@@ -1484,8 +1580,7 @@
       }
       return true;
     } catch (error) {
-      setRunStatus("运行失败", true);
-      $("streamSummary").textContent = error.message;
+      setRunStatus(`运行失败：${error.message}`, true);
       console.error(error);
       return false;
     } finally {
@@ -1544,6 +1639,7 @@
     renderTimeline();
     renderAnomalies();
     renderShotMap();
+    renderMatchOverview();
     updateReadouts(source);
     $("progressInput").max = String(Math.max(0, parsed.length - 1));
     $("progressInput").value = "0";
@@ -1597,12 +1693,26 @@
           violations: 0,
           fouls: 0,
           events: [],
+          eventDetails: [],
           retainedRebound: false,
         };
         possessionMap.set(id, possession);
       }
       possession.end = index;
       possession.events.push(...names);
+      // 回合内事件时间轴素材：本 tick 新增的领域事件（含参与者 payload）
+      if (Array.isArray(tick.event_log)) {
+        for (const entry of tick.event_log) {
+          possession.eventDetails.push({
+            index,
+            sequence: entry.sequence ?? 0,
+            time: finite(entry.time),
+            kind: entry.kind,
+            data: entry.data || null,
+          });
+        }
+        possession.eventDetails.sort((a, b) => a.sequence - b.sequence);
+      }
       possession.passes += names.filter((name) => name === "PASS").length;
       possession.shots += names.filter(
         (name) => name === "SHOT_RELEASE",
@@ -1724,6 +1834,61 @@
           possession.retainedRebound = true;
         }
       }
+      // 回合叙事字段：进攻方、发起点、结果、得分归属与净胜分变化
+      const startTick = ticks[possession.start];
+      const endTick = ticks[possession.end];
+      possession.offenseTeam =
+        possessionTeams.get(possession.id) || startTick.possession_team || "home";
+      possession.period = startTick.period || 1;
+      const startNames = eventNames(startTick);
+      const allNames = possession.events;
+      if (startNames.includes("TIPOFF")) possession.origin = "tipoff";
+      else if (allNames.includes("STEAL")) possession.origin = "steal";
+      else if (allNames.includes("BLOCK")) possession.origin = "block";
+      else if (
+        allNames.includes("REBOUND") &&
+        !possession.retainedRebound
+      )
+        possession.origin = "defensive_rebound";
+      else if (possession.retainedRebound) possession.origin = "offensive_rebound";
+      else if (allNames.includes("OUT_OF_BOUNDS")) possession.origin = "inbound";
+      else possession.origin = "inbound";
+      const scoreBefore = possession.start > 0
+        ? ticks[possession.start - 1].score
+        : { home: 0, away: 0 };
+      possession.scoreBefore = {
+        home: finite(scoreBefore?.home),
+        away: finite(scoreBefore?.away),
+      };
+      possession.scoreAfter = {
+        home: finite(endTick.score?.home),
+        away: finite(endTick.score?.away),
+      };
+      const homeDelta = possession.scoreAfter.home - possession.scoreBefore.home;
+      const awayDelta = possession.scoreAfter.away - possession.scoreBefore.away;
+      possession.pointsScored =
+        possession.offenseTeam === "home" ? homeDelta : awayDelta;
+      const turnoverish = allNames.some((name) =>
+        /TURNOVER|STEAL|VIOLATION|OUT_OF_BOUNDS/.test(name) &&
+        name !== "OUT_OF_BOUNDS" ||
+        (name === "OUT_OF_BOUNDS" &&
+          ticks[possession.end].callout?.includes("出界")),
+      );
+      const shotAttempted = possession.shots > 0 || possession.driveScores > 0;
+      if (possession.pointsScored > 0) {
+        possession.result = "scored";
+      } else if (turnoverish) {
+        possession.result = "turnover";
+      } else if (shotAttempted) {
+        possession.result = "missed";
+      } else if (allNames.includes("FOUL")) {
+        possession.result = "foul";
+      } else {
+        possession.result = "other";
+      }
+      possession.turnovers = allNames.filter((name) =>
+        /TURNOVER|STEAL/.test(name),
+      ).length;
     }
 
     const resolvedShots = shots.filter((shot) => shot.resolved);
@@ -1867,7 +2032,7 @@
     headerRow.className = "stat-row stat-header";
     headerRow.style.fontWeight = "700";
     headerRow.style.color = "var(--text-muted)";
-    headerRow.style.fontSize = "10.5px";
+    headerRow.style.fontSize = "11px";
     headerRow.style.textTransform = "uppercase";
     headerRow.style.letterSpacing = "0.5px";
     headerRow.innerHTML =
@@ -2086,21 +2251,350 @@
       list.replaceChildren(empty);
     }
   }
+
+  // ==================== 五层验证（validation.md 五层判定） ====================
+  // 验证器在服务端对 /api/simulate 返回的同一场比赛（同一确定性重放）
+  // 做全部层判定；页面只渲染结论，不重算判据（validation.md §10：
+  // UI 只读取结果，不得在 UI 内重新判断是否通过）。
+  function setValidationBadge(text, cls) {
+    const badge = $("validationBadge");
+    if (!badge) return;
+    badge.textContent = text;
+    badge.className = `validation-pill-badge${cls ? ` ${cls}` : ""}`;
+  }
+
+  async function runValidation() {
+    const button = $("validationRunButton");
+    if (button) button.disabled = true;
+    setValidationBadge("验证中…", "validation-running");
+    const summary = $("validationSummary");
+    if (summary) {
+      const pending = document.createElement("span");
+      pending.className = "muted-label";
+      pending.textContent = "验证运行中：结构场景 → 独立重建 → 实例审计…";
+      summary.replaceChildren(pending);
+    }
+    try {
+      const response = await fetch("/api/validation/run", { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || `${response.status}`);
+      renderValidationResult(body.result);
+    } catch (error) {
+      setValidationBadge("验证失败", "validation-defect");
+      if (summary) {
+        const row = document.createElement("div");
+        row.className = "validation-verdict-row verdict-error";
+        row.textContent = `验证执行失败：${error.message}`;
+        summary.replaceChildren(row);
+      }
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function refreshValidation() {
+    try {
+      const response = await fetch("/api/validation/status");
+      const body = await response.json();
+      if (body.status === "done" && body.result) {
+        renderValidationResult(body.result);
+      }
+    } catch {
+      // 面板静默：状态接口离线时不打扰比赛观看。
+    }
+  }
+
+  function metricCell(value, label) {
+    const cell = document.createElement("div");
+    cell.className = "validation-metric-cell";
+    const valueEl = document.createElement("div");
+    valueEl.className = "validation-metric-value";
+    valueEl.textContent = String(value);
+    const labelEl = document.createElement("div");
+    labelEl.className = "validation-metric-label";
+    labelEl.textContent = label;
+    cell.append(valueEl, labelEl);
+    return cell;
+  }
+
+  function renderValidationResult(result) {
+    const exitCode = Number(result.exit_code);
+    const evidence = result.evidence || {};
+    let cls = "validation-defect";
+    if (exitCode === 0) {
+      cls = "validation-pass";
+    } else if (exitCode === 3) {
+      cls = "validation-insufficient";
+    }
+    const verdictTextMap = {
+      0: "通过：结构与事实层全部判定无缺陷",
+      1: "存在确定缺陷",
+      2: "输入或执行错误",
+      3: "必需证据不足",
+    };
+    const verdictText = verdictTextMap[exitCode] || "未知状态";
+    const badgeTextMap = { 0: "通过", 1: "有缺陷", 2: "执行错误", 3: "证据不足" };
+    setValidationBadge(badgeTextMap[exitCode] || "未知", cls);
+
+    const summary = $("validationSummary");
+    if (!summary) return;
+    const fragment = document.createDocumentFragment();
+
+    const verdictRow = document.createElement("div");
+    let verdictCls = "verdict-defect";
+    if (cls === "validation-pass") {
+      verdictCls = "verdict-pass";
+    } else if (cls === "validation-insufficient") {
+      verdictCls = "verdict-insufficient";
+    }
+    verdictRow.className = `validation-verdict-row ${verdictCls}`;
+    verdictRow.textContent = verdictText;
+    fragment.appendChild(verdictRow);
+
+    const grid = document.createElement("div");
+    grid.className = "validation-metric-grid";
+    grid.append(
+      metricCell(`${evidence.passes ?? 0}/${evidence.opportunities ?? 0}`, "通过/机会"),
+      metricCell(evidence.defects ?? 0, "缺陷"),
+      metricCell(evidence.insufficient ?? 0, "证据不足"),
+      metricCell(result.ticks ?? 0, "刻数"),
+      metricCell(result.events ?? 0, "事件"),
+      metricCell(result.open_business_instances ?? 0, "未终结实例"),
+    );
+    fragment.appendChild(grid);
+
+    // 独立重建对账（ledger_comparison 同源）。
+    const ledgerTitle = document.createElement("div");
+    ledgerTitle.className = "validation-section-title";
+    ledgerTitle.textContent = "独立重建 vs 引擎声明";
+    fragment.appendChild(ledgerTitle);
+    loadValidationLedger(ledgerTitle);
+
+    // 第 3/4/5 层：统计与机制判定（statistical/mechanism 工件）。
+    loadValidationLayers(detail || summary);
+    // 批量认证总览（certification 工件，最近一次批量判定跑）。
+    loadValidationCertification(detail || summary);
+
+    // 场景与证据不足详单。
+    const detail = $("validationDetail");
+    if (detail) {
+      detail.style.display = "flex";
+      detail.replaceChildren();
+      const insufficient = result.insufficient_reasons || [];
+      if (insufficient.length) {
+        const insufficientTitle = document.createElement("div");
+        insufficientTitle.className = "validation-section-title";
+        insufficientTitle.textContent = "证据不足原因（数据准备任务）";
+        detail.appendChild(insufficientTitle);
+        for (const reason of insufficient) {
+          const row = document.createElement("div");
+          row.className = "validation-ledger-item";
+          row.textContent = reason;
+          detail.appendChild(row);
+        }
+      }
+      loadValidationScenarios(detail);
+    }
+    summary.replaceChildren(fragment);
+  }
+
+  async function loadValidationCertification(container) {
+    if (!container) return;
+    try {
+      const response = await fetch("/api/validation/certification");
+      if (!response.ok) return;
+      const body = await response.json();
+      const cert = body.certification;
+      if (!cert || !cert.certification_status) {
+        const row = document.createElement("div");
+        row.className = "validation-ledger-item muted-label";
+        row.textContent = "批量认证：尚未运行（CLI: nba-sim validate --games N --scope full --out .work/validation-view）";
+        container.prepend(row);
+        return;
+      }
+      const title = document.createElement("div");
+      title.className = "validation-section-title";
+      title.textContent = "批量认证总览（最近一次整场批量判定）";
+      container.appendChild(title);
+      const statusTextMap = {
+        pass: "通过",
+        defects_found: "存在缺陷",
+        insufficient_evidence: "证据不足",
+      };
+      const statusClsMap = {
+        pass: "verdict-pass",
+        defects_found: "verdict-defect",
+        insufficient_evidence: "verdict-insufficient",
+      };
+      const statusRow = document.createElement("div");
+      statusRow.className = `validation-verdict-row ${statusClsMap[cert.certification_status] || "verdict-insufficient"}`;
+      const l35 = cert.layer3_5_distribution || {};
+      const l1 = cert.layer1_flow || {};
+      statusRow.textContent = `认证结论：${statusTextMap[cert.certification_status] || cert.certification_status} · 第1/2层场景 ${l1.scenarios_pass ?? "?"}/${l1.scenarios_total ?? "?"} · 第3/5层 缺陷 ${(l35.defects || []).length} 项 · 证据不足 ${(l35.insufficient || []).length} 项`;
+      container.appendChild(statusRow);
+      // 缺陷清单（引擎侧工作清单的输入）。
+      for (const criterion of l35.defects || []) {
+        const row = document.createElement("div");
+        row.className = "validation-ledger-item";
+        const name = document.createElement("span");
+        name.textContent = criterion;
+        const verdict = document.createElement("span");
+        verdict.className = "verdict-defect";
+        verdict.textContent = "缺陷";
+        row.append(name, verdict);
+        container.appendChild(row);
+      }
+      for (const criterion of l35.insufficient || []) {
+        const row = document.createElement("div");
+        row.className = "validation-ledger-item";
+        const name = document.createElement("span");
+        name.textContent = criterion;
+        const verdict = document.createElement("span");
+        verdict.className = "verdict-insufficient";
+        verdict.textContent = "证据不足";
+        row.append(name, verdict);
+        container.appendChild(row);
+      }
+      // 覆盖面三态。
+      const cov = cert.branch_coverage || {};
+      const covRow = document.createElement("div");
+      covRow.className = "validation-ledger-item";
+      covRow.textContent = `规则域覆盖：采样判定 ${cov.sampled ?? "?"} / 仅场景 ${cov.scenario_only ?? "?"} / 未覆盖 ${cov.uncovered ?? "?"}`;
+      container.appendChild(covRow);
+    } catch {
+      // 认证总览失败不影响其他展示。
+    }
+  }
+
+  async function loadValidationLayers(container) {
+    if (!container) return;
+    try {
+      const response = await fetch("/api/validation/layers");
+      if (!response.ok) return;
+      const body = await response.json();
+      // 统计层（第 3 层 STAT + 第 5 层 JOINT 的单场诊断值）。
+      const stat = body.statistical;
+      if (stat && Array.isArray(stat.verdicts) && stat.verdicts.length) {
+        const title = document.createElement("div");
+        title.className = "validation-section-title";
+        title.textContent = "分布判定（第 3/5 层 · 单场诊断）";
+        container.appendChild(title);
+        const groups = new Map();
+        for (const v of stat.verdicts) {
+          if (!groups.has(v.criterion_id)) groups.set(v.criterion_id, []);
+          groups.get(v.criterion_id).push(v);
+        }
+        for (const [criterion, entries] of groups) {
+          const row = document.createElement("div");
+          row.className = "validation-ledger-item";
+          const worst = entries.some((e) => e.verdict === "Defect")
+            ? "Defect"
+            : entries.some((e) => e.verdict === "InsufficientEvidence")
+              ? "InsufficientEvidence"
+              : "Pass";
+          const verdictKey = worst.toLowerCase();
+          const name = document.createElement("span");
+          name.textContent = `${criterion}（${entries.length} 指标）`;
+          const verdict = document.createElement("span");
+          verdict.className = `verdict-${verdictKey}`;
+          const textMap = { pass: "通过", defect: "缺陷", insufficientevidence: "证据不足" };
+          verdict.textContent = textMap[verdictKey] || worst;
+          row.append(name, verdict);
+          container.appendChild(row);
+        }
+      }
+      // 机制层（第 4 层实验）。
+      const mech = body.mechanism;
+      if (mech && Array.isArray(mech.experiments) && mech.experiments.length) {
+        const title = document.createElement("div");
+        title.className = "validation-section-title";
+        title.textContent = "机制实验（第 4 层 · 检查点扰动）";
+        container.appendChild(title);
+        for (const exp of mech.experiments) {
+          const row = document.createElement("div");
+          row.className = "validation-ledger-item";
+          const rates = exp.group_rates || [];
+          const fmt = (r) => (r === null || r === undefined ? "—" : (r * 100).toFixed(1) + "%");
+          const statusMap = {
+            completed: "完成",
+            insufficient_checkpoints: "检查点不足",
+            spec_digest_mismatch: "规格摘要不符",
+          };
+          row.textContent = `${exp.experiment_id}：${statusMap[exp.status] || exp.status} · 检查点 ${exp.checkpoints_hit} · 命中率 基${fmt(rates[0])}/低${fmt(rates[1])}/中${fmt(rates[2])}/高${fmt(rates[3])}`;
+          container.appendChild(row);
+        }
+      }
+    } catch {
+      // 分层详单失败不影响顶层结论展示。
+    }
+  }
+
+  async function loadValidationLedger(titleEl) {
+    try {
+      const response = await fetch("/api/validation/report");
+      if (!response.ok) return;
+      const report = await response.json();
+      const ledger = report.ledger || {};
+      const rebuilt = ledger.box_score_rebuilt?.home || {};
+      const declared = ledger.box_score_declared?.home || {};
+      const stats = ["fga", "fgm", "three_pa", "fta", "ftm", "orb", "drb", "stl", "tov", "pf"];
+      const mismatched = stats.filter((key) => rebuilt[key] !== declared[key]);
+      const possession = `回合 ${ledger.possession_rebuilt ?? "?"}/${ledger.possession_engine ?? "?"}（终局不一致 ${ledger.terminal_mismatches?.length ?? 0}）`;
+      const pairing = ledger.pairing || {};
+      const pairingOk =
+        !pairing.shots_without_release && !pairing.passes_without_release && !pairing.free_throws_without_award;
+      const row = document.createElement("div");
+      row.className = "validation-ledger-item";
+      row.textContent = mismatched.length
+        ? `箱体 ${mismatched.length} 项不一致（${mismatched.join(", ")}）；${possession}；因果配对${pairingOk ? "完整" : "有悬空"}`
+        : `箱体 10 项一致；${possession}；因果配对${pairingOk ? "完整" : "有悬空"}`;
+      titleEl.after(row);
+    } catch {
+      // 账本详单失败不影响顶层结论展示。
+    }
+  }
+
+  async function loadValidationScenarios(detail) {
+    try {
+      const response = await fetch("/api/validation/report");
+      if (!response.ok) return;
+      const report = await response.json();
+      const scenarios = report.scenarios || [];
+      if (!scenarios.length) return;
+      const title = document.createElement("div");
+      title.className = "validation-section-title";
+      title.textContent = "22 个必需结构场景";
+      detail.appendChild(title);
+      for (const scenario of scenarios) {
+        const row = document.createElement("div");
+        row.className = "validation-scenario-item";
+        const name = document.createElement("span");
+        name.textContent = scenario.scenario_id;
+        const verdict = document.createElement("span");
+        // ScenarioOutcome 的 verdict 序列化为 snake_case（pass/defect/…）。
+        const verdictKey = String(scenario.verdict || "").toLowerCase();
+        verdict.className = `verdict-${verdictKey}`;
+        const verdictTextMap = {
+          pass: "通过",
+          defect: "缺陷",
+          not_applicable: "不适用",
+          insufficient_evidence: "证据不足",
+        };
+        verdict.textContent = `${verdictTextMap[verdictKey] || verdictKey} · ${scenario.trigger_occurrences}次`;
+        row.append(name, verdict);
+        detail.appendChild(row);
+      }
+    } catch {
+      // 场景详单失败不影响顶层结论展示。
+    }
+  }
+
   function updateReadouts(source) {
     $("eventReadout").textContent = `共 ${state.events.length} 条事件`;
-    const normalizedSource = String(source || "")
-      .replace("seed", "种子")
-      .replace("5p", "5 回合")
-      .replace("1p", "1 回合")
-      .replace("10p", "10 回合")
-      .replace("1q", "1 单节")
-      .replace("full", "全场 48 分钟");
-    $("streamSummary").textContent =
-      `${normalizedSource} · ${state.possessions.length} 回合 · ${state.shots.length} 次投篮`;
   }
   function setRunStatus(text, error = false) {
     $("runStatus").textContent = text;
-    $("runStatus").style.color = error ? "var(--red)" : "";
+    $("runStatus").style.color = error ? "var(--color-urgent)" : "";
   }
 
   function renderCurrent(forceJson = false) {
@@ -2109,14 +2603,12 @@
     updateHud(tick);
     drawCourt(tick);
     updateTimelineCursor();
+    updateMatchFlowCursor();
     $("progressInput").value = String(state.idx);
     $("jumpInput").value = String(state.idx);
-    if ($("frameLabel")) $("frameLabel").textContent = `第 ${state.idx} 帧`;
     $("tickReadout").textContent =
       `${state.idx.toLocaleString()} / ${state.ticks.length.toLocaleString()} 帧`;
     $("progressTime").textContent = timeWithTenths(tick.t);
-    $("progressPossession").textContent =
-      `第 ${tick.possession_id ?? "—"} 回合`;
     if (forceJson || !state.playing || state.idx % 3 === 0)
       renderFrameJson(tick);
     renderDecision(tick);
@@ -2124,38 +2616,42 @@
   function updateHud(tick) {
     const homeTeam = tick.home_team || {};
     const awayTeam = tick.away_team || {};
-    if ($("frameLabel")) $("frameLabel").textContent = `第 ${state.idx} 帧`;
     $("homeTeamName").textContent = getTeamNameZh(homeTeam);
     $("awayTeamName").textContent = getTeamNameZh(awayTeam);
     const isHomePossession = tick.possession_team === "home" || tick.possession_id % 2 === 1;
     const currentOffenseTactic = getTacticsZh(tick.tactical_set) || "半场战术体系";
-    if ($("tacticalSet")) $("tacticalSet").textContent = currentOffenseTactic;
-    const homeTacticEl = $("homeTacticTag") || document.querySelector(".home-side .team-tactic-tag");
-    const awayTacticEl = $("awayTacticTag") || document.querySelector(".away-side .team-tactic-tag");
+    // 进攻标签展示持球方战术，防守标签展示对位方的防守策略
+    const homeTacticEl = $("homeTacticTag");
+    const awayTacticEl = $("awayTacticTag");
+    const homeDefEl = $("homeDefTag");
+    const awayDefEl = $("awayDefTag");
+    const defensiveTactic = cleanTacticNameZh(tick.defensive_tactic) || "沉退防守";
     if (homeTacticEl && awayTacticEl) {
       if (isHomePossession) {
-        homeTacticEl.textContent = `进攻 · ${currentOffenseTactic}`;
-        const defTacticId = studio?.default_setup?.away_lineup?.defense_tactic;
-        awayTacticEl.textContent = `防守 · ${defTacticId ? cleanTacticNameZh(studio.defense.find((d) => d.id === defTacticId)?.name_zh || "沉退防守") : "沉退防守"}`;
+        homeTacticEl.textContent = `攻 · ${currentOffenseTactic}`;
+        awayTacticEl.textContent = `攻 · —`;
       } else {
-        awayTacticEl.textContent = `进攻 · ${currentOffenseTactic}`;
-        const defTacticId = studio?.default_setup?.home_lineup?.defense_tactic;
-        homeTacticEl.textContent = `防守 · ${defTacticId ? cleanTacticNameZh(studio.defense.find((d) => d.id === defTacticId)?.name_zh || "沉退防守") : "沉退防守"}`;
+        awayTacticEl.textContent = `攻 · ${currentOffenseTactic}`;
+        homeTacticEl.textContent = `攻 · —`;
       }
     }
-    $("phaseLabel").textContent = getPhaseZh(tick.phase);
+    if (homeDefEl && awayDefEl) {
+      // defensive_tactic 是当前防守方（对方）的战术名，归位到对侧
+      if (isHomePossession) {
+        awayDefEl.textContent = `守 · ${defensiveTactic}`;
+        homeDefEl.textContent = `守 · —`;
+      } else {
+        homeDefEl.textContent = `守 · ${defensiveTactic}`;
+        awayDefEl.textContent = `守 · —`;
+      }
+    }
     const allNames = eventNames(tick);
     const highlightNames = allNames.filter((name) =>
       HIGHLIGHT_EVENTS.has(name),
     );
-    const chip = $("eventChip");
     const overlay = $("eventOverlayChip");
     if (highlightNames.length) {
       const txt = highlightNames.map(getEventNameZh).join(" · ");
-      if (chip) {
-        chip.textContent = txt;
-        chip.classList.add("active");
-      }
       if (overlay) {
         overlay.textContent = txt;
         overlay.classList.add("active");
@@ -2191,14 +2687,16 @@
     const sc = finite(tick.shotClock);
     $("shotClock").textContent = one(tick.shotClock);
     $("shotClock").classList.toggle("urgent-shot-clock", sc <= 5 && sc > 0);
-    const flowText = String(tick.game_flow || "LIVE");
-    $("flowLabel").textContent = /Dead|Free|Quarter|Half|GameEnd/.test(flowText)
-      ? "鸣哨停表"
-      : "活球推进";
-    $("foulsReadout").textContent =
-      `${tick.team_fouls_home ?? 0} / ${tick.team_fouls_away ?? 0}`;
-    $("freeThrows").textContent = String(tick.free_throws_remaining ?? 0);
-    $("intensityReadout").textContent = getIntensityZh(tick.intensity);
+    // 犯规数各归各队块
+    $("homeFouls").textContent = String(tick.team_fouls_home ?? 0);
+    $("awayFouls").textContent = String(tick.team_fouls_away ?? 0);
+    // 罚球提示仅在有剩余罚球时出现
+    const ftChip = $("freeThrowChip");
+    const ftRemaining = Number(tick.free_throws_remaining ?? 0);
+    if (ftChip) {
+      ftChip.hidden = !(ftRemaining > 0);
+      ftChip.textContent = `罚球 ${ftRemaining}`;
+    }
     const callout = formatCalloutZh(tick.callout) || "—";
     if ($("calloutText").textContent !== callout) {
       $("calloutText").textContent = callout;
@@ -2208,14 +2706,289 @@
         $("calloutText").classList.add("callout-flash");
       }
     }
-    const dead = /Dead|Free|Quarter|Half|GameEnd/.test(String(tick.game_flow));
-    $("flowLabel").style.color = dead ? "var(--away)" : "";
+    updateFlowState(tick);
+  }
+
+  const GAME_FLOW_ZH = {
+    Pregame: "赛前",
+    TipOff: "跳球",
+    LiveBall: "活球",
+    DeadBall: "死球",
+    Timeout: "暂停",
+    FreeThrow: "罚球中",
+    QuarterEnd: "节末",
+    Halftime: "半场休息",
+    Overtime: "加时",
+    GameEnd: "全场结束",
+  };
+  const SUB_PHASE_ZH = {
+    Initiation: "回合发起",
+    ActionExecution: "阵地战术",
+    ShotAttempt: "出手飞行",
+    FlightAndRebound: "篮板争抢",
+    DeadBallReset: "死球重置",
+  };
+  // 字幕条状态词：game_flow 非 LiveBall 时显示流程状态，活球时显示回合内子阶段
+  function updateFlowState(tick) {
+    const el = $("flowStateLabel");
+    if (!el) return;
+    const flow = String(tick.game_flow || "LiveBall").replace(/^.*\("?/, "").replace(/"?\).*$/, "");
+    const isDead = flow !== "LiveBall";
+    if (isDead) {
+      el.textContent = GAME_FLOW_ZH[flow] || flow;
+    } else {
+      el.textContent = SUB_PHASE_ZH[tick.phase] || getPhaseZh(tick.phase);
+    }
+    el.classList.toggle("dead", isDead);
+    el.classList.toggle("idle", !state.ticks.length);
   }
 
   function renderFrameJson(tick) {
     if (state.lastFrameJson === state.idx) return;
     $("frameJson").textContent = JSON.stringify(tick, null, 2);
     state.lastFrameJson = state.idx;
+  }
+
+  // ========================================================
+  // 比赛总览：回合流水线 + 校验与判罚汇总
+  // ========================================================
+  const ORIGIN_ZH = {
+    tipoff: "跳球",
+    inbound: "发球",
+    steal: "抢断",
+    block: "盖帽",
+    defensive_rebound: "防守篮板",
+    offensive_rebound: "补篮二次进攻",
+  };
+  const RESULT_ZH = {
+    scored: "得分",
+    missed: "出手未中",
+    turnover: "球权转换",
+    foul: "犯规终止",
+    other: "结束",
+  };
+  // 回合内事件时间轴：按 event_log payload 生成可读描述
+  function describeFlowEvent(entry) {
+    const payload = entry.data ? entry.data[Object.keys(entry.data)[0]] : null;
+    const name = (id) => playerNameFromId(id);
+    switch (entry.kind) {
+      case "TIPOFF": return "中圈跳球";
+      case "TIPOFF_SECURED": return "跳球获得球权";
+      case "PLAY_ACTIVATED": {
+        const playId = payload?.play_id || "";
+        const play = studio?.plays?.find((p) => p.id === playId);
+        return `启动战术 · ${cleanTacticNameZh(play?.name_zh) || playId}`;
+      }
+      case "PASS": return `${name(payload?.passer_id)} 传给 ${name(payload?.receiver_id)}`;
+      case "PASS_RECEIVED": return `${name(payload?.receiver_id)} 接球`;
+      case "PASS_DROPPED": return `${name(payload?.receiver_id)} 没接住 ${name(payload?.passer_id)} 的传球`;
+      case "PASS_LANDING_CORRECTED": return `传球落点修正 · 偏差 ${one(finite(payload?.divergence_ft))} 英尺`;
+      case "SHOT_RELEASE": {
+        const three = payload?.is_three ? "三分出手" : "出手";
+        return `${name(payload?.shooter_id)} ${three} · 命中率 ${pct(finite(payload?.make_probability))}`;
+      }
+      case "SCORE": {
+        const three = payload?.is_three ? "三分命中" : "命中";
+        return `${name(payload?.shooter_id)} ${three}`;
+      }
+      case "SHOT_MISS": return `${name(payload?.shooter_id)} 出手未中`;
+      case "REBOUND": return `${name(payload?.rebounder_id)} 抢下${payload?.is_offensive ? "进攻" : "防守"}篮板`;
+      case "DRIVE_INITIATED": return `${name(payload?.driver_id)} 持球突破`;
+      case "DRIVE_SCORE": return `${name(payload?.driver_id)} 突破得分`;
+      case "DRIVE_STOPPED": return `${name(payload?.driver_id)} 突破被阻截`;
+      case "FOUL": return `${name(payload?.fouler_id)} 犯规 · ${name(payload?.fouled_player_id)} 被犯${payload?.is_shooting ? "（投篮动作）" : ""}`;
+      case "BALL_POKED_LOOSE": return `${name(payload?.defender_id)} 拍掉 ${name(payload?.handler_id)} 的球`;
+      case "LOOSE_BALL_SECURED": return `${name(payload?.player_id)} 控制活球`;
+      case "OUT_OF_BOUNDS": return `球出界 · ${name(payload?.responsible_player_id)} 责任`;
+      case "SCREEN_CONTACT": {
+        const legal = payload?.legal_position ? "合法掩护" : "掩护接触";
+        return `${name(payload?.player_a)} 与 ${name(payload?.player_b)} ${legal}`;
+      }
+      case "CONTACT_BUMP": return `${name(payload?.player_a)} 与 ${name(payload?.player_b)} 身体对抗`;
+      case "BALL_ORIENTATION": return `${name(payload?.player_id)} 调整背身朝向`;
+      case "ACTION_WINDOW_SHIFT": return `${name(payload?.player_id)} ${getActionZh(payload?.action_type)}`;
+      case "PHASE_TRANSITION": return `阶段流转：${FLOW_PHASE_ZH[payload?.from] || payload?.from} → ${FLOW_PHASE_ZH[payload?.to] || payload?.to}`;
+      case "PLACEMENT_APPLIED": return `${name(payload?.player_id)} 落位调整（${FLOW_PHASE_ZH[payload?.phase] || payload?.phase}）`;
+      case "POSSESSION_SUMMARY": {
+        const parts = [`回合结束 · ${one(finite(payload?.duration_seconds))} 秒`];
+        if (payload?.shooter_id) parts.push(`最后出手 ${name(payload.shooter_id)}`);
+        if (payload?.turnover_player_id) parts.push(`失误 ${name(payload.turnover_player_id)}`);
+        return parts.join(" · ");
+      }
+      default: return getEventNameZh(entry.kind) || entry.kind;
+    }
+  }
+  const FLOW_PHASE_ZH = {
+    SetPlay: "阵地战术",
+    Transition: "转换进攻",
+    DeadBall: "死球",
+    Inbound: "发球",
+    FreeThrow: "罚球",
+    SetPlayExecution: "战术执行",
+    DeadBallReset: "死球重置",
+    Initiation: "回合发起",
+    ActionExecution: "阵地战术",
+    ShotAttempt: "出手飞行",
+    FlightAndRebound: "篮板争抢",
+  };
+  // 回合内事件重要性分级：核心事件始终展示，底层物理事件折叠
+  const FLOW_EVENT_MAJOR = new Set([
+    "TIPOFF", "TIPOFF_SECURED", "PLAY_ACTIVATED", "PASS", "PASS_DROPPED",
+    "SHOT_RELEASE", "SCORE", "SHOT_MISS", "REBOUND", "DRIVE_INITIATED",
+    "DRIVE_SCORE", "DRIVE_STOPPED", "FOUL", "BALL_POKED_LOOSE",
+    "LOOSE_BALL_SECURED", "OUT_OF_BOUNDS", "POSSESSION_SUMMARY",
+  ]);
+  const expandedPossessions = new Set();
+  function togglePossessionExpand(possessionId) {
+    if (expandedPossessions.has(possessionId)) expandedPossessions.delete(possessionId);
+    else expandedPossessions.add(possessionId);
+    renderMatchOverview();
+  }
+  function renderMatchOverview() {
+    const list = $("matchFlowList");
+    if (!list) return;
+    const possessions = state.possessions || [];
+    if (!possessions.length) {
+      list.replaceChildren(el("div", "empty-state", "等待推演开始…"));
+      renderValidationSummary();
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    for (const possession of possessions) {
+      const row = el("button", `match-flow-row ${possession.result === "scored" ? "flow-scored" : possession.result === "turnover" ? "flow-turnover" : ""} ${expandedPossessions.has(possession.id) ? "flow-expanded" : ""}`);
+      row.type = "button";
+      row.dataset.possessionId = String(possession.id);
+      row.dataset.index = String(possession.start);
+      row.addEventListener("click", () => togglePossessionExpand(possession.id));
+
+      const offenseTeam = possession.offenseTeam === "home"
+        ? $("homeTeamName")?.textContent || "主队"
+        : $("awayTeamName")?.textContent || "客队";
+      const offenseSide = el("span", `flow-offense ${possession.offenseTeam === "home" ? "home-dot-text" : "away-dot-text"}`, offenseTeam);
+
+      const idEl = el("span", "flow-id", `#${possession.id}`);
+      const originEl = el("span", "flow-origin", ORIGIN_ZH[possession.origin] || possession.origin);
+      const statEl = el("span", "flow-stat", `${possession.passes} 传 · ${possession.shots} 投 · ${one(possession.duration)} 秒`);
+      const resultEl = el("span", `flow-result result-${possession.result}`,
+        possession.pointsScored > 0 ? `${RESULT_ZH.scored} +${possession.pointsScored}` : RESULT_ZH[possession.result] || "结束");
+      const scoreEl = el("span", "flow-score",
+        `${possession.scoreAfter.away}:${possession.scoreAfter.home}`);
+
+      row.append(idEl, offenseSide, originEl, statEl, resultEl, scoreEl);
+      fragment.append(row);
+
+      // 展开态：回合内事件时间轴
+      if (expandedPossessions.has(possession.id)) {
+        fragment.append(buildPossessionTimeline(possession));
+      }
+    }
+    list.replaceChildren(fragment);
+    updateMatchFlowCursor();
+    renderValidationSummary();
+  }
+  function buildPossessionTimeline(possession) {
+    const wrap = el("div", "flow-timeline");
+    const details = possession.eventDetails || [];
+    if (!details.length) {
+      wrap.append(el("div", "flow-timeline-empty muted-label", "该回合没有记录到领域事件"));
+      return wrap;
+    }
+    const majors = details.filter((entry) => FLOW_EVENT_MAJOR.has(entry.kind));
+    const minors = details.filter((entry) => !FLOW_EVENT_MAJOR.has(entry.kind));
+    const visible = expandedPossessions.has(`details:${possession.id}`) ? details : majors;
+
+    const line = el("div", "flow-timeline-list");
+    let lastTime = null;
+    for (const entry of visible) {
+      const item = el("button", `flow-event kind-${entry.kind.toLowerCase().replaceAll("_", "-")}`);
+      item.type = "button";
+      item.dataset.index = String(entry.index);
+      item.title = "点击跳到该事件所在帧";
+      // 时刻列：与上一事件同秒则留空避免重复
+      const clock = String(Math.floor(entry.time));
+      const timeEl = el("span", "flow-event-time", clock === String(lastTime) ? "" : `${clock}s`);
+      lastTime = Math.floor(entry.time);
+      item.append(
+        timeEl,
+        el("span", `flow-event-dot major-${FLOW_EVENT_MAJOR.has(entry.kind)}`),
+        el("span", "flow-event-text", describeFlowEvent(entry)),
+      );
+      item.addEventListener("click", (event) => {
+        event.stopPropagation();
+        seek(entry.index);
+      });
+      line.append(item);
+    }
+    wrap.append(line);
+
+    if (minors.length) {
+      const detailOpen = expandedPossessions.has(`details:${possession.id}`);
+      const toggle = el("button", "flow-timeline-toggle", detailOpen
+        ? `收起 ${minors.length} 条底层物理事件`
+        : `展开 ${minors.length} 条底层物理事件（接触/球位/落位调整）`);
+      toggle.type = "button";
+      toggle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (detailOpen) expandedPossessions.delete(`details:${possession.id}`);
+        else expandedPossessions.add(`details:${possession.id}`);
+        renderMatchOverview();
+      });
+      wrap.append(toggle);
+    }
+    return wrap;
+  }
+  function updateMatchFlowCursor() {
+    const rows = $("matchFlowList")?.querySelectorAll(".match-flow-row") || [];
+    let current = null;
+    for (const row of rows) {
+      const active = Number(row.dataset.index) <= state.idx;
+      row.classList.toggle("flow-past", active);
+      row.classList.remove("flow-current");
+      if (active) current = row;
+    }
+    if (current) current.classList.add("flow-current");
+    // 展开的时间轴内：当前帧所在事件及之前的事件标为已发生，当前帧命中行高亮
+    const events = $("matchFlowList")?.querySelectorAll(".flow-event") || [];
+    for (const item of events) {
+      const entryIdx = Number(item.dataset.index);
+      item.classList.toggle("flow-event-past", entryIdx <= state.idx);
+      item.classList.remove("flow-event-current");
+    }
+    let currentEvent = null;
+    for (const item of events) {
+      if (Number(item.dataset.index) <= state.idx) currentEvent = item;
+    }
+    if (currentEvent) currentEvent.classList.add("flow-event-current");
+  }
+  function renderValidationSummary() {
+    const box = $("validationSummary");
+    if (!box) return;
+    const stats = state.analytics?.stats;
+    const anomalies = state.anomalies || [];
+    const possessions = state.possessions || [];
+    if (!stats || !possessions.length) {
+      box.replaceChildren(el("span", "muted-label", "等待推演开始…"));
+      return;
+    }
+    const turnoverCount = possessions.filter((p) => p.result === "turnover").length;
+    const scoredCount = possessions.filter((p) => p.result === "scored").length;
+    const cards = [
+      { label: "引擎不变量违规", value: anomalies.length, tone: anomalies.length ? "bad" : "good", hint: anomalies.length ? "点击违规监测查看详情" : "本轮推演全部校验通过" },
+      { label: "犯规", value: stats.fouls, tone: stats.fouls > 0 ? "warn" : "good", hint: `每回合 ${two(stats.foulRate)} 次` },
+      { label: "失误与违例", value: stats.turnovers ?? turnoverCount, tone: "neutral", hint: `占回合 ${pct(stats.turnoverRate)}` },
+      { label: "回合成功率", value: possessions.length ? pct(scoredCount / possessions.length) : "—", tone: "good", hint: `${scoredCount}/${possessions.length} 回合得分` },
+    ];
+    const grid = el("div", "validation-grid");
+    for (const card of cards) {
+      const item = el("div", `validation-card tone-${card.tone}`);
+      item.append(
+        el("span", "validation-label", card.label),
+        el("strong", "validation-value", String(card.value)),
+        el("span", "validation-hint", card.hint),
+      );
+      grid.append(item);
+    }
+    box.replaceChildren(grid);
   }
 
   // ========================================================
@@ -2745,7 +3518,14 @@
         ctx.restore();
       }
 
-      if (player.target_x !== undefined && player.target_y !== undefined) {
+      // 跑位目标虚线：与势能场共用显幁开关。全体球员逐帧画目标线
+      // 在默认视角下是纯噪音（球场除人球外最多余的元素），只有
+      // 打开「势能场」才展示战术意图层。
+      if (
+        state.potentialFieldVisible &&
+        player.target_x !== undefined &&
+        player.target_y !== undefined
+      ) {
         const targetPt = point(
           finite(player.target_x) * rules.courtWidth,
           finite(player.target_y) * rules.courtHeight,
@@ -2784,18 +3564,35 @@
       const isHome = player.team === "home";
       const px = playerPoint.x;
       const py = playerPoint.y;
-      let radius = 14.5;
+      // 双圆物理对齐（10px = 1ft 画布比例）：
+      // 内圆 = body_contact_radius_ft（真实躯干半宽，默认 1ft → 10px），「人」；
+      // 外圈 = player_radius_ft（含臂展的碰撞包络，默认 1.8ft → 18px），「判定范围」。
+      // 两名球员到达引擎最小分离距离 3.6ft 圆心距时外圈恰好相切。
+      const contactRadius = rules.bodyContactRadius * 10;
+      let radius = rules.playerRadius * 10;
 
-      // 提取动作意图与动作窗口阶段
+      // 提取动作意图与动作窗口阶段。
+      // action_phase 是引擎动作窗口的权威信号：球员在 JumpShot/Block/
+      // ReboundJump 等窗口内时才有值，无窗口时字段缺失。腾空/封盖等
+      // 动力学渲染只允许由它触发——用 action 字符串猜测会把
+      // SPOT_UP_3PT（含 "3PT"）误判成干拔跳投、把 HELP_SIDE_SHELL
+      // （含 "HELP"）误判成封盖，无球站位球员被画成腾空 + 错误标签
+      // （seed42 Q1 11:34 实测）。
       const actionRaw = String(player.action || "").toUpperCase();
-      const actionPhase = String(player.action_phase || "Execution");
+      const hasActionWindow = player.action_phase !== undefined && player.action_phase !== null;
+      const actionPhase = String(player.action_phase || "");
 
-      const isShooting = actionRaw.includes("SHOT") || actionRaw.includes("3PT") || actionRaw.includes("LAYUP");
+      // 投篮姿态（朝向锁定、瞄准线）同样只由动作窗口触发；
+      // 含 "3PT" 的站位动作（SPOT_UP_3PT）不是投篮。
+      const isShooting = hasActionWindow && (actionRaw.endsWith("SHOT") || actionRaw.includes("LAYUP"));
       const isCrossover = actionRaw.includes("CROSSOVER") || actionRaw.includes("BETWEENTHELEGS");
       const isDribbleDrive = isCrossover || actionRaw.includes("DRIVE") || actionRaw.includes("ADVANCE") || actionRaw.includes("INITIATE") || actionRaw.includes("DRIBBLE");
-      const isScreen = actionRaw.includes("SCREEN") || actionRaw.includes("SET_HIGH_SCREEN");
-      const isContest = actionRaw.includes("CONTEST") || actionRaw.includes("DROP_CONTAIN") || actionRaw.includes("HELP_SIDE") || actionRaw.includes("CLOSEOUT");
-      // 步频周期震荡（支撑高速跑动与运球动感节奏）
+      const isScreen = hasActionWindow && actionRaw.includes("SCREEN");
+      // 干扰罩只在真实干扰窗口（CloseoutContest / 封堵）内绘制；
+      // HELP_SIDE_SHELL、DROP_CONTAIN 是常驻协防站位，逐帧画弧
+      // 只是视觉噪音（防守人两侧的「横线」来源）。
+      const isContest = hasActionWindow && (actionRaw.includes("CONTEST") || actionRaw.includes("CLOSEOUT") || actionRaw.includes("DROP_CONTAIN"));
+      // 步频周期震荡（运球触地脉冲的节奏源）
       const gaitCycle = curSpeed > 0.4 ? (state.idx * 0.45 + (Number(player.number) || 1) * 1.5) : 0;
       const gaitPulse = Math.sin(gaitCycle);
 
@@ -2855,17 +3652,21 @@
       // 真实三维起跳腾空动力学系统 (Aerial Elevation & Jump Kinetics)
       // 覆盖投篮、上篮、扣篮、抢篮板、盖帽、抢断突扑等核心发力动作
       // ========================================================
-      const isDunk = actionRaw.includes("DUNK");
-      const isLayup = actionRaw.includes("LAYUP") || actionRaw.includes("FLOATER") || actionRaw.includes("HOOK");
-      const isJumpShot = actionRaw.includes("JUMP") || actionRaw.includes("3PT") || actionRaw.includes("SHOT") || actionRaw.includes("PULLUP");
-      const isBlock = actionRaw.includes("BLOCK") || (actionRaw.includes("HELP") && actionPhase === "Execution");
-      const isReboundJump = actionRaw.includes("REBOUND") || actionRaw.includes("CRASH");
-      const isStealLunge = actionRaw.includes("STEAL") || actionRaw.includes("POKE") || actionRaw.includes("LOOSE");
+      const isDunk = hasActionWindow && actionRaw.includes("DUNK");
+      const isLayup = hasActionWindow && (actionRaw.includes("LAYUP") || actionRaw.includes("FLOATER") || actionRaw.includes("HOOK"));
+      // 跳投窗口期的动作名都以 Shot 结尾（JumpShot/ThreePointShot/
+      // StepBackShot/PullUpShot/TurnaroundFadeaway），与引擎自身的
+      // 窗口分类口径一致（action_windows.rs 的 ends_with("Shot")）。
+      const isJumpShot = hasActionWindow && actionRaw.endsWith("SHOT");
+      const isBlock = hasActionWindow && actionRaw.includes("BLOCK");
+      const isReboundJump = hasActionWindow && (actionRaw.includes("REBOUND") || actionRaw.includes("CRASH"));
+      const isStealLunge = hasActionWindow && (actionRaw.includes("STEAL") || actionRaw.includes("POKE") || actionRaw.includes("LOOSE"));
       const isJumpAction = isDunk || isLayup || isJumpShot || isBlock || isReboundJump || isStealLunge;
 
       let jumpHeight = 0; // 0.0 ~ 1.0 相对腾空高度
+      let maxLift = 0; // 各动作的腾空峰值（同时决定垂直位移量级）
       if (isJumpAction) {
-        let maxLift = 0.85;
+        // NBA 弹跳峰值 3~4ft：扣篮最高，抢断飞扑是低平扑救
         if (isDunk) maxLift = 1.0;
         else if (isBlock) maxLift = 0.95;
         else if (isReboundJump) maxLift = 0.9;
@@ -2874,9 +3675,9 @@
         else if (isStealLunge) maxLift = 0.65;
 
         if (actionPhase === "Preparation") {
-          // 起跳准备：屈膝蓄力，身体下沉
-          radius -= 1.4;
+          // 起跳准备：屈膝蓄力，圆盘轻微下蹲压缩（阴影随之缩小）
           jumpHeight = 0;
+          radius *= 0.92;
         } else if (actionPhase === "Execution") {
           // 腾空发力：达到起跳峰值高度
           jumpHeight = maxLift;
@@ -2888,16 +3689,20 @@
         }
       }
 
-      // 透视垂直位移与体量尺寸透视放大：位移量级必须达到「一个身位」
-      // （全场视角下 11px 无感知，30px ≈ 1.8 倍圆盘半径才显著）
-      const verticalLift = jumpHeight * 30;
+      // 腾空表达：影子不动，人动。俯视视角下高度靠空地分离 +
+      // 投影收缩（离天顶越远投影越小），位移为主信号。
+      // 位移量级与动作绑定：扣篮 36px、盖帽 34px、跳投 30px、飞扑 20px。
+      const jumpLiftPx = maxLift * 36;
+      const verticalLift = jumpHeight * jumpLiftPx;
       const renderPx = px;
       const renderPy = py - verticalLift; // 腾空后的圆盘中心
-      if (jumpHeight > 0) {
-        radius = radius * (1.0 + jumpHeight * 0.45); // 透视放大（扈篮是 1.45x）
-      }
+      // 腾空时圆盘等比缩小（最高 ×0.82），保持正圆；落地恢复原尺寸
+      const airShrink = 1.0 - jumpHeight * 0.18;
+      radius *= airShrink;
+      const isLanding = isJumpAction && actionPhase === "FollowThrough" && jumpHeight <= maxLift * 0.4;
 
-      // 2. 地面自然接触阴影 (起跳时阴影留在地面原点，并随高度扩散淡化)
+      // 2. 地面自然接触阴影：椭圆透视 + 速度方向拉伸，留在地面不动。
+      // 腾空时阴影随高度扩散变淡（空地分离的关键参照）。
       ctx.beginPath();
       const shadowSpread = 1.0 + jumpHeight * 1.1;
       const shadowStretch = Math.min(1.25, 1.0 + curSpeed * 0.04);
@@ -2926,10 +3731,10 @@
         ctx.lineTo(renderPx, renderPy);
         ctx.stroke();
 
-        // 地面起跳落点锚环 (清晰指示起跳位置与身体落点)
+        // 地面起跳落点锚环：固定尺寸，作为「地面不动」的参照系
         ctx.setLineDash([]);
         ctx.beginPath();
-        ctx.ellipse(px, py + 2, 7.5 * shadowSpread, 3.8 * shadowSpread, 0, 0, Math.PI * 2);
+        ctx.ellipse(px, py + 2, 8.5, 4.3, 0, 0, Math.PI * 2);
         ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.65)" : "rgba(245, 158, 11, 0.65)";
         ctx.lineWidth = 1.3;
         ctx.stroke();
@@ -3158,17 +3963,30 @@
         ctx.restore();
       }
 
-      // 8. 奔跑动感切向微拉伸 (Locomotion Stretch)
+      // 8. 双圆结构（全部物理对齐，正圆无拉伸）：
+      // 外圈 = 碰撞包络（radius，含臂展），细描边；
+      // 内圆 = 躯干（contactRadius），队色实心，「人」的本体。
       ctx.save();
       ctx.translate(renderPx, renderPy);
-      if (curSpeed > 0.6) {
-        const moveAng = Math.atan2(curVy, curVx);
-        ctx.rotate(moveAng);
-        ctx.scale(1.0 + Math.min(0.12, curSpeed * 0.015), 1.0 - Math.min(0.06, curSpeed * 0.008));
-        ctx.rotate(-moveAng);
-      }
 
-      // 稳重专业的朝向指示微标 (等腰三角，长 7px，全场视角可辨认)
+      // 外圈：碰撞包络细描边（半透明，判定范围的视觉证据）
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.5)" : "rgba(245, 158, 11, 0.5)";
+      ctx.lineWidth = player.hasBall ? 2.4 : 1.4;
+      ctx.stroke();
+
+      // 内圆：躯干本体，队色实心
+      ctx.beginPath();
+      ctx.arc(0, 0, contactRadius, 0, Math.PI * 2);
+      ctx.fillStyle = isHome ? "#059669" : "#d97706";
+      ctx.fill();
+      // 内圆描边（持球人加粗醒目）
+      ctx.strokeStyle = isHome ? "#10b981" : "#f59e0b";
+      ctx.lineWidth = player.hasBall ? 2.6 : 1.6;
+      ctx.stroke();
+
+      // 朝向指示微标：等腰三角，钉在碰撞包络边缘指向朝向
       ctx.save();
       ctx.rotate(facingAngle);
       ctx.beginPath();
@@ -3180,19 +3998,7 @@
       ctx.fill();
       ctx.restore();
 
-      // 9. 战术圆盘徽章主体 (Pro Tactical Disc - 清新活力运动风格)
-      // 主队：鲜活薄荷翡翠绿；客队：明媚阳光琥珀金
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.fillStyle = isHome ? "#059669" : "#d97706";
-      ctx.fill();
-
-      // 队色边框 (持球人加粗至 3.2px 醒目标识)
-      ctx.strokeStyle = isHome ? "#10b981" : "#f59e0b";
-      ctx.lineWidth = player.hasBall ? 3.2 : 2.0;
-      ctx.stroke();
-
-      // 持球人外围极细微自然提示环
+      // 持球提示环（超出碰撞包络 2.5px，与外圈区分）
       if (player.hasBall) {
         ctx.beginPath();
         ctx.arc(0, 0, radius + 3.5, 0, Math.PI * 2);
@@ -3201,8 +4007,7 @@
         ctx.stroke();
       }
 
-      // 背身姿态视觉：圆盘两侧张肘卡位短弧 + 盘下「背身」姿态标签
-      // （与面框三威胁的朝向三角形成直接的视觉对立语言）
+      // 背身姿态视觉：躯干两侧张肘卡位短弧 + 盘下「背身」姿态标签
       if (isBackToBasket) {
         const elbowColor = isHome ? "rgba(6, 95, 70, 0.85)" : "rgba(146, 64, 14, 0.85)";
         ctx.strokeStyle = elbowColor;
@@ -3213,22 +4018,22 @@
         ctx.beginPath();
         ctx.arc(0, 0, radius + 5.0, 0.0, Math.PI * 0.32);
         ctx.stroke();
-        ctx.font = "800 10.5px system-ui, sans-serif";
+        ctx.font = "800 11px system-ui, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
         ctx.fillStyle = elbowColor;
         ctx.fillText("背身", 0, radius + 6.5);
       } else if (player.hasBall && !isShooting) {
         // 面框三威胁：盘下细微姿态标签，与背身标签对称
-        ctx.font = "600 9.5px system-ui, sans-serif";
+        ctx.font = "600 11px system-ui, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
         ctx.fillStyle = isHome ? "rgba(6, 95, 70, 0.55)" : "rgba(146, 64, 14, 0.55)";
         ctx.fillText("面框", 0, radius + 6.5);
       }
 
-      // 纯白清晰数字背号 (居中，高对比度)
-      ctx.font = "700 11.5px monospace";
+      // 纯白清晰数字背号（居中于躯干内圆，高对比度）
+      ctx.font = "800 10px monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       const num =
@@ -3240,6 +4045,19 @@
       ctx.fillText(num, 0.5, 1.0);
       ctx.fillStyle = "#ffffff";
       ctx.fillText(num, 0, 0.5);
+
+      // 落地涟漪：FollowThrough 阶段一次性触发，从躯干扩到包络外圈
+      if (isLanding && jumpLiftPx > 0) {
+        const rippleProgress = 1 - jumpHeight / (maxLift * 0.35); // 0→1 随落地推进
+        const rippleR = contactRadius + (radius - contactRadius + 10) * rippleProgress;
+        ctx.beginPath();
+        ctx.arc(0, 0, rippleR, 0, Math.PI * 2);
+        ctx.strokeStyle = isHome
+          ? `rgba(16, 185, 129, ${(0.5 * (1 - rippleProgress)).toFixed(2)})`
+          : `rgba(245, 158, 11, ${(0.5 * (1 - rippleProgress)).toFixed(2)})`;
+        ctx.lineWidth = 2.0;
+        ctx.stroke();
+      }
 
       ctx.restore(); // 还原 translate(renderPx, renderPy)
 
@@ -3271,7 +4089,7 @@
       const posTagY = renderPy + radius + 9;
       ctx.font = isDynamicAction
         ? "800 11px system-ui, -apple-system, sans-serif"
-        : "700 10.5px system-ui, -apple-system, sans-serif";
+        : "700 11px system-ui, -apple-system, sans-serif";
       const posTagW = ctx.measureText(tagText).width + 10;
       const homeFill = isHome ? "rgba(6, 95, 70, 0.95)" : "rgba(146, 64, 14, 0.95)";
       let tagFill = "rgba(255, 255, 255, 0.92)";
@@ -3602,7 +4420,7 @@
     // 中间标签
     ctx.fillStyle = "#64748b";
     ctx.textAlign = "center";
-    ctx.font = "600 9.5px system-ui, -apple-system, sans-serif";
+    ctx.font = "600 11px system-ui, -apple-system, sans-serif";
     ctx.fillText("空间控制", 500, hudY + 9);
 
     // 主队控制率 (右侧，薄荷翡翠绿)
@@ -3891,7 +4709,7 @@
         fill.style.width = `${clamp(Math.abs(number) * scale, 1, 100)}%`;
         track.append(fill);
         row.append(
-          el("span", "score-bar-label", getDecisionKindZh(item.kind)),
+          el("span", "score-bar-label", describeDecisionKind(item.kind)),
           track,
           el("span", "score-bar-value", number.toFixed(3)),
         );
@@ -3905,7 +4723,7 @@
       for (const flag of flags) {
         const row = el("div", "flag-row");
         row.append(
-          el("span", null, flag.constraint),
+          el("span", null, getConstraintZh(flag.constraint)),
           el("span", null, flag.reason),
           el("b", null, two(finite(flag.penalty))),
         );
@@ -3913,11 +4731,19 @@
       }
       return box;
     };
+    // 阻截串形如 "ADVANCE(H_05) ✗ action_eligibility"，解析为中文
+    const describeBlocked = (entry) => {
+      const match = String(entry).match(/^(.*?)\s*✗\s*(\S+)$/);
+      if (!match) return String(entry);
+      return `${describeDecisionKind(match[1])} · 被${getConstraintZh(match[2])}阻拦`;
+    };
     const chips = (items, className, emptyText) => {
       const box = el("div", "chips");
       if (items?.length) {
         for (const item of items)
-          box.append(el("span", `chip ${className}`, item));
+          box.append(
+            el("span", `chip ${className}`, className === "bad" ? describeBlocked(item) : getConstraintZh(item)),
+          );
       } else {
         box.append(el("span", "muted-label", emptyText));
       }
@@ -3925,25 +4751,25 @@
     };
     const head = el("div", "decision-head");
     head.append(
-      el("strong", null, getDecisionKindZh(chosen) || "—"),
-      el("span", null, `${getPlayerNameZh(debug.player) || "—"} · 第 ${decisionIndex} 帧`),
+      el("strong", null, describeDecisionKind(chosen)),
+      el("span", null, `${playerNameFromId(debug.player)} · 第 ${decisionIndex} 帧`),
     );
     panel.append(
       head,
       section(
-        "效用评分排序 (Utility)",
+        "候选动作效用评分",
         scoreRows(utilities, (item) => item.utility, 100 / maxUtility),
       ),
       section(
-        "决策概率分布 (Softmax)",
+        "候选动作最终概率",
         scoreRows(probabilities, (item) => item.prob, 100),
       ),
       section(
-        "硬性约束阻截 (Blockers)",
+        "被规则直接拦下的动作",
         chips(debug.blocked, "bad", "没有被硬约束剔除的候选"),
       ),
-      section("约束惩罚标记 (Flags)", flagSection(debug.flags || [])),
-      section("当前激活约束条件", chips(debug.active_constraints, "", "—")),
+      section("约束惩罚标记", flagSection(debug.flags || [])),
+      section("本帧生效中的规则", chips(debug.active_constraints, "", "—")),
       section(
         "执行阻碍反馈",
         chips(debug.enforcement, "warn", "本帧没有执行意图"),
@@ -4064,14 +4890,6 @@
   function setControlsBusy(busy) {
     $("runButton").disabled = busy;
     $("fileInput").disabled = busy;
-    $("runRulesButton").disabled = busy;
-    $("loadRulesButton").disabled = busy;
-    for (const button of document.querySelectorAll("[data-preset]")) {
-      button.disabled = busy;
-    }
-    for (const button of document.querySelectorAll(".transport-group button")) {
-      button.disabled = busy;
-    }
     for (const button of document.querySelectorAll(".speed-group button")) {
       button.disabled = busy;
     }
@@ -4137,26 +4955,17 @@
     }
   }
   function setRulesStatus(text, error = false) {
-    $("rulesStatus").textContent = text;
-    $("rulesStatus").className = `rules-status ${error ? "error" : "success"}`;
-  }
-  async function runEditedRules() {
-    let rules;
-    try {
-      rules = JSON.parse($("rulesEditor").value);
-    } catch (error) {
-      setRulesStatus(`JSON 错误：${error.message}`, true);
-      return;
-    }
-    setRulesStatus("规则已解析，模拟运行中…");
-    const ok = await runSimulation(rules);
-    if (ok)
-      setRulesStatus(`完成：${state.ticks.length.toLocaleString()} ticks`);
+    const el = $("rulesStatus");
+    if (!el) return;
+    el.textContent = text;
+    el.className = `rules-status ${error ? "error" : "success"}`;
   }
   function applyPreset(name) {
+    const editor = $("rulesEditor") || $("sheetRulesEditor");
+    if (!editor) return;
     let rules;
     try {
-      rules = JSON.parse($("rulesEditor").value || "{}");
+      rules = JSON.parse(editor.value || "{}");
     } catch {
       rules = { ...state.rules };
     }
@@ -4178,7 +4987,7 @@
         finite(rules.contact_margin_ft, 0.6) * 1.5,
       );
     }
-    $("rulesEditor").value = JSON.stringify(rules, null, 2);
+    editor.value = JSON.stringify(rules, null, 2);
     setRulesStatus(`已载入 ${name.toUpperCase()} 预设，点击应用并重跑`);
   }
 
@@ -4316,18 +5125,8 @@
     // 规则预设按钮
     for (const btn of document.querySelectorAll(".sheet-preset-btn")) {
       btn.addEventListener("click", () => {
-        const preset = btn.dataset.rulesPreset;
-        applyPreset(preset);
-        if ($("sheetRulesEditor")) $("sheetRulesEditor").value = $("rulesEditor").value;
+        applyPreset(btn.dataset.rulesPreset);
         updateSettingsSummaryHint();
-      });
-    }
-
-    // 规则编辑框同步
-    const sheetRulesEditor = $("sheetRulesEditor");
-    if (sheetRulesEditor) {
-      sheetRulesEditor.addEventListener("input", () => {
-        if ($("rulesEditor")) $("rulesEditor").value = sheetRulesEditor.value;
       });
     }
 
@@ -4337,11 +5136,11 @@
       applyBtn.addEventListener("click", async () => {
         closeSettings();
         if (seedInput && sheetSeedInput) seedInput.value = sheetSeedInput.value;
-        if (sheetRulesEditor && $("rulesEditor")) $("rulesEditor").value = sheetRulesEditor.value;
         let rules = null;
+        const editor = $("sheetRulesEditor");
         try {
-          if ($("rulesEditor").value.trim()) {
-            rules = JSON.parse($("rulesEditor").value);
+          if (editor && editor.value.trim()) {
+            rules = JSON.parse(editor.value);
           }
         } catch (e) {
           console.warn("规则解析异常", e);
@@ -4355,10 +5154,7 @@
     if (!studio) return;
     const isHome = state.teamPerspective === "home";
     const setup = studio.default_setup;
-    const homeTeam = setup.home_team;
-    const awayTeam = setup.away_team;
-    const lineup = isHome ? setup.home_lineup : setup.away_lineup;
-    const currentTeam = isHome ? homeTeam : awayTeam;
+    const currentTeam = isHome ? setup.home_team : setup.away_team;
 
     // 同步种子与范围
     if ($("sheetSeedInput") && $("seedInput")) $("sheetSeedInput").value = $("seedInput").value;
@@ -4368,88 +5164,27 @@
     }
 
     // 同步规则编辑器内容
-    if ($("sheetRulesEditor") && $("rulesEditor")) {
-      $("sheetRulesEditor").value = $("rulesEditor").value;
+    if ($("sheetRulesEditor")) {
+      $("sheetRulesEditor").value = state.rules ? JSON.stringify(state.rules, null, 2) : "";
     }
 
-    // 同步队伍按钮
+    // 同步队伍按钮（战术 pane）
     const homeBtn = $("sheetTeamHomeBtn");
     const awayBtn = $("sheetTeamAwayBtn");
     if (homeBtn) homeBtn.classList.toggle("active", isHome);
     if (awayBtn) awayBtn.classList.toggle("active", !isHome);
-    const homeName = getTeamNameZh(homeTeam.id) || homeTeam.name;
-    const awayName = getTeamNameZh(awayTeam.id) || awayTeam.name;
+    const homeName = getTeamNameZh(setup.home_team.id) || setup.home_team.name;
+    const awayName = getTeamNameZh(setup.away_team.id) || setup.away_team.name;
     if ($("sheetHomeTeamName")) $("sheetHomeTeamName").textContent = `${homeName} (主队)`;
     if ($("sheetAwayTeamName")) $("sheetAwayTeamName").textContent = `${awayName} (客队)`;
 
-    // 渲染战术选项卡
-    renderSheetTactics(isHome ? "home" : "away", lineup);
-
-    // 渲染阵容列表
-    renderSheetRoster(currentTeam);
+    // 渲染战术板与阵容列表
+    renderBoard();
+    renderRoster();
+    syncRosterTeamButtons();
 
     // 更新底部简报
     updateSettingsSummaryHint();
-  }
-
-  function renderSheetTactics(side, lineup) {
-    const offContainer = $("sheetOffenseChoiceRow");
-    const defContainer = $("sheetDefenseChoiceRow");
-    if (!offContainer || !defContainer || !studio) return;
-
-    offContainer.replaceChildren(
-      ...studio.offense.map((item) => {
-        const btn = el(
-          "button",
-          `choice-card${item.id === lineup.offense_tactic ? " active" : ""}`,
-          el("strong", null, cleanTacticNameZh(item.name_zh)),
-          el("span", "choice-meta", getTacticDescZh(item.id))
-        );
-        btn.type = "button";
-        btn.addEventListener("click", async () => {
-          lineup.offense_tactic = item.id;
-          const next = studio.offense.find((t) => t.id === item.id);
-          const compatible = playsForTactic(next?.spec);
-          if (side === "home") studio.default_setup.home_playbook = compatible;
-          else studio.default_setup.away_playbook = compatible;
-          renderStudio();
-          syncSettingsCenter();
-          await runSimulation(null, true);
-        });
-        return btn;
-      })
-    );
-
-    defContainer.replaceChildren(
-      defenseGroupedRow(studio.defense, lineup.defense_tactic, async (id) => {
-        lineup.defense_tactic = id;
-        renderStudio();
-        syncSettingsCenter();
-        await runSimulation(null, true);
-      })
-    );
-  }
-
-  function renderSheetRoster(team) {
-    const startersBox = $("sheetStartersList");
-    const benchBox = $("sheetBenchList");
-    if (!startersBox || !benchBox || !team) return;
-
-    const players = team.players || [];
-    const starters = players.filter((p) => p.starter);
-    const bench = players.filter((p) => !p.starter);
-
-    const makeItem = (p) => {
-      const row = el("div", "sheet-roster-item");
-      row.append(
-        el("strong", null, `#${p.jersey} ${getPlayerNameZh(p.name)}`),
-        el("span", null, `${getPositionZh(p.position)} · ${getOffensiveRoleZh(p.offensive_role)}`)
-      );
-      return row;
-    };
-
-    startersBox.replaceChildren(...starters.map(makeItem));
-    benchBox.replaceChildren(...bench.map(makeItem));
   }
 
   function updateSettingsSummaryHint() {
@@ -4471,12 +5206,11 @@
         loadStream(await file.text(), file.name);
         setRunStatus(`${state.ticks.length.toLocaleString()} ticks`);
       } catch (error) {
-        setRunStatus("文件读取失败", true);
-        $("streamSummary").textContent = error.message;
+        setRunStatus(`文件读取失败：${error.message}`, true);
       }
     });
 
-    // 伴随式实时透视台选项卡 (Deck Tabs)
+    // 右栏分析面板选项卡 (Deck Tabs)
     for (const button of document.querySelectorAll(".deck-tab-button")) {
       button.addEventListener("click", () => {
         const tab = button.dataset.deckTab;
@@ -4493,54 +5227,46 @@
         if (tab === "anomalies") {
           renderAnomalies();
         }
-      });
-    }
-
-    $("anomalyBadge").addEventListener("click", () => {
-      const anomaliesBtn = document.querySelector('.deck-tab-button[data-deck-tab="anomalies"]');
-      if (anomaliesBtn) anomaliesBtn.click();
-      const panel = $("anomalyPanel");
-      if (panel) {
-        const open = panel.hidden;
-        panel.hidden = !open;
-        $("anomalyBadge").setAttribute("aria-expanded", String(open));
-      }
-    });
-
-    // 底部研讨舱选项卡 (Studio Tabs)
-    for (const button of document.querySelectorAll(".tab-button")) {
-      button.addEventListener("click", () => {
-        state.currentTab = button.dataset.tab;
-        for (const item of document.querySelectorAll(".tab-button")) {
-          item.classList.toggle("active", item === button);
+        if (tab === "validation") {
+          refreshValidation();
         }
-        for (const pane of document.querySelectorAll(".tab-pane")) {
-          const active = pane.id === `tab-${state.currentTab}`;
-          pane.hidden = !active;
-          pane.classList.toggle("active", active);
+        if (tab === "shots") {
+          renderShotMap();
         }
-        const isTeamConfigTab = state.currentTab === "board" || state.currentTab === "roster";
-        const perspectiveBar = $("teamPerspectiveBar");
-        if (perspectiveBar) {
-          perspectiveBar.style.display = isTeamConfigTab ? "flex" : "none";
+        if (tab === "stats" && state.analytics) {
+          renderStats(state.analytics.stats);
         }
-        if (state.currentTab === "shots") renderShotMap();
-        if (state.currentTab === "stats" && state.analytics) renderStats(state.analytics.stats);
-        if (state.currentTab === "board") renderStudio();
-        if (state.currentTab === "frame" && state.ticks[state.idx]) {
+        if (tab === "frame" && state.ticks[state.idx]) {
           renderFrameJson(state.ticks[state.idx]);
         }
       });
     }
 
-    // 球队执教视角切换按钮 (主队 / 客队)
-    const perspectiveHomeBtn = $("perspectiveHomeBtn");
-    const perspectiveAwayBtn = $("perspectiveAwayBtn");
-    if (perspectiveHomeBtn) {
-      perspectiveHomeBtn.addEventListener("click", () => setTeamPerspective("home"));
+    // 验证入口：对页面当前查看的这场比赛执行五层判定。
+    const validationRunButton = $("validationRunButton");
+    if (validationRunButton) {
+      validationRunButton.addEventListener("click", () => runValidation());
     }
-    if (perspectiveAwayBtn) {
-      perspectiveAwayBtn.addEventListener("click", () => setTeamPerspective("away"));
+
+    $("anomalyBadge").addEventListener("click", () => {
+      const anomaliesBtn = document.querySelector('.deck-tab-button[data-deck-tab="anomalies"]');
+      if (anomaliesBtn) anomaliesBtn.click();
+    });
+
+    // 设置中心内阵容 pane 的球队切换按钮
+    const rosterHomeBtn = $("rosterTeamHomeBtn");
+    const rosterAwayBtn = $("rosterTeamAwayBtn");
+    if (rosterHomeBtn) {
+      rosterHomeBtn.addEventListener("click", () => {
+        setTeamPerspective("home");
+        syncRosterTeamButtons();
+      });
+    }
+    if (rosterAwayBtn) {
+      rosterAwayBtn.addEventListener("click", () => {
+        setTeamPerspective("away");
+        syncRosterTeamButtons();
+      });
     }
     $("prevPossessionButton").addEventListener("click", () =>
       possessionJump(-1),
@@ -4569,11 +5295,6 @@
           item.classList.toggle("active", item === button);
         }
       });
-    }
-    $("loadRulesButton").addEventListener("click", loadDefaultRules);
-    $("runRulesButton").addEventListener("click", runEditedRules);
-    for (const button of document.querySelectorAll("[data-preset]")) {
-      button.addEventListener("click", () => applyPreset(button.dataset.preset));
     }
     $("copyFrameButton").addEventListener("click", async () => {
       try {
@@ -4615,22 +5336,12 @@
     if (uploadTrigger) {
       uploadTrigger.addEventListener("click", () => $("fileInput").click());
     }
-
-    for (const chip of document.querySelectorAll(".scope-chip")) {
-      chip.addEventListener("click", () => {
-        for (const c of document.querySelectorAll(".scope-chip")) {
-          c.classList.remove("active");
-        }
-        chip.classList.add("active");
-        $("scopeInput").value = chip.dataset.scope;
-      });
-    }
     function handlePointer(clientX, clientY, canvas) {
       const rect = canvas.getBoundingClientRect();
       const x = ((clientX - rect.left) * canvas.width) / rect.width;
       const y = ((clientY - rect.top) * canvas.height) / rect.height;
       const hit = state.hitPlayers.find(
-        (item) => Math.hypot(item.x - x, item.y - y) < 26,
+        (item) => Math.hypot(item.x - x, item.y - y) < 20,
       );
       const tooltip = $("playerTooltip");
       if (!hit) {
@@ -4769,8 +5480,7 @@
     },
   };
   boot().catch((error) => {
-    setRunStatus("启动失败", true);
-    $("streamSummary").textContent = error.message;
+    setRunStatus(`启动失败：${error.message}`, true);
     console.error(error);
   });
 })();

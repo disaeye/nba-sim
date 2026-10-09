@@ -18,6 +18,7 @@ pub mod projectile;
 pub mod resolve;
 pub mod rules;
 pub mod tactics;
+pub use action_window::Foot;
 pub use capability::{
     drive_finishing_delta, effective_catch_radius, effective_defensive_boxout_bonus,
     effective_help_awareness, effective_max_accel, effective_max_speed,
@@ -37,7 +38,9 @@ pub use event::{
     GameEvent, PossessionEndCause, PossessionSummary, ShotCreationSource, TimedGameEvent,
     TransitionOrigin,
 };
-pub use flow::{transition_ball_state, BallPhase, BallState, GameFlowState, PhaseType};
+pub use flow::{
+    transition_ball_state, BallPhase, BallState, DribbleControlState, GameFlowState, PhaseType,
+};
 pub use league::{LeagueId, LeagueProfile};
 pub use play::{
     DecisionActionFamily, PlayAction, PlayCarrierPreference, PlayCourtSide, PlayInhibition,

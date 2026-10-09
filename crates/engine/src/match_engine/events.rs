@@ -653,6 +653,12 @@ impl MatchEngine {
                     _ => {}
                 }
                 let data = serde_json::to_value(&event).ok();
+                // 业务身份与结构化关系（validation.md §3.2）：按事件种类
+                // 取号/清算业务实例，并把仍活动的身份与关系写入帧事件。
+                let (business_ids, relations) =
+                    self.assign_business_identity(&event, event_id, parent_event_id);
+                let observations = self.derive_observation_events(&event, &business_ids);
+                self.journal.pending_events.extend(observations);
                 self.journal.current_event_log.push(FrameEvent {
                     sequence: self.journal.event_sequence,
                     time: (self.clock.current_time * 100.0).round() / 100.0,
@@ -660,6 +666,16 @@ impl MatchEngine {
                     data,
                     event_id,
                     parent_event_id,
+                    tick_index: self.clock.tick_index,
+                    action_id: business_ids.action,
+                    shot_id: business_ids.shot,
+                    pass_id: business_ids.pass,
+                    loose_ball_id: business_ids.loose_ball,
+                    foul_program_id: business_ids.foul_program,
+                    responsibility_id: business_ids.responsibility,
+                    movement_intent_id: business_ids.movement_intent,
+                    play_instance_id: business_ids.play_instance,
+                    relations,
                 });
             }
             if let Some(primary) = self.journal.current_event_types.last() {

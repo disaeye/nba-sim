@@ -9,12 +9,66 @@
 //! 3. 抽取接触事实与配位评估，映射为待发布事件；
 //! 4. 把体力与士气写回物理层球员，供渲染与下一 tick 的决策读取。
 
+use glam::Vec2;
 use nba_semantics::SemanticEvaluator;
 
 use super::projection::{physics_fact_to_event, semantic_contact_to_event};
 use super::MatchEngine;
 
 impl MatchEngine {
+    /// 收球持球人的接地点裁定：收球后允许两步，第三步落地即走步；
+    /// 尚未迈步时轴心脚在容差外重新落地也是走步（轴心脚滑动）。
+    /// 迈步后的轴心脚再落地由步数预算约束（真实收球后两步内轴心脚
+    /// 可离地再落地，第二落点是上篮节奏的常态）。
+    ///
+    /// 只裁定时正在持球且处于收球态的球员；事实事件同时入流，供回放与
+    /// 评判重建收球后的脚步。
+    fn observe_gathered_foot_contact(
+        &mut self,
+        entity_id: &str,
+        foot: nba_domain::Foot,
+        position: Vec2,
+    ) {
+        let Some(nba_domain::DribbleControlState::Gathered {
+            pivot_foot,
+            pivot_position,
+            steps_after_gather,
+        }) = self.clock.dribble_control.get(entity_id).copied()
+        else {
+            return;
+        };
+        if self.ball.holder_id() != Some(entity_id) {
+            return;
+        }
+        self.journal
+            .pending_events
+            .push(nba_domain::GameEvent::FootContact {
+                player_id: entity_id.to_string(),
+                foot,
+                position: (position.x, position.y),
+            });
+        if self.clock.dribble_violation.is_some() {
+            return;
+        }
+        let pivot_dragged = pivot_foot == Some(foot)
+            && steps_after_gather == 0
+            && (position - pivot_position).length() > self.config.rules.pivot_foot_tolerance_ft;
+        let steps = steps_after_gather.saturating_add(1);
+        if pivot_dragged || steps > 2 {
+            self.clock.dribble_violation = Some(nba_decision::constraint::ViolationKind::Travel);
+            self.clock.current_possession_turnover_player = Some(entity_id.to_string());
+        } else {
+            self.clock.dribble_control.insert(
+                entity_id.to_string(),
+                nba_domain::DribbleControlState::Gathered {
+                    pivot_foot,
+                    pivot_position,
+                    steps_after_gather: steps,
+                },
+            );
+        }
+    }
+
     pub(crate) fn collect_tick_facts(&mut self, dt: f32) {
         // 球态是持球人的唯一事实源，物理层只接收显式输入：
         // 持球权变更即姿态生命周期边界。
@@ -76,13 +130,20 @@ impl MatchEngine {
                 .iter()
                 .map(semantic_contact_to_event),
         );
-        self.journal.pending_events.extend(
-            self.systems
-                .physics
-                .drain_facts()
-                .into_iter()
-                .map(physics_fact_to_event),
-        );
+        for fact in self.systems.physics.drain_facts() {
+            match fact {
+                nba_physics::PhysicsFact::FootContact {
+                    entity_id,
+                    foot,
+                    position,
+                } => self.observe_gathered_foot_contact(&entity_id, foot, position),
+                other => {
+                    if let Some(event) = physics_fact_to_event(other) {
+                        self.journal.pending_events.push(event);
+                    }
+                }
+            }
+        }
         for player_id in &player_ids {
             if let Some(state) = self.observations.modulation.get(player_id) {
                 if let Some(player) = self.systems.physics.get_player_mut(player_id) {

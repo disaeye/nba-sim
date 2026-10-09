@@ -95,6 +95,10 @@ pub enum ViolationKind {
     Contact,
     ThreeSecondLane,
     OverAndBack,
+    /// 走步：收球后的脚步超过两步限制。
+    Travel,
+    /// 二次运球：收球后再次启动运球。
+    DoubleDribble,
 }
 
 impl ViolationKind {
@@ -110,6 +114,8 @@ impl ViolationKind {
             Self::Contact => "CONTACT_VIOLATION",
             Self::ThreeSecondLane => "THREE_SECOND_LANE",
             Self::OverAndBack => "OVER_AND_BACK",
+            Self::Travel => "TRAVEL",
+            Self::DoubleDribble => "DOUBLE_DRIBBLE",
         }
     }
 }
@@ -242,6 +248,10 @@ pub struct ConstraintContext<'a> {
     /// 进攻方场上球员在限制区的最长连续停留（攻方三秒判据，
     /// charter §6.2）。时钟层仅在前场控制时累加（phases.rs）。
     pub lane_dwell_seconds: f32,
+    /// 当前持球段是否已出现真实收球事实。
+    pub gathered: bool,
+    pub dribbled: bool,
+    pub dribble_violation: Option<ViolationKind>,
     /// 上述最长停留的球员（违例责任人）。
     pub lane_dwell_player_id: Option<&'a str>,
     /// 进攻方已在前场建立控制（回场违例判据）。
@@ -477,6 +487,25 @@ constraint!(
     pass_event,
     |_ctx| EnforcementAction::Violation {
         kind: ViolationKind::OverAndBack
+    }
+);
+constraint!(
+    DRIBBLE_CONTROL_CONSTRAINT,
+    "dribble_control",
+    ConstraintDomain::Semantic,
+    Severity::Hard,
+    12,
+    ConstraintScope::Ball,
+    ConstraintTiming::Runtime,
+    &[PhaseType::Transition, PhaseType::SetPlay],
+    |ctx| ctx.dribble_violation.is_some(),
+    pass_action,
+    eval_dribble_control_world,
+    pass_event,
+    |ctx| EnforcementAction::Violation {
+        kind: ctx
+            .dribble_violation
+            .expect("active dribble violation must carry a kind")
     }
 );
 constraint!(
@@ -757,6 +786,7 @@ pub struct ConstraintFinding {
 }
 
 /// 约束注册中心：阶段激活集合从这里派生。
+#[derive(Clone)]
 pub struct ConstraintRegistry {
     pub all: Vec<&'static Constraint>,
 }
@@ -776,6 +806,7 @@ impl ConstraintRegistry {
                 &BACKCOURT_CLOCK_CONSTRAINT,
                 &THREE_SECOND_LANE_CONSTRAINT,
                 &OVER_AND_BACK_CONSTRAINT,
+                &DRIBBLE_CONTROL_CONSTRAINT,
                 &PASS_BACKCOURT_CONSTRAINT,
                 &GAME_CLOCK_RUNTIME_CONSTRAINT,
                 &OUT_OF_BOUNDS_PRE_CONSTRAINT,

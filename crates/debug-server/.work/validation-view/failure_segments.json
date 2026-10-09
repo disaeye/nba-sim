@@ -1,0 +1,91 @@
+{
+  "failures": [
+    {
+      "criterion_id": "SC-SHOT-OPEN",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[\"SHOT_ATTEMPT_RESOLVED\"] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-BLOCK-BEFORE",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[\"LOOSE_BALL_SECURED\"] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-BLOCK-AFTER",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[\"SHOT_ATTEMPT_RESOLVED\"] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-AIRBALL",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[\"REBOUND\"] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-REBOUND",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[\"CONTROL_ESTABLISHED\"] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-PASS-REPEAT",
+      "verdict": "Defect",
+      "detail": "missing_required=[\"PASS_RECEIVED\"] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-PASS-WHISTLE",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-DRIVE",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-SHOOTING-FOUL",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[\"FREE_THROW\"] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-FT-PROGRAM",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-CLOCK",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-BUZZER",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-SUBSTITUTION",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-PLAY-END",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-PLAY-COMPETE",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[\"PLAY_WINDOW_ENDED\"] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-TRANSITION",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[\"CONTROL_ESTABLISHED\"] forbidden_seen=[]"
+    },
+    {
+      "criterion_id": "SC-TECHNICAL",
+      "verdict": "InsufficientEvidence",
+      "detail": "missing_required=[] forbidden_seen=[]"
+    }
+  ],
+  "retained_pass_samples": 0,
+  "total_passes": 5
+}

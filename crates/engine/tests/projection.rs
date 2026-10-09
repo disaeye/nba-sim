@@ -215,6 +215,10 @@ fn frame_rules_default_matches_game_rules_default_projection() {
     assert_eq!(projected.hoop_y_ft, fallback.hoop_y_ft);
     assert_eq!(projected.player_radius_ft, fallback.player_radius_ft);
     assert_eq!(
+        projected.body_contact_radius_ft,
+        fallback.body_contact_radius_ft
+    );
+    assert_eq!(
         projected.min_player_separation_ft,
         fallback.min_player_separation_ft
     );

@@ -24,7 +24,7 @@ mod outcome;
 mod settlement;
 mod write_entry;
 
-use arms::FlightContext;
+pub(crate) use arms::FlightContext;
 
 /// 一次弹道裁决产出的待处理事实。
 ///
@@ -260,6 +260,10 @@ impl MatchEngine {
         match &self.ball.ball_state {
             BallTrajectoryKind::Held { carrier_id } => {
                 let cid = carrier_id.clone();
+                assert!(
+                    self.systems.physics.get_player(&cid).is_some(),
+                    "held ball carrier `{cid}` must exist"
+                );
                 let prev = self.ball.ball_pos_3d;
                 let (sampled_pos, sampled_z) = BallisticsEngine::sample_ball_position(
                     &self.ball.ball_state,
@@ -268,8 +272,12 @@ impl MatchEngine {
                     &self.config.rules,
                 );
                 let carrier_pos = self.systems.physics.get_player(&cid).map(|p| p.pos_ft);
-                let (pos, z) =
-                    self.clamp_held_family_ball_pos(prev, (sampled_pos, sampled_z), carrier_pos, dt);
+                let (pos, z) = self.clamp_held_family_ball_pos(
+                    prev,
+                    (sampled_pos, sampled_z),
+                    carrier_pos,
+                    dt,
+                );
                 self.ball.ball_pos_3d = (pos, z);
                 if self.systems.physics.get_player(&cid).is_none() {
                     self.ball.ball_pos_3d = (
@@ -362,6 +370,8 @@ impl MatchEngine {
                             self.possession_ctx.last_cut_reception_time = Some(current_t);
                             self.possession_ctx.last_cut_reception_player = Some(cid.clone());
                         }
+                        // 运球控制的初始化由球态写入口统一处理（新持球人无记录时
+                        // 插入未运球的 LiveDribble 并重落双脚）。
                         self.ball.pending_pass_receiver = None;
                         // 传球结束：丢弃本回合的接球人估计（下一回合重新形成预判）。
                         self.ball.receiver_estimate = None;
@@ -762,6 +772,7 @@ impl MatchEngine {
                 aim_pos,
                 make_probability,
                 contest_intensity,
+                collision_checked_until,
                 ..
             } => {
                 // 臂体见 arms.rs（D29 划分）：载荷从总 match 借用中取出，
@@ -775,6 +786,7 @@ impl MatchEngine {
                     *from_pos,
                     *aim_pos,
                     *make_probability,
+                    *collision_checked_until,
                     *contest_intensity,
                     ctx,
                     &mut outcome,

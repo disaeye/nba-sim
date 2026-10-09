@@ -421,7 +421,7 @@ Smoke、Regression 和 Calibration 使用不同目的、样本量和通过标准
 
 ### G2 · 事件和账本闭环
 
-补齐事件 ID、父链、动作生命周期、回合终端和四式账本。
+补齐事件 ID、父链、动作生命周期、回合终端和四式账本。已核对的开放点：罚球没有独立账本（得分账本按 `FREE_THROW` 载荷逐次计分，无独立的尝试/命中/程序余量重建）；球权检查不覆盖跳球与交替拥有。
 
 ### G3 · 物理和语义一致性
 
@@ -433,7 +433,7 @@ Smoke、Regression 和 Calibration 使用不同目的、样本量和通过标准
 
 ### G5 · 战术和防守重构
 
-将档案、slot fill、对位和防守责任图接入机会、执行和结果。
+将档案、slot fill、对位和防守责任图接入机会、执行和结果。已核对的开放点：`SituationalTactics`、`RotationEntry`、`CoachProfile` 定义存在但无引擎读取；`DefensiveScheme` 三套 id 与 `DefensiveTactic` 六套 id 并存（运行链路只用后者）；Play 动词步长仍是 `play_actions.rs` 代码常量（头注释自证待迁移）；槽位填充失败回退名单顺序，无冲突回溯。
 
 ### G6 · 阵容、疲劳和教练
 
@@ -500,9 +500,17 @@ rim 出手来源（转换/二次进攻/无球切入接球）联合收敛，单�
 
 建立来源明确的参考分布、PBP 规范化、固定分母和校准证据包。
 
+### G9a · 五层验证基础设施（validation.md 实施，进行中）
+
+按 `docs/validation.md` 构建独立验证器：业务身份与关系协议、观测载荷发射、
+`crates/validation`（裁决模型、准则注册表、独立重建、统计比较、场景矩阵）、
+CLI `validate` 与十类工件。关闭门：五层工作包达到 `ValidatorImplemented`
+（validation.md §11）；`STAT/JOINT` 的参考数据与等效容差登记前保持
+`InsufficientEvidence`，不用实现完成代替外部证据完成。
+
 ### G9 · 产品化与资源
 
-完善 batch/evaluate/replay、缺陷定位、资源治理和跨后端重放。
+完善 batch/evaluate/replay/validate、缺陷定位、资源治理和跨后端重放。
 
 依赖原则：G0 → G1 → G2 → G3/G4 → G5/G6/G7 → G8 → G9；若某阶段的结构门失败，后续阶段只能做不改变真相的准备工作。
 
@@ -513,24 +521,26 @@ rim 出手来源（转换/二次进攻/无球切入接球）联合收敛，单�
 ### 20.1 状态与物理
 
 - [x] 权威时间使用引擎时钟，`MatchEngine` 无外部可写公开字段（`scripts/check_world_privacy.py`）；
-- [ ] 球权归属与球运动正交：当前 `BallState` 仍同时携带归属、预定结果和飞行参数（ADR-007）；
+- [x] 球权归属与球运动正交：物理层 `has_ball` 旁路已删除，球态预写结果字段已删（ADR-007 accepted 不变量形态，外部 `BallState` 接口稳定）；
 - [x] 已实现的状态边有领域转换测试，离散布置有生命周期事实；
 - [x] 球速、持球约束、控制交接和运动上限有生成端约束与不变量测试；
-- [ ] 出手、传球、突破、篮板和犯规按 `docs/basketball.md` §3 在对应事实出现时决定。
+- [x] 出手、传球、突破按 `docs/basketball.md` §3 在对应事实出现时决定：命中由到筐几何位置裁定（`classify_shot_arrival`），犯规由语义接触事实裁定并链接前置接触事件，传球五结果互斥（`pass_speed_continuity.rs`），突破终局由几何接触评估（`drive_geometry.rs`）；黄金哈希随行为变更登记重冻结（现行 v81）；
+- [ ] 封盖与未封盖的同参数对照、连续飞行中的细粒度触筐碰撞检测（golden_hash v81 前的采样端点裁定与 backboard probe 仍非权威）。
 
 ### 20.2 因果与账本
 
 - [x] 事件有全场 `event_id` 和可选 `parent_event_id`；
 - [x] 每个回合终结使用 `PossessionEndCause` 的合法变体；
 - [x] 得分、球权、时间、失误责任可从事件流检查；
-- [ ] 个人犯规、球队罚则、离场和罚球次数按 `docs/basketball.md` §5 从事件流重建；
+- [x] 个人犯规、球队罚则、离场和罚球次数按 `docs/basketball.md` §5 从事件流重建（`check_foul_conservation`：个人/每节球队累计、犯满离场、bonus、逐次罚球对应，板凳耗尽由 `BENCH_DEPLETED` 事实豁免）；
+- [ ] 罚球独立账本与跳球/交替拥有球权检查（见 G2）；
 - [x] `InsufficientEvidence` 不计入通过。
 
 ### 20.3 决策与组织
 
 - [x] 持球决策产出 `DecisionTrace`；
 - [ ] 每个保留能力和倾向都有消费点、行为响应和断路测试；
-- [ ] 无球动作和挡拆防守责任按 `docs/basketball.md` §2、§4 发布可回放事实；
+- [x] 无球动作和挡拆防守责任按 `docs/basketball.md` §2、§4 发布可回放事实（`lifecycle.rs` 17 项、`defense_responsibility_chain.rs` 5 项、九种主责任）；
 - [ ] 档案字段没有未登记消费点；
 - [x] roster 顺序和球员编号不决定身份（`scripts/check_no_index_identity.py`）。
 

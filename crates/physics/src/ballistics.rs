@@ -30,6 +30,37 @@ pub enum ShotArrivalOutcome {
     Miss,
 }
 
+/// A collision or terminal crossing found while advancing one shot interval.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShotFlightStep {
+    InFlight,
+    Made {
+        time: f32,
+        ball_position: glam::Vec3,
+    },
+    Contact(ShotFlightContact),
+    Miss {
+        time: f32,
+        ball_position: glam::Vec3,
+        incoming_velocity: glam::Vec3,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShotContactSurface {
+    Rim,
+    Backboard,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShotFlightContact {
+    pub surface: ShotContactSurface,
+    pub time: f32,
+    pub ball_position: glam::Vec3,
+    pub contact_position: glam::Vec3,
+    pub incoming_velocity: glam::Vec3,
+}
+
 // 重力抛体纯数学住在 domain（projectile.rs），physics 直接复用同一实现：
 // `GameRules::pass_duration` 与 `BallisticsEngine::shot_duration` 必须同源，
 // 两处各写一份必然漂移。
@@ -133,6 +164,402 @@ impl BallisticsEngine {
             };
         }
         ShotArrivalOutcome::Miss
+    }
+
+    /// Advances a released shot through one interval and returns its first physical result.
+    pub fn shot_flight_step(
+        state: &BallTrajectoryKind,
+        from_time: f32,
+        to_time: f32,
+        rules: &GameRules,
+    ) -> ShotFlightStep {
+        assert!(
+            from_time.is_finite() && to_time.is_finite() && from_time <= to_time,
+            "shot collision interval must be finite and ordered"
+        );
+        let BallTrajectoryKind::Shot {
+            from_pos,
+            hoop_pos,
+            aim_pos,
+            start_time,
+            duration,
+            ..
+        } = state
+        else {
+            panic!("shot collision detection requires a Shot ball state");
+        };
+        assert!(
+            start_time.is_finite() && duration.is_finite() && *duration > f32::EPSILON,
+            "shot collision trajectory must have a finite positive duration"
+        );
+        let interval_start = from_time.max(*start_time);
+        let interval_end = to_time;
+        if interval_end < interval_start {
+            return ShotFlightStep::InFlight;
+        }
+
+        let board_contact = Self::shot_backboard_contact(
+            *from_pos,
+            *hoop_pos,
+            *aim_pos,
+            *start_time,
+            *duration,
+            rules,
+        );
+        let rim_contact = Self::shot_rim_contact_in_interval(
+            *from_pos,
+            *hoop_pos,
+            *aim_pos,
+            *start_time,
+            *duration,
+            interval_start,
+            interval_end,
+            rules,
+        );
+        let first_contact = [
+            rim_contact,
+            board_contact
+                .filter(|contact| contact.time >= interval_start && contact.time <= interval_end),
+        ]
+        .into_iter()
+        .flatten()
+        .min_by(|left, right| left.time.total_cmp(&right.time));
+
+        let hoop_crossing_time = *start_time + *duration;
+        if hoop_crossing_time >= interval_start && hoop_crossing_time <= to_time {
+            let crossing_position = Self::shot_position_at(
+                *from_pos,
+                *hoop_pos,
+                *aim_pos,
+                *start_time,
+                *duration,
+                hoop_crossing_time,
+                rules,
+            );
+            if let Some(contact) = first_contact {
+                if contact.time <= hoop_crossing_time {
+                    return ShotFlightStep::Contact(contact);
+                }
+            }
+            if matches!(
+                Self::classify_shot_arrival(crossing_position.truncate(), *hoop_pos, rules),
+                ShotArrivalOutcome::Made
+            ) {
+                return ShotFlightStep::Made {
+                    time: hoop_crossing_time,
+                    ball_position: crossing_position,
+                };
+            }
+            if let Some(contact) = board_contact {
+                if contact.time > hoop_crossing_time {
+                    if contact.time <= interval_end {
+                        return ShotFlightStep::Contact(contact);
+                    }
+                    return ShotFlightStep::InFlight;
+                }
+            }
+            if rim_contact.is_none() {
+                return ShotFlightStep::Miss {
+                    time: hoop_crossing_time,
+                    ball_position: crossing_position,
+                    incoming_velocity: Self::shot_velocity_at(
+                        *from_pos,
+                        *hoop_pos,
+                        *aim_pos,
+                        *start_time,
+                        *duration,
+                        hoop_crossing_time,
+                        rules,
+                    ),
+                };
+            }
+        }
+
+        if hoop_crossing_time < interval_start {
+            let arc = ProjectileArc::solve(
+                rules.chest_height_ft,
+                rules.rim_height_ft,
+                *duration,
+                rules.ball_gravity_ftps2,
+            );
+            let descending_velocity = arc.vz0 - rules.ball_gravity_ftps2 * *duration;
+            let gravity = rules.ball_gravity_ftps2.max(f32::EPSILON);
+            let exit_time = hoop_crossing_time
+                + (descending_velocity
+                    + (descending_velocity * descending_velocity
+                        + 2.0 * gravity * rules.ball_radius_ft)
+                        .sqrt())
+                    / gravity;
+            if let Some(contact) = board_contact {
+                if contact.time >= interval_start && contact.time <= interval_end {
+                    return ShotFlightStep::Contact(contact);
+                }
+            }
+            if interval_end >= exit_time {
+                return ShotFlightStep::Miss {
+                    time: exit_time,
+                    ball_position: Self::shot_position_at(
+                        *from_pos,
+                        *hoop_pos,
+                        *aim_pos,
+                        *start_time,
+                        *duration,
+                        exit_time,
+                        rules,
+                    ),
+                    incoming_velocity: Self::shot_velocity_at(
+                        *from_pos,
+                        *hoop_pos,
+                        *aim_pos,
+                        *start_time,
+                        *duration,
+                        exit_time,
+                        rules,
+                    ),
+                };
+            }
+        }
+        if let Some(contact) = first_contact {
+            return ShotFlightStep::Contact(contact);
+        }
+        ShotFlightStep::InFlight
+    }
+
+    fn shot_position_at(
+        from_pos: Vec2,
+        hoop_pos: Vec2,
+        aim_pos: Vec2,
+        start_time: f32,
+        duration: f32,
+        time: f32,
+        rules: &GameRules,
+    ) -> glam::Vec3 {
+        let duration = duration.max(f32::EPSILON);
+        let elapsed = (time - start_time).max(0.0);
+        let direction = (hoop_pos - from_pos).normalize_or_zero();
+        let lateral = Vec2::new(-direction.y, direction.x);
+        let lateral_offset = (aim_pos - hoop_pos).dot(lateral);
+        let xy = from_pos.lerp(hoop_pos, elapsed / duration)
+            + lateral * (lateral_offset * elapsed / duration);
+        let arc = ProjectileArc::solve(
+            rules.chest_height_ft,
+            rules.rim_height_ft,
+            duration,
+            rules.ball_gravity_ftps2,
+        );
+        glam::Vec3::new(
+            xy.x,
+            xy.y,
+            arc.z_at(elapsed, rules.chest_height_ft, rules.ball_gravity_ftps2)
+                .max(0.0),
+        )
+    }
+
+    fn shot_velocity_at(
+        from_pos: Vec2,
+        hoop_pos: Vec2,
+        aim_pos: Vec2,
+        start_time: f32,
+        duration: f32,
+        time: f32,
+        rules: &GameRules,
+    ) -> glam::Vec3 {
+        let duration = duration.max(f32::EPSILON);
+        let direction = (hoop_pos - from_pos).normalize_or_zero();
+        let lateral = Vec2::new(-direction.y, direction.x);
+        let lateral_offset = (aim_pos - hoop_pos).dot(lateral);
+        let horizontal = (hoop_pos - from_pos) / duration + lateral * (lateral_offset / duration);
+        let arc = ProjectileArc::solve(
+            rules.chest_height_ft,
+            rules.rim_height_ft,
+            duration,
+            rules.ball_gravity_ftps2,
+        );
+        glam::Vec3::new(
+            horizontal.x,
+            horizontal.y,
+            arc.vz0 - rules.ball_gravity_ftps2 * (time - start_time).max(0.0),
+        )
+    }
+
+    fn shot_rim_contact_in_interval(
+        from_pos: Vec2,
+        hoop_pos: Vec2,
+        aim_pos: Vec2,
+        start_time: f32,
+        duration: f32,
+        interval_start: f32,
+        interval_end: f32,
+        rules: &GameRules,
+    ) -> Option<ShotFlightContact> {
+        if interval_end < interval_start {
+            return None;
+        }
+        let start = Self::shot_position_at(
+            from_pos,
+            hoop_pos,
+            aim_pos,
+            start_time,
+            duration,
+            interval_start,
+            rules,
+        );
+        let end = Self::shot_position_at(
+            from_pos,
+            hoop_pos,
+            aim_pos,
+            start_time,
+            duration,
+            interval_end,
+            rules,
+        );
+        let path_length = (end - start).length();
+        let sample_spacing = (rules.ball_radius_ft / 4.0).max(f32::EPSILON);
+        let samples = (path_length / sample_spacing).ceil().max(1.0) as u32;
+        let distance_to_rim = |time: f32| {
+            let position = Self::shot_position_at(
+                from_pos, hoop_pos, aim_pos, start_time, duration, time, rules,
+            );
+            let radial = (position.truncate() - hoop_pos).length() - rules.rim_radius_ft;
+            radial.hypot(position.z - rules.rim_height_ft) - rules.ball_radius_ft
+        };
+        let mut previous_time = interval_start;
+        let mut previous_distance = distance_to_rim(previous_time);
+        if previous_distance <= 0.0 {
+            return Some(Self::rim_contact_at(
+                previous_time,
+                from_pos,
+                hoop_pos,
+                aim_pos,
+                start_time,
+                duration,
+                rules,
+            ));
+        }
+        for sample in 1..=samples {
+            let sample_time =
+                interval_start + (interval_end - interval_start) * sample as f32 / samples as f32;
+            let sample_distance = distance_to_rim(sample_time);
+            if sample_distance <= 0.0 {
+                let mut low = previous_time;
+                let mut high = sample_time;
+                for _ in 0..20 {
+                    let middle = (low + high) * 0.5;
+                    if distance_to_rim(middle) <= 0.0 {
+                        high = middle;
+                    } else {
+                        low = middle;
+                    }
+                }
+                return Some(Self::rim_contact_at(
+                    high, from_pos, hoop_pos, aim_pos, start_time, duration, rules,
+                ));
+            }
+            previous_time = sample_time;
+            previous_distance = sample_distance;
+        }
+        let _ = previous_distance;
+        None
+    }
+
+    fn rim_contact_at(
+        time: f32,
+        from_pos: Vec2,
+        hoop_pos: Vec2,
+        aim_pos: Vec2,
+        start_time: f32,
+        duration: f32,
+        rules: &GameRules,
+    ) -> ShotFlightContact {
+        let ball_position = Self::shot_position_at(
+            from_pos, hoop_pos, aim_pos, start_time, duration, time, rules,
+        );
+        let radial = (ball_position.truncate() - hoop_pos).normalize_or_zero();
+        let radial = if radial.length_squared() > f32::EPSILON {
+            radial
+        } else {
+            Vec2::X
+        };
+        let contact_position = glam::Vec3::new(
+            hoop_pos.x + radial.x * rules.rim_radius_ft,
+            hoop_pos.y + radial.y * rules.rim_radius_ft,
+            rules.rim_height_ft,
+        );
+        let velocity = Self::shot_velocity_at(
+            from_pos, hoop_pos, aim_pos, start_time, duration, time, rules,
+        );
+        ShotFlightContact {
+            surface: ShotContactSurface::Rim,
+            time,
+            ball_position,
+            contact_position,
+            incoming_velocity: velocity,
+        }
+    }
+
+    fn shot_backboard_contact(
+        from_pos: Vec2,
+        hoop_pos: Vec2,
+        aim_pos: Vec2,
+        start_time: f32,
+        duration: f32,
+        rules: &GameRules,
+    ) -> Option<ShotFlightContact> {
+        let direction = (hoop_pos - from_pos).normalize_or_zero();
+        let lateral = Vec2::new(-direction.y, direction.x);
+        let lateral_offset = (aim_pos - hoop_pos).dot(lateral);
+        let displacement = hoop_pos - from_pos + lateral * lateral_offset;
+        if displacement.x.abs() <= f32::EPSILON {
+            return None;
+        }
+        let board_x = if hoop_pos.x <= rules.court.width_ft / 2.0 {
+            rules.backboard_offset_from_baseline_ft
+        } else {
+            rules.court.width_ft - rules.backboard_offset_from_baseline_ft
+        };
+        let beyond_hoop = (board_x - hoop_pos.x) * displacement.x > 0.0
+            && (from_pos.x - hoop_pos.x) * displacement.x < 0.0;
+        if !beyond_hoop {
+            return None;
+        }
+        let center_x = board_x - displacement.x.signum() * rules.ball_radius_ft;
+        let progress = (center_x - from_pos.x) / displacement.x;
+        if progress <= 0.0 {
+            return None;
+        }
+        let time = start_time + duration * progress;
+        let ball_position = Self::shot_position_at(
+            from_pos, hoop_pos, aim_pos, start_time, duration, time, rules,
+        );
+        if ball_position.z <= 0.0
+            || (ball_position.y - rules.court.hoop_y_ft).abs()
+                > rules.backboard_width_ft / 2.0 + rules.ball_radius_ft
+            || ball_position.z < rules.backboard_bottom_height_ft - rules.ball_radius_ft
+            || ball_position.z > rules.backboard_top_height_ft + rules.ball_radius_ft
+        {
+            return None;
+        }
+        let contact_position = glam::Vec3::new(
+            board_x,
+            ball_position.y.clamp(
+                rules.court.hoop_y_ft - rules.backboard_width_ft / 2.0,
+                rules.court.hoop_y_ft + rules.backboard_width_ft / 2.0,
+            ),
+            ball_position.z.clamp(
+                rules.backboard_bottom_height_ft,
+                rules.backboard_top_height_ft,
+            ),
+        );
+        let velocity = Self::shot_velocity_at(
+            from_pos, hoop_pos, aim_pos, start_time, duration, time, rules,
+        );
+        Some(ShotFlightContact {
+            surface: ShotContactSurface::Backboard,
+            time,
+            ball_position,
+            contact_position,
+            incoming_velocity: velocity,
+        })
     }
 
     /// Computes a shot flight duration from the projectile physics.
@@ -353,7 +780,7 @@ impl BallisticsEngine {
         } = state
         {
             let flight_time = duration.max(f32::EPSILON);
-            let elapsed = (current_time - start_time).clamp(0.0, flight_time);
+            let elapsed = (current_time - start_time).max(0.0);
             let arc = ProjectileArc::solve(
                 rules.chest_height_ft,
                 rules.rim_height_ft,
@@ -623,7 +1050,7 @@ impl BallisticsEngine {
                     "shot trajectory time parameters must be finite and positive"
                 );
                 let t_flight = *duration;
-                let elapsed = (current_time - start_time).clamp(f32::from(0u8), t_flight);
+                let elapsed = (current_time - start_time).max(f32::from(0u8));
                 let progress = elapsed / t_flight;
                 let offset = *aim_pos - *hoop_pos;
                 let direction = (*hoop_pos - *from_pos).normalize_or_zero();
@@ -979,6 +1406,40 @@ impl BallisticsEngine {
         z_contact >= rules.backboard_bottom_height_ft && z_contact <= rules.backboard_top_height_ft
     }
 
+    /// 从检测到的触板位置与入射速度生成反弹落点。
+    pub fn compute_rebound_landing_bank_from_contact_velocity(
+        contact_pos: Vec2,
+        contact_z: f32,
+        incoming_velocity: glam::Vec3,
+        rules: &GameRules,
+    ) -> ReboundLandingSpot {
+        let gravity = rules.ball_gravity_ftps2.max(f32::EPSILON);
+        let board_x = if contact_pos.x <= rules.court.width_ft / 2.0 {
+            rules.backboard_offset_from_baseline_ft
+        } else {
+            rules.court.width_ft - rules.backboard_offset_from_baseline_ft
+        };
+        let reflected = Vec2::new(
+            -incoming_velocity.x * rules.backboard_restitution,
+            incoming_velocity.y,
+        );
+        let vertical = (-incoming_velocity.z * rules.backboard_vertical_restitution).max(0.0);
+        let flight_duration =
+            (vertical + (vertical * vertical + 2.0 * gravity * contact_z).sqrt()) / gravity;
+        let landing_pos = rules.court.clamp_playable(
+            contact_pos + reflected * flight_duration,
+            rules.player_radius_ft,
+        );
+        ReboundLandingSpot {
+            contact_pos: Vec2::new(board_x, contact_pos.y),
+            contact_z,
+            landing_pos,
+            flight_duration,
+            peak_z: contact_z + vertical * vertical / (2.0 * gravity),
+            rebounder_id: None,
+        }
+    }
+
     /// 打板反弹（ADR-017 第三步）：打铁的板通道，入射由瞄准几何推导。
     ///
     /// 打板在真实篮球里是瞄准行为：出手者瞄准板上的点或筐心，瞄准点
@@ -1030,16 +1491,21 @@ impl BallisticsEngine {
             ProjectileArc::solve(rules.chest_height_ft, rules.rim_height_ft, t_flight, g);
         let vz_in = shot_arc.vz0 - g * t_flight;
         // 镜像反射：法向（x）翻转 × 恢复系数，切向（y）保持。
+        // 竖直：入射下落速度 × 板面弹起系数——真实板反弹球会向上弹起
+        // （竖直分量衰减但不归零），滞空 1~2s 给篮板争抢留出窗口；
+        // 保持入射下落速度会让球贴板滑落（滞空 0.4s），篮板全部
+        // 变成落地地板球。
+        let vz_out = -vz_in * rules.backboard_vertical_restitution;
         let v_out = Vec2::new(-v_in_h.x * rules.backboard_restitution, v_in_h.y);
         let contact_pos = Vec2::new(board_x, y_contact);
-        // 落点：从 (触板点, 触板高度) 以 (v_out, vz_in) 的抛体触地时刻解。
-        let discriminant = (vz_in * vz_in + 2.0 * g * z_contact).max(0.0);
-        let t_land = (vz_in + discriminant.sqrt()) / g;
+        // 落点：从 (触板点, 触板高度) 以 (v_out, vz_out) 的抛体触地时刻解。
+        let discriminant = (vz_out * vz_out + 2.0 * g * z_contact).max(0.0);
+        let t_land = (vz_out + discriminant.sqrt()) / g;
         let raw_landing = contact_pos + v_out * t_land;
         let margin = rules.player_radius_ft.max(0.0);
         let landing_pos = rules.court.clamp_playable(raw_landing, margin);
-        let peak_z = if vz_in > 0.0 {
-            z_contact + vz_in * vz_in / (2.0 * g)
+        let peak_z = if vz_out > 0.0 {
+            z_contact + vz_out * vz_out / (2.0 * g)
         } else {
             // 竖直保持下落：反弹后不再升起，弧顶即触板高度。
             z_contact

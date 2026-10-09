@@ -1,0 +1,17 @@
+[package]
+name = "nba-validation"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+nba-domain = { path = "../domain" }
+nba-engine = { path = "../engine" }
+nba-protocol = { path = "../protocol" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rand_chacha = { workspace = true }
+parquet = { version = "53.4.1", default-features = false, features = ["arrow"] }
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+arrow-array = "53.4.1"
+arrow-schema = "53.4.1"

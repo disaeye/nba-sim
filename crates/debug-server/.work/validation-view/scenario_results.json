@@ -1,0 +1,240 @@
+[
+  {
+    "scenario_id": "SC-SHOT-OPEN",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [
+      "SHOT_ATTEMPT_RESOLVED"
+    ],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-BLOCK-BEFORE",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [
+      "LOOSE_BALL_SECURED"
+    ],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-BLOCK-AFTER",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [
+      "SHOT_ATTEMPT_RESOLVED"
+    ],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-AIRBALL",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [
+      "REBOUND"
+    ],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-REBOUND",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [
+      "CONTROL_ESTABLISHED"
+    ],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-PASS-REPEAT",
+    "verdict": "defect",
+    "trigger_occurrences": 1,
+    "precondition_met": true,
+    "missing_required": [
+      "PASS_RECEIVED"
+    ],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-PASS-WHISTLE",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-DRIVE",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-SHOOTING-FOUL",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [
+      "FREE_THROW"
+    ],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-FT-PROGRAM",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-CLOCK",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-BUZZER",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-TEAM-TOV",
+    "verdict": "pass",
+    "trigger_occurrences": 1,
+    "precondition_met": true,
+    "missing_required": [],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-SUBSTITUTION",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-MOVEMENT",
+    "verdict": "pass",
+    "trigger_occurrences": 1,
+    "precondition_met": true,
+    "missing_required": [],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-SCREEN",
+    "verdict": "pass",
+    "trigger_occurrences": 1,
+    "precondition_met": true,
+    "missing_required": [],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-COVERAGE",
+    "verdict": "pass",
+    "trigger_occurrences": 1,
+    "precondition_met": true,
+    "missing_required": [],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-ZONE",
+    "verdict": "pass",
+    "trigger_occurrences": 1,
+    "precondition_met": true,
+    "missing_required": [],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-PLAY-END",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-PLAY-COMPETE",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [
+      "PLAY_WINDOW_ENDED"
+    ],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-TRANSITION",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [
+      "CONTROL_ESTABLISHED"
+    ],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  },
+  {
+    "scenario_id": "SC-TECHNICAL",
+    "verdict": "insufficient_evidence",
+    "trigger_occurrences": 0,
+    "precondition_met": false,
+    "missing_required": [],
+    "forbidden_seen": [],
+    "ticks_run": 238,
+    "execution_error": null
+  }
+]

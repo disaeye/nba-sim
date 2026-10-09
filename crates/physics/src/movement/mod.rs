@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 use nba_domain::action_window::BallOrientation;
+use nba_domain::Foot;
 use nba_domain::{FixedDt, GameRules};
 
 use crate::spatial::{OpennessMetric, PassCorridorStatus, SpatialGeometry};
@@ -35,6 +36,12 @@ pub enum PhysicsFact {
         entity_id: String,
         attempted_pos: Vec2,
         boundary_name: String,
+    },
+    /// 步态模型的一次接地点事实：摆动脚在身体前方落地。
+    FootContact {
+        entity_id: String,
+        foot: Foot,
+        position: Vec2,
     },
 }
 
@@ -112,6 +119,12 @@ pub struct PlayerPhysicsState {
     /// 硬性碰撞分离（min_player_separation）仍然生效——豁免的只是
     /// 转向，不是穿人。
     pub is_driving_to_rim: bool,
+    /// 左脚当前落地点（步态模型的一等状态，随运动推进）。
+    pub left_foot_pos: Vec2,
+    /// 右脚当前落地点。
+    pub right_foot_pos: Vec2,
+    /// 下一个将落地的摆动脚；另一只脚即当前支撑脚。
+    pub swing_foot: Foot,
     /// BoundaryCross 的边沿锁存：记录上一 tick 是否处于越界（被 clamp）
     /// 状态，使边界事实只在上升沿发射而非逐 tick 重复（电平→边沿）。
     pub boundary_cross_latched: bool,
@@ -165,6 +178,13 @@ pub enum PhysicsBackend {
 /// rule, score, foul, turnover, and tactical outcomes belong above this layer.
 pub trait SpatialPhysics {
     fn backend_kind(&self) -> PhysicsBackend;
+
+    /// 深复制后端（检查点 fork 用；语义 = 位精确的运行态复制）。
+    ///
+    /// Rapier 后端按权威玩家状态重建刚体/碰撞结构（kinematic body 的
+    /// 位置完全由 `players` 驱动，重建等价于复制）；SimpleCircle 后端
+    /// 是纯数据直接 Clone。
+    fn clone_dyn(&self) -> Box<dyn SpatialPhysics>;
     fn register_player(&mut self, state: PlayerPhysicsState);
     fn set_player_target(
         &mut self,
@@ -183,6 +203,8 @@ pub trait SpatialPhysics {
     fn get_players(&self) -> &HashMap<String, PlayerPhysicsState>;
     fn get_player(&self, id: &str) -> Option<&PlayerPhysicsState>;
     fn get_player_mut(&mut self, id: &str) -> Option<&mut PlayerPhysicsState>;
+    /// 解除全部球员的运动学冻结（暂停恢复路径）。
+    fn unlock_all(&mut self);
     fn teleport_player(&mut self, id: &str, pos: Vec2);
     /// 持球权变更边界：重置失去球权球员的持球姿态（面框基准）。
     fn set_ball_holder(&mut self, holder_id: Option<&str>);
@@ -340,6 +362,13 @@ impl PhysicsWorld {
         self.backend.get_player(id)
     }
 
+    /// 解除全部球员的运动学冻结（r47 暂停恢复用）：暂停打断
+    /// ControlTransfer 的冻结等待后，接球人若不显式解冻会永久卡在
+    /// target=自身/速度 0。暂停是全场停表，恢复后无人应保留冻结标志。
+    pub fn unlock_all_players(&mut self) {
+        self.backend.unlock_all();
+    }
+
     pub fn get_player_mut(&mut self, id: &str) -> Option<&mut PlayerPhysicsState> {
         self.backend.get_player_mut(id)
     }
@@ -399,9 +428,21 @@ impl PhysicsWorld {
         self.backend.rules()
     }
 }
+impl Clone for PhysicsWorld {
+    fn clone(&self) -> Self {
+        PhysicsWorld {
+            backend: self.backend.clone_dyn(),
+        }
+    }
+}
+
 impl SpatialPhysics for PhysicsWorld {
     fn backend_kind(&self) -> PhysicsBackend {
         self.backend.backend_kind()
+    }
+
+    fn clone_dyn(&self) -> Box<dyn SpatialPhysics> {
+        self.backend.clone_dyn()
     }
     fn register_player(&mut self, state: PlayerPhysicsState) {
         self.backend.register_player(state);
@@ -441,6 +482,9 @@ impl SpatialPhysics for PhysicsWorld {
     }
     fn get_player_mut(&mut self, id: &str) -> Option<&mut PlayerPhysicsState> {
         self.backend.get_player_mut(id)
+    }
+    fn unlock_all(&mut self) {
+        self.backend.unlock_all();
     }
     fn teleport_player(&mut self, id: &str, pos: Vec2) {
         self.backend.teleport_player(id, pos);
@@ -611,6 +655,24 @@ impl SpatialPhysics for RapierSpatialPhysics {
         PhysicsBackend::Rapier
     }
 
+    fn clone_dyn(&self) -> Box<dyn SpatialPhysics> {
+        // 重建式复制：kinematic body 的位置/速度完全由 `players` 权威状态在
+        // step 开头写入（set_next_kinematic_translation），rapier 内部结构
+        // （宽窄相、岛管理器等）在下一步 step 时从体位置重新派生，因此按
+        // 权威状态重放 register_player 即等价于位精确复制。
+        let mut replica = RapierSpatialPhysics::with_rules(&self.rules);
+        let mut ids: Vec<&String> = self.players.keys().collect();
+        ids.sort();
+        for id in ids {
+            let state = self.players[id].clone();
+            replica.register_player(state);
+        }
+        replica.active_contacts = self.active_contacts.clone();
+        replica.pending_contacts = self.pending_contacts.clone();
+        replica.pending_facts = self.pending_facts.clone();
+        Box::new(replica)
+    }
+
     fn register_player(&mut self, state: PlayerPhysicsState) {
         let body = RigidBodyBuilder::kinematic_position_based()
             .translation(vector![state.pos_ft.x, state.pos_ft.y])
@@ -739,6 +801,14 @@ impl SpatialPhysics for RapierSpatialPhysics {
     fn get_player_mut(&mut self, id: &str) -> Option<&mut PlayerPhysicsState> {
         self.players.get_mut(id)
     }
+    fn unlock_all(&mut self) {
+        for player in self.players.values_mut() {
+            if player.is_locked_kinematics {
+                player.is_locked_kinematics = false;
+                player.target_speed_ftps = 0.0;
+            }
+        }
+    }
 
     fn teleport_player(&mut self, id: &str, pos: Vec2) {
         if let Some(player) = self.players.get_mut(id) {
@@ -810,6 +880,7 @@ impl SpatialPhysics for RapierSpatialPhysics {
 }
 
 /// Dependency-light kinematic backend used by deterministic tests and headless runs.
+#[derive(Clone)]
 pub struct SimpleCirclePhysics {
     players: HashMap<String, PlayerPhysicsState>,
     active_contacts: HashSet<(String, String)>,
@@ -833,6 +904,10 @@ impl SimpleCirclePhysics {
 impl SpatialPhysics for SimpleCirclePhysics {
     fn backend_kind(&self) -> PhysicsBackend {
         PhysicsBackend::SimpleCircle
+    }
+
+    fn clone_dyn(&self) -> Box<dyn SpatialPhysics> {
+        Box::new(self.clone())
     }
 
     fn register_player(&mut self, state: PlayerPhysicsState) {
@@ -917,6 +992,14 @@ impl SpatialPhysics for SimpleCirclePhysics {
 
     fn get_player_mut(&mut self, id: &str) -> Option<&mut PlayerPhysicsState> {
         self.players.get_mut(id)
+    }
+    fn unlock_all(&mut self) {
+        for player in self.players.values_mut() {
+            if player.is_locked_kinematics {
+                player.is_locked_kinematics = false;
+                player.target_speed_ftps = 0.0;
+            }
+        }
     }
     fn teleport_player(&mut self, id: &str, pos: Vec2) {
         if let Some(player) = self.players.get_mut(id) {

@@ -162,6 +162,11 @@ pub struct DebugFlag {
 pub struct RenderFrame {
     pub t: f32,
     pub t_game: f32,
+    /// 本帧的全场 tick 序号（validation.md §3.1：每条帧提供 `tick_index`；
+    /// 事件身份判断用 `(tick_index, sequence)`，时间显示值只作展示）。
+    /// `default` 保证旧流可解析；验证层把缺失视为旧流。
+    #[serde(default)]
+    pub tick_index: u64,
     #[serde(rename = "shotClock", default)]
     pub shot_clock: f32,
     pub period: u32,
@@ -256,6 +261,104 @@ pub struct FrameEvent {
     /// `SHOT_RELEASE → SCORE`、`FOUL → FREE_THROW`）。无父事件时为 `None`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_event_id: Option<u64>,
+    /// 本事件所在 tick（validation.md §3.1：每条事件可按 `(tick_index, sequence)`
+    /// 排序；时间显示值不承担身份判断）。`default` 保证旧流可解析。
+    #[serde(default)]
+    pub tick_index: u64,
+    /// 业务实例身份（validation.md §3.2）：同一实例从创建到终结身份不变。
+    /// 适用类型的必填约束由协议注册表规定；旧流无这些字段时按 `None` 解析。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shot_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pass_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loose_ball_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foul_program_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub responsibility_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub movement_intent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub play_instance_id: Option<String>,
+    /// 结构化关系（validation.md §3.2）：`parent_event_id` 保留直接触发语义，
+    /// `relations` 表达 `CausedBy` 等带类型的附加关系；触发原因指向更早
+    /// 的事件，禁止回写开始事件造成环。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relations: Vec<EventRelation>,
+}
+
+/// 事件间的关系类型（validation.md §3.2）。方向：本事件 -> `event_id`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventRelationKind {
+    CausedBy,
+    CreatedBy,
+    InterruptedBy,
+    AwardedBy,
+    RecoveredFrom,
+    Continues,
+    InfluencedBy,
+}
+
+impl EventRelationKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CausedBy => "caused_by",
+            Self::CreatedBy => "created_by",
+            Self::InterruptedBy => "interrupted_by",
+            Self::AwardedBy => "awarded_by",
+            Self::RecoveredFrom => "recovered_from",
+            Self::Continues => "continues",
+            Self::InfluencedBy => "influenced_by",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "caused_by" => Some(Self::CausedBy),
+            "created_by" => Some(Self::CreatedBy),
+            "interrupted_by" => Some(Self::InterruptedBy),
+            "awarded_by" => Some(Self::AwardedBy),
+            "recovered_from" => Some(Self::RecoveredFrom),
+            "continues" => Some(Self::Continues),
+            "influenced_by" => Some(Self::InfluencedBy),
+            _ => None,
+        }
+    }
+}
+
+/// 一条带类型的结构化关系。`event_id` 是关系目标事件的全场 ID。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventRelation {
+    pub kind: EventRelationKind,
+    pub event_id: u64,
+}
+
+impl FrameEvent {
+    /// 构造器：kind 之外的字段全部取默认值，由调用方按需填充。
+    pub fn new(sequence: u64, time: f32, kind: String) -> Self {
+        Self {
+            sequence,
+            time,
+            kind,
+            data: None,
+            event_id: 0,
+            parent_event_id: None,
+            tick_index: 0,
+            action_id: None,
+            shot_id: None,
+            pass_id: None,
+            loose_ball_id: None,
+            foul_program_id: None,
+            responsibility_id: None,
+            movement_intent_id: None,
+            play_instance_id: None,
+            relations: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -267,6 +370,10 @@ pub struct FrameRules {
     pub hoop_right_x_ft: f32,
     pub hoop_y_ft: f32,
     pub player_radius_ft: f32,
+    /// 真实人体躯干半径（ft）：渲染层的「躯干内圆」半径来源，与
+    /// `player_radius_ft`（含臂展的碰撞包络）分属两个口径。
+    #[serde(default = "default_body_contact_radius")]
+    pub body_contact_radius_ft: f32,
     pub min_player_separation_ft: f32,
     #[serde(default)]
     pub separation_safety_margin_ft: f32,
@@ -294,6 +401,9 @@ pub struct FrameRules {
     pub bonus_fouls_per_period: u32,
 }
 
+fn default_body_contact_radius() -> f32 {
+    1.0
+}
 fn default_shot_clock() -> f32 {
     24.0
 }
@@ -335,6 +445,7 @@ impl Default for FrameRules {
             // C6.4：取 GameRules::default().player_radius_ft (1.8) 同源值。
             // 原值 1.0 是手抄漂移；全字段一致性测试在 engine/tests 守卫。
             player_radius_ft: 1.8,
+            body_contact_radius_ft: 1.0,
             min_player_separation_ft: 3.6,
             // C6.4：取 GameRules::default() (0.05) 同源值——第二个手抄漂移点，
             // 由 engine/tests 的全字段一致性测试抓出。

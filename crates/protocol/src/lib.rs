@@ -5,9 +5,14 @@
 //! 与引擎内部结构完全解耦。
 
 pub mod frame;
+pub mod validation_stream;
 
 pub use frame::{
-    DebugFlag, DebugPlayAdjustment, DebugProb, DebugUtility, DecisionDebug, FrameEvent, FrameRules,
-    PotentialFieldSample, RenderBall, RenderFrame, RenderPlayer, RenderScore, RenderTeam,
-    StreamTick,
+    DebugFlag, DebugPlayAdjustment, DebugProb, DebugUtility, DecisionDebug, EventRelation,
+    EventRelationKind, FrameEvent, FrameRules, PotentialFieldSample, RenderBall, RenderFrame,
+    RenderPlayer, RenderScore, RenderTeam, StreamTick,
+};
+pub use validation_stream::{
+    EvidenceLevel, StreamCapabilities, UnitDeclaration, ValidationStreamHeader,
+    ValidationStreamTrailer,
 };

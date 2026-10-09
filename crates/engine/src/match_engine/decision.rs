@@ -84,6 +84,24 @@ impl MatchEngine {
                         .is_some_and(|play| play.spec.id == entry.play_id)
             });
             if !book_active {
+                // 窗口终结事实（validation.md §3.3）：簿记不再支持激活时
+                // 关闭窗口；冷却截止读簿记剩余 tick。已启动的动作沿业务
+                // 关系继续，不因窗口结束而消失。
+                if let Some(play) = active.as_ref() {
+                    let cooldown_remaining = entries
+                        .iter()
+                        .find(|entry| entry.play_id == play.spec.id)
+                        .map(|entry| entry.remaining_ticks)
+                        .unwrap_or(0);
+                    self.journal
+                        .pending_events
+                        .push(GameEvent::PlayWindowEnded {
+                            play_id: play.spec.id.clone(),
+                            possession,
+                            reason: nba_domain::event::PlayWindowEndReason::BookCleared,
+                            cooldown_remaining_ticks: cooldown_remaining,
+                        });
+                }
                 *active = None;
             }
         }
@@ -93,7 +111,20 @@ impl MatchEngine {
         let cooldowns = self.active_play_cooldowns_mut(possession).clone();
         self.active_play_book_mut(possession)
             .note_possession_end(&cooldowns);
-        *self.active_play_mut(possession) = None;
+        // 窗口终结事实（validation.md §3.3）：回合边界关闭窗口；
+        // 冷却剩余读冷却表。先取走激活 Play 避免借用冲突。
+        let ended = self.active_play_mut(possession).take();
+        if let Some(play) = ended {
+            let cooldown_remaining = cooldowns.get(&play.spec.id).copied().unwrap_or(0);
+            self.journal
+                .pending_events
+                .push(GameEvent::PlayWindowEnded {
+                    play_id: play.spec.id.clone(),
+                    possession,
+                    reason: nba_domain::event::PlayWindowEndReason::PossessionEnded,
+                    cooldown_remaining_ticks: cooldown_remaining,
+                });
+        }
         self.observations.possession_ticks = 0;
         // 回合边界作废挂起的投篮释放：回合已结束（出界/犯规/违例），
         // 冻结的出手不可能再起飞。若不在此时作废，窗口的 Exec→Follow
@@ -306,6 +337,16 @@ impl MatchEngine {
     }
 
     pub(crate) fn decision_phase(&mut self, current_t: f32) -> Option<DecisionOutput> {
+        // 挂起的投篮释放期间禁止一切持球决策——门禁必须挂在
+        // decision_phase 入口而不是 ActionExecution 分支：非投篮
+        // 犯规（events.rs）会把子阶段切回 Initiation，出手者仍持球、
+        // pending 仍挂着，Initiation 分支若无门禁会让同一球员再次
+        // 出手，撞上 pending 非空的 fast-fail（实测 seed100 全量赛
+        // tick ~35994）。pending 只由窗口推进消费或回合边界作废，
+        // 期间球权与球态都冻结在出手者身上，任何新决策都不合法。
+        if self.observations.pending_shot_release.is_some() {
+            return None;
+        }
         // Phase state machine: inbound decisions are evaluated only during the
         // inbound phase; live-ball decisions use the same registry pipeline.
         let mut decision_output: Option<DecisionOutput> = None;

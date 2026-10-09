@@ -367,6 +367,7 @@ mod tests {
         let frame = RenderFrame {
             t,
             t_game,
+            tick_index: 0,
             shot_clock: 24.0,
             period: 1,
             phase: "LiveBall".to_string(),
@@ -412,6 +413,7 @@ mod tests {
             time: 0.0,
             kind: kind.to_string(),
             data: Some(data),
+            ..nba_protocol::FrameEvent::new(0, 0.0, String::new())
         }
     }
 

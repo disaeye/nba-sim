@@ -14,6 +14,7 @@ members = [
     "crates/evaluator",
     "crates/bball-wasm",
     "crates/test-support",
+    "crates/validation",
 ]
 [workspace.package]
 version = "0.1.0"
@@ -41,6 +42,7 @@ nba-protocol = { path = "crates/protocol" }
 nba-semantics = { path = "crates/semantics" }
 nba-invariants = { path = "crates/invariants" }
 nba-test-support = { path = "crates/test-support" }
+nba-validation = { path = "crates/validation" }
 
 [profile.dev]
 opt-level = 1

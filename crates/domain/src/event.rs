@@ -1,4 +1,4 @@
-use crate::action_window::{ActionPhase, ActionType};
+use crate::action_window::{ActionPhase, ActionType, Foot};
 use crate::flow::PhaseType;
 use crate::Possession;
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,16 @@ pub enum TransitionOrigin {
     DefensiveRebound,
     Steal,
     LooseBallRecovery,
+    /// 投篮命中后对方底线发球（回合终结 = Score 且非罚球）。
+    MadeFieldGoal,
+    /// 罚球命中（末罚）后对方底线发球。
+    MadeFreeThrow,
+    /// 违例（走步/二次运球/进攻时限/回场等）后对方发球。
+    Violation,
+    /// 球出界后掷球入界（界外球权归属已定）。
+    OutOfBounds,
+    /// 暂停后恢复比赛（叫暂停方的球权继续/对方球权按规则）。
+    Timeout,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -263,6 +273,18 @@ pub enum GameEvent {
         /// 路线形成了终结窗口。进球由随后的触筐事实决定。
         successful: bool,
     },
+    /// 持球人已结束运球并进入可传球、投篮或走步的收球阶段。
+    DribbleGathered {
+        player_id: String,
+        position: (f32, f32),
+        pivot_foot: Option<Foot>,
+    },
+    /// 步态模型的接地点事实：一只脚在身体前方落地。
+    FootContact {
+        player_id: String,
+        foot: Foot,
+        position: (f32, f32),
+    },
     TransitionStarted {
         offense: Possession,
         origin: TransitionOrigin,
@@ -320,6 +342,13 @@ pub enum GameEvent {
     RuleViolation {
         constraint_id: String,
         reason: String,
+    },
+    /// 教练暂停（r46）：叫暂停方 + 双方剩余暂停数。暂停期间停表，
+    /// 恢复比赛时 TRANSITION_STARTED.origin = timeout。
+    TeamTimeout {
+        team: String,
+        home_timeouts_remaining: u32,
+        away_timeouts_remaining: u32,
     },
     /// 球离开场地（第一性原理：出界是**球的位置事实**，不是球员违例）。
     ///
@@ -396,6 +425,141 @@ pub enum GameEvent {
         play_id: String,
         possession: Possession,
     },
+    /// Play 窗口终结（validation.md §3.3）：对应激活身份、结束原因和
+    /// 冷却截止。窗口结束后停止新增影响，已启动的动作沿业务关系继续。
+    PlayWindowEnded {
+        play_id: String,
+        possession: Possession,
+        reason: PlayWindowEndReason,
+        cooldown_remaining_ticks: u32,
+    },
+    /// 控制建立事实（validation.md §3.3）：独立球权重建所需的边界证据。
+    /// 与 `LooseBallSecured`/`PassReceived` 的区别：本事件只陈述
+    /// 「控制已建立」这一球权边界，不重复结果语义。
+    ControlEstablished {
+        player_id: String,
+        team: String,
+        /// 控制来源：`pass_reception` / `rebound` / `steal` / `loose_ball` /
+        /// `inbound` / `jump_ball`。
+        source: String,
+        position: (f32, f32),
+    },
+    /// 球权授予事实（validation.md §3.3）：发球、争球、交替拥有等由规则
+    /// 授予而非控制建立的球权边界。
+    PossessionAwarded {
+        team: String,
+        /// 授予原因：`inbound_after_score` / `inbound_after_violation` /
+        /// `jump_ball` / `alternate_possession` / `free_throw_retention`。
+        reason: String,
+        #[serde(default)]
+        inbounder_id: Option<String>,
+    },
+    /// 时钟事实（validation.md §3.3）：进攻时钟暂停/重置与比赛钟边界。
+    /// 三种时长的独立重建从此事实读边界，不读显示值。
+    ClockChanged {
+        /// 变化种类：`shot_clock_reset_full` / `shot_clock_reset_14` /
+        /// `clock_running_changed` / `period_clock_set`。
+        kind: String,
+        /// 变化后的比赛时钟值（秒）。
+        #[serde(default)]
+        game_clock_seconds: Option<f32>,
+        /// 变化后的进攻时钟值（秒）。
+        #[serde(default)]
+        shot_clock_seconds: Option<f32>,
+        /// 两类比赛时钟的运行标志。
+        game_clock_running: bool,
+        shot_clock_running: bool,
+        /// 变化原因事件 ID（触筐、控制建立等）。
+        #[serde(default)]
+        cause_event_id: Option<u64>,
+    },
+    /// 节末结算完成事实（validation.md §3.3 / §2.4）：全部待决事项
+    /// （在飞投篮、罚则）关闭后才能发布；此后才允许节/加时/终场决定。
+    PeriodSettlementCompleted {
+        period: u32,
+        home_score: u32,
+        away_score: u32,
+        /// 本节关闭的待决投篮数。
+        pending_shots_resolved: u32,
+        /// 本节执行的罚球次数。
+        free_throws_resolved: u32,
+    },
+    /// 统计记账声明（validation.md §3.3）：引擎对一次统计事件的归属输出。
+    /// 验证器独立重算后与此声明逐项比较，不能直接当作真值。
+    StatAttribution {
+        team: String,
+        #[serde(default)]
+        player_id: Option<String>,
+        /// 统计种类：`FGA` / `FGM` / `3PA` / `3PM` / `FTA` / `FTM` /
+        /// `ORB` / `DRB` / `BLK` / `STL` / `TOV` / `PF` / `AST`。
+        stat_kind: String,
+        /// 数量（通常为 1；球队失误等归零实体时也由本载荷声明）。
+        amount: u32,
+        /// 来源业务身份（如 shot_id/pass_id/foul_program_id）。
+        #[serde(default)]
+        source_business_id: Option<String>,
+        /// 规则依据（如 `field_goal_made` / `blocked_shot_counts_fga`）。
+        #[serde(default)]
+        rule_basis: Option<String>,
+    },
+    /// 出手裁决记录（validation.md §2.2）：一次投篮动作的物理结果、
+    /// 有效性裁决与规则依据。独立统计器据此计算 `FGA/FGM/BLK`。
+    ShotAttemptResolved {
+        shooter_id: String,
+        /// 物理结果：`made` / `miss_rim` / `miss_backboard` / `miss_no_rim` /
+        /// `blocked` / `out_of_bounds`。
+        physical_outcome: String,
+        /// 统计裁决：`fga_fgm` / `fga_miss` / `fga_blocked` / `no_fga`。
+        scoring_decision: String,
+        /// 判定依据（如 `hoop_arrival_made` / `rim_contact_miss`）。
+        rule_basis: String,
+        #[serde(default)]
+        is_three: bool,
+    },
+    /// 运动意图（validation.md §3.3）：球员跑位任务的创建/修订记录。
+    /// 修订经 `revision` 递增并引用被替代的意图身份。
+    MovementIntent {
+        player_id: String,
+        /// 原因事件 ID（任务由哪个事实产生）。
+        #[serde(default)]
+        cause_event_id: Option<u64>,
+        /// 任务类型（`sprint_back` / `cut` / `screen` / `box_out` 等）。
+        task: String,
+        /// 目标（场地区域名或对象描述）。
+        target: String,
+        target_pos: (f32, f32),
+        /// 计划期限（tick 数；到期即超时事实）。
+        deadline_ticks: u32,
+        revision: u32,
+    },
+    /// 运动结果（validation.md §3.3）：意图的终态与证据。
+    MovementOutcome {
+        player_id: String,
+        task: String,
+        /// 终态：`completed` / `blocked` / `interrupted` / `timed_out` /
+        /// `superseded`。
+        outcome: String,
+        /// 实际轨迹长度（英尺，相邻位置距离之和）。
+        path_length_ft: f32,
+        #[serde(default)]
+        evidence_event_id: Option<u64>,
+    },
+    /// 防守责任开始/结束事实（validation.md §3.3）：对位或区域、接替人、
+    /// 开始与结束条件。失败是比赛行为记录；伪报完成才是结构缺陷。
+    ResponsibilityStarted {
+        defender_id: String,
+        responsibility: DefenseResponsibility,
+        #[serde(default)]
+        offensive_player_id: Option<String>,
+    },
+    ResponsibilityEnded {
+        defender_id: String,
+        responsibility: DefenseResponsibility,
+        /// 结束条件：`possession_end` / `switch` / `recovered` / `substitution`。
+        end_reason: String,
+        /// 责任期内是否达成目标（回位失败等如实记录为 false）。
+        achieved: bool,
+    },
     /// 持球姿态技术选择：新持球人确立时面框或背身的决策事实。
     /// 这是可观测性事件：帧投影的 `orientation` 字段与本事件同 tick 对应，
     /// 消费方据此重建「谁在何时选择了什么姿态」的技术选择时间线。
@@ -403,6 +567,28 @@ pub enum GameEvent {
         player_id: String,
         back_to_basket: bool,
     },
+}
+
+/// Play 窗口终结原因（validation.md §3.3 / §3.2 窗口语义）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayWindowEndReason {
+    /// 窗口 tick 耗尽。
+    WindowExpired,
+    /// 回合结束。
+    PossessionEnded,
+    /// 冷却/簿记状态不再支持激活。
+    BookCleared,
+}
+
+impl PlayWindowEndReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WindowExpired => "window_expired",
+            Self::PossessionEnded => "possession_ended",
+            Self::BookCleared => "book_cleared",
+        }
+    }
 }
 
 /// 回合终结的显式归因（dev 方案 §3.2 D0.1）。
@@ -541,6 +727,8 @@ impl GameEvent {
                     "DRIVE_STOPPED"
                 }
             }
+            GameEvent::DribbleGathered { .. } => "DRIBBLE_GATHERED",
+            GameEvent::FootContact { .. } => "FOOT_CONTACT",
             GameEvent::TransitionStarted { .. } => "TRANSITION_STARTED",
             GameEvent::LooseBallSecured { .. } => "LOOSE_BALL_SECURED",
             GameEvent::FreeThrowAttempt { .. } => "FREE_THROW",
@@ -549,6 +737,7 @@ impl GameEvent {
             GameEvent::PhaseTransition { .. } => "PHASE_TRANSITION",
             GameEvent::Foul { .. } => "FOUL",
             GameEvent::RuleViolation { .. } => "VIOLATION",
+            GameEvent::TeamTimeout { .. } => "TIMEOUT",
             GameEvent::BallOutOfBounds { .. } => "OUT_OF_BOUNDS",
             GameEvent::EnforcementApplied { .. } => "ENFORCEMENT_APPLIED",
             GameEvent::PossessionSummary(_) => "POSSESSION_SUMMARY",
@@ -557,6 +746,17 @@ impl GameEvent {
             GameEvent::BallPlacementApplied { .. } => "BALL_PLACEMENT_APPLIED",
             GameEvent::PlacementApplied { .. } => "PLACEMENT_APPLIED",
             GameEvent::PlayActivated { .. } => "PLAY_ACTIVATED",
+            GameEvent::PlayWindowEnded { .. } => "PLAY_WINDOW_ENDED",
+            GameEvent::ControlEstablished { .. } => "CONTROL_ESTABLISHED",
+            GameEvent::PossessionAwarded { .. } => "POSSESSION_AWARDED",
+            GameEvent::ClockChanged { .. } => "CLOCK_CHANGED",
+            GameEvent::PeriodSettlementCompleted { .. } => "PERIOD_SETTLEMENT_COMPLETED",
+            GameEvent::StatAttribution { .. } => "STAT_ATTRIBUTION",
+            GameEvent::ShotAttemptResolved { .. } => "SHOT_ATTEMPT_RESOLVED",
+            GameEvent::MovementIntent { .. } => "MOVEMENT_INTENT",
+            GameEvent::MovementOutcome { .. } => "MOVEMENT_OUTCOME",
+            GameEvent::ResponsibilityStarted { .. } => "RESPONSIBILITY_STARTED",
+            GameEvent::ResponsibilityEnded { .. } => "RESPONSIBILITY_ENDED",
             GameEvent::BallOrientationChosen { .. } => "BALL_ORIENTATION",
         }
     }

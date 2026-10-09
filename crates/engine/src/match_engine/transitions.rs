@@ -86,6 +86,15 @@ impl MatchEngine {
     }
 
     pub(crate) fn start_violation_turnover(&mut self, _kind: ViolationKind) {
+        // 哨响时持球人尚有未离手的挂起出手（走步/二次运球在投篮窗口内
+        // 被抓住）：出手不成立——窗口取消、挂起静默作废（不发布
+        // ShotRelease 事实，不计 FGA），与犯规哨作废挂起出手同一口径。
+        if let Some(pending) = self.observations.pending_shot_release.take() {
+            self.observations.active_windows.remove(&pending.shooter_id);
+            self.systems
+                .physics
+                .set_player_locked(&pending.shooter_id, false, None);
+        }
         // 哨响时传球仍在飞行：球即刻死亡，传球不再有物理结算——
         // 以哨响位置补发 PASS_DROPPED 终结事实（否则事件流出现无结局的
         // PASS，传球五分支互斥被破坏）。父级由因果槽自动指向该 PASS。
@@ -237,6 +246,19 @@ impl MatchEngine {
         } else {
             self.config.rules.league.shot_clock_seconds
         };
+        self.journal.pending_events.push(GameEvent::ClockChanged {
+            kind: if is_offensive {
+                "shot_clock_reset_14"
+            } else {
+                "shot_clock_reset_full"
+            }
+            .to_string(),
+            game_clock_seconds: Some(self.clock.game_clock),
+            shot_clock_seconds: Some(self.clock.shot_clock),
+            game_clock_running: self.flow.game_flow.allows_live_ball_actions(),
+            shot_clock_running: self.flow.game_flow.allows_live_ball_actions(),
+            cause_event_id: None,
+        });
         self.transition_phase(SubPhase::Initiation);
         self.set_game_flow(GameFlowState::LiveBall);
         self.clock.last_decision_time = -self.config.rules.decision_interval_seconds;
@@ -629,6 +651,14 @@ impl MatchEngine {
         baseline_pos: Vec2,
         current_ball_3d: (Vec2, f32),
     ) {
+        // r46 教练暂停：回合终结后的发球窗口是唯一合法叫暂停时机（所有
+        // 回合终结都汇聚到本函数）。叫暂停时记录发球点供恢复路径复用，
+        // 本 tick 短路进暂停状态。
+        if let Some(team) = self.evaluate_timeout() {
+            self.clock.pending_inbound_pos = Some((baseline_pos, current_ball_3d));
+            self.execute_timeout(team);
+            return;
+        }
         self.complete_possession();
         self.ball.last_passer_id = None;
         self.ball.pending_pass_receiver = None;
@@ -642,6 +672,30 @@ impl MatchEngine {
         }
         self.flow.possession = opposite(self.flow.possession);
         self.flow.possession_id += 1;
+        let team = match self.flow.possession {
+            Possession::Home => "home",
+            Possession::Away => "away",
+        };
+        let inbounder_id = self.new_possession_pg();
+        self.journal
+            .pending_events
+            .push(GameEvent::PossessionAwarded {
+                team: team.to_string(),
+                reason: "inbound_after_terminal".to_string(),
+                inbounder_id: Some(inbounder_id),
+            });
+        // 回合开始原因事实：推导逻辑统一在 resolve_inbound_origin
+        // （显式覆盖优先，否则按上一回合终结原因映射；无映射不发——
+        // 节间开场不属于任何一回合的转移）。
+        let origin = self.resolve_inbound_origin();
+        if let Some(origin) = origin {
+            self.journal
+                .pending_events
+                .push(nba_domain::GameEvent::TransitionStarted {
+                    offense: self.flow.possession,
+                    origin,
+                });
+        }
         self.begin_inbound(baseline_pos, current_ball_3d);
     }
 
@@ -656,6 +710,14 @@ impl MatchEngine {
     pub(crate) fn begin_inbound(&mut self, baseline_pos: Vec2, current_ball_3d: (Vec2, f32)) {
         self.update_coach_strategy();
         self.clock.shot_clock = self.config.rules.league.shot_clock_seconds;
+        self.journal.pending_events.push(GameEvent::ClockChanged {
+            kind: "shot_clock_reset_full".to_string(),
+            game_clock_seconds: Some(self.clock.game_clock),
+            shot_clock_seconds: Some(self.clock.shot_clock),
+            game_clock_running: self.flow.game_flow.allows_live_ball_actions(),
+            shot_clock_running: self.flow.game_flow.allows_live_ball_actions(),
+            cause_event_id: None,
+        });
         self.sync_team_tactics();
         // 死球换人窗口（gap.md G6）：必须在发球员选定**之前**评估——
         // 若发球员被换下，`new_possession_pg` 会按在场名单重新选定，
@@ -821,6 +883,15 @@ impl MatchEngine {
                     from: PhaseType::SetPlay,
                     to: PhaseType::DeadBallReset,
                 });
+            self.journal
+                .pending_events
+                .push(GameEvent::PeriodSettlementCompleted {
+                    period: previous_period,
+                    home_score: self.ledger.home_score,
+                    away_score: self.ledger.away_score,
+                    pending_shots_resolved: 0,
+                    free_throws_resolved: 0,
+                });
             self.journal.current_event = Some("PERIOD_END".to_string());
             self.journal.current_callout = Some(format!(
                 "第{}节结束，进入{}休息",
@@ -841,10 +912,28 @@ impl MatchEngine {
             self.ledger.team_fouls_home = 0;
             self.ledger.team_fouls_away = 0;
             self.clock.period_break_elapsed = 0.0;
+            self.journal
+                .pending_events
+                .push(GameEvent::PeriodSettlementCompleted {
+                    period: previous_period,
+                    home_score: self.ledger.home_score,
+                    away_score: self.ledger.away_score,
+                    pending_shots_resolved: 0,
+                    free_throws_resolved: 0,
+                });
             self.set_game_flow(GameFlowState::Overtime);
             self.transition_phase(SubPhase::Initiation);
             self.journal.current_event = Some("OVERTIME_START".to_string());
         } else {
+            self.journal
+                .pending_events
+                .push(GameEvent::PeriodSettlementCompleted {
+                    period: previous_period,
+                    home_score: self.ledger.home_score,
+                    away_score: self.ledger.away_score,
+                    pending_shots_resolved: 0,
+                    free_throws_resolved: 0,
+                });
             self.set_game_flow(GameFlowState::GameEnd);
             self.transition_phase(SubPhase::DeadBallReset);
             self.journal

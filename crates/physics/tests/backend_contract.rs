@@ -32,6 +32,9 @@ fn player(id: &str, team: &str, pos: Vec2) -> PlayerPhysicsState {
         out_of_bounds_placement: false,
         is_receiving_pass: false,
         is_driving_to_rim: false,
+        left_foot_pos: pos,
+        right_foot_pos: pos,
+        swing_foot: nba_domain::Foot::Left,
         boundary_cross_latched: false,
         attributes: Default::default(),
         tendencies: Default::default(),
@@ -105,6 +108,96 @@ fn kinematic_step_never_exceeds_configured_speed() {
             rules.max_player_speed_ftps
         );
     }
+}
+
+#[test]
+fn moving_player_emits_alternating_foot_contacts() {
+    let rules = GameRules {
+        tick_seconds: 0.05,
+        ..GameRules::default()
+    };
+    let mut world = PhysicsWorld::with_backend(&rules, PhysicsBackend::SimpleCircle);
+    world.register_player(player("H_01", "home", Vec2::new(20.0, 25.0)));
+    world.set_player_target(
+        "H_01",
+        Vec2::new(44.0, 25.0),
+        10.0,
+        "BallHandler",
+        "PG",
+        "Normal",
+    );
+
+    let mut contacts: Vec<(nba_domain::Foot, Vec2)> = Vec::new();
+    for _ in 0..120 {
+        world.step(nba_domain::FixedDt(rules.tick_seconds));
+        contacts.extend(
+            world
+                .drain_facts()
+                .into_iter()
+                .filter_map(|fact| match fact {
+                    nba_physics::PhysicsFact::FootContact { foot, position, .. } => {
+                        Some((foot, position))
+                    }
+                    _ => None,
+                }),
+        );
+    }
+
+    assert!(contacts.len() >= 2, "movement must produce foot contacts");
+    for pair in contacts.windows(2) {
+        assert_ne!(pair[0].0, pair[1].0, "contacts must alternate feet");
+        assert!(
+            pair[1].1.x > pair[0].1.x,
+            "contact positions must follow the movement direction"
+        );
+        let spacing = (pair[1].1 - pair[0].1).length();
+        assert!(
+            spacing >= 1.0,
+            "consecutive contacts must be spaced by a stride, got {spacing}"
+        );
+    }
+}
+
+#[test]
+fn foot_placement_heals_after_teleport_without_emitting_contacts() {
+    let rules = GameRules {
+        tick_seconds: 0.05,
+        ..GameRules::default()
+    };
+    let mut world = PhysicsWorld::with_backend(&rules, PhysicsBackend::SimpleCircle);
+    world.register_player(player("H_01", "home", Vec2::new(20.0, 25.0)));
+    world.set_player_target(
+        "H_01",
+        Vec2::new(30.0, 25.0),
+        8.0,
+        "BallHandler",
+        "PG",
+        "Normal",
+    );
+    for _ in 0..60 {
+        world.step(nba_domain::FixedDt(rules.tick_seconds));
+        world.drain_facts();
+    }
+    // 传送：双脚留在远处，身体被放置到新位置并站定。
+    {
+        let player = world.get_player_mut("H_01").unwrap();
+        player.pos_ft = Vec2::new(70.0, 25.0);
+        player.target_pos_ft = Vec2::new(70.0, 25.0);
+        player.vel_ft = Vec2::ZERO;
+        player.target_speed_ftps = 0.0;
+    }
+    let mut teleported_contacts = 0;
+    for _ in 0..20 {
+        world.step(nba_domain::FixedDt(rules.tick_seconds));
+        teleported_contacts += world.drain_facts().into_iter().count();
+    }
+    assert_eq!(
+        teleported_contacts, 0,
+        "teleport placement must heal foot state silently"
+    );
+    let player = world.get_player("H_01").unwrap();
+    assert!((player.pos_ft - player.left_foot_pos).length() < 1.0);
+    assert!((player.pos_ft - player.right_foot_pos).length() < 1.0);
 }
 
 #[test]
@@ -191,6 +284,7 @@ fn shot_samples_stay_within_configured_speed_envelope() {
         aim_pos: hoop,
         start_time: 0.0,
         duration,
+        collision_checked_until: 0.0,
         is_three: true,
         peak_z,
         make_probability: 0.5,

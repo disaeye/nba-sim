@@ -55,6 +55,8 @@ pub struct ExportSummary {
     pub violations: Vec<Violation>,
     /// 比赛统计数据分解。
     pub box_score: MatchBoxScore,
+    /// 流结束时仍未终结的业务实例数（validation.md §3.1 流尾部）。
+    pub open_business_instances: u64,
     /// 违例多维分类账分析结果。
     pub taxonomy: ViolationTaxonomy,
 }

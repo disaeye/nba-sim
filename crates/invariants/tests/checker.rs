@@ -56,6 +56,7 @@ fn base_tick(players: Vec<RenderPlayer>, ball: RenderBall) -> StreamTick {
         frame: RenderFrame {
             t: 0.0,
             t_game: 720.0,
+            tick_index: 0,
             shot_clock: 24.0,
             period: 1,
             phase: "Initiation".to_string(),

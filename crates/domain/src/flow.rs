@@ -2,6 +2,7 @@
 //!
 //! 这些类型只描述比赛世界的事实，不包含决策、物理或裁判实现。
 
+use crate::action_window::Foot;
 use crate::possession::Possession;
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
@@ -226,6 +227,8 @@ pub enum BallState {
         aim_pos: Vec2,
         start_time: f32,
         duration: f32,
+        /// 上一次物理步采样的绝对时间，供连续碰撞检测限定本 tick 区间。
+        collision_checked_until: f32,
         is_three: bool,
         peak_z: f32,
         /// 释放时刻的命中概率输入。命中在触筐结算时决定。
@@ -308,6 +311,37 @@ pub enum BallState {
     },
 }
 
+/// 持球人运球与收球的规则状态。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DribbleControlState {
+    /// 当前持球段仍在运球，可连续改变方向并再次启动突破。
+    LiveDribble {
+        dribbled: bool,
+        pivot_foot: Option<Foot>,
+    },
+    /// 球员已收球；接下来最多可完成两步动作，并且不得移动已确立的轴心脚。
+    Gathered {
+        pivot_foot: Option<Foot>,
+        pivot_position: Vec2,
+        steps_after_gather: u8,
+    },
+}
+
+impl Default for DribbleControlState {
+    fn default() -> Self {
+        Self::LiveDribble {
+            dribbled: false,
+            pivot_foot: None,
+        }
+    }
+}
+
+impl DribbleControlState {
+    pub fn is_gathered(self) -> bool {
+        matches!(self, Self::Gathered { .. })
+    }
+}
+
 /// 球的宏观相位标签（由 [`BallState`] 派生，供决策上下文等窄消费面使用）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BallPhase {
@@ -326,7 +360,7 @@ impl BallState {
     /// 当前持球人（仅持球族有值）。
     pub fn carried_by(&self) -> Option<&str> {
         match self {
-            BallState::Held { carrier_id }
+            BallState::Held { carrier_id, .. }
             | BallState::Drive {
                 driver_id: carrier_id,
                 ..
@@ -344,7 +378,7 @@ impl BallState {
     ///   [`BallState::possessing_team`] 从最后触球方派生）。
     pub fn associated_player(&self) -> Option<&str> {
         match self {
-            BallState::Held { carrier_id }
+            BallState::Held { carrier_id, .. }
             | BallState::Drive {
                 driver_id: carrier_id,
                 ..

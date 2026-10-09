@@ -34,6 +34,25 @@ impl MatchEngine {
     }
 
     #[doc(hidden)]
+    pub fn execute_pass_for_test(
+        &mut self,
+        passer_id: &str,
+        receiver_id: &str,
+        from_pos: Vec2,
+        to_pos: Vec2,
+        inbound: bool,
+    ) {
+        self.execute_pass(
+            passer_id,
+            receiver_id,
+            from_pos,
+            to_pos,
+            self.clock.current_time,
+            inbound,
+        );
+    }
+
+    #[doc(hidden)]
     pub fn execute_drive_for_test(
         &mut self,
         driver_id: &str,
@@ -50,7 +69,38 @@ impl MatchEngine {
         );
     }
 
-    /// 设置交替拥有箭头（仅测试钩子，D20）。
+    /// 实证探针用：突破犯规（DRIVE_FOUL）累计计数。
+    pub fn drive_foul_count(&self) -> usize {
+        self.observations.drive_foul_counter
+    }
+
+    /// 实证探针用：突破发起计数。
+    pub fn drive_initiated_count(&self) -> usize {
+        self.observations.drive_initiated_counter
+    }
+
+    /// 实证探针用：指定球员的 openness 采样（最近防守距离、干扰强度）。
+    pub fn openness_probe(&self, player_id: &str) -> (f32, f32) {
+        let o = self.systems.physics.openness(player_id);
+        (o.closest_defender_dist, o.contest_intensity)
+    }
+
+    /// 实证探针用：只读快照挂起的投篮释放（shooter_id, release_time）。
+    pub fn peek_pending_shot(&self) -> Option<(String, f32)> {
+        self.observations
+            .pending_shot_release
+            .as_ref()
+            .map(|p| (p.shooter_id.clone(), p.release_time))
+    }
+
+    /// 实证探针用：指定球员的动作窗口相位名（无窗口时 None）。
+    pub fn window_phase(&self, player_id: &str) -> Option<String> {
+        self.observations
+            .active_windows
+            .get(player_id)
+            .map(|w| format!("{:?}", w.phase))
+    }
+
     pub fn set_possession_arrow_for_test(&mut self, arrow: Option<nba_domain::Possession>) {
         self.flow.possession_arrow = arrow;
     }
@@ -113,11 +163,67 @@ impl MatchEngine {
             self.mark_receiver(None);
         }
         self.ball.set_ball_state(state);
+        self.clock.dribble_control.clear();
+        self.clock.dribble_violation = None;
+    }
+
+    #[doc(hidden)]
+    pub fn set_dribble_control_for_test(
+        &mut self,
+        player_id: &str,
+        control: nba_domain::DribbleControlState,
+    ) {
+        self.clock
+            .dribble_control
+            .insert(player_id.to_string(), control);
+        if let Some(player) = self.systems.physics.get_player_mut(player_id) {
+            // 注入即重落双脚：测试场景从注入状态起算脚步。
+            player.left_foot_pos = player.pos_ft;
+            player.right_foot_pos = player.pos_ft;
+            if let nba_domain::DribbleControlState::Gathered {
+                pivot_foot: Some(pivot),
+                ..
+            } = control
+            {
+                // 轴心脚是支撑脚：摆动脚取另一只，首个接地点为非轴心脚。
+                player.swing_foot = pivot.opposite();
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn dribble_control_for_test(
+        &self,
+        player_id: &str,
+    ) -> Option<nba_domain::DribbleControlState> {
+        self.clock.dribble_control.get(player_id).copied()
+    }
+
+    #[doc(hidden)]
+    pub fn set_dribble_violation_for_test(
+        &mut self,
+        kind: nba_decision::constraint::ViolationKind,
+        player_id: &str,
+    ) {
+        self.clock.dribble_violation = Some(kind);
+        self.clock.current_possession_turnover_player = Some(player_id.to_string());
     }
 
     #[doc(hidden)]
     pub fn set_ball_pos_for_test(&mut self, pos: Vec2, z: f32) {
         self.ball.ball_pos_3d = (pos, z);
+    }
+
+    #[doc(hidden)]
+    pub fn set_player_position_for_test(&mut self, player_id: &str, position: Vec2) {
+        let player = self
+            .systems
+            .physics
+            .get_player_mut(player_id)
+            .unwrap_or_else(|| panic!("test player `{player_id}` does not exist"));
+        player.pos_ft = position;
+        player.vel_ft = Vec2::ZERO;
+        player.target_pos_ft = position;
     }
 
     #[doc(hidden)]
@@ -278,6 +384,34 @@ impl MatchEngine {
     }
 
     #[doc(hidden)]
+    pub fn set_player_block_attributes_for_test(
+        &mut self,
+        player_id: &str,
+        height_cm: u16,
+        block: f32,
+        vertical: f32,
+        aggressiveness: f32,
+    ) {
+        let roster_player = self
+            .config
+            .home_team
+            .players
+            .iter_mut()
+            .chain(self.config.away_team.players.iter_mut())
+            .find(|player| player.id == player_id)
+            .unwrap_or_else(|| panic!("test roster player `{player_id}` does not exist"));
+        roster_player.height_cm = height_cm;
+        let physics_player = self
+            .systems
+            .physics
+            .get_player_mut(player_id)
+            .unwrap_or_else(|| panic!("test physics player `{player_id}` does not exist"));
+        physics_player.attributes.block = block;
+        physics_player.attributes.vertical = vertical;
+        physics_player.tendencies.block_aggressiveness = aggressiveness;
+    }
+
+    #[doc(hidden)]
     pub fn start_action_window_for_test(
         &mut self,
         player_id: &str,
@@ -326,6 +460,11 @@ impl MatchEngine {
     }
 
     #[doc(hidden)]
+    pub fn current_time_for_test(&self) -> f32 {
+        self.clock.current_time
+    }
+
+    #[doc(hidden)]
     pub fn publish_events_for_test(&mut self) -> Vec<nba_protocol::FrameEvent> {
         let before_count = self.journal.current_event_log.len();
         self.publish_events();
@@ -340,6 +479,70 @@ impl MatchEngine {
     #[doc(hidden)]
     pub fn ball_state_for_test(&self) -> nba_physics::ballistics::BallTrajectoryKind {
         self.ball.ball_state.clone()
+    }
+
+    #[doc(hidden)]
+    pub fn try_resolve_shot_block_for_test(&mut self) -> bool {
+        let BallTrajectoryKind::Shot {
+            shooter_id,
+            from_pos,
+            is_three,
+            ..
+        } = self.ball.ball_state.clone()
+        else {
+            panic!("shot block probe requires a Shot ball state");
+        };
+        let Some(block) =
+            self.try_resolve_shot_block(&shooter_id, &from_pos, self.clock.current_time, is_three)
+        else {
+            return false;
+        };
+        let mut outcome = super::ball_flight::BallFlightOutcome::default();
+        outcome.new_ball_state = Some(block.next_state);
+        outcome.blocked_shot_event = Some(block.event);
+        self.apply_ball_flight_outcome(outcome, self.clock.current_time);
+        true
+    }
+
+    #[doc(hidden)]
+    pub fn resolve_shot_flight_for_test(&mut self) -> bool {
+        let BallTrajectoryKind::Shot {
+            shooter_id,
+            hoop_pos,
+            start_time,
+            duration,
+            is_three,
+            from_pos,
+            aim_pos,
+            make_probability,
+            contest_intensity,
+            collision_checked_until,
+            ..
+        } = self.ball.ball_state.clone()
+        else {
+            panic!("shot flight probe requires a Shot ball state");
+        };
+        let mut outcome = super::ball_flight::BallFlightOutcome::default();
+        self.resolve_shot_arm(
+            shooter_id,
+            hoop_pos,
+            start_time,
+            duration,
+            is_three,
+            from_pos,
+            aim_pos,
+            make_probability,
+            collision_checked_until,
+            contest_intensity,
+            super::ball_flight::FlightContext {
+                current_t: self.clock.current_time,
+                is_home: self.flow.possession == nba_domain::Possession::Home,
+                dt: self.config.rules.tick_seconds,
+            },
+            &mut outcome,
+        );
+        self.apply_ball_flight_outcome(outcome, self.clock.current_time);
+        !matches!(self.ball.ball_state, BallTrajectoryKind::Shot { .. })
     }
 
     #[doc(hidden)]

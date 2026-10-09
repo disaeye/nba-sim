@@ -29,6 +29,9 @@ fn receiver(pos: Vec2, vel: Vec2) -> PlayerPhysicsState {
         out_of_bounds_placement: false,
         is_receiving_pass: false,
         is_driving_to_rim: false,
+        left_foot_pos: pos,
+        right_foot_pos: pos,
+        swing_foot: nba_domain::Foot::Left,
         boundary_cross_latched: false,
         attributes: nba_domain::PlayerAttributes::default(),
         tendencies: nba_domain::PlayerTendencies::default(),
@@ -114,6 +117,115 @@ fn lead_time_tracks_distance_not_a_constant() {
 
 /// 自由球-人接触（ADR-017 第三步）：水平半径、摸高门、最近者与
 /// 确定性、板凳豁免。
+#[test]
+fn shot_sweep_detects_rim_contact_inside_a_tick_interval() {
+    let rules = GameRules::default();
+    let hoop = rules.court.hoop_pos(true);
+    let origin = hoop - Vec2::new(25.0, 0.0);
+    let state = BallTrajectoryKind::Shot {
+        shooter_id: "H_01".to_string(),
+        from_pos: origin,
+        hoop_pos: hoop,
+        aim_pos: hoop + Vec2::new(0.0, 0.9),
+        start_time: 1.0,
+        duration: 1.2,
+        collision_checked_until: 1.0,
+        is_three: true,
+        peak_z: 15.0,
+        make_probability: 0.5,
+        contest_intensity: 0.0,
+    };
+    let step = BallisticsEngine::shot_flight_step(&state, 2.15, 2.2, &rules);
+    let ShotFlightStep::Contact(contact) = step else {
+        panic!("sweep must detect rim contact before the interval endpoint: {step:?}");
+    };
+    assert_eq!(contact.surface, ShotContactSurface::Rim);
+    assert!((2.15..=2.2).contains(&contact.time));
+    assert!(
+        ((contact.contact_position.truncate() - hoop).length() - rules.rim_radius_ft).abs()
+            < 1.0e-3
+    );
+    assert!(contact.incoming_velocity.is_finite());
+}
+
+#[test]
+fn shot_sweep_detects_actual_backboard_contact() {
+    let rules = GameRules::default();
+    let hoop = rules.court.hoop_pos(true);
+    let origin = Vec2::new(70.0, hoop.y);
+    let state = BallTrajectoryKind::Shot {
+        shooter_id: "H_01".to_string(),
+        from_pos: origin,
+        hoop_pos: hoop,
+        aim_pos: hoop + Vec2::Y * 3.2,
+        start_time: 0.0,
+        duration: 0.9,
+        collision_checked_until: 0.0,
+        is_three: false,
+        peak_z: 15.0,
+        make_probability: 0.5,
+        contest_intensity: 0.0,
+    };
+    let step = BallisticsEngine::shot_flight_step(&state, 0.0, 1.2, &rules);
+    let ShotFlightStep::Contact(contact) = step else {
+        panic!("missed over the hoop must contact the backboard in the swept interval: {step:?}");
+    };
+    assert_eq!(contact.surface, ShotContactSurface::Backboard);
+    assert!(
+        (contact.contact_position.x
+            - (rules.court.width_ft - rules.backboard_offset_from_baseline_ft))
+            .abs()
+            < 1.0e-4
+    );
+    assert!(
+        (rules.backboard_bottom_height_ft..=rules.backboard_top_height_ft)
+            .contains(&contact.contact_position.z)
+    );
+    assert!(contact.incoming_velocity.is_finite());
+}
+
+#[test]
+fn shot_sweep_resolves_clean_make_at_the_hoop_plane() {
+    let rules = GameRules::default();
+    let hoop = rules.court.hoop_pos(true);
+    let state = BallTrajectoryKind::Shot {
+        shooter_id: "H_01".to_string(),
+        from_pos: hoop - Vec2::new(25.0, 0.0),
+        hoop_pos: hoop,
+        aim_pos: hoop,
+        start_time: 0.0,
+        duration: 1.2,
+        collision_checked_until: 0.0,
+        is_three: true,
+        peak_z: 15.0,
+        make_probability: 1.0,
+        contest_intensity: 0.0,
+    };
+    let step = BallisticsEngine::shot_flight_step(&state, 1.19, 1.21, &rules);
+    assert!(matches!(step, ShotFlightStep::Made { time, .. } if (time - 1.2).abs() < 1.0e-5));
+}
+
+#[test]
+fn shot_sweep_reports_no_contact_when_ball_clears_the_goal_structure() {
+    let rules = GameRules::default();
+    let hoop = rules.court.hoop_pos(true);
+    let state = BallTrajectoryKind::Shot {
+        shooter_id: "H_01".to_string(),
+        from_pos: hoop - Vec2::new(25.0, 0.0),
+        hoop_pos: hoop,
+        aim_pos: hoop + Vec2::Y * 7.0,
+        start_time: 0.0,
+        duration: 1.2,
+        collision_checked_until: 0.0,
+        is_three: true,
+        peak_z: 15.0,
+        make_probability: 0.1,
+        contest_intensity: 0.0,
+    };
+    let step = BallisticsEngine::shot_flight_step(&state, 1.19, 1.3, &rules);
+    assert!(matches!(step, ShotFlightStep::Miss { .. }));
+}
+
 #[test]
 fn free_ball_contact_respects_radius_reach_and_priority() {
     let rules = GameRules::default();

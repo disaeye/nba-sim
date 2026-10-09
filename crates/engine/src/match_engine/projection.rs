@@ -245,6 +245,7 @@ impl MatchEngine {
         let frame = RenderFrame {
             t: (self.clock.current_time * 100.0).round() / 100.0,
             t_game: (self.clock.game_clock * 10.0).round() / 10.0,
+            tick_index: self.clock.tick_index,
             shot_clock: (self.clock.shot_clock * 10.0).round() / 10.0,
             period: self.clock.period,
             phase: format!("{:?}", self.clock.sub_phase),
@@ -293,18 +294,19 @@ impl MatchEngine {
     }
 }
 
-/// 领域事实到协议事件的适配层。
-pub(crate) fn physics_fact_to_event(fact: nba_physics::PhysicsFact) -> GameEvent {
+/// 领域事实到协议事件的适配层。接地点事实由规则裁定路径消费，不经此函数。
+pub(crate) fn physics_fact_to_event(fact: nba_physics::PhysicsFact) -> Option<GameEvent> {
     match fact {
         nba_physics::PhysicsFact::BoundaryCross {
             entity_id,
             attempted_pos,
             boundary_name,
-        } => GameEvent::BoundaryCross {
+        } => Some(GameEvent::BoundaryCross {
             player_id: entity_id,
             pos: (attempted_pos.x, attempted_pos.y),
             boundary_name,
-        },
+        }),
+        nba_physics::PhysicsFact::FootContact { .. } => None,
     }
 }
 

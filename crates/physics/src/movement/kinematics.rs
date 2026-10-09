@@ -236,7 +236,28 @@ pub(super) fn make_motion_proposals(
             }
 
             // 将 APF 斥力加速度叠加进速度积分，再按纵向制动与横向抓地限制更新。
-            let apf_steered_vel = next_vel + apf_repulsion_accel * dt;
+            //
+            // ## 侧向偏转投影（发球回合实测缺陷修复）
+            //
+            // 斥力若原样叠加，其中与目标方向共线的逆向分量会直接对冲
+            // 速度幅值：贴防者以 min_separation 3.6ft 恒定贴住时，斥力
+            // 恒为 ~4.8 ft/s²，与 seek 的每帧修正量（total_limit =
+            // max_accel×dt ≈ 0.7 ft/s）形成稳态对抗，实测把落位跑动
+            // 压到 0.2~0.5 ft/s（seed42 Q1 11:04，SPOT_UP_3PT 目标在
+            // 75ft 外却全场钉死在后场）——「贴防」变成了「运动压制」。
+            //
+            // 真实行为是绕行：速度幅值不损失，方向避开障碍。因此把
+            // 斥力投影到目标方向的垂直平面后再叠加（切向逃逸），速度
+            // 幅值由 seek 保持，方向自然绕开。分离硬约束仍由
+            // resolve_motion_collisions 保证，不依赖斥力减速。
+            let apf_lateral = if next_vel.length_squared() > f32::EPSILON {
+                let dir = next_vel.normalize_or_zero();
+                let along = apf_repulsion_accel.dot(dir);
+                apf_repulsion_accel - dir * along
+            } else {
+                apf_repulsion_accel
+            };
+            let apf_steered_vel = next_vel + apf_lateral * dt;
             next_vel = traction_limited_velocity(
                 current_vel,
                 apf_steered_vel,
@@ -675,7 +696,66 @@ pub(super) fn apply_motion_proposals(
         // 下一 tick 的提案从合法速度出发（否则投影推挤会自我累积）。
         player.vel_ft = final_vel.clamp_length_max(proposal.max_speed_ftps);
         player.accel_ft = (final_vel - proposal.current_vel) / dt;
+        update_foot_placement(player, rules, pending_facts);
     }
+}
+
+/// 步态模型：双脚位置是运动状态的组成部分，而不是事后按位移插值。
+///
+/// 身体越过支撑脚落地点一个步幅时，摆动脚在身体前方落地并发射
+/// [`PhysicsFact::FootContact`]；步幅随速度伸展（走/跑的自然差异）。
+/// 静止、锁定（起跳/冻结期视为腾空）不产生新的接地事实。双脚远离
+/// 身体超过四个基准步幅时（显式放置、传送、注册后的首帧）静默把双脚
+/// 收回身体位置，不发射事实——放置位移属于空间契约，不属于步态周期；
+/// 摆动脚的旧落点在加速段可自然滞后约两个步幅，阈值必须高于它。
+fn update_foot_placement(
+    player: &mut PlayerPhysicsState,
+    rules: &GameRules,
+    pending_facts: &mut Vec<PhysicsFact>,
+) {
+    use nba_domain::Foot;
+
+    let base_stride = rules.gait_stride_length_ft;
+    assert!(
+        player.left_foot_pos.is_finite() && player.right_foot_pos.is_finite(),
+        "foot placement must remain finite"
+    );
+    if (player.pos_ft - player.left_foot_pos).length() > base_stride * 4.0
+        || (player.pos_ft - player.right_foot_pos).length() > base_stride * 4.0
+    {
+        player.left_foot_pos = player.pos_ft;
+        player.right_foot_pos = player.pos_ft;
+        return;
+    }
+    if player.is_locked_kinematics {
+        return;
+    }
+    let speed = player.vel_ft.length();
+    if speed <= 0.75 {
+        return;
+    }
+    let stride = base_stride * (0.75 + speed / (rules.max_player_speed_ftps * 1.5)).clamp(1.0, 2.0);
+    let stance_foot = player.swing_foot.opposite();
+    let stance_pos = match stance_foot {
+        Foot::Left => player.left_foot_pos,
+        Foot::Right => player.right_foot_pos,
+    };
+    if (player.pos_ft - stance_pos).length() < stride {
+        return;
+    }
+    let heading = player.vel_ft / speed;
+    let contact_pos = player.pos_ft + heading * (stride * 0.5);
+    let swing_foot = player.swing_foot;
+    match swing_foot {
+        Foot::Left => player.left_foot_pos = contact_pos,
+        Foot::Right => player.right_foot_pos = contact_pos,
+    }
+    player.swing_foot = stance_foot;
+    pending_facts.push(PhysicsFact::FootContact {
+        entity_id: player.id.clone(),
+        foot: swing_foot,
+        position: contact_pos,
+    });
 }
 fn traction_limited_velocity(
     current: Vec2,

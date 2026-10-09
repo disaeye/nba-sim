@@ -24,6 +24,18 @@ impl MatchEngine {
         move_kind: Option<nba_domain::action_window::DribbleMoveKind>,
         current_t: f32,
     ) {
+        // 收球后动作候选交由二次运球运行时约束处理。
+        if self
+            .clock
+            .dribble_control
+            .get(driver_id)
+            .is_some_and(|control| control.is_gathered())
+        {
+            self.clock.dribble_violation =
+                Some(nba_decision::constraint::ViolationKind::DoubleDribble);
+            self.clock.current_possession_turnover_player = Some(driver_id.to_string());
+            return;
+        }
         let Some(driver) = self.systems.physics.get_player(driver_id).cloned() else {
             return;
         };
@@ -104,6 +116,17 @@ impl MatchEngine {
             "BallHandler",
             &driver.morale,
         );
+        let dribble_control = self
+            .clock
+            .dribble_control
+            .entry(driver_id.to_string())
+            .or_default();
+        match dribble_control {
+            nba_domain::DribbleControlState::LiveDribble { dribbled, .. } => *dribbled = true,
+            nba_domain::DribbleControlState::Gathered { .. } => {
+                unreachable!("gathered ball handler cannot begin a Drive")
+            }
+        }
         self.transition_ball_state(BallTrajectoryKind::Drive {
             driver_id: driver_id.to_string(),
             from_pos,
@@ -122,6 +145,7 @@ impl MatchEngine {
             self.config.rules.tick_seconds,
         );
         self.transition_phase(SubPhase::ActionExecution);
+        self.observations.drive_initiated_counter += 1;
         self.journal.pending_events.push(GameEvent::DriveInitiated {
             driver_id: driver_id.to_string(),
             from_pos: (from_pos.x, from_pos.y),
@@ -299,6 +323,7 @@ impl MatchEngine {
             aim_pos,
             start_time: pending.release_time,
             duration: flight_time,
+            collision_checked_until: pending.release_time,
             is_three: pending.is_three,
             peak_z,
             make_probability: pending.make_probability,
@@ -402,6 +427,22 @@ impl MatchEngine {
         self.start_action_window(shooter_id, window, None, Some((hoop.x, hoop.y)));
         self.possession_ctx.current_possession_shooter = Some(shooter_id.to_string());
         self.possession_ctx.current_possession_contest = Some(openness.contest_intensity);
+        self.gather_dribble_control(shooter_id);
+        // 投篮起手即收步：持球人把移动目标改为原地，剩余动量按制动包线
+        // 衰减。收球后的接地脚步由步态事实裁定（收步超两步即走步）。
+        if let Some(shooter) = self.systems.physics.get_player(shooter_id) {
+            let stop_pos = shooter.pos_ft;
+            let slot = shooter.slot.clone();
+            let morale = shooter.morale.clone();
+            self.systems.physics.set_player_target(
+                shooter_id,
+                stop_pos,
+                0.0,
+                "StopToShoot",
+                &slot,
+                &morale,
+            );
+        }
         let source_event_id = match creation_source {
             nba_domain::ShotCreationSource::DrivePullUp => Some(
                 self.journal
@@ -470,6 +511,41 @@ impl MatchEngine {
             }
         }
         self.possession_ctx.current_possession_turnover_player = Some(shooter_id.to_string());
+    }
+
+    /// 收球：已运球的持球人为终结动作（投篮/传球）拿起球时，结束运球并
+    /// 确立轴心脚。轴心脚取当时的支撑脚（摆动脚的另一只），落点为该脚
+    /// 的当前步态位置。收球后的接地点由 [`Self::observe_gathered_foot_contact`]
+    /// 裁定；球离手（球态离开持球族）时该记录由写入口清除。
+    pub(crate) fn gather_dribble_control(&mut self, player_id: &str) {
+        let Some(nba_domain::DribbleControlState::LiveDribble { dribbled: true, .. }) =
+            self.clock.dribble_control.get(player_id).copied()
+        else {
+            return;
+        };
+        let Some(player) = self.systems.physics.get_player(player_id).cloned() else {
+            return;
+        };
+        let pivot_foot = player.swing_foot.opposite();
+        let pivot_position = match pivot_foot {
+            nba_domain::Foot::Left => player.left_foot_pos,
+            nba_domain::Foot::Right => player.right_foot_pos,
+        };
+        self.clock.dribble_control.insert(
+            player_id.to_string(),
+            nba_domain::DribbleControlState::Gathered {
+                pivot_foot: Some(pivot_foot),
+                pivot_position,
+                steps_after_gather: 0,
+            },
+        );
+        self.journal
+            .pending_events
+            .push(GameEvent::DribbleGathered {
+                player_id: player_id.to_string(),
+                position: (player.pos_ft.x, player.pos_ft.y),
+                pivot_foot: Some(pivot_foot),
+            });
     }
 
     pub(crate) fn apply_decision_output(&mut self, out: DecisionOutput, current_t: f32) {
@@ -546,6 +622,22 @@ impl MatchEngine {
                 target_pos,
                 ..
             } => {
+                // r47 推进移动语义：Advance 已激活时（同一持球人、球仍在
+                // 后场）校验既有目标仍在推进方向——是被槽位/接球跑位覆盖
+                // 成身后或原地时重设，否则保留（避免每周期重新加速的
+                // walk-stop-walk）。
+                let offense_home = self.flow.possession == Possession::Home;
+                if let Some(p) = self.systems.physics.get_player(&player_id) {
+                    let toward_midcourt = if offense_home {
+                        p.target_pos_ft.x >= p.pos_ft.x - 1.0
+                    } else {
+                        p.target_pos_ft.x <= p.pos_ft.x + 1.0
+                    };
+                    let not_self_target = (p.target_pos_ft - p.pos_ft).length() > f32::from(1u8);
+                    if toward_midcourt && not_self_target {
+                        return;
+                    }
+                }
                 let target = self
                     .config
                     .rules
@@ -841,6 +933,9 @@ impl MatchEngine {
         let from_pos = self.ball.ball_pos_3d.0;
         let from_z = self.ball.ball_pos_3d.1;
         let target_lead_pos = to_pos;
+        if !inbound {
+            self.gather_dribble_control(passer_id);
+        }
         self.start_action_window(
             passer_id,
             ActionTimeWindow::new_pass(passer_id, current_t, &self.config.rules),

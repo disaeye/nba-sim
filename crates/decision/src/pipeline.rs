@@ -80,6 +80,7 @@ fn action_family(action: &CandidateAction) -> DecisionActionFamily {
 }
 
 /// 决策系统：候选生成 → 约束管线 → 效用评分 → softmax 采样。
+#[derive(Clone)]
 pub struct DecisionSystem {
     pub registry: ConstraintRegistry,
     pub weights: DecisionWeights,
@@ -228,7 +229,9 @@ impl DecisionSystem {
                 Some(nba_domain::action_window::DribbleMoveKind::DirectDrive)
             };
             let is_putback_opportunity = ctx.putback_rebounder_id == Some(carrier_id);
-            if !is_putback_opportunity {
+            // Gathered 后不得生成新的运球突破动作。
+            let drive_blocked_by_gather = ctx.gathered && ctx.rules.travel_enforcement;
+            if !is_putback_opportunity && !drive_blocked_by_gather {
                 candidates.push(CandidateAction::Drive {
                     driver_id: carrier_id.to_string(),
                     from_pos: carrier_pos,
@@ -259,6 +262,38 @@ impl DecisionSystem {
                 is_three,
                 jumper_kind,
             });
+            // r44 退线三分：持球人在 20-23.75ft（长两分区）时，额外生成一个
+            // 后退到三分线外的三分候选（真实行为：运一步到线外投三分，长两分
+            // 是被淘汰的出手）。距离 = 三分线 + 0.5ft 缓冲。
+            if !is_three && (20.0..23.75).contains(&dist_to_hoop) {
+                let hoop = ctx.rules.court.hoop_pos(offense_team == "home");
+                let to_hoop = (carrier_pos - hoop).normalize_or_zero();
+                let stepback_pos = ctx.rules.court.clamp_playable(
+                    carrier_pos + to_hoop * (23.75 + 0.5 - dist_to_hoop),
+                    ctx.rules.player_radius_ft,
+                );
+                candidates.push(CandidateAction::Shoot {
+                    shooter_id: carrier_id.to_string(),
+                    from_pos: stepback_pos,
+                    is_three: true,
+                    jumper_kind: Some(nba_domain::action_window::JumperKind::StepBack),
+                });
+                // r47 进线中距离（退线三分对偶）：推进 pullup_midrange_step_ft
+                // 后急停跳投——份额由效用竞争决定而非候选缺失。
+                let step_ft = ctx.rules.decision.pullup_midrange_step_ft;
+                if step_ft > 0.0 {
+                    let pullup_pos = ctx.rules.court.clamp_playable(
+                        carrier_pos - to_hoop * step_ft,
+                        ctx.rules.player_radius_ft,
+                    );
+                    candidates.push(CandidateAction::Shoot {
+                        shooter_id: carrier_id.to_string(),
+                        from_pos: pullup_pos,
+                        is_three: false,
+                        jumper_kind: Some(nba_domain::action_window::JumperKind::PullUp),
+                    });
+                }
+            }
             let jab_dir = (hoop - carrier_pos).normalize_or_zero();
             if !is_putback_opportunity
                 && !carrier_back
@@ -310,10 +345,11 @@ impl DecisionSystem {
                 .filter(|p| p.on_court && p.team == offense_team && p.id != carrier_id)
                 .collect();
             ordered_teammates.sort_by(|left, right| left.id.cmp(&right.id));
+            // 前场板收球人同样生成 Pass 候选（r38：真实 NBA 前场板后约
+            // 19% 的回合选择传出去重新组织，JOINT-C04 二次出手率参照
+            // 0.81）。补篮效用高时效用比较仍会选 Shoot；传球候选的加入
+            // 让空位队友的重组织选项进入比较，二次出手率由效用决定。
             for p in ordered_teammates {
-                if is_putback_opportunity {
-                    break;
-                }
                 // 球的落点与飞行时长一起求解（不动点），不采用固定领传时长。
                 let to_pos = nba_physics::ballistics::BallisticsEngine::solve_pass_landing(
                     carrier_pos,
@@ -335,7 +371,11 @@ impl DecisionSystem {
         if in_backcourt {
             let advance_target =
                 Self::advance_target(ctx.rules, offense_team == "home", carrier_pos);
-            if advance_target.distance(carrier_pos) > ctx.rules.player_radius_ft {
+            // 收球后的前场推进不得通过持续移动绕过脚步裁定。
+            let advance_blocked_by_gather = ctx.gathered && ctx.rules.travel_enforcement;
+            if advance_target.distance(carrier_pos) > ctx.rules.player_radius_ft
+                && !advance_blocked_by_gather
+            {
                 candidates.push(CandidateAction::Advance {
                     player_id: carrier_id.to_string(),
                     from_pos: carrier_pos,
@@ -640,8 +680,16 @@ impl DecisionSystem {
                 ..
             } => {
                 let openness = ctx.physics.openness(shooter_id);
+                // r47 位置语义一致化：distance_factor 用候选出手点
+                // from_pos（pull-up/stepback 按真实出手距离计价）。
+                let candidate_dist = match &s.action {
+                    CandidateAction::Shoot { from_pos, .. } => (*from_pos
+                        - ctx.rules.court.hoop_pos(ctx.possession_team == "home"))
+                    .length(),
+                    _ => dist_to_hoop,
+                };
                 let distance_factor = 1.0
-                    - (dist_to_hoop / ctx.rules.shot_distance_reference_ft.max(1.0))
+                    - (candidate_dist / ctx.rules.shot_distance_reference_ft.max(1.0))
                         .clamp(0.0, 1.0);
                 let shot_zone = ctx.rules.court.shot_zone(
                     match &s.action {
@@ -656,7 +704,19 @@ impl DecisionSystem {
                     ctx.rules.league.three_point_distance_ft,
                     ctx.rules.league.corner_three_distance_ft,
                 );
-                let open_bonus = openness.contest_free_score() * self.weights.shot_openness_weight;
+                // r47：近框区 contest 天然高，解除效用层双重惩罚
+                //（乘 shot_openness_interior_scale）。
+                let interior = matches!(
+                    shot_zone,
+                    nba_domain::ShotZone::Rim | nba_domain::ShotZone::Near
+                );
+                let open_scale = if interior {
+                    ctx.rules.decision.shot_openness_interior_scale
+                } else {
+                    f32::from(1u8)
+                };
+                let open_bonus =
+                    openness.contest_free_score() * self.weights.shot_openness_weight * open_scale;
                 let shooting_skill = attributes
                     .map(|a| {
                         // 统一出手分区（attributes.md §2.3a）：效用选技与
@@ -693,18 +753,44 @@ impl DecisionSystem {
                 // 使高 finishing 内线更倾向直接补篮而非运出重新组织。
                 // 规则字段 `rebound.putback_distance_discount`
                 // 同时把有效距离折扣用于距离因子，保持同一语义通道。
+                // r49 补篮情境开度门：加成随空位衰减（贴防下让位给
+                // 重新组织；0=禁用）。
                 let putback_bonus = if ctx.possession_had_shot
                     && ctx.putback_rebounder_id == Some(shooter_id.as_str())
                     && dist_to_hoop < nba_domain::court::RIM_ZONE_MAX_DIST_FT
                 {
+                    let gate = ctx.rules.resolve.rebound.putback_openness_gate;
+                    let open_scale =
+                        f32::from(1u8) - (f32::from(1u8) - openness.contest_free_score()) * gate;
                     attributes
                         .map(|a| {
                             nba_domain::effective_putback_bias(ctx.rules, a)
                                 * ctx.rules.resolve.rebound.putback_distance_discount
+                                * open_scale
                         })
                         .unwrap_or(0.0)
                 } else {
                     0.0
+                };
+                // r44 期望分差只给退线三分（长两分区退出的候选），
+                // 不全面提额挤占篮下。
+                let stepback_ep_bonus = match &s.action {
+                    CandidateAction::Shoot {
+                        from_pos,
+                        is_three: true,
+                        ..
+                    } => {
+                        let hoop = ctx.rules.court.hoop_pos(ctx.possession_team == "home");
+                        let d = ((*from_pos - hoop).length()
+                            - ctx.rules.league.three_point_distance_ft)
+                            .abs();
+                        if d <= 1.0 {
+                            ctx.rules.decision.stepback_three_expected_points_bonus
+                        } else {
+                            0.0
+                        }
+                    }
+                    _ => 0.0,
                 };
                 let range_bias = if *is_three {
                     centered(style.three_point_emphasis) * coach.three_point_bias
@@ -718,13 +804,9 @@ impl DecisionSystem {
                 } else {
                     1.0
                 };
-                // 第一性原理：早出手有**机会成本**——放弃一次可能更好的
-                // 后续出手。此前效用只随 shot clock 递减（紧迫加成），没有
-                // 「时间价值」项，导致 46% 出手发生在 8 秒内（真实约 15%），
-                // 进而使每回合传球仅 1.3 次（真实 ~3.5）。
-                //
-                // 用 `shot_clock_urgency_seconds` 作为「进入紧迫期」的分界：
-                // 在此之前出手按剩余时间打折；进入紧迫期后折扣消失。
+                // 早出手有机会成本（放弃更好的后续出手）：无时间价值项时
+                // 46% 出手在 8 秒内（真实 ~15%）。紧迫期分界前按剩余时间
+                // 打折，进入紧迫期后折扣消失。
                 let zero = f32::from(0u8);
                 let one = f32::from(1u8);
                 let clock_remaining = ctx.shot_clock.max(zero);
@@ -754,18 +836,34 @@ impl DecisionSystem {
                 } else {
                     zero
                 };
-                let midrange_bonus = if shot_zone == nba_domain::ShotZone::Mid {
+                // r47：midrange_utility_bonus 语义收窄为长两分惩罚
+                //（20-23.75ft），17-20ft 真中距离不再连坐（按候选点分档）。
+                let long_two_penalty = if shot_zone == nba_domain::ShotZone::Mid
+                    && (20.0..23.75).contains(&candidate_dist)
+                {
                     ctx.rules.decision.midrange_utility_bonus
                 } else {
                     f32::from(0u8)
                 };
+                // r47 期望分项：四区期望地形（规则通道）与距离/空位
+                // 效用混合；skill/openness 调制保留在乘性项。
+                let zone_ep = match shot_zone {
+                    nba_domain::ShotZone::Rim => ctx.rules.decision.shot_ep_rim,
+                    nba_domain::ShotZone::Near => ctx.rules.decision.shot_ep_near,
+                    nba_domain::ShotZone::Mid => ctx.rules.decision.shot_ep_mid,
+                    nba_domain::ShotZone::Three => ctx.rules.decision.shot_ep_three,
+                };
+                let expected_points_term = ctx.rules.decision.shot_expected_points_weight
+                    * (zone_ep - ctx.rules.decision.shot_ep_anchor);
                 self.weights.shoot_base
                     * three_mult
                     * (0.45 + distance_factor * self.weights.shot_distance_slope + open_bonus)
                     * (1.0 + (shooting_skill - 0.5) * self.weights.tendency_weight)
                     + (shoot_preference - 0.5) * self.weights.tendency_weight
-                    + midrange_bonus
+                    + long_two_penalty
                     + range_bias * self.weights.team_style_weight
+                    + stepback_ep_bonus
+                    + expected_points_term
                     + putback_bonus
                     + transition_shoot_bonus
                     - early_shot_cost
@@ -800,6 +898,16 @@ impl DecisionSystem {
                         f32::from(0u8)
                     }
                 };
+                // 造罚球期望（v91）：突破的收益不止 2 分出手——顶开
+                // 协防冲击篮筐会带来犯规（被犯即 2 罚，期望 ~1.5 PPP
+                // 且不占出手）。效用按「目标越接近篮筐 × 终结能力」
+                // 给出加成，弧顶出发的远距离突破不加成（离筐远时
+                // 造犯需要完整冲到篮下，概率随距离衰减）。
+                let foul_draw_bonus = self.weights.drive_foul_draw_weight
+                    * (1.0
+                        - (dist_to_hoop / ctx.rules.shot_distance_reference_ft.max(1.0))
+                            .clamp(f32::from(0u8), f32::from(1u8)))
+                    * finishing_skill.clamp(f32::from(0u8), f32::from(1u8));
                 self.weights.drive_base
                     * coach.pace_factor
                     * (0.35 + (1.0 - dist_to_hoop / ctx.rules.court.width_ft.max(1.0)) * 0.45)
@@ -809,6 +917,7 @@ impl DecisionSystem {
                     + centered(style.rim_pressure) * self.weights.team_style_weight
                     + drive_distance.min(ctx.rules.court.width_ft) * 0.001
                     + transition_finish
+                    + foul_draw_bonus
                     - (1.0 - openness.contest_free_score()) * self.weights.team_style_weight * 0.5
             }
             CandidateAction::Pass {
@@ -826,29 +935,18 @@ impl DecisionSystem {
                 let openness = ctx.physics.openness(receiver_id);
                 let passing_skill = attributes.map(|a| a.passing).unwrap_or(0.5);
                 let pass_preference = tendency.map(|t| t.pass_frequency).unwrap_or(0.5);
-                // ## 距离衰减（round-15 接线，此前声明但从未消费）
-                //
-                // 实测（6 场）：传球距离中位 28.3 ft、48% 超过 30 ft，
-                // 而拦截率随距离单调上升（0-12ft 4.2% → 40ft+ 21.5%），
-                // 短传失败率（6.4%）已与真实(~5%)一致。根因是效用只有
-                // 「接球人空不空」一个空间项——最空的人往往最远，于是传球
-                // 人系统性选择长传。三项参数（free/参考/上限）正是为此
-                // 声明的规则通道，本次接线：
-                //   factor = 1 − clamp((d − free)/(ref − free), 0, 1) × max_decay
-                // 走廊风险**不**在这里重复计入——它已由约束层的
-                // PASS_LANE_CONTESTED/NARROW 通道惩罚（单一事实源，charter C1）。
+                // 距离衰减（round-15 接线）：拦截率随距离单调上升
+                //（0-12ft 4.2% → 40ft+ 21.5%），效用只有空位一个空间项
+                // 导致系统性长传。factor = 1 − 归一化超出 × max_decay；
+                // 走廊风险已由约束层通道惩罚，不在此重复计入。
                 let pass_distance = (*to_pos - *from_pos).length();
                 let free = ctx.rules.decision.pass_distance_free_ft;
                 let reference =
                     (ctx.rules.decision.pass_distance_decay_reference_ft - free).max(f32::EPSILON);
                 let over = ((pass_distance - free) / reference).clamp(0.0, 1.0);
-                // ## 发球传球的义务性压力（round-16）
-                //
-                // 发球传球受 5 秒规则约束：不发的后果是 FIVE_SECOND 失误。
-                // 此前用「豁免距离衰减」修复 5 秒违例（0→22 次/场的回归），
-                // 但那丢失了接球人的距离优选（发球后失败率回升）。
-                // 正确的做法：保留距离衰减（优选接球人），把「必须出球」的
-                // 压力加在替代动作（Dwell/Jab）上——见下方的 inbound_pressure。
+                // 发球传球义务性压力（round-16）：5 秒规则使不发成为
+                // 失误。保留距离衰减（优选接球人），把压力加在替代动作
+                //（Dwell/Jab）上——见 inbound_pressure。
                 let distance_factor = 1.0 - over * ctx.rules.decision.pass_distance_max_decay;
                 // G6a 链 1 的最后一环：接球人处于篮下（BackdoorCut/DipToRim
                 // 切入后的落点）时，传球就是一次攻框机会（接球后直接终结）。
@@ -867,7 +965,17 @@ impl DecisionSystem {
                         f32::from(0u8)
                     }
                 };
+                // r43：前场板收球人的传球选项获得独立效用系数——补篮效用
+                // 高（rim_pressure + putback_bonus）压倒了传球，二次出手率
+                // 0.91 vs 真实 0.81；传出去重新组织需要有效用存在感。
+                let putback_pass_factor =
+                    if ctx.possession_had_shot && ctx.putback_rebounder_id == ctx.ball_holder_id {
+                        ctx.rules.resolve.rebound.putback_pass_out_factor
+                    } else {
+                        1.0
+                    };
                 self.weights.pass_base
+                    * putback_pass_factor
                     * (0.5 + openness.contest_free_score())
                     * distance_factor
                     * (1.0 + (passing_skill - 0.5) * self.weights.tendency_weight)
@@ -883,13 +991,8 @@ impl DecisionSystem {
                 let decay = 1.0
                     - (time_used / ctx.rules.league.shot_clock_seconds.max(1.0))
                         .clamp(0.0, self.weights.dwell_decay_max);
-                // ## 发球 5 秒压力（round-16）
-                //
-                // 发球阶段「继续持球」是非法选项的邻近地带：5 秒规则使
-                // 不发球成为失误。压力随发球已用时间线性上升（0s 可自由
-                // 观察，近 5s 必须出球），使持球观察的效用让位于发球传球
-                // ——即使接球人较远（距离衰减后的效用仍高于受压的 Dwell）。
-                // 修复前：豁免发球距离衰减 → 5 秒违例归零但长发球失败回升。
+                // 发球 5 秒压力（round-16）：压力随发球已用时间线性上升
+                //（0s 自由观察，近 5s 必须出球），使 Dwell 让位于发球传球。
                 let inbound_pressure = if ctx.rules.inbound_seconds > f32::EPSILON {
                     1.0 - (ctx.inbound_elapsed / ctx.rules.inbound_seconds).clamp(0.0, 1.0)
                 } else {
@@ -912,16 +1015,9 @@ impl DecisionSystem {
                 let finishing_skill = attributes
                     .map(|a| a.finishing)
                     .unwrap_or(ctx.rules.capability.neutral_attribute);
-                // ## 低位背身是独立的动作族（D27）
-                //
-                // 本式原先与 `Drive` 共用 `drive_base`，且距离因子用 `dist/15`
-                // （而 `PostUp` 只在距篮 18 ft 内生成），因此它在距篮 8 ft 处
-                // 只得 ≈0.20，而 Drive 得 ≈0.65：`PostUp` 进入候选 15 次、
-                // 被选中 0 次（seed 42、20000 tick 实测）。
-                //
-                // 低位背身看的是**对位强弱**，不是道路空旷：
-                // 用背身者的 `strength` 与对位防守人的物理性对抗得到错位优势，
-                // 这是它与 Drive 的结构差异。防守人属性不可知时取中性值。
+                // 低位背身是独立动作族（D27）：看对位强弱而非道路空旷，
+                // 用 strength 对抗得错位优势（与 Drive 共用 drive_base 时
+                // 15 次候选 0 次被选中，seed42 实测）。
                 let defender_resistance = ctx
                     .physics
                     .openness(s.action.actor_id())
@@ -984,12 +1080,12 @@ impl DecisionSystem {
         } else {
             (midcourt - overshoot).max(0.0)
         };
+        // r47 推进走廊：y 向中央收拢（边线推进被两面夹死，均速 2.5 ft/s）。
+        let lane_center_min = rules.court.height_ft * 0.24;
+        let lane_center_max = rules.court.height_ft * 0.76;
         Vec2::new(
             target_x,
-            carrier_pos.y.clamp(
-                rules.player_radius_ft,
-                rules.court.height_ft - rules.player_radius_ft,
-            ),
+            carrier_pos.y.clamp(lane_center_min, lane_center_max),
         )
     }
 
@@ -1057,16 +1153,31 @@ impl DecisionSystem {
                 }
             }
 
-            // ## 冲框价值折扣（round-18）
-            //
-            // 拥堵是成本，但冲框有更高的期望收益（篮下 ~1.3 PPP vs 中距
-            // ~0.8）。原实现只比成本，篮筐（防守最密处）几乎永不入选——
-            // 实测 88% 突破停在离筐 14-18 ft，篮下出手仅 3%（真实 25-50%）。
-            // 按持球人终结能力给冲框走廊折扣：终结强者应顶着防守攻框。
+            // 冲框价值折扣（round-18/v91 量纲修正）：拥堵是成本但篮下期望
+            // 更高（~1.3 PPP）。旧折扣是线性因子（≈0.6），对走廊拥堵
+            // 累计 2~3 形同虚设（篮下出手仅 3%）。量纲对齐为「贴身协防
+            // 计数制」——远处协防的轮转时间差正是突破的收益窗口。
             let is_rim_attack =
                 (clamped_target - hoop).length() <= rules.tactics.drive_early_finish_dist_ft;
             let effective = if is_rim_attack {
-                (congestion
+                let lane_width =
+                    rules.tactics.drive_lane_offset_ft + rules.min_player_separation_ft;
+                let rim_congestion = players
+                    .values()
+                    .filter(|p| {
+                        if !p.on_court || p.team == offense_team {
+                            return false;
+                        }
+                        let to_p = p.pos_ft - carrier_pos;
+                        let proj = to_p.dot(seg_norm);
+                        if proj <= 0.0 || proj >= seg_len {
+                            return false;
+                        }
+                        let perp_dist = (to_p - seg_norm * proj).length();
+                        perp_dist < lane_width
+                    })
+                    .count() as f32;
+                (rim_congestion
                     - rules.tactics.drive_rim_attack_bias * driver_finishing.clamp(0.0, 1.0))
                 .max(0.0)
             } else {

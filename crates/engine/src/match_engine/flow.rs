@@ -39,6 +39,16 @@ impl MatchEngine {
             Possession::Home => "home",
             Possession::Away => "away",
         };
+        // 运球控制状态由持球人生命周期与动作执行记录。
+        let (gathered, dribbled) = self
+            .ball
+            .holder_id()
+            .and_then(|carrier_id| self.clock.dribble_control.get(carrier_id).copied())
+            .map(|control| match control {
+                nba_domain::DribbleControlState::LiveDribble { dribbled, .. } => (false, dribbled),
+                nba_domain::DribbleControlState::Gathered { .. } => (true, true),
+            })
+            .unwrap_or((false, false));
         ConstraintContext {
             physics: &self.systems.physics,
             ball_pos: self.ball.ball_pos_3d.0,
@@ -65,6 +75,9 @@ impl MatchEngine {
             possession_elapsed_seconds: (self.clock.current_time
                 - self.possession_ctx.current_possession_start_time)
                 .max(f32::from(0u8)),
+            gathered,
+            dribbled,
+            dribble_violation: self.clock.dribble_violation,
             lane_dwell_seconds: self
                 .clock
                 .lane_dwell
@@ -193,6 +206,87 @@ impl MatchEngine {
     }
 
     /// Re-evaluate coach strategy at every possession boundary.
+    /// r46 教练暂停评估：落后方达到触发分差且节剩时进入阈值窗口、
+    /// 该队还有暂停余额时叫暂停。只在死球窗口调用（回合终结后）。
+    /// 返回 Some(叫暂停方) 时由调用方执行暂停程序。
+    pub(crate) fn evaluate_timeout(&mut self) -> Option<Possession> {
+        let policy = self.config.rules.modulation.clone();
+        let (home_score, away_score) = (self.ledger.home_score, self.ledger.away_score);
+        let (diff, trailing) = if home_score > away_score {
+            ((home_score - away_score) as i32, Possession::Away)
+        } else if away_score > home_score {
+            ((away_score - home_score) as i32, Possession::Home)
+        } else {
+            return None;
+        };
+        if diff < policy.timeout_trailing_margin {
+            return None;
+        }
+        if self.clock.game_clock > policy.timeout_clock_seconds {
+            return None;
+        }
+        let idx = match trailing {
+            Possession::Home => 0,
+            Possession::Away => 1,
+        };
+        if self.clock.timeouts_used[idx] >= policy.timeouts_per_team {
+            return None;
+        }
+        self.clock.timeouts_used[idx] += 1;
+        Some(trailing)
+    }
+
+    /// 回合开始原因的统一推导：显式覆盖（罚球命中发球）优先，否则由
+    /// 上一回合终结原因映射。start_inbound_transition 与暂停恢复共用，
+    /// 保证两条路径的事实语义一致。
+    pub(crate) fn resolve_inbound_origin(&mut self) -> Option<nba_domain::TransitionOrigin> {
+        self.flow
+            .pending_inbound_origin
+            .take()
+            .or(match self.flow.last_possession_terminal {
+                Some(nba_domain::PossessionEndCause::Score) => {
+                    Some(nba_domain::TransitionOrigin::MadeFieldGoal)
+                }
+                Some(nba_domain::PossessionEndCause::TurnoverViolation)
+                | Some(nba_domain::PossessionEndCause::TurnoverOffensiveFoul) => {
+                    Some(nba_domain::TransitionOrigin::Violation)
+                }
+                Some(
+                    nba_domain::PossessionEndCause::TurnoverSteal
+                    | nba_domain::PossessionEndCause::TurnoverPassTipped
+                    | nba_domain::PossessionEndCause::TurnoverPassDropped
+                    | nba_domain::PossessionEndCause::TurnoverLooseBall,
+                ) => Some(nba_domain::TransitionOrigin::OutOfBounds),
+                _ => None,
+            })
+    }
+
+    /// 执行暂停程序：切 Timeout 状态停表、发 TIMEOUT 事实、记录暂停后
+    /// 恢复时按挂起的回合终结原因发 TRANSITION_STARTED（暂停不改变
+    /// 球权来源）。
+    pub(crate) fn execute_timeout(&mut self, team: Possession) {
+        let team_str = match team {
+            Possession::Home => "home",
+            Possession::Away => "away",
+        };
+        self.journal.pending_events.push(GameEvent::TeamTimeout {
+            team: team_str.to_string(),
+            home_timeouts_remaining: self.clock.timeouts_used[0],
+            away_timeouts_remaining: self.clock.timeouts_used[1],
+        });
+        // origin 不在此设置：挂起的显式覆盖与 last_possession_terminal
+        // 原样保留，恢复帧由 resolve_inbound_origin 统一推导（暂停不改变
+        // 球权来源；推导为 None 才兜底 Timeout）。
+        // 冻结解除：ControlTransfer 飞行中的接球人被运动学冻结等待到球；
+        // 暂停会打断该等待（恢复走发球程序重建球态），若不显式解冻，
+        // 接球人永久卡在 target=自身/速度 0（实测 8 秒违例 10 次/场、
+        // ADV-KEEP speed=0.00 124 次/场）。暂停是全场停表，恢复后无人
+        // 应保留冻结标志。
+        self.systems.physics.unlock_all_players();
+        self.set_game_flow(GameFlowState::Timeout);
+        self.transition_phase(SubPhase::DeadBallReset);
+    }
+
     pub(crate) fn update_coach_strategy(&mut self) {
         let score_diff = self.ledger.home_score as i32 - self.ledger.away_score as i32;
         self.systems.coach = CoachStrategy::evaluate(
@@ -326,6 +420,12 @@ impl MatchEngine {
             self.ledger.box_score.turnovers += 1;
         }
         self.possession_ctx.last_possession_summary_index = Some(summary.possession_index);
+        // 回合终结原因入档：下一回合的 TransitionStarted.origin 依据
+        // （回合开始原因事实的唯一依据，Q01 转移矩阵的引擎侧事实源）。
+        self.flow.last_possession_terminal = Some(terminal_event);
+        self.clock.dribble_control.clear();
+        self.clock.dribble_violation = None;
+        self.clock.current_possession_turnover_player = None;
         self.journal
             .pending_events
             .push(nba_domain::GameEvent::PossessionSummary(summary));

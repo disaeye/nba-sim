@@ -112,6 +112,14 @@ pub(super) fn eval_over_and_back_world(ctx: &ConstraintContext) -> ConstraintRes
     }
 }
 
+pub(super) fn eval_dribble_control_world(ctx: &ConstraintContext) -> ConstraintResult {
+    if let Some(kind) = ctx.dribble_violation {
+        ConstraintResult::violate(kind.as_str())
+    } else {
+        ConstraintResult::pass()
+    }
+}
+
 pub(super) fn eval_game_clock_world(ctx: &ConstraintContext) -> ConstraintResult {
     if ctx.game_clock <= 0.0 && !ctx.is_ball_in_flight() && ctx.is_live_ball() {
         ConstraintResult::violate("GAME_CLOCK_EXPIRED")

@@ -72,21 +72,10 @@ impl MatchEngine {
         let contact =
             self.resolve_pass_contact(&receiver_id, ctx.is_home, ctx.dt, horizontal_speed_ftps);
         let passer_id = self.ball.last_passer_id.clone().unwrap_or_default();
-        // Fix（round-15 第一性原理）：接球是「首次触球」事件，不是
-        // 「飞行终点」事件。
-        //
-        // 旧实现只在 tau≥1 时裁决。实测（22 例层 A 失败）：接球人的
-        // 估计模型以自身为参照系（`initial = ball + dir×|ball−我|`），
-        // 他朝来球走 → 距离收缩 → 估计点随之后退（追赶曲线）→
-        // 接球人不断走向传球人一侧，球却在冻结终点触地。最终
-        // 估计误差 p50=3.37 ft、接球人正确到达自己的估计（距估计
-        // 1.34 ft）、球距 3.64 ft —— 「朝来球移动」这一正确篮球行为
-        // 反而必然导致终点 miss。
-        //
-        // 真实篮球里接球发生在第一次触球。这里把到达裁决的触发条件
-        // 从「飞行结束」放宽为「飞行结束 **或** 接球人已进入接球半径」；
-        // 裁决逻辑本身（层 A 距离 + 层 B 概率 + 状态转移）完全复用，
-        // 不新增路径。
+        // Fix（round-15）：接球是「首次触球」事件。旧实现只在 tau≥1
+        // 裁决——接球人估计点随自身移动后退（追赶曲线），「朝来球
+        // 移动」的正确行为反而必然导致终点 miss（22 例层 A 失败）。
+        // 触发条件放宽为「飞行结束或已进入接球半径」，裁决逻辑复用。
         //
         // 接触优先于接球：防守者先碰到球，球就到不了接球人手里。
         let receiver_touch = self
@@ -196,22 +185,10 @@ impl MatchEngine {
                 );
             let receiver_ready = catch_secure;
             if receiver_ready {
-                // 接球事实的位置必须是**冻结的传球终点**，而不是接球人
-                // 当时的身体位置。
-                // round-6：`PassReceived.position` 应携带**球的实际到达位置**，
-                // 而不是冻结点 `to_pos`。
-                //
-                // round-10（层 A）更正：层 A 判定改用「球与接球人的**实际**
-                // 距离 ≤ catch_radius」后，接球成功时球可能距冻结点数英尺
-                // （因为接球人按自己的估计跑位）。若仍把球瞬移到 `to_pos`，
-                // 会产生两个错误：
-                //   (a) 球的飞行终点被暴改为一个它从未到达的位置（伪造事实）；
-                //   (b) `Held` 要求 `BALL_WITH_HOLDER` ≤ leash，而接球人可能
-                //       距 `to_pos` 超过 leash —— 实测 seed 5 tick 14338
-                //       报 `BALL_WITH_HOLDER: ball 3.07 ft from holder`。
-                //
-                // 正确做法：接球成功时把球**收到接球人身上**（持球锚点），
-                // 位置即接球人当前位置——这才是物理事实，也天然满足 leash。
+                // 接球事实的位置是球的实际到达位置（round-6/round-10）：
+                // 层 A 按实际距离判定后球可能距冻结点数英尺，瞬移到
+                // to_pos 会伪造飞行终点并触发 BALL_WITH_HOLDER 越 leash
+                //（seed 5 tick 14338）。收到接球人身上（持球锚点）。
                 let catch_spot = self.ball.ball_pos_3d.0;
                 let catch_height = self.ball.ball_pos_3d.1;
                 assert!(
@@ -524,7 +501,16 @@ impl MatchEngine {
         };
         let mut next_vel_z = vel_z - self.config.rules.ball_gravity_ftps2 * ctx.dt;
         let mut next_z = z + next_vel_z * ctx.dt;
-        let mut next_vel = vel * self.config.rules.ball_velocity_retention;
+        // 滚动摩擦：恒定减速度沿当前速度方向衰减（物理上木地板对
+        // 滚动球近似恒定摩擦力；逐 tick 指数衰减是空气阻力模型，
+        // 会让球 0.3s 内减速到爬行，争抢窗口消失）。
+        let speed = vel.length();
+        let mut next_vel = if speed > f32::EPSILON {
+            let decel = self.config.rules.loose_ball_rolling_decel_ftps2 * ctx.dt;
+            (vel / speed) * (speed - decel).max(0.0)
+        } else {
+            vel
+        };
         if next_z <= 0.0 {
             // 地面碰撞反弹：反弹恢复系数 e = 0.70，地面摩擦衰减
             next_z = 0.0;
@@ -534,15 +520,36 @@ impl MatchEngine {
         let reach = self.config.rules.player_radius_ft + self.config.rules.defender_reach_ft;
         let home_jumper = self.select_jumper_id(Possession::Home);
         let away_jumper = self.select_jumper_id(Possession::Away);
-        let mut candidates =
-            self.systems
-                .physics
-                .query_nearby(pos, reach, &nba_physics::EntityFilter::Any);
+        let mut candidates: Vec<(String, f32)> = self
+            .systems
+            .physics
+            .query_nearby(pos, reach, &nba_physics::EntityFilter::Any)
+            .into_iter()
+            .map(|id| {
+                let dist = self
+                    .systems
+                    .physics
+                    .get_player(&id)
+                    .map(|p| (p.pos_ft - pos).length())
+                    .unwrap_or(f32::INFINITY);
+                (id, dist)
+            })
+            .collect();
         // 真实规则：跳球员在球触地或被其他人触及前，严禁直接控球
         if z > 0.5 {
-            candidates.retain(|id| *id != home_jumper && *id != away_jumper);
+            candidates.retain(|(id, _)| *id != home_jumper && *id != away_jumper);
         }
-        candidates.sort();
+        // 收球竞争按真实距离排序（id 仅作同距的确定性 tie-break，
+        // charter C4）。旧行为按 id 字符串排序取第一个：抢断落球后
+        // 场上 id 最小的球员直接收走球——观感「自动送球到对方手上」，
+        // 且原持球人因 id 序靠前能在球弹回脚边时立即重收，抹掉
+        // 争抢窗口。
+        candidates.sort_by(|left, right| {
+            left.1
+                .partial_cmp(&right.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.0.cmp(&right.0))
+        });
         // 球-人身体接触（ADR-017 第三步）：本 tick 预检已命中时，
         // 弹开优先于捡起——球被弹开而不是被收下，弹开后的
         // 松球态已在函数顶部写入 `new_ball_state`，此处跳过
@@ -572,9 +579,15 @@ impl MatchEngine {
         let secure_candidate = if bounce_active || !controllable {
             None
         } else if rebound_sourced {
-            self.resolve_contested_floor_rebound(&candidates, next_pos)
+            self.resolve_contested_floor_rebound(
+                &candidates
+                    .iter()
+                    .map(|(id, _)| id.clone())
+                    .collect::<Vec<_>>(),
+                next_pos,
+            )
         } else {
-            candidates.into_iter().next()
+            candidates.into_iter().next().map(|(id, _)| id)
         };
         if bounce_active {
             // 弹开路径：不再覆盖 new_ball_state。
@@ -665,6 +678,16 @@ impl MatchEngine {
         // 1. 中途分流决策（Drive Branching: 突分 Kickout 或急停中投 Pull-up）
         let elapsed = ctx.current_t - start_time;
         let mut branched = false;
+        // 出手冻结期间不得分支：该突破者已有一条挂起的投篮释放
+        // （execute_shot 冻结的裁定）， Drive 球态保持到 release 才转
+        // Shot。分支若在此期间再触发 execute_shot，会撞上 pending
+        // 非空的 fast-fail（实测 seed100 全量赛 tick ~35994：
+        // pending 挂起 + Drive 臂 pullup 分支二次出手）。
+        let frozen_by_pending = self
+            .observations
+            .pending_shot_release
+            .as_ref()
+            .is_some_and(|pending| pending.shooter_id == driver_id);
         if elapsed
             >= self
                 .config
@@ -672,17 +695,24 @@ impl MatchEngine {
                 .tactics
                 .drive_decision_check_interval_seconds
             && tau < 0.85
+            && !frozen_by_pending
         {
-            let paint_crowding = SemanticEvaluator::spacing(
+            let spacing = SemanticEvaluator::spacing(
                 self.flow.possession,
                 driver_pos,
                 &self.systems.physics,
                 &self.config.rules,
-            )
-            .paint_crowding;
+            );
+            // 触发度量：突破路线是否被防守封堵（lane_openness 低）。
+            // 旧条件 paint_crowding（以篮筐为圆心的**进攻方**队友密度）
+            // 语义错位——五外战术全员在外线，禁区内没有队友，crowding
+            // 恒低，kickout 在最需要它的战术里永不触发；kickout 的决策
+            // 理由是「突破路线被协防封死、外线有空位」，度量对象是
+            // 持球人周围的防守密度。
+            let lane_blocked = 1.0 - spacing.lane_openness;
 
-            // 当内线极度拥挤且持球人在中远距离时，评估突分（Kickout）给外线空位队友
-            if paint_crowding > self.config.rules.tactics.drive_kickout_max_crowding {
+            // 突破路线被封且持球人在中远距离时，评估突分（Kickout）给外线空位队友
+            if lane_blocked > self.config.rules.tactics.drive_kickout_max_crowding {
                 let mut best_kickout: Option<(String, Vec2)> = None;
                 let mut min_opp_dist = self.config.rules.tactics.drive_kickout_min_defender_dist_ft;
 
@@ -746,7 +776,7 @@ impl MatchEngine {
                         ctx.current_t,
                     ));
                     branched = true;
-                } else if paint_crowding > self.config.rules.tactics.drive_pullup_min_crowding
+                } else if lane_blocked > self.config.rules.tactics.drive_pullup_min_crowding
                     && dist_to_hoop > self.config.rules.tactics.drive_early_finish_dist_ft
                     && dist_to_hoop <= self.config.rules.tactics.drive_mid_range_pullup_dist_ft
                 {
@@ -1019,6 +1049,7 @@ impl MatchEngine {
                         aim_pos,
                         start_time: ctx.current_t,
                         duration: shot_dur,
+                        collision_checked_until: ctx.current_t,
                         is_three: finish_zone == nba_domain::ShotZone::Three,
                         peak_z: if finish_kind == nba_domain::action_window::RimFinishKind::Dunk {
                             self.config.rules.rim_height_ft + 0.5
@@ -1050,84 +1081,136 @@ impl MatchEngine {
         &mut self,
         shooter_id: String,
         hoop_pos: Vec2,
-        start_time: f32,
+        _start_time: f32,
         duration: f32,
         is_three: bool,
         from_pos: Vec2,
         aim_pos: Vec2,
         _make_probability: f32,
+        collision_checked_until: f32,
         contest_intensity: f32,
         ctx: FlightContext,
         out: &mut BallFlightOutcome,
     ) {
         let sid = shooter_id.clone();
-        let tau = ((ctx.current_t - start_time) / duration.max(f32::EPSILON)).clamp(0.0, 1.0);
-        if tau < 1.0 {
-            return;
-        }
-        let (ball_position, ball_height) = BallisticsEngine::sample_ball_position(
+        let result = BallisticsEngine::shot_flight_step(
             &self.ball.ball_state,
+            collision_checked_until,
             ctx.current_t,
-            self.systems.physics.get_players(),
             &self.config.rules,
         );
-        let arrival_event = GameEvent::ShotTrajectoryArrival {
-            shooter_id: shooter_id.clone(),
-            ball_position: (ball_position.x, ball_position.y, ball_height),
-        };
-        match BallisticsEngine::classify_shot_arrival(ball_position, hoop_pos, &self.config.rules) {
-            nba_physics::ballistics::ShotArrivalOutcome::Made => {
+        match result {
+            nba_physics::ballistics::ShotFlightStep::InFlight => {
+                let BallTrajectoryKind::Shot {
+                    collision_checked_until: checked_until,
+                    ..
+                } = &mut self.ball.ball_state
+                else {
+                    unreachable!("shot state changed during shot flight detection");
+                };
+                *checked_until = ctx.current_t;
+                self.ball.ball_pos_3d = BallisticsEngine::sample_ball_position(
+                    &self.ball.ball_state,
+                    ctx.current_t,
+                    self.systems.physics.get_players(),
+                    &self.config.rules,
+                );
+            }
+            nba_physics::ballistics::ShotFlightStep::Made {
+                time,
+                ball_position,
+            } => {
+                let arrival_event = GameEvent::ShotTrajectoryArrival {
+                    shooter_id: shooter_id.clone(),
+                    ball_position: (ball_position.x, ball_position.y, ball_position.z),
+                };
                 self.journal.pending_events.push(arrival_event);
+                self.ball.ball_pos_3d = (ball_position.truncate(), ball_position.z);
+                let arrival_t = FlightContext {
+                    current_t: time,
+                    ..ctx
+                };
                 self.shot_arrival_settlement(
                     shooter_id,
                     hoop_pos,
                     from_pos,
                     aim_pos,
                     None,
+                    None,
                     true,
                     is_three,
                     contest_intensity,
                     duration,
-                    ctx,
+                    arrival_t,
                     out,
                 );
             }
-            nba_physics::ballistics::ShotArrivalOutcome::RimContact {
-                ball_position: _,
-                contact_position,
-            } => {
-                self.journal.pending_events.push(arrival_event);
+            nba_physics::ballistics::ShotFlightStep::Contact(contact) => {
+                self.journal
+                    .pending_events
+                    .push(GameEvent::ShotTrajectoryArrival {
+                        shooter_id: shooter_id.clone(),
+                        ball_position: (
+                            contact.ball_position.x,
+                            contact.ball_position.y,
+                            contact.ball_position.z,
+                        ),
+                    });
                 self.journal.pending_events.push(GameEvent::ShotContact {
                     shooter_id: shooter_id.clone(),
-                    surface: "Rim".to_string(),
+                    surface: match contact.surface {
+                        nba_physics::ballistics::ShotContactSurface::Rim => "Rim",
+                        nba_physics::ballistics::ShotContactSurface::Backboard => "Backboard",
+                    }
+                    .to_string(),
                     position: (
-                        contact_position.x,
-                        contact_position.y,
-                        self.config.rules.rim_height_ft,
+                        contact.contact_position.x,
+                        contact.contact_position.y,
+                        contact.contact_position.z,
                     ),
                 });
-                self.shot_arrival_settlement(
-                    shooter_id,
-                    hoop_pos,
-                    from_pos,
-                    aim_pos,
-                    Some(contact_position),
-                    false,
-                    is_three,
-                    contest_intensity,
-                    duration,
-                    ctx,
-                    out,
-                );
-            }
-            nba_physics::ballistics::ShotArrivalOutcome::Miss => {
-                let velocity = BallisticsEngine::sample_ball_velocity(
-                    &self.ball.ball_state,
-                    ctx.current_t,
-                    self.systems.physics.get_players(),
-                    &self.config.rules,
-                );
-                self.journal.pending_events.push(arrival_event);
+                self.ball.ball_pos_3d = (contact.ball_position.truncate(), contact.ball_position.z);
+                if !self.ledger.free_throw_queue.is_empty() {
+                    let arrival_t = FlightContext {
+                        current_t: contact.time,
+                        ..ctx
+                    };
+                    self.shot_arrival_settlement(
+                        shooter_id,
+                        hoop_pos,
+                        from_pos,
+                        aim_pos,
+                        Some(contact.contact_position.truncate()),
+                        Some(contact.incoming_velocity),
+                        false,
+                        is_three,
+                        contest_intensity,
+                        duration,
+                        arrival_t,
+                        out,
+                    );
+                    return;
+                }
+                let landing = match contact.surface {
+                    nba_physics::ballistics::ShotContactSurface::Rim => {
+                        BallisticsEngine::compute_rebound_landing_from_contact_velocity(
+                            from_pos,
+                            hoop_pos,
+                            contact.incoming_velocity,
+                            contact.contact_position.truncate(),
+                            &mut self.systems.rng,
+                            &self.config.rules,
+                        )
+                    }
+                    nba_physics::ballistics::ShotContactSurface::Backboard => {
+                        BallisticsEngine::compute_rebound_landing_bank_from_contact_velocity(
+                            contact.contact_position.truncate(),
+                            contact.contact_position.z,
+                            contact.incoming_velocity,
+                            &self.config.rules,
+                        )
+                    }
+                };
                 self.journal.pending_events.push(GameEvent::HoopArrival {
                     shooter_id: shooter_id.clone(),
                     shot_origin: (from_pos.x, from_pos.y),
@@ -1138,20 +1221,58 @@ impl MatchEngine {
                 if let Some(state) = self.observations.modulation.get_mut(&sid) {
                     state.record_shot(false);
                 }
-                // 偏筐无接触不中，且哨已在飞行中响起：无松球，罚球接管
-                // （阶段直接进入 DeadBallReset，不经 FlightAndRebound）。
+                self.transition_phase(SubPhase::FlightAndRebound);
+                self.ball.ball_pos_3d = (
+                    contact.contact_position.truncate(),
+                    contact.contact_position.z,
+                );
+                out.new_ball_state = Some(BallTrajectoryKind::RimRebound {
+                    from_pos: landing.contact_pos,
+                    from_z: landing.contact_z,
+                    hoop_pos,
+                    target_landing: landing.landing_pos,
+                    start_time: contact.time,
+                    duration: landing.flight_duration,
+                    peak_z: landing.peak_z,
+                    last_touch_team: self.flow.possession,
+                    last_touch_player: Some(shooter_id),
+                });
+                self.assign_rebound_pursuit(landing.landing_pos, contact.time);
+            }
+            nba_physics::ballistics::ShotFlightStep::Miss {
+                time: _,
+                ball_position,
+                incoming_velocity,
+            } => {
+                self.journal
+                    .pending_events
+                    .push(GameEvent::ShotTrajectoryArrival {
+                        shooter_id: shooter_id.clone(),
+                        ball_position: (ball_position.x, ball_position.y, ball_position.z),
+                    });
+                self.journal.pending_events.push(GameEvent::HoopArrival {
+                    shooter_id: shooter_id.clone(),
+                    shot_origin: (from_pos.x, from_pos.y),
+                    is_made: false,
+                    is_three,
+                    contest_intensity,
+                });
+                if let Some(state) = self.observations.modulation.get_mut(&sid) {
+                    state.record_shot(false);
+                }
+                self.ball.ball_pos_3d = (ball_position.truncate(), ball_position.z);
                 if !self.ledger.free_throw_queue.is_empty() {
                     self.try_start_next_free_throw_program(out);
                     return;
                 }
                 self.transition_phase(SubPhase::FlightAndRebound);
                 out.new_ball_state = Some(BallTrajectoryKind::LooseBall {
-                    pos: ball_position,
-                    vel: glam::Vec2::new(velocity.x, velocity.y),
-                    z: ball_height,
-                    vel_z: velocity.z,
+                    pos: ball_position.truncate(),
+                    vel: incoming_velocity.truncate(),
+                    z: ball_position.z,
+                    vel_z: incoming_velocity.z,
                     last_touch_team: self.flow.possession,
-                    last_touch_player: Some(shooter_id.clone()),
+                    last_touch_player: Some(shooter_id),
                 });
             }
         }

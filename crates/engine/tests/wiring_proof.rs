@@ -44,8 +44,14 @@ fn rules_wiring_drive_finish_range_changes_simulation() {
     long.tactics.drive_finish_range_ft = 22.0;
 
     let seeds = [42u64, 1, 7, 100, 999, 31337];
-    let a = fingerprint_for_setup(short, &seeds, PROOF_TICKS_MEDIUM);
-    let b = fingerprint_for_setup(long, &seeds, PROOF_TICKS_MEDIUM);
+    // v91 冲框折扣量纲修正后，突破目标更多直指篮筐、被
+    // early_finish（6 ft 门）终结的比例大增——finish_range 的
+    // 停滞分支被绕过，扰动的行为差异面收窄到 2/6（6000 tick）。
+    // 窗口加倍到 12000 tick：停滞判定本身仍是活跃通道，
+    // 样本量恢复后差异重新显形。
+    let proof_ticks = 12000usize;
+    let a = fingerprint_for_setup(short, &seeds, proof_ticks);
+    let b = fingerprint_for_setup(long, &seeds, proof_ticks);
 
     let changed = a
         .iter()
@@ -134,8 +140,9 @@ fn spatial_pressure_runs_on_real_on_court_players() {
 /// 能力函数中每一个的输入属性，都必须能改变真实模拟输出。
 ///
 /// 做法：把全队属性设到极端低 / 极端高，比较真实模拟指纹。
-fn assert_attribute_reaches_behaviour(
+fn assert_attribute_reaches_behaviour_at(
     label: &str,
+    ticks: usize,
     mutate: impl Fn(&mut nba_domain::PlayerAttributes, f32),
 ) {
     let run = |value: f32| -> Vec<support::BehaviorFingerprint> {
@@ -150,7 +157,7 @@ fn assert_attribute_reaches_behaviour(
                     }
                 }
                 let mut engine = MatchEngine::with_setup(setup, seed);
-                fingerprint(&mut engine, PROOF_TICKS)
+                fingerprint(&mut engine, ticks)
             })
             .collect()
     };
@@ -168,6 +175,16 @@ fn assert_attribute_reaches_behaviour(
          but only {changed}/4 differed — the capability function is only covered by a \
          formula-level unit test and never consumed by the engine"
     );
+}
+
+/// 低频消费路径的能力接线门：窗口加倍到 [`PROOF_TICKS_MEDIUM`]。
+/// 卡位能力只在空中篮板落点裁定（v81 后每 6000 tick 约 4~8 次）时
+/// 被消费，3000 tick 窗口的概率样本量不足以让扰动显形。
+fn assert_attribute_reaches_behaviour(
+    label: &str,
+    mutate: impl Fn(&mut nba_domain::PlayerAttributes, f32),
+) {
+    assert_attribute_reaches_behaviour_at(label, PROOF_TICKS, mutate);
 }
 
 #[test]
@@ -195,10 +212,14 @@ fn capability_help_awareness_reaches_behaviour() {
 
 #[test]
 fn capability_boxout_bonus_reaches_behaviour() {
-    assert_attribute_reaches_behaviour("effective_defensive_boxout_bonus", |a, v| {
-        a.defensive_rebound = v;
-        a.strength = v;
-    });
+    assert_attribute_reaches_behaviour_at(
+        "effective_defensive_boxout_bonus",
+        PROOF_TICKS_MEDIUM,
+        |a, v| {
+            a.defensive_rebound = v;
+            a.strength = v;
+        },
+    );
 }
 
 #[test]

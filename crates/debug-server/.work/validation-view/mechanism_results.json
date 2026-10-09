@@ -1,0 +1,438 @@
+{
+  "registered_criteria": [
+    "MECH-B01",
+    "MECH-C01",
+    "MECH-F01",
+    "MECH-M01",
+    "MECH-P01",
+    "MECH-R01",
+    "MECH-S01",
+    "MECH-S02",
+    "MECH-T01",
+    "MECH-T02"
+  ],
+  "verdicts": [
+    {
+      "criterion_id": "MECH-B01",
+      "verdict": "InsufficientEvidence",
+      "reason_code": "mechanism_insufficient_trials"
+    },
+    {
+      "criterion_id": "MECH-C01",
+      "verdict": "InsufficientEvidence",
+      "reason_code": "experiment_spec_missing"
+    },
+    {
+      "criterion_id": "MECH-F01",
+      "verdict": "InsufficientEvidence",
+      "reason_code": "experiment_spec_missing"
+    },
+    {
+      "criterion_id": "MECH-M01",
+      "verdict": "InsufficientEvidence",
+      "reason_code": "mechanism_insufficient_trials"
+    },
+    {
+      "criterion_id": "MECH-P01",
+      "verdict": "InsufficientEvidence",
+      "reason_code": "mechanism_insufficient_trials"
+    },
+    {
+      "criterion_id": "MECH-R01",
+      "verdict": "InsufficientEvidence",
+      "reason_code": "experiment_spec_missing"
+    },
+    {
+      "criterion_id": "MECH-S01",
+      "verdict": "InsufficientEvidence",
+      "reason_code": "mechanism_insufficient_trials"
+    },
+    {
+      "criterion_id": "MECH-S02",
+      "verdict": "InsufficientEvidence",
+      "reason_code": "experiment_spec_missing"
+    },
+    {
+      "criterion_id": "MECH-T01",
+      "verdict": "InsufficientEvidence",
+      "reason_code": "experiment_spec_missing"
+    },
+    {
+      "criterion_id": "MECH-T02",
+      "verdict": "InsufficientEvidence",
+      "reason_code": "experiment_spec_missing"
+    }
+  ],
+  "experiments": [
+    {
+      "experiment_id": "MECH-S01-three-precision",
+      "criterion_id": "MECH-S01",
+      "spec_digest": 18055158572190372642,
+      "digest_verified": false,
+      "status": "spec_digest_mismatch",
+      "checkpoints_hit": 0,
+      "monotonicity": {},
+      "group_rates": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "group_attempts": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "group_makes": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "experiment_id": "MECH-R01-free-throw",
+      "criterion_id": "MECH-R01",
+      "spec_digest": 11091151662275759756,
+      "digest_verified": false,
+      "status": "spec_digest_mismatch",
+      "checkpoints_hit": 0,
+      "monotonicity": {},
+      "group_rates": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "group_attempts": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "group_makes": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "experiment_id": "MECH-S01-close-precision",
+      "criterion_id": "MECH-S01",
+      "spec_digest": 2643552848241389036,
+      "digest_verified": true,
+      "status": "completed",
+      "checkpoints_hit": 20,
+      "monotonicity": {
+        "baseline_rate": "0.4783",
+        "high_rate": "0.4815",
+        "high_vs_mid_interval": "[-0.2857, 0.8571]",
+        "low_rate": "0.6250",
+        "mid_rate": "0.3750",
+        "mid_vs_low_interval": "[-1.1875, 0.1875]",
+        "monotonicity": "InsufficientEvidence"
+      },
+      "group_rates": [
+        0.4782608695652174,
+        0.625,
+        0.375,
+        0.48148148148148145
+      ],
+      "group_attempts": [
+        23,
+        32,
+        32,
+        27
+      ],
+      "group_makes": [
+        11,
+        20,
+        12,
+        13
+      ]
+    },
+    {
+      "experiment_id": "MECH-S01-mid-precision",
+      "criterion_id": "MECH-S01",
+      "spec_digest": 16306674187188120521,
+      "digest_verified": true,
+      "status": "completed",
+      "checkpoints_hit": 15,
+      "monotonicity": {
+        "baseline_rate": "0.5000",
+        "high_rate": "0.5000",
+        "high_vs_mid_interval": "[-0.5333, 0.6000]",
+        "low_rate": "0.5000",
+        "mid_rate": "0.4500",
+        "mid_vs_low_interval": "[-0.5333, 0.5333]",
+        "monotonicity": "InsufficientEvidence"
+      },
+      "group_rates": [
+        0.5,
+        0.5,
+        0.45,
+        0.5
+      ],
+      "group_attempts": [
+        18,
+        18,
+        20,
+        18
+      ],
+      "group_makes": [
+        9,
+        9,
+        9,
+        9
+      ]
+    },
+    {
+      "experiment_id": "MECH-M01-speed",
+      "criterion_id": "MECH-M01",
+      "spec_digest": 3343673372366010526,
+      "digest_verified": true,
+      "status": "completed",
+      "checkpoints_hit": 20,
+      "monotonicity": {
+        "baseline_rate": "319.3020",
+        "high_rate": "332.3348",
+        "high_vs_mid_interval": "[-1892.1500, 35.6000]",
+        "low_rate": "330.2353",
+        "mid_rate": "306.7514",
+        "mid_vs_low_interval": "[-60.3500, 1792.7500]",
+        "monotonicity": "InsufficientEvidence"
+      },
+      "group_rates": [
+        319.3019801980198,
+        330.2352941176471,
+        306.7513812154696,
+        332.3348416289593
+      ],
+      "group_attempts": [
+        202,
+        221,
+        181,
+        221
+      ],
+      "group_makes": [
+        64499,
+        72982,
+        55522,
+        73446
+      ]
+    },
+    {
+      "experiment_id": "MECH-M02-acceleration",
+      "criterion_id": "MECH-M01",
+      "spec_digest": 13582547499011769981,
+      "digest_verified": true,
+      "status": "completed",
+      "checkpoints_hit": 20,
+      "monotonicity": {
+        "baseline_rate": "317.3349",
+        "high_rate": "309.3318",
+        "high_vs_mid_interval": "[-2003.2500, 1554.9500]",
+        "low_rate": "340.1442",
+        "mid_rate": "310.8122",
+        "mid_vs_low_interval": "[-1162.0000, 1938.7000]",
+        "monotonicity": "InsufficientEvidence"
+      },
+      "group_rates": [
+        317.33488372093024,
+        340.1442307692308,
+        310.81218274111677,
+        309.33181818181816
+      ],
+      "group_attempts": [
+        215,
+        208,
+        197,
+        220
+      ],
+      "group_makes": [
+        68227,
+        70750,
+        61230,
+        68053
+      ]
+    },
+    {
+      "experiment_id": "MECH-M03-stamina",
+      "criterion_id": "MECH-M01",
+      "spec_digest": 11009043949051886472,
+      "digest_verified": true,
+      "status": "completed",
+      "checkpoints_hit": 20,
+      "monotonicity": {
+        "baseline_rate": "300.2832",
+        "high_rate": "298.9162",
+        "high_vs_mid_interval": "[-871.1500, 1456.8000]",
+        "low_rate": "316.9180",
+        "mid_rate": "315.9695",
+        "mid_vs_low_interval": "[-263.7000, 2340.3000]",
+        "monotonicity": "InsufficientEvidence"
+      },
+      "group_rates": [
+        300.283185840708,
+        316.91796875,
+        315.9695431472081,
+        298.91623036649213
+      ],
+      "group_attempts": [
+        226,
+        256,
+        197,
+        191
+      ],
+      "group_makes": [
+        67864,
+        81131,
+        62246,
+        57093
+      ]
+    },
+    {
+      "experiment_id": "MECH-P01-strength",
+      "criterion_id": "MECH-P01",
+      "spec_digest": 17863160296941453596,
+      "digest_verified": true,
+      "status": "completed",
+      "checkpoints_hit": 20,
+      "monotonicity": {
+        "baseline_rate": "2.0000",
+        "high_rate": "1.8182",
+        "high_vs_mid_interval": "[-0.7143, 0.7143]",
+        "low_rate": "1.5333",
+        "mid_rate": "1.7500",
+        "mid_vs_low_interval": "[-0.6667, 0.5000]",
+        "monotonicity": "InsufficientEvidence"
+      },
+      "group_rates": [
+        2.0,
+        1.5333333333333334,
+        1.75,
+        1.8181818181818181
+      ],
+      "group_attempts": [
+        9,
+        15,
+        12,
+        11
+      ],
+      "group_makes": [
+        18,
+        23,
+        21,
+        20
+      ]
+    },
+    {
+      "experiment_id": "MECH-B01-orebound",
+      "criterion_id": "MECH-B01",
+      "spec_digest": 7678695351788610151,
+      "digest_verified": true,
+      "status": "completed",
+      "checkpoints_hit": 20,
+      "monotonicity": {
+        "baseline_rate": "0.7333",
+        "high_rate": "0.8889",
+        "high_vs_mid_interval": "[-2.0000, 0.0000]",
+        "low_rate": "1.1000",
+        "mid_rate": "1.0000",
+        "mid_vs_low_interval": "[-1.0000, 1.0000]",
+        "monotonicity": "InsufficientEvidence"
+      },
+      "group_rates": [
+        0.7333333333333333,
+        1.1,
+        1.0,
+        0.8888888888888888
+      ],
+      "group_attempts": [
+        15,
+        10,
+        10,
+        9
+      ],
+      "group_makes": [
+        11,
+        11,
+        10,
+        8
+      ]
+    },
+    {
+      "experiment_id": "MECH-B02-drebound",
+      "criterion_id": "MECH-B01",
+      "spec_digest": 500758284515629277,
+      "digest_verified": true,
+      "status": "completed",
+      "checkpoints_hit": 20,
+      "monotonicity": {
+        "baseline_rate": "1.6429",
+        "high_rate": "2.0000",
+        "high_vs_mid_interval": "[-0.6000, 0.6000]",
+        "low_rate": "2.8571",
+        "mid_rate": "1.8182",
+        "mid_vs_low_interval": "[-0.6667, 0.0000]",
+        "monotonicity": "InsufficientEvidence"
+      },
+      "group_rates": [
+        1.6428571428571428,
+        2.857142857142857,
+        1.8181818181818181,
+        2.0
+      ],
+      "group_attempts": [
+        14,
+        7,
+        11,
+        11
+      ],
+      "group_makes": [
+        23,
+        20,
+        20,
+        22
+      ]
+    },
+    {
+      "experiment_id": "MECH-D01-decision-iq",
+      "criterion_id": "MECH-D01",
+      "spec_digest": 7530005896062674695,
+      "digest_verified": true,
+      "status": "completed",
+      "checkpoints_hit": 20,
+      "monotonicity": {
+        "baseline_rate": "0.3061",
+        "high_rate": "0.3696",
+        "high_vs_mid_interval": "[-0.8000, 0.8000]",
+        "low_rate": "0.2917",
+        "mid_rate": "0.3864",
+        "mid_vs_low_interval": "[-0.7000, 0.4000]",
+        "monotonicity": "InsufficientEvidence"
+      },
+      "group_rates": [
+        0.30612244897959184,
+        0.2916666666666667,
+        0.38636363636363635,
+        0.3695652173913043
+      ],
+      "group_attempts": [
+        49,
+        48,
+        44,
+        46
+      ],
+      "group_makes": [
+        15,
+        14,
+        17,
+        17
+      ]
+    }
+  ],
+  "note": "MECH verdicts from frozen checkpoint experiments (validation.md §7.1); leaves without experiment specs stay InsufficientEvidence"
+}

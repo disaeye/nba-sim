@@ -90,6 +90,82 @@ fn blocked_shot_is_distinct_from_a_miss() {
     );
 }
 
+/// 同一出手轨迹在封盖与未封盖分支必须产生不同的终态。
+#[test]
+fn identical_shot_parameters_diverge_when_a_block_is_applied() {
+    use glam::Vec2;
+    use nba_domain::{action_window::ActionTimeWindow, GameRules};
+    use nba_engine::{MatchEngine, MatchSetup};
+    use nba_physics::ballistics::BallTrajectoryKind;
+
+    let mut setup = MatchSetup::builtin(GameRules::default());
+    setup.rules.resolve.block.base_probability = 1.0;
+    setup.rules.resolve.block.probability_ceiling = 1.0;
+    let hoop = setup.rules.court.hoop_pos(true);
+    let origin = hoop - Vec2::new(3.0, 0.0);
+    let baseline = BallTrajectoryKind::Shot {
+        shooter_id: "H_01".to_string(),
+        from_pos: origin,
+        hoop_pos: hoop,
+        aim_pos: hoop,
+        start_time: 0.0,
+        duration: 0.8,
+        collision_checked_until: 0.0,
+        is_three: false,
+        peak_z: 13.0,
+        make_probability: 0.7,
+        contest_intensity: 0.0,
+    };
+    let mut blocked = MatchEngine::with_setup(setup.clone(), 811);
+    let control_time = 0.3;
+    blocked.set_game_flow_for_test(nba_domain::GameFlowState::LiveBall);
+    blocked.force_possession_for_test(nba_domain::Possession::Home);
+    blocked.set_ball_state_for_test(baseline.clone());
+    blocked.set_ball_pos_for_test(origin, blocked.rules().chest_height_ft);
+    blocked.set_current_time_for_test(0.2);
+    let mut clear = MatchEngine::with_setup(setup, 811);
+    clear.set_game_flow_for_test(nba_domain::GameFlowState::LiveBall);
+    clear.force_possession_for_test(nba_domain::Possession::Home);
+    clear.set_ball_state_for_test(baseline.clone());
+    clear.set_ball_pos_for_test(origin, clear.rules().chest_height_ft);
+    clear.set_current_time_for_test(0.2);
+
+    let mut window = ActionTimeWindow::new_jump_shot("H_01", 0.0, blocked.rules());
+    window.prep_duration = 0.0;
+    window.exec_duration = 1.0;
+    window.interference_start = 0.0;
+    window.interference_end = 1.0;
+    blocked.start_action_window_for_test("H_01", window, None, None);
+    blocked.advance_action_windows_for_test(control_time);
+    blocked.set_current_time_for_test(control_time);
+    blocked.set_player_position_for_test("H_01", origin);
+    blocked.set_player_position_for_test("A_05", origin + Vec2::new(-0.2, 0.0));
+    clear.set_player_position_for_test("H_01", origin);
+    blocked.set_player_block_attributes_for_test("A_05", 220, 1.0, 1.0, 1.0);
+    assert_eq!(
+        blocked.window_phase("H_01").as_deref(),
+        Some("Execution"),
+        "block probe must be in the shooter execution window"
+    );
+    blocked.set_ball_pos_for_test(origin, 8.5);
+    assert!(
+        blocked.try_resolve_shot_block_for_test(),
+        "same parameters must generate a BLOCKED_SHOT fact when the block intervention succeeds"
+    );
+    let block_reached = !matches!(blocked.ball_state(), BallTrajectoryKind::Shot { .. });
+    assert!(block_reached, "blocked trajectory must leave Shot state");
+    let clear_reached = clear.resolve_shot_flight_for_test();
+    assert!(
+        !clear_reached,
+        "unblocked trajectory before first contact must remain Shot"
+    );
+    assert!(
+        matches!(clear.ball_state(), BallTrajectoryKind::Shot { .. })
+            && !matches!(blocked.ball_state(), BallTrajectoryKind::Shot { .. }),
+        "block and clear controls must have different ball-state outcomes"
+    );
+}
+
 /// 封盖率必须响应 `block` 能力：把全队封盖能力推到极端高，被封数必须上升。
 #[test]
 fn block_rate_responds_to_the_block_attribute() {

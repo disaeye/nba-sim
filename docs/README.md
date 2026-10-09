@@ -62,8 +62,7 @@ docs/dev/
 ├── roadmap.md                        ← 里程碑路线，不记录完成度
 ├── current/
 │   ├── plan.md                       ← 当前执行队列
-│   ├── implementation.md             ← 队列各项的实施步骤
-│   └── spec_gap.md                   ← 规格与代码的核对结果
+│   └── implementation.md             ← 队列各项的实施步骤
 ├── evidence/
 │   ├── problem.md                    ← 原始问题与复现实验
 │   └── impact_assessment.md          ← 跨周期伤害评估
@@ -72,7 +71,7 @@ docs/dev/
     └── 20260911_first-principles/    ← 已结束周期的方案与执行记录
 ```
 
-`current/plan.md` 是当前执行队列，其中每项都必须是未完成工作。`implementation.md` 写这些队列项的类型、事实和测试入口。`spec_gap.md` 记录本次规格核对的状态。计划一旦只剩历史结果，就随周期移入 `cycles/`；不在 `current/` 留“已完成但方便查找”的副本。
+`current/plan.md` 是当前执行队列，其中每项都必须是未完成工作。`implementation.md` 写这些队列项的类型、事实和测试入口。计划一旦只剩历史结果，就随周期移入 `cycles/`；不在 `current/` 留“已完成但方便查找”的副本。规格核对的历史基线在 `dev/cycles/`；规格映射的当前状态以 `dev/status.md` 门矩阵为准。
 
 ## 3. 工作面内容分工
 
@@ -81,7 +80,6 @@ docs/dev/
 | 当前状态 | `dev/status.md` | 当前代码、测试、守卫和开放门 | 设计推导、长篇执行流水账 |
 | 当前待办 | `dev/current/plan.md` | 未完成任务、依赖、验收条件 | 已完成轮次的详细叙述、逐步改动 |
 | 实施步骤 | `dev/current/implementation.md` | 队列项对应的类型、事实和测试入口 | 另一套执行顺序、当前状态 |
-| 规格核对 | `dev/current/spec_gap.md` | 本次核对到的规格条目和证据 | 未核对行为的完成或缺失判断 |
 | 跨周期程序 | `dev/gap.md` | 差距类别、依赖、出口条件 | 当前门状态、逐次命令输出 |
 | 里程碑路线 | `dev/roadmap.md` | M1–M10 的稳定顺序和边界 | “M9 已完成”之类的状态断言 |
 | 原始证据 | `dev/evidence/` | 输入、命令、输出、失败和口径 | 把历史结果概括成当前真相 |

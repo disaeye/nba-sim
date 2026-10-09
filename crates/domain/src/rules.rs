@@ -19,13 +19,17 @@ pub use policies::{
 #[serde(default)]
 pub struct GameRules {
     pub tick_seconds: f32,
-    /// 联赛规则档案（M10）：计时结构、进攻时钟、犯规政策、几何。
-    /// 切换联赛 = 替换该档案，引擎零联赛分支（architecture.md 6.3）。
+    /// R5 持球违例执法开关（r45）：true（生产）= 收球后无移动/再运球候选
+    /// （结构性合法）；false（注入测试）= 判定层抓违例。
+    pub travel_enforcement: bool,
+    /// 联赛规则档案（M10）：切换联赛 = 替换该档案，引擎零联赛分支。
     pub league: crate::league::LeagueProfile,
-    /// Estimated possessions per period used by abbreviated simulations.
     pub estimated_possessions_per_period: u32,
     pub inbound_seconds: f32,
     pub inbound_setup_seconds: f32,
+    /// 发球接应人落位点距发球员的距离（ft）：无接应位时发球只能
+    /// 选择 20-60ft 高风险长传。0 关闭接应机制。
+    pub inbound_safety_distance_ft: f32,
     pub backcourt_seconds: f32,
     /// 攻方三秒时限（charter §6.2）：前场控制时进攻人在限制区连续停留超过
     /// 该时限判违例。NBA 与 FIBA 同为 3 秒。
@@ -33,10 +37,8 @@ pub struct GameRules {
     pub period_break_seconds: f32,
     pub tactical_initiation_seconds: f32,
     pub decision_interval_seconds: f32,
-    /// 发球阶段的决策间隔（秒）。发球受 5 秒规则约束，若沿用阵地进攻的
-    /// `decision_interval_seconds`（2.4s），首次决策若被 Dwell 消耗，第二次
-    /// 要等到 4.8s，加上取整余量即越过 5.0s 阈值——实测 37% 的发球因此被判
-    /// 五秒违例。发球是「尽快把球发进场」的程序，不该套用阵地节奏。
+    /// 发球决策间隔（秒）：发球是「尽快发进场」程序，不套用阵地节奏
+    ///（套用曾致 37% 发球判五秒违例）。
     pub inbound_decision_interval_seconds: f32,
     pub free_throw_interval_seconds: f32,
     pub ball_max_speed_ftps: f32,
@@ -66,20 +68,14 @@ pub struct GameRules {
     /// 水平速度的恢复系数。篮板飞行与地板球共用同一系数（真实篮球里
     /// 球触人后的余速量级与触板相近，约入射的一半）。
     pub loose_ball_player_restitution: f32,
-    /// 篮球半径（ft，真实 9.4-9.5 英寸直径 ≈ 0.4 ft）：自由球与球员
-    /// 身体碰撞的水平接触半径 = `player_radius_ft + 本值`。伸手接球的
-    /// 判定半径（`defender_reach_ft`）是主动触碰（抢断/封盖）的口径，
-    /// 不属于被动身体碰撞。
+    /// 篮球半径（ft，真实直径 ≈ 0.4 ft）：与球员身体碰撞的水平接触
+    /// 半径 = `player_radius_ft + 本值`（主动触碰口径另计）。
     pub ball_radius_ft: f32,
-    /// 人体对球的被动碰撞半径（ft，真实躯干半宽约 1 ft）：区别于
-    /// `player_radius_ft`（人-人分离半径 1.8 ft，含臂展）。被动碰撞
-    /// 用单一人体半径，不区分腿/躯干（真实篮球里球碰腿与碰躯干都弹开，
-    /// 半径差异是二阶量）。
+    /// 人体对球的被动碰撞半径（ft，躯干半宽量级）：单一半径不区分
+    /// 腿/躯干（球碰腿与碰躯干都弹开，半径差异是二阶量）。
     pub body_contact_radius_ft: f32,
-    /// 地板球的「可控制速度上限」（ft/s）：球速超过该值时，5.8 ft
-    /// 可及半径内的球员无法立即收下球（快球会从手上弹开），球继续
-    /// 按物理飞行，直到撞到身体弹开或被减速后重新可收。真实篮球里
-    /// 快速地板球几乎都会被拍/被碰弹开，只有慢球能被稳稳收下。
+    /// 地板球的「可控制速度上限」（ft/s）：超速时快球从手上弹开，
+    /// 球继续飞行直到撞身体弹开或减速后可收（真实只有慢球能稳收）。
     pub loose_ball_control_speed_ftps: f32,
     /// 篮板几何（ADR-017 第三步）：板面距底线的水平距离（ft）。
     /// 篮板平面垂直于底线方向，左筐板面 x = 该值，右筐板面 x = 场宽 − 该值。
@@ -92,6 +88,11 @@ pub struct GameRules {
     pub backboard_top_height_ft: f32,
     /// 触板后水平速度法向分量的恢复系数：镜像反射后整体乘该值。
     pub backboard_restitution: f32,
+    /// 触板后竖直方向的弹起系数：入射下落速度 × 此系数为向上弹起
+    /// 初速。真实板反弹球的竖直分量会损失大半但仍向上弹起（板面
+    /// 给球一个离开的冲量），0 意味着球贴板滑落、篮板失去争抢窗口。
+    #[serde(default = "default_backboard_vertical_restitution")]
+    pub backboard_vertical_restitution: f32,
     pub pass_peak_ft: f32,
     /// 传球抛体弧顶随距离的增长率（ft/ft）：胸口短传平快，
     /// 长传弧顶抬高（第一步飞行抛体化）。
@@ -117,6 +118,16 @@ pub struct GameRules {
     pub shot_pct_floor: f32,
     pub shot_pct_ceiling: f32,
     pub tip_off_duration_seconds: f32,
+    /// 跳球点拍初速（ft/s）：须与收球门同源标定——反弹后水平速度
+    /// 低于 `loose_ball_control_speed_ftps`（28 ft/s 时球滚 45 ft）。
+    pub tip_off_tap_speed_ftps: f32,
+    /// 点拍目标距中圈的距离（ft）：拍向本方后场方向、候在跳球圈
+    /// 外的接应队友（跳球站位中本方除跳球员外离中圈最近者）。
+    pub tip_off_tap_distance_ft: f32,
+    /// 点拍离手高度（ft）：中锋跳到最高点时手的高度量级。
+    pub tip_off_tap_height_ft: f32,
+    /// 点拍出手竖直初速（ft/s）：轻拨带一点上抛弧线。
+    pub tip_off_tap_vel_z_ftps: f32,
     /// Ball presentation policy while a player is dribbling.
     pub ball_bounce_base_ft: f32,
     pub ball_bounce_amplitude_ft: f32,
@@ -144,10 +155,7 @@ pub struct GameRules {
     pub arrival_speed_scale: f32,
     /// 目标速度缩放的下限比例（避免远距离时速度被压得过低）。
     pub arrival_speed_floor: f32,
-    /// 转身减速期间保留的速度比例基准（round-10 从内联 0.4 收编）。
-    ///
-    /// 实际值经 `capability::effective_turn_decel_retention` 按 `agility` 调制
-    /// （attributes.md §2.2：「变向减速代价」是 agility 的法定消费链）。
+    /// 转身减速保留速度比例基准（实际值按 `agility` 调制，§2.2）。
     pub turn_decel_retention: f32,
     /// 调制后保留比例的下限（防止低敏捷者转向失速至停）。
     pub turn_decel_retention_floor: f32,
@@ -156,26 +164,26 @@ pub struct GameRules {
     pub contact_margin_ft: f32,
     /// 最大转体角速度（弧度/秒，真实人体转向速率上限）
     pub max_player_turn_rate_rad_per_sec: f32,
-    /// 轴心脚允许微小滑动容差（呎，防止数值浮点误差触发走步）
+    /// 步态模型的基准步幅（ft）：身体每越过支撑脚该距离，摆动脚落地一次；
+    /// 实际步幅随速度在基准上伸展。
+    pub gait_stride_length_ft: f32,
+    /// 轴心脚允许微小滑动容差（ft，防止数值浮点误差触发走步）。
     pub pivot_foot_tolerance_ft: f32,
     /// 地球标准重力加速度（呎/秒^2，用于自由球与弹跳抛物线计算）
     pub ball_gravity_ftps2: f32,
-    pub ball_velocity_retention: f32,
+    /// 地板球滚动减速度（呎/秒^2）：恒定摩擦让球滚 1-3s/10+ 呎
+    ///（旧逐 tick 指数衰减 0.3s 即爬行到可收速度，争抢窗口消失）。
+    pub loose_ball_rolling_decel_ftps2: f32,
     pub defender_reach_ft: f32,
     pub pass_corridor_radius_ft: f32,
-    /// 接球半径基准（ft）：接球人"控制圈"在**无技能加成**时的半径。
-    ///
-    /// 用于判断球到达时接球人是否**在物理上可能接到**（层 A，P-1）。
-    /// 实际半径由 `capability::effective_catch_radius` 按
-    /// `ball_handling` / `off_ball_sense` / 体格调制——本值仅作曲线基准，
-    /// 不直接参与判定（charter C1：曲线形状参数走规则通道）。
+    /// 接球半径基准（ft）：无技能加成时的控制圈半径，实际半径由
+    /// `effective_catch_radius` 按属性调制（charter C1：曲线走规则通道）。
     pub catch_radius_base_ft: f32,
-    /// 接球技能对接球半径的调制幅度（ft）：`ball_handling` 从 0→1 的增量。
     pub catch_radius_skill_gain_ft: f32,
-    /// 预估误差幅度（ft）：`off_ball_sense` 从 1→0 时接球人预估接球点的
-    /// 额外误差上限。0 表示完全精确（当前行为）；>0 即实现 P-1「预估可能错」。
+    /// 预估误差幅度（ft）：`off_ball_sense` 低时预估接球点的额外误差上限
+    /// （0 = 完全精确；>0 = P-1「预估可能错」）。
     pub receive_estimate_noise_ft: f32,
-    /// 确定性误差向量的量化分母（用于把 16 位哈希切片映射到 [-1, 1]）。
+    /// 确定性误差向量的量化分母（16 位哈希切片映射到 [-1, 1]）。
     /// 是**数值工具参数**（不是行为常数）：放在规则通道以便审计与调整，
     /// 取值 32767.5 = (2^16 − 1) / 2，使 0..=65535 映射到 [-1, 1]。
     pub estimate_offset_quantization: f32,
@@ -205,12 +213,8 @@ pub struct GameRules {
     pub invariant_speed_tolerance_ftps: f32,
     /// 球高度上限（L1 BALL_HEIGHT_BOUNDS）。
     pub ball_z_max_ft: f32,
-    /// 「实质性越界」的最小超出距离（ft）。
-    ///
-    /// 球员目标点贴边时，物理 clamp 会每 tick 产生零点几英尺的差值；
-    /// 把这种亚英尺级钳制当成越界事实，会让被顶在边线的持球人反复
-    /// 被判出界（实测每场 42–52 次虚假失误）。只有超出该阈值的位移
-    /// 才产生 `BoundaryCross`。
+    /// 「实质性越界」的最小超出距离（ft）：亚英尺级 clamp 差值不算越界
+    ///（否则被顶在边线的持球人每场 42-52 次虚假失误）。
     pub boundary_epsilon_ft: f32,
     /// 事实/总结流的最大写入字节数（gap.md §16.4 资源治理）。
     /// 实测一场 full scope 的 facts 流约 7–16 MiB，故预算取 64 MiB
@@ -245,12 +249,8 @@ pub struct GameRules {
     pub rebound_prep_seconds: f32,
     pub rebound_exec_seconds: f32,
     pub rebound_follow_seconds: f32,
-    /// 进攻方冲抢篮板的人数（charter C1：行为参数走数据通道，不内联在引擎里）。
-    ///
-    /// 真实篮球里不是全队都冲抢：全员扑向球的落点会立即触发
-    /// `min_player_separation_ft` 碰撞消解，反而把所有人推离球的落点。
-    /// evidence/problem.md §23.8 记录了指派前攻方几乎无人向球移动
-    /// （0.0001 ft/tick，而守方 0.0042）。
+    /// 进攻方冲抢篮板的人数（charter C1 数据通道）。全员扑落点会触发
+    /// 碰撞消解把人推离落点（problem.md §23.8：指派前攻方几乎不动）。
     pub rebound_crash_offense_count: u32,
     /// 防守方卡位／收篮板的人数。守方多一人，与真实的
     /// 「守方收下约 75.5% 投失」一致（evidence/problem.md §23.7）。
@@ -292,22 +292,17 @@ impl Default for TacticalRules {
             // 长.distance 突破需要更长时间才能真实到达（A/B 见 §19.3）。
             drive_max_duration_seconds: 3.2,
             drive_speed_ratio: 1.15,
-            drive_early_finish_dist_ft: 4.5,
+            drive_early_finish_dist_ft: 6.0,
             drive_mid_range_pullup_dist_ft: 14.0,
             drive_kickout_pass_dist_ft: 22.0,
             drive_lane_offset_ft: 4.0,
-            // 冲框走廊折扣：congestion 是全防守人的走廊投影和（篮下走廊
-            // 通常 2–3），折扣按终结能力加权，使终结强者面对一般拥堵
-            // 仍会攻框。基准 1.3 同时守住两条逐种子带：篮下占比下限
-            // 0.25（折扣 1.2 时低攻框名单会击穿）与中距离占比下限
-            // 0.08（折扣 ≥1.4 时中距离出手被攻框吞并）。
+            // 冲框走廊折扣：按终结能力加权（终结强者面对拥堵仍攻框）。
+            // 基准 1.3 守住篮下占比 ≥0.25 与中距离占比 ≥0.08 两条带。
             drive_rim_attack_bias: 1.3,
             drive_finish_extend_ft: 6.0,
             drive_beaten_recovery_seconds: 0.6,
-            // 突破停滞线（finish_range）：16ft 时实测 78 次/场的突破停滞在
-            // 10–16ft 的脏区重新组织，篮下出手仅 1–2%（真实 NBA 30%）。
-            // 收窄到 10ft：突破推进到 10ft 内就直接攻框（上篮/抛投），
-            // 停滞只发生在防守把人卡在脏区之外的场合。
+            // 突破停滞线：16ft 时停滞堆在 10-16ft 脏区（篮下出手仅
+            // 1-2% vs 真实 30%）——收窄到 10ft，进入即直接攻框。
             drive_finish_range_ft: 16.0,
             drive_dunk_max_dist_ft: 4.0,
             drive_floater_min_dist_ft: 7.0,
@@ -324,8 +319,15 @@ impl Default for TacticalRules {
             carrier_speed_ratio: 0.73,
             screener_speed_ratio: 0.64,
             support_speed_ratio: 0.45,
-            defender_speed_ratio: 0.73,
+            // r40：0.73→0.85（同速使后场纠缠：8 秒违例 8 次/场 vs ~0.3）。
+            defender_speed_ratio: 0.85,
             rebound_chase_speed_ratio: 0.73,
+            offensive_crash_max: 3,
+            timeout_duration_seconds: 60.0,
+            backcourt_support_count: 2,
+            backcourt_support_offset_ft: 12.0,
+            backcourt_support_y_min: 6.0,
+            backcourt_support_y_max: 44.0,
             receive_approach_speed_ratio: 0.9,
             receive_stop_margin_ft: 2.5,
             receive_min_approach_speed_ratio: 0.25,
@@ -353,11 +355,8 @@ impl Default for TacticalRules {
             screen_tendency_floor: 0.75,
             screen_tendency_span: 0.5,
             screen_tendency_threshold: 0.3,
-            // 冲筐类槽位行为（掩护顺下/背切/下沉）的「进-出」曲线：
-            // 攻方三秒规则下，进攻人在限制区只做穿越——前场建立后
-            // 依次发起、到达、折返，不在限制区停留。窗口收紧到 ≈2 秒
-            // （含球员追踪滞后 ≈2.5 秒在限制区内），给接球后的决策
-            // 间隔留出三秒余量。
+            // 冲筐类槽位的「进-出」曲线：三秒规则下限制区只穿越不停留，
+            // 窗口 ≈2 秒，给接球后决策留三秒余量。
             rim_cut_start_seconds: 0.5,
             rim_cut_peak_seconds: 1.5,
             rim_cut_exit_seconds: 2.4,
@@ -366,6 +365,9 @@ impl Default for TacticalRules {
             backdoor_cut_depth_ratio: 0.85,
             dip_to_rim_depth_ratio: 0.7,
             drop_coverage_depth_ft: 14.0,
+            // 到位半径：跑位任务的几何完成门（validation.md §4.2）。
+            // 实际位置进入目标点此半径即 `completed`；超出且到期 `timed_out`。
+            arrival_radius_ft: 2.0,
             defense: DefenseRules::default(),
         }
     }
@@ -375,14 +377,20 @@ fn default_separation_safety_margin_ft() -> f32 {
     0.05
 }
 
+fn default_backboard_vertical_restitution() -> f32 {
+    0.45
+}
+
 impl Default for GameRules {
     fn default() -> Self {
         Self {
             tick_seconds: 0.04,
+            travel_enforcement: true,
             league: crate::league::LeagueProfile::nba(),
             estimated_possessions_per_period: 35,
             inbound_seconds: 5.0,
             inbound_setup_seconds: 2.2,
+            inbound_safety_distance_ft: 8.0,
             backcourt_seconds: 8.0,
             three_second_lane_seconds: 3.0,
             period_break_seconds: 15.0,
@@ -397,13 +405,9 @@ impl Default for GameRules {
             max_shot_duration_seconds: 1.45,
             decision: DecisionRules::default(),
             shot_peak_base_ft: 14.0,
-            // 弧顶随距离的增长率（ft/ft）：ADR-017 曾计划校准为 0.04，
-            // 实测后暂缓：0.04 使全部投篮提前约 0.065 s 到筐，8-seed
-            // 三分封盖率 3.7%→7.3%（真实 NBA 约 2–3%）、3P% 中位数
-            // 34.0→27.0 越出 [30,40] 带；出手时平均 make_probability
-            // 三种配置完全一致（0.307/0.308），封盖概率的高度惩罚归零
-            // 实验也不改变封盖数——机制未明，禁止盲目调参补救，
-            // 保持 0.25 待封盖裁决与飞行时长的耦合查清后再动。
+            // 弧顶随距离的增长率（ft/ft）：0.04 使投篮提前 0.065s 到筐、
+            // 封盖率与 3P% 双双越带且机制未明——保持 0.25，待封盖裁决与
+            // 飞行时长耦合查清后再动（禁止盲目调参）。
             shot_peak_distance_factor: 0.25,
             chest_height_ft: 4.0,
             rim_height_ft: 10.0,
@@ -413,8 +417,9 @@ impl Default for GameRules {
             // 自然产生。恢复系数量级：真实篮球碰筐后水平余速约 0.4-0.6，
             // 竖直弹起约入射下落速度的 0.3-0.4。
             rim_contact_angle_spread_radians: 1.1,
-            rim_contact_restitution_flush: 0.62,
-            rim_contact_restitution_graze: 0.35,
+            // r45：0.62/0.35→0.45/0.25（此前长篮板散满半场，OREB 堆高）。
+            rim_contact_restitution_flush: 0.45,
+            rim_contact_restitution_graze: 0.25,
             rim_contact_vertical_restitution: 0.35,
             rim_contact_scatter_radians: 0.35,
             // 自由球-人接触（ADR-017 第三步）：球触人后的余速约入射一半，
@@ -431,14 +436,13 @@ impl Default for GameRules {
             backboard_bottom_height_ft: 9.5,
             backboard_top_height_ft: 13.0,
             backboard_restitution: 0.55,
+            backboard_vertical_restitution: 0.45,
             pass_peak_ft: 4.0,
             // 传球弧顶随距离增长：30 ft 传球弧顶 7 ft（抛体解出 T ≈ 0.86 s，
             // 球速 ≈ 38 ft/s，真实胸口传球量级）；50 ft 长传弧顶 9 ft。
             pass_peak_distance_factor: 0.10,
-            // D3.4 校准（dev 方案 §6.2）：紧逼窗口从最后 5s 扩到 12s。
-            // 实测：5s 窗口下进攻方长期 Dwell 到 24s 违例（单场 53 次
-            // SHOT_CLOCK_VIOLATION，真实 NBA ≈ 0–2 次），回合以违例而非
-            // 出手告终。真实进攻在 24→14s 区间就已开始组织。
+            // D3.4 校准：紧逼窗口 5s→12s（5s 窗口下单场 53 次 24 秒
+            // 违例 vs 真实 0-2——真实进攻 24→14s 区间已开始组织）。
             shot_clock_urgency_seconds: 12.0,
             // D3.1 校准：防守干扰惩罚从 0.22 提至 0.32，使空位/重压出手的
             // 命中率分化接近真实。0.42 实测 2P 63.8% 超带且诱发贴边几何僵局
@@ -454,6 +458,10 @@ impl Default for GameRules {
             shot_pct_floor: 0.10,
             shot_pct_ceiling: 0.85,
             tip_off_duration_seconds: 1.5,
+            tip_off_tap_speed_ftps: 13.0,
+            tip_off_tap_distance_ft: 14.0,
+            tip_off_tap_height_ft: 5.5,
+            tip_off_tap_vel_z_ftps: 6.0,
             ball_bounce_base_ft: 3.25,
             ball_bounce_amplitude_ft: 0.35,
             ball_bounce_frequency_hz: 2.2,
@@ -475,12 +483,14 @@ impl Default for GameRules {
             turn_decel_retention_ceiling: 0.7,
             contact_margin_ft: 0.6,
             max_player_turn_rate_rad_per_sec: 18.0,
+            gait_stride_length_ft: 2.5,
             pivot_foot_tolerance_ft: 0.35,
             ball_gravity_ftps2: 32.17,
-            ball_velocity_retention: 0.85,
+            loose_ball_rolling_decel_ftps2: 6.0,
             defender_reach_ft: 4.0,
             pass_corridor_radius_ft: 3.5,
-            catch_radius_base_ft: 2.0,
+            // r38 校准：2.0→2.8 ft（此前 30% 传球被判掉球，失误率主源）。
+            catch_radius_base_ft: 2.8,
             catch_radius_skill_gain_ft: 1.2,
             receive_estimate_noise_ft: 2.5,
             estimate_offset_quantization: 32767.5,
@@ -509,11 +519,8 @@ impl Default for GameRules {
             separation_correction_share: 0.5,
             stamina_sprint_speed_ftps: 15.0,
             stamina_recovery_speed_ftps: 6.0,
-            // 体力动态标定（G6 换人链的前提）：实测全场速度档分布为
-            // 冲刺 4% / 中速 31% / 慢速 63%（seed 42，在场逐 tick），且
-            // 持球人冲刺占比显著高于均值。实测净耗率 ≈0.0029/s（0.033 时
-            // 198s 即首换、70–88 次/队/场），按「每队 35–45 次」反推
-            // 上场周期 ~5.3 分钟 → drain 0.021。
+            // 体力动态标定（G6 换人链前提）：实测净耗率 ≈0.0029/s，
+            // 按「每队 35-45 次换人」反推上场周期 ~5.3 分钟 → drain 0.021。
             stamina_drain_per_second: 0.021,
             stamina_recovery_per_second: 0.0005,
             stamina_floor: 0.2,
@@ -668,6 +675,10 @@ impl GameRules {
             self.ball_radius_ft,
             self.body_contact_radius_ft,
             self.loose_ball_control_speed_ftps,
+            self.tip_off_tap_speed_ftps,
+            self.tip_off_tap_distance_ft,
+            self.tip_off_tap_height_ft,
+            self.tip_off_tap_vel_z_ftps,
             self.backboard_offset_from_baseline_ft,
             self.backboard_width_ft,
             self.backboard_bottom_height_ft,
@@ -776,6 +787,10 @@ impl GameRules {
             || self.league.shot_clock_seconds <= 0.0
             || self.league.offensive_rebound_shot_clock_seconds <= 0.0
             || self.inbound_seconds <= 0.0
+            || self.tip_off_tap_speed_ftps <= 0.0
+            || self.tip_off_tap_distance_ft <= 0.0
+            || self.tip_off_tap_height_ft <= 0.0
+            || self.tip_off_tap_vel_z_ftps <= 0.0
             || self.inbound_setup_seconds < 0.0
             || self.backcourt_seconds <= 0.0
             || self.three_second_lane_seconds <= 0.0
@@ -830,7 +845,6 @@ impl GameRules {
             || self.max_player_braking_accel_ftps2 <= 0.0
             || self.max_player_lateral_accel_ftps2 <= 0.0
             || self.player_linear_damping < 0.0
-            || !(0.0..=1.0).contains(&self.ball_velocity_retention)
             || self.defender_reach_ft < 0.0
             || self.pass_corridor_radius_ft < 0.0
             || self.catch_radius_base_ft <= 0.0
@@ -986,6 +1000,7 @@ impl GameRules {
             || self.ball_holder_offset_ft < 0.0
             || self.ball_holder_height_ft < 0.0
             || self.max_ball_carrier_turn_rate_rad_per_sec <= f32::EPSILON
+            || self.gait_stride_length_ft <= 0.0
             || self.jump_shot_prep_seconds < 0.0
             || self.jump_shot_exec_seconds < 0.0
             || self.jump_shot_follow_seconds < 0.0
@@ -1103,15 +1118,6 @@ mod tests {
                 hoop_right_x_ft: GameRules::default().court.width_ft + 1.0,
                 ..GameRules::default().court
             },
-            ..GameRules::default()
-        };
-        assert!(rules.validate().is_err());
-    }
-
-    #[test]
-    fn rejects_invalid_ball_and_rebound_policies() {
-        let rules = GameRules {
-            ball_velocity_retention: 1.1,
             ..GameRules::default()
         };
         assert!(rules.validate().is_err());

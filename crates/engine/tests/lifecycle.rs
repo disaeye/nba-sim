@@ -162,6 +162,7 @@ fn test_period_end_waits_for_shot_in_flight() {
         aim_pos: Vec2::new(88.75, 25.0),
         start_time: engine.current_time(),
         duration: 10.0,
+        collision_checked_until: engine.current_time(),
         is_three: false,
         peak_z: 15.0,
         make_probability: 0.5,
@@ -351,10 +352,11 @@ fn test_action_lifecycle_all_types_complete_and_unlock_kinematics() {
         let expects_locked = window.lock_kinematics;
         engine.start_action_window_for_test(player_id, window, None, None);
         assert_eq!(engine.active_windows_count_for_test(), 1);
+        // Preparation 是蓄势段（可被干扰、仍在移动）：锁定只从 Execution 起。
         if expects_locked {
             assert!(
-                engine.is_player_locked_for_test(player_id),
-                "action {action_type:?} should lock kinematics on start"
+                !engine.is_player_locked_for_test(player_id),
+                "action {action_type:?} must stay mobile during Preparation"
             );
         }
 
@@ -374,6 +376,12 @@ fn test_action_lifecycle_all_types_complete_and_unlock_kinematics() {
                 .any(|e| e.kind == "ACTION_PHASE_CHANGED"),
             "action {action_type:?} should emit ActionPhaseChanged"
         );
+        if expects_locked {
+            assert!(
+                engine.is_player_locked_for_test(player_id),
+                "action {action_type:?} should lock kinematics in Execution"
+            );
+        }
 
         // Advance to full completion
         let finish_time = start_t + 10.0;
@@ -410,7 +418,8 @@ fn test_action_lifecycle_single_uncompleted_action_per_player_tick() {
     let window1 = ActionTimeWindow::new_screen_set(player_id, start_t, &rules);
     engine.start_action_window_for_test(player_id, window1, None, None);
     assert_eq!(engine.active_windows_count_for_test(), 1);
-    assert!(engine.is_player_locked_for_test(player_id));
+    // 蓄势段不锁定：同一 tick 内被新动作接管时不存在残留锁定。
+    assert!(!engine.is_player_locked_for_test(player_id));
 
     // Start a second action window for the same player in the same tick
     let window2 = ActionTimeWindow::new_cut_backdoor(player_id, start_t, &rules);
@@ -422,10 +431,9 @@ fn test_action_lifecycle_single_uncompleted_action_per_player_tick() {
         1,
         "player must have at most one active action window per tick"
     );
-    // CutBackdoor does not lock kinematics, so superseded old window must have unlocked
     assert!(
         !engine.is_player_locked_for_test(player_id),
-        "superseded locked window must unlock kinematics"
+        "superseded window must leave kinematics unlocked"
     );
 
     let events = engine.publish_events_for_test();
@@ -447,6 +455,10 @@ fn test_action_lifecycle_cancellation_unlocks_kinematics() {
 
     let window = ActionTimeWindow::new_screen_set(player_id, start_t, &rules);
     engine.start_action_window_for_test(player_id, window, None, None);
+    // 推进到 Execution：锁定在此生效，取消路径才有可解除的锁。
+    engine
+        .advance_action_windows_for_test(start_t + rules.screen_prep_seconds + rules.tick_seconds);
+    engine.publish_events_for_test();
     assert!(engine.is_player_locked_for_test(player_id));
 
     let cancelled =
@@ -477,6 +489,11 @@ fn test_action_lifecycle_failure_unlocks_kinematics() {
 
     let window = ActionTimeWindow::new_jump_shot(player_id, start_t, &rules);
     engine.start_action_window_for_test(player_id, window, None, None);
+    // 推进到 Execution：锁定在此生效，失败路径才有可解除的锁。
+    engine.advance_action_windows_for_test(
+        start_t + rules.jump_shot_prep_seconds + rules.tick_seconds,
+    );
+    engine.publish_events_for_test();
     assert!(engine.is_player_locked_for_test(player_id));
 
     let failed = engine.fail_action_window_for_test(player_id, ActionFailureReason::Blocked);

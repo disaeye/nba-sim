@@ -51,6 +51,12 @@ impl MatchEngine {
                 {
                     self.possession_ctx.current_possession_turnover_player = Some(dweller);
                 }
+            } else if matches!(kind, ViolationKind::Travel | ViolationKind::DoubleDribble) {
+                self.possession_ctx.current_possession_turnover_player = self
+                    .clock
+                    .current_possession_turnover_player
+                    .take()
+                    .or_else(|| self.current_turnover_player_id());
             } else if kind == ViolationKind::OverAndBack {
                 if let Some(toucher) = self.current_ball_toucher_id().map(str::to_string) {
                     self.possession_ctx.current_possession_turnover_player = Some(toucher);
@@ -100,7 +106,7 @@ impl MatchEngine {
         if !facts.is_empty() {
             self.journal
                 .pending_events
-                .extend(facts.into_iter().map(physics_fact_to_event));
+                .extend(facts.into_iter().filter_map(physics_fact_to_event));
         }
         if self.ledger.free_throws_remaining > 0
             && self.flow.game_flow == GameFlowState::FreeThrow

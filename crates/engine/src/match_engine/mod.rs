@@ -12,6 +12,7 @@ mod action_windows;
 mod ball_flight;
 mod block;
 mod bookkeeping;
+mod business;
 mod construction;
 mod contests;
 mod decision;
@@ -19,6 +20,8 @@ mod events;
 mod execution;
 mod flow;
 mod free_ball;
+mod inbound_safety;
+mod perturbation;
 mod phases;
 mod projection;
 mod receiver;
@@ -57,6 +60,7 @@ enum ScopeBoundary {
 /// 除展示/审计所需的只读访问器外，所有状态字段均**私有**：外部只能经
 /// `step()` / `snapshot()` / 显式命令推进与观察比赛，不能直接改写真相。
 /// 需变可写的测试场景集中在显式命名的 `*_for_test` 钩子里。
+#[derive(Clone)]
 pub struct MatchEngine {
     /// 比赛时钟（时间轴、节次、子阶段与各类计时器）。
     clock: state::MatchClock,
@@ -83,6 +87,8 @@ pub struct MatchEngine {
 
 pub type Simulation = MatchEngine;
 
+pub use perturbation::ValidationAttribute;
+
 impl MatchEngine {
     pub fn new(seed: u64) -> Self {
         Self::with_setup(MatchSetup::builtin(GameRules::default()), seed)
@@ -90,6 +96,94 @@ impl MatchEngine {
 
     pub fn with_rules(seed: u64, rules: GameRules) -> Self {
         Self::with_setup(MatchSetup::builtin(rules), seed)
+    }
+
+    /// 校验专用随机源重播种（validation.md §7.1 具名随机键）。
+    ///
+    /// 具名随机键 `(experiment_id, checkpoint_id, subsystem, trial_id,
+    /// draw_index)` 哈希为 ChaCha8 种子；档位组共享同一键（键里无档位），
+    /// 使基线与三档在相同情形上天然配对。`subsystem` 参与哈希——不同
+    /// 子系统的抽样相互独立，同键才同随机流。
+    pub fn reseed_validation_rng(
+        &mut self,
+        experiment_id: &str,
+        checkpoint_id: u64,
+        subsystem: &str,
+        trial_id: u64,
+        draw_index: u64,
+    ) {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        experiment_id.hash(&mut hasher);
+        checkpoint_id.hash(&mut hasher);
+        subsystem.hash(&mut hasher);
+        trial_id.hash(&mut hasher);
+        draw_index.hash(&mut hasher);
+        let derived = hasher.finish();
+        use rand::SeedableRng;
+        let new_rng = rand_chacha::ChaCha8Rng::seed_from_u64(derived);
+        self.systems.rng = new_rng;
+    }
+
+    /// 校验专用扰动入口（validation.md §7.1：恢复后只修改目标输入，
+    /// 并通过生产初始化逻辑更新其派生量）。
+    ///
+    /// 走生产路径的含义：属性写入与 `PlayerAttributes::validate` 同一套
+    /// 校验规则；派生量（物理上限）经 `nba_domain::effective_*` 映射层
+    /// 重算，与 `construction.rs` 的初始化代码同源。禁止旁路直写内部字段。
+    ///
+    /// 返回旧值（供实验组恢复或核对档位）。球员不存在或属性越界直接
+    /// panic（快崩语义：实验配置错误不应被吞掉）。
+    pub fn apply_validation_perturbation(
+        &mut self,
+        player_id: &str,
+        attribute: ValidationAttribute,
+        value: f32,
+    ) -> f32 {
+        let teams = [
+            (&mut self.config.home_team, "home"),
+            (&mut self.config.away_team, "away"),
+        ];
+        for (team, _side) in teams {
+            if let Some(player) = team.players.iter_mut().find(|p| p.id == player_id) {
+                let old = attribute.get(&player.attributes);
+                attribute.set(&mut player.attributes, value);
+                // 生产校验路径（与 setup.rs 的名册校验同一实现）。
+                player
+                    .attributes
+                    .validate()
+                    .unwrap_or_else(|error| panic!("扰动后属性非法: {error}"));
+                // 派生量重算：物理后端的运动上限（生产映射层同源）。
+                if let Some(state) = self.systems.physics.get_player_mut(player_id) {
+                    state.max_speed_ftps =
+                        nba_domain::effective_max_speed(&self.config.rules, &player.attributes);
+                    state.max_accel_ftps2 =
+                        nba_domain::effective_max_accel(&self.config.rules, &player.attributes);
+                    // 调小速度类属性后上限随之变小，当前速度若仍按旧上限
+                    // 积分会立即击穿物理快崩断言；把当前速度钳回新上限
+                    // （实验起点状态约束到新限制内，与「扰动从现在起生效」
+                    // 语义一致）。
+                    let speed = state.vel_ft.length();
+                    if speed > state.max_speed_ftps {
+                        state.vel_ft *= state.max_speed_ftps / speed;
+                    }
+                }
+                return old;
+            }
+        }
+        panic!("扰动目标球员不存在: {player_id}");
+    }
+
+    /// 校验用检查点分叉（validation.md §7.1 直接机制实验）：
+    /// 位精确复制当前比赛状态，返回可独立 `step()` 的副本。
+    ///
+    /// 与母局的关系：fork 不加任何扰动并继续跑，后续事件流必须与母局
+    /// 逐字节一致（位精确续跑检查是 fork 实现的验收闸，见 validation
+    /// 集成测试）。外部仍摸不到状态字段——fork 复制整场比赛，符合
+    /// D7「外部不改写比赛真相」；对副本的扰动只能经校验专用入口
+    /// （`apply_validation_perturbation`，走生产属性路径）。
+    pub fn experimental_fork(&self) -> Self {
+        self.clone()
     }
 
     pub fn is_finished(&self) -> bool {
@@ -239,7 +333,6 @@ impl MatchEngine {
             &self.config.rules,
         );
         self.ball.ball_pos_3d = sample_3d;
-
         // 弹道裁决与拦截检查（阶段实现见 `ball_flight.rs`）。
         // 写入状态组：ball, observations。
         let outcome = self.resolve_ball_flight(current_t, is_home, dt);
@@ -249,14 +342,14 @@ impl MatchEngine {
         // 转换 tick 同样在锥制范围内。
         let ball_carrier_id = |state: &nba_physics::ballistics::BallTrajectoryKind| match state {
             nba_physics::ballistics::BallTrajectoryKind::Held { carrier_id }
-            | nba_physics::ballistics::BallTrajectoryKind::Drive { driver_id: carrier_id, .. } => {
-                Some(carrier_id.clone())
-            }
+            | nba_physics::ballistics::BallTrajectoryKind::Drive {
+                driver_id: carrier_id,
+                ..
+            } => Some(carrier_id.clone()),
             _ => None,
         };
-        let held_family_continues =
-            ball_carrier_id(&sampled_from_ball_state).is_some()
-                && ball_carrier_id(&sampled_from_ball_state) == ball_carrier_id(&self.ball.ball_state);
+        let held_family_continues = ball_carrier_id(&sampled_from_ball_state).is_some()
+            && ball_carrier_id(&sampled_from_ball_state) == ball_carrier_id(&self.ball.ball_state);
         if held_family_continues {
             let previous_3d = glam::Vec3::new(
                 previous_ball_position.0.x,
@@ -284,6 +377,9 @@ impl MatchEngine {
         // 战术目标生成 & 移动导航（每 tick）。
         // 写入状态组：systems, observations。
         self.plan_tactics_and_navigation(current_t);
+        // 到位与回位判定（validation.md §4.2）：意图终态在目标重算后
+        // 结算，避免把本 tick 刚下达的任务立即判超时。
+        self.settle_movement_intents();
         self.collect_tick_facts(dt);
 
         self.publish_events();

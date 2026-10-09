@@ -50,6 +50,11 @@ TIER_SELECTORS = {
     "tier3": (
         ("target", "nba-engine::stats_baseline"),
     ),
+    "validation": (
+        ("package", "nba-validation"),
+        ("target", "nba-engine::fork_continuation"),
+        ("target", "nba-engine::perturbation"),
+    ),
 }
 
 TIER_REQUIRED_TARGETS = {
@@ -76,6 +81,13 @@ TIER_REQUIRED_TARGETS = {
     },
     "tier3": {
         "nba-engine::stats_baseline",
+    },
+    "validation": {
+        "nba-validation::nba_validation",
+        "nba-validation::mech_experiment",
+        "nba-validation::validation_integration",
+        "nba-engine::fork_continuation",
+        "nba-engine::perturbation",
     },
 }
 
@@ -163,7 +175,7 @@ def run_self_test():
     test_targets, _ = load_test_targets()
     serial_pattern = re.compile(SERIAL_PATTERN)
     failed = False
-    for tier in ("tier1", "tier2", "tier3"):
+    for tier in ("tier1", "tier2", "tier3", "validation"):
         expected, actual = select_tier(tier, test_targets)
         print(f"\n{tier} 目标筛选自测")
         print_target_set("期望目标名称", expected)
@@ -258,7 +270,7 @@ def main():
                     help="每个二进制内部 --test-threads，默认 2（核数/2，避免超订）")
     ap.add_argument("--timeout", type=int, default=600,
                     help="单目标超时秒数，默认 600")
-    ap.add_argument("--tier", choices=("tier1", "tier2", "tier3", "tier2+3"),
+    ap.add_argument("--tier", choices=("tier1", "tier2", "tier3", "validation", "tier2+3"),
                     help="按 workspace Cargo metadata 选择分层目标")
     ap.add_argument("--include", default="",
                     help="目标名称正则，匹配 package::target；空表示全部目标")

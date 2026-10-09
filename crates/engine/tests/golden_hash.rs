@@ -131,8 +131,19 @@ fn golden_baseline_seed42() {
 #[test]
 fn golden_window_covers_scoring_behaviour() {
     let mut engine = MatchEngine::new(42);
-    // 实测首个 3 分出手在 tick 3588，取 4000 tick 留约 10% 余量覆盖首个 2 分与 3 分
-    let ticks = 4000usize;
+    // v82 温度 0.12 后实测：首次 2 分 tick 474，首次 3 分 tick 4564；
+    // v83 发球接应位后决策序列整体重排，首次三分推迟至 tick 7541；
+    // v84 APF 侧向偏转 + 发球程序窗口重置后节奏再变：首次 2 分
+    // tick 693，首次三分 tick 9021；
+    // v85 松球滚动摩擦 + 收球距离竞争后：首次三分 tick 346、
+    // 首次 2 分 tick 566；
+    // v87 切球率标定、v88 跳球点拍轻拨后：首次 2 分 tick 504、
+    // 首次三分 tick 7177；
+    // v90 点拍目标动态化后：首次 2 分 tick 375、首次三分
+    // tick 13050；
+    // v91 区位价值修正后：首次 2 分 tick 541、首次三分 tick 2262，
+    // 窗口 16000 tick 留约 7 倍余量。
+    let ticks = 16000usize;
     for _ in 0..ticks {
         engine.step();
     }
@@ -711,7 +722,193 @@ fn golden_window_long_covers_fouls_and_free_throws() {
 // v80 0xcd1598382421a6b8 - 卡位能力接入主流篮板路径：
 //   落点捷径与篮板地板球双人争抢都改用卡位/补篮有效距离裁决
 //   （resolve_rebound），地板球不再按 id 顺序先到先得。重冻结基线。
-const GOLDEN_SEED42_2000: u64 = 0xcd1598382421a6b8;
+// v81 0x4f0aabafed2e4d05 - 验证观测层（validation.md §3.2/§3.3）：
+//   引擎为验证器发布独立取证事实：事件信封新增 tick_index、八个业务
+//   身份字段与结构化关系；新增观测载荷 STAT_ATTRIBUTION /
+//   SHOT_ATTEMPT_RESOLVED / CONTROL_ESTABLISHED / RESPONSIBILITY_
+//   STARTED/ENDED / CLOCK_CHANGED / PERIOD_SETTLEMENT_COMPLETED /
+//   POSSESSION_AWARDED / PLAY_WINDOW_ENDED / MOVEMENT_INTENT/
+//   MOVEMENT_OUTCOME（后者限运动任务，驻留任务到位即清算，不产生
+//   逐 tick 流水）。事件串进入本哈希，观测事实扩充必然改变哈希；
+//   纯物理轨迹（球员/球位置、球态、比分、时钟）经对照探针逐位一致
+//   （.work 临时诊断，v81 前后三个种子完全相同），行为本身未变。
+// v82 0xfaf86639f7554d88 - 回合开始原因事实补发（validation.md Q01 转移矩阵
+//   的引擎侧事实源）：TransitionOrigin 新增 made_field_goal / made_free_throw /
+//   violation / out_of_bounds 四变体；start_inbound_transition 按上一回合终结
+//   原因（emit_possession_summary 入档）发射对应 TRANSITION_STARTED，罚球命中
+//   的发球显式覆盖为 made_free_throw。连带语义修正：TRANSITION_STARTED 事件
+//   处理现在会为进球/违例/出界后的发球设置 possession_ctx.transition_start_time
+//   （此前只有 steal/drb/loose 三类转移设置），回合转移计时起点覆盖全部转移
+//   情形——决策时序与回合时长统计随之变化，属有依据的行为变更。
+//   MECH 扰动入口新增速度钳制（调小速度属性时把当前速度钳回新上限，防扰动
+//   瞬间击穿物理快崩断言），纯模拟路径不经过该入口。
+// v83 0x9d6f7fac0c68d530 - 分布偏差修正 r38 第一轮（全部走 GameRules 数据通道
+//   与决策候选生成，validation 20 场判定的引擎侧工作清单）：
+//   (a) BaseRates 四区命中基准反推校准（rim 0.32→0.706 / near 0.29→0.570 /
+//       mid 0.265→0.385 / 3pt 0.33→0.325），使出场平均 make_probability 落入
+//       注册参照带；(b) catch_radius_base_ft 2.0→2.8（接球范围罩住跑位预估
+//       噪声，失误率主源）；(c) poke 尝试频率与成功上限回调；(d) 前场板收球人
+//       放开 Pass 候选（二次出手率由效用决定）。RESOLVED 命中结算的
+//       last_closed_shot_id 回退属于事件信封修复，也参与本哈希。
+// v84 0x4166fe10d6b1eb39 - r38 第三轮命中基准校准（批量口径反推）：10 场批量
+//   实测出场 rim 0.748/near 0.450/mid 0.337/three 0.361（二轮 base 的批量口径
+//   净修正与单场不同），base 取 rim 0.556 / near 0.563 / mid 0.446。
+// v85 0x7e9786d4315192fe - r38 第四轮命中基准校准 + 三分效用：三分份额 0.348→0.390
+//   （three_point_utility_multiplier 0.65→0.80，对齐 0.395）；base 按 2 场批量口径
+//   净修正反推（rim 0.385 / near 0.489 / mid 0.440 / 3pt 0.292）。命中率对效用
+//   形状高度敏感（份额变化改变出手构成的 skill/contest 加权），迭代以批量口径
+//   收敛，见 implementation.md r38 批次。
+// v86 0x007a788a8140db28 - r38 五轮：3pt base 0.292→0.360（10 场口径出场 3P%
+//   0.298 vs 参照 0.366，净修正 +0.006 反推）。
+// v87 0x701a944023b6f35c - r40 回合节奏 A/B：pass_base 1.15→1.30（传球数向
+//   真实 3.0/回合靠近，回合拉长，TOV 率 13.2% 精确对齐 13.4%——poke 摊薄效应）；
+//   urgency_shoot_boost 1.20→1.05（紧迫出手早终结占比下降）。dwell_decay_max
+//   0.85→0.50 的对照实验方向相反（回合更多更短），确认该参数非单调，保持 0.85。
+// v88 0xd3af32987dd45491 - r40 二步：3pt base 0.360→0.319（pass_base 提额后
+//   空位接球投增多使出场 3P% 0.407 超参照 0.366，批量口径净修正回调）。
+// v89 0xde6d1606f401d28d - r40 三步：defender_speed_ratio 0.73→0.85（退防比
+//   持球推进快——真实退防是无球直线跑；后场纠缠减少，8 秒违例 8→6/场）。
+//   carrier_speed_ratio 0.88 的对照实验无效果（推进瓶颈是决策周期重设目标
+//   的走走停停，非巡航速度），已回滚。8 秒违例剩余 6/场 归入 r40 遗留清单
+//   （根源：后场推进的移动语义被决策周期切碎，需要专门实验周期）。
+// v90 0xabd027ef038512c2 - r41 poke 球速 14→9 的实验：单场口径 poke 丢权下降，
+//   但 10 场批量口径 TOV 持平且 C01 Q4 压哨三分 0.441→0.107 严重恶化（回合结构
+//   连带），已回滚。判据：复合指标（TOV/C01）的改动以批量口径为准，单场噪声 ±3%
+//   会误导。catch_radius 3.4 对照同样不可分辨，保持 2.8。
+// v91 0x0adb91d6dd6c3411 - r42 篮板分工：RimRebound 状态下防守方只派距落点
+//   最近的 2 人参与争抢（此前 25ft 内全员冲抢，实测 10.5 人/miss，OREB 率被
+//   人数堆高到 0.32 vs 真实 0.250）。冲抢密度降到 ~7 人/miss，配合 boxout
+//   base 0.10→0.30 向真实 OREB 分工收敛。
+// v92 0xf025d05997c54be3 - r45 篮板分工方向修正：冲抢人数闸门从防守方
+//   （硬编码 take(2)）移到进攻方（TacticalRules.offensive_crash_max = 3，走
+//   规则通道）——OREB 偏高的根源是攻方全员冲抢堆高概率，防守卡位是本职
+//   不应设限。防守恢复全员 25ft 内争抢资格，归属由距离与 boxout 自然决定。
+//   同批：travel_enforcement 执法开关字段预留（R5 脚步状态机设计）。
+// v93 0xc11d681856a8cb09 - r45 篮板落点物理修正：筐沿恢复系数 flush 0.62→0.45
+//   / graze 0.35→0.25（水平收缩 27%）。实测落点 100% 落在进攻方篮筐 15ft 内
+//   （此前 92/93 弹到 15ft 外——长篮板散满半场使外线乱战取代篮下卡位，OREB
+//   被攻方外线捡球堆高）。单场 OREB 率 24.5% vs 真实 25%。
+// v94 0xa6bad08321189576 - r47 出手效用结构升级（三分份额治理结构项）：
+//   (a) 出手位置语义一致化——Shoot 效用的 distance_factor 与长两分惩罚改用
+//       候选出手点 from_pos 而非持球人当前位置（r44 遗留的语义不一致，
+//       pull-up/stepback 候选因此从未按真实出手距离计价）；
+//   (b) 新增 pull-up 中距离候选（长两分区持球时向篮筐推进
+//       pullup_midrange_step_ft=3ft 急停跳投，与退线三分对偶）；
+//   (c) 期望分地形项（shot_ep_rim/near/mid/three=1.19/0.79/0.79/1.08，
+//       权重 0.35 锚 0.9，走规则通道独立于结算 BaseRates 可校准）；
+//   (d) 近框区 openness 双重惩罚解除（shot_openness_interior_scale=0.5）；
+//   (e) three_point_utility_multiplier 0.80→0.65（结构项到位后的重新定标）；
+//   (f) midrange_utility_bonus 语义收窄为长两分惩罚（只挂 20-23.75ft，
+//       不再整体惩罚 Mid 区）。10 场批：3PA 份额 0.532→0.446、ORB 0.334→0.294、
+//       FG% 0.443→0.463、C04 0.919→0.866，defect 39→36。
+// v95 0xbdeb50c3a79bcecb - r48 后场推进移动语义（8 秒违例治理）：
+//   (a) Advance 持久化：已激活推进时校验既有目标仍在推进方向，被槽位/
+//       接球跑位覆盖成身后/原地时才重设（消除每周期重新加速的
+//       walk-stop-walk）；推进期持球人跳过战术槽位重置；
+//   (b) 推进走廊：advance_target 的 y 向场地中央收拢（12-38ft），
+//       沿边线推进被边线+追防两面夹死（实测均速 2.5 ft/s）；
+//   (c) 接应机制：推进期最近两名队友回撤中路接应点（backcourt
+//       pressure release），持球人不再孤立被包夹；
+//   (d) 后场收球执法豁免：Drive→Held 是「推进结束转重组」，后场重组
+//       后再运球合法——收球闸只约束前场（否则推进义务被结构性堵死）；
+//   (e) 暂停解冻 bug 修复：暂停打断 ControlTransfer 冻结等待后接球人
+//       永久 is_locked_kinematics（速度 0/target=自身，实测 ADV-KEEP
+//       speed=0.00 124 次/场）——execute_timeout 全场解冻 + 新增
+//       PhysicsWorld::unlock_all_players；
+//   (f) 回合开始原因推导统一 resolve_inbound_origin（发球路径与暂停
+//       恢复路径共用，暂停恢复帧补 publish_events，不再伪造
+//       origin=timeout / 丢失违例转移，validation_integration 19/19）。
+//   10 场批：TOV 0.204→0.197、C01 0.273→0.341、defect 36→32。
+// v96 0x18717106de9b12ff - ui 分支合并（17 个提交与 main r47-r50 的复合）：
+//   ui 侧并入：发球接应位（inbound_safety）、切球不应期
+//   （poke_recovery_seconds 1.5s）、跳球点拍规则通道
+//   （tip_off_tap_speed_ftps）、地板球滚动摩擦、APF 斥力侧向偏转投影、
+//   打板竖直弹起、决策温度校准、kickout 度量、debug-ui 重构（投篮热区/
+//   高阶数据/原始帧检视）。
+//   合并裁决：ui 的造犯规修正（Drive 载荷预写 fouler_id/is_made）依赖
+//   「出手时刻裁定」的球态哲学，与 main 的「结果权交回过程」（v78）
+//   互斥——该特性待在 main 结算架构下重新实现；poke 标定保留 main 的
+//   1.2/0.11（r38 批量校准）+ ui 的不应期字段。
+//   复合基线实测重冻结。
+// v97 0x21a35155c80c6e6b - R1 连续飞行碰撞 + R5 走步/二次运球事实链：
+//   (a) Shot 飞行逐 tick 扫掠篮筐/篮板首次接触（collision_checked_until
+//       区间追踪），触筐/触板按实际接触点与入射速度反弹，干净命中在
+//       筐平面结算，事件链保持 SHOT_RELEASE → SHOT_TRAJECTORY_ARRIVAL
+//       → SHOT_CONTACT/SCORE/SHOT_MISS/REBOUND；
+//   (b) 步态模型成为一等物理状态（双脚位置 + 摆动脚，接地点事实由
+//       落地发射），收球在投篮/传球起手时确立（DRIBBLE_GATHERED 事件、
+//       轴心脚与两步预算），球离手时经写入口清除；
+//   (c) 动作窗口的运动学锁定收窄到 Execution/FollowThrough：
+//       Preparation 蓄势段恢复移动（投篮收步、跑位逼近），投篮起手
+//       同时设停止目标；
+//   (d) 违例哨作废未离手的挂起出手（与犯规哨同口径）。
+const GOLDEN_SEED42_2000: u64 = 0x21a35155c80c6e6b;
+// ―― 以下为 ui 分支并行演化记录（与 v79 旧合并之后的独立批次，合并时
+//       以 v95 为基线整体复合，复合基线见下方 const 重登记）――
+// v82 0xd58e4eb28c1c6cb3 - 决策温度校准（DecisionRules.temperature
+//       0.30→0.12）：明显优势局面（效用差 ≥0.6）的选择命中率
+//       73%→99%，全场最高效用动作命中率 58.9%→80.8%；统计基线门
+//       全绿（回合节奏/得分结构在容差带内）。
+// v83 0x979efe0eefff2703 - 发球接应位（inbound_safety_distance_ft 8.0）：
+//       底线/边线发球时 handler_score 次高者回到发球员身边接球，
+//       23/23 发球窗口出现接应、17/17 完成短传（<15ft）；
+//       PASS_DROPPED 4→2，PASS_RECEIVED 51→66（seed42 1q）。
+// v84 0x0eb2375cab44b264 - APF 斥力侧向偏转投影（贴防只偏转不减速，
+//       消除「贴防=运动压制」的稳态对抗：球前场+后场≥3人
+//       63帧→4帧）+ 发球程序窗口重置（接应人不再被上一回合
+//       动作窗口锁住运动学 48 tick）。
+// v85 0x979b95e978e25f0c - 地板球滚动摩擦（loose_ball_rolling_decel_ftps2
+//       6.0，替换逐 tick 指数衰减）+ 收球距离竞争（松球收下按到球
+//       距离排序，不再按 id 字符串序）：poke 后争抢窗口 0.2s→
+//       0.5~2.1s、球滚 2~10ft，抢断/盖帽的球权转换有了真实的
+//       追逐与争抢表现。
+// v86 0x38afa7998fc1399f - 切球不应期（poke_recovery_seconds 1.5s）：
+//       持球人被拍掉球后的短时间内不再评估新切球，消除「松球
+//       滚回被收起的下一秒立即连拍」（实测最小 poke 间隔 1s→2s）。
+// v87 0x9bb6b0a8117f4f8a - 切球率对真实标定（poke_attempt_rate_per_sec
+//       2.2→0.8）：松球物理修正后贴身时间大增，原参数使拍球事件
+//       达每场约 80 次（真实 NBA 全场地板球约 24~30），球落地
+//       场景过密。标定后 1q 6 次（全场约 24），LOOSE_BALL 帧占比
+//       3.0%→1.9%。
+// v88 0xddc4aedb5e3c4613 - 跳球点拍初速 28→13 ft/s：点拍是「轻拨
+//       给接应队友」，28 ft/s 使球超出收球速度门、穿过候在中圈外
+//       的后卫无人能收，一路滚 45 ft 到对方底线深处（开场球直奔
+//       后场的根因）。13 ft/s 下球飞 ~17 ft 在接应人身前落地，
+//       反弹减速后被他收下，第一攻从自家后场从容展开。
+// v89 0xfdf2628c3f45bd5a - 沉退方案护筐锚定（schemes.json 通道
+//       drop_low_man_rim_gain，man 1.0 / drop 2.6 / zone 2.2）：
+//       drop coverage 的低位大个子护筐引力增强、整回合缩在护框
+//       纵深内不跟出去。此前 drop 与盯人的防守几何差仅 0.002 ft
+//       （装饰参数），defense_effect 门 3 抓获。
+// v90 0x566a37f04015a1a5 - 跳球点拍走规则通道（tip_off_tap_speed_ftps
+//       等四字段）+ 点拍目标动态化为「本方除跳球员外离中圈最近的
+//       队友」：不再拍向固定空位坐标，接应人由跳球站位涌现。
+// v91 0x02e57b3586c7d5bb - 区位价值修正三件套：
+//       ① three_point_utility_multiplier 0.68→1.10：旧「折损」语义
+//         使三分效用只有长两分的 61%、区位排序与期望得分倒挂
+//         （长两分 26%，真实 13%）；1.10 让三分效用与长两分打平，
+//         区位选择由干扰与空位决定。
+//       ② 冲框折扣量纲对齐：篮下目标的拥堵从「12ft 排斥半径内
+//         平滑因子累计」（常年 2~3）改为「贴身协防人数计数」
+//         （与 bias 1.2 同量纲），突破停滞率 87%→52%。
+//       ③ kickout 触发度量修正：paint_crowding 是以篮筐为圆心的
+//         进攻方队友密度（五外恒低，kickout 永不触发），改为
+//         lane_openness（持球人周围防守密度）——突破路线被封
+//         才是突分的真实理由。
+//       连带：drive_early_finish_dist_ft 4.5→6.0（覆盖上篮起跳点，
+//       篮下出手 8%→16%）。
+// v92 0x27775a89122ff669 - 造罚球收益进入突破决策与事实流：
+//       ① DecisionRules.drive_foul_draw_weight 0.35：突破效用加
+//         「目标越接近篮筐 × 终结能力」的造犯期望项——冲框的
+//         收益不止 2 分出手，被犯即 2 罚且不占出手。
+//       ② foul_on_drive_rate 0.22→0.44 + 突破犯规发布时机移到
+//         缠斗时刻（tau 0.45）：旧实现在终点 finish 块内发布，
+//         40% 分流 + 停滞的突破把掷骰结果静默吞掉（一场 141 次
+//         突破 0 次突破犯规）。标定后突破犯规率 5%→10~15%
+//         （真实 13~15%）。
+//       ③ 连带 three_point_utility_multiplier 1.10→1.12：造犯收益
+//         抬高突破/篮下产出后 3P% 边缘越界 0.2pp，微推三分选择
+//         回带。总分中位 188→217（真实 226），3P% 35.9（真实 36）。
 /// 球权类不变量（两人持球 / 球人分离 / 持球者离场）是最易在状态机重构中
 /// 被破坏的约束；这里在多个种子上跑足量 tick，断言引擎在每 tick 的
 /// `last_tick_violations` 始终为空。

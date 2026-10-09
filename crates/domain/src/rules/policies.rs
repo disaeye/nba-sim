@@ -82,7 +82,9 @@ impl Default for CapabilityCurveRules {
         Self {
             risk_tolerance_base: 0.80,
             risk_tolerance_gain: 0.35,
-            boxout_bonus_base: 0.10,
+            // r42：0.10→0.30。OREB 率 0.316 vs 真实 0.250（攻方争抢偏强），
+            // 提防守卡位保底加成让防守篮板归属向真实收敛。
+            boxout_bonus_base: 0.30,
             boxout_bonus_primary_gain: 0.15,
             boxout_bonus_secondary_gain: 0.10,
             putback_bias_base: 0.05,
@@ -110,6 +112,13 @@ impl Default for CapabilityCurveRules {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ModulationRules {
+    /// 暂停触发：分差达到该值（落后方）且比赛时钟低于 `timeout_clock_seconds`
+    /// 时教练叫暂停（r46）。
+    pub timeout_trailing_margin: i32,
+    /// 暂停触发的比赛时钟阈值（秒）：节剩时低于此值才评估叫暂停。
+    pub timeout_clock_seconds: f32,
+    /// 每队每场暂停总数上限（NBA 常规暂停简化口径）。
+    pub timeouts_per_team: u32,
     pub hot_hand_makes: u32,
     pub frustrated_misses: u32,
     pub frustrated_turnovers: u32,
@@ -160,6 +169,11 @@ pub struct ModulationRules {
 impl Default for ModulationRules {
     fn default() -> Self {
         Self {
+            // r45 实测 6-10 次/场偏多（真实 4-6）：收紧窗口到节剩 <4 分钟、
+            // 分差 ≥10。
+            timeout_trailing_margin: 10,
+            timeout_clock_seconds: 240.0,
+            timeouts_per_team: 6,
             hot_hand_makes: 2,
             frustrated_misses: 3,
             frustrated_turnovers: 2,
@@ -425,6 +439,20 @@ pub struct TacticalRules {
     /// 历史上引擎在战术层内联固定数值，现在收编进规则通道（charter C1），
     /// 可经规则档案覆盖与校准。
     pub rebound_chase_speed_ratio: f32,
+    /// 进攻方单次 miss 的冲抢人数上限（r45 修正）：真实 NBA 前场板由
+    /// 2-3 名球员冲抢、其余退防防快攻；此前全员冲抢（10.5 人/miss）把
+    /// OREB 率堆到 0.32 vs 真实 0.250。防守方不设上限——卡位是篮板
+    /// 防守的本职，参与资格由空间距离自然决定。
+    pub offensive_crash_max: usize,
+    /// 暂停时长（秒，比赛停表，模拟媒体暂停窗口；r46）。
+    pub timeout_duration_seconds: f32,
+    /// 后场接应（r48）：推进期最近 N 名队友回撤接应（0=禁用）；接应点
+    /// 在持球人后方 `backcourt_support_offset_ft`、横向分开，y 夹到
+    /// `backcourt_support_y_min/max`。
+    pub backcourt_support_count: usize,
+    pub backcourt_support_offset_ft: f32,
+    pub backcourt_support_y_min: f32,
+    pub backcourt_support_y_max: f32,
     /// 接球人向冻结点收敛的速度上限倍率（round-6 审计修复）。
     ///
     /// ## 为什么需要它
@@ -537,6 +565,10 @@ pub struct TacticalRules {
     ///
     /// 三个方案各自实例见 `DefensiveSchemeSpec`。
     pub defense: DefenseRules,
+    /// 运动意图到位半径（ft，validation.md §4.2）：实际位置进入目标点
+    /// 此半径内即登记 `completed`；超出且到期登记 `timed_out`。
+    /// 属几何测量协议参数，走规则通道（charter C1）。
+    pub arrival_radius_ft: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -555,6 +587,12 @@ pub struct DecisionRules {
     /// （五外站位）会让三分线外常年空位 —— 实测旧值 0.5 时三分线外
     /// 出手占 74%（真实 40%），空位加成压倒了命中率的距离衰减。
     pub shot_openness_weight: f32,
+    /// 近框区的 openness 权重乘数（r47）：篮下/近筐出手天然被贴防，
+    /// contest 的惩罚应主要体现在结算层 make 概率上——效用层再罚一次
+    /// 构成双重惩罚，系统性把份额推向空位三分（真实 NBA rim 出手
+    /// contest 高但仍是第二优出手）。rim/near 区的 open_bonus 乘以该值
+    /// （默认 0.5），mid/three 区保持 1.0。
+    pub shot_openness_interior_scale: f32,
     /// 出手效用中距离衰减的斜率：`distance_factor = 1 − dist / 参考`。
     /// 与参考距离共同决定「篮下 vs 三分」的效用落差，必须能覆盖
     /// 空位加成的量级，否则外线空位永远压倒篮下攻击。
@@ -583,7 +621,57 @@ pub struct DecisionRules {
     pub team_style_weight: f32,
     /// 中距离投篮候选的效用补偿，用于参考区间校准。
     pub midrange_utility_bonus: f32,
+    /// 退线三分的期望分差加成（r44）：三分与长两分的每次出手期望分差
+    /// （make3×3 − makeMid×2 ≈ +0.28），乘此系数进入三分候选效用，
+    /// 使「退一步投三分」在效用上胜过原地长两分。
+    pub stepback_three_expected_points_bonus: f32,
+    /// 进线中距离步长（ft，r47）：持球人在长两分区（20-23.75ft）时的
+    /// 对偶候选——运球向篮筐推进该步长后急停跳投（PullUp，ShotZone::Mid）。
+    /// 与退线三分对称：长两分被双向分流（退线三分 / 进线中距离），
+    /// 恢复真实 NBA 中距离 ~26% 的份额地形。0=禁用。
+    pub pullup_midrange_step_ft: f32,
+    /// 出手效用的期望分地形（r47，四区每次出手期望得分）：效用加项 =
+    /// weight × (zone_ep − ep_anchor)。默认取真实 NBA 四区期望地形
+    /// （rim≈1.19 / near≈0.79 / mid≈0.79 / three≈1.08——三分第二高、
+    /// 长两分与中距离同为谷底），独立于结算 BaseRates 可单独校准
+    /// （结算 base 含 contest/技能净修正，直接复用会双重计入）。
+    pub shot_ep_rim: f32,
+    pub shot_ep_near: f32,
+    pub shot_ep_mid: f32,
+    pub shot_ep_three: f32,
+    /// 期望分项的混合权重（r47）：0=纯距离/空位效用（旧行为），1=纯
+    /// 期望分地形。缩放后 ≈0.04-0.15 的效用差，翻转距离项逆差而保留
+    /// openness/skill 调制。
+    pub shot_expected_points_weight: f32,
+    /// 期望分锚（r47）：地形值减去该锚后进入效用，使「锚水平的出手」
+    /// 不加不减。
+    pub shot_ep_anchor: f32,
     /// 三分投篮效用折损系数（反映三分球相对近距离攻框的期望难度）。
+    /// 突破造罚球期望的效用权重：被犯即 2 罚（期望 ~1.5 PPP）且
+    /// 不占出手，纯 2 分模型系统性低估冲框。按目标接近篮筐的
+    /// 程度与终结能力给出加成。
+    pub drive_foul_draw_weight: f32,
+    /// 三分投篮效用乘数：与距离衰减因子共同决定「三分 vs 长两分」
+    /// 的效用排序。数值推导（shot_distance_reference_ft=47、
+    /// shot_distance_slope=0.70 时）：
+    ///   长两分 18ft 效用 = 0.45 + (1−18/47)×0.70 ≈ 0.88
+    ///   三分 24ft 效用 = M × (0.45 + (1−24/47)×0.70) ≈ M × 0.79
+    /// 期望得分比（三分 1.08 PPP / 长两分 0.94 PPP ≈ 1.15）与
+    /// 「篮下仍须显著优先」的双约束：M=1.28 时三分效用 1.01 逼近
+    /// 篮下 1.08，实测（seed42）三分占比暴涨到 65%、篮下暴跌到
+    /// 8%；M=1.18 时三分 59% 仍过热；M=1.10 时三分效用 0.87 与
+    /// 长两分 0.88 打平，出手分布最均衡（三分 59%、远两分 13%、
+    /// 篮下 16%）；M=1.02 让三分效用低于长两分后远两分回升到
+    /// 19%——证明剩余的三分占比由突分落点分布主导（kickout
+    /// 修复后突分空位三分是真实产物），效用乘数只负责把
+    /// 「长两分」压回正确区位。
+    /// 旧值 0.68 是「折损」语义（为压制外线空位 74% 的问题而设），
+    /// 使三分效用只有长两分的 61%、区位排序与期望得分倒挂——
+    /// 长两分 26%（真实 13%）的直接来源。
+    /// r47-r50 批量校准注记：ui 分支的 1.10-1.12 推导在没有期望分
+    /// 地形项的世界成立；r47 引入 shot_ep_* 地形项后，批量口径重新
+    /// 定标为 0.58（pull-up 中距离候选 + 位置语义一致化到位后的
+    /// 局部最优，见 golden v94 登记）。
     pub three_point_utility_multiplier: f32,
     /// 突破攻框基础效用权重。
     pub drive_base: f32,
@@ -678,25 +766,49 @@ impl Default for DecisionRules {
             // 攻框行为链缺失（见 gap.md G6a），效用参数无法闭合，
             // 故恢复 v66 原值，禁止再盲调这两个系数。
             shot_openness_weight: 0.50,
+            shot_openness_interior_scale: 0.5,
             shot_distance_slope: 0.70,
-            advance_urgency_boost: 3.0,
+            // r40：3.0→4.5（8 秒违例 5.3 次/场 vs 真实 ~0.3，后场推进
+            // 不够急是主源；提高推进紧迫度让 Dwell→Advance 更早切换）。
+            advance_urgency_boost: 4.5,
             advance_overshoot_ratio: 0.075,
             // round-16 调整（A/B 证据 §17.5）：0.82 → 1.15。
             // 0.82 == dwell_base 使传球与原地持球打平，n（传球/回合）
             // 卡在 1.45（真实 3.0）；1.15 使 n=2.46、失败率 15.0%→10.7%。
             // 代价 e 0.180→0.231，需配合拦截率标定（intercept_* 斜率）
             // 联合收敛到 e≈0.145。
-            pass_base: 1.15,
+            // r40 A/B：1.15→1.30（传球数向真实 3.0 靠近，同时拉长回合）。
+            pass_base: 1.30,
             dwell_base: 1.05,
             stamina_sensitivity: 0.5,
-            temperature: 0.30,
+            temperature: 0.12,
             pass_lead_time_seconds: 0.65,
             risk_aversion: 0.8,
             tendency_weight: 0.35,
             team_style_weight: 0.25,
-            midrange_utility_bonus: 0.15,
-            // 三分球效用折损，控制三分出手倾向。
-            three_point_utility_multiplier: 0.65,
+            // r44：0.15→-0.45。长两分（20-23.75ft）是现代 NBA 被淘汰的
+            // 出手（真实 ~10%，引擎 0.25）；旧加成反向激励了最差出手。
+            // 乘积项量级 ~0.3，惩罚需同量级才有效（-0.10 实测无感知）。
+            midrange_utility_bonus: -0.45,
+            // r47 四区期望地形（真实 NBA 公开口径）。混合权重暂定 0.35
+            //（w=1.0 实测把三分推到 0.662——期望分加项只推高已占优的区，
+            // 需要与 pull-up 中距离候选配合使用，见 pullup_midrange_step_ft）。
+            shot_ep_rim: 1.19,
+            shot_ep_near: 0.79,
+            shot_ep_mid: 0.79,
+            shot_ep_three: 1.08,
+            shot_expected_points_weight: 0.35,
+            shot_ep_anchor: 0.9,
+            // r47 进线中距离：默认 3ft（弧线外一步进线即到 20-21ft 中距离）。
+            pullup_midrange_step_ft: 3.0,
+            // 退线三分的期望分差加成（r44）：三分与长两分的每次出手期望分
+            // 差（make3×3 − makeMid×2 ≈ +0.28）。通道已建，数值待出手位置
+            // 语义一致化后启用（见 implementation.md 遗留清单）。
+            stepback_three_expected_points_bonus: 0.0,
+            // 三分效用折损：r38 0.65→0.80；r45 对照 0.80/0.74 各有胜负
+            // （份额-ORB-距离互相牵制），保持 0.80，份额治理归结构项。
+            three_point_utility_multiplier: 0.58,
+            drive_foul_draw_weight: 0.35,
             drive_base: 0.85,
             // 低位背身的量级：与 Drive 同阶，使两者在距篮较近时真正竞争。
             post_up_base: 3.0,
@@ -722,7 +834,9 @@ impl Default for DecisionRules {
             // 量级远小于 pass_base=0.82，无法在倒计时阶段真正压低组织/传球、
             // 抬高出手。实测提升后单场违例从 53 降至 ~70/3 场均值，TO% 由
             // 60% 降至 46%。三个系数仍全部走 GameRules 通道。
-            urgency_shoot_boost: 1.20,
+            // r40 A/B：倒计时出手加成 1.20→1.05（回合节奏收敛实验：
+            // 紧迫出手提前终结回合，占早终结的一部分）。
+            urgency_shoot_boost: 1.05,
             urgency_drive_boost: 0.60,
             urgency_pass_penalty: 0.30,
             urgency_dwell_penalty: 0.80,

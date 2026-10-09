@@ -27,6 +27,16 @@ impl MatchEngine {
     /// 持球越过中线，后场计时必须清零并从 0 重新计；前场判定复用领域层
     /// `is_backcourt` 的同一几何定义。
     pub(crate) fn clock_advance_phase(&mut self, dt: f32, was_tip_off: bool) {
+        let old_game_clock = self.clock.game_clock;
+        let old_shot_clock = self.clock.shot_clock;
+        let old_game_running = self.flow.game_flow.allows_live_ball_actions();
+        let old_shot_running = old_game_running
+            && !matches!(
+                self.ball.ball_state,
+                BallTrajectoryKind::Shot { .. }
+                    | BallTrajectoryKind::FreeThrow { .. }
+                    | BallTrajectoryKind::RimRebound { .. }
+            );
         // 节间休息（architecture.md §2：停表期间比赛/进攻钟不推进）：
         // 本阶段只累计节间计时，由 `dead_flow_phase` 的 sync 判定节间结束。
         if matches!(
@@ -211,6 +221,42 @@ impl MatchEngine {
             }
         }
         self.clock.period_break_elapsed = 0.0;
+        let game_running = self.flow.game_flow.allows_live_ball_actions();
+        let shot_running = game_running
+            && !matches!(
+                self.ball.ball_state,
+                BallTrajectoryKind::Shot { .. }
+                    | BallTrajectoryKind::FreeThrow { .. }
+                    | BallTrajectoryKind::RimRebound { .. }
+            );
+        let game_clock_reset = self.clock.game_clock > old_game_clock;
+        let shot_clock_reset = self.clock.shot_clock > old_shot_clock;
+        let game_clock_expired = old_game_clock > 0.0 && self.clock.game_clock == 0.0;
+        let shot_clock_expired = old_shot_clock > 0.0 && self.clock.shot_clock == 0.0;
+        if game_clock_reset
+            || shot_clock_reset
+            || game_clock_expired
+            || shot_clock_expired
+            || old_game_running != game_running
+            || old_shot_running != shot_running
+        {
+            self.journal
+                .pending_events
+                .push(nba_domain::GameEvent::ClockChanged {
+                    kind: if game_clock_reset || shot_clock_reset {
+                        "clock_reset".to_string()
+                    } else if game_clock_expired || shot_clock_expired {
+                        "clock_expired".to_string()
+                    } else {
+                        "clock_running_changed".to_string()
+                    },
+                    game_clock_seconds: Some(self.clock.game_clock),
+                    shot_clock_seconds: Some(self.clock.shot_clock),
+                    game_clock_running: game_running,
+                    shot_clock_running: shot_running,
+                    cause_event_id: None,
+                });
+        }
     }
 
     /// 跳球阶段：可配置时长的死球表现阶段，零时长在同一固定步内直接转换。
@@ -260,11 +306,39 @@ impl MatchEngine {
             };
             let center_x = self.config.rules.court.width_ft * 0.5;
             let center_y = self.config.rules.court.height_ft * 0.5;
-            let tap_target = if winner_is_home {
-                Vec2::new(center_x - 14.0, center_y)
-            } else {
-                Vec2::new(center_x + 14.0, center_y)
+            // 点拍目标是**接应队友本身**（本方除跳球员外离中圈最近
+            // 的球员），不是固定空位：真实跳球是中锋把球拨到自己
+            // 队友候球的位置，球到人身旁即被收下。旧实现拍向
+            // 「中圈向本方后场 14 ft 的坐标」，若队友站位偏移或球速
+            // 超过收球门，球落无人区一路滚向底线（实测 seed42 开场
+            // 球滚 45 ft 到底线的根因之一）。
+            let tap_receiver = {
+                let my_team = if winner_is_home { "home" } else { "away" };
+                let center = Vec2::new(center_x, center_y);
+                let mut best: Option<(&str, f32)> = None;
+                for p in self.systems.physics.get_players().values() {
+                    if p.team != my_team || !p.on_court {
+                        continue;
+                    }
+                    let is_jumper = p.id == *home_jumper_id || p.id == *away_jumper_id;
+                    if is_jumper {
+                        continue;
+                    }
+                    let d = (p.pos_ft - center).length();
+                    if best.is_none_or(|(_, bd)| d < bd) {
+                        best = Some((p.id.as_str(), d));
+                    }
+                }
+                best.expect("tip-off requires an on-court non-jumper teammate")
+                    .0
+                    .to_string()
             };
+            let tap_target = self
+                .systems
+                .physics
+                .get_player(&tap_receiver)
+                .map(|p| p.pos_ft)
+                .unwrap_or_else(|| panic!("tip-off receiver `{tap_receiver}` is absent"));
             self.set_game_flow(GameFlowState::LiveBall);
             if let Some(p) = self.systems.physics.get_player_mut(&home_jumper_id) {
                 p.target_pos_ft = Vec2::new(center_x - 3.0, center_y);
@@ -273,11 +347,16 @@ impl MatchEngine {
                 p.target_pos_ft = Vec2::new(center_x + 3.0, center_y);
             }
             let tap_dir = (tap_target - Vec2::new(center_x, center_y)).normalize();
+            // 初速/高度/竖直分量全部走规则通道
+            // （`tip_off_tap_*`）：初速标定必须与收球门同源——
+            // 球落到接应人身前反弹后的水平速度须低于收球速度门，
+            // 否则球穿过接应人滚向底线。
+            let tap = &self.config.rules;
             self.transition_ball_state(BallTrajectoryKind::LooseBall {
                 pos: Vec2::new(center_x, center_y),
-                vel: tap_dir * 28.0,
-                z: 5.5,
-                vel_z: 6.0,
+                vel: tap_dir * tap.tip_off_tap_speed_ftps,
+                z: tap.tip_off_tap_height_ft,
+                vel_z: tap.tip_off_tap_vel_z_ftps,
                 last_touch_team: if winner_is_home {
                     Possession::Home
                 } else {
@@ -288,7 +367,7 @@ impl MatchEngine {
             });
             self.journal.current_event_types = vec!["TIPOFF_SECURED".to_string()];
             self.journal.current_callout = Some(format!(
-                "{} 起跳率先触球，将球点拍向后场！第一攻展开！",
+                "{} 起跳率先触球，将球点拍给接应队友！第一攻展开！",
                 tapping_player
             ));
             return PhaseOutcome::ShortCircuit;
@@ -322,6 +401,51 @@ impl MatchEngine {
             self.flow.game_flow,
             GameFlowState::Timeout | GameFlowState::GameEnd
         ) {
+            // r46 暂停恢复：Timeout 持续固定 tick（模拟暂停时长，比赛时钟
+            // 停表）后转回发球程序。恢复路径复用 begin_inbound（球权按
+            // 暂停前归属，pending_inbound_origin = timeout 已在 execute_timeout
+            // 设定）。GameEnd 永不恢复。
+            if self.flow.game_flow == GameFlowState::Timeout {
+                self.clock.sub_phase_timer += self.config.rules.tick_seconds;
+                if self.clock.sub_phase_timer >= self.config.rules.tactics.timeout_duration_seconds
+                {
+                    self.transition_phase(SubPhase::Initiation);
+                    self.set_game_flow(GameFlowState::DeadBall);
+                    self.clock.last_decision_time = -self.config.rules.decision_interval_seconds;
+                    // 恢复到暂停前挂起的发球点（叫暂停发生在发球窗口）。
+                    // TRANSITION_STARTED.origin 消费挂起的回合终结类型
+                    // （violation/out_of_bounds/…——暂停不改变球权来源），
+                    // 无挂起类型时才是 Timeout；begin_inbound 不含 origin
+                    // 发射逻辑（那是 start_inbound_transition 的回合转移
+                    // 语义），故在此显式发射。
+                    if self.clock.pending_inbound_pos.is_none()
+                        && std::env::var("NBA_TIMEOUT_DEBUG").is_ok()
+                    {
+                        eprintln!(
+                            "⚠️ 暂停恢复无挂起发球点 origin={:?}",
+                            self.flow.pending_inbound_origin
+                        );
+                    }
+                    if let Some((baseline, ball_3d)) = self.clock.pending_inbound_pos.take() {
+                        let origin = self
+                            .resolve_inbound_origin()
+                            .unwrap_or(nba_domain::TransitionOrigin::Timeout);
+                        self.journal.pending_events.push(
+                            nba_domain::GameEvent::TransitionStarted {
+                                offense: self.flow.possession,
+                                origin,
+                            },
+                        );
+                        self.begin_inbound(baseline, ball_3d);
+                    }
+                    // 恢复帧必须携带本帧产生的 PlacementApplied 与
+                    // TransitionStarted——否则事件滞留 pending 被
+                    // begin_tick 清除，不变式在放置帧失去豁免依据、
+                    // 违例转移事实丢失（r47 注入测试实测 175/181）。
+                    self.publish_events();
+                    return PhaseOutcome::ShortCircuit;
+                }
+            }
             self.journal.current_event = None;
             self.journal.current_event_types.clear();
             self.journal.current_enforcements.clear();

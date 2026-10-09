@@ -441,6 +441,7 @@ mod tests {
             time: 0.0,
             kind: kind.to_string(),
             data: Some(data),
+            ..FrameEvent::new(0, 0.0, String::new())
         }
     }
 
@@ -448,6 +449,7 @@ mod tests {
         let frame = RenderFrame {
             t: 0.0,
             t_game: 0.0,
+            tick_index: 0,
             shot_clock: 24.0,
             period,
             phase: "LiveBall".to_string(),

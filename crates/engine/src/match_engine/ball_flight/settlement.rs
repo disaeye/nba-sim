@@ -21,8 +21,9 @@ impl MatchEngine {
         sid: String,
         h_pos: Vec2,
         s_pos: Vec2,
-        aim_pos: Vec2,
+        _aim_pos: Vec2,
         contact_position: Option<Vec2>,
+        contact_velocity: Option<glam::Vec3>,
         made: bool,
         three: bool,
         contest_intensity: f32,
@@ -125,35 +126,30 @@ impl MatchEngine {
                 // 越过筐」——出手 → 筐延长线穿过板面且弦外推 z
                 // 处于板高内 → 走打板路径（瞄准点为筐心，散射
                 // 由弦几何承载）；不足量仍是近筐沿反射。
-                let landing_spot = if let Some(contact_position) = contact_position {
-                    BallisticsEngine::compute_rebound_landing_from_contact(
-                        s_pos,
-                        h_pos,
-                        shot_flight_seconds,
-                        contact_position,
-                        &mut self.systems.rng,
-                        &self.config.rules,
-                    )
-                } else if BallisticsEngine::compute_backboard_contact_probe(
-                    s_pos,
-                    aim_pos,
-                    &self.config.rules,
-                ) {
-                    BallisticsEngine::compute_rebound_landing_bank(
-                        s_pos,
-                        aim_pos,
-                        shot_flight_seconds,
-                        &mut self.systems.rng,
-                        &self.config.rules,
-                    )
-                } else {
-                    BallisticsEngine::compute_rebound_landing(
+                let landing_spot = match (contact_position, contact_velocity) {
+                    (Some(position), Some(velocity)) => {
+                        BallisticsEngine::compute_rebound_landing_from_contact_velocity(
+                            s_pos,
+                            h_pos,
+                            velocity,
+                            position,
+                            &mut self.systems.rng,
+                            &self.config.rules,
+                        )
+                    }
+                    (Some(_), None) => {
+                        unreachable!("shot contact position requires its incoming velocity")
+                    }
+                    (None, Some(_)) => {
+                        unreachable!("shot contact velocity requires its contact position")
+                    }
+                    (None, None) => BallisticsEngine::compute_rebound_landing(
                         s_pos,
                         h_pos,
                         shot_flight_seconds,
                         &mut self.systems.rng,
                         &self.config.rules,
-                    )
+                    ),
                 };
                 // 反弹起点 = 触点（近筐沿或板面，第三步双通道）。
                 let rebound_from = (landing_spot.contact_pos, landing_spot.contact_z);

@@ -1,9 +1,11 @@
-# 规格与代码差距清单
+# 已归档周期核对 · 规格与代码差距清单（R1–R11 基线）
 
-> 文档类型：规格与代码差距基线，含本次 R1 和篮板来源定向复核。
+> 文档类型：已归档周期核对（历史只读）。当前活动任务见 `docs/dev/current/plan.md`。
+> 归档状态：R1/R2/R7/R8 复核结论已写入 `docs/dev/current/implementation.md` 对应节与 `docs/dev/status.md` 门矩阵；未闭合事实（六类账本缺口、零消费档案类型、防守 id 并存、动词步长常量等）已并入 `docs/dev/gap.md` 对应节。当前状态的规格映射以 `docs/dev/status.md` 门矩阵为准。
+> 文档类型（原文）：规格与代码差距基线，含本次 R1 和篮板来源定向复核。
 > 对照范围：`docs/basketball.md`、`docs/tactics.md`、`docs/attributes.md`、`docs/quality.md`、`docs/protocol.md`、`docs/architecture.md`。
 > 证据来源：工作区类型、事件、实现和已运行的定向测试。本清单不把测试名称存在当成行为已经符合规格。
-> 覆盖边界：42 条总量与原统计来自先前只读核对；本次复核 R1 相关代码、篮板来源和节间时间定向测试，没有逐行检查全部引擎实现。新的 16-seed 矩阵仍在运行，结果未取得。原数量不能视为本次复核后的最新总数。当前 R1–R11 的逐项验收范围见 [`implementation.md`](implementation.md)。
+> 覆盖边界（历史口径，当时语境）：42 条总量与原统计来自先前只读核对；本次复核 R1 相关代码、篮板来源和节间时间定向测试，没有逐行检查全部引擎实现。当时的 16-seed 矩阵在归档后已通过（`stats_baseline` 常驻门），R2/R3/R4 已闭合，当前状态以 `docs/dev/status.md` 门矩阵为准。
 
 状态含义：
 
@@ -82,7 +84,7 @@
 
 上表共 42 条：14 条 implemented，26 条 partial，2 条 missing。
 
-本次 R8 复核更新了球权与球运动正交、单一球态写入、阶段窄写权限、阶段调度与不变量五行（物理层持球旁路删除、唯一写通道守卫、阶段顺序重排与逐 step 校验回归）；剩余 missing 为 R9 的 `assign_matchups` 与 R10 的 `domain::scouting`。其余行仍为先前基线。`docs/dev/gap.md` §20 的勾选范围比本清单窄，两份文件同时保留。
+本次 R8 复核更新了球权与球运动正交、单一球态写入、阶段窄写权限、阶段调度与不变量五行（物理层持球旁路删除、唯一写通道守卫、阶段顺序重排与逐 step 校验回归）；剩余 missing 为 R9 的 `assign_matchups` 与 R10 的 `domain::scouting`。其余行仍为先前基线。归档后 `docs/dev/gap.md` §20 的勾选已同步补齐。
 
 ## 7. R1 与篮板来源复核
 

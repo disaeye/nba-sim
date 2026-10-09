@@ -88,6 +88,9 @@ fn player_state(rules: &GameRules) -> PlayerPhysicsState {
         out_of_bounds_placement: false,
         is_receiving_pass: false,
         is_driving_to_rim: false,
+        left_foot_pos: pos_ft,
+        right_foot_pos: pos_ft,
+        swing_foot: nba_domain::Foot::Left,
         boundary_cross_latched: false,
         attributes: PlayerAttributes::default(),
         tendencies: PlayerTendencies::default(),
@@ -108,6 +111,9 @@ fn decision_probabilities(
         ("away".to_string(), TeamTraits::default()),
     ]);
     let context = ConstraintContext {
+        gathered: false,
+        dribbled: false,
+        dribble_violation: None,
         physics: &physics,
         ball_pos: Vec2::new(
             rules.court.width_ft / f32::from(2u8),
@@ -171,6 +177,9 @@ fn putback_rebounder_has_no_non_shooting_dwell_candidate() {
         ("away".to_string(), TeamTraits::default()),
     ]);
     let context = ConstraintContext {
+        gathered: false,
+        dribbled: false,
+        dribble_violation: None,
         physics: &physics,
         ball_pos: rules.court.hoop_pos(true),
         possession_team: "home",

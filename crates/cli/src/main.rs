@@ -13,6 +13,7 @@ mod commands;
 pub(crate) use commands::batch::run_batch_simulation;
 pub(crate) use commands::convert::{run_evaluate, run_pbp_convert};
 pub(crate) use commands::simulate::{run_single_simulation, TempStreamGuard};
+pub(crate) use commands::validate::run_validate_batch;
 
 fn read_stream_text(path: &str) -> std::io::Result<String> {
     // 评判工件通常已经是内存字符串；这里保持同一语义，并按 gzip magic
@@ -558,6 +559,56 @@ fn main() -> std::io::Result<()> {
             i += 1;
         }
         return run_pbp_convert(input, out, league, version);
+    }
+
+    if args.len() > 1 && args[1] == "validate" {
+        let mut seed = 42u64;
+        let mut scope = "full".to_string();
+        let mut out_dir = "output/validation";
+        let mut games = 1u32;
+        let mut i = 2;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--seed" => {
+                    if let Some(v) = args.get(i + 1).and_then(|s| s.parse().ok()) {
+                        seed = v;
+                        i += 2;
+                        continue;
+                    }
+                    eprintln!("❌ validate --seed requires a value");
+                    std::process::exit(2);
+                }
+                "--games" => {
+                    if let Some(v) = args.get(i + 1).and_then(|s| s.parse().ok()) {
+                        games = v;
+                        i += 2;
+                        continue;
+                    }
+                    eprintln!("❌ validate --games requires a value");
+                    std::process::exit(2);
+                }
+                "--scope" => {
+                    if let Some(v) = args.get(i + 1) {
+                        scope = v.clone();
+                        i += 2;
+                        continue;
+                    }
+                    eprintln!("❌ validate --scope requires a value");
+                    std::process::exit(2);
+                }
+                "--out" => {
+                    if let Some(v) = args.get(i + 1) {
+                        out_dir = v.as_str();
+                        i += 2;
+                        continue;
+                    }
+                    eprintln!("❌ validate --out requires a value");
+                    std::process::exit(2);
+                }
+                _ => i += 1,
+            }
+        }
+        return run_validate_batch(seed, games, &scope, out_dir);
     }
 
     if args.len() > 1 && args[1] == "benchmark" {

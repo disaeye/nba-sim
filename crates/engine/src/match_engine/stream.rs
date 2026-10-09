@@ -92,13 +92,20 @@ pub fn frame_rules_from_game_rules(rules: &GameRules) -> FrameRules {
         hoop_right_x_ft: rules.court.hoop_right_x_ft,
         hoop_y_ft: rules.court.hoop_y_ft,
         player_radius_ft: rules.player_radius_ft,
+        body_contact_radius_ft: rules.body_contact_radius_ft,
         min_player_separation_ft: rules.min_player_separation_ft,
         separation_safety_margin_ft: rules.separation_safety_margin_ft,
         max_player_speed_ftps: rules.max_player_speed_ftps,
         max_player_accel_ftps2: rules.max_player_accel_ftps2,
         ball_max_speed_ftps: rules.ball_max_speed_ftps,
         three_point_distance_ft: rules.league.three_point_distance_ft,
-        shot_clock_seconds: rules.league.shot_clock_seconds,
+        // SHOT_CLOCK_BOUNDS 限值必须涵盖进攻篮板后的 14s 重置——否则
+        // 进攻篮板场景会被不变式误判越界（r47 实测：注入 shot_clock=3 的
+        // 测试中进攻篮板重置 14s 触发 SHOT_CLOCK_BOUNDS）。
+        shot_clock_seconds: rules
+            .league
+            .shot_clock_seconds
+            .max(rules.league.offensive_rebound_shot_clock_seconds),
         holder_leash_ft: rules.invariant_holder_leash_ft,
         speed_tolerance_ftps: rules.invariant_speed_tolerance_ftps,
         ball_z_max_ft: rules.ball_z_max_ft,
@@ -365,6 +372,7 @@ impl StreamPipeline {
             scope_desc,
             violations: all_violations,
             box_score: engine.ledger.box_score.clone(),
+            open_business_instances: engine.open_business_instances(),
             taxonomy,
         })
     }

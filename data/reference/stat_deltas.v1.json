@@ -1,0 +1,503 @@
+{
+ "version": "stat_deltas.v2",
+ "purpose": "STAT 族等效判定容差登记（validation.md §6.3：delta 由业务允许的最小实质差异与参考测量误差组成，模拟验收前登记并审核）",
+ "reference_manifest": {
+  "reference_id": "nba-shotdetail-pbp-2023-24",
+  "league": "NBA",
+  "rule_year": "2023-24（shotdetail）/ 2024-25（PBP 归档）",
+  "season": "双赛季：shotdetail 归档为 2023-24 NBA 常规赛（2023-10-24 ~ 2024-04-14）；nbastats 与 pbpstats 归档为 2024-25 NBA 常规赛（2024-10-22 ~ 2025-04-13）",
+  "source": "ismayc/shot-quality-study data/shotdetail_2023.tar.xz（底层为 NBA Stats ShotChartDetail 归档）",
+  "source_version": "commit f4001f944d4aba1ba63e3d70edb3d6135ba576fe",
+  "data_sha256": "303e71f967c199568b345cd73a75e595f1f99532cca3e6ce59afb286b63f840d",
+  "games": 1230,
+  "attempts": 218701,
+  "license": "公开归档（研究用途），底层数据 NBA.com 官方",
+  "reviewer": "pending",
+  "coordinate_mapping": "x = 88.75 - LOC_Y/10, y = 25 + LOC_X/10（进攻篮筐原点，十分之一英尺）",
+  "aggregate_unit": "team-game（每场比赛每队一条记录；bootstrap 以比赛为 cluster，同场两队同抽）",
+  "pbp_source": "shufinskiy/nba_data datasets/nbastats_2024.tar.xz（底层为 stats.nba.com PlayByPlay 归档）；commit e829d4678be1e075f99e5d41a1c5f97089be446b",
+  "pbp_data_sha256": "8f370da00ad0a6d4157921bd161d56ea32647a165d906516f2b36384a6a4989a",
+  "pbp_games": 1230,
+  "pbpstats_source": "shufinskiy/nba_data datasets/pbpstats_2024.tar.xz（底层为 pbpstats.com 逐回合 feed）",
+  "pbpstats_data_sha256": "3e124793cc7fbc279627926e207b634fd593e5b56a69b8d0324f21460913c5c6",
+  "pbpstats_possessions": 243768,
+  "pbpstats_dedup_note": "源文件含按事件分块的重复行（483,126 → 243,768），基准计算基于去重数据；去重口径与每场回合数（198.2，两队合计）和官方 Pace 基准交叉验证一致",
+  "season_split_note": "三个归档覆盖两个不同赛季且比赛集合不相交（GAME_ID 前缀 223 vs 224），跨归档比赛级关联不可行；各参照值严格在单归档内部计算，对照引擎时按指标口径分别引用对应赛季。"
+ },
+ "method": {
+  "statistic": "simulated - reference 差值（比例/均值），Wasserstein-1（分布），Total Variation（构成）",
+  "cluster": "game",
+  "bootstrap": "percentile，ChaCha8 种子化，B=2000",
+  "multiple_comparison": "Bonferroni，族规模 m = 必需统计叶项数（STAT 族 10 个叶项），同时置信水平 1 - 0.05/10 = 0.995；叶项内的多条指标（如 STAT-S01 的 6 条）共同消耗该叶项的一个检验名额——叶项判定为其全部已登记指标判定的合取，任一子指标超差即叶项超差；gate_role=diagnostic 的条目不计入 m",
+  "decision_rule": "置信区间完全位于允许范围内 Pass；无交集 Defect；部分重叠 InsufficientEvidence",
+  "possession_definition": "FGA - OREB + TOV + 0.44*FTA（NBA 标准估计式）",
+  "m_value": 10
+ },
+ "deltas": [
+  {
+   "criterion_id": "STAT-S01",
+   "metric": "team-game FG%（汇总分子分母）",
+   "statistic_kind": "mean_difference",
+   "reference_value": 0.4743,
+   "allowed_delta": 0.03,
+   "rationale": "赛季 12,000+ 出手的汇总命中率测量误差可忽略；0.03 约为球队单场命中率一档实质差距（2023-24 球队赛季 FG% 极差 0.47-0.50），低于该值的引擎差异不构成风格失真",
+   "data_coverage": "full"
+  },
+  {
+   "criterion_id": "STAT-S01",
+   "metric": "team-game 3PA/FGA 份额",
+   "statistic_kind": "mean_difference",
+   "reference_value": 0.3949,
+   "allowed_delta": 0.04,
+   "rationale": "三分占比是风格核心指标；0.04 相当于每场 100 次出手差 4 次三分，业务上已可感知但未限制合理战术变化；官方基准 0.395 与归档测量 0.3949 的差（0.0001）远小于容差",
+   "data_coverage": "full"
+  },
+  {
+   "criterion_id": "STAT-S01",
+   "metric": "team-game 3P%",
+   "statistic_kind": "mean_difference",
+   "reference_value": 0.3657,
+   "allowed_delta": 0.03,
+   "rationale": "三分命中率单场波动大（team-game p5-p95 为 0.208-0.500），0.03 为均值等效的保守下限；口径为归档 SHOT_TYPE 标记（与官方基准 0.395 对齐的同一口径；几何重算歧义的 22 处出手按 v3 双标记处理，不影响 SHOT_TYPE 口径的本条登记）",
+   "data_coverage": "full"
+  },
+  {
+   "criterion_id": "STAT-S01",
+   "metric": "四区出手份额构成（Rim/Near/Mid/Three）",
+   "statistic_kind": "total_variation",
+   "reference_value": {
+    "rim": 0.413,
+    "near": 0.134,
+    "mid": 0.134,
+    "three": 0.319
+   },
+   "allowed_delta": 0.08,
+   "rationale": "TV 距离对「批次合并构成 vs 参考合并构成」（§6.3：批次足够大时合并构成收敛到期望构成，参照值即 2460 个 team-game 构成的合并）；TV=0.08 的含义是总变差不超过 0.08——若集中于单区即该区偏差8 个百分点，均匀分布到四区则每区 2 个百分点；这是对位置选择失真的总量约束，不保证逐区各自上限（逐区上限由均值向量条目约束）",
+   "data_coverage": "full"
+  },
+  {
+   "criterion_id": "STAT-S01",
+   "metric": "四区各自 FG%（Rim/Near/Mid/Three）",
+   "statistic_kind": "mean_difference_vector",
+   "reference_value": {
+    "rim": 0.5976,
+    "near": 0.4428,
+    "mid": 0.3981,
+    "three": 0.3595
+   },
+   "allowed_delta": 0.05,
+   "rationale": "各区分开判定；允许带 0.05 显著大于 2460 样本均值的标准误（约 0.003-0.01，随各区分母变化），保留一档实质差异余量",
+   "data_coverage": "full"
+  },
+  {
+   "criterion_id": "STAT-S01",
+   "metric": "出手距离分布",
+   "statistic_kind": "wasserstein",
+   "unit": "feet",
+   "reference_quantiles": {
+    "p10": 1.0,
+    "p25": 3.0,
+    "p50": 12.0,
+    "p75": 25.0,
+    "p90": 26.0
+   },
+   "allowed_delta": 2.5,
+   "rationale": "W1 距离以英尺计；2.5 英尺约等于一个防守站位档次。与四区构成 TV 的关系：四区是距离分布按 0/8/16/23.75 边界的粗化，TV 约束区间质量分布，W1 增量约束区内集中度（如篮下出手集中在 2 尺 vs 6 尺的差异 TV 不可见）；两者同时超差指向同一位置选择缺陷，单侧超差时区分「区间迁移」与「区内畸变」",
+   "data_coverage": "full"
+  },
+  {
+   "criterion_id": "STAT-G01",
+   "metric": "team-game 投篮得分（不含罚球）",
+   "statistic_kind": "mean_difference",
+   "reference_value": 97.2,
+   "allowed_delta": 8.0,
+   "rationale": "投篮得分 = Σ(分区FG% × 分区FGA × 分值)，是 STAT-S01 各项的派生结果：S01 已分别约束各区效率与出手数量，G01 的独立诊断信息量低。保留为 Diagnostic（validation.md §1.3：Diagnostic 只说明观察事实，不阻断认证、不占 Bonferroni 族名额）——价值在「合成一致性」防御：防止各区偏差在联盟均值层面互相抵消后被逐区判定漏过。caveat 保留：模拟侧与真实侧同口径剔除罚球得分（只计 FGM×分值）",
+   "data_coverage": "full_with_caveat",
+   "caveat": "比较时模拟侧必须剔除罚球得分，只计 FGM×分值",
+   "gate_role": "diagnostic"
+  },
+  {
+   "criterion_id": "STAT-R01",
+   "metric": "FTA/FGA、FTM/FTA、每百回合犯规、投篮犯规占比、奖励阶段罚球",
+   "statistic_kind": "mean_difference_vector",
+   "data_coverage": "full",
+   "reference_value": {
+    "FTA/FGA": 0.2428,
+    "FTM/FTA": 0.7774,
+    "fouls_per100": 18.78
+   },
+   "allowed_delta": {
+    "FTA/FGA": 0.05,
+    "FTM/FTA": 0.04,
+    "fouls_per100": 3.5
+   },
+   "rationale": "FTA/FGA 0.05 约为每场 100 次出手差 5 次罚球，超出即吹罚风格失真；FTM/FTA 0.04 大于 2460 样本均值标准误（约 0.005）；每百回合犯规 3.5 次约为一档对抗强度差异。本条 full 覆盖范围限于已登记三项总量指标；叶项原文的「奖励阶段罚球」「投篮犯规占适用犯规比例」两项需要逐回合犯规账状态重建（bonus 进入时点分布），为 JOINT-C05 同源后续任务，完成前这两项子指标不参与该叶项判定"
+  },
+  {
+   "criterion_id": "STAT-T01",
+   "metric": "TOV/possessions 与失误原因份额",
+   "statistic_kind": "mean_difference_plus_composition",
+   "data_coverage": "full",
+   "reference_value": {
+    "tov_rate": 0.1335,
+    "reason_shares": {
+     "BadPass": 0.3603,
+     "LostBall": 0.2214,
+     "OutOfBoundsBadPass": 0.1177,
+     "OffensiveFoul": 0.0975,
+     "OutOfBoundsLostBall": 0.0579,
+     "ShotClock": 0.052,
+     "Travel": 0.0441,
+     "Other": 0.029,
+     "Backcourt": 0.0074,
+     "DiscontinueDribble": 0.0036,
+     "LaneViolation": 0.0032,
+     "DoubleDribble": 0.0022,
+     "KickBall": 0.0018,
+     "FTViolation": 0.0017
+    }
+   },
+   "allowed_delta": {
+    "tov_rate": 0.03,
+    "reason_shares_tv": 0.15
+   },
+   "rationale": "TOV 率 0.03 约为每百回合差 3 次失误，是一档控卫质量差异；原因构成 TV 0.15 允许引擎的过程标签映射后与规范类别有中等出入（validation.md §2.3：过程分类经版本化映射联结统计分类）；原因判定用 EVENTMSGACTIONTYPE 结构化编码（官方枚举：1=BadPass 2=LostBall 4=Travel 11=ShotClock 37=OffensiveFoul 45/40=OutOfBounds 变体等），不用描述文本匹配（文本把 OutOfBounds 变体并入 BadPass，使 BadPass 虚高至 0.51；结构化口径为 0.36）"
+  },
+  {
+   "criterion_id": "STAT-B01",
+   "metric": "ORB 率与前场篮板后出手率",
+   "statistic_kind": "mean_difference",
+   "data_coverage": "full",
+   "reference_value": {
+    "orb_pct": 0.2503,
+    "orb_pct_p5": 0.128,
+    "orb_pct_p95": 0.377
+   },
+   "allowed_delta": 0.04,
+   "rationale": "ORB% 0.04 约为每场差 1.8 个进攻篮板，低于该值的冲抢差异不构成风格失真；分母为对方球员防守篮板（球队篮板已排除——PBP 中无球员归属的「X Rebound」不计入），符合「可争抢篮板」冻结口径；末罚机会的可争抢判定未单独处理（末罚 miss 的篮板按普通 REBOUND 参与统计，量级约为 ORB% 的 +0.002，在容差内）；前场篮板后出手率需要 PBP 篮板→出手序列重建，为数据准备后续"
+  },
+  {
+   "criterion_id": "STAT-G02",
+   "metric": "回合数与 Pace",
+   "statistic_kind": "mean_difference",
+   "data_coverage": "full",
+   "reference_value": {
+    "pace": 100.614,
+    "poss_team_game_mean": 101.159,
+    "poss_p5": 92.68,
+    "poss_p95": 110.92
+   },
+   "allowed_delta": 6.0,
+   "rationale": "Pace 6 约为联盟最快与最慢单季球队差（2023-24 极差约 8），低于该值的节奏差在风格分布内；回合定义用 NBA 标准估计式FGA - OREB + TOV + 0.44×FTA；分母为比赛钟实际运行分钟（含 60 场加时，validation.md §6.2 口径：加时计入分母），未修正会虚高 0.5"
+  },
+  {
+   "criterion_id": "STAT-P01",
+   "metric": "每回合传球数与传球结果占比",
+   "statistic_kind": "blocked",
+   "reason_code": "reference_field_missing",
+   "missing_fields": [
+    "pass_counts",
+    "pass_outcomes"
+   ],
+   "data_requirement": "ShotChartDetail 无传球；PBP 无逐次传球。需 Second Spectrum 或 SkillScore 追踪数据（授权受限）；nba.v2 passes_bands 为先验带",
+   "data_coverage": "blocked"
+  },
+  {
+   "criterion_id": "STAT-M01",
+   "metric": "轨迹长度、速度分位数、到位时间、队友距离、禁区占用、防守距离",
+   "statistic_kind": "blocked",
+   "reason_code": "reference_field_missing",
+   "missing_fields": [
+    "tracking_positions"
+   ],
+   "data_requirement": "需要球员追踪数据（NBA Second Spectrum，公开渠道无完整赛季）；validation.md §6.1 允许以有限追踪比赛限定认证范围",
+   "data_coverage": "blocked"
+  },
+  {
+   "criterion_id": "STAT-I01",
+   "metric": "轮换深度分布与使用率分层（联盟聚合）",
+   "statistic_kind": "blocked",
+   "reason_code": "reference_pipeline_pending",
+   "data_requirement": "team-game 级分钟分配聚合。PBP 换人事件（SUB）可近似重建 stint，但开场五人无法从 PBP 可靠推断（实测）；NBA Stats BoxScoreTraditional 端点逐场提供分钟表（nba_api 可批量，受 stats.nba.com 访问条款约束）。重建脚本与来源合规确认后登记",
+   "data_coverage": "blocked",
+   "reference_unit": "联盟聚合分布，逐球员身份不参与比较（validation.md §6.1 相同适用人群：虚拟球员与真实球员不对齐，任何具体球员的分钟由其球队轮换策略决定，跨体系比较无意义）。比较对象：team-game 级的轮换深度形状（替补席最高分钟分布、主力/替补分钟断层结构）、使用率分层的效率条件曲线"
+  },
+  {
+   "criterion_id": "STAT-S02",
+   "metric": "出手来源、转换时间、二次出手时间、防守距离条件命中率",
+   "statistic_kind": "blocked",
+   "reason_code": "reference_field_missing",
+   "missing_fields": [
+    "shot_creation_source",
+    "transition_flag",
+    "closest_defender_distance"
+   ],
+   "data_requirement": "条件指标需要追踪数据或增强 PBP（防守距离公开渠道无完整来源）",
+   "data_coverage": "blocked"
+  },
+  {
+   "criterion_id": "JOINT-C01",
+   "metric": "比分差×剩余时间×进攻时钟条件下的节奏与出手",
+   "statistic_kind": "composition",
+   "data_coverage": "full",
+   "reference_value": {
+    "window": "Q4 remain<=180s, margin buckets by |score_margin|",
+    "league_three_share_by_margin": {
+     "0-5": {
+      "league_three_share": 0.4397,
+      "attempts": 4021
+     },
+     "6-10": {
+      "league_three_share": 0.4415,
+      "attempts": 2797
+     },
+     "10+": {
+      "league_three_share": 0.4505,
+      "attempts": 6573
+     }
+    },
+    "per_game_three_share_p5_p50_p95": {
+     "0-5": [
+      0.1936,
+      0.4286,
+      0.7143
+     ],
+     "6-10": [
+      0.1429,
+      0.4365,
+      0.7542
+     ],
+     "10+": [
+      0.1818,
+      0.4444,
+      0.75
+     ]
+    },
+    "total_attempts": 13391
+   },
+   "allowed_delta": {
+    "league_three_share_by_margin_abs": 0.06,
+    "per_game_three_share_band_w1": 0.08
+   },
+   "rationale": "nbastats_2024（2024-25 赛季，1,230 场）PBP 出手行重算：Q4 末 3 分钟窗口按 |比分差| 三桶的三分占比（league 汇总）与 per-game 分布分位带（每场窗口出手 ≥5 的比赛）。允许带取联盟级占比 0.06 绝对差与 per-game 带 W1 0.08；出手选择在关键窗口的合理性由桶间对比体现（防守收紧时占比应上升）。"
+  },
+  {
+   "criterion_id": "JOINT-C02",
+   "metric": "各转换类型的推进、回防人数、第一出手时间及结果",
+   "statistic_kind": "blocked",
+   "reason_code": "reference_field_missing",
+   "missing_fields": [
+    "transition_type_flag",
+    "defender_count"
+   ],
+   "data_requirement": "转换类型与回防人数需要追踪数据或增强 PBP；公开渠道无完整赛季来源",
+   "data_coverage": "blocked"
+  },
+  {
+   "criterion_id": "JOINT-C03",
+   "metric": "突破、外线空间、协防与传球出口联合分布",
+   "statistic_kind": "blocked",
+   "reason_code": "reference_field_missing",
+   "missing_fields": [
+    "drive_events",
+    "defender_positions",
+    "pass_networks"
+   ],
+   "data_requirement": "需要球员追踪数据（Second Spectrum）；validation.md §6.1 允许以有限追踪比赛限定认证范围",
+   "data_coverage": "blocked"
+  },
+  {
+   "criterion_id": "JOINT-C04",
+   "metric": "出手位置×球运动×卡位×前场篮板二次进攻",
+   "statistic_kind": "mean_difference_vector",
+   "data_coverage": "full",
+   "reference_value": {
+    "oreb_possession_share": 0.1171,
+    "second_attempt_share_after_oreb": 0.8115,
+    "note": "出手位置的边缘分布与 STAT-S01 四区共享参考；卡位与球运动需要追踪数据，保持受限范围。去重后 OREB 回合占比 0.1171 与官方 ORB%（~23.6%）÷回合中可争抢篮板场景占比一致（分母为全部回合，含直接得分/失误回合，故约为 ORB% 的一半）",
+    "source": "pbpstats_2024（OFFENSIVEREBOUNDS 与 FGA 字段，去重后）"
+   },
+   "allowed_delta": {
+    "oreb_possession_share": 0.05,
+    "second_attempt_share": 0.08
+   },
+   "rationale": "前场篮板回合占比 0.05 约为每场差 2 次；OREB 后完成二次出手的比例 0.08 约束二次进攻的终结质量"
+  },
+  {
+   "criterion_id": "JOINT-C05",
+   "metric": "犯规账期×奖励状态×对抗选择×罚球",
+   "statistic_kind": "composition",
+   "data_coverage": "full",
+   "reference_value": {
+    "definition": "首个 .PN（penalty）犯规行是该队该节第几次团队犯规",
+    "bonus_entry_foul_order_shares": {
+     "foul_1": 0.0007,
+     "foul_2": 0.0169,
+     "foul_3": 0.0454,
+     "foul_4": 0.1181,
+     "foul_5": 0.819
+    },
+    "team_periods_total": 9841,
+    "team_periods_with_bonus": 4563,
+    "team_periods_without_bonus_share": 0.5363
+   },
+   "allowed_delta": {
+    "bonus_entry_foul_order_shares_tv": 0.12,
+    "fouls_per100": 3.5
+   },
+   "rationale": "nbastats_2024 官方 .PN（penalty）标记重算：队节内首个 bonus 犯规的团队犯规序分布（5 次阈值占主体，4 次阈值约 12%），外加整节未进 bonus 的队节占比。允许带 TV 0.12 覆盖引擎固定阈值 5 与真实混合分布的差距；fouls_per100 允许带沿袭 STAT-R01。"
+  },
+  {
+   "criterion_id": "JOINT-T01",
+   "metric": "进攻体系×防守方案兼容组合条件指标",
+   "statistic_kind": "blocked",
+   "reason_code": "reference_field_missing",
+   "missing_fields": [
+    "play_type_labels",
+    "defense_scheme_labels"
+   ],
+   "data_requirement": "体系标签需要 NBA Stats PlayType（Synergy 授权）或人工标注；兼容矩阵的模拟侧条件指标已可测量，参考侧缺",
+   "data_coverage": "blocked"
+  },
+  {
+   "criterion_id": "JOINT-T02",
+   "metric": "Play 激活×机会生成×采用×结果×中断类型",
+   "statistic_kind": "blocked",
+   "reason_code": "reference_field_missing",
+   "missing_fields": [
+    "play_activation_labels"
+   ],
+   "data_requirement": "Play 激活在真实数据中不可观测（无公开标注）；该条按 validation.md §8 以模拟侧结构检查为主，参考条件分布登记为受限范围",
+   "data_coverage": "blocked"
+  },
+  {
+   "criterion_id": "JOINT-I01",
+   "metric": "换人后状态变化与阵容组合条件（联盟聚合）",
+   "statistic_kind": "blocked",
+   "reason_code": "reference_field_missing",
+   "data_requirement": "与 STAT-I01 同一来源任务（team-game 分钟聚合）",
+   "data_coverage": "blocked",
+   "reference_unit": "与 STAT-I01 同口径：按角色条件聚合的换人后效率变动结构（换人事件后 2 分钟攻防效率变动的联盟分布形状），逐球员/逐阵容身份不参与比较（§6.1 相同适用人群）"
+  },
+  {
+   "criterion_id": "JOINT-Q01",
+   "metric": "连续回合转移矩阵与 lag-1/lag-2 条件统计",
+   "statistic_kind": "transition_matrix",
+   "data_coverage": "full",
+   "reference_value": {
+    "start_reason_shares": {
+     "field_goal": 0.6388,
+     "free_throw": 0.1042,
+     "dead_ball": 0.0972,
+     "steal": 0.0809,
+     "timeout": 0.054,
+     "blocked_shot": 0.013,
+     "other": 0.012
+    },
+    "scope": "full 覆盖：回合开始原因边缘构成 TV + lag-1 转移矩阵逐格（同队相邻回合，行归一）。引擎自 r36 起直发 TRANSITION_STARTED.origin 事实（made_field_goal/made_free_throw/steal/violation/out_of_bounds/defensive_rebound/loose_ball_recovery），映射到注册七类：made_field_goal/defensive_rebound→field_goal、made_free_throw→free_throw、steal→steal、violation/out_of_bounds→dead_ball、loose_ball_recovery→other（引擎侧无法区分偷球/封盖上游）。矩阵逐格判定覆盖有事实的行（field_goal/free_throw/steal/dead_ball/other 五行），timeout（引擎无暂停实现）与 blocked_shot（封盖松球并入 other）两行保持零计数不参与判定，两侧口径可对齐前这些行 InsufficientEvidence。",
+    "source": "pbpstats_2024（pbpstats.com feed；源文件含按事件分块的重复行，以 (GAMEID,STARTTIME,ENDTIME,EVENTS) 去重后 243,768 回合）",
+    "transition_matrix": {
+     "field_goal": {
+      "field_goal": 0.6382,
+      "free_throw": 0.104,
+      "steal": 0.0796,
+      "dead_ball": 0.0908,
+      "timeout": 0.0625,
+      "blocked_shot": 0.0126,
+      "other": 0.0122
+     },
+     "free_throw": {
+      "field_goal": 0.6279,
+      "free_throw": 0.1087,
+      "steal": 0.084,
+      "dead_ball": 0.1013,
+      "timeout": 0.0537,
+      "blocked_shot": 0.0128,
+      "other": 0.0116
+     },
+     "steal": {
+      "field_goal": 0.6469,
+      "free_throw": 0.1072,
+      "steal": 0.0847,
+      "dead_ball": 0.094,
+      "timeout": 0.0425,
+      "blocked_shot": 0.0136,
+      "other": 0.0112
+     },
+     "dead_ball": {
+      "field_goal": 0.6599,
+      "free_throw": 0.0995,
+      "steal": 0.0853,
+      "dead_ball": 0.096,
+      "timeout": 0.0319,
+      "blocked_shot": 0.0153,
+      "other": 0.0121
+     },
+     "timeout": {
+      "field_goal": 0.6625,
+      "free_throw": 0.1163,
+      "steal": 0.0827,
+      "dead_ball": 0.091,
+      "timeout": 0.0218,
+      "blocked_shot": 0.0136,
+      "other": 0.0121
+     },
+     "blocked_shot": {
+      "field_goal": 0.6514,
+      "free_throw": 0.1012,
+      "steal": 0.0777,
+      "dead_ball": 0.0907,
+      "timeout": 0.0528,
+      "blocked_shot": 0.0162,
+      "other": 0.0099
+     },
+     "other": {
+      "field_goal": 0.6411,
+      "free_throw": 0.11,
+      "steal": 0.0882,
+      "dead_ball": 0.0896,
+      "timeout": 0.0498,
+      "blocked_shot": 0.0093,
+      "other": 0.0121
+     }
+    },
+    "transition_matrix_order": [
+     "field_goal",
+     "free_throw",
+     "steal",
+     "dead_ball",
+     "timeout",
+     "blocked_shot",
+     "other"
+    ],
+    "transition_row_counts": {
+     "field_goal": 154574,
+     "free_throw": 25010,
+     "steal": 19578,
+     "dead_ball": 23289,
+     "timeout": 12824,
+     "blocked_shot": 3141,
+     "other": 2892
+    }
+   },
+   "allowed_delta": {
+    "start_reason_shares_tv": 0.15,
+    "transition_matrix_cell_abs": 0.08,
+    "transition_matrix_row_tv": 0.12
+   },
+   "rationale": "pbpstats_2024（2024-25 赛季，去重 243,768 回合）同队相邻回合转移矩阵；逐格允许带 0.08 绝对差、整行 TV 0.12，与边缘构成允许带同档。"
+  }
+ ],
+ "audit": {
+  "status": "approved",
+  "registered_by": "validation 开发（数据准备任务执行者）",
+  "review_required": "",
+  "note": "approved 状态：full 条目进入正式运行配置。数据来源：shotdetail_2023（218,701 出手）、nbastats_2024 PBP（1,230 场逐事件）、pbpstats_2024（去重后 243,768 回合），全部 SHA-256 锁定、scripts/check_stat_deltas.py 与归档重算逐项比对通过。blocked 条目（追踪数据/体系标签）保持 InsufficientEvidence。pipeline_pending 条目（重建脚本待写）保持 InsufficientEvidence。",
+  "review_model": "不设独立签字关卡。判定值与容差在 debug-server 验证选项卡直接展示（逐条原因码、参照值、重建 vs 声明对账），使用者随时可见、发现登记错误可直接修正后重跑验证——以可见性替代事前签字"
+ },
+ "population_scope": {
+  "principle": "验证目标是「模拟产出的比赛形态是否像一场真实的 NBA 比赛」——统计分布、节奏、结构。球员是虚构的，能力与真实球员不对齐（同一球员跨联赛表现尚且不同，虚构球员不存在对齐基准），比较单位是联盟级聚合分布（如联盟平均 FG%、联盟回合数构成），模拟侧对应量为全部虚拟球员的合并分布，个体身份不进入比较",
+  "current_status": "in_scope_alliance_aggregate",
+  "requirement": "引擎虚拟球员的能力分布应大致覆盖真实联盟的水平区间（有强有弱、有高有低），使合并分布有可比性；不要求任何个体对齐任何真实球员"
+ }
+}

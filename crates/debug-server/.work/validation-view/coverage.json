@@ -1,0 +1,22 @@
+{
+  "total_scenarios": 22,
+  "triggered": 6,
+  "untriggered": [
+    "SC-SHOT-OPEN",
+    "SC-BLOCK-BEFORE",
+    "SC-BLOCK-AFTER",
+    "SC-AIRBALL",
+    "SC-REBOUND",
+    "SC-PASS-WHISTLE",
+    "SC-DRIVE",
+    "SC-SHOOTING-FOUL",
+    "SC-FT-PROGRAM",
+    "SC-CLOCK",
+    "SC-BUZZER",
+    "SC-SUBSTITUTION",
+    "SC-PLAY-END",
+    "SC-PLAY-COMPETE",
+    "SC-TRANSITION",
+    "SC-TECHNICAL"
+  ]
+}

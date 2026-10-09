@@ -35,6 +35,7 @@ use super::types::MatchBoxScore;
 /// 这四个字段都是构造时确定、运行期不改绑定的对象；它们的方法会被调用，但字段
 /// 本身不重新赋值（`rng` 与 `physics` 例外：前者在决策时换出再换回以避开借用
 /// 冲突，后者内部可变）。放在一起使「引擎依赖了哪些子系统」一眼可见。
+#[derive(Clone)]
 pub(crate) struct Systems {
     pub(crate) physics: PhysicsWorld,
     pub(crate) decision: DecisionSystem,
@@ -47,6 +48,7 @@ pub(crate) struct Systems {
 /// 这些字段是「引擎看过什么」的缓存：它们不决定比赛真相，但决定下一 tick 的
 /// 决策与渲染。放在一起使「观测值的生命周期是本 tick 还是跨 tick」成为局部问题
 /// （`active_windows` 与 `beaten_recovery_until` 跨 tick，其余逐 tick 重算）。
+#[derive(Clone)]
 pub(crate) struct RuntimeObservations {
     pub(crate) active_windows: HashMap<String, ActionTimeWindow>,
     pub(crate) defense_responsibilities: HashMap<String, nba_domain::DefenseResponsibility>,
@@ -70,6 +72,11 @@ pub(crate) struct RuntimeObservations {
     /// 被过防守人的恢复窗口截止时刻（round-19）：窗口内战术层不得重派。
     pub(crate) beaten_recovery_until: HashMap<String, f32>,
     pub(crate) advancing_player: Option<String>,
+    /// 最近一次切球成功的比赛时刻（秒）：poke 不应期判据。
+    pub(crate) last_poke_time: f32,
+    /// 探针计数器：突破发起与突破犯规（仅实证用）。
+    pub(crate) drive_initiated_counter: usize,
+    pub(crate) drive_foul_counter: usize,
     pub(crate) modulation: HashMap<String, PlayerModulationState>,
     /// 每名球员最近的出场/离场时刻（比赛时钟秒）：换人体息时间判据
     /// （gap.md G6）。在场者存出场时刻，替补存离场时刻。
@@ -94,6 +101,21 @@ pub(crate) struct RuntimeObservations {
     /// 的 `active_windows` 里 `JumpShot` 窗口同生共死——窗口消失而挂起
     /// 仍在属于状态机破缺，消费点就地 panic（fast-fail）。
     pub(crate) pending_shot_release: Option<PendingShotRelease>,
+    /// 在途运动意图（validation.md §3.3）：按球员登记的当前任务、目标点、
+    /// 起始 tick 与期限。到位/超时/替代时清算并发布 `MovementOutcome`。
+    pub(crate) movement_intents: HashMap<String, MovementIntentRecord>,
+}
+
+/// 一条在途运动意图的登记记录（引擎侧簿记，不是事件载荷）。
+#[derive(Debug, Clone)]
+pub(crate) struct MovementIntentRecord {
+    pub(crate) task: String,
+    pub(crate) target_pos: Vec2,
+    pub(crate) started_tick: u64,
+    pub(crate) deadline_ticks: u32,
+    pub(crate) revision: u32,
+    pub(crate) last_position: Vec2,
+    pub(crate) path_length_ft: f32,
 }
 
 /// 一次待释放的投篮快照（plan.md §6.2）。
@@ -138,6 +160,7 @@ pub(crate) struct PotentialFieldObservation {
     pub(crate) void_ratio: f32,
 }
 
+#[derive(Clone)]
 pub(crate) struct ActivePlay {
     pub(crate) spec: nba_domain::PlaySpec,
 }
@@ -165,6 +188,9 @@ impl RuntimeObservations {
             latest_contacts: Vec::new(),
             beaten_recovery_until: HashMap::new(),
             advancing_player: None,
+            last_poke_time: f32::NEG_INFINITY,
+            drive_initiated_counter: 0,
+            drive_foul_counter: 0,
             modulation,
             rotation_clock: HashMap::new(),
             substitutions_this_window: (0, 0),
@@ -172,6 +198,7 @@ impl RuntimeObservations {
             pending_foulout_sub: None,
             bench_depleted_reported: std::collections::HashSet::new(),
             pending_shot_release: None,
+            movement_intents: HashMap::new(),
         }
     }
 }
@@ -181,6 +208,7 @@ impl RuntimeObservations {
 /// 这些字段共同构成「比赛记分」这一事实：它们只在得分、犯规与罚球结算时写入，
 /// 并被帧投影与回合总结读取。放在一起使「改了记分就必须同步罚球程序」成为类型上
 /// 可见的耦合，并集中在一组声明里。
+#[derive(Clone)]
 pub(crate) struct ScoreLedger {
     pub(crate) home_score: u32,
     pub(crate) away_score: u32,
@@ -227,6 +255,7 @@ impl ScoreLedger {
 /// 这些字段回答「现在是谁的球、比赛处在哪个生命周期阶段、本次运行的要求完成了吗」：
 /// 它们只在球权转移、阶段迁移、作用域设置与得分/失误结算时写入。放在一起使
 /// 「球权一条事实」与「生命周期一条事实」的写入边界在类型上可见。
+#[derive(Clone)]
 pub(crate) struct GameFlow {
     /// 当前宏观生命周期（TipOff/LiveBall/DeadBall/FreeThrow/节末/终场）。
     pub(crate) game_flow: GameFlowState,
@@ -244,6 +273,12 @@ pub(crate) struct GameFlow {
     pub(crate) simulation_complete: bool,
     /// 发球基线位置（界外球的放置基准）。
     pub(crate) inbound_baseline: glam::Vec2,
+    /// 上一回合的终结原因（回合开始原因事实的依据）。
+    /// emit_possession_summary 是唯一写入点；start_inbound_transition 消费。
+    pub(crate) last_possession_terminal: Option<nba_domain::PossessionEndCause>,
+    /// 待发射的回合开始原因（罚球命中后的发球需要显式覆盖为
+    /// MadeFreeThrow——终结账本里罚球与投篮同为 Score）。
+    pub(crate) pending_inbound_origin: Option<nba_domain::TransitionOrigin>,
 }
 
 impl GameFlow {
@@ -259,6 +294,8 @@ impl GameFlow {
             completed_possessions: 0,
             simulation_complete: false,
             inbound_baseline,
+            last_possession_terminal: None,
+            pending_inbound_origin: None,
         }
     }
 }
@@ -269,6 +306,7 @@ impl GameFlow {
 /// 而非日志，`event_id` 全场单调且因果链只记真实因果关系。解说文案
 /// （`current_callout` / `current_intensity`）与事实同处一组，因为它们同属
 /// 「本 tick 对外呈现什么」，与比赛真相不同层。
+#[derive(Clone)]
 pub(crate) struct EventJournal {
     pub(crate) pending_events: Vec<nba_domain::GameEvent>,
     pub(crate) current_event: Option<String>,
@@ -290,6 +328,22 @@ pub(crate) struct EventJournal {
     /// 解说文案与强度（展示层，随事实同步更新）。
     pub(crate) current_callout: Option<String>,
     pub(crate) current_intensity: Option<String>,
+    /// 业务实例注册表（validation.md §3.2）：每个实例从创建到终结身份不变。
+    /// 键为实例类型（`shot`/`pass`/`loose_ball`/`foul_program`/`responsibility`/
+    /// `movement_intent`/`play_instance`），值为下一可用序号；格式如
+    /// `shot-000123`。发射点按类型取号并写进 FrameEvent，验证器据此
+    /// 把同一实例的全部事件配对。
+    pub(crate) business_id_counters: HashMap<&'static str, u64>,
+    /// 当前活动业务身份（validation.md §3.2 同一实例从创建到终结身份不变）：
+    /// 发射结果/终结事件时从这里读取仍活动的身份（如飞行中的 shot、
+    /// 在飞行的 pass、进行中的 foul_program）。
+    pub(crate) active_business: HashMap<String, String>,
+    /// 已创建但尚未终结的业务实例总数（trailer 的 `open_business_instances`）。
+    pub(crate) open_business_instances: u64,
+    /// 最近关闭的 shot 业务身份：进球回合的 SHOT_ATTEMPT_RESOLVED 派生
+    /// 发布晚于回合结算（PossessionSummary 关闭 "shot" 实例），命中结算
+    /// 的事件信封从这里回退取 shot_id。
+    pub(crate) last_closed_shot_id: Option<String>,
 }
 
 impl EventJournal {
@@ -305,6 +359,10 @@ impl EventJournal {
             event_sequence: 0,
             current_callout: None,
             current_intensity: None,
+            business_id_counters: HashMap::new(),
+            active_business: HashMap::new(),
+            open_business_instances: 0,
+            last_closed_shot_id: None,
         }
     }
 
@@ -323,6 +381,7 @@ impl EventJournal {
 /// 放在一起使「哪些配置是只读的」与「哪些是运行期派生到规则里的」显式可见：
 /// 后者是 charter C1 的例外路径，由 ADR-004 允许（防守方案必须成为因果输入），
 /// 其余字段在构造后只读。
+#[derive(Clone)]
 pub(crate) struct TeamConfig {
     pub(crate) rules: nba_domain::GameRules,
     /// 当前球权对应的进攻战术集（由 `sync_team_tactics` 每 tick 派生）。
@@ -350,6 +409,7 @@ pub(crate) struct TeamConfig {
 /// 这些字段共同决定「现在是什么时间、处于哪一节、哪个子阶段」：它们只在时钟
 /// 推进、阶段迁移与节间休息时写入，并被几乎所有阶段读取（136 处引用）。
 /// 放在一起使「推进时间」与「切换阶段」的职责边界在类型上可见。
+#[derive(Clone)]
 pub(crate) struct MatchClock {
     /// Monotonic fixed-step index used by semantic facts and replay consumers.
     pub(crate) tick_index: u64,
@@ -381,6 +441,14 @@ pub(crate) struct MatchClock {
     pub(crate) period_break_elapsed: f32,
     /// 上一次决策的时刻（用于决策间隔）。
     pub(crate) last_decision_time: f32,
+    /// 实际收球发生时待执行的走步或二次运球违例。
+    pub(crate) dribble_violation: Option<nba_decision::constraint::ViolationKind>,
+    pub(crate) dribble_control: HashMap<String, nba_domain::DribbleControlState>,
+    pub(crate) current_possession_turnover_player: Option<String>,
+    /// 每队已用暂停数 [home, away]（r46 暂停实现）。
+    pub(crate) timeouts_used: [u32; 2],
+    /// 暂停时挂起的发球点（恢复路径复用；暂停前回合终结时记录）。
+    pub(crate) pending_inbound_pos: Option<(glam::Vec2, (glam::Vec2, f32))>,
 }
 
 impl MatchClock {
@@ -404,6 +472,11 @@ impl MatchClock {
             frontcourt_established: false,
             frontcourt_seconds: f32::from(0u8),
             period_break_elapsed: 0.0,
+            dribble_control: HashMap::new(),
+            dribble_violation: None,
+            current_possession_turnover_player: None,
+            timeouts_used: [0, 0],
+            pending_inbound_pos: None,
             last_decision_time,
         }
     }
@@ -413,6 +486,7 @@ impl MatchClock {
 ///
 /// 这些字段只在回合开始时初始化、在回合进行中更新、在回合结束时重置。
 /// 放在一起使「一个回合的统计口径」集中在一处可读的事实里。
+#[derive(Clone)]
 pub(crate) struct PossessionContext {
     /// 当前回合开始时的游戏时钟（用于计算回合时长）。
     pub(crate) current_possession_start_clock: f32,
@@ -533,6 +607,7 @@ pub(crate) struct PassContactState {
     pub(crate) duration_seconds: f32,
 }
 
+#[derive(Clone)]
 pub(crate) struct BallRuntime {
     /// 球的三维位置（ft）。位置的唯一写入点是弹道采样与状态转移。
     pub(crate) ball_pos_3d: (glam::Vec2, f32),
@@ -611,6 +686,7 @@ impl BallRuntime {
 }
 
 /// 校验账本：每 tick 的不变量校验器与最近一次运行产生的违反。
+#[derive(Clone)]
 pub(crate) struct AuditTrail {
     /// Per-tick invariant checker; validates every emitted frame against the
     /// physical/basketball rules that must always hold, regardless of tactics.

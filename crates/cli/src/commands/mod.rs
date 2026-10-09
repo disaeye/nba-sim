@@ -7,3 +7,4 @@
 pub(crate) mod batch;
 pub(crate) mod convert;
 pub(crate) mod simulate;
+pub(crate) mod validate;

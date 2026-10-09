@@ -1,5 +1,19 @@
-# Play 战术系统与势能场优化 · 执行编排
+# 已归档周期编排 · Play 战术系统与势能场优化
 
+> 文档类型：已归档周期执行编排（历史只读）。当前活动任务见 `docs/dev/current/plan.md`。
+> 归档状态：已完成并吸收。本文所编排的全部任务（#12–#24）均已落地：
+> - #12 规格裁定 → `docs/tactics.md` §2.2.4/§2.5 与 `docs/decisions.md` ADR-019；
+> - #13 数据层 → `crates/domain/src/play.rs`（PlaySpec/PlayRule/校验器）与 `crates/engine/tests/playbook_setup.rs`；
+> - #14 交互动作词汇 → `crates/decision/src/play_actions.rs`（含 `crates/decision/tests/play_actions.rs`）；
+> - #15 执行器 → `crates/decision/src/play_executor.rs`；
+> - #16 选板器 → `crates/decision/src/play_selector.rs`（含 `crates/decision/tests/play_selector.rs`）；
+> - #17 playbook 数据 → `data/tactics/plays/` 九份档案；
+> - #18 引擎接线与可观测性 → `PlayActivated` 事件与 `play_engine_integration.rs`（golden v75 登记）；
+> - #19/#20 校准与终验 → golden v74/v75 条目与 D28 出口证据（`docs/dev/status.md`）；
+> - #21 滞回 → `crates/decision/src/potential_field.rs` `DefenseHysteresisState` 与 `crates/decision/tests/defense_hysteresis_chain.rs`；
+> - #22 help_blend → 同上 `help_anchor_hoop_weight` 与 `crates/decision/tests/defense_help_blend.rs`（golden v74）；
+> - #23/#24 场验收门与体能衰减 → `crates/decision/tests/defense_stamina_field.rs`（golden hash 登记）。
+> 语义结论以 `docs/tactics.md`、`docs/decisions.md` ADR-019 为准；本文保留当时的执行编排与分派记录。
 > 周期：20260917_first_principles_next 的延伸计划（play 系统 + 场优化）。
 > 本文件是执行编排视图：串行链、并行波次、subagent 分派与验收纪律。
 > 任务语义以 todo 系统为准（#12–#24）；本文不复述实现细节，只管顺序与分派。

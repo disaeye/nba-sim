@@ -39,7 +39,7 @@ impl MatchEngine {
                     reason: nba_domain::event::ActionCancellationReason::Superseded,
                 });
         }
-        let lock_now = window.lock_kinematics && !window.is_finished(self.current_time());
+        let lock_now = window.locks_kinematics_at(self.current_time());
         self.systems
             .physics
             .set_player_locked(player_id, lock_now, None);
@@ -130,7 +130,7 @@ impl MatchEngine {
                 let current = window.update(current_t);
                 self.systems.physics.set_player_locked(
                     &window.player_id,
-                    window.lock_kinematics && !window.is_finished(current_t),
+                    window.locks_kinematics_at(current_t),
                     None,
                 );
                 if current != previous {

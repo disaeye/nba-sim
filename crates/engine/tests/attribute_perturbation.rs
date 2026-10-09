@@ -313,6 +313,9 @@ fn rebound_player(
         out_of_bounds_placement: false,
         is_receiving_pass: false,
         is_driving_to_rim: false,
+        left_foot_pos: glam::Vec2::ZERO,
+        right_foot_pos: glam::Vec2::ZERO,
+        swing_foot: nba_domain::Foot::Left,
         boundary_cross_latched: false,
         attributes: PlayerAttributes {
             offensive_rebound: off_reb,

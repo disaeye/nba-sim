@@ -13,4 +13,5 @@ pub use snapshot::{BallStateView, EngineSnapshot, GameStateView, LineupStateView
 
 pub use match_engine::{
     frame_rules_from_game_rules, ExportSummary, MatchBoxScore, MatchEngine, Simulation, StreamMode,
+    ValidationAttribute,
 };

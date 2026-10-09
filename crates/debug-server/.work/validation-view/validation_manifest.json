@@ -1,0 +1,21 @@
+{
+  "manifest_version": "validation-manifest-1",
+  "input_digest": "engine-seed-7",
+  "code_version": "engine-stream-238",
+  "rng_algorithm": "chacha8",
+  "seed": 7,
+  "scope": "1p",
+  "protocol_version": "validation-1",
+  "criteria_digest": "criteria-v1-100",
+  "reference_digest": "",
+  "units": {
+    "length": "feet",
+    "time": "seconds",
+    "coordinates": "left_hoop_origin_x_right_y_down",
+    "tick_seconds": 0.04
+  },
+  "budget_max_ticks": 200000,
+  "budget_max_bytes": 4294967296,
+  "expected_games": 1,
+  "certification_scope": "structural"
+}

@@ -1,0 +1,15 @@
+{
+  "total_judgments": 23,
+  "hard_defect_count": 1,
+  "soft_defect_count": 0,
+  "defect_count": 1,
+  "passes": 6,
+  "defects": 1,
+  "insufficient_evidence": 16,
+  "defects_by_criterion": [
+    [
+      "SC-PASS-REPEAT",
+      1
+    ]
+  ]
+}

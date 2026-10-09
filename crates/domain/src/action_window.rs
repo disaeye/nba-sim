@@ -36,6 +36,22 @@ pub enum ActionType {
     Putback,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Foot {
+    Left,
+    Right,
+}
+
+impl Foot {
+    pub fn opposite(self) -> Self {
+        match self {
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DribbleMoveKind {
     DirectDrive,
     Crossover,
@@ -295,6 +311,30 @@ impl ActionTimeWindow {
             self.phase = ActionPhase::FollowThrough;
         }
         self.phase
+    }
+
+    /// 当前时刻的阶段（纯函数，不推进状态）。
+    pub fn phase_at(&self, current_time: f32) -> ActionPhase {
+        let elapsed = current_time - self.start_time;
+        if elapsed < self.prep_duration {
+            ActionPhase::Preparation
+        } else if elapsed < self.prep_duration + self.exec_duration {
+            ActionPhase::Execution
+        } else {
+            ActionPhase::FollowThrough
+        }
+    }
+
+    /// 运动学锁定只覆盖 Execution 与 FollowThrough：Preparation 是
+    /// 「可被干扰/可被打断的蓄势段」，球员仍在移动（投篮收步、卡位
+    /// 逼近、掩护走到位）；合球起跳与落地恢复才需要锁死运动学。
+    pub fn locks_kinematics_at(&self, current_time: f32) -> bool {
+        self.lock_kinematics
+            && !self.is_finished(current_time)
+            && matches!(
+                self.phase_at(current_time),
+                ActionPhase::Execution | ActionPhase::FollowThrough
+            )
     }
 
     pub fn is_finished(&self, current_time: f32) -> bool {

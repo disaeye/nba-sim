@@ -18,15 +18,16 @@ R1 → R8 球态与阶段权限
 R4 → R9 战术三层
 R6 → R10 球员输入
 R3、R4、R5 → R11 评判闭环
+R2–R8 → R12 验证基础设施（validation.md 五层实施）
 ```
 
 后一项可以使用前一项已经发布的事实，不提前用统计带声明关闭。每项的类型、事实和测试入口见 `docs/dev/current/implementation.md`。
 
 ## 2. R1 · 结果权交回过程
 
-R1 当前未关闭。投篮到达仍为端点分类，篮板路径尚未由连续碰撞事实完整驱动；传球接收的状态连续测试与有限信息测试已有局部通过记录。八种子 attribution 10 项测试全部通过：每一对相邻生产帧的球速包络测试 `all_adjacent_frames_respect_ball_speed_envelope` 全绿，出手结果事实与释放/到达/封盖事件严格对平（`shot_result_facts_reconcile_with_release_and_arrival_events`）。球位连续性已按同一物理口径修复三类单帧跳变：出手起点取球实际位置（突破终结的统计分区仍按向篮筐延伸的 finish_pos），传球携带实际出手球高 `from_z`，控制转移时长按三维路径长度计算。哨响连续性已实施（R1.2 验收条款）：罚球不截断在飞出手与被犯规者本人的挂起出手，到筐结算消费罚球队列；哨响作废在飞传球时补发 `PASS_DROPPED` 终结。罚球准备使用 `FreeThrowSetup` 三维轨迹，统一从 `begin_free_throw_flight` 生成罚球轨迹；`free_throw`（11 项）、`ball_ownership`（3 项）、physics backend contract（15 项）、rim-contact（8 项）、physics 弹道单测（5 项）、传球五分支互斥（`pass_speed_continuity.rs` 5 项）与突破终局因果（`drive_geometry.rs` 6 项）全部通过。黄金哈希 seed42 × 2000 冻结为 `0xca1d1cae20e46d0e`，随球位与哨响连续性行为修正及决策重校准同步重冻结并由 `golden_hash` 核验。详见 `implementation.md` 的 R1 证据。
+R1 已闭合（连续飞行碰撞与同参数封盖对照已实施并验证）。Shot 飞行逐 tick 扫掠篮筐/篮板首次接触（`BallisticsEngine::shot_flight_step`，`collision_checked_until` 区间追踪）：干净命中在筐平面结算；触筐/触板按实际接触位置与入射速度生成反弹（发球犯规失投同步消费）；偏筐无接触判失投转松球；事件因果链保持 SHOT_RELEASE → SHOT_TRAJECTORY_ARRIVAL → SHOT_CONTACT/SCORE/SHOT_MISS/REBOUND。同参数封盖成功/失败对照（`block.rs::identical_shot_parameters_diverge_when_a_block_is_applied`）验证封盖分支产生 BLOCKED_SHOT 并离开 Shot 状态，而相同参数的未封盖分支在首次碰撞前仍处于 Shot 状态。八种子 attribution 10 项、全帧球速包络、出手时序、罚球（11 项）、封盖（4 项）、传球五分支互斥与突破终局因果全部通过；黄金哈希重冻结为 `0x21a35155c80c6e6b`（v97，登记于 `golden_hash.rs`，变更源含 R5 走步事实链与动作窗口蓄势段解锁）。
 
-规格要求见 `docs/basketball.md` §3。2026-09-25 起完成了球态预写结果字段移除、出手释放延迟、传球到达判定、突破窗口终局和黄金哈希更新。当前仍需把结果决定绑定到真实触筐与接触事实，补齐封盖对照、传球五结果互斥和事件因果父链；速度连续性仍需核验 PASS→HELD、STEAL 与 SHOT_RELEASE 等状态边界。具体复核见 `docs/dev/current/spec_gap.md` §7。以下为完整关闭条件：
+规格要求见 `docs/basketball.md` §3。关闭条件与历史证据如下：
 
 1. 出手开始只保留出手人、出手位置、动作窗口和当时可见的防守事实；
 2. 球离手后由弹道、封盖窗口和触筐事实产生命中、不中、封盖和犯规；
@@ -43,7 +44,7 @@ R1 当前未关闭。投篮到达仍为端点分类，篮板路径尚未由连�
 - 接球、掉球、点拨、抢断和出界结果互斥，并由对应的到达或接触事实决定；
 - 突破终局由接触、位置和终结窗口事实决定，不在动作创建时预写概率结果；
 - 现有得分账本继续对平；
-- 黄金哈希按行为变更重新冻结，并写明变化来自结果决定点。当前冻结值为 `0xca1d1cae20e46d0e`，由 `golden_hash` 逐位核验；变化源为球位连续性与哨响连续性行为修正及决策重校准。
+- 黄金哈希按行为变更重新冻结，并写明变化来自结果决定点；现行冻结值为 `0x4f0aabafed2e4d05`（v81，登记于 `golden_hash.rs`），由 `golden_hash` 逐位核验；R1 阶段冻结值为 `0xca1d1cae20e46d0e`（v80）。
 
 代码入口：
 
@@ -56,13 +57,13 @@ R1 当前未关闭。投篮到达仍为端点分类，篮板路径尚未由连�
 
 ## 3. R2 · 篮下出手分布
 
-R2 已闭合。全量 16 种子 `stats_baseline`（`full_game_stats_within_baseline_band`）全部通过：总分中位数 204.5 落在 [140, 230] 门槛，区间为 [167, 232]；平均回合数 246.9 落在 [172, 290] 门槛；平均单回合持续时间 14.40s 落在 [12.0, 20.0] 门槛；三分命中率中位数 38.5% 落在 [30.0, 40.0] 目标带；篮下出手占比中位数 0.333，全部 16 种子均进入 [0.25, 0.50] 参考带（16/16）；16 种子全部通过 evaluator `SHOT_PROFILE_ZONE_MIX` 构成判定；突破、切入接球、前场篮板与攻防转换四条路径在矩阵中均有真实出手；每场比赛的出手分区计数与箱体 FGA 严格一致；五式账本零违规；Hard 门零缺陷。单种子来源审计 `rim_attempt_composition` 同步通过。决策基准：`drive_rim_attack_bias` 1.3 守住篮下占比逐种子下限 0.25，`midrange_utility_bonus` 0.18 守住中距离占比逐种子下限 0.08，`post_up_base` 3.6 使背身仅在错位时胜出并保住背身/卡位系系数的行为触达（`rules_complete_wiring` 14/14）。
+R2 已闭合（已完成轮次，保留作为验收范围与证据索引；活跃队列见 §1 与 §13）。全量 16 种子 `stats_baseline`（`full_game_stats_within_baseline_band`）全部通过：总分中位数 204.5 落在 [140, 230] 门槛，区间为 [167, 232]；平均回合数 246.9 落在 [172, 290] 门槛；平均单回合持续时间 14.40s 落在 [12.0, 20.0] 门槛；三分命中率中位数 38.5% 落在 [30.0, 40.0] 目标带；篮下出手占比中位数 0.333，全部 16 种子均进入 [0.25, 0.50] 参考带（16/16）；16 种子全部通过 evaluator `SHOT_PROFILE_ZONE_MIX` 构成判定；突破、切入接球、前场篮板与攻防转换四条路径在矩阵中均有真实出手；每场比赛的出手分区计数与箱体 FGA 严格一致；五式账本零违规；Hard 门零缺陷。单种子来源审计 `rim_attempt_composition` 同步通过。决策基准：`drive_rim_attack_bias` 1.3 守住篮下占比逐种子下限 0.25，`midrange_utility_bonus` 0.18 守住中距离占比逐种子下限 0.08，`post_up_base` 3.6 使背身仅在错位时胜出并保住背身/卡位系系数的行为触达（`rules_complete_wiring` 14/14）。
 
 关闭证据：16-seed 全场的篮下出手占比全部进入 `nba.v2.json` 的 `rim_share_of_fga` 带（16/16），同时总分、三分命中率、回合数与时长、账本、Hard 门及四路径覆盖全部通过。
 
 ## 4. R3 · 动作生命周期
 
-R3 已闭合。接入动作开始、阶段变化、完成、取消与失败类型化事实：
+R3 已闭合（已完成轮次，保留作为验收范围与证据索引）。接入动作开始、阶段变化、完成、取消与失败类型化事实：
 - 发布事实：`ActionStarted`、`ActionPhaseChanged`、`ActionCompleted`、`ActionCancelled`、`ActionFailed`；
 - 覆盖动作：掩护建立（`ScreenSet`）、顺下（`ScreenRoll`）、外弹（`ScreenPop`）、背切（`CutBackdoor`）、空切（`Cut`）、卡位（`BoxOut`）、补篮（`Putback`）及投传扑盖共 13 种动作；
 - 互斥保证：同一球员在同一 tick 至多保留一个活动动作窗口，新动作发起时旧动作以 `Superseded` 原因自动取消；
@@ -72,7 +73,7 @@ R3 已闭合。接入动作开始、阶段变化、完成、取消与失败类�
 
 ## 5. R4 · 防守责任图
 
-R4 已闭合。实施防守责任图与责任交接事实：
+R4 已闭合（已完成轮次，保留作为验收范围与证据索引）。实施防守责任图与责任交接事实：
 - 责任状态：定义 `DefenseResponsibility` 包含 `PrimaryMatchup`、`Hedge`、`FightThrough`、`GoUnder`、`SwitchedMatchup`、`Help`、`Drop`、`Rotate`、`Recover` 九种主责任，保证每个防守人在任一 tick 有且仅有一个主责任；
 - 责任交接事实：发布 `GameEvent::DefenseResponsibilityChanged`，包含执行防守人、原责任、新责任、对位进攻人及触发动作；
 - 挡拆覆盖策略：`ScreenDefenseRules` 引入 `OnBallScreenDefenseStrategy`（`StandardContest`、`FightThrough`、`GoUnder`、`Switch`），联动 `drop_depth_ft` 与 `hedge_distance_ft` 在战术规划层生成对应责任；
@@ -83,7 +84,7 @@ R4 已闭合。实施防守责任图与责任交接事实：
 
 依 `docs/basketball.md` §5 和 §6 补齐走步、三秒、干扰、个人犯规、球队罚则及逐次罚球。`check_foul_conservation` 改为重建个人累计、球队累计、离场、罚则和罚球结果。NBA 与 FIBA 的差异只来自 `LeagueProfile`。
 
-当前状态：犯规账本重建（个人/球队累计、犯满、bonus、逐次罚球对账，限值取自帧内 `FrameRules`，板凳耗尽由流内 `BENCH_DEPLETED` 事实豁免）、逐次罚球队列（不再覆写进行中的程序）、犯满离场重试、攻方三秒与回场程序（含发球例外）、活球松球争抢优先派发已实现；FIBA bonus 阈值核验为单节第 5 次，加时进节清零球队犯规。走步、二次运球、干扰球、贴身五秒、背筐五秒仍缺程序：前两者需要运球/合球阶段事实，干扰球需要飞行中球-人接触物理事实，物理层不产生这些事实，需先补物理事实通道。
+当前状态：犯规账本重建（个人/球队累计、犯满、bonus、逐次罚球对账，限值取自帧内 `FrameRules`，板凳耗尽由流内 `BENCH_DEPLETED` 事实豁免）、逐次罚球队列（不再覆写进行中的程序）、犯满离场重试、攻方三秒与回场程序（含发球例外）、活球松球争抢优先派发已实现；FIBA bonus 阈值核验为单节第 5 次，加时进节清零球队犯规。走步与二次运球已接入事实链与运行时判罚：步态模型（双脚位置/摆动脚）在物理层产生接地点事实，已运球持球人在投篮或传球起手时收球并确立轴心脚，收球后超两步或轴心脚容差外再落地即 TRAVEL，再突破即 DOUBLE_DRIBBLE，违例哨作废未离手的挂起出手；专项测试与正常比赛稀疏性回归已建立。干扰球、贴身五秒、背筐五秒仍缺程序：干扰球需要飞行中球-人接触物理事实，需先补物理事实通道。
 
 ## 7. R6 · 个体身份
 
@@ -118,3 +119,16 @@ R6 完成后实施。补齐 `wingspan_cm`、`effective_reach`、`release_height`
 R3、R4、R5 完成后实施。`evaluate_stream` 增加动作完整、防守责任完整、罚则完整、跳球和交替拥有四类准则。证据不足保持独立裁决。
 
 关闭证据：缺失终态、缺失责任交接或罚则对不上时，评判器产出 Defect；这些准则进入归因账本。
+
+## 13. R12 · 验证基础设施（validation.md 五层实施）
+
+R2–R8 的事件语义稳定后实施（validation.md §11 工作包划分）。交付物：只读 crate `crates/validation` 与 CLI `validate` 入口，判定事实来自事件流独立重建，不调用生产结算函数。
+
+当前进度（会话 todo 同步）：
+
+- 已完成：协议层扩展（`FrameEvent` 的 `tick_index`、业务身份、`relations`；流首尾部类型）；引擎观测事实发射（`StatAttribution`、`ShotAttemptResolved`、`ControlEstablished`、责任生命周期、时钟/节末事实、运动意图到期清算）；`crates/validation` 的裁决模型、准则注册表、档案、清单、严格流读取、独立重建器、机会提取器、MOVE/TACT 事实层、统计比较器（配对 bootstrap）、JOINT 观测、机制实验框架、场景框架与 22 个必需场景、runner 与全部十三件工件（validation.md §10 全清单，含 `game_metrics.parquet`、`instances.sqlite`、`ledger_comparison.json` 与旧兼容视图）；CLI `validate` 子命令；集成测试 14 项（`crates/validation/tests/validation_integration.rs`，含严格流拒绝行为、双结算检测、关系审计、重建对平、parquet 读回、SQLite 实例存储查询、兼容视图同源一致性、配对 bootstrap 数学边界、退出码）全绿。
+- 待办：STAT-I01 分钟表来源（boxscore 归档）；追踪数据类 6 叶项（无公开渠道）；机制实验检查点 API（已登记缺口，todo #26-#29）。JOINT-C01/C05/Q01 参照值已重建入登记（`scripts/rebuild_joint_reference.py`，full 叶项 10），登记审核为展示可见性模式（无独立签字）。批次判定覆盖面已补齐（42 逐指标 + 3 构成组 TV + 矩阵 21 格 + 距离 W1，工件含 coverage 段），期间修复引擎侧回合开始原因匹配缺陷（SCREAMING_SNAKE_CASE，starts_* 曾恒为零）。
+
+行为影响：黄金哈希重冻结为 `0x4f0aabafed2e4d05`（v81，事件流扩充；纯物理轨迹经对照探针逐位一致）；吞吐基准带下界下调到 5000。详见 `docs/dev/current/implementation.md` 的 R12 节。
+
+关闭证据：五层工作包达到 `ValidatorImplemented`；`/fact` 叶项与场景定向测试通过；`STAT/JOINT` 在参考数据缺位时保持 `InsufficientEvidence`，登记数据准备任务。

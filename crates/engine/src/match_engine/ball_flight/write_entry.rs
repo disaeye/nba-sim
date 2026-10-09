@@ -96,6 +96,20 @@ impl MatchEngine {
         if entering_free_flight && !same_kind {
             self.ball.loose_contact_resolved.clear();
         }
+        // 持球族进出收口：换持球人（或球离手）时清除原持球人的运球控制
+        // 记录——收球只在「收球到球离手」窗口内有意义；新持球人无记录时
+        // 初始化为未运球状态，并把双脚重落在身体位置（接球即双脚落地的
+        // 步态事实）。同一持球人在 Held/Drive 内延续时不重置。
+        let held_carrier_of = |state: &BallTrajectoryKind| match state {
+            BallTrajectoryKind::Held { carrier_id }
+            | BallTrajectoryKind::Drive {
+                driver_id: carrier_id,
+                ..
+            } => Some(carrier_id.clone()),
+            _ => None,
+        };
+        let previous_carrier = held_carrier_of(&self.ball.ball_state);
+        let next_carrier = held_carrier_of(&next);
         match nba_domain::transition_ball_state(&self.ball.ball_state, next) {
             Ok(next) => {
                 // ## 接球人标记必须在**写入口**设置（round-10）
@@ -116,6 +130,21 @@ impl MatchEngine {
                     self.ball.pass_contact_states.clear();
                 }
                 self.ball.set_ball_state(next);
+                if previous_carrier.as_deref() != next_carrier.as_deref() {
+                    if let Some(previous) = &previous_carrier {
+                        self.clock.dribble_control.remove(previous);
+                    }
+                    if let Some(carrier_id) = &next_carrier {
+                        self.clock
+                            .dribble_control
+                            .entry(carrier_id.clone())
+                            .or_default();
+                        if let Some(player) = self.systems.physics.get_player_mut(carrier_id) {
+                            player.left_foot_pos = player.pos_ft;
+                            player.right_foot_pos = player.pos_ft;
+                        }
+                    }
+                }
                 if let Some(receiver_id) = &pass_receiver_exiting {
                     if !matches!(
                         self.ball.ball_state,

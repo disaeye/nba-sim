@@ -1,4 +1,4 @@
-//! 开发调试服务器：内嵌静态页 + 模拟流/规则编辑 HTTP API。
+//! 开发调试服务器：内嵌静态页 + 模拟流/规则编辑/五层验证 HTTP API。
 //!
 //! 只服务于本地开发调试（P0–P2 调试工作台），不是生产服务。
 //! std-only：手写最小 HTTP/1.1 解析，避免引入 web 框架依赖。
@@ -10,9 +10,17 @@ use std::sync::{Arc, Mutex};
 use nba_domain::{FixedDt, GameRules};
 use nba_engine::{MatchEngine, MatchService};
 use nba_invariants::Violation;
+use nba_protocol::StreamTick;
 use serde_json::Value;
 
 mod static_page;
+mod validation_api;
+
+use validation_api::{
+    api_validation_certification, api_validation_layers, api_validation_report,
+    api_validation_run, api_validation_status, CachedGame, SharedValidation,
+    ValidationState,
+};
 
 type SharedSession = Arc<Mutex<MatchService>>;
 type Response = (&'static str, &'static str, Vec<u8>);
@@ -33,19 +41,27 @@ fn main() {
         .unwrap_or(4173);
     let listener = TcpListener::bind(("127.0.0.1", port)).expect("bind debug server port");
     let session = Arc::new(Mutex::new(MatchService::new()));
+    let validation: SharedValidation = Arc::new(Mutex::new(ValidationState::Idle {
+        cached_game: None,
+        last_result: None,
+    }));
     println!("nba-debug-server listening on http://127.0.0.1:{}", port);
     for stream in listener.incoming().flatten() {
         // MatchService currently contains a backend trait object without a Send
         // bound. Keep ownership on this accept thread until the engine boundary
         // opts into cross-thread execution; each request still locks the session
         // so route code cannot alias mutable simulation state.
-        if let Err(e) = handle(stream, &session) {
+        if let Err(e) = handle(stream, &session, &validation) {
             eprintln!("request error: {}", e);
         }
     }
 }
 
-fn handle(mut stream: TcpStream, session: &SharedSession) -> std::io::Result<()> {
+fn handle(
+    mut stream: TcpStream,
+    session: &SharedSession,
+    validation: &SharedValidation,
+) -> std::io::Result<()> {
     let req = match read_request(&mut stream) {
         Ok(Some(r)) => r,
         Ok(None) => return Ok(()),
@@ -59,7 +75,7 @@ fn handle(mut stream: TcpStream, session: &SharedSession) -> std::io::Result<()>
             return Ok(());
         }
     };
-    let (status, content_type, body) = route(&req, session);
+    let (status, content_type, body) = route(&req, session, validation);
     write_response(&mut stream, status, content_type, &body)
 }
 
@@ -140,7 +156,7 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
     }))
 }
 
-fn route(req: &Request, session: &SharedSession) -> Response {
+fn route(req: &Request, session: &SharedSession, validation: &SharedValidation) -> Response {
     match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/") => (
             "200 OK",
@@ -157,12 +173,22 @@ fn route(req: &Request, session: &SharedSession) -> Response {
             "application/javascript; charset=utf-8",
             static_page::JS.as_bytes().to_vec(),
         ),
+        ("GET", "/wasm/nba_wasm.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            static_page::WASM_JS.as_bytes().to_vec(),
+        ),
+        ("GET", "/wasm/nba_wasm_bg.wasm") => (
+            "200 OK",
+            "application/wasm",
+            static_page::WASM_BIN.to_vec(),
+        ),
         ("GET", "/api/rules") => match serde_json::to_vec_pretty(&GameRules::default()) {
             Ok(json) => ("200 OK", "application/json; charset=utf-8", json),
             Err(e) => internal_error(e.to_string()),
         },
         ("GET", "/api/studio") => api_studio(),
-        ("GET", "/api/simulate") | ("POST", "/api/simulate") => api_simulate(req),
+        ("GET", "/api/simulate") | ("POST", "/api/simulate") => api_simulate(req, validation),
         ("POST", "/api/session/setup") => api_session_setup(req, session),
         ("GET", "/api/session") | ("GET", "/api/session/state") => api_session_state(session),
         ("GET", "/api/session/snapshot") => api_session_snapshot(session),
@@ -177,6 +203,11 @@ fn route(req: &Request, session: &SharedSession) -> Response {
         ("POST", "/api/session/next-possession") | ("POST", "/api/session/next_possession") => {
             api_session_command(session, "next-possession", req)
         }
+        ("POST", "/api/validation/run") => api_validation_run(req, validation),
+        ("GET", "/api/validation/status") => api_validation_status(validation),
+        ("GET", "/api/validation/report") => api_validation_report(validation),
+        ("GET", "/api/validation/layers") => api_validation_layers(req),
+        ("GET", "/api/validation/certification") => api_validation_certification(req),
         ("OPTIONS", _) => ("204 No Content", "text/plain; charset=utf-8", Vec::new()),
         _ => (
             "404 Not Found",
@@ -392,13 +423,33 @@ fn bad_request(msg: String) -> (&'static str, &'static str, Vec<u8>) {
     )
 }
 
-fn api_simulate(req: &Request) -> (&'static str, &'static str, Vec<u8>) {
+fn api_simulate(
+    req: &Request,
+    validation: &SharedValidation,
+) -> (&'static str, &'static str, Vec<u8>) {
     let run = match parse_run_request(req) {
         Ok(run) => run,
         Err(e) => return bad_request(e),
     };
     match run_simulation(run.seed, &run.scope, run.rules, run.setup) {
-        Ok(body) => ("200 OK", "application/x-ndjson; charset=utf-8", body),
+        Ok((body, ticks)) => {
+            // 缓存页面正在查看的这场比赛：验证入口对同一刻序列做判定，
+            // 结论与页面展示的比赛严格一致（同一确定性重放）。
+            let previous_result = match &*validation.lock().expect("validation state") {
+                ValidationState::Idle { last_result, .. }
+                | ValidationState::Running { last_result, .. } => last_result.clone(),
+                ValidationState::Done { .. } | ValidationState::Failed { .. } => None,
+            };
+            *validation.lock().expect("validation state") = ValidationState::Idle {
+                cached_game: Some(CachedGame {
+                    seed: run.seed,
+                    scope: run.scope.clone(),
+                    ticks,
+                }),
+                last_result: previous_result,
+            };
+            ("200 OK", "application/x-ndjson; charset=utf-8", body)
+        }
         Err(e) => bad_request(e),
     }
 }
@@ -699,7 +750,7 @@ fn run_simulation(
     scope: &str,
     rules: GameRules,
     setup: Option<nba_engine::MatchSetup>,
-) -> Result<Vec<u8>, String> {
+) -> Result<(Vec<u8>, Vec<StreamTick>), String> {
     let mut engine = match setup {
         Some(mut setup) => {
             setup.rules = rules;
@@ -710,7 +761,8 @@ fn run_simulation(
     };
     engine.set_scope(scope)?;
     let mut body = Vec::with_capacity(1024 * 1024);
-    let mut ticks = 0usize;
+    let mut ticks = Vec::new();
+    let mut ticks_count = 0usize;
     // C6.6：官方违规随响应下发（gap.md §16.3 调试视图是投影）。
     // 此前引擎不变量判定只存在于进程内，前端只能用 detectAnomalies
     // 自行重算（第二套口径，容差与引擎不一致）。现在违规作为流末的
@@ -721,8 +773,9 @@ fn run_simulation(
         violations.extend(engine.last_tick_violations().iter().cloned());
         serde_json::to_writer(&mut body, &tick).map_err(|e| e.to_string())?;
         body.push(b'\n');
-        ticks += 1;
-        if ticks > MAX_SIMULATION_TICKS {
+        ticks.push(tick);
+        ticks_count += 1;
+        if ticks_count > MAX_SIMULATION_TICKS {
             return Err(format!(
                 "simulation exceeded the {} tick safety limit",
                 MAX_SIMULATION_TICKS
@@ -736,7 +789,7 @@ fn run_simulation(
     });
     serde_json::to_writer(&mut body, &summary).map_err(|e| e.to_string())?;
     body.push(b'\n');
-    Ok(body)
+    Ok((body, ticks))
 }
 
 fn url_decode(input: &str) -> Result<String, String> {
@@ -797,9 +850,14 @@ mod tests {
     }
     #[test]
     fn studio_catalog_round_trips_into_simulation() {
+        let validation: SharedValidation = Arc::new(Mutex::new(ValidationState::Idle {
+            cached_game: None,
+            last_result: None,
+        }));
         let (status, _, body) = route(
             &request("GET", "/api/studio", Vec::new()),
             &session_unused(),
+            &validation,
         );
         assert_eq!(status, "200 OK");
         let catalog: Value = serde_json::from_slice(&body).expect("studio catalog should be JSON");
@@ -807,17 +865,46 @@ mod tests {
         assert!(setup["home_team"]["players"].as_array().unwrap().len() >= 5);
         assert!(catalog["offense"].as_array().unwrap().len() >= 2);
         assert!(catalog["defense"].as_array().unwrap().len() >= 2);
-        let response = api_simulate(&request(
-            "POST",
-            "/api/simulate",
-            json_body(serde_json::json!({
-                "seed": 7,
-                "scope": "1p",
-                "setup": setup,
-            })),
-        ));
+        let response = api_simulate(
+            &request(
+                "POST",
+                "/api/simulate",
+                json_body(serde_json::json!({
+                    "seed": 7,
+                    "scope": "1p",
+                    "setup": setup,
+                })),
+            ),
+            &validation,
+        );
         assert_eq!(response.0, "200 OK");
         assert!(!response.2.is_empty());
+        // 模拟完成后缓存比赛可用，验证入口能对同一刻序列给出结论。
+        let run_response = api_validation_run(
+            &request("POST", "/api/validation/run", Vec::new()),
+            &validation,
+        );
+        assert_eq!(run_response.0, "200 OK", "validation run after simulate");
+        let run_json: Value = serde_json::from_slice(&run_response.2).expect("run JSON");
+        assert_eq!(run_json["status"], "done");
+        let report_response = api_validation_report(&validation);
+        assert_eq!(report_response.0, "200 OK", "report after run");
+        let report: Value = serde_json::from_slice(&report_response.2).expect("report JSON");
+        assert_eq!(report["scenarios"].as_array().map(Vec::len), Some(22));
+        assert_eq!(report["ledger"]["pairing"]["shots_without_release"], 0);
+    }
+
+    #[test]
+    fn validation_run_requires_cached_game() {
+        let validation: SharedValidation = Arc::new(Mutex::new(ValidationState::Idle {
+            cached_game: None,
+            last_result: None,
+        }));
+        let response = api_validation_run(
+            &request("POST", "/api/validation/run", Vec::new()),
+            &validation,
+        );
+        assert_eq!(response.0, "400 Bad Request");
     }
 
     #[test]
@@ -845,8 +932,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["spain_pnr_stack_v1"]
         );
-        let stream = run_simulation(response.seed, &response.scope, response.rules, Some(setup))
-            .expect("Spain PnR simulation should complete");
+        let (stream, _) =
+            run_simulation(response.seed, &response.scope, response.rules, Some(setup))
+                .expect("Spain PnR simulation should complete");
         let records: Vec<Value> = std::str::from_utf8(&stream)
             .expect("simulation stream should be UTF-8")
             .lines()
@@ -913,21 +1001,35 @@ mod tests {
         Arc::new(Mutex::new(MatchService::new()))
     }
 
+    fn validation_unused() -> SharedValidation {
+        Arc::new(Mutex::new(ValidationState::Idle {
+            cached_game: None,
+            last_result: None,
+        }))
+    }
+
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn session_routes_preserve_setup_and_lifecycle() {
         let session = session_unused();
         let setup = MatchSetup::builtin(GameRules::default());
         let setup_body = serde_json::to_vec(&setup).expect("builtin setup should serialize");
-        let (status, content_type, body) =
-            route(&request("POST", "/api/session/setup", setup_body), &session);
+        let (status, content_type, body) = route(
+            &request("POST", "/api/session/setup", setup_body),
+            &session,
+            &validation_unused(),
+        );
         assert_eq!(status, "200 OK");
         assert_eq!(content_type, "application/json; charset=utf-8");
         let info: Value = serde_json::from_slice(&body).expect("setup response should be JSON");
         assert_eq!(info["seed"], 42);
         assert!(info["home_team_id"].as_str().is_some());
 
-        let (status, _, body) = route(&request("GET", "/api/session/state", Vec::new()), &session);
+        let (status, _, body) = route(
+            &request("GET", "/api/session/state", Vec::new()),
+            &session,
+            &validation_unused(),
+        );
         assert_eq!(status, "200 OK");
         let state: Value = serde_json::from_slice(&body).expect("state response should be JSON");
         assert_eq!(state["state"], "Ready");
@@ -936,12 +1038,17 @@ mod tests {
         let (status, _, body) = route(
             &request("GET", "/api/session/snapshot", Vec::new()),
             &session,
+            &validation_unused(),
         );
         assert_eq!(status, "200 OK");
         let snapshot: Value = serde_json::from_slice(&body).expect("snapshot should be JSON");
         assert!(snapshot["t"].as_f64().is_some());
 
-        let (status, _, body) = route(&request("POST", "/api/session/start", Vec::new()), &session);
+        let (status, _, body) = route(
+            &request("POST", "/api/session/start", Vec::new()),
+            &session,
+            &validation_unused(),
+        );
         assert_eq!(status, "200 OK");
         let state: Value = serde_json::from_slice(&body).expect("start response should be JSON");
         assert_eq!(state["state"], "Running");
@@ -953,12 +1060,17 @@ mod tests {
                 json_body(serde_json::json!({ "dt": 0.04 })),
             ),
             &session,
+            &validation_unused(),
         );
         assert_eq!(status, "200 OK");
         let tick: Value = serde_json::from_slice(&body).expect("tick response should be JSON");
         assert!(tick["t"].as_f64().is_some());
 
-        let (status, _, body) = route(&request("GET", "/api/session/events", Vec::new()), &session);
+        let (status, _, body) = route(
+            &request("GET", "/api/session/events", Vec::new()),
+            &session,
+            &validation_unused(),
+        );
         assert_eq!(status, "200 OK");
         assert!(serde_json::from_slice::<Value>(&body)
             .expect("events response should be JSON")
@@ -973,7 +1085,7 @@ mod tests {
             "/api/session/tick",
             json_body(serde_json::json!({ "dt": -1.0 })),
         );
-        let (status, content_type, body) = route(&invalid_request, &session);
+        let (status, content_type, body) = route(&invalid_request, &session, &validation_unused());
         assert_eq!(status, "400 Bad Request");
         assert_eq!(content_type, "application/json; charset=utf-8");
         let error: Value = serde_json::from_slice(&body).expect("error should be JSON");
@@ -985,6 +1097,7 @@ mod tests {
         let (status, _, _) = route(
             &request("GET", "/api/session/snapshot", Vec::new()),
             &session,
+            &validation_unused(),
         );
         assert_eq!(status, "409 Conflict");
     }
@@ -994,6 +1107,13 @@ mod tests {
 mod c6_6_tests {
     use super::*;
 
+    fn validation_shared() -> SharedValidation {
+        Arc::new(Mutex::new(ValidationState::Idle {
+            cached_game: None,
+            last_result: None,
+        }))
+    }
+
     /// C6.6 规定：`/api/simulate` 的响应是「tick 帧 + 流末 run_summary 记录」，
     /// run_summary 必须携带引擎官方 violations 数组（gap.md §16.3：调试视图
     /// 是事件与快照的投影，前端不得自行重算不变量）。
@@ -1002,12 +1122,15 @@ mod c6_6_tests {
     /// （`detectAnomalies`）重算，两侧容差已经分叉。
     #[test]
     fn simulate_response_ends_with_run_summary_carrying_engine_violations() {
-        let (status, content_type, body) = api_simulate(&Request {
-            method: "GET".to_string(),
-            path: "/api/simulate".to_string(),
-            query: "seed=1&scope=2p".to_string(),
-            body: Vec::new(),
-        });
+        let (status, content_type, body) = api_simulate(
+            &Request {
+                method: "GET".to_string(),
+                path: "/api/simulate".to_string(),
+                query: "seed=1&scope=2p".to_string(),
+                body: Vec::new(),
+            },
+            &validation_shared(),
+        );
         assert_eq!(status, "200 OK", "simulate must succeed");
         assert_eq!(content_type, "application/x-ndjson; charset=utf-8");
 
