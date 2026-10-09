@@ -19,6 +19,7 @@ use nba_physics::ballistics::{BallTrajectoryKind, BallisticsEngine};
 
 use super::MatchEngine;
 
+mod drive_arm;
 mod arms;
 mod outcome;
 mod settlement;

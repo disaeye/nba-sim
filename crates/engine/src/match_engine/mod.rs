@@ -29,6 +29,7 @@ mod roster;
 mod runtime_phase;
 mod state;
 mod stream;
+mod movement_intents;
 mod tactics_phase;
 mod test_hooks;
 mod transitions;
