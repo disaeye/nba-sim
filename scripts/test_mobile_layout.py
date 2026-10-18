@@ -107,7 +107,7 @@ chrome_cmd = [
     "--disable-gpu",
     "--no-sandbox",
     "--remote-debugging-port=9225",
-    "http://127.0.0.1:4173/",
+    "http://127.0.0.1:31100/",
 ]
 proc = subprocess.Popen(chrome_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(3.5)

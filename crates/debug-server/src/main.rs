@@ -7,14 +7,18 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 
-use nba_domain::{FixedDt, GameRules};
-use nba_engine::{MatchEngine, MatchService};
+use nba_domain::GameRules;
+use nba_engine::MatchEngine;
+use nba_sim_core::SessionService;
 use nba_invariants::Violation;
 use nba_protocol::StreamTick;
 use serde_json::Value;
 
+mod core_api;
 mod static_page;
 mod validation_api;
+
+use core_api::SharedCore;
 
 use validation_api::{
     api_validation_certification, api_validation_layers, api_validation_report,
@@ -22,7 +26,6 @@ use validation_api::{
     ValidationState,
 };
 
-type SharedSession = Arc<Mutex<MatchService>>;
 type Response = (&'static str, &'static str, Vec<u8>);
 
 const MAX_REQUEST_BODY_BYTES: usize = 8 * 1024 * 1024;
@@ -38,9 +41,9 @@ fn main() {
     let port: u16 = std::env::args()
         .nth(1)
         .and_then(|p| p.parse().ok())
-        .unwrap_or(4173);
+        .unwrap_or(31100);
     let listener = TcpListener::bind(("127.0.0.1", port)).expect("bind debug server port");
-    let session = Arc::new(Mutex::new(MatchService::new()));
+    let core: SharedCore = Arc::new(Mutex::new(SessionService::new(42)));
     let validation: SharedValidation = Arc::new(Mutex::new(ValidationState::Idle {
         cached_game: None,
         last_result: None,
@@ -51,7 +54,7 @@ fn main() {
         // bound. Keep ownership on this accept thread until the engine boundary
         // opts into cross-thread execution; each request still locks the session
         // so route code cannot alias mutable simulation state.
-        if let Err(e) = handle(stream, &session, &validation) {
+        if let Err(e) = handle(stream, &core, &validation) {
             eprintln!("request error: {}", e);
         }
     }
@@ -59,7 +62,7 @@ fn main() {
 
 fn handle(
     mut stream: TcpStream,
-    session: &SharedSession,
+    core: &SharedCore,
     validation: &SharedValidation,
 ) -> std::io::Result<()> {
     let req = match read_request(&mut stream) {
@@ -75,11 +78,11 @@ fn handle(
             return Ok(());
         }
     };
-    let (status, content_type, body) = route(&req, session, validation);
+    let (status, content_type, body) = route(&req, core, validation);
     write_response(&mut stream, status, content_type, &body)
 }
 
-struct Request {
+pub(crate) struct Request {
     method: String,
     path: String,
     query: String,
@@ -156,7 +159,11 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
     }))
 }
 
-fn route(req: &Request, session: &SharedSession, validation: &SharedValidation) -> Response {
+fn route(
+    req: &Request,
+    core: &SharedCore,
+    validation: &SharedValidation,
+) -> Response {
     match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/") => (
             "200 OK",
@@ -189,35 +196,43 @@ fn route(req: &Request, session: &SharedSession, validation: &SharedValidation) 
         },
         ("GET", "/api/studio") => api_studio(),
         ("GET", "/api/simulate") | ("POST", "/api/simulate") => api_simulate(req, validation),
-        ("POST", "/api/session/setup") => api_session_setup(req, session),
-        ("GET", "/api/session") | ("GET", "/api/session/state") => api_session_state(session),
-        ("GET", "/api/session/snapshot") => api_session_snapshot(session),
-        ("GET", "/api/session/events") => api_session_events(req, session),
-        ("POST", "/api/session/start") => api_session_command(session, "start", req),
-        ("POST", "/api/session/pause") => api_session_command(session, "pause", req),
-        ("POST", "/api/session/resume") => api_session_command(session, "resume", req),
-        ("POST", "/api/session/tick") => api_session_command(session, "tick", req),
+        ("POST", "/api/session/setup") => core_api::api_core_setup(req, core),
+        ("GET", "/api/session") | ("GET", "/api/session/state") => {
+            core_api::api_core_state(core)
+        }
+        ("GET", "/api/session/snapshot") => core_api::api_core_snapshot(core),
+        ("GET", "/api/session/events") => core_api::api_core_events(req, core),
+        ("POST", "/api/session/start") => core_api::api_core_command(core, "start", req),
+        ("POST", "/api/session/pause") => core_api::api_core_command(core, "pause", req),
+        ("POST", "/api/session/resume") => core_api::api_core_command(core, "resume", req),
+        ("POST", "/api/session/tick") => core_api::api_core_command(core, "tick", req),
         ("POST", "/api/session/fast-forward") | ("POST", "/api/session/fast_forward") => {
-            api_session_command(session, "fast-forward", req)
+            core_api::api_core_command(core, "fast-forward", req)
         }
         ("POST", "/api/session/next-possession") | ("POST", "/api/session/next_possession") => {
-            api_session_command(session, "next-possession", req)
+            core_api::api_core_command(core, "next-possession", req)
         }
-        ("POST", "/api/validation/run") => api_validation_run(req, validation),
-        ("GET", "/api/validation/status") => api_validation_status(validation),
+        ("POST", "/api/validation/run") => api_validation_run(req, validation),        ("GET", "/api/validation/status") => api_validation_status(validation),
         ("GET", "/api/validation/report") => api_validation_report(validation),
         ("GET", "/api/validation/layers") => api_validation_layers(req),
         ("GET", "/api/validation/certification") => api_validation_certification(req),
         ("OPTIONS", _) => ("204 No Content", "text/plain; charset=utf-8", Vec::new()),
-        _ => (
-            "404 Not Found",
-            "text/plain; charset=utf-8",
-            b"not found".to_vec(),
-        ),
+        _ => {
+            if req.path.starts_with("/api/core/") {
+                if let Some(response) = core_api::route_core(req, core) {
+                    return response;
+                }
+            }
+            (
+                "404 Not Found",
+                "text/plain; charset=utf-8",
+                b"not found".to_vec(),
+            )
+        }
     }
 }
 
-fn internal_error(msg: String) -> Response {
+pub(crate) fn internal_error(msg: String) -> Response {
     (
         "500 Internal Server Error",
         "application/json; charset=utf-8",
@@ -225,7 +240,7 @@ fn internal_error(msg: String) -> Response {
     )
 }
 
-fn conflict(msg: String) -> Response {
+pub(crate) fn conflict(msg: String) -> Response {
     (
         "409 Conflict",
         "application/json; charset=utf-8",
@@ -233,172 +248,7 @@ fn conflict(msg: String) -> Response {
     )
 }
 
-fn session_lock(
-    session: &SharedSession,
-) -> Result<std::sync::MutexGuard<'_, MatchService>, Response> {
-    session
-        .lock()
-        .map_err(|_| internal_error("match session lock poisoned".to_string()))
-}
-
-fn api_session_setup(req: &Request, session: &SharedSession) -> Response {
-    if req.body.is_empty() {
-        return bad_request("match setup JSON body is required".to_string());
-    }
-    let body = match std::str::from_utf8(&req.body) {
-        Ok(body) => body,
-        Err(_) => return bad_request("match setup body must be valid UTF-8".to_string()),
-    };
-    let mut service = match session_lock(session) {
-        Ok(service) => service,
-        Err(response) => return response,
-    };
-    match service.setup_match_json(body) {
-        Ok(info) => (
-            "200 OK",
-            "application/json; charset=utf-8",
-            info.into_bytes(),
-        ),
-        Err(error) => bad_request(error),
-    }
-}
-
-fn api_session_state(session: &SharedSession) -> Response {
-    let service = match session_lock(session) {
-        Ok(service) => service,
-        Err(response) => return response,
-    };
-    api_session_state_from_service(&service)
-}
-
-fn api_session_state_from_service(service: &MatchService) -> Response {
-    let body = serde_json::json!({
-        "state": service.state(),
-        "configured": service.is_configured(),
-        "seed": service.seed(),
-    });
-    (
-        "200 OK",
-        "application/json; charset=utf-8",
-        body.to_string().into_bytes(),
-    )
-}
-
-fn api_session_snapshot(session: &SharedSession) -> Response {
-    let service = match session_lock(session) {
-        Ok(service) => service,
-        Err(response) => return response,
-    };
-    match service.snapshot() {
-        Some(snapshot) => snapshot_response(snapshot),
-        None => conflict("cannot read snapshot before match setup".to_string()),
-    }
-}
-
-fn api_session_events(req: &Request, session: &SharedSession) -> Response {
-    let sequence = match query_u64(&req.query, "since") {
-        Ok(sequence) => sequence,
-        Err(error) => return bad_request(error),
-    };
-    let service = match session_lock(session) {
-        Ok(service) => service,
-        Err(response) => return response,
-    };
-    match service.events_since_json(sequence) {
-        Ok(body) => (
-            "200 OK",
-            "application/json; charset=utf-8",
-            body.into_bytes(),
-        ),
-        Err(error) => internal_error(error),
-    }
-}
-
-fn api_session_command(session: &SharedSession, command: &str, req: &Request) -> Response {
-    let duration = match command {
-        "tick" => match parse_duration(req, &["dt", "seconds", "duration"]) {
-            Ok(duration) => Some(duration),
-            Err(error) => return bad_request(error),
-        },
-        "fast-forward" => match parse_duration(req, &["seconds", "duration", "dt"]) {
-            Ok(duration) => Some(duration),
-            Err(error) => return bad_request(error),
-        },
-        _ => None,
-    };
-    let mut service = match session_lock(session) {
-        Ok(service) => service,
-        Err(response) => return response,
-    };
-    match command {
-        "start" => match service.start() {
-            Ok(()) => api_session_state_from_service(&service),
-            Err(error) => conflict(error),
-        },
-        "pause" => {
-            service.pause();
-            api_session_state_from_service(&service)
-        }
-        "resume" => match service.resume() {
-            Ok(()) => api_session_state_from_service(&service),
-            Err(error) => conflict(error),
-        },
-        "tick" => match service.tick(FixedDt(duration.expect("validated tick duration"))) {
-            Ok(snapshot) => snapshot_response(snapshot),
-            Err(error) => conflict(error),
-        },
-        "fast-forward" => {
-            match service.fast_forward(duration.expect("validated fast-forward duration")) {
-                Ok(snapshot) => snapshot_response(snapshot),
-                Err(error) => conflict(error),
-            }
-        }
-        "next-possession" => match service.next_possession() {
-            Ok(snapshot) => snapshot_response(snapshot),
-            Err(error) => conflict(error),
-        },
-        _ => internal_error(format!("unknown session command: {command}")),
-    }
-}
-
-fn snapshot_response(snapshot: nba_protocol::StreamTick) -> Response {
-    match serde_json::to_vec(&snapshot) {
-        Ok(body) => ("200 OK", "application/json; charset=utf-8", body),
-        Err(error) => internal_error(format!("snapshot serialization failed: {error}")),
-    }
-}
-
-fn parse_duration(req: &Request, keys: &[&str]) -> Result<f32, String> {
-    if req.body.is_empty() {
-        return Err("JSON body with a non-negative duration is required".to_string());
-    }
-    let value: Value = serde_json::from_slice(&req.body)
-        .map_err(|error| format!("request JSON invalid: {error}"))?;
-    let raw = match value {
-        Value::Number(number) => number
-            .as_f64()
-            .ok_or_else(|| "duration must be a finite JSON number".to_string())?,
-        Value::Object(object) => {
-            let value = keys.iter().find_map(|key| object.get(*key));
-            let Some(value) = value else {
-                return Err(format!(
-                    "JSON body must contain one of: {}",
-                    keys.join(", ")
-                ));
-            };
-            value
-                .as_f64()
-                .ok_or_else(|| "duration must be a finite JSON number".to_string())?
-        }
-        _ => return Err("duration must be a JSON number or object".to_string()),
-    };
-    if !raw.is_finite() || raw < 0.0 || raw > f32::MAX as f64 {
-        return Err("duration must be finite, non-negative, and fit in f32".to_string());
-    }
-    Ok(raw as f32)
-}
-
-fn query_u64(query: &str, expected_key: &str) -> Result<u64, String> {
+pub(crate) fn query_u64(query: &str, expected_key: &str) -> Result<u64, String> {
     let mut result = 0;
     for pair in query.split('&').filter(|pair| !pair.is_empty()) {
         let (key, value) = match pair.split_once('=') {
@@ -415,7 +265,7 @@ fn query_u64(query: &str, expected_key: &str) -> Result<u64, String> {
     Ok(result)
 }
 
-fn bad_request(msg: String) -> (&'static str, &'static str, Vec<u8>) {
+pub(crate) fn bad_request(msg: String) -> (&'static str, &'static str, Vec<u8>) {
     (
         "400 Bad Request",
         "application/json; charset=utf-8",
@@ -431,6 +281,9 @@ fn api_simulate(
         Ok(run) => run,
         Err(e) => return bad_request(e),
     };
+    if run.engine == "core" {
+        return core_api::core_simulate_response(run.seed, &run.scope);
+    }
     match run_simulation(run.seed, &run.scope, run.rules, run.setup) {
         Ok((body, ticks)) => {
             // 缓存页面正在查看的这场比赛：验证入口对同一刻序列做判定，
@@ -457,6 +310,7 @@ fn api_simulate(
 struct RunRequest {
     seed: u64,
     scope: String,
+    engine: String,
     rules: GameRules,
     setup: Option<nba_engine::MatchSetup>,
 }
@@ -465,6 +319,7 @@ fn parse_run_request(req: &Request) -> Result<RunRequest, String> {
     let defaults = GameRules::default();
     let mut seed = 42u64;
     let mut scope = "5p".to_string();
+    let mut engine = "legacy".to_string();
     let mut rules_value: Option<Value> = None;
     let mut setup_value: Option<Value> = None;
 
@@ -484,6 +339,12 @@ fn parse_run_request(req: &Request) -> Result<RunRequest, String> {
         }
         rules_value = value.get("rules").cloned();
         setup_value = value.get("setup").cloned();
+        if let Some(v) = value.get("engine") {
+            engine = v
+                .as_str()
+                .ok_or_else(|| "engine must be a string".to_string())?
+                .to_string();
+        }
     } else {
         for pair in req.query.split('&').filter(|s| !s.is_empty()) {
             let (key, value) = match pair.split_once('=') {
@@ -498,6 +359,7 @@ fn parse_run_request(req: &Request) -> Result<RunRequest, String> {
                         .map_err(|_| "seed must be an unsigned integer".to_string())?
                 }
                 "scope" => scope = value,
+                "engine" => engine = value,
                 "rules" => {
                     rules_value = Some(
                         serde_json::from_str(&value)
@@ -551,6 +413,7 @@ fn parse_run_request(req: &Request) -> Result<RunRequest, String> {
     Ok(RunRequest {
         seed,
         scope,
+        engine,
         rules,
         setup,
     })
@@ -997,8 +860,8 @@ mod tests {
     }
 
     #[allow(clippy::arc_with_non_send_sync)]
-    fn session_unused() -> SharedSession {
-        Arc::new(Mutex::new(MatchService::new()))
+    fn session_unused() -> SharedCore {
+        Arc::new(Mutex::new(SessionService::new(42)))
     }
 
     fn validation_unused() -> SharedValidation {
@@ -1079,7 +942,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn session_routes_reject_invalid_duration_before_engine_call() {
-        let session = Arc::new(Mutex::new(MatchService::new()));
+        let session = session_unused();
         let invalid_request = request(
             "POST",
             "/api/session/tick",
@@ -1092,7 +955,7 @@ mod tests {
         assert!(error["error"]
             .as_str()
             .unwrap_or_default()
-            .contains("duration"));
+            .contains("non-negative"));
 
         let (status, _, _) = route(
             &request("GET", "/api/session/snapshot", Vec::new()),

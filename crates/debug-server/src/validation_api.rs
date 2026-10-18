@@ -109,7 +109,7 @@ pub fn api_validation_run(_req: &crate::Request, validation: &SharedValidation) 
     let config = nba_validation::runner::ValidationRunConfig {
         seed,
         scope: scope.clone(),
-        output_dir: std::path::PathBuf::from(".work/validation-view"),
+        output_dir: nba_sim_core::params::workspace_validation_dir(),
         max_ticks: nba_validation::runner::DEFAULT_MAX_TICKS,
     };
     // 引擎账本的流尾未完成实例数：刻序列直接推进的会话用实例存储
@@ -154,7 +154,7 @@ pub fn api_validation_run(_req: &crate::Request, validation: &SharedValidation) 
 ///
 /// 工件由 `write_artifacts` 在 run 后写入 output_dir；本端点纯读取。
 pub fn api_validation_layers(_req: &crate::Request) -> Response {
-    let dir = std::path::Path::new(".work/validation-view");
+    let dir = nba_sim_core::params::workspace_validation_dir();
     let read = |name: &str| -> Value {
         std::fs::read_to_string(dir.join(name))
             .ok()
@@ -175,7 +175,7 @@ pub fn api_validation_layers(_req: &crate::Request) -> Response {
 /// 写入 output_dir；本端点纯读取，工件缺失时字段为 null（页面显示
 /// 「尚未运行批量判定」）。
 pub fn api_validation_certification(_req: &crate::Request) -> Response {
-    let dir = std::path::Path::new(".work/validation-view");
+    let dir = nba_sim_core::params::workspace_validation_dir();
     let read = |name: &str| -> Value {
         std::fs::read_to_string(dir.join(name))
             .ok()

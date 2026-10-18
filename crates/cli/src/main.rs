@@ -13,7 +13,9 @@ mod commands;
 pub(crate) use commands::batch::run_batch_simulation;
 pub(crate) use commands::convert::{run_evaluate, run_pbp_convert};
 pub(crate) use commands::simulate::{run_single_simulation, TempStreamGuard};
+pub(crate) use commands::sim_core::run_sim_core;
 pub(crate) use commands::validate::run_validate_batch;
+pub(crate) use commands::validate_core::run_validate_core;
 
 fn read_stream_text(path: &str) -> std::io::Result<String> {
     // 评判工件通常已经是内存字符串；这里保持同一语义，并按 gzip magic
@@ -503,6 +505,95 @@ fn main() -> std::io::Result<()> {
     if args.len() > 1 && (args[1] == "--help" || args[1] == "-h") {
         print_usage();
         return Ok(());
+    }
+
+    if args.len() > 1 && args[1] == "validate-core" {
+        let mut seed_start = 1u64;
+        let mut games = 16u64;
+        let mut json = false;
+        let mut mechanism = false;
+        let mut out: Option<std::path::PathBuf> = None;
+        let mut i = 2;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--seed" => {
+                    seed_start = parse_option_value(&args, i + 1, "--seed <n>")?
+                        .parse()
+                        .map_err(|_| std::io::Error::other("seed must be a number"))?;
+                    i += 2;
+                }
+                "--games" => {
+                    games = parse_option_value(&args, i + 1, "--games <n>")?
+                        .parse()
+                        .map_err(|_| std::io::Error::other("games must be a number"))?;
+                    i += 2;
+                }
+                "--json" => {
+                    json = true;
+                    i += 1;
+                }
+                "--mechanism" => {
+                    mechanism = true;
+                    i += 1;
+                }
+                "--out" => {
+                    out = Some(std::path::PathBuf::from(parse_option_value(
+                        &args,
+                        i + 1,
+                        "--out <dir>",
+                    )?));
+                    i += 2;
+                }
+                other => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("unknown validate-core option `{other}`"),
+                    ));
+                }
+            }
+        }
+        return run_validate_core(seed_start, games, json, mechanism, out);
+    }
+
+    if args.len() > 1 && args[1] == "sim-core" {
+        let mut seed = 42u64;
+        let mut games = 1u64;
+        let mut gate = false;
+        let mut stream: Option<String> = None;
+        let mut i = 2;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--seed" => {
+                    seed = parse_option_value(&args, i + 1, "--seed <n>")?
+                        .parse()
+                        .map_err(|_| std::io::Error::other("seed must be a number"))?;
+                    i += 2;
+                }
+                "--games" => {
+                    games = parse_option_value(&args, i + 1, "--games <n>")?
+                        .parse()
+                        .map_err(|_| std::io::Error::other("games must be a number"))?;
+                    i += 2;
+                }
+                "--gate" => {
+                    gate = true;
+                    i += 1;
+                }
+                "--stream" => {
+                    stream = Some(
+                        parse_option_value(&args, i + 1, "--stream <path>")?.to_string(),
+                    );
+                    i += 2;
+                }
+                other => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("unknown sim-core option `{other}`"),
+                    ));
+                }
+            }
+        }
+        return run_sim_core(seed, games, gate, stream.as_deref());
     }
 
     if args.len() > 1 && args[1] == "audit" {

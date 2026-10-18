@@ -1,0 +1,23 @@
+{
+  "branch_coverage": {
+    "gate_criteria": 17,
+    "mechanism_attributes": 11,
+    "sampled": 28,
+    "scenario_only": 0,
+    "uncovered": 0
+  },
+  "certification_status": "insufficient_evidence",
+  "commit": "e560a8505c59c4027c9c473844bfbe80957b29d0",
+  "games": 16,
+  "layer1_flow": {
+    "scenarios_pass": 16,
+    "scenarios_total": 16
+  },
+  "layer3_5_distribution": {
+    "defects": [],
+    "insufficient": [
+      "mechanism:speed",
+      "mechanism:stamina"
+    ]
+  }
+}

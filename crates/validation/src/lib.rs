@@ -5,6 +5,8 @@
 
 pub mod artifacts;
 pub mod composition;
+pub mod core_validation;
+pub mod mechanism_core;
 pub mod criteria;
 pub mod joint;
 pub mod manifest;

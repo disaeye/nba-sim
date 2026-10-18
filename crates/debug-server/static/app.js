@@ -123,7 +123,9 @@
     accumulator: 0,
     teamPerspective: "home",
     courtMode: "full",
-    potentialFieldVisible: true,
+    // 势能场是内部分析图层，默认隐藏：它铺满大半个球场，不透明填充会盖掉
+    // 地板与三分线，与「看比赛」的视觉目标冲突。需要时用侧栏开关（P）打开。
+    potentialFieldVisible: false,
     lastFrameJson: -1,
     courtFX: null,
     fxRafId: null,
@@ -218,7 +220,10 @@
     ADVANCE: "持球推进",
     HELD: "持球控制",
     DRIVE: "突破推进",
-    SHOT: "投篮飞行",
+    SHOT: "投篮出手",
+    SCREEN: "立掩护",
+    POSSESSION_STARTED: "回合开始",
+    SUBSTITUTION: "换人",
     DEAD: "死球",
     INBOUND_TRANSFER: "发球传递",
     INBOUND_READY: "发球就位",
@@ -1543,6 +1548,7 @@
           body: JSON.stringify({
             seed,
             scope,
+            engine: "core",
             rules: withRules || state.rules || null,
             setup,
           }),
@@ -1715,7 +1721,7 @@
       }
       possession.passes += names.filter((name) => name === "PASS").length;
       possession.shots += names.filter(
-        (name) => name === "SHOT_RELEASE",
+        (name) => name === "SHOT_RELEASE" || name === "SHOT",
       ).length;
       possession.scores += names.filter(
         (name) => name === "SCORE" || name === "DRIVE_SCORE",
@@ -1740,7 +1746,40 @@
         const frameEvents = Array.isArray(tick.event_log) ? tick.event_log : [];
         const domainEvent = frameEvents.find((event) => event.kind === name);
         const payload = domainEvent?.data || null;
-        if (name === "SHOT_RELEASE") {
+        if (name === "SHOT") {
+          const shooterId =
+            payload?.shooter_id || tick.debug?.player || holderId || "unknown";
+          const shooter =
+            (tick.players || []).find((player) => player.id === shooterId) ||
+            (previous?.players || []).find(
+              (player) => player.id === shooterId,
+            );
+          const team = shooter?.team || tick.possession_team || "home";
+          const rules = runtimeRules(tick);
+          const x = finite(shooter?.x) * rules.courtWidth;
+          const y = finite(shooter?.y) * rules.courtHeight;
+          const hoop =
+            team === "home"
+              ? { x: rules.rightHoopX, y: rules.hoopY }
+              : { x: rules.leftHoopX, y: rules.hoopY };
+          const distance = Math.hypot(x - hoop.x, y - hoop.y);
+          shots.push({
+            index,
+            eventId: domainEvent?.event_id ?? null,
+            possessionId: id,
+            team,
+            shooter: shooterId,
+            x,
+            y,
+            distance,
+            three: payload?.zone === "three",
+            makeProbability: null,
+            contestLevel: payload?.contest ?? null,
+            made: Boolean(payload?.made),
+            resolved: true,
+            points: Number(payload?.points) || 0,
+          });
+        } else if (name === "SHOT_RELEASE") {
           const eventId = domainEvent?.event_id ?? null;
           const shooterId =
             payload?.ShotRelease?.shooter_id ||
@@ -2094,6 +2133,12 @@
         return "队友稳妥接球";
       case "SHOT_RELEASE":
         return "投篮出手！";
+      case "SHOT": {
+        const entry = Array.isArray(tick.event_log)
+          ? tick.event_log.find((item) => item.kind === "SHOT")
+          : null;
+        return entry?.data?.made ? "投篮命中！" : "投篮不中";
+      }
       case "SCORE":
         return "球进！得分生效！";
       case "SHOT_MISS":
@@ -2372,7 +2417,7 @@
 
     // 第 3/4/5 层：统计与机制判定（statistical/mechanism 工件）。
     loadValidationLayers(detail || summary);
-    // 批量认证总览（certification 工件，最近一次批量判定跑）。
+    // 批次判定总览（certification 工件，最近一次批量判定跑）。
     loadValidationCertification(detail || summary);
 
     // 场景与证据不足详单。
@@ -2408,13 +2453,13 @@
       if (!cert || !cert.certification_status) {
         const row = document.createElement("div");
         row.className = "validation-ledger-item muted-label";
-        row.textContent = "批量认证：尚未运行（CLI: nba-sim validate --games N --scope full --out .work/validation-view）";
+        row.textContent = "批次判定：尚未运行（CLI: nba-sim validate-core --games 16 --mechanism --out .work/validation-view）";
         container.prepend(row);
         return;
       }
       const title = document.createElement("div");
       title.className = "validation-section-title";
-      title.textContent = "批量认证总览（最近一次整场批量判定）";
+      title.textContent = "批次判定总览（最近一次整场批量判定）";
       container.appendChild(title);
       const statusTextMap = {
         pass: "通过",
@@ -2430,7 +2475,7 @@
       statusRow.className = `validation-verdict-row ${statusClsMap[cert.certification_status] || "verdict-insufficient"}`;
       const l35 = cert.layer3_5_distribution || {};
       const l1 = cert.layer1_flow || {};
-      statusRow.textContent = `认证结论：${statusTextMap[cert.certification_status] || cert.certification_status} · 第1/2层场景 ${l1.scenarios_pass ?? "?"}/${l1.scenarios_total ?? "?"} · 第3/5层 缺陷 ${(l35.defects || []).length} 项 · 证据不足 ${(l35.insufficient || []).length} 项`;
+      statusRow.textContent = `判定结论：${statusTextMap[cert.certification_status] || cert.certification_status} · 逐场账本 ${l1.scenarios_pass ?? "?"}/${l1.scenarios_total ?? "?"} · 分布与机制缺陷 ${(l35.defects || []).length} 项 · 效应不足 ${(l35.insufficient || []).length} 项`;
       container.appendChild(statusRow);
       // 缺陷清单（引擎侧工作清单的输入）。
       for (const criterion of l35.defects || []) {
@@ -2459,7 +2504,7 @@
       const cov = cert.branch_coverage || {};
       const covRow = document.createElement("div");
       covRow.className = "validation-ledger-item";
-      covRow.textContent = `规则域覆盖：采样判定 ${cov.sampled ?? "?"} / 仅场景 ${cov.scenario_only ?? "?"} / 未覆盖 ${cov.uncovered ?? "?"}`;
+      covRow.textContent = `判定面覆盖：已判定 ${cov.sampled ?? "?"} 项（分布准则 ${cov.gate_criteria ?? "?"} · 机制属性 ${cov.mechanism_attributes ?? "?"}） · 未覆盖 ${cov.uncovered ?? "?"}`;
       container.appendChild(covRow);
     } catch {
       // 认证总览失败不影响其他展示。
@@ -2786,6 +2831,11 @@
       case "SHOT_RELEASE": {
         const three = payload?.is_three ? "三分出手" : "出手";
         return `${name(payload?.shooter_id)} ${three} · 命中率 ${pct(finite(payload?.make_probability))}`;
+      }
+      case "SHOT": {
+        const three = payload?.zone === "three" ? "三分出手" : "出手";
+        const result = payload?.made ? "命中" : "不中";
+        return `${name(payload?.shooter_id)} ${three} · ${Math.round(finite(payload?.distance_ft))} 英尺 · ${result}`;
       }
       case "SCORE": {
         const three = payload?.is_three ? "三分命中" : "命中";
@@ -3473,6 +3523,27 @@
     // 5. 球员渲染
     state.hitPlayers.length = 0;
 
+    // 防守焦点集合：持球人所在队的对手中，责任为 Chaser（对位紧逼）或
+    // PointOfAttack（第一道防线）的球员。开启战术图层时只给这两人画目标线
+    // （红色点线），避免 10 条线同时出现无法辨识意图归属。
+    // 责任字段是引擎的权威信号（status.md 门矩阵「防守」行：DefenseResponsibility
+    // 九种主责任），不按距离猜对位。
+    state.defensiveFocusIds = new Set();
+    {
+      const carrier = (tick.players || []).find(
+        (p) => p.onCourt !== false && p.hasBall === true,
+      );
+      if (carrier) {
+        for (const p of tick.players || []) {
+          if (p.onCourt === false || p.team === carrier.team) continue;
+          const role = String(p.defensive_role || "");
+          if (role === "Chaser" || role === "PointOfAttack") {
+            state.defensiveFocusIds.add(p.id);
+          }
+        }
+      }
+    }
+
     for (const player of tick.players || []) {
       if (player.onCourt === false) continue;
       const playerPoint = point(
@@ -3490,9 +3561,16 @@
       const curVx = hist[hist.length - 1]?.vx || 0;
       const curVy = hist[hist.length - 1]?.vy || 0;
 
-      // 战术路线 (Play-art route)
+      // 焦点判定先于使用：战术路线与跑位目标两段共用。
+      // 「焦点球员」= 持球人（进攻意图发起者）+ 对位防守人。
+      const isFocusRunner = player.hasBall === true;
+      const isFocusDefender = state.defensiveFocusIds?.has(player.id) === true;
+
+      // 战术路线 (Play-art route)：这是「体系档案里写好的跑位路线」，
+      // 与下方按人计算的跑位目标是两种东西，故用细密虚线且更淡。
       if (
         state.potentialFieldVisible &&
+        isFocusRunner &&
         player.potential_target_x !== undefined &&
         player.potential_target_y !== undefined
       ) {
@@ -3518,11 +3596,13 @@
         ctx.restore();
       }
 
-      // 跑位目标虚线：与势能场共用显幁开关。全体球员逐帧画目标线
-      // 在默认视角下是纯噪音（球场除人球外最多余的元素），只有
-      // 打开「势能场」才展示战术意图层。
+      // 跑位目标虚线：与势能场共用显幁开关。
+      // 开启时也不给全体球员画目标线——10 条线同时出现仍然是纯噪音，
+      // 而且看不出谁是谁。只画持球人（进攻意图的发起者）与对位防守人，
+      // 其余球员的目标点由势能场的目标锚点（带压力权重）表达。
       if (
         state.potentialFieldVisible &&
+        (isFocusRunner || isFocusDefender) &&
         player.target_x !== undefined &&
         player.target_y !== undefined
       ) {
@@ -3536,22 +3616,52 @@
         );
         if (dist > 18) {
           ctx.save();
-          ctx.setLineDash([4, 4]);
-          ctx.strokeStyle =
-            player.team === "home"
-              ? "rgba(16, 185, 129, 0.45)"
-              : "rgba(245, 158, 11, 0.45)";
-          ctx.lineWidth = 1.5;
+          // 语义分层：持球人的跑位意图=实线+箭头（我要去哪），
+          // 防守对位=点线（我在盯谁）。旧版两者同为 [4,4] 虚线，
+          // 开着图层时进攻防守线无法区分。
+          if (isFocusRunner) {
+            ctx.setLineDash([]);
+            ctx.strokeStyle =
+              player.team === "home"
+                ? "rgba(5, 150, 105, 0.8)"
+                : "rgba(217, 119, 6, 0.8)";
+            ctx.lineWidth = 1.8;
+          } else {
+            ctx.setLineDash([1, 4]);
+            ctx.strokeStyle =
+              player.team === "home"
+                ? "rgba(220, 38, 38, 0.45)"
+                : "rgba(220, 38, 38, 0.45)";
+            ctx.lineWidth = 1.2;
+          }
           ctx.beginPath();
           ctx.moveTo(playerPoint.x, playerPoint.y);
           ctx.lineTo(targetPt.x, targetPt.y);
           ctx.stroke();
+          if (isFocusRunner) {
+            // 箭头尖端：标明方向而非仅仅「一条线连着一个点」
+            const ang = Math.atan2(targetPt.y - playerPoint.y, targetPt.x - playerPoint.x);
+            ctx.fillStyle = ctx.strokeStyle;
+            ctx.beginPath();
+            ctx.moveTo(targetPt.x, targetPt.y);
+            ctx.lineTo(
+              targetPt.x - Math.cos(ang - 0.42) * 6,
+              targetPt.y - Math.sin(ang - 0.42) * 6,
+            );
+            ctx.lineTo(
+              targetPt.x - Math.cos(ang + 0.42) * 6,
+              targetPt.y - Math.sin(ang + 0.42) * 6,
+            );
+            ctx.closePath();
+            ctx.fill();
+          }
           ctx.beginPath();
-          ctx.arc(targetPt.x, targetPt.y, 4, 0, Math.PI * 2);
-          ctx.fillStyle =
-            player.team === "home"
-              ? "rgba(16, 185, 129, 0.7)"
-              : "rgba(245, 158, 11, 0.7)";
+          ctx.arc(targetPt.x, targetPt.y, isFocusRunner ? 4 : 2.6, 0, Math.PI * 2);
+          ctx.fillStyle = isFocusRunner
+            ? player.team === "home"
+              ? "rgba(5, 150, 105, 0.7)"
+              : "rgba(217, 119, 6, 0.7)"
+            : "rgba(220, 38, 38, 0.55)";
           ctx.fill();
           ctx.restore();
         }
@@ -3593,7 +3703,7 @@
       // 只是视觉噪音（防守人两侧的「横线」来源）。
       const isContest = hasActionWindow && (actionRaw.includes("CONTEST") || actionRaw.includes("CLOSEOUT") || actionRaw.includes("DROP_CONTAIN"));
       // 步频周期震荡（运球触地脉冲的节奏源）
-      const gaitCycle = curSpeed > 0.4 ? (state.idx * 0.45 + (Number(player.number) || 1) * 1.5) : 0;
+      const gaitCycle = curSpeed > 0.4 ? (state.idx * 0.45 + (Number(player.jersey ?? player.number) || 1) * 1.5) : 0;
       const gaitPulse = Math.sin(gaitCycle);
 
       // 1. 身体朝向角 (Facing Angle) 与动态锁定
@@ -3986,24 +4096,57 @@
       ctx.lineWidth = player.hasBall ? 2.6 : 1.6;
       ctx.stroke();
 
-      // 朝向指示微标：等腰三角，钉在碰撞包络边缘指向朝向
+      // 朝向箭头：长度随移动速度增加。静止时短标识保持朝向，移动时延长
+      // 成方向标；线段和箭头头部均从碰撞圈外开始，不穿过球员躯干。
       ctx.save();
       ctx.rotate(facingAngle);
+      const hasMomentum = curSpeed > 3.5;
+      const headingLength = hasMomentum
+        ? clamp(8 + curSpeed * 0.9, 8, 27)
+        : 8;
+      const headingAlpha = hasMomentum
+        ? clamp(0.48 + curSpeed / 34, 0.48, 0.78)
+        : 0.4;
+      ctx.strokeStyle = isHome
+        ? `rgba(5, 150, 105, ${headingAlpha.toFixed(2)})`
+        : `rgba(217, 119, 6, ${headingAlpha.toFixed(2)})`;
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.lineWidth = hasMomentum ? 1.6 : 1.0;
+      ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.moveTo(radius + 7.0, 0);
-      ctx.lineTo(radius + 0.5, -4.5);
-      ctx.lineTo(radius + 0.5, 4.5);
+      ctx.moveTo(radius + 2, 0);
+      ctx.lineTo(radius + headingLength, 0);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(radius + headingLength + 3, 0);
+      ctx.lineTo(radius + headingLength - 2, -3.2);
+      ctx.lineTo(radius + headingLength - 2, 3.2);
       ctx.closePath();
-      ctx.fillStyle = isHome ? "#059669" : "#d97706";
       ctx.fill();
       ctx.restore();
 
-      // 持球提示环（超出碰撞包络 2.5px，与外圈区分）
+      // 持球提示环：轻微呼吸脉冲，外圈稳定表达碰撞范围，内层环指示球权。
       if (player.hasBall) {
+        const possessionPulse = 0.5 + 0.5 * Math.sin(now / 240);
         ctx.beginPath();
-        ctx.arc(0, 0, radius + 3.5, 0, Math.PI * 2);
-        ctx.strokeStyle = isHome ? "rgba(16, 185, 129, 0.6)" : "rgba(245, 158, 11, 0.6)";
-        ctx.lineWidth = 1.2;
+        ctx.arc(0, 0, radius + 4 + possessionPulse * 2, 0, Math.PI * 2);
+        ctx.strokeStyle = isHome
+          ? `rgba(16, 185, 129, ${(0.42 + possessionPulse * 0.4).toFixed(2)})`
+          : `rgba(245, 158, 11, ${(0.42 + possessionPulse * 0.4).toFixed(2)})`;
+        ctx.lineWidth = 1.4 + possessionPulse * 0.6;
+        ctx.stroke();
+      }
+
+      // 关键动作强调：只在持球投篮/上篮/扣篮的动作窗口内加一圈短促外环；
+      // 不给全队所有动作加光效，避免重新制造视觉噪声。
+      if (isJumpAction && jumpHeight > 0.12) {
+        const actionPulse = 0.5 + 0.5 * Math.sin(now / 90);
+        ctx.beginPath();
+        ctx.arc(0, 0, radius + 8 + actionPulse * 3, 0, Math.PI * 2);
+        ctx.strokeStyle = isHome
+          ? `rgba(255, 255, 255, ${(0.55 + actionPulse * 0.35).toFixed(2)})`
+          : `rgba(255, 255, 255, ${(0.55 + actionPulse * 0.35).toFixed(2)})`;
+        ctx.lineWidth = 1.5 + actionPulse;
         ctx.stroke();
       }
 
@@ -4032,14 +4175,14 @@
         ctx.fillText("面框", 0, radius + 6.5);
       }
 
-      // 纯白清晰数字背号（居中于躯干内圆，高对比度）
+      // 纯白清晰背号（居中于躯干内圆，高对比度）
+      // 权威字段是 `jersey`（帧 players 携带 '23'/'3' 等字符串）；`number` 不存在。
+      // 旧代码只读 `number`，取不到就回落到内部 ID，于是场上显示成 A_02/H_05。
       ctx.font = "800 10px monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       const num =
-        player.number === undefined
-          ? String(player.id || "")
-          : String(player.number);
+        player.jersey ?? player.number ?? String(player.id || "").replace(/^[AH]_/, "");
 
       ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
       ctx.fillText(num, 0.5, 1.0);
@@ -4061,7 +4204,11 @@
 
       ctx.restore(); // 还原 translate(renderPx, renderPy)
 
-      // 6. 脚下纯中文战术动作与位置角色微标 (动态呈现当前场上实时战意与配合)
+      // 6. 脚下中文战术动作与位置角色微标
+      //
+      // 标签只给「焦点球员」：持球人、正在做关键动作的人、以及跳转动作。
+      // 旧版给全部 10 人无条件绘制标签，实测 4 个标签会叠在不到 100×60 px
+      // 里互相遮盖，完全不可读；位置/动作信息移到侧栏名册与决策面板。
       const actionZh = getActionZh(player.action);
       let jumpActionZh = "";
       if (jumpHeight > 0.25) {
@@ -4084,6 +4231,10 @@
           "—",
         ].includes(player.action));
       const tagText = jumpActionZh || (isDynamicAction ? actionZh : getPositionZh(player.position));
+      // 焦点球员才给标签：跳转动作（暴扣/封盖/跳投等关键瞬间）或持球人。
+      // 这两个条件同时满足的球员全场通常只有 1-2 个，标签不会互相压叠。
+      const showTag = Boolean(jumpActionZh) || player.hasBall === true;
+      if (showTag) {
       ctx.save();
       // 标签跟随腾空身体（否则人跳起来了标签留在地面，动作与文字分离）
       const posTagY = renderPy + radius + 9;
@@ -4120,6 +4271,7 @@
       ctx.textBaseline = "middle";
       ctx.fillText(tagText, px, posTagY);
       ctx.restore();
+      }
     }
 
     // 6. 篮球渲染 (严格对齐真实俯视投影平面与三维透视物理)
@@ -4238,8 +4390,9 @@
     ctx.save();
     ctx.globalCompositeOperation = "source-over";
 
-    // 全场空间连续势能曲面 (高分辨率 1.5ft 步长)
-    const stepFt = 1.5;
+    // 全场空间连续势能曲面 (细网格 0.75ft 步长：作为分析图层，宁可细而淡，
+    // 不可粗而实——粗块会形成马赛克并盖住地板质感)
+    const stepFt = 0.75;
     const nx = Math.ceil(rules.courtWidth / stepFt);
     const ny = Math.ceil(rules.courtHeight / stepFt);
     const sigma2 = 2 * 7.5 * 7.5; // 控制辐射半衰期
@@ -4304,10 +4457,12 @@
           const w = cellNext.x - cellPt.x;
           const h = cellNext.y - cellPt.y;
 
-          // 高辨识度色彩映射：主队翡翠绿 (#10b981)，客队琥珀金 (#f59e0b)
+          // 细网格（0.75ft）+ 低不透明度：势能场是分析图层，不得盖掉
+          // 地板质感、三分线与球员。旧的 1.5ft/alpha≤0.40 组合会形成
+          // 大片不透明马赛克，压在球员和标签之下反而更难读。
           const alpha = Math.min(
-            0.40,
-            0.15 + Math.abs(dominance) * 0.25 * (0.35 + intensity * 0.65),
+            0.16,
+            0.04 + Math.abs(dominance) * 0.12 * (0.35 + intensity * 0.65),
           );
           if (dominance > 0) {
             ctx.fillStyle = `rgba(16, 185, 129, ${alpha.toFixed(3)})`;
@@ -4321,7 +4476,7 @@
           const cellNext = point(gx + stepFt, gy + stepFt);
           const w = cellNext.x - cellPt.x;
           const h = cellNext.y - cellPt.y;
-          ctx.fillStyle = `rgba(255, 255, 255, ${(0.08 + intensity * 0.1).toFixed(3)})`;
+          ctx.fillStyle = `rgba(255, 255, 255, ${(0.03 + intensity * 0.05).toFixed(3)})`;
           ctx.fillRect(cellPt.x, cellPt.y, w + 0.5, h + 0.5);
         }
       }
@@ -4348,8 +4503,8 @@
 
         // 驱动虚线与主体箭头
         ctx.strokeStyle = color;
-        ctx.globalAlpha = 0.65 + sample.pressure * 0.35;
-        ctx.lineWidth = 2.0;
+        ctx.globalAlpha = 0.45 + sample.pressure * 0.25;
+        ctx.lineWidth = 1.6;
         ctx.beginPath();
         ctx.moveTo(start.x, start.y);
         ctx.lineTo(end.x, end.y);
@@ -4391,49 +4546,48 @@
     const homePct = Math.round((homeControlPoints / totalControl) * 100);
     const awayPct = 100 - homePct;
 
-    const awayTeamName = getTeamNameZh(tick.away_team) || "客队";
-    const homeTeamName = getTeamNameZh(tick.home_team) || "主队";
-
     ctx.save();
-    // 居中放置在球场顶部中央 (清新现代微浮动卡片)
-    const hudW = 210;
-    const hudH = 26;
-    const hudX = 500 - hudW / 2;
-    const hudY = 12;
+    // 贴球场左下角的 Apron 区（球场边界 y=530 之外），不占中圈与三分线的
+    // 视觉焦点。旧版居中顶部（hudY=12）会把这条内部统计指标摆在球场正中，
+    // 与中圈、双方罚球区重叠；且宽度 210px 盖住三分线弧顶。
+    const hudW = 176;
+    const hudH = 22;
+    const hudX = 34;
+    const hudY = 534;
 
-    ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
-    ctx.strokeStyle = "rgba(203, 213, 225, 0.9)";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.82)";
+    ctx.strokeStyle = "rgba(203, 213, 225, 0.7)";
     ctx.lineWidth = 1.0;
     ctx.beginPath();
-    ctx.roundRect(hudX, hudY, hudW, hudH, 6);
+    ctx.roundRect(hudX, hudY, hudW, hudH, 5);
     ctx.fill();
     ctx.stroke();
 
-    ctx.font = "700 11px system-ui, -apple-system, sans-serif";
+    ctx.font = "700 10px system-ui, -apple-system, sans-serif";
     ctx.textBaseline = "middle";
 
     // 客队控制率 (左侧，明朗琥珀金)
-    ctx.fillStyle = "#d97706";
+    ctx.fillStyle = "#b45309";
     ctx.textAlign = "left";
-    ctx.fillText(`${awayTeamName.slice(0, 4)} ${awayPct}%`, hudX + 10, hudY + 9);
+    ctx.fillText(`${awayPct}%`, hudX + 8, hudY + 7);
 
     // 中间标签
     ctx.fillStyle = "#64748b";
     ctx.textAlign = "center";
-    ctx.font = "600 11px system-ui, -apple-system, sans-serif";
-    ctx.fillText("空间控制", 500, hudY + 9);
+    ctx.font = "600 10px system-ui, -apple-system, sans-serif";
+    ctx.fillText("空间控制", hudX + hudW / 2, hudY + 7);
 
     // 主队控制率 (右侧，薄荷翡翠绿)
-    ctx.fillStyle = "#059669";
+    ctx.fillStyle = "#047857";
     ctx.textAlign = "right";
-    ctx.font = "700 11px system-ui, -apple-system, sans-serif";
-    ctx.fillText(`${homePct}% ${homeTeamName.slice(0, 4)}`, hudX + hudW - 10, hudY + 9);
+    ctx.font = "700 10px system-ui, -apple-system, sans-serif";
+    ctx.fillText(`${homePct}%`, hudX + hudW - 8, hudY + 7);
 
     // 底部双色空间对比进度条
-    const barW = hudW - 20;
-    const barH = 3.0;
-    const barX = hudX + 10;
-    const barY = hudY + 19;
+    const barW = hudW - 16;
+    const barH = 2.5;
+    const barX = hudX + 8;
+    const barY = hudY + 15;
     const awayBarW = (barW * awayPct) / 100;
 
     // 底槽浅灰

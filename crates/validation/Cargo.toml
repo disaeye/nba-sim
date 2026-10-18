@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 nba-domain = { path = "../domain" }
 nba-engine = { path = "../engine" }
+nba-sim-core.workspace = true
 nba-protocol = { path = "../protocol" }
 serde = { workspace = true }
 serde_json = { workspace = true }

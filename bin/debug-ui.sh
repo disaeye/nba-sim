@@ -9,5 +9,5 @@ if [ ! -x "$BIN" ]; then
     (cd "$DIR" && cargo build --release -p nba-debug-server)
 fi
 
-PORT="${1:-4173}"
+PORT="${1:-31100}"
 exec "$BIN" "$PORT"

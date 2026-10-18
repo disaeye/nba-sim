@@ -1,0 +1,72 @@
+{
+  "calibration": {
+    "formations": {
+      "contest": "",
+      "method": "half-court slot coordinates in feet for a team attacking right; the alternate formation brings the handler to the elbow so pull-ups are not all above the break",
+      "sample": 0,
+      "script": "hand-authored formation geometry, reviewed against the shot zone shares",
+      "season": "2024-25",
+      "source": "modern five-out half-court spacing; three perimeter slots and two interior slots"
+    },
+    "freethrow": {
+      "contest": "",
+      "method": "回合事件文本里的 Free Throw 行逐次计数",
+      "sample": 53301,
+      "script": "scripts/calibrate/fit_tables.py",
+      "season": "2024-25",
+      "source": "shufinskiy/nba_data pbpstats possession event text"
+    },
+    "policy": {
+      "contest": "",
+      "method": "coordinate descent on the induced shot and possession distributions",
+      "sample": 0,
+      "script": "scripts/calibrate/fit_policy.py",
+      "season": "2024-25",
+      "source": "prior; refined by scripts/calibrate/fit_policy.py moment matching"
+    },
+    "possession": {
+      "contest": "",
+      "method": "按回合起始语境分组统计结局速率与时长分位",
+      "sample": 243782,
+      "script": "scripts/calibrate/fit_tables.py",
+      "season": "2024-25",
+      "source": "shufinskiy/nba_data pbpstats (pbpstats.com possession data)"
+    },
+    "rebound": {
+      "contest": "",
+      "method": "分区相对差异来自事件文本的首次投失归组；总水平取 possession 表的 oreb_per_miss 后按分区投失占比等比缩放",
+      "sample": 96692,
+      "script": "scripts/calibrate/fit_tables.py",
+      "season": "2024-25",
+      "source": "shufinskiy/nba_data pbpstats possession table + event text"
+    },
+    "shot_make": {
+      "contest": "modeled: centred at 0.5 so the fitted mean is preserved; sensitivity documented in table",
+      "method": "empirical make rate per (shot kind, distance bin, two/three), sparse cells smoothed toward the kind mean",
+      "sample": 219527,
+      "script": "scripts/calibrate/fit_tables.py",
+      "season": "2024-25",
+      "source": "shufinskiy/nba_data shotdetail (stats.nba.com ShotChartDetail)"
+    },
+    "shot_profile": {
+      "contest": "",
+      "method": "投篮档案逐球统计出手类型、区域与来源份额，按样本数归一",
+      "sample": 219527,
+      "script": "scripts/calibrate/fit_tables.py",
+      "season": "2024-25",
+      "source": "shufinskiy/nba_data shotdetail"
+    }
+  },
+  "commit": "e560a8505c59c4027c9c473844bfbe80957b29d0",
+  "games": 16,
+  "mechanism": {
+    "high_value": 0.95,
+    "low_value": 0.1,
+    "minimum_relative_change": 0.002,
+    "passed": true,
+    "possessions": null,
+    "seeds": 8
+  },
+  "seed_start": 1,
+  "working_tree_dirty": true
+}

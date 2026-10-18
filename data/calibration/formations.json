@@ -1,0 +1,31 @@
+{
+  "table": "formations",
+  "provenance": {
+    "source": "modern five-out half-court spacing; three perimeter slots and two interior slots",
+    "season": "2024-25",
+    "sample": 0,
+    "script": "hand-authored formation geometry, reviewed against the shot zone shares",
+    "method": "half-court slot coordinates in feet for a team attacking right; the alternate formation brings the handler to the elbow so pull-ups are not all above the break"
+  },
+  "offense": [
+    [63.0, 25.0],
+    [73.0, 8.0],
+    [84.0, 2.5],
+    [82.0, 30.0],
+    [85.0, 32.0]
+  ],
+  "offense_alt": [
+    [67.0, 19.0],
+    [73.0, 8.0],
+    [84.0, 2.5],
+    [82.0, 33.0],
+    [85.0, 32.0]
+  ],
+  "defense": [
+    [69.0, 25.0],
+    [75.0, 11.0],
+    [82.0, 5.0],
+    [80.0, 28.0],
+    [83.0, 30.0]
+  ]
+}

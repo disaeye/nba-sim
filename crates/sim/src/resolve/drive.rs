@@ -1,0 +1,174 @@
+//! 突破与背身结算：过掉首要防守人、到达位置、丢球。
+
+use glam::Vec2;
+use rand::Rng;
+
+use crate::action::{
+    ActionIntent, ActionKind, ActionOutcome, Completion, Fact, StateDelta, TurnoverKind,
+};
+use crate::resolve::{clamp01, sigmoid};
+use crate::state::PossessionKind;
+use crate::world::World;
+
+pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
+    let driver = intent.actor;
+    let team = world.players[driver].team;
+    let hoop = world.hoop_for(team);
+    let pos = world.players[driver].pos;
+    let lane = crate::state::lane_clearance(&world.players, pos, hoop, team);
+    let nearest = world
+        .players
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.on_court && p.team != team)
+        .min_by(|a, b| {
+            (a.1.pos - pos)
+                .length_squared()
+                .partial_cmp(&(b.1.pos - pos).length_squared())
+                .expect("finite distances")
+        })
+        .map(|(index, _)| index);
+
+    let turnover_base = world.params.policy.w("drive_turnover_rate");
+    let handle = world.players[driver].data.attributes.ball_handling
+        + world.players[driver].data.attributes.agility * 0.5;
+    let decision = world.players[driver].data.attributes.decision_iq;
+    let risk = clamp01(turnover_base * (1.4 - handle - 0.3 * decision));
+    if world.rng.gen::<f32>() < risk {
+        world.line_mut(driver).turnovers += 1;
+        if let Some(defender) = nearest {
+            if world.rng.gen::<f32>() < 0.55 {
+                world.line_mut(defender).steals += 1;
+            }
+        }
+        world.emit(Fact::Turnover {
+            player: driver,
+            kind: TurnoverKind::LostBall,
+        });
+        world.end_possession("turnover", 0);
+        world.start_possession(team.other(), PossessionKind::Live);
+        return ActionOutcome {
+            actor: driver,
+            kind: ActionKind::Drive,
+            completion: Completion::Failed,
+            delta: StateDelta {
+                turnover: Some(TurnoverKind::LostBall),
+                ..Default::default()
+            },
+            facts: Vec::new(),
+        };
+    }
+
+    let (defense_skill, help_distance) = match nearest {
+        Some(defender) => {
+            let skill = world.players[defender].data.attributes.defense_perimeter
+                + world.players[defender].data.attributes.agility * 0.5;
+            let help = world
+                .players
+                .iter()
+                .filter(|p| p.on_court && p.team != team && p.id != world.players[defender].id)
+                .map(|p| (p.pos - pos).length())
+                .fold(f32::INFINITY, f32::min);
+            (skill, help)
+        }
+        None => (0.5, 30.0),
+    };
+
+    let lane_norm = clamp01(lane / 8.0);
+    let help_term = clamp01(1.0 - help_distance / 20.0);
+    let p_beat = sigmoid(
+        world.params.policy.w("drive_beat_base")
+            + world.params.policy.w("drive_beat_skill") * (handle - defense_skill) * 2.0
+            + world.params.policy.w("drive_beat_lane") * lane_norm
+            - world.params.policy.w("drive_beat_help") * help_term,
+    );
+    let beaten = world.rng.gen::<f32>() < p_beat;
+
+    let travelled = (pos - intent.from_ft).length();
+    let max_travel = world.rules.max_player_speed_ftps * intent.duration as f32;
+    if travelled > max_travel * 1.08 {
+        world.violations.push(format!(
+            "geometry: drive covered {travelled:.1} ft in {:.2} s (limit {max_travel:.1} ft)",
+            intent.duration
+        ));
+    }
+
+    let direction = (hoop - pos).normalize_or_zero();
+    if beaten {
+        let reach = world.params.policy.w("drive_reach_rate");
+        let finish_distance = if world.rng.gen::<f32>() < reach {
+            1.6
+        } else {
+            6.0 + world.rng.gen::<f32>() * 6.0
+        };
+        let finish = hoop - direction * finish_distance;
+        world.players[driver].pos = finish;
+        world.players[driver].target = finish;
+        world.possession.drives += 1;
+        world.possession.last_drive_at = Some(world.now());
+        world.possession.last_drive_actor = Some(driver);
+        world.emit(Fact::Drive {
+            driver,
+            reached: true,
+            defender_beaten: true,
+        });
+        ActionOutcome {
+            actor: driver,
+            kind: ActionKind::Drive,
+            completion: Completion::Completed,
+            delta: StateDelta {
+                separation_ft: Some(2.0 + 2.0 * lane_norm),
+                ..Default::default()
+            },
+            facts: Vec::new(),
+        }
+    } else {
+        world.possession.drives += 1;
+        world.possession.last_drive_at = Some(world.now());
+        world.possession.last_drive_actor = Some(driver);
+        world.emit(Fact::Drive {
+            driver,
+            reached: false,
+            defender_beaten: false,
+        });
+        ActionOutcome {
+            actor: driver,
+            kind: ActionKind::Drive,
+            completion: Completion::Failed,
+            delta: StateDelta {
+                separation_ft: Some(0.3),
+                ..Default::default()
+            },
+            facts: Vec::new(),
+        }
+    }
+}
+
+pub fn resolve_post(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
+    let actor = intent.actor;
+    let team = world.players[actor].team;
+    let hoop = world.hoop_for(team);
+    let pos = world.players[actor].pos;
+    let direction = (hoop - pos).normalize_or_zero();
+    let target = hoop - direction * (4.0 + world.rng.gen::<f32>() * 4.0);
+    world.players[actor].pos = target;
+    world.players[actor].target = target;
+    world.possession.drives += 1;
+    world.possession.last_post_at = Some(world.now());
+    world.possession.last_post_actor = Some(actor);
+    ActionOutcome {
+        actor,
+        kind: ActionKind::PostUp,
+        completion: Completion::Completed,
+        delta: StateDelta {
+            separation_ft: Some(1.0),
+            ..Default::default()
+        },
+        facts: Vec::new(),
+    }
+}
+
+pub fn drive_target(hoop: Vec2, pos: Vec2) -> Vec2 {
+    let direction = (hoop - pos).normalize_or_zero();
+    hoop - direction * 2.0
+}

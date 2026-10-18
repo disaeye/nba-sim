@@ -3,7 +3,7 @@
 export const memory: WebAssembly.Memory;
 export const __wbg_wasmmatchservice_free: (a: number, b: number) => void;
 export const getDefaultRulesJson: () => [number, number, number, number];
-export const simulateToNdjson: (a: bigint, b: number, c: number, d: number, e: number) => [number, number, number, number];
+export const simulateToNdjson: (a: bigint, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
 export const wasmmatchservice_events_since_json: (a: number, b: bigint) => [number, number, number, number];
 export const wasmmatchservice_fastForwardMs: (a: number, b: number) => [number, number, number, number];
 export const wasmmatchservice_new: () => number;

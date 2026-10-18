@@ -1,0 +1,17 @@
+[package]
+name = "nba-sim-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+nba-domain = { workspace = true }
+nba-protocol = { workspace = true }
+glam = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[[bin]]
+name = "sim2"
+path = "src/bin/sim2.rs"

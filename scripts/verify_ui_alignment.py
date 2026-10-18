@@ -15,7 +15,7 @@ Covers:
 
 import json, subprocess, sys, time, urllib.request
 
-SERVER = "http://127.0.0.1:4173"
+SERVER = "http://127.0.0.1:31100"
 
 def run_chrome_eval(js_expr: str, port: int = 9222) -> dict:
     """Evaluate JS expression in the active page via Chrome DevTools Protocol."""

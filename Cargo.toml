@@ -13,6 +13,7 @@ members = [
     "crates/invariants",
     "crates/evaluator",
     "crates/bball-wasm",
+    "crates/sim",
     "crates/test-support",
     "crates/validation",
 ]
@@ -43,6 +44,7 @@ nba-semantics = { path = "crates/semantics" }
 nba-invariants = { path = "crates/invariants" }
 nba-test-support = { path = "crates/test-support" }
 nba-validation = { path = "crates/validation" }
+nba-sim-core = { path = "crates/sim" }
 
 [profile.dev]
 opt-level = 1

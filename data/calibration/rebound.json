@@ -1,0 +1,17 @@
+{
+  "table": "rebound",
+  "provenance": {
+    "source": "shufinskiy/nba_data pbpstats possession table + event text",
+    "season": "2024-25",
+    "sample": 96692,
+    "script": "scripts/calibrate/fit_tables.py",
+    "method": "分区相对差异来自事件文本的首次投失归组；总水平取 possession 表的 oreb_per_miss 后按分区投失占比等比缩放"
+  },
+  "oreb_rate_by_zone": {
+    "rim": 0.362493,
+    "near": 0.315355,
+    "mid": 0.234123,
+    "three": 0.256311
+  },
+  "league_oreb_per_miss": 0.285985
+}

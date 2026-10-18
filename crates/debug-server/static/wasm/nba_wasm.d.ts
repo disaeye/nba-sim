@@ -34,7 +34,7 @@ export function getDefaultRulesJson(): string;
  * 在浏览器内存中直接运行指定 scope 的模拟，输出 NDJSON 字符串。
  * 完全无需后端服务器参与，0 磁盘消耗。
  */
-export function simulateToNdjson(seed: bigint, scope: string, rules_json?: string | null): string;
+export function simulateToNdjson(seed: bigint, scope: string, rules_json?: string | null, setup_json?: string | null): string;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -42,7 +42,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_wasmmatchservice_free: (a: number, b: number) => void;
     readonly getDefaultRulesJson: () => [number, number, number, number];
-    readonly simulateToNdjson: (a: bigint, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly simulateToNdjson: (a: bigint, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
     readonly wasmmatchservice_events_since_json: (a: number, b: bigint) => [number, number, number, number];
     readonly wasmmatchservice_fastForwardMs: (a: number, b: number) => [number, number, number, number];
     readonly wasmmatchservice_new: () => number;

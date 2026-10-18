@@ -1,0 +1,14 @@
+{
+  "table": "freethrow",
+  "provenance": {
+    "source": "shufinskiy/nba_data pbpstats possession event text",
+    "season": "2024-25",
+    "sample": 53301,
+    "script": "scripts/calibrate/fit_tables.py",
+    "method": "回合事件文本里的 Free Throw 行逐次计数"
+  },
+  "league_make": 0.779817,
+  "attempts_observed": 53301,
+  "skill_slope": 0.26,
+  "and_one_share": 0.045
+}

@@ -1,0 +1,54 @@
+{
+  "table": "possession",
+  "provenance": {
+    "source": "shufinskiy/nba_data pbpstats (pbpstats.com possession data)",
+    "season": "2024-25",
+    "sample": 243782,
+    "script": "scripts/calibrate/fit_tables.py",
+    "method": "按回合起始语境分组统计结局速率与时长分位",
+    "context": "live = 上一次回合以活球方式终结（抢断/封盖/投失）；dead = 停表方式终结"
+  },
+  "context": {
+    "dead": {
+      "share": 0.614036,
+      "turnover_per_possession": 0.1456,
+      "fga_per_possession": 0.900896,
+      "fg2a_per_possession": 0.51943,
+      "fg3a_per_possession": 0.381466,
+      "shooting_foul_per_possession": 0.094127,
+      "oreb_per_possession": 0.13906,
+      "fg2_pct": 0.521221,
+      "fg3_pct": 0.356345,
+      "duration_p10": 10.0,
+      "duration_p50": 17.0,
+      "duration_p90": 25.0
+    },
+    "live": {
+      "share": 0.385964,
+      "turnover_per_possession": 0.141363,
+      "fga_per_possession": 0.892158,
+      "fg2a_per_possession": 0.523259,
+      "fg3a_per_possession": 0.368898,
+      "shooting_foul_per_possession": 0.106429,
+      "oreb_per_possession": 0.132149,
+      "fg2_pct": 0.583052,
+      "fg3_pct": 0.373207,
+      "duration_p10": 3.0,
+      "duration_p50": 9.0,
+      "duration_p90": 19.0
+    }
+  },
+  "league": {
+    "possessions_per_game": 198.1967,
+    "fga_per_possession": 0.897523,
+    "three_attempt_share": 0.419616,
+    "turnover_per_possession": 0.143965,
+    "shooting_foul_per_possession": 0.098875,
+    "oreb_per_possession": 0.136392,
+    "oreb_per_miss": 0.285985,
+    "fg2_pct": 0.545193,
+    "fg3_pct": 0.362719,
+    "fta_per_game": 43.3341,
+    "shooting_fouls_per_game": 19.5967
+  }
+}

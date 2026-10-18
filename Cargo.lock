@@ -698,7 +698,9 @@ dependencies = [
  "nba-engine",
  "nba-invariants",
  "nba-protocol",
+ "nba-sim-core",
  "nba-validation",
+ "serde",
  "serde_json",
 ]
 
@@ -815,7 +817,21 @@ dependencies = [
  "nba-evaluator",
  "nba-invariants",
  "nba-protocol",
+ "nba-sim-core",
  "nba-validation",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "nba-sim-core"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "nba-domain",
+ "nba-protocol",
+ "rand",
+ "rand_chacha",
  "serde",
  "serde_json",
 ]
@@ -836,6 +852,7 @@ dependencies = [
  "nba-domain",
  "nba-engine",
  "nba-protocol",
+ "nba-sim-core",
  "parquet",
  "rand_chacha",
  "rusqlite",
@@ -849,7 +866,7 @@ version = "0.1.0"
 dependencies = [
  "getrandom 0.2.17",
  "nba-domain",
- "nba-engine",
+ "nba-sim-core",
  "serde_json",
  "wasm-bindgen",
 ]

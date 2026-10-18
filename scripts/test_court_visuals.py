@@ -9,7 +9,7 @@ import subprocess
 import time
 import urllib.request
 
-SERVER = "http://127.0.0.1:4173"
+SERVER = "http://127.0.0.1:31100"
 
 def run_chrome_eval(js_expr: str, port: int = 9224) -> dict:
     req = urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=10)

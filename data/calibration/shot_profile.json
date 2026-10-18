@@ -1,0 +1,472 @@
+{
+  "table": "shot_profile",
+  "provenance": {
+    "source": "shufinskiy/nba_data shotdetail",
+    "season": "2024-25",
+    "sample": 219527,
+    "script": "scripts/calibrate/fit_tables.py",
+    "method": "投篮档案逐球统计出手类型、区域与来源份额，按样本数归一"
+  },
+  "kind_share": {
+    "alley_oop": 0.011657,
+    "catch_shoot": 0.289942,
+    "cutting_dunk": 0.015046,
+    "cutting_layup": 0.026471,
+    "driving_dunk": 0.009038,
+    "driving_layup": 0.113726,
+    "dunk": 0.014846,
+    "floater": 0.09474,
+    "hook": 0.027409,
+    "layup": 0.024366,
+    "pull_up": 0.131396,
+    "putback": 0.038975,
+    "reverse_layup": 0.014199,
+    "running_dunk": 0.013862,
+    "running_jump": 0.031217,
+    "running_layup": 0.0421,
+    "step_back": 0.056676,
+    "turnaround": 0.044336
+  },
+  "zone_share": {
+    "rim": 0.315806,
+    "near": 0.190592,
+    "mid": 0.072447,
+    "three": 0.421155
+  },
+  "three_share": 0.421155,
+  "creation_share": {
+    "cut": 0.044897,
+    "drive": 0.219927,
+    "post": 0.063614,
+    "pull_up": 0.189922,
+    "putback": 0.04517,
+    "set": 0.315688,
+    "transition": 0.120782
+  },
+  "zone_by_kind": {
+    "alley_oop": {
+      "rim": 0.965612,
+      "near": 0.033607,
+      "mid": 0.000782,
+      "three": 0.0
+    },
+    "catch_shoot": {
+      "rim": 0.002278,
+      "near": 0.021194,
+      "mid": 0.037628,
+      "three": 0.9389
+    },
+    "cutting_dunk": {
+      "rim": 0.958825,
+      "near": 0.041175,
+      "mid": 0.0,
+      "three": 0.0
+    },
+    "cutting_layup": {
+      "rim": 0.900706,
+      "near": 0.099294,
+      "mid": 0.0,
+      "three": 0.0
+    },
+    "driving_dunk": {
+      "rim": 0.936996,
+      "near": 0.063004,
+      "mid": 0.0,
+      "three": 0.0
+    },
+    "driving_layup": {
+      "rim": 0.804855,
+      "near": 0.194585,
+      "mid": 0.000561,
+      "three": 0.0
+    },
+    "dunk": {
+      "rim": 0.980362,
+      "near": 0.019638,
+      "mid": 0.0,
+      "three": 0.0
+    },
+    "floater": {
+      "rim": 0.167997,
+      "near": 0.775844,
+      "mid": 0.047601,
+      "three": 0.008559
+    },
+    "hook": {
+      "rim": 0.342197,
+      "near": 0.654479,
+      "mid": 0.003324,
+      "three": 0.0
+    },
+    "layup": {
+      "rim": 0.899981,
+      "near": 0.099458,
+      "mid": 0.000561,
+      "three": 0.0
+    },
+    "pull_up": {
+      "rim": 0.003952,
+      "near": 0.161102,
+      "mid": 0.240804,
+      "three": 0.594141
+    },
+    "putback": {
+      "rim": 0.964236,
+      "near": 0.035297,
+      "mid": 0.000468,
+      "three": 0.0
+    },
+    "reverse_layup": {
+      "rim": 0.974013,
+      "near": 0.025987,
+      "mid": 0.0,
+      "three": 0.0
+    },
+    "running_dunk": {
+      "rim": 0.953993,
+      "near": 0.045679,
+      "mid": 0.000329,
+      "three": 0.0
+    },
+    "running_jump": {
+      "rim": 0.00394,
+      "near": 0.011382,
+      "mid": 0.014008,
+      "three": 0.97067
+    },
+    "running_layup": {
+      "rim": 0.881519,
+      "near": 0.117615,
+      "mid": 0.000866,
+      "three": 0.0
+    },
+    "step_back": {
+      "rim": 0.000321,
+      "near": 0.07547,
+      "mid": 0.250924,
+      "three": 0.673284
+    },
+    "turnaround": {
+      "rim": 0.032364,
+      "near": 0.695161,
+      "mid": 0.236618,
+      "three": 0.035857
+    }
+  },
+  "distance_by_kind": {
+    "alley_oop": {
+      "p10": 0.0,
+      "p50": 1.0,
+      "p90": 3.0,
+      "mean": 1.5
+    },
+    "catch_shoot": {
+      "p10": 22.0,
+      "p50": 25.0,
+      "p90": 27.0,
+      "mean": 24.33
+    },
+    "cutting_dunk": {
+      "p10": 0.0,
+      "p50": 1.0,
+      "p90": 3.0,
+      "mean": 1.43
+    },
+    "cutting_layup": {
+      "p10": 0.0,
+      "p50": 2.0,
+      "p90": 4.0,
+      "mean": 2.22
+    },
+    "driving_dunk": {
+      "p10": 0.0,
+      "p50": 1.0,
+      "p90": 4.0,
+      "mean": 1.5
+    },
+    "driving_layup": {
+      "p10": 1.0,
+      "p50": 2.0,
+      "p90": 6.0,
+      "mean": 2.86
+    },
+    "dunk": {
+      "p10": 0.0,
+      "p50": 1.0,
+      "p90": 3.0,
+      "mean": 0.93
+    },
+    "floater": {
+      "p10": 3.0,
+      "p50": 8.0,
+      "p90": 12.0,
+      "mean": 7.98
+    },
+    "hook": {
+      "p10": 2.0,
+      "p50": 6.0,
+      "p90": 9.0,
+      "mean": 5.61
+    },
+    "layup": {
+      "p10": 0.0,
+      "p50": 2.0,
+      "p90": 5.0,
+      "mean": 2.21
+    },
+    "pull_up": {
+      "p10": 11.0,
+      "p50": 25.0,
+      "p90": 27.0,
+      "mean": 21.48
+    },
+    "putback": {
+      "p10": 0.0,
+      "p50": 0.0,
+      "p90": 3.0,
+      "mean": 0.97
+    },
+    "reverse_layup": {
+      "p10": 0.0,
+      "p50": 2.0,
+      "p90": 3.0,
+      "mean": 1.72
+    },
+    "running_dunk": {
+      "p10": 0.0,
+      "p50": 1.0,
+      "p90": 3.0,
+      "mean": 1.29
+    },
+    "running_jump": {
+      "p10": 22.0,
+      "p50": 25.0,
+      "p90": 27.0,
+      "mean": 24.37
+    },
+    "running_layup": {
+      "p10": 0.0,
+      "p50": 2.0,
+      "p90": 5.0,
+      "mean": 2.25
+    },
+    "step_back": {
+      "p10": 14.0,
+      "p50": 25.0,
+      "p90": 27.0,
+      "mean": 22.37
+    },
+    "turnaround": {
+      "p10": 6.0,
+      "p50": 11.0,
+      "p90": 17.0,
+      "mean": 11.51
+    }
+  },
+  "three_share_by_kind": {
+    "alley_oop": 0.0,
+    "catch_shoot": 0.9389,
+    "cutting_dunk": 0.0,
+    "cutting_layup": 0.0,
+    "driving_dunk": 0.0,
+    "driving_layup": 0.0,
+    "dunk": 0.0,
+    "floater": 0.008559,
+    "hook": 0.0,
+    "layup": 0.0,
+    "pull_up": 0.594141,
+    "putback": 0.0,
+    "reverse_layup": 0.0,
+    "running_dunk": 0.0,
+    "running_jump": 0.97067,
+    "running_layup": 0.0,
+    "step_back": 0.673284,
+    "turnaround": 0.035857
+  },
+  "kind_by_creation": {
+    "cut": {
+      "alley_oop": 0.0,
+      "catch_shoot": 0.0,
+      "cutting_dunk": 0.335126,
+      "cutting_layup": 0.58959,
+      "driving_dunk": 0.0,
+      "driving_layup": 0.0,
+      "dunk": 0.0,
+      "floater": 0.0,
+      "hook": 0.0,
+      "layup": 0.075284,
+      "pull_up": 0.0,
+      "putback": 0.0,
+      "reverse_layup": 0.0,
+      "running_dunk": 0.0,
+      "running_jump": 0.0,
+      "running_layup": 0.0,
+      "step_back": 0.0,
+      "turnaround": 0.0
+    },
+    "drive": {
+      "alley_oop": 0.0,
+      "catch_shoot": 0.0,
+      "cutting_dunk": 0.0,
+      "cutting_layup": 0.0,
+      "driving_dunk": 0.041094,
+      "driving_layup": 0.517109,
+      "dunk": 0.000932,
+      "floater": 0.354495,
+      "hook": 0.042005,
+      "layup": 0.0,
+      "pull_up": 0.0,
+      "putback": 0.0,
+      "reverse_layup": 0.044366,
+      "running_dunk": 0.0,
+      "running_jump": 0.0,
+      "running_layup": 0.0,
+      "step_back": 0.0,
+      "turnaround": 0.0
+    },
+    "post": {
+      "alley_oop": 0.0,
+      "catch_shoot": 0.017401,
+      "cutting_dunk": 0.0,
+      "cutting_layup": 0.0,
+      "driving_dunk": 0.0,
+      "driving_layup": 0.0,
+      "dunk": 0.0,
+      "floater": 0.0,
+      "hook": 0.285643,
+      "layup": 0.0,
+      "pull_up": 0.0,
+      "putback": 0.0,
+      "reverse_layup": 0.0,
+      "running_dunk": 0.0,
+      "running_jump": 0.0,
+      "running_layup": 0.0,
+      "step_back": 0.0,
+      "turnaround": 0.696957
+    },
+    "pull_up": {
+      "alley_oop": 0.0,
+      "catch_shoot": 0.0,
+      "cutting_dunk": 0.0,
+      "cutting_layup": 0.0,
+      "driving_dunk": 0.0,
+      "driving_layup": 0.0,
+      "dunk": 0.0,
+      "floater": 0.088336,
+      "hook": 0.0,
+      "layup": 0.0,
+      "pull_up": 0.613244,
+      "putback": 0.0,
+      "reverse_layup": 0.0,
+      "running_dunk": 0.0,
+      "running_jump": 0.0,
+      "running_layup": 0.0,
+      "step_back": 0.298419,
+      "turnaround": 0.0
+    },
+    "putback": {
+      "alley_oop": 0.0,
+      "catch_shoot": 0.0,
+      "cutting_dunk": 0.0,
+      "cutting_layup": 0.0,
+      "driving_dunk": 0.0,
+      "driving_layup": 0.0,
+      "dunk": 0.137152,
+      "floater": 0.0,
+      "hook": 0.0,
+      "layup": 0.0,
+      "pull_up": 0.0,
+      "putback": 0.862848,
+      "reverse_layup": 0.0,
+      "running_dunk": 0.0,
+      "running_jump": 0.0,
+      "running_layup": 0.0,
+      "step_back": 0.0,
+      "turnaround": 0.0
+    },
+    "set": {
+      "alley_oop": 0.0,
+      "catch_shoot": 0.914938,
+      "cutting_dunk": 0.0,
+      "cutting_layup": 0.0,
+      "driving_dunk": 0.0,
+      "driving_layup": 0.0,
+      "dunk": 0.017099,
+      "floater": 0.0,
+      "hook": 0.0,
+      "layup": 0.053895,
+      "pull_up": 0.0,
+      "putback": 0.0,
+      "reverse_layup": 0.014069,
+      "running_dunk": 0.0,
+      "running_jump": 0.0,
+      "running_layup": 0.0,
+      "step_back": 0.0,
+      "turnaround": 0.0
+    },
+    "transition": {
+      "alley_oop": 0.096511,
+      "catch_shoot": 0.0,
+      "cutting_dunk": 0.0,
+      "cutting_layup": 0.0,
+      "driving_dunk": 0.0,
+      "driving_layup": 0.0,
+      "dunk": 0.025231,
+      "floater": 0.0,
+      "hook": 0.0,
+      "layup": 0.032887,
+      "pull_up": 0.12359,
+      "putback": 0.0,
+      "reverse_layup": 0.0,
+      "running_dunk": 0.114765,
+      "running_jump": 0.258457,
+      "running_layup": 0.348557,
+      "step_back": 0.0,
+      "turnaround": 0.0
+    }
+  },
+  "zone_by_creation": {
+    "cut": {
+      "rim": 0.922281,
+      "near": 0.077719,
+      "mid": 0.0,
+      "three": 0.0
+    },
+    "drive": {
+      "rim": 0.577071,
+      "near": 0.40379,
+      "mid": 0.017295,
+      "three": 0.001843
+    },
+    "post": {
+      "rim": 0.123165,
+      "near": 0.684998,
+      "mid": 0.166631,
+      "three": 0.025206
+    },
+    "pull_up": {
+      "rim": 0.012544,
+      "near": 0.200465,
+      "mid": 0.240424,
+      "three": 0.546567
+    },
+    "putback": {
+      "rim": 0.967729,
+      "near": 0.031868,
+      "mid": 0.000403,
+      "three": 0.0
+    },
+    "set": {
+      "rim": 0.079233,
+      "near": 0.023996,
+      "mid": 0.034487,
+      "three": 0.862284
+    },
+    "transition": {
+      "rim": 0.56749,
+      "near": 0.06321,
+      "mid": 0.012219,
+      "three": 0.357081
+    }
+  }
+}

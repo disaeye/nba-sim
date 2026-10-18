@@ -14,6 +14,7 @@ nba-evaluator.workspace = true
 nba-invariants.workspace = true
 nba-protocol.workspace = true
 nba-validation.workspace = true
+nba-sim-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 flate2.workspace = true
