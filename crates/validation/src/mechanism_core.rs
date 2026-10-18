@@ -1,11 +1,13 @@
 //! 机制实验：属性扰动后回合响应方向。
 //!
 //! 每个实验对同一组种子跑两次：基准阵容与单属性提高后的阵容。指标按
-//! 分子分母汇总后再比较，避免小样本比率噪声。判定只要求方向与最小效应，
-//! 不要求具体数值区间。
+//! 分子分母汇总后再比较，避免小样本比率噪声。裁决以种子为抽样单元做
+//! 配对 bootstrap：区间整体在零的预期一侧才通过，跨零记证据不足。
 //!
 //! 这层替代旧引擎的 MECH 实验。旧实现在单次请求里同步跑上千次短跑，
 //! 三百分秒不返回；这里把重实验留在离线命令，端点只读缓存工件。
+//!
+//! 哪些属性被排除、为什么，只写在 `data/calibration/known_insufficient.json`。
 
 use std::path::Path;
 
@@ -66,7 +68,7 @@ impl MechanismAttribute {
         match self {
             Self::ShootingThree => Metric::ThreePointPct,
             Self::ShootingClose => Metric::RimPct,
-            Self::ShootingMid => Metric::MidAttemptShare,
+            Self::ShootingMid => Metric::MidPct,
             Self::FreeThrow => Metric::FreeThrowPct,
             Self::Speed | Self::Acceleration => Metric::MeanFirstActionSeconds,
             Self::Stamina => Metric::FieldGoalPct,
@@ -90,18 +92,6 @@ impl MechanismAttribute {
         match self {
             Self::Speed | Self::Acceleration => "wiring",
             _ => "outcome",
-        }
-    }
-
-    /// 结构上不响应扰动的属性。这类属性不是样本量问题，提高场次永远
-    /// 解决不了；登记为 `not_applicable` 并写明原因，不计入 `insufficient`。
-    pub fn not_applicable(self) -> Option<&'static str> {
-        match self {
-            Self::ShootingMid => Some(
-                "中投出手份额由长两分惩罚与距离项主导：技巧只改变命中率，\
-                 对出手选择的边际效应低于千分之一，放大场次也分不出方向",
-            ),
-            _ => None,
         }
     }
 
@@ -131,6 +121,7 @@ impl MechanismAttribute {
 pub enum Metric {
     ThreePointPct,
     RimPct,
+    MidPct,
     MidAttemptShare,
     FreeThrowPct,
     FieldGoalPct,
@@ -146,6 +137,7 @@ impl Metric {
         match self {
             Self::ThreePointPct => "three_point_pct",
             Self::RimPct => "rim_pct",
+            Self::MidPct => "mid_pct",
             Self::MidAttemptShare => "mid_attempt_share",
             Self::FreeThrowPct => "free_throw_pct",
             Self::FieldGoalPct => "field_goal_pct",
@@ -255,6 +247,78 @@ pub struct MechanismConfigReport {
     pub high_value: f64,
 }
 
+/// 已登记的排除项。声明只写一份：`data/calibration/known_insufficient.json`。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnownInsufficient {
+    pub attribute: String,
+    pub reason: String,
+    /// `more_games`：效应存在、当前样本分辨不出，`required_games` 给出所需场次；
+    /// `mechanism_change`：效应结构上接近零，放大场次解决不了。
+    pub resolution: String,
+    #[serde(default)]
+    pub required_games: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct KnownInsufficientFile {
+    entries: Vec<KnownInsufficient>,
+}
+
+/// 读登记表。`more_games` 必须带 `required_games`，否则加载直接失败。
+pub fn load_known_insufficient(dir: &Path) -> Result<Vec<KnownInsufficient>, String> {
+    let path = dir.join("known_insufficient.json");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let text = std::fs::read_to_string(&path).map_err(|error| {
+        format!(
+            "known-insufficient table {} unreadable: {error}",
+            path.display()
+        )
+    })?;
+    let file: KnownInsufficientFile = serde_json::from_str(&text).map_err(|error| {
+        format!(
+            "known-insufficient table {} invalid: {error}",
+            path.display()
+        )
+    })?;
+    validate_known_entries(&file.entries)?;
+    Ok(file.entries)
+}
+
+/// 校验登记项：`more_games` 必须给出所需场次，未知 resolution 直接拒绝。
+pub fn validate_known_entries(entries: &[KnownInsufficient]) -> Result<(), String> {
+    for entry in entries {
+        match entry.resolution.as_str() {
+            "more_games" => {
+                if entry.required_games.is_none() {
+                    return Err(format!(
+                        "known-insufficient entry `{}` is `more_games` but has no required_games",
+                        entry.attribute
+                    ));
+                }
+            }
+            "mechanism_change" => {}
+            other => {
+                return Err(format!(
+                    "known-insufficient entry `{}` has unknown resolution `{other}`",
+                    entry.attribute
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
+fn declared<'a>(
+    known: &'a [KnownInsufficient],
+    attribute: MechanismAttribute,
+) -> Option<&'a KnownInsufficient> {
+    known
+        .iter()
+        .find(|entry| entry.attribute == attribute.key())
+}
+
 pub fn run_mechanism_experiments(config: MechanismConfig) -> Result<MechanismReport, String> {
     run_mechanism_experiments_with_dir(config, &workspace_calibration_dir())
 }
@@ -272,7 +336,8 @@ pub fn run_mechanism_experiment_with_dir(
     calibration: &Path,
 ) -> Result<MechanismResult, String> {
     let params = Params::load(calibration)?;
-    experiment(&params, attribute, config)
+    let known = load_known_insufficient(calibration)?;
+    experiment(&params, attribute, config, declared(&known, attribute))
 }
 
 pub fn run_mechanism_experiments_with_dir(
@@ -280,9 +345,15 @@ pub fn run_mechanism_experiments_with_dir(
     calibration: &Path,
 ) -> Result<MechanismReport, String> {
     let params = Params::load(calibration)?;
+    let known = load_known_insufficient(calibration)?;
     let mut results = Vec::new();
     for attribute in MechanismAttribute::all() {
-        results.push(experiment(&params, attribute, config)?);
+        results.push(experiment(
+            &params,
+            attribute,
+            config,
+            declared(&known, attribute),
+        )?);
     }
     Ok(MechanismReport {
         config: MechanismConfigReport {
@@ -300,6 +371,7 @@ fn experiment(
     params: &Params,
     attribute: MechanismAttribute,
     config: MechanismConfig,
+    declaration: Option<&KnownInsufficient>,
 ) -> Result<MechanismResult, String> {
     let baseline = run_arm(params, attribute, config.low_value, config)?;
     let perturbed = run_arm(params, attribute, config.high_value, config)?;
@@ -375,9 +447,11 @@ fn experiment(
     } else {
         "insufficient"
     };
-    let (verdict, reason) = match attribute.not_applicable() {
-        Some(reason) => ("not_applicable", reason.to_string()),
-        None => (judged, String::new()),
+    let (verdict, reason) = match declaration {
+        Some(entry) if entry.resolution == "mechanism_change" => {
+            ("not_applicable", entry.reason.clone())
+        }
+        _ => (judged, String::new()),
     };
     // 靠近零的那一侧边界与点估计的比值：区间对称时，比值小于一半等价于
     // 区间宽度超过点估计本身。只在通过的项上有意义。
@@ -480,6 +554,10 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
         Metric::RimPct => (
             report.shot_zone_makes[0][0] as f64,
             report.shot_zone_counts[0][0] as f64,
+        ),
+        Metric::MidPct => (
+            report.shot_zone_makes[0][2] as f64,
+            report.shot_zone_counts[0][2] as f64,
         ),
         // 中投出手占主队全部出手的份额：分母是整队出手，不受中投小样本限制。
         Metric::MidAttemptShare => (

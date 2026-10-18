@@ -46,10 +46,8 @@ pub(crate) fn run_validate_core(
         None
     };
     let (commit, dirty) = git_state(&out_dir);
-    let known = load_known_insufficient(
-        &nba_sim_core::params::workspace_root().join("data/calibration/known_insufficient.json"),
-    )
-    .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let known = load_known_insufficient(&nba_sim_core::params::workspace_calibration_dir())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     let certification = certification_artifact(&report, mechanism_report.as_ref(), &commit, &known);
     write_json(&out_dir, "certification.json", &certification)?;
     let params = Params::load(&nba_sim_core::params::workspace_calibration_dir())
@@ -95,8 +93,14 @@ pub(crate) fn run_validate_core(
         .and_then(|items| items.as_array())
         .map(|items| items.len())
         .unwrap_or(0);
+    let marginal = certification
+        .get("criteria")
+        .and_then(|criteria| criteria.get("marginal"))
+        .and_then(|items| items.as_array())
+        .map(|items| items.len())
+        .unwrap_or(0);
     println!(
-        "  认证：{status}（已知不足 {known} 项，未登记不足 {new_insufficient} 项，结构上不适用 {not_applicable} 项）"
+        "  认证：{status}（已知不足 {known} 项，未登记不足 {new_insufficient} 项，当前不适用 {not_applicable} 项，边缘通过 {marginal} 项）"
     );
     Ok(match status {
         "pass" => 0,

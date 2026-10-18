@@ -12,6 +12,8 @@ use nba_sim_core::world::TICK_SECONDS;
 use nba_sim_core::{gate, GameReport, MatchSetup, Params, TeamSide, World};
 use serde::{Deserialize, Serialize};
 
+pub use crate::mechanism_core::{load_known_insufficient, KnownInsufficient};
+
 use crate::mechanism_core::MechanismReport;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -395,6 +397,7 @@ pub fn certification_artifact(
     let mut known: Vec<String> = Vec::new();
     let mut new_insufficient: Vec<String> = Vec::new();
     let mut not_applicable: Vec<String> = Vec::new();
+    let mut marginal: Vec<String> = Vec::new();
     for layer in &report.gate.layers {
         if !layer.passed {
             defects.push(layer.criterion.clone());
@@ -419,6 +422,14 @@ pub fn certification_artifact(
                     result.attribute, result.reason
                 )),
                 _ => {}
+            }
+            if result.marginal {
+                marginal.push(match result.lower_bound_ratio {
+                    Some(ratio) => {
+                        format!("mechanism:{}（下界比 {ratio:.2}）", result.attribute)
+                    }
+                    None => format!("mechanism:{}", result.attribute),
+                });
             }
         }
     }
@@ -492,6 +503,7 @@ pub fn certification_artifact(
             "known_insufficient": known,
             "new_insufficient": new_insufficient,
             "not_applicable": not_applicable,
+            "marginal": marginal,
         },
         "coverage": {
             "registered": registered,
@@ -570,60 +582,4 @@ pub fn batch_statistical_artifact(
             "ledger_failures": report.ledger_failures,
         },
     })
-}
-
-/// 已知的机制实验不足项。登记在这里的项只记录，不阻断；未登记的
-/// 不足项按缺陷处理。
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct KnownInsufficient {
-    pub attribute: String,
-    pub reason: String,
-    /// `more_games`：效应存在，当前样本分辨不出，`required_games` 给出所需场次；
-    /// `mechanism_change`：效应在结构上接近零，放大场次解决不了，需要改机制。
-    pub resolution: String,
-    #[serde(default)]
-    pub required_games: Option<u32>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct KnownInsufficientFile {
-    entries: Vec<KnownInsufficient>,
-}
-
-pub fn load_known_insufficient(path: &Path) -> Result<Vec<KnownInsufficient>, String> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let text = std::fs::read_to_string(path).map_err(|error| {
-        format!(
-            "known-insufficient table {} unreadable: {error}",
-            path.display()
-        )
-    })?;
-    let file: KnownInsufficientFile = serde_json::from_str(&text).map_err(|error| {
-        format!(
-            "known-insufficient table {} invalid: {error}",
-            path.display()
-        )
-    })?;
-    for entry in &file.entries {
-        match entry.resolution.as_str() {
-            "more_games" => {
-                if entry.required_games.is_none() {
-                    return Err(format!(
-                        "known-insufficient entry `{}` is `more_games` but has no required_games",
-                        entry.attribute
-                    ));
-                }
-            }
-            "mechanism_change" => {}
-            other => {
-                return Err(format!(
-                    "known-insufficient entry `{}` has unknown resolution `{other}`",
-                    entry.attribute
-                ))
-            }
-        }
-    }
-    Ok(file.entries)
 }

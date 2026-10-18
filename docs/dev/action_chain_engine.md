@@ -86,13 +86,13 @@
 
 `crates/validation/mechanism_core` 替代旧引擎的 MECH 层：每个属性跑两组，主队属性取低值（0.10）与高值（0.95），客队作为同种子对照组。裁决以种子为抽样单元做配对 bootstrap：逐种子计算基准与扰动的差值，取 5%–95% 区间；区间完全落在零的预期一侧记 `pass`，跨越零记 `insufficient`，方向与预期相反记 `defect`。
 
-结果分两类证据。`wiring` 的度量直接取自消费者公式的输入：`speed` 与 `acceleration` 的度量是 `mean_first_action_seconds`，由 `advance_seconds = distance / speed + (speed / accel) · exp(-distance / 30) + 2.3` 算出来，它只证明接线接通。`outcome` 的度量是比赛产物：三区命中率、罚球命中率、篮板率、失误率、中投出手份额，它们证明技巧改变了结果。两类在报告里分列。
+结果分两类证据。`wiring` 的度量直接取自消费者公式的输入：`speed` 与 `acceleration` 的度量是 `mean_first_action_seconds`，由 `advance_seconds = distance / speed + (speed / accel) · exp(-distance / 30) + 2.3` 算出来，它只证明接线接通。`outcome` 的度量是比赛产物：三区命中率、罚球命中率、篮板率、失误率，它们证明技巧改变了结果。两类在报告里分列。
 
-入项：投篮三区、罚球、速度、加速度、体能、力量、前场篮板、后场篮板、决策智商，共十一项。中投用中投出手份额（中投出手除以全队出手）而不是中投命中率：后者每场只有 8–10 次出手，32 场样本分不出效应。
+入项：投篮三区、罚球、速度、加速度、体能、力量、前场篮板、后场篮板、决策智商，共十一项。中投的度量是中投命中率（中投命中除以中投出手）：技巧直接决定的就是命中率，出手份额由策略层的长两分惩罚与距离项决定，属于另一个判据。当前批次的中投命中率从 0.2451 到 0.3824，区间 `[+21.6%, +99.4%]`。
 
-已登记在 `data/calibration/known_insufficient.json` 的不足项只记录，未登记的不足项按缺陷处理。登记项的 `resolution` 分两种：`more_games` 必须写 `required_games` 与推导依据，归入 `insufficient`；`mechanism_change` 表示效应在结构上接近零，归入 `not_applicable`。结构上不响应的属性（例如中投技巧之于中投出手份额：出手选择由长两分惩罚与距离项主导）直接登记为 `not_applicable`，测量值与原因一并入档，不计入不足。`certification.json` 把三类分开写成 `known_insufficient`、`new_insufficient` 与 `not_applicable`。
+排除声明只写在 `data/calibration/known_insufficient.json`，代码里没有硬编码的排除项。`resolution` 分两种：`more_games` 必须写 `required_games` 与推导依据，归入 `insufficient`；`mechanism_change` 表示效应在结构上接近零，归入 `not_applicable`。`certification.json` 把四类分开写成 `known_insufficient`、`new_insufficient`、`not_applicable` 与 `marginal`。
 
-通过项记录区间宽度与「靠零边界 / 点估计」比值；比值小于 0.5 标为边缘通过。体能当前是 `+7.86%`、区间 `[+1.93%, +14.31%]`，下界不到点估计的四分之一，记录里带边缘标记。
+通过项记录区间宽度与「靠零边界 / 点估计」比值；区间宽度超过点估计本身标为边缘通过。`marginal` 栏只记录不阻断，摘要因此能看出哪几项离零很近。当前两项：中投命中率下界比 0.39，体能下界比 0.24。
 
 重实验只在 `validate-core --mechanism` 离线运行，结果写入工件目录；接口只读这个工件，不在请求里同步重跑。旧实现把上千次短跑放进一次请求，三百分秒不返回。
 

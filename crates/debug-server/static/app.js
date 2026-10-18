@@ -2482,7 +2482,7 @@
       statusRow.className = `validation-verdict-row ${statusClsMap[cert.certification_status] || "verdict-insufficient"}`;
       const criteria = cert.criteria || {};
       const ledger = cert.per_game_ledger || {};
-      statusRow.textContent = `判定结论：${statusTextMap[cert.certification_status] || cert.certification_status} · 逐场账本 ${ledger.passed ?? "?"}/${ledger.total ?? "?"} · 缺陷 ${(criteria.defects || []).length} 项 · 已知不足 ${(criteria.known_insufficient || []).length} 项 · 未登记不足 ${(criteria.new_insufficient || []).length} 项 · 当前不适用 ${(criteria.not_applicable || []).length} 项`;
+      statusRow.textContent = `判定结论：${statusTextMap[cert.certification_status] || cert.certification_status} · 逐场账本 ${ledger.passed ?? "?"}/${ledger.total ?? "?"} · 缺陷 ${(criteria.defects || []).length} 项 · 已知不足 ${(criteria.known_insufficient || []).length} 项 · 未登记不足 ${(criteria.new_insufficient || []).length} 项 · 当前不适用 ${(criteria.not_applicable || []).length} 项 · 边缘通过 ${(criteria.marginal || []).length} 项`;
       container.appendChild(statusRow);
       // 缺陷清单（引擎侧工作清单的输入）。
       for (const criterion of criteria.defects || []) {
@@ -2526,6 +2526,17 @@
         const verdict = document.createElement("span");
         verdict.className = "verdict-insufficient";
         verdict.textContent = "当前不适用";
+        row.append(name, verdict);
+        container.appendChild(row);
+      }
+      for (const criterion of criteria.marginal || []) {
+        const row = document.createElement("div");
+        row.className = "validation-ledger-item";
+        const name = document.createElement("span");
+        name.textContent = criterion;
+        const verdict = document.createElement("span");
+        verdict.className = "verdict-insufficient";
+        verdict.textContent = "边缘通过";
         row.append(name, verdict);
         container.appendChild(row);
       }
