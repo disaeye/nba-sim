@@ -12,8 +12,6 @@ export PATH="$HOME/.cargo/bin:$PATH"
 TEMP_ROOT="${NBA_TEMP_ROOT:-$DIR/.work/tmp}"
 
 BIN="$DIR/target/release/nba-sim"
-SCOPE="${3:-1q}"
-STREAM_MODE="${4:-facts}"
 
 if [ ! -x "$BIN" ]; then
     echo "📦 Compiling NBA-Sim CLI (release)..."
@@ -25,13 +23,13 @@ if [ -n "${2:-}" ]; then
     OUT_FILE="$2"
 else
     # 默认写入临时目录并带时间戳，避免覆盖与累积。
-    OUT_FILE="$TEMP_ROOT/nba_sim_seed${SEED}_$(date +%s).ndjson"
+    OUT_FILE="$TEMP_ROOT/nba_sim_seed${SEED}_$(date +%s).ndjson.gz"
 fi
 
 mkdir -p "$(dirname "$OUT_FILE")"
 
-echo "▶️  seed=$SEED scope=$SCOPE mode=$STREAM_MODE out=$OUT_FILE"
-"$BIN" "$SEED" "$OUT_FILE" "$SCOPE" --stream-mode "$STREAM_MODE"
+echo "▶️  seed=$SEED out=$OUT_FILE"
+"$BIN" sim-core --seed "$SEED" --stream "$OUT_FILE"
 
 SIZE="$(du -h "$OUT_FILE" 2>/dev/null | awk '{print $1}')"
 echo "📦 stream size: ${SIZE:-unknown}"
