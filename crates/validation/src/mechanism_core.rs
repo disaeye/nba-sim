@@ -211,7 +211,9 @@ pub struct MechanismResult {
     pub seeds: usize,
     pub observed_direction: String,
     pub direction_matches: bool,
+    /// 配对 bootstrap 的 5% 分位，与 `relative_change` 同向：正数表示上升。
     pub ci_low: f64,
+    /// 配对 bootstrap 的 95% 分位，与 `relative_change` 同向：正数表示上升。
     pub ci_high: f64,
     pub verdict: String,
     pub passed: bool,
@@ -316,8 +318,6 @@ fn experiment(
             Direction::Down => **change < 0.0,
         })
         .count();
-    let seeds_opposite = seed_count - seeds_in_expected_direction;
-    let _ = seeds_opposite;
     let baseline_value = ratio_of_sums(&baseline_values);
     let perturbed_value = ratio_of_sums(&perturbed_values);
     let relative = if baseline_value.abs() > f64::EPSILON {
@@ -338,20 +338,29 @@ fn experiment(
     };
     // 配对 bootstrap：以种子为抽样单元重采样，对每次重采样重新算聚合比率。
     // 单场比率在分母很小时噪声大，bootstrap 把「这一场的出手」整体当
-    // 一个样本，不假设逐场差值服从正态分布。
-    let (ci_low, ci_high) = paired_bootstrap(
-        &baseline_values,
-        &perturbed_values,
-        attribute.direction(),
-        2_000,
-    );
-    // 置信区间整体在零的一侧才算方向成立；跨零为 insufficient。
-    let verdict = if ci_low > 0.0 {
-        "pass"
-    } else if ci_high < 0.0 {
-        "defect"
-    } else {
-        "insufficient"
+    // 一个样本，不假设逐场差值服从正态分布。区间与 `relative_change`
+    // 同向：正数表示上升。
+    let (ci_low, ci_high) = paired_bootstrap(&baseline_values, &perturbed_values, 2_000);
+    // 区间完全落在零的预期一侧才成立；跨零为 insufficient。
+    let verdict = match attribute.direction() {
+        Direction::Up => {
+            if ci_low > 0.0 {
+                "pass"
+            } else if ci_high < 0.0 {
+                "defect"
+            } else {
+                "insufficient"
+            }
+        }
+        Direction::Down => {
+            if ci_high < 0.0 {
+                "pass"
+            } else if ci_low > 0.0 {
+                "defect"
+            } else {
+                "insufficient"
+            }
+        }
     };
     Ok(MechanismResult {
         attribute: attribute.key().to_string(),
@@ -485,7 +494,6 @@ fn round_two(value: f32) -> f64 {
 fn paired_bootstrap(
     baseline: &[(f64, f64)],
     perturbed: &[(f64, f64)],
-    direction: Direction,
     resamples: usize,
 ) -> (f64, f64) {
     use rand::Rng;
@@ -512,11 +520,7 @@ fn paired_bootstrap(
         if low.abs() <= f64::EPSILON {
             continue;
         }
-        let signed = match direction {
-            Direction::Up => (high - low) / low,
-            Direction::Down => (low - high) / low,
-        };
-        stats.push(signed);
+        stats.push((high - low) / low);
     }
     if stats.is_empty() {
         return (0.0, 0.0);

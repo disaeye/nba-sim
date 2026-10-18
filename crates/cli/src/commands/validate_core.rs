@@ -211,13 +211,15 @@ fn print_mechanism(report: &MechanismReport) {
         );
         for result in rows {
             println!(
-                "  {:<12} {:<22} {:<24} 基准 {:.4} 扰动 {:.4} 变化 {:+.2}% 预期 {}",
+                "  {:<12} {:<22} {:<24} 基准 {:.4} 扰动 {:.4} 变化 {:+.2}% 区间 [{:+.2}%, {:+.2}%] 预期 {}",
                 result.verdict,
                 result.attribute,
                 result.metric,
                 result.baseline,
                 result.perturbed,
                 result.relative_change * 100.0,
+                result.ci_low * 100.0,
+                result.ci_high * 100.0,
                 result.expectation
             );
         }
