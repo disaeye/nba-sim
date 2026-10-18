@@ -27,14 +27,55 @@ pub fn resolve(
     let base = world.params.policy.w("pass_turnover_rate");
     let lane_risk = (1.0 - clamp01(lane / 6.0)).max(0.0);
     let skill_relief = 0.5 + passer_skill + 0.8 * decision;
-    let p_intercept = clamp01(base * lane_risk / skill_relief);
+    // 抢断归因于卡在传球路线上的那个人：自己的 steal 与冒险倾向决定
+    // 拦截机会，传球人的视野与传球能力决定风险被压低多少。
+    let defender = lane_defender(world, from, to);
+    let steal_scale = world.params.policy.w("steal_skill_scale");
+    let skill_base = world.params.policy.w("steal_skill_base");
+    let gamble_base = world.params.policy.w("steal_gamble_base");
+    let gamble_slope = world.params.policy.w("steal_gamble_slope");
+    let steal_credit = defender.map(|(index, _, _)| index);
+    let p_intercept = match lane_defender(world, from, to) {
+        Some((_, skill, gamble)) => clamp01(
+            base * lane_risk / skill_relief
+                * steal_scale
+                * (skill_base + skill)
+                * (gamble_base + gamble_slope * gamble),
+        ),
+        None => f32::MIN_POSITIVE,
+    };
 
     if world.rng.gen::<f32>() < p_intercept {
-        let defender = nearest_defender(world, from);
         world.line_mut(from).turnovers += 1;
-        if let Some(defender) = defender {
+        if let Some(defender) = steal_credit {
             world.line_mut(defender).steals += 1;
         }
+        world.emit(Fact::Turnover {
+            player: from,
+            kind: TurnoverKind::BadPass,
+        });
+        world.end_possession("turnover", 0);
+        world.start_possession(team.other(), PossessionKind::Live);
+        return crate::action::ActionOutcome {
+            actor: from,
+            kind: ActionKind::Pass(kind),
+            completion: Completion::Failed,
+            delta: StateDelta {
+                turnover: Some(TurnoverKind::BadPass),
+                ..Default::default()
+            },
+            facts: Vec::new(),
+        };
+    }
+
+    // 非抢断失误：传球直接出界。这类回合计入失误但不给任何人记抢断；
+    // 传球技巧决定出界的概率，判断力已经作用在上面的拦截风险里。
+    let bad_pass = clamp01(
+        world.params.policy.w("bad_pass_rate")
+            / (world.params.policy.w("bad_pass_skill_base") + passer_skill),
+    );
+    if world.rng.gen::<f32>() < bad_pass {
+        world.line_mut(from).turnovers += 1;
         world.emit(Fact::Turnover {
             player: from,
             kind: TurnoverKind::BadPass,
@@ -165,21 +206,39 @@ pub fn resolve_cut(world: &mut World, intent: &ActionIntent) -> crate::action::A
     }
 }
 
-fn nearest_defender(world: &World, actor: usize) -> Option<usize> {
-    let team = world.players[actor].team;
-    let pos = world.players[actor].pos;
+/// 卡在传球路线上的防守人，连同他自己的抢断与冒险倾向。返回球员在
+/// 在场球员里的下标，用来记抢断。
+fn lane_defender(world: &World, from: usize, to: usize) -> Option<(usize, f32, f32)> {
+    let start = world.players[from].pos;
+    let end = world.players[to].pos;
+    let team = world.players[from].team;
     world
         .players
         .iter()
         .enumerate()
         .filter(|(_, p)| p.on_court && p.team != team)
         .min_by(|a, b| {
-            (a.1.pos - pos)
-                .length_squared()
-                .partial_cmp(&(b.1.pos - pos).length_squared())
-                .expect("finite distances")
+            let left = segment_distance(start, end, a.1.pos);
+            let right = segment_distance(start, end, b.1.pos);
+            left.partial_cmp(&right).expect("finite lane distances")
         })
-        .map(|(index, _)| index)
+        .map(|(index, p)| {
+            (
+                index,
+                p.data.attributes.steal,
+                p.data.tendencies.gamble_steal,
+            )
+        })
+}
+
+fn segment_distance(start: Vec2, end: Vec2, point: Vec2) -> f32 {
+    let span = end - start;
+    let length_squared = span.length_squared();
+    if length_squared <= f32::EPSILON {
+        return (point - start).length();
+    }
+    let t = (point - start).dot(span) / length_squared;
+    (point - (start + span * t)).length()
 }
 
 pub fn pass_speed_reference() -> f32 {

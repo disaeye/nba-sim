@@ -47,14 +47,24 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
 
     let foul_rate = world.params.policy.w("shooting_foul_rate");
     let p_foul = clamp01(foul_rate * (0.6 + 0.9 * contest));
-    let fouled = world.rng.gen::<f32>() < p_foul;
-    let mut made = world.rng.gen::<f32>() < p_make;
-    let shot_id = world.new_shot_id();
-    let blocker = if made {
-        None
-    } else {
-        nearest_blocker(world, shooter, pos, contest)
+    // 封盖尝试先于命中判定。校准表给的是包含封盖在内的边际命中率，
+    // 所以先抽封盖，再把命中率条件化到「未被封盖」，两次抽样合起来
+    // 保持边际命中率不变，同时让封盖归属与次数随防守人变化。
+    let (block_candidate, p_block) = block_probability(world, shooter, pos, contest, is_three);
+    let block_foul = match block_candidate {
+        Some(candidate) => world.rng.gen::<f32>() < block_foul_probability(world, candidate),
+        None => false,
     };
+    let fouled = block_foul || world.rng.gen::<f32>() < p_foul;
+    let blocked = !fouled && block_candidate.is_some() && world.rng.gen::<f32>() < p_block;
+    let p_make_cond = (p_make / (1.0 - p_block).max(0.01)).clamp(0.02, 0.98);
+    let mut made = if blocked {
+        false
+    } else {
+        world.rng.gen::<f32>() < p_make_cond
+    };
+    let shot_id = world.new_shot_id();
+    let blocker = if blocked { block_candidate } else { None };
     if blocker.is_some() {
         made = false;
     }
@@ -254,8 +264,15 @@ fn logit(p: f32) -> f32 {
     (p / (1.0 - p)).ln()
 }
 
-/// 封盖：出手点附近、封盖能力强的防守人才能碰到球。
-fn nearest_blocker(world: &mut World, shooter: usize, pos: Vec2, contest: f32) -> Option<usize> {
+/// 封盖：出手点附近、封盖与弹跳更强的防守人更可能起跳。返回被选中的
+/// 防守人与这次出手被封盖的概率。
+fn block_probability(
+    world: &World,
+    shooter: usize,
+    pos: Vec2,
+    contest: f32,
+    is_three: bool,
+) -> (Option<usize>, f32) {
     let team = world.players[shooter].team;
     let candidate = world
         .players
@@ -264,23 +281,45 @@ fn nearest_blocker(world: &mut World, shooter: usize, pos: Vec2, contest: f32) -
         .filter(|(_, p)| p.on_court && p.team != team)
         .filter(|(_, p)| (p.pos - pos).length() < 4.5)
         .max_by(|a, b| {
-            a.1.data
-                .attributes
-                .block
-                .partial_cmp(&b.1.data.attributes.block)
+            let weights = &world.params.policy;
+            let score = |p: &crate::state::PlayerState| {
+                p.data.attributes.block * weights.w("block_select_skill")
+                    + p.data.attributes.vertical * weights.w("block_select_height")
+            };
+            score(a.1)
+                .partial_cmp(&score(b.1))
                 .expect("finite block attributes")
         })
-        .map(|(index, _)| index)?;
-    let skill = world.players[candidate].data.attributes.block;
-    let vertical = world.players[candidate].data.attributes.vertical;
-    let base = world.params.policy.w("block_base");
-    let p_block =
-        (base * (0.4 + 1.2 * skill) * (0.5 + 0.5 * vertical) * (0.4 + contest)).clamp(0.0, 0.30);
-    if world.rng.gen::<f32>() < p_block {
-        Some(candidate)
+        .map(|(index, _)| index);
+    let Some(candidate) = candidate else {
+        return (None, 0.0);
+    };
+    let defender = &world.players[candidate];
+    let skill = defender.data.attributes.block;
+    let vertical = defender.data.attributes.vertical;
+    let aggression = defender.data.tendencies.block_aggressiveness;
+    let weights = &world.params.policy;
+    let base = weights.w("block_base");
+    let range = if is_three {
+        weights.w("block_range_factor_three")
     } else {
-        None
-    }
+        1.0
+    };
+    let p_block = (base
+        * (weights.w("block_skill_base") + weights.w("block_skill_slope") * skill)
+        * (weights.w("block_height_base") + weights.w("block_height_slope") * vertical)
+        * (weights.w("block_contest_base") + contest)
+        * (weights.w("block_aggression_base") + weights.w("block_aggression_slope") * aggression)
+        * range)
+        .clamp(f32::MIN_POSITIVE, weights.w("block_cap"));
+    (Some(candidate), p_block)
+}
+
+/// 起跳犯规：对抗强度高的防守人在封盖尝试里更容易撞到投篮人。
+fn block_foul_probability(world: &World, blocker: usize) -> f32 {
+    let physicality = world.players[blocker].data.tendencies.physicality;
+    let base = world.params.policy.w("block_foul_physicality_base");
+    clamp01(world.params.policy.w("block_foul_rate") * (base + physicality))
 }
 
 pub fn shot_origin(shooter_pos: Vec2, hoop: Vec2) -> Vec2 {

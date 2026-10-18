@@ -212,6 +212,47 @@ fn clone_params(params: &Params) -> Params {
     params.clone()
 }
 
+/// 封盖与抢断是动作，不是聚合项：同一种子下只改防守人的能力，
+/// 封盖/抢断次数必须跟着变。
+#[test]
+fn defensive_skill_changes_blocks_and_steals() {
+    let base = params();
+    let rules = nba_domain::GameRules::default();
+    let mut weak = MatchSetup::builtin(rules.clone());
+    for player in weak.home.players.iter_mut() {
+        player.attributes.block = 0.1;
+        player.attributes.steal = 0.1;
+    }
+    let mut strong = MatchSetup::builtin(rules.clone());
+    for player in strong.home.players.iter_mut() {
+        player.attributes.block = 0.95;
+        player.attributes.steal = 0.95;
+    }
+    let mut weak_blocks = 0u32;
+    let mut strong_blocks = 0u32;
+    let mut weak_steals = 0u32;
+    let mut strong_steals = 0u32;
+    for seed in 31u64..39 {
+        let weak_report = World::new(weak.clone(), clone_params(&base), seed).run();
+        let weak_line = weak_report.box_score.team_totals(TeamSide::Home);
+        weak_blocks += weak_line.blocks;
+        weak_steals += weak_line.steals;
+
+        let strong_report = World::new(strong.clone(), clone_params(&base), seed).run();
+        let strong_line = strong_report.box_score.team_totals(TeamSide::Home);
+        strong_blocks += strong_line.blocks;
+        strong_steals += strong_line.steals;
+    }
+    assert!(
+        strong_blocks > weak_blocks,
+        "raising block skill must raise blocks ({weak_blocks} -> {strong_blocks})"
+    );
+    assert!(
+        strong_steals > weak_steals,
+        "raising steal skill must raise steals ({weak_steals} -> {strong_steals})"
+    );
+}
+
 #[test]
 fn session_service_advances_and_reports() {
     use nba_sim_core::SessionService;

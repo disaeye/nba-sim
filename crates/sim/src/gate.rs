@@ -159,6 +159,18 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
         possessions / games,
         league.possessions_per_game as f64,
     );
+    let home_line = report.box_score.team_totals(crate::TeamSide::Home);
+    let away_line = report.box_score.team_totals(crate::TeamSide::Away);
+    push(
+        "blocks_per_game",
+        (home_line.blocks + away_line.blocks) as f64 / games,
+        league.blocks_per_game as f64,
+    );
+    push(
+        "steals_per_game",
+        (home_line.steals + away_line.steals) as f64 / games,
+        league.steals_per_game as f64,
+    );
 
     gate.passed = gate.geometric_violations == 0
         && gate.context_violations == 0

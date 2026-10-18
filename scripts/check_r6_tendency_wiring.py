@@ -50,16 +50,16 @@ def check_rust_consumers():
         "drive_frequency": ["crates/sim/src/policy.rs"],
         "screen_frequency": ["crates/sim/src/policy.rs"],
         "pass_frequency": ["crates/sim/src/world.rs"],
+        "gamble_steal": ["crates/sim/src/resolve/pass.rs"],
+        "block_aggressiveness": ["crates/sim/src/resolve/shot.rs"],
+        "help_aggressiveness": ["crates/sim/src/resolve/mod.rs"],
+        "physicality": ["crates/sim/src/resolve/shot.rs"],
     }
     # 尚未接入的倾向。登记在这里而不是删掉，使缺口始终可见；
     # 每项接入后从本表移入 consumers。
     pending = {
         "cut_frequency": "空切动作已有结算，但选择层还没读倾向",
         "offensive_rebound_frequency": "冲抢篮板还没有独立动作",
-        "gamble_steal": "防守侧没有独立抢断结算",
-        "block_aggressiveness": "封盖只在出手结算里以概率出现",
-        "help_aggressiveness": "协防只建了目标位置，没有独立结算",
-        "physicality": "对抗只影响掩护判罚",
         "risk_tolerance": "传球风险容忍还没有进入选择层",
         "transition_sprint": "转换只按回合起始类型区分",
     }

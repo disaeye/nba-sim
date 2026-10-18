@@ -29,10 +29,12 @@ pub enum MechanismAttribute {
     OffensiveRebound,
     DefensiveRebound,
     DecisionIq,
+    Block,
+    Steal,
 }
 
 impl MechanismAttribute {
-    pub fn all() -> [Self; 11] {
+    pub fn all() -> [Self; 13] {
         [
             Self::ShootingThree,
             Self::ShootingClose,
@@ -45,6 +47,8 @@ impl MechanismAttribute {
             Self::OffensiveRebound,
             Self::DefensiveRebound,
             Self::DecisionIq,
+            Self::Block,
+            Self::Steal,
         ]
     }
 
@@ -61,6 +65,8 @@ impl MechanismAttribute {
             Self::OffensiveRebound => "offensive_rebound",
             Self::DefensiveRebound => "defensive_rebound",
             Self::DecisionIq => "decision_iq",
+            Self::Block => "block",
+            Self::Steal => "steal",
         }
     }
 
@@ -75,6 +81,8 @@ impl MechanismAttribute {
             Self::Strength | Self::OffensiveRebound => Metric::OffensiveReboundRate,
             Self::DefensiveRebound => Metric::DefensiveReboundRate,
             Self::DecisionIq => Metric::TurnoverRate,
+            Self::Block => Metric::BlocksPerShot,
+            Self::Steal => Metric::StealsPerPossession,
         }
     }
 
@@ -112,6 +120,8 @@ impl MechanismAttribute {
                 Self::OffensiveRebound => attributes.offensive_rebound = value,
                 Self::DefensiveRebound => attributes.defensive_rebound = value,
                 Self::DecisionIq => attributes.decision_iq = value,
+                Self::Block => attributes.block = value,
+                Self::Steal => attributes.steal = value,
             }
         }
     }
@@ -130,6 +140,8 @@ pub enum Metric {
     OffensiveReboundRate,
     DefensiveReboundRate,
     TurnoverRate,
+    BlocksPerShot,
+    StealsPerPossession,
 }
 
 impl Metric {
@@ -146,6 +158,8 @@ impl Metric {
             Self::OffensiveReboundRate => "offensive_rebound_rate",
             Self::DefensiveReboundRate => "defensive_rebound_rate",
             Self::TurnoverRate => "turnover_rate",
+            Self::BlocksPerShot => "blocks_per_shot",
+            Self::StealsPerPossession => "steals_per_possession",
         }
     }
 }
@@ -177,7 +191,7 @@ pub struct MechanismConfig {
 impl Default for MechanismConfig {
     fn default() -> Self {
         Self {
-            seeds: 20,
+            seeds: 40,
             seed_start: 1,
             possessions: None,
             low_value: 0.10,
@@ -585,6 +599,21 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
                 .count()
                 .max(1) as f64;
             (home.turnovers as f64, home_possessions)
+        }
+        // 主队封盖 ÷ 客队出手：封盖是对手出手上的防守产物。
+        Metric::BlocksPerShot => {
+            let away = report.box_score.team_totals(TeamSide::Away);
+            (home.blocks as f64, away.fga.max(1) as f64)
+        }
+        // 主队抢断 ÷ 客队回合：抢断剥夺的是对手的回合。
+        Metric::StealsPerPossession => {
+            let away_possessions = report
+                .possessions
+                .iter()
+                .filter(|record| record.team == TeamSide::Away)
+                .count()
+                .max(1) as f64;
+            (home.steals as f64, away_possessions)
         }
     }
 }

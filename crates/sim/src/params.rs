@@ -177,6 +177,10 @@ pub struct PossessionLeague {
     pub fta_per_game: f32,
     pub shooting_fouls_per_game: f32,
     pub points_per_game: f32,
+    /// 两队合计场均封盖。
+    pub blocks_per_game: f32,
+    /// 两队合计场均抢断。
+    pub steals_per_game: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

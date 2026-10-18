@@ -519,7 +519,7 @@ pub fn certification_artifact(
 
 /// 已登记的分布准则。新增判据必须在此登记，否则 `coverage.uncovered`
 /// 会暴露缺口。
-pub const REGISTERED_GATE_CRITERIA: [&str; 17] = [
+pub const REGISTERED_GATE_CRITERIA: [&str; 19] = [
     "zone_share_rim",
     "zone_share_near",
     "zone_share_mid",
@@ -537,6 +537,8 @@ pub const REGISTERED_GATE_CRITERIA: [&str; 17] = [
     "points_per_game",
     "oreb_per_game",
     "possessions_per_game",
+    "blocks_per_game",
+    "steals_per_game",
 ];
 
 /// 逐准则的观测值与基准，供批次统计工件消费。

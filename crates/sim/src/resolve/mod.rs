@@ -78,6 +78,11 @@ pub fn contest_for(world: &World, shooter: usize, pos: Vec2) -> f32 {
         }
         let between = crate::state::is_between(defender.pos, pos, hoop);
         let contest = crate::state::contest_from_defender(distance, between);
+        // 协防倾向高的防守人更早收缩，位置不变时干扰更强。
+        let help = defender.data.tendencies.help_aggressiveness;
+        let contest = contest
+            * (world.params.policy.w("help_contest_base")
+                + world.params.policy.w("help_contest_slope") * help);
         if contest > best {
             best = contest;
         }
