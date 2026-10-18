@@ -213,7 +213,14 @@ fn git_state(out_dir: &Path) -> (String, bool) {
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
         .unwrap_or_else(|| "unknown".to_string());
     let root = nba_sim_core::params::workspace_root();
-    let relative = out_dir
+    let absolute = if out_dir.is_absolute() {
+        out_dir.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| root.clone())
+            .join(out_dir)
+    };
+    let relative = absolute
         .strip_prefix(&root)
         .ok()
         .map(|path| path.to_string_lossy().replace('\\', "/"));

@@ -88,7 +88,7 @@
       "criterion": "points_per_game",
       "observed": 235.96875,
       "passed": true,
-      "target": 228.4
+      "target": 227.59109497070312
     },
     {
       "criterion": "oreb_per_game",

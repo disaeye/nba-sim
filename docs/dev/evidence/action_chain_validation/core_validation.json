@@ -12697,9 +12697,9 @@
         "layer": "distribution",
         "criterion": "points_per_game",
         "observed": 235.96875,
-        "target": 228.4,
+        "target": 227.59109497070312,
         "passed": true,
-        "detail": "relative error 0.033 (band 0.150)"
+        "detail": "relative error 0.037 (band 0.150)"
       },
       {
         "layer": "distribution",
