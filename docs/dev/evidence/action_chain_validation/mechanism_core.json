@@ -42,7 +42,11 @@
       "direction_matches": true,
       "ci_low": 0.34484619535887745,
       "ci_high": 0.6282925209305577,
+      "interval_width": 0.2834463255716802,
+      "lower_bound_ratio": 0.7278146566798835,
+      "marginal": false,
       "verdict": "pass",
+      "reason": "",
       "passed": true
     },
     {
@@ -81,7 +85,11 @@
       "direction_matches": true,
       "ci_low": 0.49025543992431425,
       "ci_high": 0.7859108159392791,
+      "interval_width": 0.2956553760149649,
+      "lower_bound_ratio": 0.7860661385593972,
+      "marginal": false,
       "verdict": "pass",
+      "reason": "",
       "passed": true
     },
     {
@@ -120,7 +128,11 @@
       "direction_matches": true,
       "ci_low": -0.1076727156956384,
       "ci_high": 0.12495299608485043,
-      "verdict": "insufficient",
+      "interval_width": 0.23262571178048883,
+      "lower_bound_ratio": null,
+      "marginal": false,
+      "verdict": "not_applicable",
+      "reason": "中投出手份额由长两分惩罚与距离项主导：技巧只改变命中率，对出手选择的边际效应低于千分之一，放大场次也分不出方向",
       "passed": false
     },
     {
@@ -159,7 +171,11 @@
       "direction_matches": true,
       "ci_low": 0.26027397260273977,
       "ci_high": 0.36440677966101687,
+      "interval_width": 0.1041328070582771,
+      "lower_bound_ratio": 0.8494708580271317,
+      "marginal": false,
       "verdict": "pass",
+      "reason": "",
       "passed": true
     },
     {
@@ -196,9 +212,13 @@
       "seeds": 20,
       "observed_direction": "down",
       "direction_matches": true,
-      "ci_low": 0.06903128406894361,
-      "ci_high": 0.10050685841729554,
+      "ci_low": -0.10049802283403646,
+      "ci_high": -0.06890709937728443,
+      "interval_width": 0.03159092345675203,
+      "lower_bound_ratio": 0.8073505529605793,
+      "marginal": false,
       "verdict": "pass",
+      "reason": "",
       "passed": true
     },
     {
@@ -235,9 +255,13 @@
       "seeds": 20,
       "observed_direction": "down",
       "direction_matches": true,
-      "ci_low": 0.02486737540449564,
-      "ci_high": 0.049954941933531546,
+      "ci_low": -0.04992697816836728,
+      "ci_high": -0.02485162095654083,
+      "interval_width": 0.02507535721182645,
+      "lower_bound_ratio": 0.6514534407781664,
+      "marginal": false,
       "verdict": "pass",
+      "reason": "",
       "passed": true
     },
     {
@@ -276,7 +300,11 @@
       "direction_matches": true,
       "ci_low": 0.019250954898992034,
       "ci_high": 0.14308012486992708,
+      "interval_width": 0.12382916997093504,
+      "lower_bound_ratio": 0.24489170513381414,
+      "marginal": true,
       "verdict": "pass",
+      "reason": "",
       "passed": true
     },
     {
@@ -315,7 +343,11 @@
       "direction_matches": true,
       "ci_low": 0.827518005746912,
       "ci_high": 1.5048895434462444,
+      "interval_width": 0.6773715376993323,
+      "lower_bound_ratio": 0.7347485769216556,
+      "marginal": false,
       "verdict": "pass",
+      "reason": "",
       "passed": true
     },
     {
@@ -354,7 +386,11 @@
       "direction_matches": true,
       "ci_low": 0.9373292624136267,
       "ci_high": 1.5194776077574128,
+      "interval_width": 0.5821483453437861,
+      "lower_bound_ratio": 0.7737018492009262,
+      "marginal": false,
       "verdict": "pass",
+      "reason": "",
       "passed": true
     },
     {
@@ -393,7 +429,11 @@
       "direction_matches": true,
       "ci_low": 0.14763581073264254,
       "ci_high": 0.281857117810598,
+      "interval_width": 0.1342213070779555,
+      "lower_bound_ratio": 0.6934536657771996,
+      "marginal": false,
       "verdict": "pass",
+      "reason": "",
       "passed": true
     },
     {
@@ -430,9 +470,13 @@
       "seeds": 20,
       "observed_direction": "down",
       "direction_matches": true,
-      "ci_low": 0.20720133686560901,
-      "ci_high": 0.3795919691921596,
+      "ci_low": -0.37934345005921927,
+      "ci_high": -0.2071764841648642,
+      "interval_width": 0.17216696589435507,
+      "lower_bound_ratio": 0.6955464176999412,
+      "marginal": false,
       "verdict": "pass",
+      "reason": "",
       "passed": true
     }
   ],
