@@ -1,6 +1,6 @@
 {
   "certification_status": "insufficient_evidence",
-  "commit": "4258efe5a37df5398c6892a9bcd4dfc371268025",
+  "commit": "3d9104c9a07273bc63f38dcaacaea0f0691a1750",
   "coverage": {
     "gate_criteria": 17,
     "mechanism_attributes": 11,
@@ -11,10 +11,10 @@
   },
   "criteria": {
     "defects": [],
-    "insufficient": [
-      "mechanism:shooting_mid",
-      "mechanism:stamina"
-    ]
+    "known_insufficient": [
+      "mechanism:shooting_mid"
+    ],
+    "new_insufficient": []
   },
   "games": 32,
   "per_game_ledger": {
