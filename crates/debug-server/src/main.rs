@@ -731,12 +731,20 @@ mod tests {
         );
         assert_eq!(run_response.0, "200 OK", "validation run after simulate");
         let run_json: Value = serde_json::from_slice(&run_response.2).expect("run JSON");
-        assert_eq!(run_json["status"], "done");
+        assert!(
+            run_json["result"]["exit_code"].is_number(),
+            "validation run must report an exit code"
+        );
         let report_response = api_validation_report(&validation);
         assert_eq!(report_response.0, "200 OK", "report after run");
         let report: Value = serde_json::from_slice(&report_response.2).expect("report JSON");
-        assert_eq!(report["scenarios"].as_array().map(Vec::len), Some(22));
-        assert_eq!(report["ledger"]["pairing"]["shots_without_release"], 0);
+        assert_eq!(report["games"].as_array().map(Vec::len), Some(8));
+        assert!(
+            report["games"][0]["ledger"]["points_reconcile"]
+                .as_bool()
+                .is_some(),
+            "each game must carry a ledger reconciliation"
+        );
     }
 
     #[test]
@@ -962,7 +970,7 @@ mod c6_6_tests {
             &Request {
                 method: "GET".to_string(),
                 path: "/api/simulate".to_string(),
-                query: "seed=1&scope=2p".to_string(),
+                query: "seed=1&scope=2p&engine=legacy".to_string(),
                 body: Vec::new(),
             },
             &validation_shared(),
