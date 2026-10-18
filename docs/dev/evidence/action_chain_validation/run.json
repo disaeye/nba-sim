@@ -26,7 +26,7 @@
     },
     "possession": {
       "contest": "",
-      "method": "按回合起始语境分组统计结局速率与时长分位",
+      "method": "按回合起始语境分组统计结局速率与时长分位；封盖与抢断取同赛季联盟场均（两队合计），因为回合数据的事件文本只覆盖部分回合，直接计数会偏低一半",
       "sample": 243782,
       "script": "scripts/calibrate/fit_tables.py",
       "season": "2024-25",
@@ -57,14 +57,14 @@
       "source": "shufinskiy/nba_data shotdetail"
     }
   },
-  "commit": "9d9e534504c960c07b41e9375e0ef20e71454124",
+  "commit": "a116b16f86490ff3e8425fb2dd869f81c0993fcf",
   "games": 32,
   "mechanism": {
     "high_value": 0.95,
     "low_value": 0.1,
     "passed": true,
     "possessions": null,
-    "seeds": 20
+    "seeds": 40
   },
   "seed_start": 1,
   "working_tree_dirty": false

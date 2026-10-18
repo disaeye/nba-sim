@@ -1,12 +1,12 @@
 {
   "certification_status": "pass",
-  "commit": "9d9e534504c960c07b41e9375e0ef20e71454124",
+  "commit": "a116b16f86490ff3e8425fb2dd869f81c0993fcf",
   "coverage": {
-    "gate_criteria": 17,
-    "mechanism_attributes": 11,
+    "gate_criteria": 19,
+    "mechanism_attributes": 13,
     "not_applicable": 0,
-    "registered": 28,
-    "sampled": 28,
+    "registered": 32,
+    "sampled": 32,
     "uncovered": 0,
     "unregistered": []
   },
@@ -14,8 +14,7 @@
     "defects": [],
     "known_insufficient": [],
     "marginal": [
-      "mechanism:shooting_mid（下界比 0.39）",
-      "mechanism:stamina（下界比 0.24）"
+      "mechanism:stamina（下界比 0.29）"
     ],
     "new_insufficient": [],
     "not_applicable": []
