@@ -63,7 +63,9 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     let blocked = !fouled && block_candidate.is_some() && world.rng.gen::<f32>() < p_block;
     // 校准表给的是包含封盖与犯规在内的边际命中率。封盖与犯规两条分支都
     // 只能以各自的概率投进，其余情况一律算投失，所以未曾封盖、未被犯规
-    // 的出手要把这两部分先扣掉再条件化，边际命中率才守恒。
+    // 的出手要把这两部分先扣掉再条件化，边际命中率才守恒。分母用
+    // 1 − p_block 与 1 − p_foul 的乘积；当条件化后的命中率超过 1 时，
+    // 上界只能夹到 1，那一小段边际会在最高命中率区域丢失。
     let p_make_cond = ((p_make - p_foul * and_one_rate) / ((1.0 - p_block) * (1.0 - p_foul)))
         .max(f32::MIN_POSITIVE)
         .min(1.0);
