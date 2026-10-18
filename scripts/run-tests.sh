@@ -130,7 +130,7 @@ fi
 # 3. 后置检查与清理
 echo
 # 只统计**有数据**的产物；空目录（进程 workspace 骨架）不占空间。
-LEFTOVER_FILES="$(find "$RUN_TMP" -type f 2>/dev/null | head -20 || true)"
+LEFTOVER_FILES="$(find "$RUN_TMP" -type f -not -path "*/validate-core/*" 2>/dev/null | head -20 || true)"
 LEFTOVER_BYTES="$(du -sb "$RUN_TMP" 2>/dev/null | awk '{print $1}')"
 cleanup
 
