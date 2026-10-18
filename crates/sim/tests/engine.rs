@@ -1,4 +1,6 @@
+use nba_sim_core::action::{Fact, TurnoverKind};
 use nba_sim_core::params::workspace_calibration_dir;
+use nba_sim_core::state::Phase;
 use nba_sim_core::{gate, run_game, MatchSetup, Params, TeamSide, World};
 
 fn params() -> Params {
@@ -292,6 +294,97 @@ fn non_shooting_fouls_occur() {
     assert!(
         total > shooting,
         "non-shooting fouls must occur: {total} vs {shooting}"
+    );
+}
+
+/// 24 秒：把回合时钟拨到零，下一个刻必须吹哨并转换球权。
+#[test]
+fn shot_clock_violation_ends_the_possession() {
+    let rules = nba_domain::GameRules::default();
+    let mut world = World::new(MatchSetup::builtin(rules), params(), 5);
+    let mut guard = 0;
+    while !matches!(world.phase, Phase::Live) {
+        world.step(0.05);
+        guard += 1;
+        assert!(guard < 4000, "world never reached live play");
+    }
+    let before = world.report().possessions.len();
+    world.clock.shot_clock = 0.0;
+    world.step(0.05);
+    let report = world.report();
+    let turnover = report
+        .events
+        .iter()
+        .rev()
+        .find(|event| matches!(event.fact, Fact::Turnover { .. }))
+        .expect("shot clock must produce a turnover fact");
+    match turnover.fact {
+        Fact::Turnover { kind, .. } => assert_eq!(kind, TurnoverKind::ShotClock),
+        _ => unreachable!(),
+    }
+    assert!(
+        report.possessions.len() > before,
+        "shot clock violation must close the possession"
+    );
+    assert_eq!(
+        report.possessions.last().map(|record| record.ended_by),
+        Some("shot_clock")
+    );
+}
+
+/// 罚球程序：每一次投篮犯规之后，罚球事实的次数与顺序等于判罚的
+/// 罚球数；命中数与箱体上的罚球命中一致。
+#[test]
+fn free_throw_facts_match_the_called_foul() {
+    let report = play(17);
+    let mut sequences = 0;
+    for (index, event) in report.events.iter().enumerate() {
+        let Fact::Foul {
+            shooting: true,
+            free_throws,
+            ..
+        } = event.fact
+        else {
+            continue;
+        };
+        let mut seen = 0u8;
+        for next in &report.events[index + 1..] {
+            if let Fact::FreeThrow {
+                index: attempt,
+                total,
+                ..
+            } = next.fact
+            {
+                seen += 1;
+                assert_eq!(total, free_throws, "attempt total must match the call");
+                assert_eq!(attempt, seen, "attempt index must be sequential");
+            }
+            if seen == free_throws {
+                break;
+            }
+        }
+        assert_eq!(
+            seen, free_throws,
+            "the called foul must be followed by exactly {free_throws} free throws"
+        );
+        sequences += 1;
+    }
+    assert!(
+        sequences > 5,
+        "expected several shooting fouls, got {sequences}"
+    );
+
+    let made: u32 = report
+        .events
+        .iter()
+        .filter(|event| matches!(event.fact, Fact::FreeThrow { made: true, .. }))
+        .count() as u32;
+    let totals = report.box_score.team_totals(TeamSide::Home);
+    let away = report.box_score.team_totals(TeamSide::Away);
+    assert_eq!(
+        made,
+        totals.ftm + away.ftm,
+        "made free throws must match the box score"
     );
 }
 
