@@ -466,13 +466,19 @@ def build_possession(rows):
         "fg3_pct": round(totals["fg3m"] / totals["fg3a"], 6),
     }
     free_throw_attempts = 0
+    free_throw_makes = 0
     for row in rows:
         for line in row["EVENTS"].splitlines():
-            if "Free Throw" in line:
-                free_throw_attempts += 1
+            if "Free Throw" not in line:
+                continue
+            free_throw_attempts += 1
+            if "MISS" not in line:
+                free_throw_makes += 1
     games = len({r["GAMEID"] for r in rows})
     table["league"]["fta_per_game"] = round(free_throw_attempts / games, 4)
     table["league"]["shooting_fouls_per_game"] = round(totals["sf"] / games, 4)
+    points = 2 * totals["fg2m"] + 3 * totals["fg3m"] + free_throw_makes
+    table["league"]["points_per_game"] = round(points / games, 4)
     return table
 
 

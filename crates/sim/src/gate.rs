@@ -131,7 +131,11 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
         league.fta_per_game as f64,
     );
     let points = (report.home_score + report.away_score) as f64;
-    push("points_per_game", points / games, 228.4);
+    push(
+        "points_per_game",
+        points / games,
+        league.points_per_game as f64,
+    );
     let oreb = report.box_score.team_totals(crate::TeamSide::Home).oreb
         + report.box_score.team_totals(crate::TeamSide::Away).oreb;
     push(

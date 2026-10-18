@@ -176,6 +176,7 @@ pub struct PossessionLeague {
     pub fg3_pct: f32,
     pub fta_per_game: f32,
     pub shooting_fouls_per_game: f32,
+    pub points_per_game: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

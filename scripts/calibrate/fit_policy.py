@@ -23,8 +23,8 @@ def targets():
         "possessions_per_game": league["possessions_per_game"],
         "fga_per_possession": league["fga_per_possession"],
         "turnover_per_possession": league["turnover_per_possession"],
-        "fta_per_game": league["shooting_foul_per_possession"] * league["possessions_per_game"],
-        "points_per_game": 228.4,
+        "fta_per_game": league["fta_per_game"],
+        "points_per_game": league["points_per_game"],
     }
 
 
