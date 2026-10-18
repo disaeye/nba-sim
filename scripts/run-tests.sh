@@ -158,15 +158,13 @@ if [ "$STATUS" -eq 0 ]; then
     python3 scripts/check_inline_constants.py || STATUS=$?
 fi
 if [ "$STATUS" -eq 0 ]; then
-    python3 scripts/check_ball_state_writes.py || STATUS=$?
+    python3 scripts/check_no_index_identity.py || STATUS=$?
 fi
-
-# 4. 性能基准带（quality.md §4.1）：fixture 冻结的吞吐带由守卫比对。
-# 计入退出码：接在测试后面但 `|| true` 会让它等于没接——性能退化与
-# 行为退化同属回归，失败必须使本次运行变红。测量基于本机 release 构建，
-# 此处 target/ 刚被全套件热过，CPU 状态与提交前验证一致。
 if [ "$STATUS" -eq 0 ]; then
-    python3 scripts/check_perf_fixture.py || STATUS=$?
+    python3 scripts/check_threshold_integrity.py || STATUS=$?
+fi
+if [ "$STATUS" -eq 0 ]; then
+    python3 scripts/check_r6_tendency_wiring.py || STATUS=$?
 fi
 
 exit "$STATUS"

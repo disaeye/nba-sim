@@ -43,8 +43,8 @@ docs/
 - `architecture.md` 只决定系统如何分层、事实如何流动和状态如何转移；
 - `basketball.md` 只决定比赛动作、结果、防守责任和规则程序；
 - `quality.md` 只决定如何观测、发现违反并表达证据缺口；
-- `validation.md` 规定五层验证的逐项检查、场景、跑位、战术、统计参照与验收工件；
-- `blind_spots.md` 只登记物理与接触模型的数据缺口（ADR-017 第四步的盲区登记；评判器侧的准则盲区另见 `crates/evaluator/fixtures/blind_spots.md`，随评判准则扩展逐轮收缩）；
+- `validation.md` 规定验证的逐项检查、场景与验收工件；动作链内核的当前判定见 `docs/dev/action_chain_engine.md`；
+- `blind_spots.md` 只登记物理与接触模型的数据缺口（ADR-017 第四步的盲区登记）；
 - `attributes.md` 只决定输入维度和值的语义；
 - `tactics.md` 只决定球队组织与战术档案如何向决策层提供机会；
 - `protocol.md` 只决定如何校准、如何验收和如何形成证据包；

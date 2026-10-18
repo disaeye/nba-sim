@@ -88,6 +88,7 @@ ACKNOWLEDGED_COUPLED: dict[str, str] = {
     "c7a9fef": "新内核首次入场：棘轮基线尚无这些文件，基准与实现同 commit 写入",
     "5956d26": "认证端点与 CI 接入随内核同批落地，新增文件的基线同 commit 写入",
     "4258efe": "bootstrap 裁决落地时同步登记新文件基线",
+    "f6ac517": "删除旧引擎：棘轮中被测对象整体消失，预算与守卫名单只能随删除同 commit 收缩",
 }
 
 ACK_TRAILER = "Threshold-Change:"

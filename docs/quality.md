@@ -33,7 +33,7 @@
 
 **目标**：捕获物理不可能 + 状态不自洽。
 
-实现：`crates/invariants`，只依赖 `protocol`，校验每帧 `StreamTick`。
+实现：`crates/sim` 在结算时记录几何与语境违规（`GameReport.violations`），逐场账本对账在 `crates/validation` 的 `core_validation`。
 
 **集成要求**：每个发布 tick 都必须执行不变量检查；Hard 违反必须进入结构化工件并使调用方失败，Soft 违反可以计数但不得伪装为通过。
 
@@ -116,7 +116,7 @@
 - **形态**：基于篮球常识的手工 fixture（按联赛维度分套：NBA/FIBA 规则下的分布不同），与 `GameRules` 走同一 JSON 覆盖通道；
 - **扩展位**：fixture 结构是分布描述（直方图/分位数）；接入更高质量的 play-by-play 数据时替换数据档案，评判代码不改；
 - **纪律**：fixture 变更属于校准行为，走 protocol.md §1 协议附证据；fixture 不参与引擎运行、不影响黄金哈希，但影响评判结果，因此必须带版本号；
-- **盲区登记**：任何有限准则集都是真实比赛分布的低维投影。评判器侧的准则盲区由 `crates/evaluator/fixtures/blind_spots.md` 登记并随准则扩展逐轮收缩；物理与接触模型的数据缺口由 `docs/blind_spots.md` 登记。两份清单都不允许把「进带」误读为「覆盖」。
+- **盲区登记**：任何有限准则集都是真实比赛分布的低维投影。物理与接触模型的数据缺口由 `docs/blind_spots.md` 登记；机制实验的结构性排除由 `data/calibration/known_insufficient.json` 登记。两份清单都不允许把「进带」误读为「覆盖」。
 
 ### 2.5 统计 sanity net（批量聚合门）
 
@@ -184,8 +184,9 @@ nba-sim --rules rules.json --seeds 0..20 batch --out stats.jsonl
 
 | 指标 | 预算 | 验证方式 |
 | --- | --- | --- |
-| release 模式吞吐 | 由已批准的基准 fixture 冻结；犯满进攻犯规换人修复后空闲复测 seed42 = 5959 ticks/s、seed1 = 6752 ticks/s（scripts/perf_fixture.json，`scripts/check_perf_fixture.py` 已接入 `run-tests.sh` 后置门，失败计入退出码） | 分层 benchmark 工具 |
-| 单节运行时间 | 由已批准的基准 fixture 冻结 | 分层 benchmark 工具 |
+| 判定批次运行时间 | `validate-core --games 32 --mechanism` 在 4 核机器上不超过 3 分钟 | `time ./target/release/nba-sim validate-core` |
+| 单场模拟运行时间 | 整场 48 分钟不超过 5 秒（release） | `sim-core --games N` 计时 |
+| 单节运行时间 | 由已批准的基准冻结 | 分层 benchmark 工具 |
 | 每 tick 堆分配 | 稳态为 0（复用缓冲；`build_tick` 的 Vec/String 复用） | 分配计数器或 heaptrack 抽查 |
 | `String` clone / tick | 消除（球员 id/jersey 预分配 Arc/静态） | 代码审查 + 分配计数 |
 | 批量跑批 | 由资源预算 fixture 冻结 | batch 资源报告 |
