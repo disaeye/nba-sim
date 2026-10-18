@@ -18,12 +18,16 @@ pub fn resolve(
     let from = intent.actor;
     let to = intent.target.expect("pass requires a receiver");
     let pass_id = world.new_pass_id();
-    let passer = &world.players[from];
-    let receiver = &world.players[to];
-    let team = passer.team;
-    let lane = crate::state::lane_clearance(&world.players, passer.pos, receiver.pos, team);
-    let passer_skill = passer.data.attributes.passing;
-    let decision = passer.data.attributes.decision_iq;
+    let team = world.players[from].team;
+    let lane = crate::state::lane_clearance(
+        &world.players,
+        world.players[from].pos,
+        world.players[to].pos,
+        team,
+    );
+    let passer_skill = world.players[from].data.attributes.passing;
+    let decision = world.players[from].data.attributes.decision_iq;
+    let receiver_handling = world.players[to].data.attributes.ball_handling;
     let base = world.params.policy.w("pass_turnover_rate");
     let lane_risk = (1.0 - clamp01(lane / 6.0)).max(0.0);
     let skill_relief = 0.5 + passer_skill + 0.8 * decision;
@@ -34,15 +38,17 @@ pub fn resolve(
     let skill_base = world.params.policy.w("steal_skill_base");
     let gamble_base = world.params.policy.w("steal_gamble_base");
     let gamble_slope = world.params.policy.w("steal_gamble_slope");
-    let steal_credit = defender.map(|(index, _, _)| index);
-    let p_intercept = match lane_defender(world, from, to) {
-        Some((_, skill, gamble)) => clamp01(
-            base * lane_risk / skill_relief
-                * steal_scale
-                * (skill_base + skill)
-                * (gamble_base + gamble_slope * gamble),
+    let (steal_credit, p_intercept) = match defender {
+        Some((index, skill, gamble)) => (
+            Some(index),
+            clamp01(
+                base * lane_risk / skill_relief
+                    * steal_scale
+                    * (skill_base + skill)
+                    * (gamble_base + gamble_slope * gamble),
+            ),
         ),
-        None => f32::MIN_POSITIVE,
+        None => (None, f32::MIN_POSITIVE),
     };
 
     if world.rng.gen::<f32>() < p_intercept {
@@ -95,8 +101,7 @@ pub fn resolve(
     }
 
     let catch_quality = clamp01(
-        0.55 + 0.6 * receiver.data.attributes.ball_handling - 0.25 * (1.0 - clamp01(lane / 8.0))
-            + 0.2 * passer_skill,
+        0.55 + 0.6 * receiver_handling - 0.25 * (1.0 - clamp01(lane / 8.0)) + 0.2 * passer_skill,
     );
     let mut facts = vec![Fact::Pass {
         pass_id,
@@ -206,29 +211,40 @@ pub fn resolve_cut(world: &mut World, intent: &ActionIntent) -> crate::action::A
     }
 }
 
-/// 卡在传球路线上的防守人，连同他自己的抢断与冒险倾向。返回球员在
-/// 在场球员里的下标，用来记抢断。
-fn lane_defender(world: &World, from: usize, to: usize) -> Option<(usize, f32, f32)> {
+/// 谁去做这次抢断：位置与能力一起参与。距离越近权重越高，同时
+/// `steal` 与 `gamble_steal` 高的防守人即使离得稍远也可能扑上来。
+fn lane_defender(world: &mut World, from: usize, to: usize) -> Option<(usize, f32, f32)> {
     let start = world.players[from].pos;
     let end = world.players[to].pos;
     let team = world.players[from].team;
-    world
+    let policy = &world.params.policy;
+    let skill_base = policy.w("steal_skill_base");
+    let gamble_base = policy.w("steal_gamble_base");
+    let gamble_slope = policy.w("steal_gamble_slope");
+    let distance_offset = policy.w("steal_distance_offset");
+    let distance_scale = policy.w("steal_distance_scale");
+    let candidates: Vec<(usize, f32, f32, f32)> = world
         .players
         .iter()
         .enumerate()
         .filter(|(_, p)| p.on_court && p.team != team)
-        .min_by(|a, b| {
-            let left = segment_distance(start, end, a.1.pos);
-            let right = segment_distance(start, end, b.1.pos);
-            left.partial_cmp(&right).expect("finite lane distances")
-        })
         .map(|(index, p)| {
-            (
-                index,
-                p.data.attributes.steal,
-                p.data.tendencies.gamble_steal,
-            )
+            let distance = segment_distance(start, end, p.pos);
+            let skill = p.data.attributes.steal;
+            let gamble = p.data.tendencies.gamble_steal;
+            let weight = (distance_scale / (distance + distance_offset))
+                * (skill_base + skill)
+                * (gamble_base + gamble_slope * gamble);
+            (index, skill, gamble, weight.max(f32::MIN_POSITIVE))
         })
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    let weights: Vec<f32> = candidates.iter().map(|entry| entry.3).collect();
+    let pick = crate::resolve::weighted_pick(&mut world.rng, &weights);
+    let (index, skill, gamble, _) = candidates[pick];
+    Some((index, skill, gamble))
 }
 
 fn segment_distance(start: Vec2, end: Vec2, point: Vec2) -> f32 {

@@ -5,7 +5,7 @@
     "season": "2024-25",
     "sample": 243782,
     "script": "scripts/calibrate/fit_tables.py",
-    "method": "按回合起始语境分组统计结局速率与时长分位；封盖与抢断取同赛季联盟场均（两队合计），因为回合数据的事件文本只覆盖部分回合，直接计数会偏低一半",
+    "method": "按回合起始语境分组统计结局速率与时长分位；封盖与抢断按事件文本上的（比赛、球员、计数）去重后逐场计数；封盖写作 `X BLOCK (n BLK)`，抢断写作 `X STEAL (n STL)`，两种词序都计入；and-1 取联盟场均参考值，事件文本里没有 and-1 标记",
     "context": "live = 上一次回合以活球方式终结（抢断/封盖/投失）；dead = 停表方式终结"
   },
   "context": {
@@ -50,8 +50,9 @@
     "fg3_pct": 0.362719,
     "fta_per_game": 43.3341,
     "shooting_fouls_per_game": 19.5967,
-    "points_per_game": 227.5911,
-    "blocks_per_game": 10.0,
-    "steals_per_game": 15.0
+    "blocks_per_game": 9.6545,
+    "steals_per_game": 16.1211,
+    "and_one_per_game": 2.5,
+    "points_per_game": 227.5911
   }
 }

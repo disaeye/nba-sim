@@ -12,6 +12,10 @@ SHOTS = os.path.join(RAW, "shotdetail_2024.csv")
 POSS = os.path.join(RAW, "pbpstats_2024.csv")
 SEASON = "2024-25"
 
+# 封盖与抢断的事件文本写法：`X BLOCK (2 BLK): ...` 或 `...: X BLOCK (2 BLK)`。
+BLOCK_EVENT_RE = re.compile(r"(\S+) BLOCK \((\d+) BLK\)")
+STEAL_EVENT_RE = re.compile(r"(\S+) STEAL \((\d+) STL\)")
+
 KIND_MAP = [
     (r"^Alley Oop", "alley_oop"),
     (r"^(Driving )?Reverse Layup", "reverse_layup"),
@@ -467,8 +471,17 @@ def build_possession(rows):
     }
     free_throw_attempts = 0
     free_throw_makes = 0
+    # 封盖与抢断在事件文本里有两种写法：
+    #   `X BLOCK (2 BLK): MISS ...` 与 `MISS ...: X BLOCK (2 BLK)`。
+    # 按（比赛、球员、计数）去重，同一事件的多行重复不会多算。
+    block_events = set()
+    steal_events = set()
     for row in rows:
         for line in row["EVENTS"].splitlines():
+            for m in BLOCK_EVENT_RE.finditer(line):
+                block_events.add((row["GAMEID"], m.group(1), m.group(2)))
+            for m in STEAL_EVENT_RE.finditer(line):
+                steal_events.add((row["GAMEID"], m.group(1), m.group(2)))
             if "Free Throw" not in line:
                 continue
             free_throw_attempts += 1
@@ -477,6 +490,8 @@ def build_possession(rows):
     games = len({r["GAMEID"] for r in rows})
     table["league"]["fta_per_game"] = round(free_throw_attempts / games, 4)
     table["league"]["shooting_fouls_per_game"] = round(totals["sf"] / games, 4)
+    table["league"]["blocks_per_game"] = round(len(block_events) / games, 4)
+    table["league"]["steals_per_game"] = round(len(steal_events) / games, 4)
     points = 2 * totals["fg2m"] + 3 * totals["fg3m"] + free_throw_makes
     table["league"]["points_per_game"] = round(points / games, 4)
     return table

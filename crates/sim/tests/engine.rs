@@ -253,6 +253,28 @@ fn defensive_skill_changes_blocks_and_steals() {
     );
 }
 
+/// 投篮犯规里的 and-1 是少数：命中不再走普通命中率，而是独立的
+/// and-1 概率；否则会在犯规分支里重复一次投进。
+#[test]
+fn and_one_is_a_minority_of_shooting_fouls() {
+    let mut fouls = 0u32;
+    let mut and_one = 0u32;
+    for seed in 51u64..61 {
+        let report = play(seed);
+        for team in [TeamSide::Home, TeamSide::Away] {
+            let totals = report.box_score.team_totals(team);
+            fouls += totals.fouls;
+            and_one += totals.and_one;
+        }
+    }
+    assert!(fouls > 100, "sample too small: {fouls} shooting fouls");
+    let share = and_one as f64 / fouls as f64;
+    assert!(
+        (0.05..0.25).contains(&share),
+        "and-1 share of shooting fouls must stay a minority: {share:.3} ({and_one}/{fouls})"
+    );
+}
+
 #[test]
 fn session_service_advances_and_reports() {
     use nba_sim_core::SessionService;

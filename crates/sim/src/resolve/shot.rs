@@ -56,10 +56,21 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         None => false,
     };
     let fouled = block_foul || world.rng.gen::<f32>() < p_foul;
+    let and_one_rate = world.params.policy.w("and_one_rate");
+    // 封盖概率不能超过“这球本来会进”的那部分，否则条件化后的命中率被夹断，
+    // 边际命中率不再守恒。
+    let p_block = p_block.min(1.0 - p_make);
     let blocked = !fouled && block_candidate.is_some() && world.rng.gen::<f32>() < p_block;
-    let p_make_cond = (p_make / (1.0 - p_block).max(0.01)).clamp(0.02, 0.98);
+    // 校准表给的是包含封盖与犯规在内的边际命中率。封盖与犯规两条分支都
+    // 只能以各自的概率投进，其余情况一律算投失，所以未曾封盖、未被犯规
+    // 的出手要把这两部分先扣掉再条件化，边际命中率才守恒。
+    let p_make_cond = ((p_make - p_foul * and_one_rate) / ((1.0 - p_block) * (1.0 - p_foul)))
+        .max(f32::MIN_POSITIVE)
+        .min(1.0);
     let mut made = if blocked {
         false
+    } else if fouled {
+        world.rng.gen::<f32>() < and_one_rate
     } else {
         world.rng.gen::<f32>() < p_make_cond
     };

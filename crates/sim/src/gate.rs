@@ -171,6 +171,16 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
         (home_line.steals + away_line.steals) as f64 / games,
         league.steals_per_game as f64,
     );
+    push(
+        "shooting_fouls_per_game",
+        (home_line.fouls + away_line.fouls) as f64 / games,
+        league.shooting_fouls_per_game as f64,
+    );
+    push(
+        "and_one_per_game",
+        (home_line.and_one + away_line.and_one) as f64 / games,
+        league.and_one_per_game as f64,
+    );
 
     gate.passed = gate.geometric_violations == 0
         && gate.context_violations == 0

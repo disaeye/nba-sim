@@ -26,6 +26,8 @@ pub struct PlayerLine {
     pub blocks: u32,
     pub turnovers: u32,
     pub fouls: u32,
+    /// 投篮犯规且投进（and-1）。
+    pub and_one: u32,
     pub plus_minus: i32,
     pub touches: u32,
 }
@@ -99,6 +101,8 @@ pub struct TeamLine {
     pub blocks: u32,
     pub turnovers: u32,
     pub fouls: u32,
+    /// 投篮犯规且投进（and-1）。
+    pub and_one: u32,
 }
 
 impl TeamLine {
@@ -117,6 +121,7 @@ impl TeamLine {
         self.blocks += line.blocks;
         self.turnovers += line.turnovers;
         self.fouls += line.fouls;
+        self.and_one += line.and_one;
     }
 }
 

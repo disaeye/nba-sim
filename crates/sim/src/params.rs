@@ -181,6 +181,8 @@ pub struct PossessionLeague {
     pub blocks_per_game: f32,
     /// 两队合计场均抢断。
     pub steals_per_game: f32,
+    /// 两队合计场均 and-1（投篮犯规且投进）。
+    pub and_one_per_game: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

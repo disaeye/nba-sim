@@ -13,6 +13,9 @@ pub fn apply_shooting_foul(
 ) {
     let team = world.players[shooter].team;
     world.line_mut(fouler).fouls += 1;
+    if made {
+        world.line_mut(shooter).and_one += 1;
+    }
     let index = World::team_index(world.players[fouler].team);
     world.fouls[index].period += 1;
     world.fouls[index].total += 1;
