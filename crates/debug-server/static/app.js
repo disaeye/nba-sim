@@ -2554,25 +2554,33 @@
           container.appendChild(row);
         }
       }
-      // 机制实验：属性扰动后的指标方向。
+      // 机制实验：按证据类别分两组，接线证据与产物证据不能互相代替。
       const mech = body.mechanism;
       if (mech && Array.isArray(mech.results) && mech.results.length) {
-        const title = document.createElement("div");
-        title.className = "validation-section-title";
-        title.textContent = `机制实验（${mech.results.length} 个属性 · 每属性 ${mech.config?.seeds ?? "?"} 个种子）`;
-        container.appendChild(title);
         const verdictZh = { pass: "通过", insufficient: "效应不足", defect: "方向相反" };
-        for (const result of mech.results) {
-          const row = document.createElement("div");
-          row.className = "validation-ledger-item";
-          const name = document.createElement("span");
-          name.textContent = `${result.attribute} · ${result.metric} · ${Number(result.baseline).toFixed(3)} → ${Number(result.perturbed).toFixed(3)}（${(result.relative_change * 100).toFixed(1)}%）`;
-          const verdict = document.createElement("span");
-          const verdictKey = result.verdict === "pass" ? "pass" : result.verdict === "defect" ? "defect" : "insufficient";
-          verdict.className = `verdict-${verdictKey}`;
-          verdict.textContent = verdictZh[result.verdict] || result.verdict;
-          row.append(name, verdict);
-          container.appendChild(row);
+        const kindZh = {
+          wiring: "接线证据（度量直接取自消费者公式的输入）",
+          outcome: "产物证据（度量是比赛产物）",
+        };
+        for (const kind of ["wiring", "outcome"]) {
+          const rows = mech.results.filter((result) => result.evidence_kind === kind);
+          if (!rows.length) continue;
+          const title = document.createElement("div");
+          title.className = "validation-section-title";
+          title.textContent = `机制实验 · ${kindZh[kind] || kind}（${rows.length} 个属性 · 每属性 ${mech.config?.seeds ?? "?"} 个种子）`;
+          container.appendChild(title);
+          for (const result of rows) {
+            const row = document.createElement("div");
+            row.className = "validation-ledger-item";
+            const name = document.createElement("span");
+            name.textContent = `${result.attribute} · ${result.metric} · ${Number(result.baseline).toFixed(3)} → ${Number(result.perturbed).toFixed(3)}（${(result.relative_change * 100).toFixed(1)}%）`;
+            const verdict = document.createElement("span");
+            const verdictKey = result.verdict === "pass" ? "pass" : result.verdict === "defect" ? "defect" : "insufficient";
+            verdict.className = `verdict-${verdictKey}`;
+            verdict.textContent = verdictZh[result.verdict] || result.verdict;
+            row.append(name, verdict);
+            container.appendChild(row);
+          }
         }
       }
     } catch {
