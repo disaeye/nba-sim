@@ -9,6 +9,7 @@ use crate::state::{BallState, PossessionKind};
 use crate::world::World;
 
 pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32) {
+    world.rebound_attempts += 1;
     let offense = world.possession.team;
     let defense = offense.other();
     let table_rate = world

@@ -68,7 +68,7 @@ impl MechanismAttribute {
             Self::ShootingClose => Metric::RimPct,
             Self::ShootingMid => Metric::MidPct,
             Self::FreeThrow => Metric::FreeThrowPct,
-            Self::Speed | Self::Acceleration => Metric::Possessions,
+            Self::Speed | Self::Acceleration => Metric::MeanFirstActionSeconds,
             Self::Stamina => Metric::FieldGoalPct,
             Self::Strength | Self::OffensiveRebound => Metric::OffensiveReboundRate,
             Self::DefensiveRebound => Metric::DefensiveReboundRate,
@@ -79,6 +79,7 @@ impl MechanismAttribute {
     pub fn direction(self) -> Direction {
         match self {
             Self::DecisionIq => Direction::Down,
+            Self::Speed | Self::Acceleration => Direction::Down,
             _ => Direction::Up,
         }
     }
@@ -113,7 +114,7 @@ pub enum Metric {
     FreeThrowPct,
     FieldGoalPct,
     Possessions,
-    MeanShotClockAtRelease,
+    MeanFirstActionSeconds,
     OffensiveReboundRate,
     DefensiveReboundRate,
     TurnoverRate,
@@ -128,7 +129,7 @@ impl Metric {
             Self::FreeThrowPct => "free_throw_pct",
             Self::FieldGoalPct => "field_goal_pct",
             Self::Possessions => "possessions",
-            Self::MeanShotClockAtRelease => "mean_shot_clock_at_release",
+            Self::MeanFirstActionSeconds => "mean_first_action_seconds",
             Self::OffensiveReboundRate => "offensive_rebound_rate",
             Self::DefensiveReboundRate => "defensive_rebound_rate",
             Self::TurnoverRate => "turnover_rate",
@@ -164,7 +165,7 @@ pub struct MechanismConfig {
 impl Default for MechanismConfig {
     fn default() -> Self {
         Self {
-            seeds: 8,
+            seeds: 20,
             seed_start: 1,
             possessions: None,
             low_value: 0.10,
@@ -202,7 +203,8 @@ pub struct MechanismResult {
     pub observed_direction: String,
     pub direction_matches: bool,
     pub magnitude_matches: bool,
-    pub weak_effect: bool,
+    pub ci_low: f64,
+    pub ci_high: f64,
     pub verdict: String,
     pub passed: bool,
 }
@@ -309,7 +311,7 @@ fn experiment(
         })
         .count();
     let seeds_opposite = seed_count - seeds_in_expected_direction;
-    let consistent_opposite = seeds_opposite * 4 >= seed_count * 3;
+    let _ = seeds_opposite;
     let baseline_value = ratio_of_sums(&baseline_values);
     let perturbed_value = ratio_of_sums(&perturbed_values);
     let relative = if baseline_value.abs() > f64::EPSILON {
@@ -324,29 +326,28 @@ fn experiment(
     } else {
         attribute.direction()
     };
-    // 方向判定用聚合值：逐种子比率在单场级别噪声很大，聚合是主估计；
-    // 逐种子同向计数作为证据一并记录。
     let direction_matches = match attribute.direction() {
         Direction::Up => relative > 0.0,
         Direction::Down => relative < 0.0,
     };
     let magnitude_matches = relative.abs() >= config.minimum_relative_change;
-    let weak_effect = relative.abs() < 0.01;
-    // 裁决规则：
-    // - pass：聚合方向符合预期且效应达到下限；
-    // - defect：聚合方向相反且效应达到下限；
-    // - insufficient：效应低于下限，当前样本分辨不出方向。
-    // 逐种子同向计数作为证据随结果记录（`seeds_in_expected_direction`），
-    // 不参与裁决：中投、罚球这类小分母指标的单场比率噪声很大，
-    // 用它门控会把显著的整体效应误判为不足。
-    let verdict = if !magnitude_matches {
-        "insufficient"
-    } else if direction_matches {
+    // 配对 bootstrap：以种子为抽样单元重采样，对每次重采样重新算聚合比率。
+    // 单场比率在分母很小时噪声大，bootstrap 把「这一场的出手」整体当
+    // 一个样本，不假设逐场差值服从正态分布。
+    let (ci_low, ci_high) = paired_bootstrap(
+        &baseline_values,
+        &perturbed_values,
+        attribute.direction(),
+        2_000,
+    );
+    // 置信区间整体在零的一侧才算方向成立；跨零为 insufficient。
+    let verdict = if ci_low > 0.0 {
         "pass"
-    } else {
+    } else if ci_high < 0.0 {
         "defect"
+    } else {
+        "insufficient"
     };
-    let _ = (consistent_opposite, seeds_opposite);
     Ok(MechanismResult {
         attribute: attribute.key().to_string(),
         metric: metric.key().to_string(),
@@ -360,7 +361,8 @@ fn experiment(
         observed_direction: observed.key().to_string(),
         direction_matches,
         magnitude_matches,
-        weak_effect,
+        ci_low,
+        ci_high,
         verdict: verdict.to_string(),
         passed: verdict == "pass",
     })
@@ -444,10 +446,17 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
         Metric::FreeThrowPct => (home.ftm as f64, home.fta as f64),
         Metric::FieldGoalPct => (home.fgm as f64, home.fga as f64),
         Metric::Possessions => (possessions, 1.0),
-        Metric::MeanShotClockAtRelease => (
-            report.shot_clock_at_release.iter().sum(),
-            report.shot_clock_at_release.len().max(1) as f64,
-        ),
+        Metric::MeanFirstActionSeconds => {
+            let values: Vec<f64> = report
+                .possessions
+                .iter()
+                .filter_map(|record| record.first_action_seconds)
+                .collect();
+            (
+                values.iter().sum(),
+                values.len().max(1) as f64,
+            )
+        }
         Metric::OffensiveReboundRate => (home.oreb as f64, (home.fga - home.fgm).max(1) as f64),
         Metric::DefensiveReboundRate => (home.dreb as f64, (home.dreb + away.oreb).max(1) as f64),
         Metric::TurnoverRate => {
@@ -465,4 +474,52 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
 /// f32 抬成 f64 会带出尾数（0.95 → 0.949999988…），记录里保留两位即可。
 fn round_two(value: f32) -> f64 {
     (f64::from(value) * 100.0).round() / 100.0
+}
+
+/// 以种子为抽样单元的配对 bootstrap：每次重采样同一组种子的基线/扰动
+/// 两个臂，重算聚合比率，取差值的 5% 与 95% 分位。方向给定时符号统一为
+/// 「预期方向为正」，因此区间整体为正即通过，整体为负即反向。
+fn paired_bootstrap(
+    baseline: &[(f64, f64)],
+    perturbed: &[(f64, f64)],
+    direction: Direction,
+    resamples: usize,
+) -> (f64, f64) {
+    use rand::Rng;
+    use rand::SeedableRng;
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(0x5eed_1234);
+    let mut stats = Vec::with_capacity(resamples);
+    for _ in 0..resamples {
+        let mut low_num = 0.0;
+        let mut low_den = 0.0;
+        let mut high_num = 0.0;
+        let mut high_den = 0.0;
+        for _ in 0..baseline.len() {
+            let index = rng.gen_range(0..baseline.len());
+            low_num += baseline[index].0;
+            low_den += baseline[index].1;
+            high_num += perturbed[index].0;
+            high_den += perturbed[index].1;
+        }
+        if low_den <= 0.0 || high_den <= 0.0 {
+            continue;
+        }
+        let low = low_num / low_den;
+        let high = high_num / high_den;
+        if low.abs() <= f64::EPSILON {
+            continue;
+        }
+        let signed = match direction {
+            Direction::Up => (high - low) / low,
+            Direction::Down => (low - high) / low,
+        };
+        stats.push(signed);
+    }
+    if stats.is_empty() {
+        return (0.0, 0.0);
+    }
+    stats.sort_by(|a, b| a.partial_cmp(b).expect("bootstrap statistics are finite"));
+    let low_index = (stats.len() as f64 * 0.05) as usize;
+    let high_index = ((stats.len() as f64 * 0.95) as usize).min(stats.len() - 1);
+    (stats[low_index], stats[high_index])
 }

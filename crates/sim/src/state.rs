@@ -117,7 +117,7 @@ impl PlayerState {
 
     /// 加速度能力决定多快到达目标速度，直接影响推进与回合时长。
     pub fn effective_acceleration(&self) -> f32 {
-        (18.0 + 22.0 * self.data.attributes.acceleration).min(40.0)
+        (8.0 + 30.0 * self.data.attributes.acceleration).min(40.0)
     }
 }
 
@@ -229,6 +229,8 @@ pub struct PossessionState {
     pub last_drive_actor: Option<usize>,
     pub last_post_actor: Option<usize>,
     pub last_cut_actor: Option<usize>,
+    /// 回合开始到首个动作起手的秒数。
+    pub first_action_seconds: Option<f64>,
 }
 
 impl PossessionState {
@@ -254,6 +256,7 @@ impl PossessionState {
             last_drive_actor: None,
             last_post_actor: None,
             last_cut_actor: None,
+            first_action_seconds: None,
         }
     }
 }

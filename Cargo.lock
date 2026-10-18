@@ -854,6 +854,7 @@ dependencies = [
  "nba-protocol",
  "nba-sim-core",
  "parquet",
+ "rand",
  "rand_chacha",
  "rusqlite",
  "serde",

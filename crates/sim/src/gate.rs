@@ -138,10 +138,13 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
     );
     let oreb = report.box_score.team_totals(crate::TeamSide::Home).oreb
         + report.box_score.team_totals(crate::TeamSide::Away).oreb;
+    // 基准按「真正走到篮板的投失」计算：犯规导致的投失不产生篮板，
+    // 用 FGA−FGM 做分母会把犯规率的变化误算成篮板能力的变化。
+    let reboundable_misses = report.rebound_attempts as f64 / games;
     push(
         "oreb_per_game",
         oreb as f64 / games,
-        (league.oreb_per_possession * league.possessions_per_game) as f64,
+        league.oreb_per_miss as f64 * reboundable_misses,
     );
     push(
         "possessions_per_game",

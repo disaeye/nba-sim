@@ -738,7 +738,7 @@ mod tests {
         let report_response = api_validation_report(&validation);
         assert_eq!(report_response.0, "200 OK", "report after run");
         let report: Value = serde_json::from_slice(&report_response.2).expect("report JSON");
-        assert_eq!(report["games"].as_array().map(Vec::len), Some(8));
+        assert_eq!(report["games"].as_array().map(Vec::len), Some(1));
         assert!(
             report["games"][0]["ledger"]["points_reconcile"]
                 .as_bool()

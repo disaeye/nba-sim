@@ -2401,7 +2401,7 @@
     grid.append(
       metricCell(`${evidence.passes ?? 0}/${evidence.opportunities ?? 0}`, "通过/机会"),
       metricCell(evidence.defects ?? 0, "缺陷"),
-      metricCell(evidence.insufficient ?? 0, "证据不足"),
+      metricCell(result.games ?? 0, "判定场次"),
       metricCell(result.ticks ?? 0, "刻数"),
       metricCell(result.events ?? 0, "事件"),
       metricCell(result.open_business_instances ?? 0, "未终结实例"),
@@ -2421,17 +2421,17 @@
     // 批次判定总览（certification 工件，最近一次批量判定跑）。
     loadValidationCertification(detail || summary);
 
-    // 场景与证据不足详单。
+    // 失败准则详单。
     if (detail) {
       detail.style.display = "flex";
       detail.replaceChildren();
-      const insufficient = result.insufficient_reasons || [];
-      if (insufficient.length) {
-        const insufficientTitle = document.createElement("div");
-        insufficientTitle.className = "validation-section-title";
-        insufficientTitle.textContent = "证据不足原因（数据准备任务）";
-        detail.appendChild(insufficientTitle);
-        for (const reason of insufficient) {
+      const failures = result.failures || [];
+      if (failures.length) {
+        const failureTitle = document.createElement("div");
+        failureTitle.className = "validation-section-title";
+        failureTitle.textContent = "未通过准则";
+        detail.appendChild(failureTitle);
+        for (const reason of failures) {
           const row = document.createElement("div");
           row.className = "validation-ledger-item";
           row.textContent = reason;
@@ -2571,7 +2571,7 @@
       if (!games.length) return;
       const title = document.createElement("div");
       title.className = "validation-section-title";
-      title.textContent = `逐场账本对账（${games.length} 场 · seed ${report.seed}）`;
+      title.textContent = `逐场账本对账（${games.length} 场 · seed ${games[0].seed}）`;
       titleEl.after(title);
       for (const game of games) {
         const ledger = game.ledger || {};

@@ -11,6 +11,7 @@ nba-sim-core.workspace = true
 nba-protocol = { path = "../protocol" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+rand.workspace = true
 rand_chacha = { workspace = true }
 parquet = { version = "53.4.1", default-features = false, features = ["arrow"] }
 rusqlite = { version = "0.32.1", features = ["bundled"] }

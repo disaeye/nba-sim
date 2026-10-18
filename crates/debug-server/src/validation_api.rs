@@ -1,13 +1,15 @@
 //! 验证面板的 HTTP 入口。
 //!
-//! 判定由动作链内核的验证模块产出：单场批次走 `core_validation`，
-//! 分层详单读 `validate-core` 写入的工件。本模块不构造引擎，也不保存
-//! 第二份比赛状态。
+//! 判定由动作链内核的验证模块产出：面板对缓存种子跑一场判定，分层详单与
+//! 认证总览读 `validate-core` 写入的工件。本模块不构造引擎，也不保存第二份
+//! 比赛状态。
 
 use std::sync::{Arc, Mutex};
 
 use nba_sim_core::params::workspace_validation_dir;
-use nba_validation::core_validation::{run_core_validation, CoreValidationReport};
+use nba_validation::core_validation::{
+    run_core_validation, CoreValidationReport, REGISTERED_GATE_CRITERIA,
+};
 use serde_json::Value;
 
 type Response = (&'static str, &'static str, Vec<u8>);
@@ -18,23 +20,22 @@ pub struct CachedGame {
     pub scope: String,
 }
 
-/// 面板状态：只保留缓存比赛与最近一次结果，判定本身是同步一次完成。
+/// 面板状态：缓存比赛与最近一次判定（快照供状态轮询，详单供账本对账）。
 pub enum ValidationState {
     Idle {
         cached_game: Option<CachedGame>,
-        last_result: Option<Value>,
+        last_snapshot: Option<Value>,
+        last_report: Option<Value>,
     },
 }
 
 pub type SharedValidation = Arc<Mutex<ValidationState>>;
 
-fn bad_request(message: String) -> Response {
+fn json_response(value: &Value) -> Response {
     (
-        "400 Bad Request",
+        "200 OK",
         "application/json; charset=utf-8",
-        serde_json::json!({ "error": message })
-            .to_string()
-            .into_bytes(),
+        value.to_string().into_bytes(),
     )
 }
 
@@ -48,79 +49,65 @@ fn internal_error(message: String) -> Response {
     )
 }
 
-fn json_response(value: &Value) -> Response {
+fn bad_request(message: String) -> Response {
     (
-        "200 OK",
+        "400 Bad Request",
         "application/json; charset=utf-8",
-        value.to_string().into_bytes(),
+        serde_json::json!({ "error": message })
+            .to_string()
+            .into_bytes(),
     )
 }
 
-/// POST /api/validation/run：对页面正在查看的种子跑一小批判定。
+/// POST /api/validation/run：对页面正在查看的种子跑一场判定，并缓存结果。
 pub fn api_validation_run(_req: &crate::Request, validation: &SharedValidation) -> Response {
     let Some(seed) = cached_seed(validation) else {
         return no_cached_game();
     };
-    let report = match run_core_validation(seed, 8) {
+    let report = match run_core_validation(seed, 1) {
         Ok(report) => report,
         Err(error) => return internal_error(error),
     };
     let snapshot = snapshot_json(&report);
+    let detail = report_json(&report);
     {
         let mut state = validation.lock().expect("validation state");
-        if let ValidationState::Idle { last_result, .. } = &mut *state {
-            *last_result = Some(snapshot.clone());
+        if let ValidationState::Idle {
+            last_snapshot,
+            last_report,
+            ..
+        } = &mut *state
+        {
+            *last_snapshot = Some(snapshot.clone());
+            *last_report = Some(detail);
         }
     }
     json_response(&serde_json::json!({ "result": snapshot }))
 }
 
-/// GET /api/validation/status：最近的判定结果。
+/// GET /api/validation/status：最近一次判定的摘要。
 pub fn api_validation_status(validation: &SharedValidation) -> Response {
     let state = validation.lock().expect("validation state");
     let body = match &*state {
-        ValidationState::Idle { last_result, .. } => match last_result {
-            Some(result) => serde_json::json!({
-                "status": "done",
-                "result": result,
-            }),
+        ValidationState::Idle { last_snapshot, .. } => match last_snapshot {
+            Some(result) => serde_json::json!({ "status": "done", "result": result }),
             None => serde_json::json!({ "status": "idle" }),
         },
     };
     json_response(&body)
 }
 
-/// GET /api/validation/report：逐场账本对账详单。
+/// GET /api/validation/report：上一次判定的逐场账本详单。
 pub fn api_validation_report(validation: &SharedValidation) -> Response {
-    let Some(seed) = cached_seed(validation) else {
-        return no_cached_game();
-    };
-    let report = match run_core_validation(seed, 8) {
-        Ok(report) => report,
-        Err(error) => return internal_error(error),
-    };
-    let games: Vec<Value> = report
-        .games
-        .iter()
-        .map(|game| {
-            serde_json::json!({
-                "seed": game.seed,
-                "home_score": game.home_score,
-                "away_score": game.away_score,
-                "possessions": game.possessions,
-                "ticks": game.ticks,
-                "events": game.events,
-                "open_business_instances": game.open_business_instances,
-                "ledger": game.ledger,
-                "violations": game.violations,
-            })
-        })
-        .collect();
-    json_response(&serde_json::json!({
-        "seed": seed,
-        "games": games,
-        "gate": report.gate,
-    }))
+    let state = validation.lock().expect("validation state");
+    match &*state {
+        ValidationState::Idle { last_report, .. } => match last_report {
+            Some(report) => json_response(report),
+            None => bad_request(
+                "no validation result: run a simulation and validate first".to_string(),
+            ),
+        },
+    }
 }
 
 /// GET /api/validation/layers：批次统计与机制实验工件。
@@ -155,14 +142,14 @@ pub fn api_validation_certification(_req: &crate::Request) -> Response {
 }
 
 fn snapshot_json(report: &CoreValidationReport) -> Value {
-    let opportunities = report.gate.layers.len();
+    let evaluated = report.gate.layers.len();
     let passes = report
         .gate
         .layers
         .iter()
         .filter(|layer| layer.passed)
         .count();
-    let mut defects = opportunities - passes + report.ledger_failures;
+    let mut defects = evaluated - passes + report.ledger_failures;
     if report.geometry_violations > 0 {
         defects += 1;
     }
@@ -174,15 +161,39 @@ fn snapshot_json(report: &CoreValidationReport) -> Value {
         "exit_code": exit_code,
         "evidence": {
             "passes": passes,
-            "opportunities": opportunities,
+            "opportunities": evaluated,
             "defects": defects,
-            "insufficient": 0,
         },
         "ticks": report.ticks,
         "events": report.events,
         "open_business_instances": report.open_business_instances,
-        "insufficient_reasons": report.failed_criteria(),
+        "failures": report.failed_criteria(),
         "games": report.games.len(),
+        "registered_gate_criteria": REGISTERED_GATE_CRITERIA.len(),
+    })
+}
+
+fn report_json(report: &CoreValidationReport) -> Value {
+    let games: Vec<Value> = report
+        .games
+        .iter()
+        .map(|game| {
+            serde_json::json!({
+                "seed": game.seed,
+                "home_score": game.home_score,
+                "away_score": game.away_score,
+                "possessions": game.possessions,
+                "ticks": game.ticks,
+                "events": game.events,
+                "open_business_instances": game.open_business_instances,
+                "ledger": game.ledger,
+                "violations": game.violations,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "games": games,
+        "gate": report.gate,
     })
 }
 
@@ -200,7 +211,8 @@ pub fn cache_game(validation: &SharedValidation, seed: u64, scope: &str) {
 pub fn idle_state() -> ValidationState {
     ValidationState::Idle {
         cached_game: None,
-        last_result: None,
+        last_snapshot: None,
+        last_report: None,
     }
 }
 
@@ -209,10 +221,6 @@ pub fn cached_seed(validation: &SharedValidation) -> Option<u64> {
     match &*state {
         ValidationState::Idle { cached_game, .. } => cached_game.as_ref().map(|game| game.seed),
     }
-}
-
-pub fn is_configured(validation: &SharedValidation) -> bool {
-    cached_seed(validation).is_some()
 }
 
 pub fn no_cached_game() -> Response {

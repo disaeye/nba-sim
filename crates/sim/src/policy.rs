@@ -257,7 +257,7 @@ pub fn shot_choice(world: &World, state: &DecisionState) -> Option<(ShotKind, &'
             .map(|time| world.now() - time < 2.5)
             .unwrap_or(false);
     let transition = world.possession.kind == PossessionKind::Live
-        && world.now() - world.possession.started_at < 6.8;
+        && world.now() - world.possession.started_at < 7.6;
     let cut_ready = world.possession.last_cut_actor == Some(state.actor)
         && world
             .possession

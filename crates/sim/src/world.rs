@@ -22,6 +22,8 @@ use crate::state::{
 
 pub const TICK_SECONDS: f64 = 0.05;
 pub const DECISION_INTERVAL: f64 = 0.55;
+/// 推进到前场之后的落位时间：持球人到达顶弧还需要给队友落位的时间。
+pub const POSSESSION_SETUP_SECONDS: f64 = 2.3;
 const MAX_TICKS: u64 = 400_000;
 
 #[derive(Debug, Clone)]
@@ -73,6 +75,8 @@ pub struct PossessionRecord {
     pub drives: u32,
     pub points: u32,
     pub ended_by: &'static str,
+    /// 回合开始到首个动作起手的秒数：推进速度的直接度量。
+    pub first_action_seconds: Option<f64>,
 }
 
 pub struct World {
@@ -111,6 +115,9 @@ pub struct World {
     pub creation_counts: [u32; 7],
     pub next_shot_id: u64,
     pub next_pass_id: u64,
+    /// 走到篮板结算的投失次数。犯规导致的投失不进入篮板，
+    /// 前场篮板率的分子分母必须用这个数对账。
+    pub rebound_attempts: u64,
 }
 
 impl World {
@@ -196,6 +203,7 @@ impl World {
             creation_counts: [0; 7],
             next_shot_id: 0,
             next_pass_id: 0,
+            rebound_attempts: 0,
         };
         world.reset_positions(first);
         world
@@ -248,6 +256,7 @@ impl World {
             periods: self.clock.period,
             ticks: self.clock.tick,
             open_business_instances: self.open_business_instances(),
+            rebound_attempts: self.rebound_attempts,
             possessions: self.possession_log.clone(),
             box_score: self.box_score.clone(),
             events: std::mem::take(&mut self.events),
@@ -456,8 +465,11 @@ impl World {
         // 在固定比赛时钟内产生更多回合。
         let advance_distance = (self.top_of_key(team) - entry).length();
         let speed = self.players[handler].effective_speed().max(1.0);
-        let advance_seconds = (advance_distance / speed).max(0.8) as f64;
-        self.next_decision_at = self.now() + advance_seconds;
+        // 推进时长 = 匀速段 + 起步加速段：加速度决定多快到达目标速度。
+        let accel = self.players[handler].effective_acceleration().max(1.0);
+        let advance_seconds =
+            (advance_distance / speed + speed / accel).max(0.8) as f64;
+        self.next_decision_at = self.now() + advance_seconds + POSSESSION_SETUP_SECONDS;
         self.emit(Fact::PossessionStarted {
             team,
             live: kind == PossessionKind::Live,
@@ -504,6 +516,7 @@ impl World {
             drives: self.possession.drives,
             points,
             ended_by: cause,
+            first_action_seconds: self.possession.first_action_seconds,
         };
         self.possession_log.push(record);
         self.possession.id = 0;
@@ -791,6 +804,9 @@ impl World {
         }
         let intent = crate::policy::choose_action(self);
         self.next_decision_at = self.now() + DECISION_INTERVAL;
+        if self.possession.first_action_seconds.is_none() {
+            self.possession.first_action_seconds = Some(self.now() - self.possession.started_at);
+        }
         match intent.kind {
             crate::action::ActionKind::Drive
             | crate::action::ActionKind::Dribble
@@ -869,6 +885,7 @@ pub struct GameReport {
     pub periods: u32,
     pub ticks: u64,
     pub open_business_instances: u64,
+    pub rebound_attempts: u64,
     pub possessions: Vec<PossessionRecord>,
     pub box_score: BoxScore,
     pub events: Vec<TimedFact>,
@@ -892,6 +909,7 @@ impl GameReport {
             periods: 0,
             ticks: 0,
             open_business_instances: 0,
+            rebound_attempts: 0,
             possessions: Vec::new(),
             box_score: BoxScore::default(),
             events: Vec::new(),
@@ -908,7 +926,9 @@ impl GameReport {
     pub fn merge(&mut self, other: &GameReport) {
         self.games += other.games;
         self.ticks += other.ticks;
-        self.open_business_instances += other.open_business_instances;
+        self.rebound_attempts += other.rebound_attempts;
+        // 未结算实例是单场比赛的流尾性质，聚合后没有对应物，不累加。
+        self.open_business_instances = 0;
         self.home_score += other.home_score;
         self.away_score += other.away_score;
         self.possessions.extend_from_slice(&other.possessions);

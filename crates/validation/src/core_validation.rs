@@ -80,10 +80,11 @@ impl CoreValidationReport {
     }
 }
 
-/// 跑一组种子并产出判定报告。样本少于两场时直接失败，避免单场噪声被当成结论。
+/// 跑一组种子并产出判定报告。单场调用用于面板「对屏幕这一场判定」；
+/// 批次结论由 `validate-core` 的 32 场口径负责。
 pub fn run_core_validation(seed_start: u64, games: u64) -> Result<CoreValidationReport, String> {
-    if games < 2 {
-        return Err("core validation requires at least two games".to_string());
+    if games == 0 {
+        return Err("core validation requires at least one game".to_string());
     }
     run_core_validation_with_dir(seed_start, games, &workspace_calibration_dir())
 }
@@ -343,12 +344,26 @@ pub fn certification_artifact(
                 && game.ledger.minutes_reconcile
         })
         .count();
-    let gate_criteria = report.gate.layers.len();
+    // 覆盖统计以声明的清单为基准：新增判据却未登记时，uncovered 会 
+    // 从零变为正数；已评估但未登记的准则单独列在 unregistered。
+    let evaluated: std::collections::BTreeSet<&str> = report
+        .gate
+        .layers
+        .iter()
+        .map(|layer| layer.criterion.as_str())
+        .collect();
+    let sampled_gate = REGISTERED_GATE_CRITERIA
+        .iter()
+        .filter(|name| evaluated.contains(*name))
+        .count();
+    let unregistered: Vec<String> = evaluated
+        .iter()
+        .filter(|name| !REGISTERED_GATE_CRITERIA.contains(name))
+        .map(|name| (*name).to_string())
+        .collect();
     let mechanism_attributes = mechanism.map(|report| report.results.len()).unwrap_or(0);
-    // 判定面覆盖：注册项与实际评估项。未覆盖 = 注册数减已评估数，
-    // 不写死为零。
-    let registered = gate_criteria + mechanism_attributes;
-    let sampled = report.gate.layers.len() + mechanism_attributes;
+    let registered = REGISTERED_GATE_CRITERIA.len() + crate::mechanism_core::MechanismAttribute::all().len();
+    let sampled = sampled_gate + mechanism_attributes;
     serde_json::json!({
         "certification_status": status,
         "commit": commit,
@@ -365,11 +380,34 @@ pub fn certification_artifact(
             "registered": registered,
             "sampled": sampled,
             "uncovered": registered.saturating_sub(sampled),
-            "gate_criteria": gate_criteria,
+            "unregistered": unregistered,
+            "gate_criteria": REGISTERED_GATE_CRITERIA.len(),
             "mechanism_attributes": mechanism_attributes,
         },
     })
 }
+
+/// 已登记的分布准则。新增判据必须在此登记，否则 `coverage.uncovered`
+/// 会暴露缺口。
+pub const REGISTERED_GATE_CRITERIA: [&str; 17] = [
+    "zone_share_rim",
+    "zone_share_near",
+    "zone_share_mid",
+    "zone_share_three",
+    "creation_share_drive",
+    "creation_share_cut",
+    "creation_share_post",
+    "creation_share_pull_up",
+    "creation_share_putback",
+    "creation_share_transition",
+    "creation_share_set",
+    "turnover_per_possession",
+    "fga_per_possession",
+    "fta_per_game",
+    "points_per_game",
+    "oreb_per_game",
+    "possessions_per_game",
+];
 
 /// 逐准则的观测值与基准，供批次统计工件消费。
 pub fn batch_statistical_artifact(report: &CoreValidationReport) -> serde_json::Value {
