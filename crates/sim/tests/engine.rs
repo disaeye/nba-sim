@@ -38,8 +38,14 @@ fn box_score_conserves_points_and_attempts() {
             player_points, totals.points,
             "player points must sum to the team total"
         );
-        assert!(totals.fgm <= totals.fga, "made shots cannot exceed attempts");
-        assert!(totals.ftm <= totals.fta, "made free throws cannot exceed attempts");
+        assert!(
+            totals.fgm <= totals.fga,
+            "made shots cannot exceed attempts"
+        );
+        assert!(
+            totals.ftm <= totals.fta,
+            "made free throws cannot exceed attempts"
+        );
         assert!(
             totals.tpm <= totals.fga,
             "made threes cannot exceed field goal attempts"
@@ -61,10 +67,13 @@ fn box_score_conserves_points_and_attempts() {
 #[test]
 fn no_player_exceeds_the_foul_limit_on_court() {
     let report = play(13);
-    let limit = nba_domain::GameRules::default()
-        .league
-        .max_personal_fouls as u32;
-    for line in report.box_score.home.iter().chain(report.box_score.away.iter()) {
+    let limit = nba_domain::GameRules::default().league.max_personal_fouls as u32;
+    for line in report
+        .box_score
+        .home
+        .iter()
+        .chain(report.box_score.away.iter())
+    {
         assert!(
             line.fouls <= limit,
             "{} recorded {} fouls, above the limit {}",
@@ -78,12 +87,19 @@ fn no_player_exceeds_the_foul_limit_on_court() {
 #[test]
 fn minutes_stay_within_the_game_length() {
     let report = play(17);
-    let period = nba_domain::GameRules::default().league.period_duration_seconds as f64;
+    let period = nba_domain::GameRules::default()
+        .league
+        .period_duration_seconds as f64;
     let overtime = nba_domain::GameRules::default()
         .league
         .overtime_duration_seconds as f64;
     let ceiling = (4.0 * period + 4.0 * overtime) / 60.0;
-    for line in report.box_score.home.iter().chain(report.box_score.away.iter()) {
+    for line in report
+        .box_score
+        .home
+        .iter()
+        .chain(report.box_score.away.iter())
+    {
         assert!(
             line.minutes() <= ceiling + 0.1,
             "{} played {:.1} minutes, above {:.1}",
@@ -132,15 +148,22 @@ fn shots_are_geometrically_legal_across_a_batch() {
 #[test]
 fn zone_and_creation_shares_are_complete() {
     let reports: Vec<_> = [31u64, 32, 33, 34].iter().map(|seed| play(*seed)).collect();
-    let zone_total: u32 = reports.iter().map(|r| r.shot_zone_counts.iter().sum::<u32>()).sum();
+    let zone_total: u32 = reports
+        .iter()
+        .map(|r| r.shot_zone_counts.iter().flatten().sum::<u32>())
+        .sum();
     let creation_total: u32 = reports
         .iter()
         .map(|r| r.creation_counts.iter().sum::<u32>())
         .sum();
     assert!(zone_total > 300, "batch must contain enough shots");
-    assert_eq!(zone_total, creation_total, "every shot has one zone and one creation");
+    assert_eq!(
+        zone_total, creation_total,
+        "every shot has one zone and one creation"
+    );
     for report in &reports {
-        for count in report.shot_zone_counts {
+        for zone in 0..4 {
+            let count = report.shot_zone_counts[0][zone] + report.shot_zone_counts[1][zone];
             assert!(count > 0, "every zone must appear in a full game");
         }
     }
@@ -159,7 +182,11 @@ fn three_point_skill_moves_three_point_output() {
     let mut made_high = 0u32;
     let mut attempts_high = 0u32;
     for seed in [41u64, 42, 43] {
-        let mut low = World::new(MatchSetup::builtin(rules.clone()), clone_params(&base), seed);
+        let mut low = World::new(
+            MatchSetup::builtin(rules.clone()),
+            clone_params(&base),
+            seed,
+        );
         let low_report = low.run();
         let low_line = low_report.box_score.team_totals(TeamSide::Home);
         made_low += low_line.tpm;
@@ -202,7 +229,10 @@ fn session_service_advances_and_reports() {
     assert!(tick.frame.tick_index > 0);
     service.fast_forward(120.0).expect("fast forward");
     let report = service.report().expect("report after fast forward");
-    assert!(!report.possessions.is_empty(), "possessions must accumulate");
+    assert!(
+        !report.possessions.is_empty(),
+        "possessions must accumulate"
+    );
     assert!(report.home_score + report.away_score > 0);
     let events = service.events(10);
     assert!(!events.is_empty(), "event history must be retained");
@@ -229,7 +259,10 @@ fn stream_ticks_round_trip_through_protocol() {
         assert_eq!(parsed.frame.tick_index, tick.frame.tick_index);
         assert_eq!(parsed.frame.score.home, tick.frame.score.home);
         assert_eq!(parsed.frame.players.len(), tick.frame.players.len());
-        assert!(parsed.frame.rules.is_present(), "rules must travel with the tick");
+        assert!(
+            parsed.frame.rules.is_present(),
+            "rules must travel with the tick"
+        );
         checked += 1;
     }
     assert!(checked >= 10, "the round trip must cover several ticks");

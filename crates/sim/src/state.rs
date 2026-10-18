@@ -311,7 +311,9 @@ impl DecisionState {
 
     pub fn openness(&self) -> f32 {
         match self.primary_defender {
-            Some(defender) => contest_from_defender(defender.distance_ft, defender.between_ball_and_hoop),
+            Some(defender) => {
+                contest_from_defender(defender.distance_ft, defender.between_ball_and_hoop)
+            }
             None => 1.0,
         }
     }
@@ -335,10 +337,7 @@ pub fn contest_from_defender(distance_ft: f32, between: bool) -> f32 {
     }
 }
 
-pub fn nearest_opponent<'a>(
-    players: &'a [PlayerState],
-    actor: usize,
-) -> Option<&'a PlayerState> {
+pub fn nearest_opponent<'a>(players: &'a [PlayerState], actor: usize) -> Option<&'a PlayerState> {
     let team = players[actor].team;
     let pos = players[actor].pos;
     players

@@ -98,18 +98,20 @@
 
 ## 8. 与旧引擎的边界
 
-调试服务器 `/api/session/*` 与会话命令已改指向 `SessionService`；`/api/simulate` 新增 `engine` 字段，取 `core` 时走本内核，演示页的主推演路径默认使用它。旧 `/api/simulate` 与 `/api/validation/*` 仍由旧引擎提供，因为验证面板依赖旧引擎的种子重放缓存。
+调试服务器 `/api/session/*` 与会话命令已改指向 `SessionService`；`/api/simulate` 新增 `engine` 字段，取 `core` 时走本内核，缺省为 `core`。`/api/validation/run` 与 `/api/validation/report` 对缓存种子重放 `core_validation`，`/api/validation/layers` 与 `/api/validation/certification` 读 `validate-core` 写入的工件。验证面板已不再消费旧引擎。
 
 保留：球场几何、联赛档案、时钟、协议层、确定性框架、命令行批量、回放投影。
 
 新建：动作链、策略、结算、球员级箱体、判定。
 
-待删除：旧的逐 tick 概率裁定、球弹道结算、效用决策、软约束管线、旧准则集。
+待删除：旧的逐 tick 概率裁定、球弹道结算、效用决策、软约束管线、旧准则集，以及 `crates/evaluator` 与 `crates/validation` 的旧模块。
 
 ## 9. 已知缺口
 
+- 防守只建模贴防与协防收缩，封盖、抢断、协防、卡位都只在概率里出现，倾向字段 `gamble_steal`、`block_aggressiveness`、`help_aggressiveness`、`physicality` 还没有独立结算可接。
+- 十二个倾向字段中只有四个进入生产路径（出手、突破、掩护、传球）；其余八个在 `scripts/check_r6_tendency_wiring.py` 里登记为待接入。
 - 无球跑位只覆盖空切与掩护，弱侧轮转与错位攻击尚未进入动作空间。
-- 防守只建模贴防与协防收缩，没有独立的防守动作结算。
 - 回合结算的篮板归属只按能力与位置加权，没有卡位动作。
+- `validation.md` §9.2 的场景目录尚未移植，`crates/sim/tests` 只有一个集成测试文件。
 - 内建名册的主客队属性相同，球队差异还没有进入引擎。
-- 删除旧引擎需要先把调试服务器与验证体系迁到新的逐帧流，两者目前仍消费旧引擎的事件词汇。
+- 删除旧引擎需要先把命令行旧命令与 `crates/validation` 的旧模块迁走。

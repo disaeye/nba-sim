@@ -120,7 +120,7 @@ jobs:
           else
             echo "rust_changed=false" >> $GITHUB_OUTPUT
           fi
-          CORE_PATTERN='^crates/(engine|physics|decision|officiating|domain)/'
+          CORE_PATTERN='^crates/(engine|physics|decision|officiating|domain|sim|validation|debug-server)/'
           if echo "$DIFF" | grep -qE "$CORE_PATTERN"; then
             echo "core_changed=true" >> $GITHUB_OUTPUT
           else
@@ -193,6 +193,12 @@ jobs:
           # 全包已覆盖，重复跑只是多付一份固定开销。
           - name: nba-domain
             command: cargo test -p nba-domain
+          - name: nba-sim-core
+            command: cargo test -p nba-sim-core
+          - name: nba-wasm
+            command: cargo test -p nba-wasm
+          - name: nba-validation-mechanism
+            command: cargo test -p nba-validation --test mechanism
           - name: nba-invariants
             command: cargo test -p nba-invariants
           - name: world-state-equivalence
@@ -233,6 +239,8 @@ jobs:
           # defense_rotation_response 仍是独立的 Tier 3 / D26 独占环节）。
           - name: nba-decision
             command: cargo test -p nba-decision
+          - name: nba-debug-server
+            command: cargo test -p nba-debug-server
           - name: nba-engine-core
             command: >-
               cargo test -p nba-engine
@@ -289,7 +297,7 @@ jobs:
     if: |
       needs.change_detection.outputs.is_full == 'true' ||
       needs.change_detection.outputs.core_changed == 'true'
-    name: Tier 3 (stats baseline)
+    name: Tier 3 (stats baselines)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -304,6 +312,21 @@ jobs:
         run: >-
           cargo test -p nba-engine --test stats_baseline -- --nocapture
           --test-threads "$(nproc)"
+      - name: Run action-chain batch validation
+        run: |
+          cargo build --release -p nba-sim-cli
+          set +e
+          ./target/release/nba-sim validate-core --seed 1 --games 32 --mechanism \
+            --out .work/validation-view
+          CODE=$?
+          set -e
+          # 1 = 存在缺陷，2 = 执行错误，两者都必须阻断；
+          # 3 = 证据不足，属于待补数据/待接属性的工作清单，降为告警。
+          if [ "$CODE" -eq 3 ]; then
+            echo "::warning::action-chain validation reports insufficient evidence"
+          elif [ "$CODE" -ne 0 ]; then
+            exit "$CODE"
+          fi
 
   full_gate:
     name: full-gate

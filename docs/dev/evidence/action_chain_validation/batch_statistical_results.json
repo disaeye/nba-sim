@@ -2,113 +2,113 @@
   "criteria": [
     {
       "criterion": "zone_share_rim",
-      "observed": 0.3497773210003426,
+      "observed": 0.3506426735218509,
       "passed": true,
       "target": 0.31580600142478943
     },
     {
       "criterion": "zone_share_near",
-      "observed": 0.20280918122644742,
+      "observed": 0.19588688946015423,
       "passed": true,
       "target": 0.19059200584888458
     },
     {
       "criterion": "zone_share_mid",
-      "observed": 0.07399794450154162,
+      "observed": 0.08191945158526136,
       "passed": true,
       "target": 0.07244700193405151
     },
     {
       "criterion": "zone_share_three",
-      "observed": 0.37341555327166837,
+      "observed": 0.3715509854327335,
       "passed": true,
       "target": 0.42115500569343567
     },
     {
       "criterion": "creation_share_drive",
-      "observed": 0.2199383350462487,
+      "observed": 0.2341045415595544,
       "passed": true,
       "target": 0.21992699801921844
     },
     {
       "criterion": "creation_share_cut",
-      "observed": 0.05275779376498801,
+      "observed": 0.04113110539845758,
       "passed": true,
       "target": 0.04489700123667717
     },
     {
       "criterion": "creation_share_post",
-      "observed": 0.07194244604316546,
+      "observed": 0.0699228791773779,
       "passed": true,
       "target": 0.06361400336027145
     },
     {
       "criterion": "creation_share_pull_up",
-      "observed": 0.16649537512846865,
+      "observed": 0.16760925449871467,
       "passed": true,
       "target": 0.1899220049381256
     },
     {
       "criterion": "creation_share_putback",
-      "observed": 0.047961630695443645,
+      "observed": 0.04438731790916881,
       "passed": true,
       "target": 0.045170001685619354
     },
     {
       "criterion": "creation_share_transition",
-      "observed": 0.13840356286399452,
+      "observed": 0.12339331619537275,
       "passed": true,
       "target": 0.12078200280666351
     },
     {
       "criterion": "creation_share_set",
-      "observed": 0.302500856457691,
+      "observed": 0.3194515852613539,
       "passed": true,
       "target": 0.31568801403045654
     },
     {
       "criterion": "turnover_per_possession",
-      "observed": 0.15048268029528677,
+      "observed": 0.14167024781549922,
       "passed": true,
       "target": 0.1439650058746338
     },
     {
       "criterion": "fga_per_possession",
-      "observed": 0.8270868824531517,
+      "observed": 0.834407677983097,
       "passed": true,
       "target": 0.8975229859352112
     },
     {
       "criterion": "fta_per_game",
-      "observed": 50.125,
+      "observed": 39.5625,
       "passed": true,
       "target": 43.33409881591797
     },
     {
       "criterion": "points_per_game",
-      "observed": 246.5,
+      "observed": 235.96875,
       "passed": true,
       "target": 228.4
     },
     {
       "criterion": "oreb_per_game",
-      "observed": 23.5625,
+      "observed": 23.96875,
       "passed": true,
       "target": 27.03244400024414
     },
     {
       "criterion": "possessions_per_game",
-      "observed": 220.125,
+      "observed": 218.15625,
       "passed": true,
       "target": 198.1967010498047
     }
   ],
-  "games": 16,
+  "games": 32,
   "totals": {
     "context_violations": 0,
     "geometry_violations": 0,
     "ledger_failures": 0,
-    "points_per_game": 246.5,
-    "possessions_per_game": 220.125
+    "points_per_game": 235.96875,
+    "possessions_per_game": 218.15625
   }
 }

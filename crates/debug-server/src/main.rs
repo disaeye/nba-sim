@@ -22,8 +22,7 @@ use core_api::SharedCore;
 
 use validation_api::{
     api_validation_certification, api_validation_layers, api_validation_report,
-    api_validation_run, api_validation_status, CachedGame, SharedValidation,
-    ValidationState,
+    api_validation_run, api_validation_status, cache_game, idle_state, SharedValidation,
 };
 
 type Response = (&'static str, &'static str, Vec<u8>);
@@ -44,10 +43,7 @@ fn main() {
         .unwrap_or(31100);
     let listener = TcpListener::bind(("127.0.0.1", port)).expect("bind debug server port");
     let core: SharedCore = Arc::new(Mutex::new(SessionService::new(42)));
-    let validation: SharedValidation = Arc::new(Mutex::new(ValidationState::Idle {
-        cached_game: None,
-        last_result: None,
-    }));
+    let validation: SharedValidation = Arc::new(Mutex::new(idle_state()));
     println!("nba-debug-server listening on http://127.0.0.1:{}", port);
     for stream in listener.incoming().flatten() {
         // MatchService currently contains a backend trait object without a Send
@@ -282,25 +278,14 @@ fn api_simulate(
         Err(e) => return bad_request(e),
     };
     if run.engine == "core" {
+        cache_game(validation, run.seed, &run.scope);
         return core_api::core_simulate_response(run.seed, &run.scope);
     }
     match run_simulation(run.seed, &run.scope, run.rules, run.setup) {
         Ok((body, ticks)) => {
-            // 缓存页面正在查看的这场比赛：验证入口对同一刻序列做判定，
-            // 结论与页面展示的比赛严格一致（同一确定性重放）。
-            let previous_result = match &*validation.lock().expect("validation state") {
-                ValidationState::Idle { last_result, .. }
-                | ValidationState::Running { last_result, .. } => last_result.clone(),
-                ValidationState::Done { .. } | ValidationState::Failed { .. } => None,
-            };
-            *validation.lock().expect("validation state") = ValidationState::Idle {
-                cached_game: Some(CachedGame {
-                    seed: run.seed,
-                    scope: run.scope.clone(),
-                    ticks,
-                }),
-                last_result: previous_result,
-            };
+            // 缓存页面正在查看的这场比赛：验证入口对同一种子重放。
+            cache_game(validation, run.seed, &run.scope);
+            let _ = ticks;
             ("200 OK", "application/x-ndjson; charset=utf-8", body)
         }
         Err(e) => bad_request(e),
@@ -319,7 +304,7 @@ fn parse_run_request(req: &Request) -> Result<RunRequest, String> {
     let defaults = GameRules::default();
     let mut seed = 42u64;
     let mut scope = "5p".to_string();
-    let mut engine = "legacy".to_string();
+    let mut engine = "core".to_string();
     let mut rules_value: Option<Value> = None;
     let mut setup_value: Option<Value> = None;
 
@@ -713,10 +698,7 @@ mod tests {
     }
     #[test]
     fn studio_catalog_round_trips_into_simulation() {
-        let validation: SharedValidation = Arc::new(Mutex::new(ValidationState::Idle {
-            cached_game: None,
-            last_result: None,
-        }));
+        let validation: SharedValidation = Arc::new(Mutex::new(idle_state()));
         let (status, _, body) = route(
             &request("GET", "/api/studio", Vec::new()),
             &session_unused(),
@@ -759,10 +741,7 @@ mod tests {
 
     #[test]
     fn validation_run_requires_cached_game() {
-        let validation: SharedValidation = Arc::new(Mutex::new(ValidationState::Idle {
-            cached_game: None,
-            last_result: None,
-        }));
+        let validation: SharedValidation = Arc::new(Mutex::new(idle_state()));
         let response = api_validation_run(
             &request("POST", "/api/validation/run", Vec::new()),
             &validation,
@@ -865,10 +844,7 @@ mod tests {
     }
 
     fn validation_unused() -> SharedValidation {
-        Arc::new(Mutex::new(ValidationState::Idle {
-            cached_game: None,
-            last_result: None,
-        }))
+        Arc::new(Mutex::new(idle_state()))
     }
 
     #[test]
@@ -971,10 +947,7 @@ mod c6_6_tests {
     use super::*;
 
     fn validation_shared() -> SharedValidation {
-        Arc::new(Mutex::new(ValidationState::Idle {
-            cached_game: None,
-            last_result: None,
-        }))
+        Arc::new(Mutex::new(idle_state()))
     }
 
     /// C6.6 规定：`/api/simulate` 的响应是「tick 帧 + 流末 run_summary 记录」，

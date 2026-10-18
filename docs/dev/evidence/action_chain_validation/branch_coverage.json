@@ -1,7 +1,7 @@
 {
   "gate_criteria": 17,
   "mechanism_attributes": 11,
+  "registered": 28,
   "sampled": 28,
-  "scenario_only": 0,
   "uncovered": 0
 }

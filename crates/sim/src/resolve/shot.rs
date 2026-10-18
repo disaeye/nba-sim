@@ -22,6 +22,7 @@ pub struct PendingShot {
     pub is_three: bool,
     pub assisted_by: Option<usize>,
     pub blocked_by: Option<usize>,
+    pub shot_id: u64,
 }
 
 pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> ActionOutcome {
@@ -48,6 +49,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     let p_foul = clamp01(foul_rate * (0.6 + 0.9 * contest));
     let fouled = world.rng.gen::<f32>() < p_foul;
     let mut made = world.rng.gen::<f32>() < p_make;
+    let shot_id = world.new_shot_id();
     let blocker = if made {
         None
     } else {
@@ -61,7 +63,18 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     } else if fouled {
         (if is_three { 3 } else { 2 }, 0)
     } else {
-        (0, if made { if is_three { 3 } else { 2 } } else { 0 })
+        (
+            0,
+            if made {
+                if is_three {
+                    3
+                } else {
+                    2
+                }
+            } else {
+                0
+            },
+        )
     };
 
     let assisted_by = if made {
@@ -106,7 +119,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         "mid" => 2,
         _ => 3,
     };
-    world.shot_zone_counts[zone_index] += 1;
+    world.shot_zone_counts[crate::world::World::team_index(team)][zone_index] += 1;
     let creation_index = match kind.creation() {
         "drive" => 0,
         "cut" => 1,
@@ -130,6 +143,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         is_three,
         assisted_by,
         blocked_by: blocker,
+        shot_id,
     });
     world.players[shooter].facing = (hoop - pos).normalize_or_zero();
     world.ball = BallState::Shot {
@@ -181,7 +195,7 @@ pub fn finish(world: &mut World) {
             "mid" => 2,
             _ => 3,
         };
-        world.shot_zone_makes[made_zone] += 1;
+        world.shot_zone_makes[crate::world::World::team_index(team)][made_zone] += 1;
         world.add_points(team, pending.points as u32);
         if let Some(passer) = pending.assisted_by {
             world.line_mut(passer).assists += 1;
@@ -191,6 +205,7 @@ pub fn finish(world: &mut World) {
         world.line_mut(blocker).blocks += 1;
     }
     world.emit(crate::action::Fact::Shot {
+        shot_id: pending.shot_id,
         shooter,
         kind: pending.kind,
         zone: pending.zone,
@@ -259,8 +274,8 @@ fn nearest_blocker(world: &mut World, shooter: usize, pos: Vec2, contest: f32) -
     let skill = world.players[candidate].data.attributes.block;
     let vertical = world.players[candidate].data.attributes.vertical;
     let base = world.params.policy.w("block_base");
-    let p_block = (base * (0.4 + 1.2 * skill) * (0.5 + 0.5 * vertical) * (0.4 + contest))
-        .clamp(0.0, 0.30);
+    let p_block =
+        (base * (0.4 + 1.2 * skill) * (0.5 + 0.5 * vertical) * (0.4 + contest)).clamp(0.0, 0.30);
     if world.rng.gen::<f32>() < p_block {
         Some(candidate)
     } else {

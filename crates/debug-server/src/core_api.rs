@@ -112,9 +112,7 @@ pub(crate) fn api_core_command(core: &SharedCore, command: &str, req: &Request) 
     };
     if !service.is_configured() {
         let seed = service.seed();
-        if let Err(error) =
-            service.setup_from_calibration(&workspace_calibration_dir(), seed)
-        {
+        if let Err(error) = service.setup_from_calibration(&workspace_calibration_dir(), seed) {
             return internal_error(error);
         }
     }
@@ -125,7 +123,9 @@ pub(crate) fn api_core_command(core: &SharedCore, command: &str, req: &Request) 
             Ok(())
         }
         "resume" => service.resume(),
-        "tick" => service.tick(if seconds > 0.0 { seconds } else { 0.05 }).map(|_| ()),
+        "tick" => service
+            .tick(if seconds > 0.0 { seconds } else { 0.05 })
+            .map(|_| ()),
         "fast-forward" => service.fast_forward(seconds).map(|_| ()),
         "next-possession" => service.next_possession().map(|_| ()),
         other => Err(format!("unknown core session command `{other}`")),
@@ -244,9 +244,7 @@ pub(crate) fn core_simulate_response(seed: u64, scope: &str) -> Response {
 
 pub(crate) fn route_core(req: &Request, core: &SharedCore) -> Option<Response> {
     let response = match (req.method.as_str(), req.path.as_str()) {
-        ("GET", "/api/core/simulate") | ("POST", "/api/core/simulate") => {
-            api_core_simulate(req)
-        }
+        ("GET", "/api/core/simulate") | ("POST", "/api/core/simulate") => api_core_simulate(req),
         ("GET", "/api/core/state") => api_core_state(core),
         ("GET", "/api/core/snapshot") => api_core_snapshot(core),
         ("GET", "/api/core/events") => api_core_events(req, core),

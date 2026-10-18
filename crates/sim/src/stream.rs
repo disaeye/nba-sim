@@ -44,11 +44,13 @@ impl World {
                 json!({ "team": team.as_str(), "live": live })
             }
             Fact::Pass {
+                pass_id,
                 from,
                 to,
                 kind,
                 completed,
             } => json!({
+                "pass_id": format!("pass-{pass_id:06}"),
                 "passer_id": self.player_id(*from),
                 "receiver_id": self.player_id(*to),
                 "kind": format!("{kind:?}"),
@@ -77,6 +79,7 @@ impl World {
                 "defender_beaten": defender_beaten,
             }),
             Fact::Shot {
+                shot_id,
                 shooter,
                 kind,
                 zone,
@@ -86,6 +89,7 @@ impl World {
                 points,
                 assisted_by,
             } => json!({
+                "shot_id": format!("shot-{shot_id:06}"),
                 "shooter_id": self.player_id(*shooter),
                 "shot_kind": kind.as_str(),
                 "creation": kind.creation(),
@@ -212,10 +216,7 @@ impl World {
             .rev()
             .collect();
 
-        let event_names: Vec<String> = recent
-            .iter()
-            .map(|event| event.kind.clone())
-            .collect();
+        let event_names: Vec<String> = recent.iter().map(|event| event.kind.clone()).collect();
         let primary = event_names.first().cloned();
 
         StreamTick {
@@ -284,6 +285,11 @@ impl World {
     }
 
     fn frame_event(&self, event: &TimedFact, offset: u64) -> FrameEvent {
+        let (shot_id, pass_id) = match &event.fact {
+            Fact::Shot { shot_id, .. } => (Some(format!("shot-{shot_id:06}")), None),
+            Fact::Pass { pass_id, .. } => (None, Some(format!("pass-{pass_id:06}"))),
+            _ => (None, None),
+        };
         FrameEvent {
             sequence: offset,
             time: event.time as f32,
@@ -293,8 +299,8 @@ impl World {
             parent_event_id: None,
             tick_index: self.clock.tick,
             action_id: None,
-            shot_id: None,
-            pass_id: None,
+            shot_id,
+            pass_id,
             loose_ball_id: None,
             foul_program_id: None,
             responsibility_id: None,

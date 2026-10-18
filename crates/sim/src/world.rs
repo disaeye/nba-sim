@@ -14,11 +14,11 @@ use crate::boxscore::{BoxScore, PlayerLine};
 use crate::params::Params;
 use crate::resolve;
 use crate::resolve::shot::PendingShot;
+pub use crate::state::Phase;
 use crate::state::{
     BallState, Clock, DecisionState, DefenderView, HelpView, PlayerState, PossessionKind,
     PossessionState, Slot, TeammateView,
 };
-pub use crate::state::Phase;
 
 pub const TICK_SECONDS: f64 = 0.05;
 pub const DECISION_INTERVAL: f64 = 0.55;
@@ -106,9 +106,11 @@ pub struct World {
     pub alternate_spacing: bool,
     pub shot_clock_at_release: Vec<f64>,
     pub contest_samples: Vec<f32>,
-    pub shot_zone_counts: [u32; 4],
-    pub shot_zone_makes: [u32; 4],
+    pub shot_zone_counts: [[u32; 4]; 2],
+    pub shot_zone_makes: [[u32; 4]; 2],
     pub creation_counts: [u32; 7],
+    pub next_shot_id: u64,
+    pub next_pass_id: u64,
 }
 
 impl World {
@@ -189,9 +191,11 @@ impl World {
             alternate_spacing: false,
             shot_clock_at_release: Vec::new(),
             contest_samples: Vec::new(),
-            shot_zone_counts: [0; 4],
-            shot_zone_makes: [0; 4],
+            shot_zone_counts: [[0; 4]; 2],
+            shot_zone_makes: [[0; 4]; 2],
             creation_counts: [0; 7],
+            next_shot_id: 0,
+            next_pass_id: 0,
         };
         world.reset_positions(first);
         world
@@ -213,6 +217,27 @@ impl World {
         self.report()
     }
 
+    pub fn new_shot_id(&mut self) -> u64 {
+        self.next_shot_id += 1;
+        self.next_shot_id
+    }
+
+    pub fn new_pass_id(&mut self) -> u64 {
+        self.next_pass_id += 1;
+        self.next_pass_id
+    }
+
+    /// 流尾部尚未结算的业务实例：飞行中的出手、飞行中的传球、未执行完的罚球。
+    pub fn open_business_instances(&self) -> u64 {
+        let shot = u64::from(self.pending_shot.is_some());
+        let pass = u64::from(matches!(self.ball, BallState::Pass { .. }));
+        let free_throws = match self.phase {
+            Phase::FreeThrows { remaining, .. } => u64::from(remaining),
+            _ => 0,
+        };
+        shot + pass + free_throws
+    }
+
     pub fn report(&mut self) -> GameReport {
         GameReport {
             seed: self.seed,
@@ -221,15 +246,17 @@ impl World {
             home_score: self.score[0],
             away_score: self.score[1],
             periods: self.clock.period,
+            ticks: self.clock.tick,
+            open_business_instances: self.open_business_instances(),
             possessions: self.possession_log.clone(),
             box_score: self.box_score.clone(),
             events: std::mem::take(&mut self.events),
-            shot_clock_at_release: Vec::new(),
-            contest_samples: Vec::new(),
-            shot_zone_counts: [0; 4],
-            shot_zone_makes: [0; 4],
-            creation_counts: [0; 7],
-            violations: Vec::new(),
+            shot_clock_at_release: std::mem::take(&mut self.shot_clock_at_release),
+            contest_samples: std::mem::take(&mut self.contest_samples),
+            shot_zone_counts: self.shot_zone_counts,
+            shot_zone_makes: self.shot_zone_makes,
+            creation_counts: self.creation_counts,
+            violations: std::mem::take(&mut self.violations),
             games: 1,
         }
     }
@@ -343,9 +370,7 @@ impl World {
 
     pub fn on_court(&self, team: TeamSide) -> Vec<usize> {
         (0..self.players.len())
-            .filter(|handle| {
-                self.players[*handle].on_court && self.players[*handle].team == team
-            })
+            .filter(|handle| self.players[*handle].on_court && self.players[*handle].team == team)
             .collect()
     }
 
@@ -427,7 +452,12 @@ impl World {
         self.ball = BallState::Held(handler);
         self.phase = Phase::Live;
         self.active = None;
-        self.next_decision_at = self.now() + 1.3;
+        // 推进到前场的时长由移动速度决定：速度快则更快进入首个决策，
+        // 在固定比赛时钟内产生更多回合。
+        let advance_distance = (self.top_of_key(team) - entry).length();
+        let speed = self.players[handler].effective_speed().max(1.0);
+        let advance_seconds = (advance_distance / speed).max(0.8) as f64;
+        self.next_decision_at = self.now() + advance_seconds;
         self.emit(Fact::PossessionStarted {
             team,
             live: kind == PossessionKind::Live,
@@ -438,8 +468,13 @@ impl World {
         self.possession_count += 1;
         let shot_clock = self.rules.league.offensive_rebound_shot_clock_seconds as f64;
         self.clock.shot_clock = shot_clock;
-        self.possession =
-            PossessionState::new(team, self.possession_count, PossessionKind::Live, self.now(), shot_clock);
+        self.possession = PossessionState::new(
+            team,
+            self.possession_count,
+            PossessionKind::Live,
+            self.now(),
+            shot_clock,
+        );
         self.possession.last_offensive_rebound_at = Some(self.now());
         self.possession.had_offensive_rebound = true;
         self.possession_points = 0;
@@ -450,13 +485,11 @@ impl World {
         self.phase = Phase::Live;
         self.active = None;
         self.next_decision_at = self.now() + 0.3;
-        self.emit(Fact::PossessionStarted {
-            team,
-            live: true,
-        });
+        self.emit(Fact::PossessionStarted { team, live: true });
     }
 
-    pub fn end_possession(&mut self, cause: &'static str, points: u32) {        if self.possession.id == 0 {
+    pub fn end_possession(&mut self, cause: &'static str, points: u32) {
+        if self.possession.id == 0 {
             return;
         }
         let record = PossessionRecord {
@@ -575,8 +608,8 @@ impl World {
         };
         let offense = self.players[actor].data.attributes.ball_handling
             + self.players[actor].data.attributes.agility * 0.5;
-        let defense = defender.data.attributes.defense_perimeter
-            + defender.data.attributes.agility * 0.5;
+        let defense =
+            defender.data.attributes.defense_perimeter + defender.data.attributes.agility * 0.5;
         (offense - defense).clamp(-1.0, 1.0) * 0.5
     }
 
@@ -592,7 +625,10 @@ impl World {
         );
         let clock_running = matches!(
             self.phase,
-            Phase::Live | Phase::PassFlight { .. } | Phase::ShotFlight { .. } | Phase::DeadBall { .. }
+            Phase::Live
+                | Phase::PassFlight { .. }
+                | Phase::ShotFlight { .. }
+                | Phase::DeadBall { .. }
         );
         if clock_running {
             self.clock.game_clock = (self.clock.game_clock - dt).max(0.0);
@@ -621,7 +657,7 @@ impl World {
             if !player.on_court {
                 continue;
             }
-            let drain = 0.00020 * (1.5 - player.data.attributes.stamina);
+            let drain = 0.00060 * (1.0 - player.data.attributes.stamina);
             player.stamina = (player.stamina - drain * dt as f32).clamp(0.45, 1.0);
         }
     }
@@ -831,13 +867,15 @@ pub struct GameReport {
     pub home_score: u32,
     pub away_score: u32,
     pub periods: u32,
+    pub ticks: u64,
+    pub open_business_instances: u64,
     pub possessions: Vec<PossessionRecord>,
     pub box_score: BoxScore,
     pub events: Vec<TimedFact>,
     pub shot_clock_at_release: Vec<f64>,
     pub contest_samples: Vec<f32>,
-    pub shot_zone_counts: [u32; 4],
-    pub shot_zone_makes: [u32; 4],
+    pub shot_zone_counts: [[u32; 4]; 2],
+    pub shot_zone_makes: [[u32; 4]; 2],
     pub creation_counts: [u32; 7],
     pub violations: Vec<String>,
     pub games: u32,
@@ -852,13 +890,15 @@ impl GameReport {
             home_score: 0,
             away_score: 0,
             periods: 0,
+            ticks: 0,
+            open_business_instances: 0,
             possessions: Vec::new(),
             box_score: BoxScore::default(),
             events: Vec::new(),
             shot_clock_at_release: Vec::new(),
             contest_samples: Vec::new(),
-            shot_zone_counts: [0; 4],
-            shot_zone_makes: [0; 4],
+            shot_zone_counts: [[0; 4]; 2],
+            shot_zone_makes: [[0; 4]; 2],
             creation_counts: [0; 7],
             violations: Vec::new(),
             games: 0,
@@ -867,15 +907,16 @@ impl GameReport {
 
     pub fn merge(&mut self, other: &GameReport) {
         self.games += other.games;
+        self.ticks += other.ticks;
+        self.open_business_instances += other.open_business_instances;
         self.home_score += other.home_score;
         self.away_score += other.away_score;
         self.possessions.extend_from_slice(&other.possessions);
-        for (mine, theirs) in self
-            .shot_zone_counts
-            .iter_mut()
-            .zip(other.shot_zone_counts.iter())
-        {
-            *mine += theirs;
+        for team in [0usize, 1] {
+            for zone in 0..4 {
+                self.shot_zone_counts[team][zone] += other.shot_zone_counts[team][zone];
+                self.shot_zone_makes[team][zone] += other.shot_zone_makes[team][zone];
+            }
         }
         for (mine, theirs) in self
             .creation_counts
@@ -884,7 +925,8 @@ impl GameReport {
         {
             *mine += theirs;
         }
-        self.contest_samples.extend_from_slice(&other.contest_samples);
+        self.contest_samples
+            .extend_from_slice(&other.contest_samples);
         self.shot_clock_at_release
             .extend_from_slice(&other.shot_clock_at_release);
         self.violations.extend_from_slice(&other.violations);

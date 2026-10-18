@@ -258,6 +258,7 @@ pub enum Fact {
         live: bool,
     },
     Pass {
+        pass_id: u64,
         from: usize,
         to: usize,
         kind: PassKind,
@@ -276,6 +277,7 @@ pub enum Fact {
         defender_beaten: bool,
     },
     Shot {
+        shot_id: u64,
         shooter: usize,
         kind: ShotKind,
         zone: &'static str,

@@ -30,6 +30,9 @@ pub struct CoreGameResult {
     pub home_score: u32,
     pub away_score: u32,
     pub possessions: usize,
+    pub ticks: u64,
+    pub events: u64,
+    pub open_business_instances: u64,
     pub box_score: nba_sim_core::BoxScore,
     pub ledger: LedgerCheck,
     pub violations: Vec<String>,
@@ -42,6 +45,9 @@ pub struct CoreValidationReport {
     pub geometry_violations: usize,
     pub context_violations: usize,
     pub ledger_failures: usize,
+    pub ticks: u64,
+    pub events: u64,
+    pub open_business_instances: u64,
     pub passed: bool,
 }
 
@@ -49,10 +55,7 @@ impl CoreValidationReport {
     pub fn failed_criteria(&self) -> Vec<String> {
         let mut failures = Vec::new();
         if self.geometry_violations > 0 {
-            failures.push(format!(
-                "geometry violations: {}",
-                self.geometry_violations
-            ));
+            failures.push(format!("geometry violations: {}", self.geometry_violations));
         }
         if self.context_violations > 0 {
             failures.push(format!("context violations: {}", self.context_violations));
@@ -102,6 +105,9 @@ pub fn run_core_validation_with_dir(
             home_score: report.home_score,
             away_score: report.away_score,
             possessions: report.possessions.len(),
+            ticks: report.ticks,
+            events: report.events.len() as u64,
+            open_business_instances: report.open_business_instances,
             box_score: report.box_score.clone(),
             ledger,
             violations: report.violations.clone(),
@@ -123,13 +129,20 @@ pub fn run_core_validation_with_dir(
         geometry_violations: gate.geometric_violations,
         context_violations: gate.context_violations,
         ledger_failures,
+        ticks: results.iter().map(|result| result.ticks).sum(),
+        events: results.iter().map(|result| result.events).sum(),
+        open_business_instances: results
+            .iter()
+            .map(|result| result.open_business_instances)
+            .sum(),
         passed: gate.passed && ledger_failures == 0,
         games: results,
         gate,
     })
 }
 
-fn check_ledger(seed: u64, report: &GameReport) -> LedgerCheck {    let mut points_reconcile = true;
+fn check_ledger(seed: u64, report: &GameReport) -> LedgerCheck {
+    let mut points_reconcile = true;
     let mut attempts_reconcile = true;
     let mut rebounds_reconcile = true;
     let mut turnovers_reconcile = true;
@@ -306,9 +319,7 @@ pub fn certification_artifact(
         for result in &mechanism.results {
             match result.verdict.as_str() {
                 "defect" => defects.push(format!("mechanism:{}", result.attribute)),
-                "insufficient" => {
-                    insufficient.push(format!("mechanism:{}", result.attribute))
-                }
+                "insufficient" => insufficient.push(format!("mechanism:{}", result.attribute)),
                 _ => {}
             }
         }
@@ -334,22 +345,26 @@ pub fn certification_artifact(
         .count();
     let gate_criteria = report.gate.layers.len();
     let mechanism_attributes = mechanism.map(|report| report.results.len()).unwrap_or(0);
+    // 判定面覆盖：注册项与实际评估项。未覆盖 = 注册数减已评估数，
+    // 不写死为零。
+    let registered = gate_criteria + mechanism_attributes;
+    let sampled = report.gate.layers.len() + mechanism_attributes;
     serde_json::json!({
         "certification_status": status,
         "commit": commit,
         "games": games,
-        "layer1_flow": {
-            "scenarios_pass": clean_games,
-            "scenarios_total": games,
+        "per_game_ledger": {
+            "passed": clean_games,
+            "total": games,
         },
-        "layer3_5_distribution": {
+        "criteria": {
             "defects": defects,
             "insufficient": insufficient,
         },
-        "branch_coverage": {
-            "sampled": gate_criteria + mechanism_attributes,
-            "scenario_only": 0,
-            "uncovered": 0,
+        "coverage": {
+            "registered": registered,
+            "sampled": sampled,
+            "uncovered": registered.saturating_sub(sampled),
             "gate_criteria": gate_criteria,
             "mechanism_attributes": mechanism_attributes,
         },

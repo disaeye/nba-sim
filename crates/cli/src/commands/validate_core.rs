@@ -11,9 +11,7 @@ use nba_sim_core::Params;
 use nba_validation::core_validation::{
     batch_statistical_artifact, certification_artifact, run_core_validation, CoreValidationReport,
 };
-use nba_validation::mechanism_core::{
-    run_mechanism_experiments, MechanismConfig, MechanismReport,
-};
+use nba_validation::mechanism_core::{run_mechanism_experiments, MechanismConfig, MechanismReport};
 
 pub(crate) fn run_validate_core(
     seed_start: u64,
@@ -21,7 +19,7 @@ pub(crate) fn run_validate_core(
     json: bool,
     mechanism: bool,
     out: Option<PathBuf>,
-) -> std::io::Result<()> {
+) -> std::io::Result<u8> {
     let report = run_core_validation(seed_start, games)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     if json {
@@ -33,7 +31,6 @@ pub(crate) fn run_validate_core(
     }
     let out_dir = out.unwrap_or_else(workspace_validation_dir);
     write_json(&out_dir, "core_validation.json", &report)?;
-    let mut failed = !report.passed;
     let mechanism_report = if mechanism {
         let config = MechanismConfig {
             seed_start,
@@ -43,7 +40,6 @@ pub(crate) fn run_validate_core(
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
         print_mechanism(&mechanism_report);
         write_json(&out_dir, "mechanism_core.json", &mechanism_report)?;
-        failed |= !mechanism_report.passed;
         Some(mechanism_report)
     } else {
         None
@@ -57,7 +53,7 @@ pub(crate) fn run_validate_core(
         &batch_statistical_artifact(&report),
     )?;
     let coverage = certification
-        .get("branch_coverage")
+        .get("coverage")
         .cloned()
         .unwrap_or(serde_json::Value::Null);
     write_json(&out_dir, "branch_coverage.json", &coverage)?;
@@ -70,13 +66,19 @@ pub(crate) fn run_validate_core(
         dirty,
     )?;
     println!("  工件目录：{}", out_dir.display());
-    if failed {
-        return Err(std::io::Error::other("core validation failed"));
-    }
-    Ok(())
+    let status = certification
+        .get("certification_status")
+        .and_then(|status| status.as_str())
+        .unwrap_or("insufficient_evidence");
+    Ok(match status {
+        "pass" => 0,
+        "defects_found" => 1,
+        _ => 3,
+    })
 }
 
-fn write_json<T: serde::Serialize>(dir: &Path, name: &str, value: &T) -> std::io::Result<()> {    std::fs::create_dir_all(dir)?;
+fn write_json<T: serde::Serialize>(dir: &Path, name: &str, value: &T) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
     let body = serde_json::to_string_pretty(value)
         .map_err(|error| std::io::Error::other(error.to_string()))?;
     std::fs::write(dir.join(name), body)

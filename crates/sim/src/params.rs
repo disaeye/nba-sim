@@ -95,9 +95,10 @@ impl ShotMakeTable {
             .cells
             .get(kind)
             .unwrap_or_else(|| panic!("shot_make table has no cells for {kind}"));
-        let cells = entry.get(side).or_else(|| entry.get(fallback)).unwrap_or_else(|| {
-            panic!("shot_make table has no cells for {kind}/{side}")
-        });
+        let cells = entry
+            .get(side)
+            .or_else(|| entry.get(fallback))
+            .unwrap_or_else(|| panic!("shot_make table has no cells for {kind}/{side}"));
         for cell in cells {
             if distance_ft < cell.upper_ft {
                 return cell.rate;
@@ -206,9 +207,19 @@ pub struct FreeThrowTable {
 pub struct PolicyTable {
     pub provenance: Provenance,
     pub weights: BTreeMap<String, f32>,
+    #[serde(default)]
+    pub bands: BTreeMap<String, f32>,
 }
 
 impl PolicyTable {
+    /// 判定带宽：未单独登记的准则用 `default`。
+    pub fn band(&self, criterion: &str) -> f64 {
+        self.bands
+            .get(criterion)
+            .or_else(|| self.bands.get("default"))
+            .copied()
+            .unwrap_or_else(|| panic!("policy table has no band for `{criterion}`")) as f64
+    }
     pub fn w(&self, key: &str) -> f32 {
         *self
             .weights
@@ -249,7 +260,9 @@ impl Params {
             policy: embedded("policy"),
             formations: embedded("formations"),
         };
-        params.validate().expect("embedded calibration tables must validate");
+        params
+            .validate()
+            .expect("embedded calibration tables must validate");
         params
     }
 
@@ -296,7 +309,9 @@ impl Params {
             }
         }
         if self.formations.offense.len() != 5 || self.formations.defense.len() != 5 {
-            return Err("formations table must define five offense and five defense slots".to_string());
+            return Err(
+                "formations table must define five offense and five defense slots".to_string(),
+            );
         }
         if !self.formations.offense_alt.is_empty() && self.formations.offense_alt.len() != 5 {
             return Err("alternate formation must define five slots".to_string());

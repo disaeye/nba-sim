@@ -68,7 +68,7 @@ impl MechanismAttribute {
             Self::ShootingClose => Metric::RimPct,
             Self::ShootingMid => Metric::MidPct,
             Self::FreeThrow => Metric::FreeThrowPct,
-            Self::Speed | Self::Acceleration => Metric::MeanPossessionSeconds,
+            Self::Speed | Self::Acceleration => Metric::Possessions,
             Self::Stamina => Metric::FieldGoalPct,
             Self::Strength | Self::OffensiveRebound => Metric::OffensiveReboundRate,
             Self::DefensiveRebound => Metric::DefensiveReboundRate,
@@ -79,7 +79,6 @@ impl MechanismAttribute {
     pub fn direction(self) -> Direction {
         match self {
             Self::DecisionIq => Direction::Down,
-            Self::Speed | Self::Acceleration => Direction::Down,
             _ => Direction::Up,
         }
     }
@@ -114,7 +113,7 @@ pub enum Metric {
     FreeThrowPct,
     FieldGoalPct,
     Possessions,
-    MeanPossessionSeconds,
+    MeanShotClockAtRelease,
     OffensiveReboundRate,
     DefensiveReboundRate,
     TurnoverRate,
@@ -129,7 +128,7 @@ impl Metric {
             Self::FreeThrowPct => "free_throw_pct",
             Self::FieldGoalPct => "field_goal_pct",
             Self::Possessions => "possessions",
-            Self::MeanPossessionSeconds => "mean_possession_seconds",
+            Self::MeanShotClockAtRelease => "mean_shot_clock_at_release",
             Self::OffensiveReboundRate => "offensive_rebound_rate",
             Self::DefensiveReboundRate => "defensive_rebound_rate",
             Self::TurnoverRate => "turnover_rate",
@@ -333,13 +332,21 @@ fn experiment(
     };
     let magnitude_matches = relative.abs() >= config.minimum_relative_change;
     let weak_effect = relative.abs() < 0.01;
-    let verdict = if direction_matches && magnitude_matches {
-        "pass"
-    } else if consistent_opposite {
-        "defect"
-    } else {
+    // 裁决规则：
+    // - pass：聚合方向符合预期且效应达到下限；
+    // - defect：聚合方向相反且效应达到下限；
+    // - insufficient：效应低于下限，当前样本分辨不出方向。
+    // 逐种子同向计数作为证据随结果记录（`seeds_in_expected_direction`），
+    // 不参与裁决：中投、罚球这类小分母指标的单场比率噪声很大，
+    // 用它门控会把显著的整体效应误判为不足。
+    let verdict = if !magnitude_matches {
         "insufficient"
+    } else if direction_matches {
+        "pass"
+    } else {
+        "defect"
     };
+    let _ = (consistent_opposite, seeds_opposite);
     Ok(MechanismResult {
         attribute: attribute.key().to_string(),
         metric: metric.key().to_string(),
@@ -381,7 +388,8 @@ fn run_arm(
     Ok(Some(samples))
 }
 
-fn ratio_of_sums(samples: &[(f64, f64)]) -> f64 {    let numerator: f64 = samples.iter().map(|(n, _)| *n).sum();
+fn ratio_of_sums(samples: &[(f64, f64)]) -> f64 {
+    let numerator: f64 = samples.iter().map(|(n, _)| *n).sum();
     let denominator: f64 = samples.iter().map(|(_, d)| *d).sum();
     if denominator.abs() < f64::EPSILON {
         0.0
@@ -404,11 +412,7 @@ fn run_limited(
 ) -> Result<GameReport, String> {
     let mut world = World::new(setup, params, seed);
     match possessions {
-        None => {
-            let mut report = world.run();
-            fill_report(&mut report, &world);
-            Ok(report)
-        }
+        None => Ok(world.run()),
         Some(target) => {
             let mut steps = 0usize;
             while !world.finished && steps < 400_000 {
@@ -418,20 +422,9 @@ fn run_limited(
                     break;
                 }
             }
-            let mut report = world.report();
-            fill_report(&mut report, &world);
-            Ok(report)
+            Ok(world.report())
         }
     }
-}
-
-fn fill_report(report: &mut GameReport, world: &World) {
-    report.shot_clock_at_release = world.shot_clock_at_release.clone();
-    report.contest_samples = world.contest_samples.clone();
-    report.shot_zone_counts = world.shot_zone_counts;
-    report.shot_zone_makes = world.shot_zone_makes;
-    report.creation_counts = world.creation_counts;
-    report.violations = world.violations.clone();
 }
 
 fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
@@ -441,29 +434,31 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
     match metric {
         Metric::ThreePointPct => (home.tpm as f64, home.tpa as f64),
         Metric::RimPct => (
-            report.shot_zone_makes[0] as f64,
-            report.shot_zone_counts[0] as f64,
+            report.shot_zone_makes[0][0] as f64,
+            report.shot_zone_counts[0][0] as f64,
         ),
         Metric::MidPct => (
-            report.shot_zone_makes[2] as f64,
-            report.shot_zone_counts[2] as f64,
+            report.shot_zone_makes[0][2] as f64,
+            report.shot_zone_counts[0][2] as f64,
         ),
         Metric::FreeThrowPct => (home.ftm as f64, home.fta as f64),
         Metric::FieldGoalPct => (home.fgm as f64, home.fga as f64),
         Metric::Possessions => (possessions, 1.0),
-        Metric::MeanPossessionSeconds => (
-            report.possessions.iter().map(|record| record.duration).sum(),
-            report.possessions.len().max(1) as f64,
+        Metric::MeanShotClockAtRelease => (
+            report.shot_clock_at_release.iter().sum(),
+            report.shot_clock_at_release.len().max(1) as f64,
         ),
-        Metric::OffensiveReboundRate => (
-            home.oreb as f64,
-            (home.fga - home.fgm).max(1) as f64,
-        ),
-        Metric::DefensiveReboundRate => (
-            home.dreb as f64,
-            (home.dreb + away.oreb).max(1) as f64,
-        ),
-        Metric::TurnoverRate => (home.turnovers as f64, possessions),
+        Metric::OffensiveReboundRate => (home.oreb as f64, (home.fga - home.fgm).max(1) as f64),
+        Metric::DefensiveReboundRate => (home.dreb as f64, (home.dreb + away.oreb).max(1) as f64),
+        Metric::TurnoverRate => {
+            let home_possessions = report
+                .possessions
+                .iter()
+                .filter(|record| record.team == TeamSide::Home)
+                .count()
+                .max(1) as f64;
+            (home.turnovers as f64, home_possessions)
+        }
     }
 }
 

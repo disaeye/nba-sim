@@ -166,7 +166,8 @@ pub fn simulate_to_ndjson(
         let tick = service
             .tick(nba_sim_core::world::TICK_SECONDS)
             .map_err(|error| JsError::new(&error))?;
-        let line = serde_json::to_string(&tick).map_err(|error| JsError::new(&error.to_string()))?;
+        let line =
+            serde_json::to_string(&tick).map_err(|error| JsError::new(&error.to_string()))?;
         output.push_str(&line);
         output.push('\n');
         ticks += 1;

@@ -3,7 +3,9 @@
 //! 与旧引擎的 `run` 子命令并存，便于对照与迁移。箱体是球员级，
 //! `--gate` 输出四层判定结果。
 
-use nba_sim_core::{gate, run_game, summarize, MatchSetup, Params, TeamSide, World, CALIBRATION_DIR};
+use nba_sim_core::{
+    gate, run_game, summarize, MatchSetup, Params, TeamSide, World, CALIBRATION_DIR,
+};
 use std::io::Write;
 use std::path::Path;
 
@@ -20,7 +22,12 @@ pub(crate) fn run_sim_core(
     let mut reports = Vec::new();
     for offset in 0..games.max(1) {
         let report = if offset == 0 && stream.is_some() {
-            export_stream(seed, calibration, params.clone(), stream.expect("stream path"))?
+            export_stream(
+                seed,
+                calibration,
+                params.clone(),
+                stream.expect("stream path"),
+            )?
         } else {
             run_game(seed + offset, calibration)
         };

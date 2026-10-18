@@ -10,9 +10,14 @@ use crate::resolve::{clamp01, sigmoid};
 use crate::state::PossessionKind;
 use crate::world::World;
 
-pub fn resolve(world: &mut World, intent: &ActionIntent, kind: PassKind) -> crate::action::ActionOutcome {
+pub fn resolve(
+    world: &mut World,
+    intent: &ActionIntent,
+    kind: PassKind,
+) -> crate::action::ActionOutcome {
     let from = intent.actor;
     let to = intent.target.expect("pass requires a receiver");
+    let pass_id = world.new_pass_id();
     let passer = &world.players[from];
     let receiver = &world.players[to];
     let team = passer.team;
@@ -49,11 +54,11 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: PassKind) -> crat
     }
 
     let catch_quality = clamp01(
-        0.55 + 0.6 * receiver.data.attributes.ball_handling
-            - 0.25 * (1.0 - clamp01(lane / 8.0))
+        0.55 + 0.6 * receiver.data.attributes.ball_handling - 0.25 * (1.0 - clamp01(lane / 8.0))
             + 0.2 * passer_skill,
     );
     let mut facts = vec![Fact::Pass {
+        pass_id,
         from,
         to,
         kind,
@@ -85,6 +90,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: PassKind) -> crat
     world.possession.assist_candidate = Some((from, world.now()));
     world.last_pass_kind = Some(kind);
     world.emit(Fact::Pass {
+        pass_id,
         from,
         to,
         kind,
@@ -113,7 +119,8 @@ pub fn resolve_cut(world: &mut World, intent: &ActionIntent) -> crate::action::A
         .map(|p| (p.pos - hoop).length())
         .fold(f32::INFINITY, f32::min);
     let open = clamp01(defender_distance / 8.0);
-    let completion = clamp01(0.35 + 0.6 * open + 0.3 * world.players[cutter].data.attributes.off_ball_sense);
+    let completion =
+        clamp01(0.35 + 0.6 * open + 0.3 * world.players[cutter].data.attributes.off_ball_sense);
     if world.rng.gen::<f32>() > completion {
         return crate::action::ActionOutcome {
             actor: intent.actor,
@@ -123,7 +130,14 @@ pub fn resolve_cut(world: &mut World, intent: &ActionIntent) -> crate::action::A
             facts: Vec::new(),
         };
     }
-    world.players[cutter].pos = hoop + (Vec2::new(-1.0, 0.0) * if world.attacking_right(team) { 1.0 } else { -1.0 }) * 2.5;
+    world.players[cutter].pos = hoop
+        + (Vec2::new(-1.0, 0.0)
+            * if world.attacking_right(team) {
+                1.0
+            } else {
+                -1.0
+            })
+            * 2.5;
     world.players[cutter].target = world.players[cutter].pos;
     world.ball = crate::state::BallState::Held(cutter);
     world.possession.last_pass_at = Some(world.now());
@@ -131,7 +145,9 @@ pub fn resolve_cut(world: &mut World, intent: &ActionIntent) -> crate::action::A
     world.possession.assist_candidate = Some((intent.actor, world.now()));
     world.possession.last_cut_at = Some(world.now());
     world.possession.last_cut_actor = Some(cutter);
+    let pass_id = world.new_pass_id();
     world.emit(Fact::Pass {
+        pass_id,
         from: intent.actor,
         to: cutter,
         kind: PassKind::Lob,

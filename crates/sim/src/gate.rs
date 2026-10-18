@@ -33,9 +33,9 @@ impl GateReport {
 }
 
 /// 第三层：把批次分布与校准表比较。带宽取真实赛季的采样波动，
-/// 相对误差超过 20% 记为不通过。
+/// 相对误差超过 15% 记为不通过。
 pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
-    let shots: u32 = report.shot_zone_counts.iter().sum();
+    let shots: u32 = report.shot_zone_counts.iter().flatten().sum();
     let mut gate = GateReport {
         geometric_violations: report
             .violations
@@ -50,15 +50,21 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
         ..Default::default()
     };
 
+    let bands = &params.policy;
     let mut push = |criterion: &str, observed: f64, target: f64| {
-        let passed = target > 0.0 && (observed / target - 1.0).abs() <= 0.20;
+        let band = bands.band(criterion);
+        let passed = target > 0.0 && (observed / target - 1.0).abs() <= band;
         gate.layers.push(LayerResult {
             layer: "distribution".to_string(),
             criterion: criterion.to_string(),
             observed,
             target,
             passed,
-            detail: format!("relative error {:.3}", (observed / target - 1.0).abs()),
+            detail: format!(
+                "relative error {:.3} (band {:.3})",
+                (observed / target - 1.0).abs(),
+                band
+            ),
         });
     };
 
@@ -66,9 +72,10 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
         let zone_names = ["rim", "near", "mid", "three"];
         for (index, name) in zone_names.iter().enumerate() {
             let target = *params.shot_profile.zone_share.get(*name).unwrap_or(&0.0) as f64;
+            let observed: u32 = report.shot_zone_counts.iter().map(|team| team[index]).sum();
             push(
                 &format!("zone_share_{name}"),
-                report.shot_zone_counts[index] as f64 / shots as f64,
+                observed as f64 / shots as f64,
                 target,
             );
         }

@@ -6,11 +6,17 @@ use crate::action::Fact;
 use crate::state::{BallState, PossessionKind};
 use crate::world::{Phase, World};
 
-pub fn shoot(world: &mut World, shooter: usize, total: u8, remaining: u8, made_so_far: u8, and_one: bool) {
+pub fn shoot(
+    world: &mut World,
+    shooter: usize,
+    total: u8,
+    remaining: u8,
+    made_so_far: u8,
+    and_one: bool,
+) {
     let table = &world.params.freethrow;
     let attribute = world.players[shooter].data.attributes.free_throw;
-    let p_make =
-        (table.league_make + (attribute - 0.5) * table.skill_slope).clamp(0.30, 0.95);
+    let p_make = (table.league_make + (attribute - 0.5) * table.skill_slope).clamp(0.30, 0.95);
     let made = world.rng.gen::<f32>() < p_make;
     let index = total - remaining + 1;
     {
@@ -36,7 +42,14 @@ pub fn shoot(world: &mut World, shooter: usize, total: u8, remaining: u8, made_s
     if left == 0 {
         let team = world.players[shooter].team;
         world.possession.shot_clock_start = world.clock.shot_clock;
-        world.end_possession(if made_count > 0 { "free_throw" } else { "free_throw_miss" }, made_count as u32);
+        world.end_possession(
+            if made_count > 0 {
+                "free_throw"
+            } else {
+                "free_throw_miss"
+            },
+            made_count as u32,
+        );
         world.phase = Phase::DeadBall {
             team: team.other(),
             ready_at: world.now() + 1.2,

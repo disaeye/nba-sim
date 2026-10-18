@@ -35,9 +35,7 @@ fn main() {
         seeds.push(42);
     }
 
-    println!(
-        "seed  score      poss  FGA  3PA   FTA  TOV  OREB  2P%    3P%    FT%"
-    );
+    println!("seed  score      poss  FGA  3PA   FTA  TOV  OREB  2P%    3P%    FT%");
     let mut totals = Vec::new();
     let mut metrics = Metrics::default();
     for seed in seeds {
@@ -90,7 +88,8 @@ fn main() {
         print_metrics(&metrics);
     }
     if gate {
-        let params = nba_sim_core::Params::load(&calibration).expect("calibration tables must load");
+        let params =
+            nba_sim_core::Params::load(&calibration).expect("calibration tables must load");
         let mut reports = Vec::new();
         for seed in 1..=16u64 {
             reports.push(run_game(seed, &calibration));
@@ -107,7 +106,10 @@ fn main() {
         for sample in samples {
             println!("VIOLATION {sample}");
         }
-        println!("GATE {}", serde_json::to_string(&report).expect("gate report serializes"));
+        println!(
+            "GATE {}",
+            serde_json::to_string(&report).expect("gate report serializes")
+        );
     }
 }
 
@@ -131,13 +133,15 @@ impl Metrics {
     fn add(&mut self, report: &nba_sim_core::GameReport) {
         self.games += 1;
         for index in 0..4 {
-            self.zone[index] += report.shot_zone_counts[index];
+            self.zone[index] +=
+                report.shot_zone_counts[0][index] + report.shot_zone_counts[1][index];
         }
         for index in 0..7 {
             self.creation[index] += report.creation_counts[index];
         }
         self.contests.extend_from_slice(&report.contest_samples);
-        self.shot_clocks.extend_from_slice(&report.shot_clock_at_release);
+        self.shot_clocks
+            .extend_from_slice(&report.shot_clock_at_release);
         self.durations
             .extend(report.possessions.iter().map(|p| p.duration));
         let summary = summarize(report);
@@ -200,7 +204,8 @@ fn print_box(
     report: &nba_sim_core::GameReport,
     home: nba_sim_core::TeamLine,
     away: nba_sim_core::TeamLine,
-) {    for (team, lines, total) in [
+) {
+    for (team, lines, total) in [
         (report.home_team.as_str(), &report.box_score.home, home),
         (report.away_team.as_str(), &report.box_score.away, away),
     ] {
@@ -272,14 +277,18 @@ fn report_distributions(report: &nba_sim_core::GameReport) {
     let contest: f32 =
         report.contest_samples.iter().sum::<f32>() / report.contest_samples.len().max(1) as f32;
     println!("  mean contest: {:.3}", contest);
-    let total: u32 = report.shot_zone_counts.iter().sum();
+    let total: u32 = report.shot_zone_counts.iter().flatten().sum();
     if total > 0 {
+        let zone_share = |index: usize| -> f32 {
+            (report.shot_zone_counts[0][index] + report.shot_zone_counts[1][index]) as f32
+                / total as f32
+        };
         println!(
             "  zone share: rim {:.3} near {:.3} mid {:.3} three {:.3}",
-            report.shot_zone_counts[0] as f32 / total as f32,
-            report.shot_zone_counts[1] as f32 / total as f32,
-            report.shot_zone_counts[2] as f32 / total as f32,
-            report.shot_zone_counts[3] as f32 / total as f32
+            zone_share(0),
+            zone_share(1),
+            zone_share(2),
+            zone_share(3)
         );
         println!(
             "  creation share: drive {:.3} cut {:.3} post {:.3} pull_up {:.3} putback {:.3} transition {:.3} set {:.3}",

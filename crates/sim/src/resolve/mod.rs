@@ -50,15 +50,12 @@ pub fn clamp01(value: f32) -> f32 {
 
 pub fn shooter_zone(world: &World, pos: Vec2, team: TeamSide) -> &'static str {
     let attacking_right = team == TeamSide::Home;
-    match world
-        .rules
-        .court
-        .shot_zone(
-            pos,
-            attacking_right,
-            world.rules.league.three_point_distance_ft,
-            world.rules.league.corner_three_distance_ft,
-        ) {
+    match world.rules.court.shot_zone(
+        pos,
+        attacking_right,
+        world.rules.league.three_point_distance_ft,
+        world.rules.league.corner_three_distance_ft,
+    ) {
         nba_domain::ShotZone::Rim => "rim",
         nba_domain::ShotZone::Near => "near",
         nba_domain::ShotZone::Mid => "mid",

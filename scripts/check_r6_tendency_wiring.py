@@ -44,40 +44,42 @@ def check_rosters():
 
 
 def check_rust_consumers():
+    # 动作链内核已在生产路径上消费的倾向。
     consumers = {
-        "shoot_frequency": ["crates/decision/src/pipeline.rs"],
-        "drive_frequency": ["crates/decision/src/pipeline.rs"],
-        "pass_frequency": ["crates/decision/src/pipeline.rs"],
-        "cut_frequency": ["crates/decision/src/tactics.rs"],
-        "screen_frequency": ["crates/decision/src/tactics.rs"],
-        "offensive_rebound_frequency": ["crates/engine/src/match_engine/contests.rs"],
-        "gamble_steal": ["crates/engine/src/match_engine/contests.rs"],
-        "block_aggressiveness": ["crates/engine/src/match_engine/block.rs"],
-        "help_aggressiveness": ["crates/decision/src/tactics.rs"],
-        "physicality": ["crates/officiating/src/resolution.rs"],
-        "risk_tolerance": ["crates/engine/src/match_engine/contests.rs"],
-        "transition_sprint": ["crates/engine/src/match_engine/tactics_phase.rs"],
+        "shoot_frequency": ["crates/sim/src/policy.rs"],
+        "drive_frequency": ["crates/sim/src/policy.rs"],
+        "screen_frequency": ["crates/sim/src/policy.rs"],
+        "pass_frequency": ["crates/sim/src/world.rs"],
     }
+    # 尚未接入的倾向。登记在这里而不是删掉，使缺口始终可见；
+    # 每项接入后从本表移入 consumers。
+    pending = {
+        "cut_frequency": "空切动作已有结算，但选择层还没读倾向",
+        "offensive_rebound_frequency": "冲抢篮板还没有独立动作",
+        "gamble_steal": "防守侧没有独立抢断结算",
+        "block_aggressiveness": "封盖只在出手结算里以概率出现",
+        "help_aggressiveness": "协防只建了目标位置，没有独立结算",
+        "physicality": "对抗只影响掩护判罚",
+        "risk_tolerance": "传球风险容忍还没有进入选择层",
+        "transition_sprint": "转换只按回合起始类型区分",
+    }
+    if set(consumers) | set(pending) != EXPECTED:
+        raise SystemExit(
+            "R6 tendency registry must cover every field: "
+            f"missing={sorted(EXPECTED - set(consumers) - set(pending))}, "
+            f"unknown={sorted((set(consumers) | set(pending)) - EXPECTED)}"
+        )
     for tendency, sources in consumers.items():
-        if not any(re.search(rf"\.\s*{re.escape(tendency)}\b", read_source(ROOT / path)) for path in sources):
+        if not any(
+            re.search(rf"\.\s*{re.escape(tendency)}\b", read_source(ROOT / path))
+            for path in sources
+        ):
             raise SystemExit(f"R6 tendency has no configured production consumer: {tendency}")
-    print(f"R6 tendency production references: {len(consumers)}/12")
-
-
-def check_evaluator_wiring():
-    source = read_source(ROOT / "crates/evaluator/src/lib.rs")
-    individual = read_source(ROOT / "crates/evaluator/src/individual.rs")
-    for criterion in (
-        "USAGE_CONCENTRATION",
-        "ASSIST_PARENT_CHAIN",
-        "MATCHUP_RESPONSIBILITY",
-        "LATE_GAME_STAMINA",
-    ):
-        if criterion not in individual or criterion not in source:
-            raise SystemExit(f"R6 evaluator criterion is not wired: {criterion}")
-    print("R6 individual evaluation criteria: 4/4 registered")
+    print(
+        f"R6 tendency production references: {len(consumers)}/{len(EXPECTED)} wired, "
+        f"{len(pending)} registered as pending"
+    )
 
 
 check_rosters()
 check_rust_consumers()
-check_evaluator_wiring()

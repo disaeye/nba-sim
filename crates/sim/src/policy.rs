@@ -23,7 +23,10 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
 
     let chosen_shot = shot_choice(world, &state).or_else(|| {
         if state.shot_clock < 2.5 {
-            Some((ShotKind::PullUp, shooter_zone(world, state.actor_pos, world.players[actor].team)))
+            Some((
+                ShotKind::PullUp,
+                shooter_zone(world, state.actor_pos, world.players[actor].team),
+            ))
         } else {
             None
         }
@@ -94,7 +97,8 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
                 .map(|defender| (1.0 - defender.distance_ft / 6.0).clamp(0.0, 1.0))
                 .unwrap_or(0.0)
         - weights.w("drive_help") * help_term
-        + weights.w("drive_tendency") * (world.players[actor].data.tendencies.drive_frequency - 0.5);
+        + weights.w("drive_tendency")
+            * (world.players[actor].data.tendencies.drive_frequency - 0.5);
     if state.distance_to_hoop() < 32.0 {
         candidates.push((
             ActionKind::Drive,
@@ -113,11 +117,9 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
             state.actor_pos.x - teammate.pos.x
         };
         let risk = (1.0 - (teammate.lane_clearance / 6.0).clamp(0.0, 1.0)).max(0.0);
-        let teammate_three = crate::resolve::shooter_zone(
-            world,
-            teammate.pos,
-            world.players[teammate.index].team,
-        ) == "three";
+        let teammate_three =
+            crate::resolve::shooter_zone(world, teammate.pos, world.players[teammate.index].team)
+                == "three";
         let score = weights.w("pass_base")
             + weights.w("pass_open") * teammate.openness
             + weights.w("pass_advancement") * (advancement / 20.0).clamp(-1.0, 1.0)
@@ -157,7 +159,12 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
                 .expect("finite strength")
         })
         .map(|view| view.index);
-    candidates.push((ActionKind::Screen(ScreenKind::OnBall), screen_score.max(0.001), screener, state.actor_pos));
+    candidates.push((
+        ActionKind::Screen(ScreenKind::OnBall),
+        screen_score.max(0.001),
+        screener,
+        state.actor_pos,
+    ));
 
     let cut_score = weights.w("cut_base") + weights.w("cut_lane") * lane_norm;
     let cutter = state
@@ -250,7 +257,7 @@ pub fn shot_choice(world: &World, state: &DecisionState) -> Option<(ShotKind, &'
             .map(|time| world.now() - time < 2.5)
             .unwrap_or(false);
     let transition = world.possession.kind == PossessionKind::Live
-        && world.now() - world.possession.started_at < 7.5;
+        && world.now() - world.possession.started_at < 6.8;
     let cut_ready = world.possession.last_cut_actor == Some(state.actor)
         && world
             .possession

@@ -552,7 +552,14 @@ fn main() -> std::io::Result<()> {
                 }
             }
         }
-        return run_validate_core(seed_start, games, json, mechanism, out);
+        return match run_validate_core(seed_start, games, json, mechanism, out) {
+            Ok(0) => Ok(()),
+            Ok(code) => std::process::exit(code as i32),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        };
     }
 
     if args.len() > 1 && args[1] == "sim-core" {

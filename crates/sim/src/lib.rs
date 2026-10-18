@@ -31,14 +31,7 @@ pub fn run_game(seed: u64, calibration_dir: &Path) -> GameReport {
 /// 用指定阵容与参数跑一场。机制实验通过它注入属性扰动。
 pub fn run_game_with_setup(seed: u64, params: Params, setup: MatchSetup) -> GameReport {
     let mut world = World::new(setup, params, seed);
-    let mut report = world.run();
-    report.shot_clock_at_release = world.shot_clock_at_release;
-    report.contest_samples = world.contest_samples;
-    report.shot_zone_counts = world.shot_zone_counts;
-    report.shot_zone_makes = world.shot_zone_makes;
-    report.creation_counts = world.creation_counts;
-    report.violations = std::mem::take(&mut world.violations);
-    report
+    world.run()
 }
 
 pub fn run_game_default(seed: u64) -> GameReport {
@@ -82,8 +75,20 @@ pub fn summarize(report: &GameReport) -> Summary {
         fta,
         turnovers: home.turnovers + away.turnovers,
         oreb: home.oreb + away.oreb,
-        fg2_pct: if fg2a == 0 { 0.0 } else { fg2m as f32 / fg2a as f32 },
-        fg3_pct: if tpa == 0 { 0.0 } else { tpm as f32 / tpa as f32 },
-        ft_pct: if fta == 0 { 0.0 } else { ftm as f32 / fta as f32 },
+        fg2_pct: if fg2a == 0 {
+            0.0
+        } else {
+            fg2m as f32 / fg2a as f32
+        },
+        fg3_pct: if tpa == 0 {
+            0.0
+        } else {
+            tpm as f32 / tpa as f32
+        },
+        ft_pct: if fta == 0 {
+            0.0
+        } else {
+            ftm as f32 / fta as f32
+        },
     }
 }

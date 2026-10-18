@@ -55,7 +55,7 @@ fail() {
 # tier2：机制与因果目标，加上 Play、D25 action_phase 与 D26 整场测试。
 # tier3：stats_baseline 整场测试。D26 与 stats_baseline 均由 --serial 独占运行。
 # validation：nba-validation 全目标 + 引擎检查点分叉/扰动测试；随后跑
-#   CLI validate 快速档（1q 单场）与认证汇总（工件视图）。
+#   CLI validate-core（16 场批次 + 机制实验）并写出工件。
 MODE="${1:-}"
 shift || true
 if [ "$MODE" = "--" ]; then
@@ -112,21 +112,20 @@ else
 fi
 STATUS=$?
 
-# validation 模式追加 CLI 快检（1q 单场全层判定 + 认证汇总）。
+# validation 模式追加动作链内核的批次判定与机制实验。
 # 判定退出码如实传递：缺陷（1）与证据不足（3）都会使本脚本退出非零——
 # validation 红着是引擎侧工作清单的输入，禁止为了让它绿而改判定。
 if [ "$MODE" = "validation" ] && [ "$STATUS" -eq 0 ]; then
     echo
-    echo "── CLI validate 快速档（seed 42, scope 1q）──"
-    VALIDATE_OUT="$RUN_TMP/validate-quick"
-    NBA_STAT_DELTAS="$DIR/data/reference/stat_deltas.v1.json" \
-        "$DIR/target/debug/nba-sim" validate --seed 42 --scope 1q --out "$VALIDATE_OUT"
+    echo "── CLI validate-core（seed 1, 16 场 + 机制实验）──"
+    VALIDATE_OUT="$RUN_TMP/validate-core"
+    cargo build --release -p nba-sim-cli
+    "$DIR/target/release/nba-sim" validate-core --seed 1 --games 32 --mechanism \
+        --out "$VALIDATE_OUT"
     VALIDATE_STATUS=$?
-    if [ "$VALIDATE_STATUS" -ne 0 ] && [ "$VALIDATE_STATUS" -ne 3 ]; then
-        echo "❌ CLI validate 执行错误（exit $VALIDATE_STATUS）" >&2
+    if [ "$VALIDATE_STATUS" -ne 0 ]; then
+        echo "❌ validate-core 判定未通过（exit $VALIDATE_STATUS）" >&2
         STATUS=$VALIDATE_STATUS
-    else
-        python3 scripts/certification_summary.py "$VALIDATE_OUT"
     fi
 fi
 

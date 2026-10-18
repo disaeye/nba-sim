@@ -94,7 +94,11 @@ impl SessionService {
         Ok(info)
     }
 
-    pub fn setup_from_calibration(&mut self, calibration: &Path, seed: u64) -> Result<MatchInfo, String> {
+    pub fn setup_from_calibration(
+        &mut self,
+        calibration: &Path,
+        seed: u64,
+    ) -> Result<MatchInfo, String> {
         let params = Params::load(calibration)?;
         self.setup(params, seed)
     }
@@ -244,16 +248,7 @@ impl SessionService {
     }
 
     pub fn report(&mut self) -> Option<GameReport> {
-        self.world.as_mut().map(|world| {
-            let mut report = world.report();
-            report.shot_clock_at_release = world.shot_clock_at_release.clone();
-            report.contest_samples = world.contest_samples.clone();
-            report.shot_zone_counts = world.shot_zone_counts;
-            report.shot_zone_makes = world.shot_zone_makes;
-            report.creation_counts = world.creation_counts;
-            report.violations = world.violations.clone();
-            report
-        })
+        self.world.as_mut().map(|world| world.report())
     }
 
     fn step_once(&mut self) {

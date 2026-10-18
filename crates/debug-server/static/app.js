@@ -2393,7 +2393,7 @@
       verdictCls = "verdict-insufficient";
     }
     verdictRow.className = `validation-verdict-row ${verdictCls}`;
-    verdictRow.textContent = verdictText;
+    verdictRow.textContent = `${verdictText}（${result.games ?? "?"} 场快速批次；权威判定见下方批次总览）`;
     fragment.appendChild(verdictRow);
 
     const grid = document.createElement("div");
@@ -2415,13 +2415,13 @@
     fragment.appendChild(ledgerTitle);
     loadValidationLedger(ledgerTitle);
 
+    const detail = $("validationDetail");
     // 第 3/4/5 层：统计与机制判定（statistical/mechanism 工件）。
     loadValidationLayers(detail || summary);
     // 批次判定总览（certification 工件，最近一次批量判定跑）。
     loadValidationCertification(detail || summary);
 
     // 场景与证据不足详单。
-    const detail = $("validationDetail");
     if (detail) {
       detail.style.display = "flex";
       detail.replaceChildren();
@@ -2473,12 +2473,12 @@
       };
       const statusRow = document.createElement("div");
       statusRow.className = `validation-verdict-row ${statusClsMap[cert.certification_status] || "verdict-insufficient"}`;
-      const l35 = cert.layer3_5_distribution || {};
-      const l1 = cert.layer1_flow || {};
-      statusRow.textContent = `判定结论：${statusTextMap[cert.certification_status] || cert.certification_status} · 逐场账本 ${l1.scenarios_pass ?? "?"}/${l1.scenarios_total ?? "?"} · 分布与机制缺陷 ${(l35.defects || []).length} 项 · 效应不足 ${(l35.insufficient || []).length} 项`;
+      const criteria = cert.criteria || {};
+      const ledger = cert.per_game_ledger || {};
+      statusRow.textContent = `判定结论：${statusTextMap[cert.certification_status] || cert.certification_status} · 逐场账本 ${ledger.passed ?? "?"}/${ledger.total ?? "?"} · 分布与机制缺陷 ${(criteria.defects || []).length} 项 · 效应不足 ${(criteria.insufficient || []).length} 项`;
       container.appendChild(statusRow);
       // 缺陷清单（引擎侧工作清单的输入）。
-      for (const criterion of l35.defects || []) {
+      for (const criterion of criteria.defects || []) {
         const row = document.createElement("div");
         row.className = "validation-ledger-item";
         const name = document.createElement("span");
@@ -2489,7 +2489,7 @@
         row.append(name, verdict);
         container.appendChild(row);
       }
-      for (const criterion of l35.insufficient || []) {
+      for (const criterion of criteria.insufficient || []) {
         const row = document.createElement("div");
         row.className = "validation-ledger-item";
         const name = document.createElement("span");
@@ -2500,8 +2500,8 @@
         row.append(name, verdict);
         container.appendChild(row);
       }
-      // 覆盖面三态。
-      const cov = cert.branch_coverage || {};
+      // 判定面覆盖。
+      const cov = cert.coverage || {};
       const covRow = document.createElement("div");
       covRow.className = "validation-ledger-item";
       covRow.textContent = `判定面覆盖：已判定 ${cov.sampled ?? "?"} 项（分布准则 ${cov.gate_criteria ?? "?"} · 机制属性 ${cov.mechanism_attributes ?? "?"}） · 未覆盖 ${cov.uncovered ?? "?"}`;
@@ -2517,55 +2517,43 @@
       const response = await fetch("/api/validation/layers");
       if (!response.ok) return;
       const body = await response.json();
-      // 统计层（第 3 层 STAT + 第 5 层 JOINT 的单场诊断值）。
+      // 分布判定：批次逐准则的观测值与基准。
       const stat = body.statistical;
-      if (stat && Array.isArray(stat.verdicts) && stat.verdicts.length) {
+      if (stat && Array.isArray(stat.criteria) && stat.criteria.length) {
         const title = document.createElement("div");
         title.className = "validation-section-title";
-        title.textContent = "分布判定（第 3/5 层 · 单场诊断）";
+        title.textContent = `分布判定（${stat.criteria.length} 项准则 · ${stat.games ?? "?"} 场批次）`;
         container.appendChild(title);
-        const groups = new Map();
-        for (const v of stat.verdicts) {
-          if (!groups.has(v.criterion_id)) groups.set(v.criterion_id, []);
-          groups.get(v.criterion_id).push(v);
-        }
-        for (const [criterion, entries] of groups) {
+        for (const criterion of stat.criteria) {
           const row = document.createElement("div");
           row.className = "validation-ledger-item";
-          const worst = entries.some((e) => e.verdict === "Defect")
-            ? "Defect"
-            : entries.some((e) => e.verdict === "InsufficientEvidence")
-              ? "InsufficientEvidence"
-              : "Pass";
-          const verdictKey = worst.toLowerCase();
           const name = document.createElement("span");
-          name.textContent = `${criterion}（${entries.length} 指标）`;
+          name.textContent = `${criterion.criterion} · 观测 ${Number(criterion.observed).toFixed(3)} / 基准 ${Number(criterion.target).toFixed(3)}`;
           const verdict = document.createElement("span");
-          verdict.className = `verdict-${verdictKey}`;
-          const textMap = { pass: "通过", defect: "缺陷", insufficientevidence: "证据不足" };
-          verdict.textContent = textMap[verdictKey] || worst;
+          verdict.className = `verdict-${criterion.passed ? "pass" : "defect"}`;
+          verdict.textContent = criterion.passed ? "通过" : "缺陷";
           row.append(name, verdict);
           container.appendChild(row);
         }
       }
-      // 机制层（第 4 层实验）。
+      // 机制实验：属性扰动后的指标方向。
       const mech = body.mechanism;
-      if (mech && Array.isArray(mech.experiments) && mech.experiments.length) {
+      if (mech && Array.isArray(mech.results) && mech.results.length) {
         const title = document.createElement("div");
         title.className = "validation-section-title";
-        title.textContent = "机制实验（第 4 层 · 检查点扰动）";
+        title.textContent = `机制实验（${mech.results.length} 个属性 · 每属性 ${mech.config?.seeds ?? "?"} 个种子）`;
         container.appendChild(title);
-        for (const exp of mech.experiments) {
+        const verdictZh = { pass: "通过", insufficient: "效应不足", defect: "方向相反" };
+        for (const result of mech.results) {
           const row = document.createElement("div");
           row.className = "validation-ledger-item";
-          const rates = exp.group_rates || [];
-          const fmt = (r) => (r === null || r === undefined ? "—" : (r * 100).toFixed(1) + "%");
-          const statusMap = {
-            completed: "完成",
-            insufficient_checkpoints: "检查点不足",
-            spec_digest_mismatch: "规格摘要不符",
-          };
-          row.textContent = `${exp.experiment_id}：${statusMap[exp.status] || exp.status} · 检查点 ${exp.checkpoints_hit} · 命中率 基${fmt(rates[0])}/低${fmt(rates[1])}/中${fmt(rates[2])}/高${fmt(rates[3])}`;
+          const name = document.createElement("span");
+          name.textContent = `${result.attribute} · ${result.metric} · ${Number(result.baseline).toFixed(3)} → ${Number(result.perturbed).toFixed(3)}（${(result.relative_change * 100).toFixed(1)}%）`;
+          const verdict = document.createElement("span");
+          const verdictKey = result.verdict === "pass" ? "pass" : result.verdict === "defect" ? "defect" : "insufficient";
+          verdict.className = `verdict-${verdictKey}`;
+          verdict.textContent = verdictZh[result.verdict] || result.verdict;
+          row.append(name, verdict);
           container.appendChild(row);
         }
       }
@@ -2579,21 +2567,25 @@
       const response = await fetch("/api/validation/report");
       if (!response.ok) return;
       const report = await response.json();
-      const ledger = report.ledger || {};
-      const rebuilt = ledger.box_score_rebuilt?.home || {};
-      const declared = ledger.box_score_declared?.home || {};
-      const stats = ["fga", "fgm", "three_pa", "fta", "ftm", "orb", "drb", "stl", "tov", "pf"];
-      const mismatched = stats.filter((key) => rebuilt[key] !== declared[key]);
-      const possession = `回合 ${ledger.possession_rebuilt ?? "?"}/${ledger.possession_engine ?? "?"}（终局不一致 ${ledger.terminal_mismatches?.length ?? 0}）`;
-      const pairing = ledger.pairing || {};
-      const pairingOk =
-        !pairing.shots_without_release && !pairing.passes_without_release && !pairing.free_throws_without_award;
-      const row = document.createElement("div");
-      row.className = "validation-ledger-item";
-      row.textContent = mismatched.length
-        ? `箱体 ${mismatched.length} 项不一致（${mismatched.join(", ")}）；${possession}；因果配对${pairingOk ? "完整" : "有悬空"}`
-        : `箱体 10 项一致；${possession}；因果配对${pairingOk ? "完整" : "有悬空"}`;
-      titleEl.after(row);
+      const games = report.games || [];
+      if (!games.length) return;
+      const title = document.createElement("div");
+      title.className = "validation-section-title";
+      title.textContent = `逐场账本对账（${games.length} 场 · seed ${report.seed}）`;
+      titleEl.after(title);
+      for (const game of games) {
+        const ledger = game.ledger || {};
+        const conserved =
+          ledger.points_reconcile &&
+          ledger.attempts_reconcile &&
+          ledger.rebounds_reconcile &&
+          ledger.turnovers_reconcile &&
+          ledger.minutes_reconcile;
+        const row = document.createElement("div");
+        row.className = "validation-ledger-item";
+        row.textContent = `seed ${game.seed} · ${game.home_score}-${game.away_score} · 回合 ${game.possessions} · ${conserved ? "五项守恒" : ledger.detail}`;
+        titleEl.after(row);
+      }
     } catch {
       // 账本详单失败不影响顶层结论展示。
     }
