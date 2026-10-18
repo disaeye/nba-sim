@@ -119,7 +119,6 @@ impl MechanismAttribute {
 pub enum Metric {
     ThreePointPct,
     RimPct,
-    MidPct,
     MidAttemptShare,
     FreeThrowPct,
     FieldGoalPct,
@@ -135,7 +134,6 @@ impl Metric {
         match self {
             Self::ThreePointPct => "three_point_pct",
             Self::RimPct => "rim_pct",
-            Self::MidPct => "mid_pct",
             Self::MidAttemptShare => "mid_attempt_share",
             Self::FreeThrowPct => "free_throw_pct",
             Self::FieldGoalPct => "field_goal_pct",
@@ -201,7 +199,7 @@ impl MechanismConfig {
 pub struct MechanismResult {
     pub attribute: String,
     pub metric: String,
-    /// `wiring`：指标直接来自消费者算式（接缐检查）；
+    /// `wiring`：指标直接来自消费者算式（接线检查）；
     /// `outcome`：指标是比赛产物（命中率、篮板率）。两类证据等级不同。
     pub evidence_kind: String,
     pub expectation: String,
@@ -446,11 +444,7 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
             report.shot_zone_makes[0][0] as f64,
             report.shot_zone_counts[0][0] as f64,
         ),
-        Metric::MidPct => (
-            report.shot_zone_makes[0][2] as f64,
-            report.shot_zone_counts[0][2] as f64,
-        ),
-        // 中投出手占主队全部出手的份额：分母是全队出手，不受中投小样本限制。
+        // 中投出手占主队全部出手的份额：分母是整队出手，不受中投小样本限制。
         Metric::MidAttemptShare => (
             report.shot_zone_counts[0][2] as f64,
             report.shot_zone_counts[0].iter().sum::<u32>() as f64,

@@ -320,8 +320,9 @@ jobs:
             --out .work/validation-view
           CODE=$?
           set -e
-          # 1 = 存在缺陷，2 = 执行错误，两者都必须阻断；
-          # 3 = 证据不足，属于待补数据/待接属性的工作清单，降为告警。
+          # 1 = 存在缺陷或未登记的不足，2 = 执行错误，两者都必须阻断；
+          # 3 = 只有已登记在 data/calibration/known_insufficient.json 的不足，
+          # 属于待补数据/待接属性的工作清单，降为告警。
           if [ "$CODE" -eq 3 ]; then
             echo "::warning::action-chain validation reports insufficient evidence"
           elif [ "$CODE" -ne 0 ]; then
