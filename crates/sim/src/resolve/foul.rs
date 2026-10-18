@@ -13,6 +13,7 @@ pub fn apply_shooting_foul(
 ) {
     let team = world.players[shooter].team;
     world.line_mut(fouler).fouls += 1;
+    world.line_mut(fouler).shooting_fouls += 1;
     if made {
         world.line_mut(shooter).and_one += 1;
     }

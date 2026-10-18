@@ -980,6 +980,7 @@ fn merge_lines(mine: &mut Vec<PlayerLine>, theirs: &[PlayerLine]) {
                 existing.blocks += line.blocks;
                 existing.turnovers += line.turnovers;
                 existing.fouls += line.fouls;
+                existing.shooting_fouls += line.shooting_fouls;
                 existing.and_one += line.and_one;
                 existing.plus_minus += line.plus_minus;
             }

@@ -5,9 +5,10 @@ use rand::Rng;
 
 use crate::action::{
     ActionIntent, ActionKind, ActionOutcome, Completion, DefenderRoute, Fact, ScreenKind,
-    StateDelta,
+    StateDelta, TurnoverKind,
 };
 use crate::resolve::clamp01;
+use crate::state::PossessionKind;
 use crate::world::World;
 
 pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> ActionOutcome {
@@ -67,6 +68,36 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
         DefenderRoute::Over => 1.0 + 1.2 * strength,
         DefenderRoute::Trapped => 0.2,
     };
+
+    // 移动掩护：掩护人没站住，吹进攻犯规，球权转换。对抗强度高的
+    // 掩护人更容易推着防守人走。
+    let screener_physicality = world.players[screener].data.tendencies.physicality;
+    let moving = world.params.policy.w("moving_screen_foul_rate")
+        * (world.params.policy.w("moving_screen_physicality_base") + screener_physicality);
+    if world.rng.gen::<f32>() < moving {
+        world.line_mut(screener).turnovers += 1;
+        world.line_mut(screener).fouls += 1;
+        let index = World::team_index(team);
+        world.fouls[index].period += 1;
+        world.fouls[index].total += 1;
+        world.players[screener].fouls += 1;
+        world.emit(Fact::Turnover {
+            player: screener,
+            kind: TurnoverKind::OffensiveFoul,
+        });
+        world.end_possession("turnover", 0);
+        world.start_possession(team.other(), PossessionKind::Live);
+        return ActionOutcome {
+            actor: intent.actor,
+            kind: ActionKind::Screen(kind),
+            completion: Completion::Failed,
+            delta: StateDelta {
+                turnover: Some(TurnoverKind::OffensiveFoul),
+                ..Default::default()
+            },
+            facts: Vec::new(),
+        };
+    }
 
     world.possession.screens += 1;
     world.emit(Fact::Screen {

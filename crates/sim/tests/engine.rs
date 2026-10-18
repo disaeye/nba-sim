@@ -275,6 +275,26 @@ fn and_one_is_a_minority_of_shooting_fouls() {
     );
 }
 
+/// 非投篮犯规（手部犯规、移动掩护）必须真的发生：总犯规数大于
+/// 投篮犯规数，否则 bonus 永远不触发。
+#[test]
+fn non_shooting_fouls_occur() {
+    let mut total = 0u32;
+    let mut shooting = 0u32;
+    for seed in 71u64..81 {
+        let report = play(seed);
+        for team in [TeamSide::Home, TeamSide::Away] {
+            let totals = report.box_score.team_totals(team);
+            total += totals.fouls;
+            shooting += totals.shooting_fouls;
+        }
+    }
+    assert!(
+        total > shooting,
+        "non-shooting fouls must occur: {total} vs {shooting}"
+    );
+}
+
 #[test]
 fn session_service_advances_and_reports() {
     use nba_sim_core::SessionService;

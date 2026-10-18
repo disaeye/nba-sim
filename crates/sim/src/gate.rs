@@ -173,7 +173,7 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
     );
     push(
         "shooting_fouls_per_game",
-        (home_line.fouls + away_line.fouls) as f64 / games,
+        (home_line.shooting_fouls + away_line.shooting_fouls) as f64 / games,
         league.shooting_fouls_per_game as f64,
     );
     push(

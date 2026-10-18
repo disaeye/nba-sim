@@ -75,6 +75,30 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     };
 
     let lane_norm = clamp01(lane / 8.0);
+    // 失位前后的手部犯规：防守人用犯规阻止突破。对抗与协防倾向高的
+    // 防守人更容易伸手；未到 bonus 时只记犯规，到 bonus 时给罚球。
+    if let Some(defender) = nearest {
+        let physicality = world.players[defender].data.tendencies.physicality;
+        let help = world.players[defender].data.tendencies.help_aggressiveness;
+        let policy = &world.params.policy;
+        let rate = policy.w("reach_in_foul_rate")
+            * (policy.w("reach_in_physicality_base") + physicality)
+            * (policy.w("reach_in_help_base") + help);
+        if world.rng.gen::<f32>() < rate {
+            let fouling_team = world.players[defender].team;
+            let free_throws = crate::resolve::foul::bonus_free_throws(world, fouling_team);
+            crate::resolve::foul::apply_non_shooting_foul(world, defender, driver);
+            if free_throws > 0 {
+                return ActionOutcome {
+                    actor: driver,
+                    kind: ActionKind::Drive,
+                    completion: Completion::Failed,
+                    delta: StateDelta::default(),
+                    facts: Vec::new(),
+                };
+            }
+        }
+    }
     let help_term = clamp01(1.0 - help_distance / 20.0);
     let p_beat = sigmoid(
         world.params.policy.w("drive_beat_base")
