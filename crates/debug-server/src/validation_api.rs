@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use nba_sim_core::params::workspace_validation_dir;
 use nba_validation::core_validation::{
-    run_core_validation, CoreValidationReport, REGISTERED_GATE_CRITERIA,
+    run_core_validation_scoped, CoreValidationReport, ValidationScope, REGISTERED_GATE_CRITERIA,
 };
 use serde_json::Value;
 
@@ -64,7 +64,8 @@ pub fn api_validation_run(_req: &crate::Request, validation: &SharedValidation) 
     let Some(seed) = cached_seed(validation) else {
         return no_cached_game();
     };
-    let report = match run_core_validation(seed, 1) {
+    let scope = cached_scope(validation).unwrap_or_else(|| "full".to_string());
+    let report = match run_core_validation_scoped(seed, 1, ValidationScope::parse(&scope)) {
         Ok(report) => report,
         Err(error) => return internal_error(error),
     };
@@ -103,9 +104,9 @@ pub fn api_validation_report(validation: &SharedValidation) -> Response {
     match &*state {
         ValidationState::Idle { last_report, .. } => match last_report {
             Some(report) => json_response(report),
-            None => bad_request(
-                "no validation result: run a simulation and validate first".to_string(),
-            ),
+            None => {
+                bad_request("no validation result: run a simulation and validate first".to_string())
+            }
         },
     }
 }
@@ -169,6 +170,8 @@ fn snapshot_json(report: &CoreValidationReport) -> Value {
         "open_business_instances": report.open_business_instances,
         "failures": report.failed_criteria(),
         "games": report.games.len(),
+        "scope": report.scope,
+        "distribution_applicable": report.distribution_applicable,
         "registered_gate_criteria": REGISTERED_GATE_CRITERIA.len(),
     })
 }
@@ -213,6 +216,15 @@ pub fn idle_state() -> ValidationState {
         cached_game: None,
         last_snapshot: None,
         last_report: None,
+    }
+}
+
+pub fn cached_scope(validation: &SharedValidation) -> Option<String> {
+    let state = validation.lock().expect("validation state");
+    match &*state {
+        ValidationState::Idle { cached_game, .. } => {
+            cached_game.as_ref().map(|game| game.scope.clone())
+        }
     }
 }
 

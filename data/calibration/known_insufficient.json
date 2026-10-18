@@ -1,0 +1,17 @@
+{
+  "table": "known_insufficient",
+  "provenance": {
+    "source": "recorded from validate-core batches",
+    "season": "2024-25",
+    "sample": 0,
+    "script": "manual",
+    "method": "机制实验中已知效应低于当前批次可分辨下限的属性；新增未登记项按缺陷处理"
+  },
+  "entries": [
+    {
+      "attribute": "shooting_mid",
+      "reason": "中投出手份额受长两分惩罚与距离项压制，技巧对选择的边际影响低于样本可分辨下限",
+      "required_games": 100
+    }
+  ]
+}

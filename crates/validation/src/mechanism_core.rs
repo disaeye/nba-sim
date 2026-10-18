@@ -66,7 +66,7 @@ impl MechanismAttribute {
         match self {
             Self::ShootingThree => Metric::ThreePointPct,
             Self::ShootingClose => Metric::RimPct,
-            Self::ShootingMid => Metric::MidPct,
+            Self::ShootingMid => Metric::MidAttemptShare,
             Self::FreeThrow => Metric::FreeThrowPct,
             Self::Speed | Self::Acceleration => Metric::MeanFirstActionSeconds,
             Self::Stamina => Metric::FieldGoalPct,
@@ -81,6 +81,15 @@ impl MechanismAttribute {
             Self::DecisionIq => Direction::Down,
             Self::Speed | Self::Acceleration => Direction::Down,
             _ => Direction::Up,
+        }
+    }
+
+    /// 证据类别：接线检查的指标直接来自消费者算式；比赛产物类指标的
+    /// 指标与消费者之间隔着整个结算过程。
+    pub fn evidence_kind(self) -> &'static str {
+        match self {
+            Self::Speed | Self::Acceleration => "wiring",
+            _ => "outcome",
         }
     }
 
@@ -111,6 +120,7 @@ pub enum Metric {
     ThreePointPct,
     RimPct,
     MidPct,
+    MidAttemptShare,
     FreeThrowPct,
     FieldGoalPct,
     Possessions,
@@ -126,6 +136,7 @@ impl Metric {
             Self::ThreePointPct => "three_point_pct",
             Self::RimPct => "rim_pct",
             Self::MidPct => "mid_pct",
+            Self::MidAttemptShare => "mid_attempt_share",
             Self::FreeThrowPct => "free_throw_pct",
             Self::FieldGoalPct => "field_goal_pct",
             Self::Possessions => "possessions",
@@ -159,7 +170,6 @@ pub struct MechanismConfig {
     pub possessions: Option<u32>,
     pub low_value: f32,
     pub high_value: f32,
-    pub minimum_relative_change: f64,
 }
 
 impl Default for MechanismConfig {
@@ -170,7 +180,6 @@ impl Default for MechanismConfig {
             possessions: None,
             low_value: 0.10,
             high_value: 0.95,
-            minimum_relative_change: 0.002,
         }
     }
 }
@@ -184,7 +193,6 @@ impl MechanismConfig {
             possessions: Some(30),
             low_value: 0.10,
             high_value: 0.95,
-            minimum_relative_change: 1e-6,
         }
     }
 }
@@ -193,6 +201,9 @@ impl MechanismConfig {
 pub struct MechanismResult {
     pub attribute: String,
     pub metric: String,
+    /// `wiring`：指标直接来自消费者算式（接缐检查）；
+    /// `outcome`：指标是比赛产物（命中率、篮板率）。两类证据等级不同。
+    pub evidence_kind: String,
     pub expectation: String,
     pub baseline: f64,
     pub perturbed: f64,
@@ -202,7 +213,6 @@ pub struct MechanismResult {
     pub seeds: usize,
     pub observed_direction: String,
     pub direction_matches: bool,
-    pub magnitude_matches: bool,
     pub ci_low: f64,
     pub ci_high: f64,
     pub verdict: String,
@@ -222,7 +232,6 @@ pub struct MechanismConfigReport {
     pub possessions: Option<u32>,
     pub low_value: f64,
     pub high_value: f64,
-    pub minimum_relative_change: f64,
 }
 
 pub fn run_mechanism_experiments(config: MechanismConfig) -> Result<MechanismReport, String> {
@@ -260,7 +269,6 @@ pub fn run_mechanism_experiments_with_dir(
             possessions: config.possessions,
             low_value: round_two(config.low_value),
             high_value: round_two(config.high_value),
-            minimum_relative_change: config.minimum_relative_change,
         },
         passed: results.iter().all(|result| result.verdict != "defect"),
         results,
@@ -330,7 +338,6 @@ fn experiment(
         Direction::Up => relative > 0.0,
         Direction::Down => relative < 0.0,
     };
-    let magnitude_matches = relative.abs() >= config.minimum_relative_change;
     // 配对 bootstrap：以种子为抽样单元重采样，对每次重采样重新算聚合比率。
     // 单场比率在分母很小时噪声大，bootstrap 把「这一场的出手」整体当
     // 一个样本，不假设逐场差值服从正态分布。
@@ -351,6 +358,7 @@ fn experiment(
     Ok(MechanismResult {
         attribute: attribute.key().to_string(),
         metric: metric.key().to_string(),
+        evidence_kind: attribute.evidence_kind().to_string(),
         expectation: attribute.direction().key().to_string(),
         baseline: baseline_value,
         perturbed: perturbed_value,
@@ -360,7 +368,6 @@ fn experiment(
         seeds: seed_count,
         observed_direction: observed.key().to_string(),
         direction_matches,
-        magnitude_matches,
         ci_low,
         ci_high,
         verdict: verdict.to_string(),
@@ -443,6 +450,11 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
             report.shot_zone_makes[0][2] as f64,
             report.shot_zone_counts[0][2] as f64,
         ),
+        // 中投出手占主队全部出手的份额：分母是全队出手，不受中投小样本限制。
+        Metric::MidAttemptShare => (
+            report.shot_zone_counts[0][2] as f64,
+            report.shot_zone_counts[0].iter().sum::<u32>() as f64,
+        ),
         Metric::FreeThrowPct => (home.ftm as f64, home.fta as f64),
         Metric::FieldGoalPct => (home.fgm as f64, home.fga as f64),
         Metric::Possessions => (possessions, 1.0),
@@ -452,10 +464,7 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
                 .iter()
                 .filter_map(|record| record.first_action_seconds)
                 .collect();
-            (
-                values.iter().sum(),
-                values.len().max(1) as f64,
-            )
+            (values.iter().sum(), values.len().max(1) as f64)
         }
         Metric::OffensiveReboundRate => (home.oreb as f64, (home.fga - home.fgm).max(1) as f64),
         Metric::DefensiveReboundRate => (home.dreb as f64, (home.dreb + away.oreb).max(1) as f64),

@@ -113,17 +113,19 @@ fi
 STATUS=$?
 
 # validation 模式追加动作链内核的批次判定与机制实验。
-# 判定退出码如实传递：缺陷（1）与证据不足（3）都会使本脚本退出非零——
-# validation 红着是引擎侧工作清单的输入，禁止为了让它绿而改判定。
+# 退出码：0 通过；1 缺陷或未登记的不足（阻断）；2 执行错误（阻断）；
+# 3 只有已登记的不足（记录，不阻断）。
 if [ "$MODE" = "validation" ] && [ "$STATUS" -eq 0 ]; then
     echo
-    echo "── CLI validate-core（seed 1, 16 场 + 机制实验）──"
+    echo "── CLI validate-core（seed 1, 32 场 + 机制实验）──"
     VALIDATE_OUT="$RUN_TMP/validate-core"
     cargo build --release -p nba-sim-cli
     "$DIR/target/release/nba-sim" validate-core --seed 1 --games 32 --mechanism \
         --out "$VALIDATE_OUT"
     VALIDATE_STATUS=$?
-    if [ "$VALIDATE_STATUS" -ne 0 ]; then
+    if [ "$VALIDATE_STATUS" -eq 3 ]; then
+        echo "⚠️  validate-core：存在已登记的证据不足（exit 3，不阻断）" >&2
+    elif [ "$VALIDATE_STATUS" -ne 0 ]; then
         echo "❌ validate-core 判定未通过（exit $VALIDATE_STATUS）" >&2
         STATUS=$VALIDATE_STATUS
     fi

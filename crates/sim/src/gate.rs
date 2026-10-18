@@ -14,6 +14,9 @@ pub struct LayerResult {
     pub criterion: String,
     pub observed: f64,
     pub target: f64,
+    /// 相对误差 `observed / target - 1`；分布层的判定量与工件记录同一份。
+    #[serde(default)]
+    pub relative_error: f64,
     pub passed: bool,
     pub detail: String,
 }
@@ -53,17 +56,22 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
     let bands = &params.policy;
     let mut push = |criterion: &str, observed: f64, target: f64| {
         let band = bands.band(criterion);
-        let passed = target > 0.0 && (observed / target - 1.0).abs() <= band;
+        let error = if target > 0.0 {
+            observed / target - 1.0
+        } else {
+            0.0
+        };
+        let passed = target > 0.0 && error >= band.lower && error <= band.upper;
         gate.layers.push(LayerResult {
             layer: "distribution".to_string(),
             criterion: criterion.to_string(),
             observed,
             target,
+            relative_error: error,
             passed,
             detail: format!(
-                "relative error {:.3} (band {:.3})",
-                (observed / target - 1.0).abs(),
-                band
+                "relative error {error:.3} (band {:.3}..{:.3})",
+                band.lower, band.upper
             ),
         });
     };

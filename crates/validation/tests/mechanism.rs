@@ -13,7 +13,6 @@ fn every_attribute_reports_a_known_verdict_or_an_explicit_gap() {
         possessions: Some(20),
         low_value: 0.10,
         high_value: 0.95,
-        minimum_relative_change: 1e-6,
     };
     for attribute in MechanismAttribute::all() {
         match run_mechanism_experiment(attribute, config) {

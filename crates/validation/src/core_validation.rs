@@ -8,7 +8,8 @@ use std::path::Path;
 
 use nba_sim_core::action::Fact;
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::{gate, run_game, GameReport, Params, TeamSide};
+use nba_sim_core::world::TICK_SECONDS;
+use nba_sim_core::{gate, GameReport, MatchSetup, Params, TeamSide, World};
 use serde::{Deserialize, Serialize};
 
 use crate::mechanism_core::MechanismReport;
@@ -41,6 +42,9 @@ pub struct CoreGameResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoreValidationReport {
     pub games: Vec<CoreGameResult>,
+    pub scope: String,
+    /// 分布层是否适用：只有整场比赛才与赛季基准可比。
+    pub distribution_applicable: bool,
     pub gate: gate::GateReport,
     pub geometry_violations: usize,
     pub context_violations: usize,
@@ -80,6 +84,40 @@ impl CoreValidationReport {
     }
 }
 
+/// 判定范围。分布层需要整场比赛；几何、语境与账本对部分比赛同样成立。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidationScope {
+    Full,
+    Quarter,
+    Possessions(u32),
+}
+
+impl ValidationScope {
+    pub fn parse(value: &str) -> Self {
+        match value.trim() {
+            "full" => Self::Full,
+            "1q" | "quarter" => Self::Quarter,
+            other => other
+                .trim_end_matches('p')
+                .parse::<u32>()
+                .map(Self::Possessions)
+                .unwrap_or(Self::Full),
+        }
+    }
+
+    pub fn is_full(self) -> bool {
+        matches!(self, Self::Full)
+    }
+
+    pub fn as_str(self) -> String {
+        match self {
+            Self::Full => "full".to_string(),
+            Self::Quarter => "1q".to_string(),
+            Self::Possessions(count) => format!("{count}p"),
+        }
+    }
+}
+
 /// 跑一组种子并产出判定报告。单场调用用于面板「对屏幕这一场判定」；
 /// 批次结论由 `validate-core` 的 32 场口径负责。
 pub fn run_core_validation(seed_start: u64, games: u64) -> Result<CoreValidationReport, String> {
@@ -89,17 +127,37 @@ pub fn run_core_validation(seed_start: u64, games: u64) -> Result<CoreValidation
     run_core_validation_with_dir(seed_start, games, &workspace_calibration_dir())
 }
 
+pub fn run_core_validation_scoped(
+    seed_start: u64,
+    games: u64,
+    scope: ValidationScope,
+) -> Result<CoreValidationReport, String> {
+    run_core_validation_scoped_with_dir(seed_start, games, scope, &workspace_calibration_dir())
+}
+
 pub fn run_core_validation_with_dir(
     seed_start: u64,
     games: u64,
     calibration: &Path,
 ) -> Result<CoreValidationReport, String> {
+    run_core_validation_scoped_with_dir(seed_start, games, ValidationScope::Full, calibration)
+}
+
+pub fn run_core_validation_scoped_with_dir(
+    seed_start: u64,
+    games: u64,
+    scope: ValidationScope,
+    calibration: &Path,
+) -> Result<CoreValidationReport, String> {
+    if games == 0 {
+        return Err("core validation requires at least one game".to_string());
+    }
     let params = Params::load(calibration)?;
     let mut reports = Vec::new();
     let mut results = Vec::new();
     for offset in 0..games {
         let seed = seed_start + offset;
-        let report = run_game(seed, calibration);
+        let report = run_scoped_game(seed, &params, scope);
         let ledger = check_ledger(seed, &report);
         results.push(CoreGameResult {
             seed,
@@ -115,7 +173,13 @@ pub fn run_core_validation_with_dir(
         });
         reports.push(report);
     }
-    let gate = gate::evaluate_batch(&reports, &params);
+    // 分布层只在整场比赛口径下判定；部分比赛的得分、回合数与区域份额
+    // 与赛季基准不可比。
+    let gate = if scope.is_full() {
+        gate::evaluate_batch(&reports, &params)
+    } else {
+        gate::GateReport::default()
+    };
     let ledger_failures = results
         .iter()
         .filter(|result| {
@@ -127,6 +191,8 @@ pub fn run_core_validation_with_dir(
         })
         .count();
     Ok(CoreValidationReport {
+        scope: scope.as_str(),
+        distribution_applicable: scope.is_full(),
         geometry_violations: gate.geometric_violations,
         context_violations: gate.context_violations,
         ledger_failures,
@@ -136,10 +202,33 @@ pub fn run_core_validation_with_dir(
             .iter()
             .map(|result| result.open_business_instances)
             .sum(),
-        passed: gate.passed && ledger_failures == 0,
+        passed: ledger_failures == 0
+            && gate.geometric_violations == 0
+            && gate.context_violations == 0
+            && (!scope.is_full() || gate.passed),
         games: results,
         gate,
     })
+}
+
+fn run_scoped_game(seed: u64, params: &Params, scope: ValidationScope) -> GameReport {
+    let setup = MatchSetup::builtin(nba_domain::GameRules::default());
+    let mut world = World::new(setup, params.clone(), seed);
+    match scope {
+        ValidationScope::Full => world.run(),
+        ValidationScope::Quarter => {
+            while !world.finished && world.clock.period < 2 {
+                world.step(TICK_SECONDS);
+            }
+            world.report()
+        }
+        ValidationScope::Possessions(target) => {
+            while !world.finished && world.possession_log.len() < target as usize {
+                world.step(TICK_SECONDS);
+            }
+            world.report()
+        }
+    }
 }
 
 fn check_ledger(seed: u64, report: &GameReport) -> LedgerCheck {
@@ -299,9 +388,12 @@ pub fn certification_artifact(
     report: &CoreValidationReport,
     mechanism: Option<&MechanismReport>,
     commit: &str,
+    known_insufficient: &[KnownInsufficient],
 ) -> serde_json::Value {
     let mut defects: Vec<String> = Vec::new();
     let mut insufficient: Vec<String> = Vec::new();
+    let mut known: Vec<String> = Vec::new();
+    let mut new_insufficient: Vec<String> = Vec::new();
     for layer in &report.gate.layers {
         if !layer.passed {
             defects.push(layer.criterion.clone());
@@ -320,14 +412,26 @@ pub fn certification_artifact(
         for result in &mechanism.results {
             match result.verdict.as_str() {
                 "defect" => defects.push(format!("mechanism:{}", result.attribute)),
-                "insufficient" => insufficient.push(format!("mechanism:{}", result.attribute)),
+                "insufficient" => insufficient.push(result.attribute.clone()),
                 _ => {}
             }
         }
     }
-    let status = if !defects.is_empty() {
+    for attribute in &insufficient {
+        if known_insufficient
+            .iter()
+            .any(|entry| entry.attribute == *attribute)
+        {
+            known.push(format!("mechanism:{attribute}"));
+        } else {
+            new_insufficient.push(format!("mechanism:{attribute}"));
+        }
+    }
+    // 已知不足只记录；未登记的不足按缺陷处理，否则新出现的不足会被
+    // 「已知清单」掩盖。
+    let status = if !defects.is_empty() || !new_insufficient.is_empty() {
         "defects_found"
-    } else if !insufficient.is_empty() {
+    } else if !known.is_empty() {
         "insufficient_evidence"
     } else {
         "pass"
@@ -344,7 +448,7 @@ pub fn certification_artifact(
                 && game.ledger.minutes_reconcile
         })
         .count();
-    // 覆盖统计以声明的清单为基准：新增判据却未登记时，uncovered 会 
+    // 覆盖统计以声明的清单为基准：新增判据却未登记时，uncovered 会
     // 从零变为正数；已评估但未登记的准则单独列在 unregistered。
     let evaluated: std::collections::BTreeSet<&str> = report
         .gate
@@ -362,7 +466,8 @@ pub fn certification_artifact(
         .map(|name| (*name).to_string())
         .collect();
     let mechanism_attributes = mechanism.map(|report| report.results.len()).unwrap_or(0);
-    let registered = REGISTERED_GATE_CRITERIA.len() + crate::mechanism_core::MechanismAttribute::all().len();
+    let registered =
+        REGISTERED_GATE_CRITERIA.len() + crate::mechanism_core::MechanismAttribute::all().len();
     let sampled = sampled_gate + mechanism_attributes;
     serde_json::json!({
         "certification_status": status,
@@ -374,7 +479,8 @@ pub fn certification_artifact(
         },
         "criteria": {
             "defects": defects,
-            "insufficient": insufficient,
+            "known_insufficient": known,
+            "new_insufficient": new_insufficient,
         },
         "coverage": {
             "registered": registered,
@@ -410,7 +516,10 @@ pub const REGISTERED_GATE_CRITERIA: [&str; 17] = [
 ];
 
 /// 逐准则的观测值与基准，供批次统计工件消费。
-pub fn batch_statistical_artifact(report: &CoreValidationReport) -> serde_json::Value {
+pub fn batch_statistical_artifact(
+    report: &CoreValidationReport,
+    params: &Params,
+) -> serde_json::Value {
     let games = report.games.len().max(1) as f64;
     let points: f64 = report
         .games
@@ -427,10 +536,13 @@ pub fn batch_statistical_artifact(report: &CoreValidationReport) -> serde_json::
         .layers
         .iter()
         .map(|layer| {
+            let band = params.policy.band(&layer.criterion);
             serde_json::json!({
                 "criterion": layer.criterion,
                 "observed": layer.observed,
                 "target": layer.target,
+                "band": { "lower": band.lower, "upper": band.upper },
+                "relative_error": layer.relative_error,
                 "passed": layer.passed,
             })
         })
@@ -446,4 +558,37 @@ pub fn batch_statistical_artifact(report: &CoreValidationReport) -> serde_json::
             "ledger_failures": report.ledger_failures,
         },
     })
+}
+
+/// 已知的机制实验不足项。登记在这里的项只记录，不阻断；未登记的
+/// 不足项按缺陷处理。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KnownInsufficient {
+    pub attribute: String,
+    pub reason: String,
+    pub required_games: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct KnownInsufficientFile {
+    entries: Vec<KnownInsufficient>,
+}
+
+pub fn load_known_insufficient(path: &Path) -> Result<Vec<KnownInsufficient>, String> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let text = std::fs::read_to_string(path).map_err(|error| {
+        format!(
+            "known-insufficient table {} unreadable: {error}",
+            path.display()
+        )
+    })?;
+    let file: KnownInsufficientFile = serde_json::from_str(&text).map_err(|error| {
+        format!(
+            "known-insufficient table {} invalid: {error}",
+            path.display()
+        )
+    })?;
+    Ok(file.entries)
 }

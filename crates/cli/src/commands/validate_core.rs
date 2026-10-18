@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use nba_sim_core::params::workspace_validation_dir;
 use nba_sim_core::Params;
 use nba_validation::core_validation::{
-    batch_statistical_artifact, certification_artifact, run_core_validation, CoreValidationReport,
+    batch_statistical_artifact, certification_artifact, load_known_insufficient,
+    run_core_validation, CoreValidationReport,
 };
 use nba_validation::mechanism_core::{run_mechanism_experiments, MechanismConfig, MechanismReport};
 
@@ -45,12 +46,18 @@ pub(crate) fn run_validate_core(
         None
     };
     let (commit, dirty) = git_state(&out_dir);
-    let certification = certification_artifact(&report, mechanism_report.as_ref(), &commit);
+    let known = load_known_insufficient(
+        &nba_sim_core::params::workspace_root().join("data/calibration/known_insufficient.json"),
+    )
+    .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let certification = certification_artifact(&report, mechanism_report.as_ref(), &commit, &known);
     write_json(&out_dir, "certification.json", &certification)?;
+    let params = Params::load(&nba_sim_core::params::workspace_calibration_dir())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     write_json(
         &out_dir,
         "batch_statistical_results.json",
-        &batch_statistical_artifact(&report),
+        &batch_statistical_artifact(&report, &params),
     )?;
     let coverage = certification
         .get("coverage")
@@ -70,6 +77,19 @@ pub(crate) fn run_validate_core(
         .get("certification_status")
         .and_then(|status| status.as_str())
         .unwrap_or("insufficient_evidence");
+    let known = certification
+        .get("criteria")
+        .and_then(|criteria| criteria.get("known_insufficient"))
+        .and_then(|items| items.as_array())
+        .map(|items| items.len())
+        .unwrap_or(0);
+    let new_insufficient = certification
+        .get("criteria")
+        .and_then(|criteria| criteria.get("new_insufficient"))
+        .and_then(|items| items.as_array())
+        .map(|items| items.len())
+        .unwrap_or(0);
+    println!("  认证：{status}（已知不足 {known} 项，未登记不足 {new_insufficient} 项）");
     Ok(match status {
         "pass" => 0,
         "defects_found" => 1,
@@ -106,7 +126,6 @@ fn write_run_record(
             "possessions": report.config.possessions,
             "low_value": report.config.low_value,
             "high_value": report.config.high_value,
-            "minimum_relative_change": report.config.minimum_relative_change,
             "passed": report.passed,
         })),
         "calibration": {
@@ -172,17 +191,36 @@ fn print_mechanism(report: &MechanismReport) {
         report.results.len(),
         report.config.seeds
     );
-    for result in &report.results {
+    for kind in ["wiring", "outcome"] {
+        let rows: Vec<_> = report
+            .results
+            .iter()
+            .filter(|result| result.evidence_kind == kind)
+            .collect();
+        if rows.is_empty() {
+            continue;
+        }
         println!(
-            "  {:<12} {:<22} {:<24} 基准 {:.4} 扰动 {:.4} 变化 {:+.2}% 预期 {}",
-            result.verdict,
-            result.attribute,
-            result.metric,
-            result.baseline,
-            result.perturbed,
-            result.relative_change * 100.0,
-            result.expectation
+            "  ── 证据类别 {}（{}）──",
+            kind,
+            if kind == "wiring" {
+                "度量直接取自消费者公式的输入，检查接线是否接通"
+            } else {
+                "度量是比赛产物，检查技巧是否改变结果"
+            }
         );
+        for result in rows {
+            println!(
+                "  {:<12} {:<22} {:<24} 基准 {:.4} 扰动 {:.4} 变化 {:+.2}% 预期 {}",
+                result.verdict,
+                result.attribute,
+                result.metric,
+                result.baseline,
+                result.perturbed,
+                result.relative_change * 100.0,
+                result.expectation
+            );
+        }
     }
     let defects = report
         .results

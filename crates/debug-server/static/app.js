@@ -2396,6 +2396,13 @@
     verdictRow.textContent = `${verdictText}（${result.games ?? "?"} 场快速批次；权威判定见下方批次总览）`;
     fragment.appendChild(verdictRow);
 
+    if (result.distribution_applicable === false) {
+      const scopeNote = document.createElement("div");
+      scopeNote.className = "validation-verdict-row verdict-insufficient";
+      scopeNote.textContent = `判定范围 ${result.scope ?? "部分比赛"}：几何、语境、账本按屏内片段判定；分布层需要整场比赛，本页不作分布判定`;
+      fragment.appendChild(scopeNote);
+    }
+
     const grid = document.createElement("div");
     grid.className = "validation-metric-grid";
     grid.append(
@@ -2475,7 +2482,7 @@
       statusRow.className = `validation-verdict-row ${statusClsMap[cert.certification_status] || "verdict-insufficient"}`;
       const criteria = cert.criteria || {};
       const ledger = cert.per_game_ledger || {};
-      statusRow.textContent = `判定结论：${statusTextMap[cert.certification_status] || cert.certification_status} · 逐场账本 ${ledger.passed ?? "?"}/${ledger.total ?? "?"} · 分布与机制缺陷 ${(criteria.defects || []).length} 项 · 效应不足 ${(criteria.insufficient || []).length} 项`;
+      statusRow.textContent = `判定结论：${statusTextMap[cert.certification_status] || cert.certification_status} · 逐场账本 ${ledger.passed ?? "?"}/${ledger.total ?? "?"} · 缺陷 ${(criteria.defects || []).length} 项 · 已知不足 ${(criteria.known_insufficient || []).length} 项 · 未登记不足 ${(criteria.new_insufficient || []).length} 项`;
       container.appendChild(statusRow);
       // 缺陷清单（引擎侧工作清单的输入）。
       for (const criterion of criteria.defects || []) {
@@ -2489,14 +2496,25 @@
         row.append(name, verdict);
         container.appendChild(row);
       }
-      for (const criterion of criteria.insufficient || []) {
+      for (const criterion of criteria.known_insufficient || []) {
         const row = document.createElement("div");
         row.className = "validation-ledger-item";
         const name = document.createElement("span");
         name.textContent = criterion;
         const verdict = document.createElement("span");
         verdict.className = "verdict-insufficient";
-        verdict.textContent = "证据不足";
+        verdict.textContent = "已知不足";
+        row.append(name, verdict);
+        container.appendChild(row);
+      }
+      for (const criterion of criteria.new_insufficient || []) {
+        const row = document.createElement("div");
+        row.className = "validation-ledger-item";
+        const name = document.createElement("span");
+        name.textContent = criterion;
+        const verdict = document.createElement("span");
+        verdict.className = "verdict-defect";
+        verdict.textContent = "未登记不足";
         row.append(name, verdict);
         container.appendChild(row);
       }

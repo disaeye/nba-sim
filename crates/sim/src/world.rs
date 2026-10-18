@@ -467,8 +467,14 @@ impl World {
         let speed = self.players[handler].effective_speed().max(1.0);
         // 推进时长 = 匀速段 + 起步加速段：加速度决定多快到达目标速度。
         let accel = self.players[handler].effective_acceleration().max(1.0);
-        let advance_seconds =
-            (advance_distance / speed + speed / accel).max(0.8) as f64;
+        // 起步段随推进距离衰减：接球时多半已在移动，长推进接近匀速。
+        let ramp_scale = self
+            .params
+            .policy
+            .w("advance_ramp_distance_ft")
+            .max(f32::EPSILON);
+        let startup = (speed / accel) * (-advance_distance / ramp_scale).exp();
+        let advance_seconds = (advance_distance / speed + startup).max(0.8) as f64;
         self.next_decision_at = self.now() + advance_seconds + POSSESSION_SETUP_SECONDS;
         self.emit(Fact::PossessionStarted {
             team,

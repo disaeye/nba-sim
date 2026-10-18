@@ -202,6 +202,13 @@ pub struct FreeThrowTable {
     pub and_one_share: f32,
 }
 
+/// 判定带宽（相对误差区间）。
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct Band {
+    pub lower: f64,
+    pub upper: f64,
+}
+
 /// 策略响应系数。由 `scripts/calibrate/fit_policy.py` 做矩匹配写入，
 /// 目标是让引擎产生的出手与回合分布贴近 `shot_profile` 与 `possession`。
 #[derive(Debug, Clone, Deserialize)]
@@ -209,17 +216,17 @@ pub struct PolicyTable {
     pub provenance: Provenance,
     pub weights: BTreeMap<String, f32>,
     #[serde(default)]
-    pub bands: BTreeMap<String, f32>,
+    pub bands: BTreeMap<String, Band>,
 }
 
 impl PolicyTable {
-    /// 判定带宽：未单独登记的准则用 `default`。
-    pub fn band(&self, criterion: &str) -> f64 {
+    /// 判定带宽（相对误差区间）：未单独登记的准则用 `default`。
+    pub fn band(&self, criterion: &str) -> Band {
         self.bands
             .get(criterion)
             .or_else(|| self.bands.get("default"))
             .copied()
-            .unwrap_or_else(|| panic!("policy table has no band for `{criterion}`")) as f64
+            .unwrap_or_else(|| panic!("policy table has no band for `{criterion}`"))
     }
     pub fn w(&self, key: &str) -> f32 {
         *self

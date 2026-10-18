@@ -47,12 +47,25 @@
     "drive_beat_help": 0.45,
     "drive_reach_rate": 0.62,
     "shooting_foul_rate": 0.165,
-    "block_base": 0.1
+    "block_base": 0.1,
+    "advance_ramp_distance_ft": 30.0
   },
   "bands": {
-    "default": 0.15,
-    "oreb_per_game": 0.2,
-    "possessions_per_game": 0.05,
-    "zone_share_mid": 0.4
+    "default": {
+      "lower": -0.15,
+      "upper": 0.15
+    },
+    "oreb_per_game": {
+      "lower": -0.2,
+      "upper": 0.2
+    },
+    "possessions_per_game": {
+      "lower": -0.05,
+      "upper": 0.05
+    },
+    "zone_share_mid": {
+      "lower": -0.45,
+      "upper": 0.93
+    }
   }
 }

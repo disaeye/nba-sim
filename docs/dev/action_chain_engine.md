@@ -84,9 +84,13 @@
 
 ### 机制实验
 
-`crates/validation/mechanism_core` 替代旧引擎的 MECH 层：每个属性跑两组，主队属性取低值（0.10）与高值（0.95），客队作为同种子对照组，比较聚合指标的变化方向。裁决分三态：`pass`（方向符合且效应达到下限）、`insufficient`（方向符合但效应低于样本可分辨下限）、`defect`（多数种子方向相反）。
+`crates/validation/mechanism_core` 替代旧引擎的 MECH 层：每个属性跑两组，主队属性取低值（0.10）与高值（0.95），客队作为同种子对照组。裁决以种子为抽样单元做配对 bootstrap：逐种子计算基准与扰动的差值，取 5%–95% 区间；区间完全落在零的预期一侧记 `pass`，跨越零记 `insufficient`，方向与预期相反记 `defect`。
 
-入项：投篮三区、罚球、速度、加速度、体能、力量、前场篮板、后场篮板、决策智商，共十一项。速度与加速度的指标是平均回合时长（更快则更短），其余用各自领域的分母/分子比率。
+结果分两类证据。`wiring` 的度量直接取自消费者公式的输入：`speed` 与 `acceleration` 的度量是 `mean_first_action_seconds`，由 `advance_seconds = distance / speed + (speed / accel) · exp(-distance / 30) + 2.3` 算出来，它只证明接线接通。`outcome` 的度量是比赛产物：三区命中率、罚球命中率、篮板率、失误率、中投出手份额，它们证明技巧改变了结果。两类在报告里分列。
+
+入项：投篮三区、罚球、速度、加速度、体能、力量、前场篮板、后场篮板、决策智商，共十一项。中投用中投出手份额（中投出手除以全队出手）而不是中投命中率：后者每场只有 8–10 次出手，32 场样本分不出效应。
+
+已登记在 `data/calibration/known_insufficient.json` 的不足项只记录，未登记的不足项按缺陷处理；`certification.json` 把两者分开写成 `known_insufficient` 与 `new_insufficient`。
 
 重实验只在 `validate-core --mechanism` 离线运行，结果写入工件目录；接口只读这个工件，不在请求里同步重跑。旧实现把上千次短跑放进一次请求，三百分秒不返回。
 
@@ -94,7 +98,7 @@
 
 ### 工件
 
-`validate-core` 写出六件：`core_validation.json`、`mechanism_core.json`、`certification.json`、`batch_statistical_results.json`、`branch_coverage.json`、`run.json`。`certification.json` 是三态总结（`pass`、`defects_found`、`insufficient_evidence`），同时供给页面认证总览；`batch_statistical_results.json` 是逐准则的观测值与基准；`branch_coverage.json` 记录实际判定过的准则数（分布准则加机制属性）。`run.json` 记录产出它们的提交、工作区是否干净、种子与场次、机制实验阈值，以及七张表各自的来源。工件目录不计入脏工作区判定，否则每次重跑都会把自己标记成脏的。
+`validate-core` 写出六件：`core_validation.json`、`mechanism_core.json`、`certification.json`、`batch_statistical_results.json`、`branch_coverage.json`、`run.json`。`certification.json` 是三态总结（`pass`、`defects_found`、`insufficient_evidence`），同时供给页面认证总览；`batch_statistical_results.json` 是逐准则的观测值、基准、带宽区间与相对误差；`branch_coverage.json` 记录实际判定过的准则数（分布准则加机制属性）。`run.json` 记录产出它们的提交、工作区是否干净、种子与场次、机制实验配置，以及七张表各自的来源。工件目录不计入脏工作区判定，否则每次重跑都会把自己标记成脏的。
 
 ## 8. 与旧引擎的边界
 

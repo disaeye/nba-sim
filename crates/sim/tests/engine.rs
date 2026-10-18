@@ -173,26 +173,28 @@ fn zone_and_creation_shares_are_complete() {
 fn three_point_skill_moves_three_point_output() {
     let base = Params::load(&workspace_calibration_dir()).expect("tables load");
     let rules = nba_domain::GameRules::default();
-    let mut setup = MatchSetup::builtin(rules.clone());
-    for player in setup.home.players.iter_mut() {
+    // 低档与高档对着同一批种子跑，主队属性分别取 0.10 与 0.95。
+    let mut low_setup = MatchSetup::builtin(rules.clone());
+    for player in low_setup.home.players.iter_mut() {
+        player.attributes.shooting_three = 0.10;
+    }
+    let mut high_setup = MatchSetup::builtin(rules.clone());
+    for player in high_setup.home.players.iter_mut() {
         player.attributes.shooting_three = 0.95;
     }
     let mut made_low = 0u32;
     let mut attempts_low = 0u32;
     let mut made_high = 0u32;
     let mut attempts_high = 0u32;
-    for seed in [41u64, 42, 43] {
-        let mut low = World::new(
-            MatchSetup::builtin(rules.clone()),
-            clone_params(&base),
-            seed,
-        );
+    // 三分命中率的种子间方差远大于技巧效应，样本取十二个种子。
+    for seed in 41u64..53 {
+        let mut low = World::new(low_setup.clone(), clone_params(&base), seed);
         let low_report = low.run();
         let low_line = low_report.box_score.team_totals(TeamSide::Home);
         made_low += low_line.tpm;
         attempts_low += low_line.tpa;
 
-        let mut high = World::new(setup.clone(), clone_params(&base), seed);
+        let mut high = World::new(high_setup.clone(), clone_params(&base), seed);
         let high_report = high.run();
         let high_line = high_report.box_score.team_totals(TeamSide::Home);
         made_high += high_line.tpm;
