@@ -127,4 +127,4 @@
 - `validation.md` §9.2 的场景目录尚未移植，`crates/sim/tests` 只有一个集成测试文件。
 - 内建名册的主客队属性相同，球队差异还没有进入引擎。
 - 检查点级统计差值对照（原 `data/reference/stat_deltas.v1.json`）没有替代品；分布层由十九项准则承接。
-- `crates/debug-server/static/app.js` 里战术与名单面板的渲染函数已不可达（面板与 `/api/studio` 已删除），它们的删除待完成；`data/tactics/plays/*.json` 也已无消费者。
+- `crates/debug-server/static/app.js` 里战术与名单面板的渲染函数已不可达（面板与 `/api/studio` 已删除），它们的删除待完成。`data/tactics/plays/*.json` 仍被 `crates/domain/tests/playbook_data.rs` 当作 PlaySpec 解析夹具使用，引擎不再读它们。
