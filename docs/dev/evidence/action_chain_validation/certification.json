@@ -1,16 +1,20 @@
 {
-  "certification_status": "pass",
-  "commit": "3671a9b0cd71cba65cffa7e6a836622c23ec78ab",
+  "certification_status": "insufficient_evidence",
+  "commit": "4258efe5a37df5398c6892a9bcd4dfc371268025",
   "coverage": {
     "gate_criteria": 17,
     "mechanism_attributes": 11,
     "registered": 28,
     "sampled": 28,
-    "uncovered": 0
+    "uncovered": 0,
+    "unregistered": []
   },
   "criteria": {
     "defects": [],
-    "insufficient": []
+    "insufficient": [
+      "mechanism:shooting_mid",
+      "mechanism:stamina"
+    ]
   },
   "games": 32,
   "per_game_ledger": {

@@ -3,5 +3,6 @@
   "mechanism_attributes": 11,
   "registered": 28,
   "sampled": 28,
-  "uncovered": 0
+  "uncovered": 0,
+  "unregistered": []
 }
