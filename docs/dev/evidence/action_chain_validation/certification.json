@@ -1,10 +1,10 @@
 {
   "certification_status": "pass",
-  "commit": "59fb1a0363e2d688287afa37e6958b4b91cee962",
+  "commit": "a0e07b0112edfe730fbe936bdd732713eb218846",
   "coverage": {
     "gate_criteria": 17,
     "mechanism_attributes": 11,
-    "not_applicable": 1,
+    "not_applicable": 0,
     "registered": 28,
     "sampled": 28,
     "uncovered": 0,
@@ -13,10 +13,12 @@
   "criteria": {
     "defects": [],
     "known_insufficient": [],
+    "marginal": [
+      "mechanism:shooting_mid（下界比 0.39）",
+      "mechanism:stamina（下界比 0.24）"
+    ],
     "new_insufficient": [],
-    "not_applicable": [
-      "mechanism:shooting_mid（中投出手份额由长两分惩罚与距离项主导：技巧只改变命中率，对出手选择的边际效应低于千分之一，放大场次也分不出方向）"
-    ]
+    "not_applicable": []
   },
   "games": 32,
   "per_game_ledger": {
