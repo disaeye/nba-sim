@@ -284,9 +284,7 @@ build_tick                   // 快照输出（无副作用）
 
 ### 4.3 状态组划分
 
-`MatchEngine` 的字段收敛为十个具名状态组（ADR-014 时的 82 字段；后续周期的
-字段归并与新增以 `crates/engine/src/match_engine/state.rs` 为单一事实源，本节
-注释中的分组与计数随状态组演进同步，不再另行维护总数）。分组依据是**写入点的同现关系**（同一函数同时写入的字段归入同组）：
+`MatchEngine` 的字段收敛为十个具名状态组（ADR-014 时的 82 字段）。这套分组属于已删除的旧引擎，当前内核的状态见 `crates/sim/src/state.rs`。分组依据是**写入点的同现关系**（同一函数同时写入的字段归入同组）：
 
 ```rust
 pub struct MatchEngine {
@@ -329,10 +327,9 @@ pub struct MatchEngine {
 
 **分组定义访问路径**。状态组的字段以 `pub(crate)` 对同 crate 的模块可见，模块通过
 `self.clock.game_clock` 这样的具名路径访问；一个阶段拿不到它没有在签名里声明的组。
-字段归错组从「无代价」变为类型不匹配。组定义在 `crates/engine/src/match_engine/state.rs`，
-由 `scripts/check_engine_state_groups.py` 守卫（断言零裸字段、组字段不泄出 crate、`mod.rs` ≤ 400 行）。
+字段归错组从「无代价」变为类型不匹配。组定义与对应的守卫都已随旧引擎删除；当前内核按 `crates/sim/src/world.rs` 的单一路径推进。
 
-**空间量的单一事实源（ADR-015）**：球员级空间事实的唯一实现是 `crates/physics/src/spatial.rs` 的 `SpatialGeometry`（经 `SpatialPhysics::openness` / `pass_corridor` 被 decision 与 semantics 读取）；全场弱侧拓扑（下沉护筐、空间真空、X-Out 轮转）不再是独立的持久对象，而是由 `crates/decision/src/potential_field.rs` 的 `DefensePotentialFieldSolver` 在求解时从在场进攻球员位置即时涌现。两者分别对应球员级事实与决策目标，不重叠。
+**空间量的单一事实源（ADR-015，旧引擎）**：球员级空间事实由旧引擎的几何层统一提供，全场弱侧拓扑由防守势场求解器在求解时从在场进攻球员位置即时涌现。这两个实现随旧引擎一起删除；当前内核的空间量见 `crates/sim/src/state.rs` 与 `crates/domain/src/court.rs`。
 
 **未采用的形式**：不把 `MatchEngine` 换成纯数据 `World` 加无状态 System 管线。大量字段存在多写入点、单个阶段函数跨多个状态组、弹道裁决块引用大量状态字段并调用多个引擎方法；在该形态下把字段按 `&mut` 解构传给窄签名函数需要重写这些函数体，行为等价性无法由黄金哈希证明。具体分布数据与代价收益比较见 ADR-014。
 

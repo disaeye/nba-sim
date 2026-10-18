@@ -1,6 +1,6 @@
 # 当前执行队列
 
-> 状态：本文是旧引擎的 R1–R12 队列。动作链内核的设计与验收见 `docs/dev/action_chain_engine.md`。
+> 状态：本文是旧引擎的 R1–R12 队列。旧引擎的包已删除，本文归档为历史记录；当前验收与缺口见 `docs/dev/action_chain_engine.md`。
 
 > 文档类型：当前未完成工作的执行顺序。
 > 已结束周期的设计和实测保留在 `docs/dev/cycles/` 与 `docs/dev/evidence/`。

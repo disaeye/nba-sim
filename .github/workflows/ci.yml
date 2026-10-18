@@ -120,7 +120,7 @@ jobs:
           else
             echo "rust_changed=false" >> $GITHUB_OUTPUT
           fi
-          CORE_PATTERN='^crates/(engine|physics|decision|officiating|domain|sim|validation|debug-server)/'
+          CORE_PATTERN='^crates/(domain|protocol|sim|validation|debug-server|cli|bball-wasm)/'
           if echo "$DIFF" | grep -qE "$CORE_PATTERN"; then
             echo "core_changed=true" >> $GITHUB_OUTPUT
           else
@@ -151,12 +151,7 @@ jobs:
           python3 scripts/check_no_index_identity.py --self-test
           python3 scripts/check_threshold_integrity.py
           python3 scripts/check_threshold_integrity.py --self-test
-          python3 scripts/check_world_privacy.py
-          python3 scripts/check_world_privacy.py --self-test
-          python3 scripts/check_engine_state_groups.py
-          python3 scripts/check_engine_state_groups.py --self-test
-          python3 scripts/check_ball_state_writes.py
-          python3 scripts/check_ball_state_writes.py --self-test
+          python3 scripts/check_r6_tendency_wiring.py
           python3 scripts/check_docs.py
           python3 scripts/check_max_source_lines.py
           python3 scripts/check_max_source_lines.py --self-test
@@ -193,22 +188,14 @@ jobs:
           # 全包已覆盖，重复跑只是多付一份固定开销。
           - name: nba-domain
             command: cargo test -p nba-domain
+          - name: nba-protocol
+            command: cargo test -p nba-protocol
           - name: nba-sim-core
             command: cargo test -p nba-sim-core
           - name: nba-wasm
             command: cargo test -p nba-wasm
           - name: nba-validation-mechanism
             command: cargo test -p nba-validation --test mechanism
-          - name: nba-invariants
-            command: cargo test -p nba-invariants
-          - name: world-state-equivalence
-            command: cargo test -p nba-engine --test world_state_equivalence
-          - name: engine-snapshot
-            command: cargo test -p nba-engine --test engine_snapshot
-          - name: projection
-            command: cargo test -p nba-engine --test projection
-          - name: golden-hash
-            command: cargo test -p nba-engine --test golden_hash
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -234,28 +221,11 @@ jobs:
       matrix:
         include:
           # 按包合并：每个测试单列一个 job 时，固定开销（checkout + 工具链
-          # + 缓存恢复 + 编译链接）比测试本身还贵。decision 全包一个 job；
-          # engine 的短测试集中一个 job（长测试 stats_baseline 与
-          # defense_rotation_response 仍是独立的 Tier 3 / D26 独占环节）。
-          - name: nba-decision
-            command: cargo test -p nba-decision
+          # + 缓存恢复 + 编译链接）比测试本身还贵。
           - name: nba-debug-server
             command: cargo test -p nba-debug-server
-          - name: nba-engine-core
-            command: >-
-              cargo test -p nba-engine
-              --test attribute_perturbation
-              --test block
-              --test decision_wiring
-              --test defense
-              --test rules_complete_wiring
-              --test wiring_proof
-              --test defense_effect
-              --test fiba_scenarios
-              --test playbook_setup
-              --test action_phase_projection
-              --test shot_release_timing
-              --test identity_projection
+          - name: nba-validation
+            command: cargo test -p nba-validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -269,12 +239,12 @@ jobs:
       - name: Run Tier 2 target
         run: ${{ matrix.command }} -- --test-threads "$(nproc)"
 
-  d26_test:
+  tier3_tests:
     needs: [change_detection, tier2_tests]
     if: |
       needs.change_detection.outputs.is_full == 'true' ||
       needs.change_detection.outputs.core_changed == 'true'
-    name: D26 full-game response
+    name: Tier 3 (batch validation)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -285,33 +255,6 @@ jobs:
           CPUS="$(nproc)"
           echo "Runner CPUs: ${CPUS}"
           echo "CARGO_BUILD_JOBS=${CPUS}" >> "$GITHUB_ENV"
-      - name: Run D26 full-game response target exclusively
-        run: >-
-          python3 scripts/par_test.py --include
-          '^nba-engine::defense_rotation_response$' --serial
-          '^nba-engine::defense_rotation_response$' --jobs 1
-          --threads-per-bin 1
-
-  tier3_tests:
-    needs: [change_detection, d26_test]
-    if: |
-      needs.change_detection.outputs.is_full == 'true' ||
-      needs.change_detection.outputs.core_changed == 'true'
-    name: Tier 3 (stats baselines)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Configure runner parallelism
-        run: |
-          CPUS="$(nproc)"
-          echo "Runner CPUs: ${CPUS}"
-          echo "CARGO_BUILD_JOBS=${CPUS}" >> "$GITHUB_ENV"
-      - name: Run Tier 3 macro sanity net
-        run: >-
-          cargo test -p nba-engine --test stats_baseline -- --nocapture
-          --test-threads "$(nproc)"
       - name: Run action-chain batch validation
         run: |
           cargo build --release -p nba-sim-cli
@@ -337,7 +280,6 @@ jobs:
       - clippy
       - fast_test
       - tier2_tests
-      - d26_test
       - tier3_tests
     if: |
       always() &&
@@ -351,7 +293,6 @@ jobs:
           CLIPPY_RESULT: ${{ needs.clippy.result }}
           FAST_TEST_RESULT: ${{ needs.fast_test.result }}
           TIER2_RESULT: ${{ needs.tier2_tests.result }}
-          D26_RESULT: ${{ needs.d26_test.result }}
           TIER3_RESULT: ${{ needs.tier3_tests.result }}
         run: |
           for result in "$LINT_RESULT" "$CLIPPY_RESULT" "$FAST_TEST_RESULT"; do
@@ -361,11 +302,10 @@ jobs:
             fi
           done
           if [[ "$TIER2_RESULT" != "success" ]] ||
-             [[ "$D26_RESULT" != "success" ]] ||
              [[ "$TIER3_RESULT" != "success" ]]; then
             printf 'Full-gate jobs did not all pass:\n'
-            printf 'Tier 2=%s, D26=%s, Tier 3=%s\n' \
-              "$TIER2_RESULT" "$D26_RESULT" "$TIER3_RESULT"
+            printf 'Tier 2=%s, Tier 3=%s\n' \
+              "$TIER2_RESULT" "$TIER3_RESULT"
             exit 1
           fi
           echo "All parallel full-gate jobs passed."
@@ -378,7 +318,6 @@ jobs:
       - clippy
       - fast_test
       - full_gate
-      - d26_test
     if: >-
       always() &&
       needs.lint_commit.result == 'success' &&
@@ -389,8 +328,6 @@ jobs:
        needs.fast_test.result == 'skipped') &&
       (needs.full_gate.result == 'success' ||
        needs.full_gate.result == 'skipped') &&
-      (needs.d26_test.result == 'success' ||
-       needs.d26_test.result == 'skipped') &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:

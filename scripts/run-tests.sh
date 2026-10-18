@@ -11,20 +11,16 @@
 #   3. 结束后再次检查并报告磁盘变化。
 #
 # 用法：
-#   ./scripts/run-tests.sh tier1      # CI fast-test 层：不变量与隔离测试（分钟级）
-#   ./scripts/run-tests.sh tier2      # CI full-gate 层：机制与因果测试
-#   ./scripts/run-tests.sh tier3      # 8 种子全场统计基线（最重，建议后台任务执行）
-#   ./scripts/run-tests.sh tier2+3    # CI full-gate 等价：tier2 与 tier3 连续执行
-#   ./scripts/run-tests.sh validation # validation 体系：验证器/引擎分叉/扰动 + CLI 快检
-#   ./scripts/run-tests.sh -- ...     # 传统全量 workspace 测试（不受 CI 依赖，最重）
+#   ./scripts/run-tests.sh tier1      # CI fast-test 层：domain、protocol、wasm（秒级）
+#   ./scripts/run-tests.sh tier2      # 判定与调试服务：nba-validation、nba-debug-server
+#   ./scripts/run-tests.sh tier3      # 动作链内核的整场测试（十二个种子）
+#   ./scripts/run-tests.sh tier2+3    # tier2 与 tier3 连续执行
+#   ./scripts/run-tests.sh validation # validation 体系：验证目标 + CLI 32 场批次与机制实验
+#   ./scripts/run-tests.sh -- ...     # 全量 workspace 测试（不受 CI 依赖）
 #
 # 全部模式都经 scripts/par_test.py 并行执行：cargo 自身按目标串行调度，
-# 4 核机器上全量超过 1000s；按目标并行 + 目标内多种子并行后实测约 950s。
-# 4 核 / 3.7GB 内存下全量 5 分钟不可达：总核秒约 2400，理论下限 600s，
-# 且多路全场模拟同跑会触发 OOM（实测 stats_baseline 与其他重目标同跑
-# 被内核杀掉，par_test 已把 stats_baseline 排除出并行池串行独占）。
-# 日常验证用 tier1（约 1 分钟）/ tier2（约 4 分钟）/ tier2+3（约 11 分钟），
-# 全量留在提交前或 CI。
+# 按目标并行后 4 核机器上秒级完成。
+# 日常验证用 tier1 / tier2，提交前用 validation。
 set -uo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -51,11 +47,11 @@ fail() {
 }
 
 # ── 分层选择由 par_test.py 根据 Cargo metadata 执行并核对 ──
-# tier1：nba-domain、nba-invariants、快照、投影与 golden hash。
-# tier2：机制与因果目标，加上 Play、D25 action_phase 与 D26 整场测试。
-# tier3：stats_baseline 整场测试。D26 与 stats_baseline 均由 --serial 独占运行。
-# validation：nba-validation 全目标 + 引擎检查点分叉/扰动测试；随后跑
-#   CLI validate-core（16 场批次 + 机制实验）并写出工件。
+# tier1：nba-domain、nba-protocol、nba-wasm。
+# tier2：nba-validation、nba-debug-server。
+# tier3：nba-sim-core 整场测试。
+# validation：nba-validation 与 nba-sim-core 全目标；随后跑
+#   CLI validate-core（32 场批次 + 机制实验）并写出工件。
 MODE="${1:-}"
 shift || true
 if [ "$MODE" = "--" ]; then

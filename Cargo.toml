@@ -2,19 +2,11 @@
 resolver = "2"
 members = [
     "crates/domain",
-    "crates/physics",
-    "crates/decision",
-    "crates/officiating",
-    "crates/engine",
     "crates/protocol",
     "crates/cli",
     "crates/debug-server",
-    "crates/semantics",
-    "crates/invariants",
-    "crates/evaluator",
     "crates/bball-wasm",
     "crates/sim",
-    "crates/test-support",
     "crates/validation",
 ]
 [workspace.package]
@@ -27,24 +19,15 @@ rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 flate2 = "1.1"
-rapier2d = "0.18"
 rand_chacha = "0.3"
 rayon = "1.10"
 wasm-bindgen = "0.2"
 
 # Internal crates
 nba-domain = { path = "crates/domain" }
-nba-physics = { path = "crates/physics" }
-nba-decision = { path = "crates/decision" }
-nba-officiating = { path = "crates/officiating" }
-nba-engine = { path = "crates/engine" }
-nba-evaluator = { path = "crates/evaluator" }
 nba-protocol = { path = "crates/protocol" }
-nba-semantics = { path = "crates/semantics" }
-nba-invariants = { path = "crates/invariants" }
-nba-test-support = { path = "crates/test-support" }
-nba-validation = { path = "crates/validation" }
 nba-sim-core = { path = "crates/sim" }
+nba-validation = { path = "crates/validation" }
 
 [profile.dev]
 opt-level = 1
@@ -57,12 +40,3 @@ lto = "thin"
 codegen-units = 1
 panic = "abort"
 debug = 0
-
-[profile.test]
-opt-level = 1
-debug = 0
-incremental = false
-
-[profile.bench]
-opt-level = 3
-lto = "thin"

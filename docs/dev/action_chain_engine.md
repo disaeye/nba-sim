@@ -102,15 +102,13 @@
 
 `validate-core` 写出六件：`core_validation.json`、`mechanism_core.json`、`certification.json`、`batch_statistical_results.json`、`branch_coverage.json`、`run.json`。`certification.json` 是三态总结（`pass`、`defects_found`、`insufficient_evidence`），同时供给页面认证总览；`batch_statistical_results.json` 是逐准则的观测值、基准、带宽区间与相对误差；`branch_coverage.json` 记录实际判定过的准则数（分布准则加机制属性）。`run.json` 记录产出它们的提交、工作区是否干净、种子与场次、机制实验配置，以及七张表各自的来源。工件目录不计入脏工作区判定，否则每次重跑都会把自己标记成脏的。
 
-## 8. 与旧引擎的边界
+## 8. 旧引擎的删除
 
-调试服务器 `/api/session/*` 与会话命令已改指向 `SessionService`；`/api/simulate` 新增 `engine` 字段，取 `core` 时走本内核，缺省为 `core`。`/api/validation/run` 与 `/api/validation/report` 对缓存种子重放 `core_validation`，`/api/validation/layers` 与 `/api/validation/certification` 读 `validate-core` 写入的工件。验证面板已不再消费旧引擎。
+旧引擎的四个包（`engine`、`decision`、`officiating`、`evaluator`）与只服务它们的 `physics`、`semantics`、`invariants`、`test-support` 已从工作区删除，命令行只剩 `sim-core` 与 `validate-core`，`crates/validation` 只剩 `core_validation` 与 `mechanism_core`。`parquet`、`rusqlite`、`arrow` 三个依赖随之退出。
 
-保留：球场几何、联赛档案、时钟、协议层、确定性框架、命令行批量、回放投影。
+调试服务器只保留新内核：`/api/simulate` 只接受 `seed` 与 `scope`，`/api/session/*` 指向 `SessionService`，`/api/validation/*` 读 `validate-core` 的工件。`/api/studio` 与战术、名单面板已删除：新内核没有战术与 Play，这些面板没有可配置的对象。
 
-新建：动作链、策略、结算、球员级箱体、判定。
-
-待删除：旧的逐 tick 概率裁定、球弹道结算、效用决策、软约束管线、旧准则集，以及 `crates/evaluator` 与 `crates/validation` 的旧模块。
+旧引擎的设计记录保留在 `docs/decisions.md` 与 `docs/dev/cycles/`，作为历史，不再维护。
 
 ## 9. 已知缺口
 
@@ -120,4 +118,4 @@
 - 回合结算的篮板归属只按能力与位置加权，没有卡位动作。
 - `validation.md` §9.2 的场景目录尚未移植，`crates/sim/tests` 只有一个集成测试文件。
 - 内建名册的主客队属性相同，球队差异还没有进入引擎。
-- 删除旧引擎需要先把命令行旧命令与 `crates/validation` 的旧模块迁走。
+- 检查点级统计差值对照（原 `data/reference/stat_deltas.v1.json`）没有替代品；分布层由十七项准则承接。

@@ -83,8 +83,6 @@
               <span id="awayTeamName" class="team-title">南湾水手</span>
             </div>
             <div class="team-extra-meta">
-              <span id="awayTacticTag" class="team-tactic-tag">攻 · —</span>
-              <span class="team-def-tag" id="awayDefTag">守 · —</span>
               <span class="team-fouls-indicator">犯规 <b id="awayFouls">0</b></span>
             </div>
           </div>
@@ -112,8 +110,6 @@
               <span class="team-glow-dot home-dot"></span>
             </div>
             <div class="team-extra-meta">
-              <span id="homeTacticTag" class="team-tactic-tag">攻 · —</span>
-              <span class="team-def-tag" id="homeDefTag">守 · —</span>
               <span class="team-fouls-indicator">犯规 <b id="homeFouls">0</b></span>
             </div>
           </div>
@@ -379,7 +375,7 @@
           </div>
           <div>
             <h3 class="settings-title">推演与比赛设置中心</h3>
-            <span class="settings-subtitle">集中配置推演环境、球队战术、球员名单与引擎规则</span>
+            <span class="settings-subtitle">集中配置推演环境与引擎规则</span>
           </div>
         </div>
         <button id="closeSettingsBtn" class="btn-close-sheet" type="button" title="关闭设置">✕</button>
@@ -389,12 +385,6 @@
         <nav class="settings-sidebar">
           <button class="settings-nav-item active" type="button" data-pane="env">
             <span class="nav-item-text">推演环境参数</span>
-          </button>
-          <button class="settings-nav-item" type="button" data-pane="tactics">
-            <span class="nav-item-text">球队战术体系</span>
-          </button>
-          <button class="settings-nav-item" type="button" data-pane="roster">
-            <span class="nav-item-text">阵容球员档案</span>
           </button>
           <button class="settings-nav-item" type="button" data-pane="rules">
             <span class="nav-item-text">比赛规则物理</span>
@@ -450,54 +440,6 @@
               <button id="sheetUploadTriggerBtn" class="btn-outline-block" type="button">
                 选择 NDJSON 轨迹文件导入
               </button>
-            </div>
-          </div>
-
-          <!-- Pane: 球队战术体系（配置 + 战术沙盘与百科） -->
-          <div id="pane-tactics" class="settings-pane">
-            <div class="settings-group">
-              <div class="group-title">执教球队视角</div>
-              <div class="group-desc">选择要查看和调配战术的单方队伍</div>
-              <div class="sheet-team-selector">
-                <button id="sheetTeamHomeBtn" class="sheet-team-btn active" type="button">
-                  <span class="perspective-dot home-dot"></span>
-                  <span id="sheetHomeTeamName">北城老鹰 (主队)</span>
-                </button>
-                <button id="sheetTeamAwayBtn" class="sheet-team-btn" type="button">
-                  <span class="perspective-dot away-dot"></span>
-                  <span id="sheetAwayTeamName">南湾水手 (客队)</span>
-                </button>
-              </div>
-            </div>
-
-            <div class="settings-group">
-              <div class="group-title">战术研讨与沙盘手册</div>
-              <div class="group-desc">当前执教队伍的战术配置、路线沙盘与执行手册</div>
-              <div id="tacticBoard" class="sheet-tactic-board"></div>
-            </div>
-          </div>
-
-          <!-- Pane: 阵容球员档案 -->
-          <div id="pane-roster" class="settings-pane">
-            <div class="settings-group">
-              <div class="group-title">执教球队视角</div>
-              <div class="group-desc">切换查看主队或客队的球员档案</div>
-              <div class="sheet-team-selector">
-                <button id="rosterTeamHomeBtn" class="sheet-team-btn active" type="button">
-                  <span class="perspective-dot home-dot"></span>
-                  <span id="rosterHomeTeamName">北城老鹰 (主队)</span>
-                </button>
-                <button id="rosterTeamAwayBtn" class="sheet-team-btn" type="button">
-                  <span class="perspective-dot away-dot"></span>
-                  <span id="rosterAwayTeamName">南湾水手 (客队)</span>
-                </button>
-              </div>
-            </div>
-
-            <div class="settings-group">
-              <div class="group-title">球员资料库</div>
-              <div class="group-desc">名单、角色与关键属性</div>
-              <div id="rosterStudio" class="sheet-roster-studio"></div>
             </div>
           </div>
 

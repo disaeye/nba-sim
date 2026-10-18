@@ -5,10 +5,7 @@ edition.workspace = true
 
 [dependencies]
 nba-domain.workspace = true
-nba-engine.workspace = true
 nba-sim-core.workspace = true
-nba-invariants.workspace = true
-nba-protocol.workspace = true
 nba-validation = { path = "../validation" }
 serde_json.workspace = true
 serde.workspace = true

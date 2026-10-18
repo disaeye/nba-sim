@@ -15,45 +15,20 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 TIER_SELECTORS = {
     "tier1": (
-        ("target", "nba-domain::nba_domain"),
-        ("target", "nba-domain::ball_ownership"),
-        ("target", "nba-domain::game_flow_transitions"),
-        ("target", "nba-domain::rules_geometry"),
-        ("package", "nba-invariants"),
-        ("target", "nba-engine::world_state_equivalence"),
-        ("target", "nba-engine::engine_snapshot"),
-        ("target", "nba-engine::projection"),
-        ("target", "nba-engine::golden_hash"),
+        ("package", "nba-domain"),
+        ("package", "nba-protocol"),
+        ("package", "nba-wasm"),
     ),
     "tier2": (
-        ("target", "nba-decision::defense_responsibility_chain"),
-        ("target", "nba-engine::nba_engine"),
-        ("target", "nba-engine::attribute_perturbation"),
-        ("target", "nba-engine::block"),
-        ("target", "nba-engine::decision_wiring"),
-        ("target", "nba-engine::defense"),
-        ("target", "nba-engine::rules_complete_wiring"),
-        ("target", "nba-engine::wiring_proof"),
-        ("target", "nba-engine::defense_effect"),
-        ("target", "nba-engine::fiba_scenarios"),
-        ("target", "nba-domain::play_spec"),
-        ("target", "nba-domain::playbook_data"),
-        ("target", "nba-decision::play_selector"),
-        ("target", "nba-decision::play_actions"),
-        ("target", "nba-decision::play_decision"),
-        ("target", "nba-engine::playbook_setup"),
-        ("target", "nba-engine::action_phase_projection"),
-        ("target", "nba-engine::shot_release_timing"),
-        ("target", "nba-engine::identity_projection"),
-        ("target", "nba-engine::defense_rotation_response"),
+        ("package", "nba-validation"),
+        ("package", "nba-debug-server"),
     ),
     "tier3": (
-        ("target", "nba-engine::stats_baseline"),
+        ("package", "nba-sim-core"),
     ),
     "validation": (
         ("package", "nba-validation"),
-        ("target", "nba-engine::fork_continuation"),
-        ("target", "nba-engine::perturbation"),
+        ("package", "nba-sim-core"),
     ),
 }
 
@@ -62,40 +37,31 @@ TIER_REQUIRED_TARGETS = {
         "nba-domain::nba_domain",
         "nba-domain::ball_ownership",
         "nba-domain::game_flow_transitions",
-        "nba-domain::rules_geometry",
-        "nba-invariants::checker",
-        "nba-invariants::nba_invariants",
-    },
-    "tier2": {
         "nba-domain::play_spec",
         "nba-domain::playbook_data",
-        "nba-decision::play_selector",
-        "nba-decision::play_actions",
-        "nba-decision::play_decision",
-        "nba-engine::playbook_setup",
-        "nba-engine::action_phase_projection",
-        "nba-engine::shot_release_timing",
-        "nba-engine::identity_projection",
-        "nba-engine::nba_engine",
-        "nba-engine::defense_rotation_response",
+        "nba-domain::rules_geometry",
+        "nba-protocol::nba_protocol",
+        "nba-wasm::nba_wasm",
+    },
+    "tier2": {
+        "nba-validation::nba_validation",
+        "nba-validation::mechanism",
+        "nba-debug-server::nba-debug-server",
     },
     "tier3": {
-        "nba-engine::stats_baseline",
+        "nba-sim-core::nba_sim_core",
+        "nba-sim-core::engine",
     },
     "validation": {
-        "nba-validation::nba_validation",
-        "nba-validation::mech_experiment",
-        "nba-validation::validation_integration",
-        "nba-engine::fork_continuation",
-        "nba-engine::perturbation",
+        "nba-validation::mechanism",
+        "nba-sim-core::engine",
     },
 }
 
-SERIAL_PATTERN = r"^nba-engine::(?:stats_baseline|defense_rotation_response)$"
-SERIAL_TARGETS = {
-    "nba-engine::stats_baseline",
-    "nba-engine::defense_rotation_response",
-}
+# 当前内核的整场测试不独占：release 下十二个种子约六秒，与其他目标同跑
+# 不会抢内存。保留空串模式以便以后出现确需独占的目标时直接登记。
+SERIAL_PATTERN = r"^$"
+SERIAL_TARGETS = set()
 
 
 def load_test_targets():
