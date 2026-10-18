@@ -47,8 +47,7 @@
     "drive_beat_help": 0.45,
     "drive_reach_rate": 0.62,
     "shooting_foul_rate": 0.165,
-    "block_base": 0.1,
-    "advance_ramp_distance_ft": 30.0
+    "block_base": 0.1
   },
   "bands": {
     "default": {
@@ -67,5 +66,8 @@
       "lower": -0.45,
       "upper": 0.93
     }
+  },
+  "geometry": {
+    "advance_ramp_distance_ft": 30.0
   }
 }

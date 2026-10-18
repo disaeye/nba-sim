@@ -471,7 +471,7 @@ impl World {
         let ramp_scale = self
             .params
             .policy
-            .w("advance_ramp_distance_ft")
+            .g("advance_ramp_distance_ft")
             .max(f32::EPSILON);
         let startup = (speed / accel) * (-advance_distance / ramp_scale).exp();
         let advance_seconds = (advance_distance / speed + startup).max(0.8) as f64;

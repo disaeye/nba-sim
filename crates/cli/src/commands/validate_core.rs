@@ -89,7 +89,15 @@ pub(crate) fn run_validate_core(
         .and_then(|items| items.as_array())
         .map(|items| items.len())
         .unwrap_or(0);
-    println!("  认证：{status}（已知不足 {known} 项，未登记不足 {new_insufficient} 项）");
+    let not_applicable = certification
+        .get("criteria")
+        .and_then(|criteria| criteria.get("not_applicable"))
+        .and_then(|items| items.as_array())
+        .map(|items| items.len())
+        .unwrap_or(0);
+    println!(
+        "  认证：{status}（已知不足 {known} 项，未登记不足 {new_insufficient} 项，结构上不适用 {not_applicable} 项）"
+    );
     Ok(match status {
         "pass" => 0,
         "defects_found" => 1,
@@ -210,18 +218,28 @@ fn print_mechanism(report: &MechanismReport) {
             }
         );
         for result in rows {
+            let bound = result
+                .lower_bound_ratio
+                .map(|ratio| format!("{ratio:.2}"))
+                .unwrap_or_else(|| "-".to_string());
+            let percent = |value: f64| value * 100.0;
             println!(
-                "  {:<12} {:<22} {:<24} 基准 {:.4} 扰动 {:.4} 变化 {:+.2}% 区间 [{:+.2}%, {:+.2}%] 预期 {}",
+                "  {:<14} {:<22} {:<24} 基准 {:.4} 扰动 {:.4} 变化 {:+.2}% 区间 [{:+.2}%, {:+.2}%] 下界比 {} 预期 {}{}",
                 result.verdict,
                 result.attribute,
                 result.metric,
                 result.baseline,
                 result.perturbed,
-                result.relative_change * 100.0,
-                result.ci_low * 100.0,
-                result.ci_high * 100.0,
-                result.expectation
+                percent(result.relative_change),
+                percent(result.ci_low),
+                percent(result.ci_high),
+                bound,
+                result.expectation,
+                if result.marginal { "（边缘）" } else { "" }
             );
+            if !result.reason.is_empty() {
+                println!("                 原因：{}", result.reason);
+            }
         }
     }
     let defects = report
@@ -234,11 +252,17 @@ fn print_mechanism(report: &MechanismReport) {
         .iter()
         .filter(|result| result.verdict == "insufficient")
         .count();
+    let not_applicable = report
+        .results
+        .iter()
+        .filter(|result| result.verdict == "not_applicable")
+        .count();
     println!(
-        "  结论：缺陷 {} 项 · 效应不足以分辨 {} 项 · 通过 {} 项",
+        "  结论：缺陷 {} 项 · 结构上不适用 {} 项 · 效应不足以分辨 {} 项 · 通过 {} 项",
         defects,
+        not_applicable,
         insufficient,
-        report.results.len() - defects - insufficient
+        report.results.len() - defects - insufficient - not_applicable
     );
 }
 

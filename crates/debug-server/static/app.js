@@ -2482,7 +2482,7 @@
       statusRow.className = `validation-verdict-row ${statusClsMap[cert.certification_status] || "verdict-insufficient"}`;
       const criteria = cert.criteria || {};
       const ledger = cert.per_game_ledger || {};
-      statusRow.textContent = `判定结论：${statusTextMap[cert.certification_status] || cert.certification_status} · 逐场账本 ${ledger.passed ?? "?"}/${ledger.total ?? "?"} · 缺陷 ${(criteria.defects || []).length} 项 · 已知不足 ${(criteria.known_insufficient || []).length} 项 · 未登记不足 ${(criteria.new_insufficient || []).length} 项`;
+      statusRow.textContent = `判定结论：${statusTextMap[cert.certification_status] || cert.certification_status} · 逐场账本 ${ledger.passed ?? "?"}/${ledger.total ?? "?"} · 缺陷 ${(criteria.defects || []).length} 项 · 已知不足 ${(criteria.known_insufficient || []).length} 项 · 未登记不足 ${(criteria.new_insufficient || []).length} 项 · 当前不适用 ${(criteria.not_applicable || []).length} 项`;
       container.appendChild(statusRow);
       // 缺陷清单（引擎侧工作清单的输入）。
       for (const criterion of criteria.defects || []) {
@@ -2515,6 +2515,17 @@
         const verdict = document.createElement("span");
         verdict.className = "verdict-defect";
         verdict.textContent = "未登记不足";
+        row.append(name, verdict);
+        container.appendChild(row);
+      }
+      for (const criterion of criteria.not_applicable || []) {
+        const row = document.createElement("div");
+        row.className = "validation-ledger-item";
+        const name = document.createElement("span");
+        name.textContent = criterion;
+        const verdict = document.createElement("span");
+        verdict.className = "verdict-insufficient";
+        verdict.textContent = "当前不适用";
         row.append(name, verdict);
         container.appendChild(row);
       }
@@ -2557,7 +2568,12 @@
       // 机制实验：按证据类别分两组，接线证据与产物证据不能互相代替。
       const mech = body.mechanism;
       if (mech && Array.isArray(mech.results) && mech.results.length) {
-        const verdictZh = { pass: "通过", insufficient: "效应不足", defect: "方向相反" };
+        const verdictZh = {
+          pass: "通过",
+          insufficient: "效应不足",
+          defect: "方向相反",
+          not_applicable: "当前不适用",
+        };
         const kindZh = {
           wiring: "接线证据（度量直接取自消费者公式的输入）",
           outcome: "产物证据（度量是比赛产物）",
@@ -2573,7 +2589,10 @@
             const row = document.createElement("div");
             row.className = "validation-ledger-item";
             const name = document.createElement("span");
-            name.textContent = `${result.attribute} · ${result.metric} · ${Number(result.baseline).toFixed(3)} → ${Number(result.perturbed).toFixed(3)}（${(result.relative_change * 100).toFixed(1)}%）`;
+            const interval = `[${(Number(result.ci_low) * 100).toFixed(1)}%, ${(Number(result.ci_high) * 100).toFixed(1)}%]`;
+            const marginal = result.marginal ? " · 边缘通过" : "";
+            const reason = result.reason ? ` · ${result.reason}` : "";
+            name.textContent = `${result.attribute} · ${result.metric} · ${Number(result.baseline).toFixed(3)} → ${Number(result.perturbed).toFixed(3)}（${(result.relative_change * 100).toFixed(1)}%） · 区间 ${interval}${marginal}${reason}`;
             const verdict = document.createElement("span");
             const verdictKey = result.verdict === "pass" ? "pass" : result.verdict === "defect" ? "defect" : "insufficient";
             verdict.className = `verdict-${verdictKey}`;

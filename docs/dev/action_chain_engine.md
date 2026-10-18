@@ -55,7 +55,7 @@
 | `formations` | 半场落位坐标 | 阵型几何 |
 | `policy` | 策略权重、结算速率、封盖参数 | 矩匹配 |
 
-`scripts/calibrate/fit_tables.py` 从原始数据生成前五张表；`scripts/calibrate/fit_policy.py` 用矩匹配调整策略权重。
+`scripts/calibrate/fit_tables.py` 从原始数据生成前五张表；`scripts/calibrate/fit_policy.py` 用矩匹配调整策略权重。`policy.json` 分三块：`weights` 是无量纲响应系数，`geometry` 是英尺与秒类的几何量（如推进起步衰减距离），`bands` 是判定带宽。三者不混在同一张表里，避免把英尺当权重读。
 
 ## 5. 判定
 
@@ -90,7 +90,9 @@
 
 入项：投篮三区、罚球、速度、加速度、体能、力量、前场篮板、后场篮板、决策智商，共十一项。中投用中投出手份额（中投出手除以全队出手）而不是中投命中率：后者每场只有 8–10 次出手，32 场样本分不出效应。
 
-已登记在 `data/calibration/known_insufficient.json` 的不足项只记录，未登记的不足项按缺陷处理；`certification.json` 把两者分开写成 `known_insufficient` 与 `new_insufficient`。
+已登记在 `data/calibration/known_insufficient.json` 的不足项只记录，未登记的不足项按缺陷处理。登记项的 `resolution` 分两种：`more_games` 必须写 `required_games` 与推导依据，归入 `insufficient`；`mechanism_change` 表示效应在结构上接近零，归入 `not_applicable`。结构上不响应的属性（例如中投技巧之于中投出手份额：出手选择由长两分惩罚与距离项主导）直接登记为 `not_applicable`，测量值与原因一并入档，不计入不足。`certification.json` 把三类分开写成 `known_insufficient`、`new_insufficient` 与 `not_applicable`。
+
+通过项记录区间宽度与「靠零边界 / 点估计」比值；比值小于 0.5 标为边缘通过。体能当前是 `+7.86%`、区间 `[+1.93%, +14.31%]`，下界不到点估计的四分之一，记录里带边缘标记。
 
 重实验只在 `validate-core --mechanism` 离线运行，结果写入工件目录；接口只读这个工件，不在请求里同步重跑。旧实现把上千次短跑放进一次请求，三百分秒不返回。
 

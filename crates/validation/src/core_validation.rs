@@ -394,6 +394,7 @@ pub fn certification_artifact(
     let mut insufficient: Vec<String> = Vec::new();
     let mut known: Vec<String> = Vec::new();
     let mut new_insufficient: Vec<String> = Vec::new();
+    let mut not_applicable: Vec<String> = Vec::new();
     for layer in &report.gate.layers {
         if !layer.passed {
             defects.push(layer.criterion.clone());
@@ -413,22 +414,30 @@ pub fn certification_artifact(
             match result.verdict.as_str() {
                 "defect" => defects.push(format!("mechanism:{}", result.attribute)),
                 "insufficient" => insufficient.push(result.attribute.clone()),
+                "not_applicable" => not_applicable.push(format!(
+                    "mechanism:{}（{}）",
+                    result.attribute, result.reason
+                )),
                 _ => {}
             }
         }
     }
     for attribute in &insufficient {
-        if known_insufficient
+        match known_insufficient
             .iter()
-            .any(|entry| entry.attribute == *attribute)
+            .find(|entry| entry.attribute == *attribute)
         {
-            known.push(format!("mechanism:{attribute}"));
-        } else {
-            new_insufficient.push(format!("mechanism:{attribute}"));
+            Some(entry) if entry.resolution == "more_games" => {
+                known.push(format!("mechanism:{attribute}"))
+            }
+            Some(entry) => {
+                not_applicable.push(format!("mechanism:{}（{}）", attribute, entry.reason))
+            }
+            None => new_insufficient.push(format!("mechanism:{attribute}")),
         }
     }
     // 已知不足只记录；未登记的不足按缺陷处理，否则新出现的不足会被
-    // 「已知清单」掩盖。
+    // 「已知清单」掩盖。结构上不适用的准则单独记录，不挂不足。
     let status = if !defects.is_empty() || !new_insufficient.is_empty() {
         "defects_found"
     } else if !known.is_empty() {
@@ -466,6 +475,7 @@ pub fn certification_artifact(
         .map(|name| (*name).to_string())
         .collect();
     let mechanism_attributes = mechanism.map(|report| report.results.len()).unwrap_or(0);
+    let not_applicable_count = not_applicable.len();
     let registered =
         REGISTERED_GATE_CRITERIA.len() + crate::mechanism_core::MechanismAttribute::all().len();
     let sampled = sampled_gate + mechanism_attributes;
@@ -481,6 +491,7 @@ pub fn certification_artifact(
             "defects": defects,
             "known_insufficient": known,
             "new_insufficient": new_insufficient,
+            "not_applicable": not_applicable,
         },
         "coverage": {
             "registered": registered,
@@ -489,6 +500,7 @@ pub fn certification_artifact(
             "unregistered": unregistered,
             "gate_criteria": REGISTERED_GATE_CRITERIA.len(),
             "mechanism_attributes": mechanism_attributes,
+            "not_applicable": not_applicable_count,
         },
     })
 }
@@ -566,7 +578,11 @@ pub fn batch_statistical_artifact(
 pub struct KnownInsufficient {
     pub attribute: String,
     pub reason: String,
-    pub required_games: u32,
+    /// `more_games`：效应存在，当前样本分辨不出，`required_games` 给出所需场次；
+    /// `mechanism_change`：效应在结构上接近零，放大场次解决不了，需要改机制。
+    pub resolution: String,
+    #[serde(default)]
+    pub required_games: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -590,5 +606,24 @@ pub fn load_known_insufficient(path: &Path) -> Result<Vec<KnownInsufficient>, St
             path.display()
         )
     })?;
+    for entry in &file.entries {
+        match entry.resolution.as_str() {
+            "more_games" => {
+                if entry.required_games.is_none() {
+                    return Err(format!(
+                        "known-insufficient entry `{}` is `more_games` but has no required_games",
+                        entry.attribute
+                    ));
+                }
+            }
+            "mechanism_change" => {}
+            other => {
+                return Err(format!(
+                    "known-insufficient entry `{}` has unknown resolution `{other}`",
+                    entry.attribute
+                ))
+            }
+        }
+    }
     Ok(file.entries)
 }

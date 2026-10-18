@@ -18,7 +18,8 @@ fn every_attribute_reports_a_known_verdict_or_an_explicit_gap() {
         match run_mechanism_experiment(attribute, config) {
             Ok(result) => {
                 assert!(
-                    ["pass", "insufficient", "defect"].contains(&result.verdict.as_str()),
+                    ["pass", "insufficient", "defect", "not_applicable"]
+                        .contains(&result.verdict.as_str()),
                     "attribute {} returned unknown verdict {}",
                     attribute.key(),
                     result.verdict

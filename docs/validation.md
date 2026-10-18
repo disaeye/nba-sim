@@ -287,9 +287,11 @@ PBP 不能提供未记录的传球次数和连续跑位；空间分布需追踪�
 
 判定以种子为抽样单元：同一批种子分别跑基准与扰动，逐种子计算配对差值，做 bootstrap 得到 5%–95% 区间。区间完全落在零的预期一侧记 `pass`，跨越零记 `insufficient`，方向与预期相反记 `defect`。门因此可以红，也可以停在证据不足。
 
+结构上不响应扰动的属性单独记 `not_applicable`，测量值与原因一并入档。这类问题放大场次解决不了，不能挂在 `insufficient` 名下，否则退出码 3 会变成长期通行证。通过项同时记区间宽度与靠零边界与点估计的比值，比值小于 0.5 标为边缘通过。
+
 机制结果分两类证据：`wiring` 的度量直接取自消费者公式的输入（`speed`、`acceleration` 之于 `mean_first_action_seconds`），用来检查接线是否接通；`outcome` 的度量是比赛产物（区域命中率、篮板率、失误率），用来检查技巧是否改变结果。两类在报告里分列，不能互相代替。
 
-已登记在 `data/calibration/known_insufficient.json` 的不足项只记录，未登记的不足项按缺陷处理。批次结论分三态：`pass`、`insufficient_evidence`（只有已登记项）与 `defects_found`（缺陷或未登记不足），退出码对应 `0`、`3`、`1`。
+已登记在 `data/calibration/known_insufficient.json` 的不足项只记录，未登记的不足项按缺陷处理。登记项的 `resolution` 为 `more_games` 时必须给出 `required_games` 与推导依据，为 `mechanism_change` 时归入 `not_applicable`。批次结论分三态：`pass`、`insufficient_evidence`（只有已登记的 `more_games` 项）与 `defects_found`（缺陷或未登记不足），退出码对应 `0`、`3`、`1`。
 
 ### 7.3 输入覆盖目录
 

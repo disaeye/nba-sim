@@ -215,6 +215,10 @@ pub struct Band {
 pub struct PolicyTable {
     pub provenance: Provenance,
     pub weights: BTreeMap<String, f32>,
+    /// 长度（英尺）与时长（秒）类几何量。与无量纲权重分开存放，
+    /// 免得把英尺当权重读。
+    #[serde(default)]
+    pub geometry: BTreeMap<String, f32>,
     #[serde(default)]
     pub bands: BTreeMap<String, Band>,
 }
@@ -227,6 +231,13 @@ impl PolicyTable {
             .or_else(|| self.bands.get("default"))
             .copied()
             .unwrap_or_else(|| panic!("policy table has no band for `{criterion}`"))
+    }
+    /// 几何量（英尺或秒）。
+    pub fn g(&self, key: &str) -> f32 {
+        *self
+            .geometry
+            .get(key)
+            .unwrap_or_else(|| panic!("policy table has no geometry value `{key}`"))
     }
     pub fn w(&self, key: &str) -> f32 {
         *self

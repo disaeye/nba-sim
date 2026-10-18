@@ -93,6 +93,18 @@ impl MechanismAttribute {
         }
     }
 
+    /// 结构上不响应扰动的属性。这类属性不是样本量问题，提高场次永远
+    /// 解决不了；登记为 `not_applicable` 并写明原因，不计入 `insufficient`。
+    pub fn not_applicable(self) -> Option<&'static str> {
+        match self {
+            Self::ShootingMid => Some(
+                "中投出手份额由长两分惩罚与距离项主导：技巧只改变命中率，\
+                 对出手选择的边际效应低于千分之一，放大场次也分不出方向",
+            ),
+            _ => None,
+        }
+    }
+
     pub fn apply(self, setup: &mut MatchSetup, value: f32) {
         // 只改主队：客队作为同一对种子里的对照组，方向差异因此可归因于
         // 被扰动的属性而不是整场随机波动。
@@ -215,7 +227,16 @@ pub struct MechanismResult {
     pub ci_low: f64,
     /// 配对 bootstrap 的 95% 分位，与 `relative_change` 同向：正数表示上升。
     pub ci_high: f64,
+    /// 区间宽度，与 `relative_change` 同单位。
+    pub interval_width: f64,
+    /// 靠近零的边界与点估计的比值；只在通过的项上有值。比值小于一半
+    /// 说明下界不到点估计的一半。
+    pub lower_bound_ratio: Option<f64>,
+    /// 边缘通过：区间宽度超过点估计本身，下界离零很近。
+    pub marginal: bool,
     pub verdict: String,
+    /// `not_applicable` 的结构性原因；其余裁决为空串。
+    pub reason: String,
     pub passed: bool,
 }
 
@@ -341,26 +362,29 @@ fn experiment(
     // 一个样本，不假设逐场差值服从正态分布。区间与 `relative_change`
     // 同向：正数表示上升。
     let (ci_low, ci_high) = paired_bootstrap(&baseline_values, &perturbed_values, 2_000);
-    // 区间完全落在零的预期一侧才成立；跨零为 insufficient。
-    let verdict = match attribute.direction() {
-        Direction::Up => {
-            if ci_low > 0.0 {
-                "pass"
-            } else if ci_high < 0.0 {
-                "defect"
-            } else {
-                "insufficient"
-            }
-        }
-        Direction::Down => {
-            if ci_high < 0.0 {
-                "pass"
-            } else if ci_low > 0.0 {
-                "defect"
-            } else {
-                "insufficient"
-            }
-        }
+    // 把区间投影到预期方向：`low > 0` 表示整个区间都在预期一侧。结构上
+    // 不响应扰动的属性先登记为 not_applicable，测量值仍然保留在记录里。
+    let (low, high) = match attribute.direction() {
+        Direction::Up => (ci_low, ci_high),
+        Direction::Down => (-ci_high, -ci_low),
+    };
+    let judged = if low > 0.0 {
+        "pass"
+    } else if high < 0.0 {
+        "defect"
+    } else {
+        "insufficient"
+    };
+    let (verdict, reason) = match attribute.not_applicable() {
+        Some(reason) => ("not_applicable", reason.to_string()),
+        None => (judged, String::new()),
+    };
+    // 靠近零的那一侧边界与点估计的比值：区间对称时，比值小于一半等价于
+    // 区间宽度超过点估计本身。只在通过的项上有意义。
+    let lower_bound_ratio = if verdict == "pass" && relative.abs() > f64::EPSILON {
+        Some(low / relative.abs())
+    } else {
+        None
     };
     Ok(MechanismResult {
         attribute: attribute.key().to_string(),
@@ -377,7 +401,11 @@ fn experiment(
         direction_matches,
         ci_low,
         ci_high,
+        interval_width: ci_high - ci_low,
+        lower_bound_ratio,
+        marginal: verdict == "pass" && (ci_high - ci_low) > relative.abs(),
         verdict: verdict.to_string(),
+        reason,
         passed: verdict == "pass",
     })
 }
