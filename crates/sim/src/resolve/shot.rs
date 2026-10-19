@@ -34,6 +34,9 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     let is_three = zone == "three";
     let distance = (pos - hoop).length();
     let contest = contest_for(world, shooter, pos);
+    // 投篮终结了持球状态：收球标志在出手时清掉。
+    world.possession.dribble_state = crate::state::DribbleState::Dribbling;
+    world.possession.gather_pos = None;
     let table = &world.params.shot_make;
     let base = table.base_rate(kind.as_str(), distance, is_three);
     let skill = world.players[shooter].shooting_attribute(zone);

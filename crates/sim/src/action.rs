@@ -212,6 +212,7 @@ pub enum TurnoverKind {
     LostBall,
     OffensiveFoul,
     Travel,
+    DoubleDribble,
     ShotClock,
     OutOfBounds,
 }
@@ -223,6 +224,7 @@ impl TurnoverKind {
             Self::LostBall => "lost_ball",
             Self::OffensiveFoul => "offensive_foul",
             Self::Travel => "travel",
+            Self::DoubleDribble => "double_dribble",
             Self::ShotClock => "shot_clock",
             Self::OutOfBounds => "out_of_bounds",
         }

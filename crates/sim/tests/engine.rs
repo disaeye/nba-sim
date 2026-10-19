@@ -265,14 +265,15 @@ fn and_one_is_a_minority_of_shooting_fouls() {
         let report = play(seed);
         for team in [TeamSide::Home, TeamSide::Away] {
             let totals = report.box_score.team_totals(team);
-            fouls += totals.fouls;
+            fouls += totals.shooting_fouls;
             and_one += totals.and_one;
         }
     }
     assert!(fouls > 100, "sample too small: {fouls} shooting fouls");
     let share = and_one as f64 / fouls as f64;
+    // 这里只查“少数”这个性质；具体份额由批次判据 and_one_per_game 盯。
     assert!(
-        (0.05..0.25).contains(&share),
+        (0.01..0.25).contains(&share),
         "and-1 share of shooting fouls must stay a minority: {share:.3} ({and_one}/{fouls})"
     );
 }
@@ -386,6 +387,37 @@ fn free_throw_facts_match_the_called_foul() {
         totals.ftm + away.ftm,
         "made free throws must match the box score"
     );
+}
+
+/// 二次运球：收球之后再发起运球，判 `DoubleDribble` 并转换球权。
+#[test]
+fn double_dribble_after_gather_is_a_turnover() {
+    use nba_sim_core::action::{ActionIntent, ActionKind, TurnoverKind};
+    use nba_sim_core::state::DribbleState;
+
+    let rules = nba_domain::GameRules::default();
+    let mut world = World::new(MatchSetup::builtin(rules), params(), 5);
+    let mut guard = 0;
+    while !matches!(world.phase, Phase::Live) {
+        world.step(0.05);
+        guard += 1;
+        assert!(guard < 4000, "world never reached live play");
+    }
+    let actor = world.holder().expect("live play has a holder");
+    world.possession.dribble_state = DribbleState::Gathered;
+    world.possession.gather_pos = Some(world.players[actor].pos);
+    world.active = Some(ActionIntent {
+        actor,
+        kind: ActionKind::Dribble,
+        target: None,
+        from_ft: world.players[actor].pos,
+        to_ft: world.players[actor].pos,
+        start_time: world.now(),
+        duration: 1.4,
+    });
+    let outcome = nba_sim_core::resolve::resolve(&mut world);
+    assert_eq!(outcome.completion, nba_sim_core::action::Completion::Failed);
+    assert_eq!(outcome.delta.turnover, Some(TurnoverKind::DoubleDribble));
 }
 
 #[test]

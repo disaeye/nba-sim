@@ -184,12 +184,15 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
 
     let dribble_score =
         weights.w("dribble_base") + weights.w("dribble_setup") * state.early_clock_slack();
-    candidates.push((
-        ActionKind::Dribble,
-        dribble_score.max(0.001),
-        None,
-        state.hoop,
-    ));
+    // 已收球就不能再运球：二次运球是犯规，不是候选。
+    if world.possession.dribble_state == crate::state::DribbleState::Dribbling {
+        candidates.push((
+            ActionKind::Dribble,
+            dribble_score.max(0.001),
+            None,
+            state.hoop,
+        ));
+    }
 
     let scores: Vec<f32> = candidates.iter().map(|(_, score, _, _)| *score).collect();
     let index = crate::resolve::weighted_pick(&mut world.rng, &scores);

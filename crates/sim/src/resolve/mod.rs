@@ -14,8 +14,10 @@ pub mod shot;
 use glam::Vec2;
 use rand::Rng;
 
-use crate::action::{ActionKind, ActionOutcome, Completion, StateDelta};
-use crate::state::{PlayerState, TeamSide};
+use crate::action::{
+    ActionIntent, ActionKind, ActionOutcome, Completion, Fact, StateDelta, TurnoverKind,
+};
+use crate::state::{DribbleState, PlayerState, PossessionKind, TeamSide};
 use crate::world::World;
 
 pub fn resolve(world: &mut World) -> ActionOutcome {
@@ -30,13 +32,58 @@ pub fn resolve(world: &mut World) -> ActionOutcome {
         ActionKind::Shoot(kind) => shot::resolve(world, &intent, kind),
         ActionKind::PostUp => drive::resolve_post(world, &intent),
         ActionKind::Cut => pass::resolve_cut(world, &intent),
-        ActionKind::Dribble | ActionKind::Relocate => ActionOutcome {
+        ActionKind::Dribble => resolve_dribble(world, &intent),
+        ActionKind::Relocate => ActionOutcome {
             actor: intent.actor,
             kind: intent.kind,
             completion: Completion::Completed,
             delta: StateDelta::default(),
             facts: Vec::new(),
         },
+    }
+}
+
+/// 运球：正常运球结束即收球并记下位置；已收球再运球是二次运球。
+fn resolve_dribble(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
+    let actor = intent.actor;
+    if world.possession.dribble_state == DribbleState::Gathered {
+        world.line_mut(actor).turnovers += 1;
+        world.emit(Fact::Turnover {
+            player: actor,
+            kind: TurnoverKind::DoubleDribble,
+        });
+        let team = world.players[actor].team;
+        world.end_possession("turnover", 0);
+        world.start_possession(team.other(), PossessionKind::Live);
+        return ActionOutcome {
+            actor,
+            kind: ActionKind::Dribble,
+            completion: Completion::Failed,
+            delta: StateDelta {
+                turnover: Some(TurnoverKind::DoubleDribble),
+                ..Default::default()
+            },
+            facts: Vec::new(),
+        };
+    }
+    // 只有站定的调整运球才以收球结束；移动中的运球是持球推进，
+    // 收球留到真正的终结动作。
+    let player = &world.players[actor];
+    let stationary =
+        (player.target - player.pos).length() < world.params.policy.g("gather_stationary_ft");
+    if stationary {
+        world.possession.dribble_state = DribbleState::Gathered;
+        world.possession.gather_pos = Some(player.pos);
+    } else {
+        world.possession.dribble_state = DribbleState::Dribbling;
+        world.possession.gather_pos = None;
+    }
+    ActionOutcome {
+        actor,
+        kind: ActionKind::Dribble,
+        completion: Completion::Completed,
+        delta: StateDelta::default(),
+        facts: Vec::new(),
     }
 }
 

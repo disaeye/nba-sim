@@ -88,15 +88,19 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
             let fouling_team = world.players[defender].team;
             let free_throws = crate::resolve::foul::bonus_free_throws(world, fouling_team);
             crate::resolve::foul::apply_non_shooting_foul(world, defender, driver);
-            if free_throws > 0 {
-                return ActionOutcome {
-                    actor: driver,
-                    kind: ActionKind::Drive,
-                    completion: Completion::Failed,
-                    delta: StateDelta::default(),
-                    facts: Vec::new(),
-                };
+            if free_throws == 0 {
+                // 非 bonus：死球后进攻方继续本次回合，只是把下一次决策
+                // 推后；不重建回合，否则每吹一次犯规就多算一个回合。
+                world.next_decision_at =
+                    world.now() + world.params.policy.g("reach_in_dead_ball_seconds") as f64;
             }
+            return ActionOutcome {
+                actor: driver,
+                kind: ActionKind::Drive,
+                completion: Completion::Failed,
+                delta: StateDelta::default(),
+                facts: Vec::new(),
+            };
         }
     }
     let help_term = clamp01(1.0 - help_distance / 20.0);
@@ -126,6 +130,30 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
             6.0 + world.rng.gen::<f32>() * 6.0
         };
         let finish = hoop - direction * finish_distance;
+        // 收球后再推进超过步幅容限就是走步。容限是英尺量，放在
+        // policy.geometry 里；Drive 本身不置收球状态。
+        if let Some(gather) = world.possession.gather_pos {
+            let allowance = world.params.policy.g("gather_travel_allowance_ft");
+            if (finish - gather).length() > allowance {
+                world.line_mut(driver).turnovers += 1;
+                world.emit(Fact::Turnover {
+                    player: driver,
+                    kind: TurnoverKind::Travel,
+                });
+                world.end_possession("turnover", 0);
+                world.start_possession(team.other(), PossessionKind::Live);
+                return ActionOutcome {
+                    actor: driver,
+                    kind: ActionKind::Drive,
+                    completion: Completion::Failed,
+                    delta: StateDelta {
+                        turnover: Some(TurnoverKind::Travel),
+                        ..Default::default()
+                    },
+                    facts: Vec::new(),
+                };
+            }
+        }
         world.players[driver].pos = finish;
         world.players[driver].target = finish;
         world.possession.drives += 1;

@@ -98,6 +98,9 @@
     }
   },
   "geometry": {
-    "advance_ramp_distance_ft": 30.0
+    "advance_ramp_distance_ft": 30.0,
+    "gather_travel_allowance_ft": 20.0,
+    "gather_stationary_ft": 1.0,
+    "reach_in_dead_ball_seconds": 1.2
   }
 }

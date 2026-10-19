@@ -207,6 +207,15 @@ pub enum PossessionKind {
     Live,
 }
 
+/// 持球状态：运球中或已收球。收球后只允许终结（投篮/传球）或两步
+/// 内的调整；再运球是二次运球，收球后超步幅位移是走步。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DribbleState {
+    #[default]
+    Dribbling,
+    Gathered,
+}
+
 #[derive(Debug, Clone)]
 pub struct PossessionState {
     pub team: TeamSide,
@@ -231,6 +240,9 @@ pub struct PossessionState {
     pub last_cut_actor: Option<usize>,
     /// 回合开始到首个动作起手的秒数。
     pub first_action_seconds: Option<f64>,
+    /// 持球状态与收球位置。
+    pub dribble_state: DribbleState,
+    pub gather_pos: Option<Vec2>,
 }
 
 impl PossessionState {
@@ -257,6 +269,8 @@ impl PossessionState {
             last_post_actor: None,
             last_cut_actor: None,
             first_action_seconds: None,
+            dribble_state: DribbleState::Dribbling,
+            gather_pos: None,
         }
     }
 }

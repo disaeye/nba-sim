@@ -28,6 +28,9 @@ pub fn resolve(
     let passer_skill = world.players[from].data.attributes.passing;
     let decision = world.players[from].data.attributes.decision_iq;
     let receiver_handling = world.players[to].data.attributes.ball_handling;
+    // 传球终结了持球状态：收球标志在出手时清掉。
+    world.possession.dribble_state = crate::state::DribbleState::Dribbling;
+    world.possession.gather_pos = None;
     let base = world.params.policy.w("pass_turnover_rate");
     let lane_risk = (1.0 - clamp01(lane / 6.0)).max(0.0);
     let skill_relief = 0.5 + passer_skill + 0.8 * decision;
@@ -189,6 +192,8 @@ pub fn resolve_cut(world: &mut World, intent: &ActionIntent) -> crate::action::A
     world.possession.last_pass_at = Some(world.now());
     world.possession.last_pass_from = Some(intent.actor);
     world.possession.assist_candidate = Some((intent.actor, world.now()));
+    world.possession.dribble_state = crate::state::DribbleState::Dribbling;
+    world.possession.gather_pos = None;
     world.possession.last_cut_at = Some(world.now());
     world.possession.last_cut_actor = Some(cutter);
     let pass_id = world.new_pass_id();
