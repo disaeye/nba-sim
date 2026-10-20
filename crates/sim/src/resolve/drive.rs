@@ -134,7 +134,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
         // policy.geometry 里；Drive 本身不置收球状态。
         if let Some(gather) = world.possession.gather_pos {
             let allowance = world.params.policy.g("gather_travel_allowance_ft");
-            if (finish - gather).length() > allowance {
+            if travel_on_drive(gather, finish, allowance) {
                 world.line_mut(driver).turnovers += 1;
                 world.emit(Fact::Turnover {
                     player: driver,
@@ -194,6 +194,12 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
             facts: Vec::new(),
         }
     }
+}
+
+/// 走步判定：收球点到终结点的位移超过容限。容限是两步加起跳的
+/// 英尺量，来自 `policy.geometry`。
+pub fn travel_on_drive(gather: Vec2, finish: Vec2, allowance: f32) -> bool {
+    (finish - gather).length() > allowance
 }
 
 pub fn resolve_post(world: &mut World, intent: &ActionIntent) -> ActionOutcome {

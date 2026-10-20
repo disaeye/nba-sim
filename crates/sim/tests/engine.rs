@@ -420,6 +420,31 @@ fn double_dribble_after_gather_is_a_turnover() {
     assert_eq!(outcome.delta.turnover, Some(TurnoverKind::DoubleDribble));
 }
 
+/// 走步判定：收球点到终结点的位移超过容限。容限是两步加起跳的
+/// 英尺量，来自 `policy.geometry`。
+#[test]
+fn travel_predicate_uses_the_two_step_allowance() {
+    use nba_sim_core::resolve::drive::travel_on_drive;
+    let gather = glam::Vec2::new(24.0, 25.0);
+    let allowance = 12.0;
+    // 位移正好等于容限不算走步，超出一步才算。
+    assert!(!travel_on_drive(
+        gather,
+        glam::Vec2::new(12.0, 25.0),
+        allowance
+    ));
+    assert!(travel_on_drive(
+        gather,
+        glam::Vec2::new(11.9, 25.0),
+        allowance
+    ));
+    assert!(travel_on_drive(
+        gather,
+        glam::Vec2::new(6.0, 25.0),
+        allowance
+    ));
+}
+
 #[test]
 fn session_service_advances_and_reports() {
     use nba_sim_core::SessionService;
