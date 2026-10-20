@@ -1,6 +1,6 @@
 {
   "certification_status": "pass",
-  "commit": "e327e70e96100cfbbbd600a26c65f23e9a86767a",
+  "commit": "349d0e78bf9cf77b3e70bdf491ab2a9201ee472a",
   "coverage": {
     "gate_criteria": 21,
     "mechanism_attributes": 13,
