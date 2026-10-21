@@ -42,14 +42,17 @@ CODE_REF = re.compile(
 )
 HISTORICAL_PREFIXES = ("docs/dev/cycles/", "docs/dev/evidence/")
 
-# 已删除的 shadow world 符号：曾在 engine 内实现全场感知（MatchWorld 逐 tick
-# 双向同步驱动 PerceptionSystem），后整体移除，全场防守拓扑改由
-# decision/potential_field.rs 的 DefensePotentialFieldSolver 涌现（ADR-015
-# 修订注记）。status.md 自称「只写当前工作区可由代码/测试/守卫复核的结论」，
-# 故不得再把这些符号当作现存机制陈述。
+# 已删除的旧引擎符号与路径。两批：shadow world（MatchWorld 逐 tick 双向
+# 同步驱动 PerceptionSystem）与整包删除的旧引擎（engine / evaluator /
+# invariants / physics / decision / officiating / semantics）。status.md 自称
+# 「只写当前工作区可由代码/测试/守卫复核的结论」，故不得再把这些符号或路径
+# 当作现存机制陈述。
 REMOVED_SYMBOLS = re.compile(
     r"sync_to_world|sync_world_players|PerceptionSystem|PerceptionSnapshot|"
-    r"MatchWorld|match_world\.rs|Systems\.world|crate::world"
+    r"MatchWorld|match_world\.rs|Systems\.world|crate::world|"
+    r"crates/(?:engine|evaluator|invariants|physics|decision|officiating|semantics)/|"
+    r"golden_hash\.rs|advance_active_play|MatchEngine|"
+    r"\brotation\.rs|individual\.rs|modulation\.rs"
 )
 # 行内含这些标记 = 正在陈述「已移除/已超越」，属合法说明（含 supersede 注记），豁免。
 REMOVAL_MARKERS = re.compile(r"移除|删除|已超越|超越|supersede|不再|已随|曾用|曾持有")
@@ -201,8 +204,8 @@ def check_current_face_symbols(dev_files: list[Path]) -> list[str]:
             if match:
                 violations.append(
                     f"{path.name}:{line_no}: 当前快照面把已删除符号 "
-                    f"`{match.group(0)}` 当作现存机制陈述（shadow world 已移除，"
-                    f"见 ADR-015 修订注记）；如需保留历史请在该行加移除/超越标记"
+                    f"`{match.group(0)}` 当作现存机制陈述（旧引擎已整体删除）；"
+                    f"如需保留历史请在该行加移除/超越标记"
                 )
     return violations
 

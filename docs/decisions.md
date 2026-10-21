@@ -86,11 +86,15 @@ G/M/D/L/F/Round 是不同层级的计划或执行编号，不是完成度。任�
 
 ### ADR-020 · 统一出手分区与赛前固定角色
 
-**状态：accepted**
+**状态：accepted（2026-10-21 修订：攻防角色经倾向通道进入行为）**
 
 投篮分类只有一份判据：`domain::court::CourtGeometry::shot_zone`。分区为篮下小于 5 英尺、近筐 5 至 14 英尺、中投至少 14 英尺且位于三分线内、三分按联赛几何并优先于距离。分类事实取释放时刻出手点。`shooting_close` 对应篮下，`shooting_near` 对应近筐，`finishing` 保留对抗终结语义。命中基准分为 `shot_make_rim`、`shot_make_near`、`shot_make_mid`、`shot_make_3pt`。突破动作阶段仍由动作阈值表达，不承担出手分区。
 
-球员档案新增 `position`、`offensive_role`、`defensive_role`。位置使用 Point、Combo、Wing、Forward、Big、Center 六类，依据长期阵容位置。攻防角色在赛前确定，整场不变；替补登场使用替补自己的配置。三者只进入身份和投影，不进入效用、概率或行为分支。回合内职责仍由实时动作、战术槽位和对位表达。
+球员档案新增 `position`、`offensive_role`、`defensive_role`。位置使用 Point、Combo、Wing、Forward、Big、Center 六类，依据长期阵容位置。攻防角色在赛前确定，整场不变；替补登场使用替补自己的配置。
+
+`position` 只进入身份和投影，不进入效用、概率或行为分支。
+
+攻防角色的行为含义经倾向通道承载：角色在名册里表达为该球员的 `PlayerTendencies` 取值，效用管线只读倾向与 `data/calibration/policy.json` 的动作族权重，代码不按角色枚举分支，也不按角色拼接系数。投射区域由 `PlayerTendencies::three_point_preference` 承载，同时作用于出手效用与无球站位到篮筐的距离。角色与行为的一致性由判据检查（背身型中锋的三分出手占其总出手低于 4%，定点射手的三分出手占其总出手高于 35%），不由代码里的角色判断保证。回合内职责仍由实时动作、战术槽位和对位表达。
 
 球员资料页按得分、组织、篮板、防守四块展示底层维度，不把同一块内的维度合并成一个数。
 

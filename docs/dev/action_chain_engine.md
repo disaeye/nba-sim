@@ -79,7 +79,7 @@
 
 判定单元是动作与回合；聚合统计只作为投影呈现，不进入前两层。
 
-`nba-sim sim-core --gate` 输出四层结果。当前批次几何与语境违规为零，二十一项分布比较全部在带内。
+`nba-sim sim-core --gate` 输出四层结果。当前批次几何与语境违规为零；二十一项分布比较里近筐份额、空切份额、回合数与使用率层级四项越界，十八条过程判据里使用率层级越界，成因见 `docs/dev/status.md` §5。
 
 ## 6. 协议流
 
@@ -124,16 +124,21 @@
 - 卡位还没有独立动作：篮板归属只按能力与位置加权，没有先占位的接触结算。
 - 十二个倾向字段中有八个进入生产路径；其余四个（空切、冲板、风险容忍、转换冲刺）在 `scripts/check_r6_tendency_wiring.py` 里登记为待接入。
 - 无球跑位只覆盖空切与掩护，弱侧轮转与错位攻击尚未进入动作空间。
-- 封盖与抢断是单次尝试，没有“尝试→失位→被过”的连续段；协防只通过干扰强度加权，没有独立的轮转动作。
-- 非投篮犯规已接上两条路径：突破失位后的手部犯规（进 bonus 给两罚）与移动掩护（进攻犯规、球权转换）。还有两类没接：停球后的抱住犯规与抢篮板时的推人。
-- 体能的机制指标还不可用：轮换把体能降到替换阈值的首发换下，两个扰动臂的在场体能分布趋同，全队命中率衡量的是轮换节奏。登记在 `data/calibration/known_insufficient.json`，resolution 为 `mechanism_change`；改指标（首发在场时段的命中率或按轮换分段）后重新跑。
+- 封盖与抢断是单次尝试，没有“尝试→失位→被过”的连续段；协防轮转由势能场求解器给出目标点，没有独立的轮转动作与到位判定。
+- 协防引力场已进生产路径：`defense::solve_defense_targets` 按对位羁绊、朝篮筐下沉、弱侧协防引力三项叠加求解五名防守人的目标点，参数全部读 `world.rules.tactics.defense.potential_field`。协防用 `rim_help_threat_ratio` 做涌现门限，强侧无球人达不到门限就不轮转（实测位移 0.00 ft）。`PossessionState.matchup` 记录对位表，只在掩护换防时交换，其余时间保持不变。尚未接入的是真空吸力、X-Out 补位与滞回双阈值。
+- 掩护路线已经进决策层：`resolve/screen.rs` 结算出的 `Over`、`Under`、`Switch` 回写进 `DefenderView.route`（有效期由 `policy.geometry.screen_read_window_seconds` 限定），`policy::choose_action` 在掩护后首个决策步把候选收敛到路线应答集（`Under` 保留 `Shoot`/`Pass`/`Dribble`，`Over` 保留 `Drive`/`Finish`/`Pass`），实测 `Under` 后干拔三分 46.0%、`Over` 后篮下攻击 70.0%。
+- 早攻强投已压住：`Shoot` 需通过按分区最高可得分的归一化时钟门槛 `H(t_sc)`，时钟超过 `early_clock_seconds` 且外推的出手瞬间干扰超过 `contested_threshold` 时直接排除，实测 1.22%，出手期望得分在 24–18 秒、17–7 秒、不足 6 秒三档为 1.384 / 1.117 / 0.996。
+- 非投篮犯规已接上三条路径：突破失位后的手部犯规（进 bonus 给两罚）、移动掩护（进攻犯规、球权转换），以及残局的故意犯规（`endgame::intentional_foul` 判定，经 `apply_non_shooting_foul` 结算）。还有两类没接：停球后的抱住犯规与抢篮板时的推人。
+- 体能的机制指标仍不可用：`rotation::update_stamina` 已经是双向的（在场消耗、场下与停表恢复），但扰动臂一旦改变体能消耗，轮换会把差异吸收掉，两个臂的在场体能分布仍会趋同。登记在 `data/calibration/known_insufficient.json`，resolution 为 `mechanism_change`；改指标（首发在场时段的命中率或按轮换分段）后重新跑。
+- 轮换与残局已进主循环：`rotation` 按犯满、体能阈值、首发犯规危机与垃圾时间换人，换人候选排除本身也需要休息的人（否则两人会来回互换）；`endgame::shot_constraint` 在末节按分差与剩余时间给出三分必投与压时间两种约束，残局指令优先于路线应答集，且早出手的机会成本在残局归零。
 - 走步与二次运球已接上：持球状态机（运球中 / 已收球）记在回合状态里，站定的调整运球以收球结束，收球后再运球判 `DoubleDribble`，收球后突破超过 `gather_travel_allowance_ft` 判 `Travel`；策略层在已收球时不再把运球列为候选。`OutOfBounds` 还没有产生点。
-- 收球步单独成动作：`Drive` 运球到 `drive_finish_distance_ft`（12–16 英尺）为止，把触球点记进 `gather_pos`，保持运球状态；`Finish` 从触球点迈两步收球，位移上限是 `gather_travel_allowance_ft`（14 英尺），超出判 `Travel`，收球后置 `Gathered`。收球步仍记在突破语境里（`last_drive_at` 刷新），否则出手类型会从突破上篮退回定点投篮。
+- 收球步单独成动作：`Drive` 运球到参考表 `shot_profile.zone_by_creation.drive` 给出的分区份额对应的落点（篮下 0.5–4.5 英尺或近筐 6–13 英尺），把触球点记进 `gather_pos`，保持运球状态；`Finish` 从触球点迈两步收球，位移上限是 `gather_travel_allowance_ft`（14 英尺），超出判 `Travel`，收球后置 `Gathered`。收球步仍记在突破语境里（`last_drive_at` 刷新），否则出手类型会从突破上篮退回定点投篮。
 - 走步因此是收球步的守卫：两步量程被容限夹住，正常回合不触发；它抓的是「收球后又出现一个超过容限的位移动作」这一非法序列，定向测试直接构造该序列。
-- 收球步的代价：出手点从原来的 1.6–12 英尺抬到 3–17 英尺，`points_per_game` 从 225.2 降到 210.2，二十一项目标判据仍在带内。要让得分回到基准，需要收球步的距离分布贴近真实上篮的 0–8 英尺，而不是均匀铺到容限上。
+- 收球步把出手点抬到 3–17 英尺。收球步的距离分布应当贴近真实上篮的 0–8 英尺，铺到容限上会压低篮下出手的占比。
 - 走步率判据仍未加：`PossessionRecord.ended_by` 已按字符串记录回合结束原因，等松球犯规与无球推人接上、犯规判据能登记时一起进目录。
-- 犯规总数偏低：投篮犯规 19 左右、非投篮犯规 9 左右，合计约 29，联盟参考是 40。缺的是无球端的松球犯规与推人；把 `team_fouls_per_game` 加进判据会直接红（29 对 40），所以这一条等松球犯规建模后再登记。
-- `validation.md` §9.2 的场景目录尚未移植，`crates/sim/tests` 只有一个集成测试文件。
-- 内建名册的主客队属性相同，球队差异还没有进入引擎。
+- 犯规总数偏低：投篮犯规在带宽内（19.4 对 19.6），缺的是无球端的松球犯规与推人，所以球队犯规合计低于联盟参考。`team_fouls_per_game` 等松球犯规建模后再登记为判据。
+- `validation.md` §9.2 的场景目录尚未移植，`crates/sim/tests` 只有 `engine.rs` 与 `baseline_fingerprint.rs` 两个集成测试文件。
+- 内建名册两队互为镜像，队内八人属性差异明显（`shooting_three` 从 0.50 到 0.91）且带 `offensive_role` 与 `defensive_role`；角色标注只进身份与投影，不进入效用、概率与行为分支，实测背身中锋出手 4 次三分、三分能力 0.91 的定点射手零次三分出手。
 - 检查点级统计差值对照（原 `data/reference/stat_deltas.v1.json`）没有替代品；分布层由二十一项准则承接。
-- `crates/debug-server/static/app.js` 里战术与名单面板的渲染函数已不可达（面板与 `/api/studio` 已删除），它们的删除待完成。`data/tactics/plays/*.json` 仍被 `crates/domain/tests/playbook_data.rs` 当作 PlaySpec 解析夹具使用，引擎不再读它们。
+- 帧流导出仍逐帧序列化：单场纯模拟 0.03 s，`--stream` 写 NDJSON 需要 1.46 s，58,936 个 tick 的逐帧序列化是主要开销。`replay::replay_possession` 只输出目标回合的帧，是当前的替代路径。
+- `crates/debug-server/static/app.js` 里战术与名单面板的渲染函数已不可达（面板与 `/api/studio` 已删除），它们的删除待完成。`data/tactics/plays/*.json` 已由 `params.tactics` 加载进引擎，`crates/domain/tests/playbook_data.rs` 只保留 schema 解析夹具的角色。
