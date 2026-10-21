@@ -99,12 +99,27 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
         - weights.w("drive_help") * help_term
         + weights.w("drive_tendency")
             * (world.players[actor].data.tendencies.drive_frequency - 0.5);
-    if state.distance_to_hoop() < 32.0 {
+    let drive_min_zone = world.params.policy.g("drive_min_zone_ft");
+    let finish_zone = world.params.policy.g("finish_zone_ft");
+    let drive_max_zone = world.params.policy.g("drive_max_zone_ft");
+    if state.distance_to_hoop() < drive_max_zone && state.distance_to_hoop() > drive_min_zone {
         candidates.push((
             ActionKind::Drive,
             drive_score.max(0.001),
             None,
             state.hoop - (state.hoop - state.actor_pos).normalize_or_zero() * 3.0,
+        ));
+    }
+    // 收球步：运球到终结距离之内后，用两步把球收到手上。走步判定
+    // 就落在这里，收球点取上一次运球的触球位置。
+    if state.distance_to_hoop() <= finish_zone
+        && world.possession.dribble_state == crate::state::DribbleState::Dribbling
+    {
+        candidates.push((
+            ActionKind::Finish,
+            drive_score.max(f32::EPSILON) + weights.w("finish_priority"),
+            None,
+            state.hoop,
         ));
     }
 
@@ -208,6 +223,7 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
             (distance / MAX_SPEED_FT_PER_SEC as f32).clamp(0.6, 3.2) as f64
         }
         ActionKind::Screen(_) => 0.9,
+        ActionKind::Finish => 0.9,
         ActionKind::Cut => 1.1,
         ActionKind::PostUp => 1.0,
         ActionKind::Shoot(_) => 0.55,

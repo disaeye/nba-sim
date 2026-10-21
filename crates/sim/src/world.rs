@@ -23,7 +23,7 @@ use crate::state::{
 pub const TICK_SECONDS: f64 = 0.05;
 pub const DECISION_INTERVAL: f64 = 0.55;
 /// 推进到前场之后的落位时间：持球人到达顶弧还需要给队友落位的时间。
-pub const POSSESSION_SETUP_SECONDS: f64 = 3.0;
+pub const POSSESSION_SETUP_SECONDS: f64 = 3.25;
 const MAX_TICKS: u64 = 400_000;
 
 #[derive(Debug, Clone)]
@@ -815,6 +815,7 @@ impl World {
         }
         match intent.kind {
             crate::action::ActionKind::Drive
+            | crate::action::ActionKind::Finish
             | crate::action::ActionKind::Dribble
             | crate::action::ActionKind::PostUp
             | crate::action::ActionKind::Relocate => {

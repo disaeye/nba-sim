@@ -123,39 +123,15 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
 
     let direction = (hoop - pos).normalize_or_zero();
     if beaten {
-        let reach = world.params.policy.w("drive_reach_rate");
-        let finish_distance = if world.rng.gen::<f32>() < reach {
-            1.6
-        } else {
-            6.0 + world.rng.gen::<f32>() * 6.0
-        };
+        let base = world.params.policy.g("drive_finish_distance_ft");
+        let spread = world.params.policy.g("drive_finish_spread_ft");
+        let finish_distance = base + world.rng.gen::<f32>() * spread;
         let finish = hoop - direction * finish_distance;
-        // 收球后再推进超过步幅容限就是走步。容限是英尺量，放在
-        // policy.geometry 里；Drive 本身不置收球状态。
-        if let Some(gather) = world.possession.gather_pos {
-            let allowance = world.params.policy.g("gather_travel_allowance_ft");
-            if travel_on_drive(gather, finish, allowance) {
-                world.line_mut(driver).turnovers += 1;
-                world.emit(Fact::Turnover {
-                    player: driver,
-                    kind: TurnoverKind::Travel,
-                });
-                world.end_possession("turnover", 0);
-                world.start_possession(team.other(), PossessionKind::Live);
-                return ActionOutcome {
-                    actor: driver,
-                    kind: ActionKind::Drive,
-                    completion: Completion::Failed,
-                    delta: StateDelta {
-                        turnover: Some(TurnoverKind::Travel),
-                        ..Default::default()
-                    },
-                    facts: Vec::new(),
-                };
-            }
-        }
         world.players[driver].pos = finish;
         world.players[driver].target = finish;
+        // 运球到终结距离为止，触球点记在这里；收球动作从它开始。
+        world.possession.gather_pos = Some(finish);
+        world.possession.dribble_state = crate::state::DribbleState::Dribbling;
         world.possession.drives += 1;
         world.possession.last_drive_at = Some(world.now());
         world.possession.last_drive_actor = Some(driver);
@@ -200,6 +176,56 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
 /// 英尺量，来自 `policy.geometry`。
 pub fn travel_on_drive(gather: Vec2, finish: Vec2, allowance: f32) -> bool {
     (finish - gather).length() > allowance
+}
+
+/// 收球步：从触球点向篮筐迈两步。位移超过容限就是走步，容限是
+/// 两步加起跳的英尺量，来自 `policy.geometry`。
+pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
+    let actor = intent.actor;
+    let team = world.players[actor].team;
+    let hoop = world.hoop_for(team);
+    let pos = world.players[actor].pos;
+    let direction = (hoop - pos).normalize_or_zero();
+    let allowance = world.params.policy.g("gather_travel_allowance_ft");
+    let gather = world.possession.gather_pos.unwrap_or(pos);
+    // 收球步的两步量程不超过容限：超出的部分本该在运球阶段消化，
+    // 否则每次从外线发起的终结都是走步。
+    let min_distance = world.params.policy.g("finish_min_distance_ft");
+    let span = ((hoop - gather).length() - min_distance).clamp(0.0, allowance);
+    let finish = hoop - direction * (min_distance + world.rng.gen::<f32>() * span);
+    if travel_on_drive(gather, finish, allowance) {
+        world.line_mut(actor).turnovers += 1;
+        world.emit(Fact::Turnover {
+            player: actor,
+            kind: TurnoverKind::Travel,
+        });
+        world.end_possession("turnover", 0);
+        world.start_possession(team.other(), PossessionKind::Live);
+        return ActionOutcome {
+            actor,
+            kind: ActionKind::Finish,
+            completion: Completion::Failed,
+            delta: StateDelta {
+                turnover: Some(TurnoverKind::Travel),
+                ..Default::default()
+            },
+            facts: Vec::new(),
+        };
+    }
+    world.players[actor].pos = finish;
+    world.players[actor].target = finish;
+    world.possession.dribble_state = crate::state::DribbleState::Gathered;
+    world.possession.gather_pos = Some(finish);
+    // 收球步仍属于这次突破，出手语境按突破计算。
+    world.possession.last_drive_at = Some(world.now());
+    world.possession.last_drive_actor = Some(actor);
+    ActionOutcome {
+        actor,
+        kind: ActionKind::Finish,
+        completion: Completion::Completed,
+        delta: StateDelta::default(),
+        facts: Vec::new(),
+    }
 }
 
 pub fn resolve_post(world: &mut World, intent: &ActionIntent) -> ActionOutcome {

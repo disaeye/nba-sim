@@ -151,6 +151,7 @@ pub enum ScreenKind {
 pub enum ActionKind {
     Dribble,
     Drive,
+    Finish,
     Pass(PassKind),
     Screen(ScreenKind),
     Cut,
@@ -164,6 +165,7 @@ impl ActionKind {
         match self {
             Self::Dribble => "Dribble",
             Self::Drive => "Drive",
+            Self::Finish => "Finish",
             Self::Pass(_) => "Pass",
             Self::Screen(_) => "Screen",
             Self::Cut => "Cut",
