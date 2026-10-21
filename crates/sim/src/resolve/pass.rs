@@ -19,7 +19,7 @@ pub fn resolve(
     let to = intent.target.expect("pass requires a receiver");
     let pass_id = world.new_pass_id();
     let team = world.players[from].team;
-    let lane = crate::state::lane_clearance(
+    let lane = crate::state::pass_lane_clearance(
         &world.players,
         world.players[from].pos,
         world.players[to].pos,
@@ -144,6 +144,14 @@ pub fn resolve(
         to,
         kind,
         completed: true,
+    });
+    world.pass_samples.push(crate::state::PassSample {
+        possession: world.possession.id,
+        from,
+        to,
+        from_pos: intent.from_ft,
+        to_pos: intent.to_ft,
+        at: intent.start_time,
     });
     crate::action::ActionOutcome {
         actor: from,

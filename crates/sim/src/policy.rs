@@ -5,7 +5,7 @@
 
 use glam::Vec2;
 
-use crate::action::{ActionIntent, ActionKind, PassKind, ScreenKind, ShotKind};
+use crate::action::{ActionIntent, ActionKind, DefenderRoute, PassKind, ScreenKind, ShotKind};
 use crate::resolve::{contest_for, shooter_zone};
 use crate::state::{DecisionState, PossessionKind};
 use crate::world::World;
@@ -18,6 +18,17 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
     let weights = &params.policy;
     let actor = state.actor;
     let now = world.now();
+    // 防守人过掩护的路线：钻下沿是外线窗口，挤过是突破走廊。
+    let route = state.primary_defender.and_then(|defender| defender.route);
+    // 读球只在掩护后的第一个决策步生效；之后回合回到常规候选集。
+    let reacting = world
+        .possession
+        .last_screen
+        .map(|read| now - read.at)
+        .map(|elapsed| {
+            elapsed <= crate::world::DECISION_INTERVAL + crate::world::TICK_SECONDS
+        })
+        .unwrap_or(false);
 
     let mut candidates: Vec<(ActionKind, f32, Option<usize>, Vec2)> = Vec::new();
 
@@ -36,6 +47,7 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
         .last_pass_at
         .map(|time| now - time < 1.2)
         .unwrap_or(false);
+    let endgame_shot = crate::endgame::shot_constraint(world);
     if let Some((shot_kind, shot_zone)) = chosen_shot {
         let shot_distance = (state.actor_pos - state.hoop).length();
         let is_three = shot_zone == "three";
@@ -51,7 +63,8 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
         ))
         .clamp(0.02, 0.98);
         let expected_points = p_make * if is_three { 3.0 } else { 2.0 };
-        let early_penalty = if just_received {
+        // 残局指令下没有「等更好的机会」这回事，早出手的机会成本归零。
+        let early_penalty = if just_received || endgame_shot != crate::endgame::EndgameShot::Free {
             0.0
         } else {
             weights.w("shoot_early_slack") * state.early_clock_slack()
@@ -69,18 +82,61 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
             + weights.w("shoot_pressure") * state.shot_clock_pressure()
             + weights.w("shoot_separation_bonus") * separation_bonus
             + weights.w("shoot_mid_bonus") * f32::from(shot_zone == "mid")
+            + weights.w("shoot_three_preference")
+                * (world.players[actor].data.tendencies.three_point_preference - 0.5)
+                * if shot_zone == "three" {
+                    f32::from(1u8)
+                } else {
+                    -f32::from(1u8)
+                }
             - early_penalty
             + weights.w("shoot_catch_bonus") * state.openness() * f32::from(just_received)
             + weights.w("shoot_putback_bonus") * f32::from(putback_ready(world))
             - weights.w("shoot_off_dribble_penalty") * f32::from(!just_received)
             + weights.w("shoot_tendency")
                 * (world.players[actor].data.tendencies.shoot_frequency - 0.5);
-        candidates.push((
-            ActionKind::Shoot(shot_kind),
-            shoot_score.max(0.001),
-            None,
-            state.actor_pos,
-        ));
+        // 出手门槛：时钟充裕时，只有期望得分跨过门槛的机会才值得出手。
+        // 防守人高速扑防时按合速度折价，因为出手瞬间的干扰会高于当下。
+        let closing = state
+            .primary_defender
+            .map(|defender| defender.closing_speed_ftps.max(f32::default()))
+            .unwrap_or_default();
+        // 出手瞬间的干扰要按防守人的合速度外推：扑防越猛，出手时越难。
+        let predicted_contest = crate::resolve::clamp01(
+            contest + closing * world.params.policy.g("closeout_contest_weight"),
+        );
+        let shot_clock_seconds = world.rules.league.shot_clock_seconds as f64;
+        let gate = weights.w("shot_gate_base")
+            + weights.w("shot_gate_span")
+                * ((state.shot_clock / shot_clock_seconds) as f32)
+                    .powf(weights.w("shot_gate_exponent"));
+        // 门槛按该区最高可得分的归一化分值比较，否则上限较低的两分机会会被一刀切掉。
+        let max_points = if shot_zone == "three" {
+            weights.w("gate_points_three")
+        } else {
+            weights.w("gate_points_two")
+        };
+        let normalized = expected_points * weights.w("gate_points_reference") / max_points;
+        // 时钟充裕时不投受干扰的球：受干扰的机会留给时钟紧迫时拆炸弹。
+        let too_contested_early = state.shot_clock
+            > world.params.policy.p("early_shot_block_seconds") as f64
+            && predicted_contest > world.params.policy.p("contested_threshold");
+        let endgame_allows = match endgame_shot {
+            crate::endgame::EndgameShot::Free => true,
+            crate::endgame::EndgameShot::ThreeOnly => shot_zone == "three",
+            crate::endgame::EndgameShot::Hold => false,
+        };
+        // 落后三分且时间不够时门槛失效：这一球必须出手，哪怕是被干扰的三分。
+        let gate_passes =
+            normalized >= gate || endgame_shot == crate::endgame::EndgameShot::ThreeOnly;
+        if gate_passes && !too_contested_early && endgame_allows {
+            candidates.push((
+                ActionKind::Shoot(shot_kind),
+                shoot_score.max(0.001),
+                None,
+                state.actor_pos,
+            ));
+        }
     }
 
     let lane_norm = (state.lane_clearance / 8.0).clamp(0.0, 1.5);
@@ -139,7 +195,8 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
             + weights.w("pass_open") * teammate.openness
             + weights.w("pass_advancement") * (advancement / 20.0).clamp(-1.0, 1.0)
             + weights.w("pass_perimeter") * f32::from(teammate_three)
-            - weights.w("pass_risk") * risk;
+            - weights.w("pass_risk") * risk
+            - weights.w("pass_react_penalty") * f32::from(reacting);
         let score = score.max(0.001);
         pass_options.push((teammate.index, score, teammate.pos));
         if best_pass.is_none_or(|(_, value, _, _)| score > value) {
@@ -197,8 +254,10 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
     let post_score = weights.w("post_base") + weights.w("post_size") * size;
     candidates.push((ActionKind::PostUp, post_score.max(0.001), None, state.hoop));
 
-    let dribble_score =
-        weights.w("dribble_base") + weights.w("dribble_setup") * state.early_clock_slack();
+    let dribble_score = weights.w("dribble_base")
+        + weights.w("dribble_setup") * state.early_clock_slack()
+        - weights.w("dribble_react_penalty")
+            * f32::from(reacting && route == Some(DefenderRoute::Under));
     // 已收球就不能再运球：二次运球是犯规，不是候选。
     if world.possession.dribble_state == crate::state::DribbleState::Dribbling {
         candidates.push((
@@ -208,6 +267,39 @@ pub fn choose_action(world: &mut World) -> ActionIntent {
             state.hoop,
         ));
     }
+
+    // 读到掩护路线后，候选收敛到该路线的应答集：钻下沿只能拔或传，
+    // 挤过只能攻框或传。读球决定行动，而不是把权重叠加到已有候选上。
+    // 残局指令优先于读球：必须抢三分或压时间时，路线应答集不再收窄候选。
+    if reacting && endgame_shot == crate::endgame::EndgameShot::Free {
+        if let Some(read) = route {
+            candidates.retain(|(kind, _, _, _)| match read {
+                DefenderRoute::Under => matches!(
+                    kind,
+                    ActionKind::Shoot(_) | ActionKind::Pass(_) | ActionKind::Dribble
+                ),
+                DefenderRoute::Over => matches!(
+                    kind,
+                    ActionKind::Drive | ActionKind::Finish | ActionKind::Pass(_)
+                ),
+                DefenderRoute::Switch | DefenderRoute::Trapped => true,
+            });
+            assert!(!candidates.is_empty(), "掩护路线的应答集不能为空");
+        }
+    }
+
+    // 选板窗口内的持球人偏好与候选抑制。
+    crate::tactics::apply_play_effects(world, &mut candidates);
+
+    // 劣势动作强制截断：分数低于最强候选固定比例的候选直接出局，
+    // 否则比例抽样会给明显更差的动作保留非零概率。
+    let best = candidates
+        .iter()
+        .map(|(_, score, _, _)| *score)
+        .fold(f32::default(), f32::max);
+    let ratio = weights.w("truncation_ratio");
+    candidates.retain(|(_, score, _, _)| *score >= best * ratio);
+    assert!(!candidates.is_empty(), "截断不能清空候选集");
 
     let scores: Vec<f32> = candidates.iter().map(|(_, score, _, _)| *score).collect();
     let index = crate::resolve::weighted_pick(&mut world.rng, &scores);
@@ -276,7 +368,8 @@ pub fn shot_choice(world: &World, state: &DecisionState) -> Option<(ShotKind, &'
             .map(|time| world.now() - time < 2.5)
             .unwrap_or(false);
     let transition = world.possession.kind == PossessionKind::Live
-        && world.now() - world.possession.started_at < 7.6;
+        && world.now() - world.possession.started_at
+            < world.params.policy.g("transition_window_seconds") as f64;
     let cut_ready = world.possession.last_cut_actor == Some(state.actor)
         && world
             .possession
@@ -291,6 +384,12 @@ pub fn shot_choice(world: &World, state: &DecisionState) -> Option<(ShotKind, &'
     let finishing = world.players[state.actor].data.attributes.finishing;
 
     // 出手类型由动作语境决定，位置必须与语境匹配；不匹配时不出手。
+    // 落后三分且时间不够时，语境不匹配也要出手：这一球只能是三分。
+    if zone == "three"
+        && crate::endgame::shot_constraint(world) == crate::endgame::EndgameShot::ThreeOnly
+    {
+        return Some((ShotKind::PullUp, zone));
+    }
     if putback_ready {
         return matches!(zone, "rim" | "near").then_some((ShotKind::Putback, zone));
     }
@@ -357,37 +456,30 @@ pub fn spot_target(world: &World, player: usize) -> Vec2 {
         crate::state::Slot::DunkerSpot => 4,
         crate::state::Slot::Top => 0,
     };
-    spots[index]
+    let base = spots[index];
+    // 投射区域倾向决定站位离篮筐的远近：低倾向向内线收缩，高倾向向外线扩张到三分线为止。
+    let hoop = world.hoop_for(team);
+    let offset = base - hoop;
+    let distance = offset.length();
+    let preference = world.players[player].data.tendencies.three_point_preference;
+    let rim = world.params.policy.g("spacing_rim_ft");
+    let center = world.params.policy.g("spacing_preference_center");
+    let span = world.params.policy.g("spacing_preference_span");
+    let arc = world.rules.league.three_point_distance_ft
+        + world.params.policy.g("spacing_arc_margin_ft");
+    let shift = if preference < center {
+        -(distance - rim).max(f32::default()) * (center - preference) * span
+    } else {
+        (arc - distance).max(f32::default()) * (preference - center) * span
+    };
+    hoop + offset.normalize_or_zero() * (distance + shift).max(rim)
 }
 
 pub fn move_toward_targets(world: &mut World) {
+    crate::defense::refresh_matchup(world);
+    crate::defense::apply_defense_targets(world);
     let offense = world.possession.team;
-    let defense = offense.other();
     let holder = world.holder();
-    let hoop = world.hoop_for(offense);
-    let ball_pos = holder
-        .map(|handle| world.players[handle].pos)
-        .unwrap_or(Vec2::new(47.0, 25.0));
-
-    // 防守：离球最近的人贴在球与篮筐之间，其余人从自己的基准位置朝球侧收缩。
-    let mut defenders = world.on_court(defense);
-    defenders.sort_by(|a, b| {
-        (world.players[*a].pos - ball_pos)
-            .length_squared()
-            .partial_cmp(&(world.players[*b].pos - ball_pos).length_squared())
-            .expect("finite distances")
-    });
-    for (rank, index) in defenders.iter().enumerate() {
-        let target = if rank == 0 {
-            let toward_hoop = (hoop - ball_pos).normalize_or_zero();
-            ball_pos + toward_hoop * 2.8
-        } else {
-            let anchor = world.players[*index].home_spot;
-            anchor.lerp(ball_pos, 0.22)
-        };
-        world.players[*index].target = target;
-    }
-
     for handle in 0..world.players.len() {
         if !world.players[handle].on_court {
             continue;

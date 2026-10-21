@@ -46,6 +46,8 @@ pub struct PlayerState {
     pub on_court: bool,
     pub stamina: f32,
     pub fouls: u8,
+    /// 犯满离场：置位后不再上场。
+    pub disqualified: bool,
     pub slot: Slot,
     pub target: Vec2,
     pub home_spot: Vec2,
@@ -65,6 +67,7 @@ impl PlayerState {
             on_court: false,
             stamina: 1.0,
             fouls: 0,
+            disqualified: false,
             slot,
             target: pos,
             home_spot: pos,
@@ -243,6 +246,15 @@ pub struct PossessionState {
     /// 持球状态与收球位置。
     pub dribble_state: DribbleState,
     pub gather_pos: Option<Vec2>,
+    /// 最近一次掩护结算出的防守人路线，供下一次决策读取。
+    pub last_screen: Option<ScreenRead>,
+    /// 对位表：`matchup[防守人在场序号] = 所对位的进攻人 handle`，未分配时为 `usize::MAX`。
+    /// 只在掩护换防或突破得手时重算，其余时间保持不变。
+    pub matchup: [usize; MAX_ON_COURT],
+    /// 当前生效的选板窗口，未激活时为 `None`。
+    pub play: Option<crate::tactics::PlayWindow>,
+    /// 本回合是否已经叫过战术：每个回合只叫一次，之后进自由进攻。
+    pub play_called: bool,
 }
 
 impl PossessionState {
@@ -271,8 +283,59 @@ impl PossessionState {
             first_action_seconds: None,
             dribble_state: DribbleState::Dribbling,
             gather_pos: None,
+            last_screen: None,
+            matchup: [usize::MAX; MAX_ON_COURT],
+            play: None,
+            play_called: false,
         }
     }
+}
+
+/// 掩护结算出的防守人路线及其有效期。
+///
+/// 决策层看不到这个结构就直接是战术盲人：防守人钻掩护下沿还是换防，
+/// 决定了持球人该干拔还是突破。
+#[derive(Debug, Clone, Copy)]
+pub struct ScreenRead {
+    pub route: DefenderRoute,
+    pub at: f64,
+    pub screener: usize,
+    pub separation_ft: f32,
+}
+
+/// 逐次出手的过程观测。
+#[derive(Debug, Clone, Copy)]
+pub struct ShotSample {
+    pub shot_clock: f64,
+    pub contest: f32,
+    /// 出手瞬间最近防守人的距离（英尺）。
+    pub defender_ft: f32,
+    pub zone: u8,
+    pub made: bool,
+    pub points: u8,
+}
+
+/// 逐次传球的观测，用于乒乓传球与传导质量判定。
+#[derive(Debug, Clone, Copy)]
+pub struct PassSample {
+    pub possession: u64,
+    pub from: usize,
+    pub to: usize,
+    pub from_pos: Vec2,
+    pub to_pos: Vec2,
+    pub at: f64,
+}
+
+/// 逐次决策的观测：掩护路线与所选动作族。
+#[derive(Debug, Clone, Copy)]
+pub struct DecisionSample {
+    pub route: Option<DefenderRoute>,
+    pub family: u8,
+    pub shot_clock: f64,
+    /// 距最近一次掩护结算的秒数；大于一个决策步就不是「下一决策步」。
+    pub since_screen: f64,
+    /// 持球人的三分能力，用于限定路线响应的适用人群。
+    pub shooter_three: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -388,14 +451,19 @@ pub fn is_between(point: Vec2, a: Vec2, b: Vec2) -> bool {
 }
 
 /// 传球线路净空：线路上防守人离传球直线的最小距离。
+/// 走廊无阻挡时的返回值（英尺）：远大于球场宽度。
+const NO_OBSTRUCTION_FT: f32 = 99.0;
+/// 走廊长度的退化阈值（英尺）：两端重合时方向向量无定义。
+const MIN_LANE_LENGTH_FT: f32 = 1e-4;
+
 pub fn lane_clearance(players: &[PlayerState], from: Vec2, to: Vec2, offense: TeamSide) -> f32 {
     let segment = to - from;
     let length = segment.length();
-    if length < 1e-4 {
-        return 99.0;
+    if length < MIN_LANE_LENGTH_FT {
+        return NO_OBSTRUCTION_FT;
     }
     let dir = segment / length;
-    let mut minimum = 99.0_f32;
+    let mut minimum = NO_OBSTRUCTION_FT;
     for player in players.iter().filter(|p| p.on_court && p.team != offense) {
         let relative = player.pos - from;
         let along = relative.dot(dir).clamp(0.0, length);
@@ -403,4 +471,88 @@ pub fn lane_clearance(players: &[PlayerState], from: Vec2, to: Vec2, offense: Te
         minimum = minimum.min(lateral);
     }
     minimum
+}
+
+/// 传球走廊的空隙：只算两端之间的防守人。
+///
+/// 站在传球人身后或接球人身后的防守人不在走廊里，拦不到球；
+/// 按纵向投影区间筛掉它们，而不是把它们按两端点投影后当成堵住走廊。
+pub fn pass_lane_clearance(players: &[PlayerState], from: Vec2, to: Vec2, offense: TeamSide) -> f32 {
+    let segment = to - from;
+    let length = segment.length();
+    if length < MIN_LANE_LENGTH_FT {
+        return NO_OBSTRUCTION_FT;
+    }
+    let dir = segment / length;
+    let mut minimum = NO_OBSTRUCTION_FT;
+    for player in players.iter().filter(|p| p.on_court && p.team != offense) {
+        let relative = player.pos - from;
+        let along = relative.dot(dir) / length;
+        if along <= f32::default() {
+            continue;
+        }
+        let lateral = (relative - dir * (along * length)).length();
+        minimum = minimum.min(lateral);
+    }
+    minimum
+}
+
+/// 同时在场人数上限：名册八人，场上五人。
+pub const MAX_ON_COURT: usize = 5;
+
+/// 在场球员句柄的定长集合。每 tick 的防守目标求解与箱体计时都读它，
+/// 用定长数组避免逐 tick 堆分配。
+#[derive(Debug, Clone, Copy)]
+pub struct OnCourt {
+    handles: [usize; MAX_ON_COURT],
+    len: usize,
+}
+
+impl OnCourt {
+    pub fn new() -> Self {
+        Self {
+            handles: [0; MAX_ON_COURT],
+            len: 0,
+        }
+    }
+
+    pub fn push(&mut self, handle: usize) {
+        assert!(
+            self.len < MAX_ON_COURT,
+            "on-court set exceeds {MAX_ON_COURT} players"
+        );
+        self.handles[self.len] = handle;
+        self.len += 1;
+    }
+
+    pub fn as_slice(&self) -> &[usize] {
+        &self.handles[..self.len]
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [usize] {
+        &mut self.handles[..self.len]
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+impl Default for OnCourt {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl IntoIterator for OnCourt {
+    type Item = usize;
+    type IntoIter = std::iter::Take<std::array::IntoIter<usize, MAX_ON_COURT>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.handles.into_iter().take(self.len)
+    }
 }

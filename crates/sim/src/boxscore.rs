@@ -30,17 +30,20 @@ pub struct PlayerLine {
     pub shooting_fouls: u32,
     /// 投篮犯规且投进（and-1）。
     pub and_one: u32,
+    /// 投射区域倾向（ADR-020）：判定层按它区分原型球员的出手结构。
+    pub three_point_preference: f32,
     pub plus_minus: i32,
     pub touches: u32,
 }
 
 impl PlayerLine {
-    pub fn new(id: &str, name: &str, jersey: &str, team: TeamSide) -> Self {
+    pub fn new(id: &str, name: &str, jersey: &str, team: TeamSide, three_point_preference: f32) -> Self {
         Self {
             id: id.to_string(),
             name: name.to_string(),
             jersey: jersey.to_string(),
             team: Some(team),
+            three_point_preference,
             ..Default::default()
         }
     }

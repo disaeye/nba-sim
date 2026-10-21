@@ -10,6 +10,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::tactics::TacticsTable;
+
 use serde::Deserialize;
 
 pub const CALIBRATION_DIR: &str = "data/calibration";
@@ -227,6 +229,10 @@ pub struct PolicyTable {
     pub geometry: BTreeMap<String, f32>,
     #[serde(default)]
     pub bands: BTreeMap<String, Band>,
+    /// 过程判据的设计边界。键名与 `gate` 的准则同名；这些是设计边界，
+    /// 不是联盟实测分布。
+    #[serde(default)]
+    pub process: BTreeMap<String, f32>,
 }
 
 impl PolicyTable {
@@ -251,6 +257,13 @@ impl PolicyTable {
             .get(key)
             .unwrap_or_else(|| panic!("policy table has no weight `{key}`"))
     }
+    /// 过程判据的设计边界。
+    pub fn p(&self, key: &str) -> f32 {
+        *self
+            .process
+            .get(key)
+            .unwrap_or_else(|| panic!("policy table has no process bound `{key}`"))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -271,6 +284,7 @@ pub struct Params {
     pub freethrow: FreeThrowTable,
     pub policy: PolicyTable,
     pub formations: Formations,
+    pub tactics: TacticsTable,
 }
 
 impl Params {
@@ -284,6 +298,7 @@ impl Params {
             freethrow: embedded("freethrow"),
             policy: embedded("policy"),
             formations: embedded("formations"),
+            tactics: TacticsTable::embedded(),
         };
         params
             .validate()
@@ -300,6 +315,7 @@ impl Params {
             freethrow: read(dir, "freethrow")?,
             policy: read(dir, "policy")?,
             formations: read(dir, "formations")?,
+            tactics: TacticsTable::load(dir)?,
         };
         params.validate()?;
         Ok(params)

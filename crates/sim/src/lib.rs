@@ -5,18 +5,24 @@
 
 pub mod action;
 pub mod boxscore;
+pub mod defense;
+pub mod endgame;
 pub mod gate;
 pub mod params;
 pub mod policy;
+pub mod replay;
 pub mod resolve;
+pub mod rotation;
 pub mod session;
 pub mod state;
 pub mod stream;
+pub mod tactics;
 pub mod world;
 
 pub use action::{ActionKind, Fact, ShotKind, TeamSide};
 pub use boxscore::{BoxScore, PlayerLine, TeamLine};
 pub use params::{Params, CALIBRATION_DIR};
+pub use replay::{replay_possession, PossessionFrames};
 pub use session::{MatchInfo, SessionService, SessionState};
 pub use world::{GameReport, MatchSetup, PossessionRecord, TimedFact, World};
 

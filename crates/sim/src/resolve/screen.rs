@@ -80,7 +80,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
         let index = World::team_index(team);
         world.fouls[index].period += 1;
         world.fouls[index].total += 1;
-        world.players[screener].fouls += 1;
+        crate::rotation::record_foul(world, screener);
         world.emit(Fact::Turnover {
             player: screener,
             kind: TurnoverKind::OffensiveFoul,

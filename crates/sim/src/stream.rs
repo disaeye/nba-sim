@@ -28,6 +28,8 @@ impl Fact {
             Self::Turnover { .. } => "TURNOVER",
             Self::Substitution { .. } => "SUBSTITUTION",
             Self::PeriodEnd { .. } => "PERIOD_END",
+            Self::PlayActivated { .. } => "PLAY_ACTIVATED",
+            Self::PlayWindowEnded { .. } => "PLAY_WINDOW_ENDED",
             Self::GameEnd => "GAME_END",
         }
     }
@@ -146,6 +148,12 @@ impl World {
                 "incoming_id": self.player_id(*incoming),
                 "outgoing_id": self.player_id(*outgoing),
             }),
+            Fact::PlayActivated { play, possession } => {
+                json!({ "play_id": play, "possession": possession })
+            }
+            Fact::PlayWindowEnded { play, possession } => {
+                json!({ "play_id": play, "possession": possession })
+            }
             Fact::PeriodEnd { period } => json!({ "period": period }),
             Fact::GameEnd => json!({}),
         }

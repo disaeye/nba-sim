@@ -34,6 +34,22 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     let is_three = zone == "three";
     let distance = (pos - hoop).length();
     let contest = contest_for(world, shooter, pos);
+    // 扑防在出手瞬间才到位时，射手把球收回来继续进攻：
+    // 时钟充裕就不该带着已经到位的强干扰把球投出去。
+    if world.clock.shot_clock > world.params.policy.p("early_clock_seconds") as f64
+        && !matches!(zone, "rim" | "near")
+        && contest > world.params.policy.p("contested_threshold")
+    {
+        world.possession.dribble_state = crate::state::DribbleState::Dribbling;
+        world.possession.gather_pos = None;
+        return ActionOutcome {
+            actor: shooter,
+            kind: ActionKind::Shoot(kind),
+            completion: Completion::Interrupted,
+            delta: StateDelta::default(),
+            facts: Vec::new(),
+        };
+    }
     // 投篮终结了持球状态：收球标志在出手时清掉。
     world.possession.dribble_state = crate::state::DribbleState::Dribbling;
     world.possession.gather_pos = None;
@@ -145,6 +161,17 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         "mid" => 2,
         _ => 3,
     };
+    let defender_ft = crate::state::nearest_opponent(&world.players, shooter)
+        .map(|defender| (defender.pos - world.players[shooter].pos).length())
+        .unwrap_or(f32::INFINITY);
+    world.shot_samples.push(crate::state::ShotSample {
+        shot_clock: world.clock.shot_clock,
+        contest,
+        defender_ft,
+        zone: zone_index as u8,
+        made,
+        points,
+    });
     world.shot_zone_counts[crate::world::World::team_index(team)][zone_index] += 1;
     let creation_index = match kind.creation() {
         "drive" => 0,

@@ -123,9 +123,15 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
 
     let direction = (hoop - pos).normalize_or_zero();
     if beaten {
-        let base = world.params.policy.g("drive_finish_distance_ft");
-        let spread = world.params.policy.g("drive_finish_spread_ft");
-        let finish_distance = base + world.rng.gen::<f32>() * spread;
+        // 突破落点按参考表的驱动分区份额取双峰：一部分直接到篮下，一部分在近筐带收球起抛投。
+        let rim_share = world.params.shot_profile.zone_by_creation["drive"]["rim"];
+        let finish_distance = if world.rng.gen::<f32>() < rim_share {
+            world.params.policy.g("drive_rim_finish_ft")
+                + world.rng.gen::<f32>() * world.params.policy.g("drive_rim_spread_ft")
+        } else {
+            world.params.policy.g("drive_finish_distance_ft")
+                + world.rng.gen::<f32>() * world.params.policy.g("drive_finish_spread_ft")
+        };
         let finish = hoop - direction * finish_distance;
         world.players[driver].pos = finish;
         world.players[driver].target = finish;

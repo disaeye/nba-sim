@@ -174,6 +174,21 @@ impl ActionKind {
             Self::Relocate => "Relocate",
         }
     }
+
+    /// 动作族编号，供决策观测与过程判据使用。
+    pub fn family(self) -> u8 {
+        match self {
+            Self::Shoot(_) => 0,
+            Self::Drive => 1,
+            Self::Pass(_) => 2,
+            Self::Screen(_) => 3,
+            Self::Cut => 4,
+            Self::PostUp => 5,
+            Self::Dribble => 6,
+            Self::Finish => 7,
+            Self::Relocate => 8,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -320,6 +335,16 @@ pub enum Fact {
     },
     PeriodEnd {
         period: u32,
+    },
+    /// 选板激活：阵地回合进入某份剧本的行为窗口。
+    PlayActivated {
+        play: String,
+        possession: u64,
+    },
+    /// 选板窗口结束。
+    PlayWindowEnded {
+        play: String,
+        possession: u64,
     },
     GameEnd,
 }

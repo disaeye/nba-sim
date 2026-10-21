@@ -20,7 +20,7 @@ pub fn apply_shooting_foul(
     let index = World::team_index(world.players[fouler].team);
     world.fouls[index].period += 1;
     world.fouls[index].total += 1;
-    world.players[fouler].fouls += 1;
+    crate::rotation::record_foul(world, fouler);
     world.emit(Fact::Foul {
         fouler,
         fouled: shooter,
@@ -56,7 +56,7 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
     world.line_mut(fouler).fouls += 1;
     world.fouls[index].period += 1;
     world.fouls[index].total += 1;
-    world.players[fouler].fouls += 1;
+    crate::rotation::record_foul(world, fouler);
     let free_throws = bonus_free_throws(world, team);
     world.emit(Fact::Foul {
         fouler,
