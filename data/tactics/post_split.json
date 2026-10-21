@@ -2,6 +2,7 @@
   "id": "off_post_split",
   "name_zh": "低位背身策应体系 (Post-Up & Split)",
   "spacing_style": "PostSplitFourOut",
+  "play_ids": ["post_split_cut_v1"],
   "slots": [
     {
       "id": "top",

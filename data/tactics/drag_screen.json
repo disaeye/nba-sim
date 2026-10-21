@@ -2,6 +2,7 @@
   "id": "off_drag_screen",
   "name_zh": "突分与追身掩护体系 (Drag Screen)",
   "spacing_style": "PistolSpread",
+  "play_ids": ["drag_screen_drive_kick_v1", "horns_flare_pop_v1"],
   "slots": [
     {
       "id": "top",

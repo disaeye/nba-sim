@@ -73,6 +73,8 @@ pub enum PlayPredicate {
     CarrierPossed,
     /// 前场阵地战（非快攻）。
     HalfcourtPossession,
+    /// 快攻回合：活球转换后的早期进攻窗口内。
+    TransitionPossession,
     /// 进攻时钟低于阈值（秒）。
     ShotClockUrgent {
         /// 阈值秒数，非负且有限。
@@ -436,6 +438,7 @@ fn predicate_name(predicate: &PlayPredicate) -> &'static str {
     match predicate {
         PlayPredicate::CarrierPossed => "carrier_possed",
         PlayPredicate::HalfcourtPossession => "halfcourt_possession",
+        PlayPredicate::TransitionPossession => "transition_possession",
         PlayPredicate::ShotClockUrgent { .. } => "shot_clock_urgent",
         PlayPredicate::BeyondCircleFt { .. } => "beyond_circle_ft",
         PlayPredicate::ScreenEstablished => "screen_established",
@@ -638,6 +641,7 @@ impl PlaySpec {
         let params: &[(&'static str, f32)] = match predicate {
             PlayPredicate::CarrierPossed
             | PlayPredicate::HalfcourtPossession
+            | PlayPredicate::TransitionPossession
             | PlayPredicate::ScreenEstablished
             | PlayPredicate::HelpShadingOff
             | PlayPredicate::WeakSideVacated

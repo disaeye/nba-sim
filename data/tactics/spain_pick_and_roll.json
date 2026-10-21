@@ -2,6 +2,7 @@
   "id": "off_spain_pnr",
   "name_zh": "西班牙双掩护战术 (Spain Pick and Roll)",
   "spacing_style": "SpreadStack",
+  "play_ids": ["spain_pnr_stack_v1"],
   "slots": [
     {
       "id": "top",

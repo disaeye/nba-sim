@@ -7,18 +7,31 @@
     {
       "id": "sprint_to_rim",
       "when": [
-        { "predicate": "carrier_possed" }
+        {
+          "predicate": "carrier_possed"
+        }
       ],
-      "then": { "verb": "CutBackdoor", "slot": "left_wing" },
+      "then": {
+        "verb": "CutBackdoor",
+        "slot": "left_wing"
+      },
       "carrier_preferences": [
-        { "action_family": "Pass", "bonus": 0.45 }
+        {
+          "action_family": "Pass",
+          "bonus": 0.45
+        }
       ]
     }
   ],
   "triggers": [
     {
       "when": [
-        { "predicate": "carrier_possed" }
+        {
+          "predicate": "carrier_possed"
+        },
+        {
+          "predicate": "transition_possession"
+        }
       ],
       "window_seconds": 4.0,
       "cooldown_seconds": 6.0

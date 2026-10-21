@@ -2,6 +2,7 @@
   "id": "off_transition_push",
   "name_zh": "快攻闪击转换体系 (Fastbreak)",
   "spacing_style": "FastBreakWide",
+  "play_ids": ["transition_rim_runner_v1"],
   "slots": [
     {
       "id": "top",

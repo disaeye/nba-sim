@@ -7,17 +7,28 @@
     {
       "id": "lift_into_weak_side_void",
       "when": [
-        { "predicate": "weak_side_vacated" },
-        { "predicate": "halfcourt_possession" }
+        {
+          "predicate": "weak_side_vacated"
+        },
+        {
+          "predicate": "halfcourt_possession"
+        }
       ],
-      "then": { "verb": "Lift", "slot": "left_wing" }
+      "then": {
+        "verb": "Lift",
+        "slot": "left_wing"
+      }
     }
   ],
   "triggers": [
     {
       "when": [
-        { "predicate": "weak_side_vacated" },
-        { "predicate": "halfcourt_possession" }
+        {
+          "predicate": "weak_side_vacated"
+        },
+        {
+          "predicate": "halfcourt_possession"
+        }
       ],
       "window_seconds": 5.0,
       "cooldown_seconds": 8.0

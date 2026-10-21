@@ -3,24 +3,59 @@
   "id": "delay_dho_handoff_v1",
   "name_zh": "弧顶手递手分球突分",
   "kind": "play",
+  "carrier_preferences": [
+    {
+      "action_family": "Drive",
+      "bonus": 0.35
+    },
+    {
+      "action_family": "Pass",
+      "bonus": 0.2
+    }
+  ],
+  "inhibitions": [
+    {
+      "action_family": "Shoot",
+      "mode": "soft",
+      "penalty": 0.6
+    },
+    {
+      "action_family": "Dwell",
+      "mode": "hard"
+    }
+  ],
   "rules": [
     {
       "id": "dho_hand_off_drive",
       "when": [
-        { "predicate": "carrier_possed" },
-        { "predicate": "halfcourt_possession" }
+        {
+          "predicate": "carrier_possed"
+        },
+        {
+          "predicate": "halfcourt_possession"
+        }
       ],
-      "then": { "verb": "Lift", "slot": "left_wing" },
+      "then": {
+        "verb": "Lift",
+        "slot": "left_wing"
+      },
       "carrier_preferences": [
-        { "action_family": "Pass", "bonus": 0.4 }
+        {
+          "action_family": "Pass",
+          "bonus": 0.4
+        }
       ]
     }
   ],
   "triggers": [
     {
       "when": [
-        { "predicate": "carrier_possed" },
-        { "predicate": "halfcourt_possession" }
+        {
+          "predicate": "carrier_possed"
+        },
+        {
+          "predicate": "halfcourt_possession"
+        }
       ],
       "window_seconds": 6.0,
       "cooldown_seconds": 8.0

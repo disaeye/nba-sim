@@ -40,6 +40,7 @@
       },
       "tendencies": {
         "shoot_frequency": 0.68,
+        "three_point_preference": 0.72,
         "drive_frequency": 0.78,
         "pass_frequency": 0.76,
         "cut_frequency": 0.5,
@@ -95,6 +96,7 @@
       },
       "tendencies": {
         "shoot_frequency": 0.86,
+        "three_point_preference": 0.95,
         "drive_frequency": 0.5,
         "pass_frequency": 0.42,
         "cut_frequency": 0.72,
@@ -150,6 +152,7 @@
       },
       "tendencies": {
         "shoot_frequency": 0.5,
+        "three_point_preference": 0.55,
         "drive_frequency": 0.5,
         "pass_frequency": 0.7,
         "cut_frequency": 0.66,
@@ -205,6 +208,7 @@
       },
       "tendencies": {
         "shoot_frequency": 0.5,
+        "three_point_preference": 0.88,
         "drive_frequency": 0.5,
         "pass_frequency": 0.5,
         "cut_frequency": 0.5,
@@ -259,7 +263,8 @@
         "off_ball_sense": 0.88
       },
       "tendencies": {
-        "shoot_frequency": 0.5,
+        "shoot_frequency": 0.32,
+        "three_point_preference": 0.18,
         "drive_frequency": 0.5,
         "pass_frequency": 0.5,
         "cut_frequency": 0.5,
@@ -315,6 +320,7 @@
       },
       "tendencies": {
         "shoot_frequency": 0.74,
+        "three_point_preference": 0.9,
         "drive_frequency": 0.61,
         "pass_frequency": 0.5,
         "cut_frequency": 0.5,
@@ -369,7 +375,8 @@
         "off_ball_sense": 0.5
       },
       "tendencies": {
-        "shoot_frequency": 0.5,
+        "shoot_frequency": 0.38,
+        "three_point_preference": 0.28,
         "drive_frequency": 0.5,
         "pass_frequency": 0.5,
         "cut_frequency": 0.84,
@@ -424,7 +431,8 @@
         "off_ball_sense": 0.5
       },
       "tendencies": {
-        "shoot_frequency": 0.5,
+        "shoot_frequency": 0.3,
+        "three_point_preference": 0.05,
         "drive_frequency": 0.5,
         "pass_frequency": 0.5,
         "cut_frequency": 0.5,

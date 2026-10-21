@@ -7,17 +7,30 @@
     {
       "id": "backdoor_from_occupied_corner",
       "when": [
-        { "predicate": "corner_occupied", "side": "left" },
-        { "predicate": "halfcourt_possession" }
+        {
+          "predicate": "corner_occupied",
+          "side": "left"
+        },
+        {
+          "predicate": "halfcourt_possession"
+        }
       ],
-      "then": { "verb": "CutBackdoor", "slot": "left_corner" }
+      "then": {
+        "verb": "CutBackdoor",
+        "slot": "left_corner"
+      }
     }
   ],
   "triggers": [
     {
       "when": [
-        { "predicate": "corner_occupied", "side": "left" },
-        { "predicate": "halfcourt_possession" }
+        {
+          "predicate": "corner_occupied",
+          "side": "left"
+        },
+        {
+          "predicate": "halfcourt_possession"
+        }
       ],
       "window_seconds": 2.5,
       "cooldown_seconds": 7.0

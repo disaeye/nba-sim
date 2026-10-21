@@ -2,6 +2,7 @@
   "id": "off_delay_attack",
   "name_zh": "弧顶发牌策应体系 (Delay Action)",
   "spacing_style": "DelayFiveOut",
+  "play_ids": ["corner_backdoor_v1", "delay_dho_handoff_v1"],
   "slots": [
     {
       "id": "top",

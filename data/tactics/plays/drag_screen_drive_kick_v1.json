@@ -7,20 +7,34 @@
     {
       "id": "drag_pick_and_kick",
       "when": [
-        { "predicate": "carrier_possed" },
-        { "predicate": "screen_established" }
+        {
+          "predicate": "carrier_possed"
+        },
+        {
+          "predicate": "screen_established"
+        }
       ],
-      "then": { "verb": "Lift", "slot": "weak_wing" },
+      "then": {
+        "verb": "Lift",
+        "slot": "weak_wing"
+      },
       "carrier_preferences": [
-        { "action_family": "Pass", "bonus": 0.3 }
+        {
+          "action_family": "Pass",
+          "bonus": 0.3
+        }
       ]
     }
   ],
   "triggers": [
     {
       "when": [
-        { "predicate": "carrier_possed" },
-        { "predicate": "screen_established" }
+        {
+          "predicate": "carrier_possed"
+        },
+        {
+          "predicate": "screen_established"
+        }
       ],
       "window_seconds": 5.0,
       "cooldown_seconds": 8.0

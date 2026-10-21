@@ -7,20 +7,34 @@
     {
       "id": "cut_off_post_feed",
       "when": [
-        { "predicate": "carrier_possed" },
-        { "predicate": "halfcourt_possession" }
+        {
+          "predicate": "carrier_possed"
+        },
+        {
+          "predicate": "halfcourt_possession"
+        }
       ],
-      "then": { "verb": "CutBackdoor", "slot": "weak_wing" },
+      "then": {
+        "verb": "CutBackdoor",
+        "slot": "weak_wing"
+      },
       "carrier_preferences": [
-        { "action_family": "Pass", "bonus": 0.35 }
+        {
+          "action_family": "Pass",
+          "bonus": 0.35
+        }
       ]
     }
   ],
   "triggers": [
     {
       "when": [
-        { "predicate": "carrier_possed" },
-        { "predicate": "halfcourt_possession" }
+        {
+          "predicate": "carrier_possed"
+        },
+        {
+          "predicate": "halfcourt_possession"
+        }
       ],
       "window_seconds": 6.0,
       "cooldown_seconds": 8.0

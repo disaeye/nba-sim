@@ -2,6 +2,7 @@
   "id": "off_horns_pnr",
   "name_zh": "高位挡拆战术 (High Pick and Roll)",
   "spacing_style": "Spread",
+  "play_ids": ["high_pnr_roll_v1"],
   "slots": [
     {
       "id": "top",

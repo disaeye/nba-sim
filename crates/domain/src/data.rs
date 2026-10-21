@@ -168,6 +168,9 @@ impl TeamTraits {
 #[serde(default)]
 pub struct PlayerTendencies {
     pub shoot_frequency: f32,
+    /// 投射区域倾向（ADR-020）：0 表示只在篮下终结，1 表示只在三分线外出手。
+    /// 角色的行为含义经这个字段承载，代码不按 `offensive_role` 分支。
+    pub three_point_preference: f32,
     pub drive_frequency: f32,
     pub pass_frequency: f32,
     pub cut_frequency: f32,
@@ -188,21 +191,25 @@ pub struct PlayerTendencies {
     pub transition_sprint: f32,
 }
 
+/// 倾向的中性值：缺省名册不偏向任何一边。
+pub const TENDENCY_NEUTRAL: f32 = 0.5;
+
 impl Default for PlayerTendencies {
     fn default() -> Self {
         Self {
-            shoot_frequency: 0.5,
-            drive_frequency: 0.5,
-            pass_frequency: 0.5,
-            cut_frequency: 0.5,
-            screen_frequency: 0.5,
-            offensive_rebound_frequency: 0.5,
-            gamble_steal: 0.5,
-            block_aggressiveness: 0.5,
-            help_aggressiveness: 0.5,
-            physicality: 0.5,
-            risk_tolerance: 0.5,
-            transition_sprint: 0.5,
+            shoot_frequency: TENDENCY_NEUTRAL,
+            three_point_preference: TENDENCY_NEUTRAL,
+            drive_frequency: TENDENCY_NEUTRAL,
+            pass_frequency: TENDENCY_NEUTRAL,
+            cut_frequency: TENDENCY_NEUTRAL,
+            screen_frequency: TENDENCY_NEUTRAL,
+            offensive_rebound_frequency: TENDENCY_NEUTRAL,
+            gamble_steal: TENDENCY_NEUTRAL,
+            block_aggressiveness: TENDENCY_NEUTRAL,
+            help_aggressiveness: TENDENCY_NEUTRAL,
+            physicality: TENDENCY_NEUTRAL,
+            risk_tolerance: TENDENCY_NEUTRAL,
+            transition_sprint: TENDENCY_NEUTRAL,
         }
     }
 }

@@ -7,20 +7,34 @@
     {
       "id": "stack_screen_and_pop",
       "when": [
-        { "predicate": "carrier_possed" },
-        { "predicate": "halfcourt_possession" }
+        {
+          "predicate": "carrier_possed"
+        },
+        {
+          "predicate": "halfcourt_possession"
+        }
       ],
-      "then": { "verb": "ScreenPop", "slot": "stack_screener" },
+      "then": {
+        "verb": "ScreenPop",
+        "slot": "stack_screener"
+      },
       "carrier_preferences": [
-        { "action_family": "Pass", "bonus": 0.4 }
+        {
+          "action_family": "Pass",
+          "bonus": 0.4
+        }
       ]
     }
   ],
   "triggers": [
     {
       "when": [
-        { "predicate": "carrier_possed" },
-        { "predicate": "halfcourt_possession" }
+        {
+          "predicate": "carrier_possed"
+        },
+        {
+          "predicate": "halfcourt_possession"
+        }
       ],
       "window_seconds": 6.0,
       "cooldown_seconds": 8.0

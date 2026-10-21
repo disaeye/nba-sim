@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA_FILES = [ROOT / "data/roster/home.json", ROOT / "data/roster/away.json"]
 EXPECTED = {
     "shoot_frequency",
+    "three_point_preference",
     "drive_frequency",
     "pass_frequency",
     "cut_frequency",
@@ -40,13 +41,14 @@ def check_rosters():
                     raise SystemExit(
                         f"{path.relative_to(ROOT)} player {player['id']} {name} is outside 0..=1"
                     )
-    print("R6 roster tendency schema: 16/16 players have 12 valid fields")
+    print(f"R6 roster tendency schema: 16/16 players have {len(EXPECTED)} valid fields")
 
 
 def check_rust_consumers():
     # 动作链内核已在生产路径上消费的倾向。
     consumers = {
         "shoot_frequency": ["crates/sim/src/policy.rs"],
+        "three_point_preference": ["crates/sim/src/policy.rs"],
         "drive_frequency": ["crates/sim/src/policy.rs"],
         "screen_frequency": ["crates/sim/src/policy.rs"],
         "pass_frequency": ["crates/sim/src/world.rs"],

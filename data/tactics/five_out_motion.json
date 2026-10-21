@@ -2,6 +2,7 @@
   "id": "off_motion_spacing",
   "name_zh": "五外动态进攻 (5-Out Motion)",
   "spacing_style": "PerimeterFiveOut",
+  "play_ids": ["weak_side_lift_v1"],
   "slots": [
     {
       "id": "top",
