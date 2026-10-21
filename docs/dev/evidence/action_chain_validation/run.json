@@ -57,7 +57,7 @@
       "source": "shufinskiy/nba_data shotdetail"
     }
   },
-  "commit": "349d0e78bf9cf77b3e70bdf491ab2a9201ee472a",
+  "commit": "5a4a755d3ed2b4a5676a5d394e1727032fc02da6",
   "games": 32,
   "mechanism": {
     "high_value": 0.95,

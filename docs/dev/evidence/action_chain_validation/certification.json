@@ -1,6 +1,6 @@
 {
   "certification_status": "pass",
-  "commit": "349d0e78bf9cf77b3e70bdf491ab2a9201ee472a",
+  "commit": "5a4a755d3ed2b4a5676a5d394e1727032fc02da6",
   "coverage": {
     "gate_criteria": 21,
     "mechanism_attributes": 13,
@@ -14,7 +14,8 @@
     "defects": [],
     "known_insufficient": [],
     "marginal": [
-      "mechanism:shooting_mid（下界比 0.50）"
+      "mechanism:shooting_mid（下界比 0.49）",
+      "mechanism:acceleration（下界比 0.43）"
     ],
     "new_insufficient": [],
     "not_applicable": [
