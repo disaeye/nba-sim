@@ -4,7 +4,10 @@ use crate::resolve::ResolveConfig;
 use serde::{Deserialize, Serialize};
 
 mod policies;
+pub mod fouls;
 mod validate;
+
+pub use fouls::{awards_free_throws, counts_toward_personal_limit, counts_toward_team_period_fouls};
 
 pub use policies::{
     CapabilityCurveRules, DecisionRules, DefenseRules, ModulationRules,

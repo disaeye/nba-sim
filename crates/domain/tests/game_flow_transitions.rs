@@ -1,9 +1,14 @@
-//! GameFlowState 转换表穷举守卫（③：第二批·守卫加固）。
+//! GameFlowState 转换表穷举守卫（③：第二批·守卫加固）与联赛规则语义守卫。
 //!
-//! 表是"合法宏观生命周期的唯一权威"。任何非法边必须被拒绝——
-//! 历史 v10 死球停滞（seed 2/4 永久冻结）就是"拒绝路径缺出口"类缺陷，
-//! 本测试把每条非法边逐一封堵，新增 Phase 变体时编译器强制补全此表。
+//! 前半部分：转换表是"合法宏观生命周期的唯一权威"。任何非法边必须被拒绝。
+//! 后半部分：进攻时钟重置、bonus 阈值矩阵与犯规计账是数据驱动的纯函数，
+//! 可用同一份测试直接卡住区间——它们不依赖引擎状态，改错一个数就会红。
 
+use nba_domain::event::FoulKind;
+use nba_domain::league::LeagueProfile;
+use nba_domain::rules::{
+    counts_toward_personal_limit, counts_toward_team_period_fouls,
+};
 use nba_domain::GameFlowState;
 
 /// 全状态枚举，保证穷举性（新增变体时此处编译失败）。
@@ -153,4 +158,55 @@ fn game_end_reachable_from_every_mid_state() {
 
 fn index_of(state: GameFlowState) -> usize {
     ALL.iter().position(|s| *s == state).unwrap()
+}
+
+/// 前场篮板后的进攻时钟：只有球触筐才重置，且只补不足、不削减剩余时间。
+///
+/// - 触筐且剩 8s → 补到 14s；
+/// - 触筐且剩 16s → 保持 16s（分秒不扣）；
+/// - 三不沾/被封盖且被攻方抢到 → 原读数继续走。
+#[test]
+fn shot_clock_resets_to_fourteen_only_when_the_ball_touches_the_rim() {
+    let league = LeagueProfile::nba();
+    assert_eq!(league.shot_clock_after_offensive_rebound(8.0, true), 14.0);
+    assert_eq!(league.shot_clock_after_offensive_rebound(16.0, true), 16.0);
+    assert_eq!(league.shot_clock_after_offensive_rebound(0.4, true), 14.0);
+    assert_eq!(league.shot_clock_after_offensive_rebound(8.0, false), 8.0);
+    assert_eq!(league.shot_clock_after_offensive_rebound(2.5, false), 2.5);
+}
+
+/// bonus 阈值矩阵：常规时段第 5 犯，第四节与加时最后两分钟第 2 犯。
+#[test]
+fn bonus_threshold_matrix_matches_the_nba_rule() {
+    let league = LeagueProfile::nba();
+    // 常规时段：第 4 犯发边线球，第 5 犯两罚。
+    assert_eq!(league.bonus_free_throws_for(4, 4, 350.0), 0);
+    assert_eq!(league.bonus_free_throws_for(5, 4, 350.0), 2);
+    // 第四节最后两分钟：第 1 犯发边线球，第 2 犯两罚。
+    assert_eq!(league.bonus_free_throws_for(1, 4, 90.0), 0);
+    assert_eq!(league.bonus_free_throws_for(2, 4, 90.0), 2);
+    // 同一种切在第二节不适用（第二节没有最后两分钟特例）。
+    assert_eq!(league.bonus_free_throws_for(1, 2, 90.0), 0);
+    assert_eq!(league.bonus_free_throws_for(4, 2, 90.0), 0);
+    // 加时同样适用最后两分钟特例。
+    assert_eq!(league.bonus_free_throws_for(2, 5, 90.0), 2);
+    // FIBA 没有这段特例，第四节最后两分钟仍需第 5 犯。
+    let fiba = LeagueProfile::fiba();
+    assert_eq!(fiba.bonus_free_throws_for(2, 4, 90.0), 0);
+    assert_eq!(fiba.bonus_free_throws_for(5, 4, 90.0), 2);
+}
+
+/// 进攻犯规计入个人累计（满 6 犯仍离场），但不计入球队单节犯规（不进 bonus）。
+#[test]
+fn offensive_fouls_count_toward_the_personal_limit_but_not_the_bonus() {
+    assert!(counts_toward_personal_limit(FoulKind::Offensive));
+    assert!(!counts_toward_team_period_fouls(FoulKind::Offensive));
+    // 投篮与普通犯规两本账都计。
+    assert!(counts_toward_personal_limit(FoulKind::Shooting));
+    assert!(counts_toward_team_period_fouls(FoulKind::Shooting));
+    assert!(counts_toward_personal_limit(FoulKind::Personal));
+    assert!(counts_toward_team_period_fouls(FoulKind::Personal));
+    // 技术犯规两本账都不计。
+    assert!(!counts_toward_personal_limit(FoulKind::Technical));
+    assert!(!counts_toward_team_period_fouls(FoulKind::Technical));
 }

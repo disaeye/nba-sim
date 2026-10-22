@@ -4,11 +4,13 @@
 //! 只依赖 serde —— 任何消费者（前端/回放器/训练管道）按此格式解码，
 //! 与引擎内部结构完全解耦。
 
+pub mod event;
 pub mod frame;
 pub mod validation_stream;
 
+pub use event::{DecisionTrace, TraceCandidate};
 pub use frame::{
-    DebugFlag, DebugPlayAdjustment, DebugProb, DebugUtility, DecisionDebug, EventRelation,
+    DebugEpv, DebugFlag, DebugPlayAdjustment, DebugProb, DebugUtility, DecisionDebug, EventRelation,
     EventRelationKind, FrameEvent, FrameRules, PotentialFieldSample, RenderBall, RenderFrame,
     RenderPlayer, RenderScore, RenderTeam, StreamTick,
 };

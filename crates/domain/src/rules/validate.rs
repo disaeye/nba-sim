@@ -27,6 +27,8 @@ impl GameRules {
             self.league.overtime_duration_seconds,
             self.league.shot_clock_seconds,
             self.league.offensive_rebound_shot_clock_seconds,
+            self.league.bonus_final_seconds,
+            self.league.timeouts_final_seconds,
             self.inbound_seconds,
             self.inbound_setup_seconds,
             self.backcourt_seconds,
@@ -176,6 +178,13 @@ impl GameRules {
             || self.decision_interval_seconds <= 0.0
             || self.free_throw_interval_seconds <= 0.0
             || self.league.regulation_periods == 0
+            || self.league.bonus_final_seconds < f32::default()
+            || (self.league.bonus_fouls_final != 0
+                && self.league.bonus_fouls_final > self.league.bonus_fouls_per_period)
+            || self.league.bonus_final_period > self.league.regulation_periods
+            || self.league.timeouts_final_seconds < f32::default()
+            || self.league.timeouts_final_max > self.league.timeouts_fourth_quarter_max
+            || self.league.timeouts_fourth_quarter_max > self.league.timeouts_per_game
             || self.estimated_possessions_per_period == 0
         {
             return Err("clock and period policy contains an invalid value".to_string());

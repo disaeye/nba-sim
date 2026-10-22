@@ -99,6 +99,33 @@ pub struct RenderTeam {
     pub short_name: String,
 }
 
+/// 单次决策的期望得分分解（单位：分）。
+///
+/// 七个项对应七种成因，总和就是这次动作的期望得分；分开列出的理由
+/// 是要能回答「为什么这个人选了这一手」，而不是只看一个总数。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub struct DebugEpv {
+    pub ability: f32,
+    pub contest: f32,
+    pub lane: f32,
+    pub help: f32,
+    pub tendency: f32,
+    pub context: f32,
+    pub turnover: f32,
+}
+
+impl DebugEpv {
+    pub fn sum(&self) -> f32 {
+        self.ability
+            + self.contest
+            + self.lane
+            + self.help
+            + self.tendency
+            + self.context
+            + self.turnover
+    }
+}
+
 /// 决策调试层（架构文档 Phase 8：每个决策输出效用分解）。
 /// Option 字段跳过序列化，正常观看流不受影响。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -109,6 +136,15 @@ pub struct DecisionDebug {
     pub probabilities: Vec<DebugProb>,
     pub flags: Vec<DebugFlag>,
     pub blocked: Vec<String>,
+    /// 本决策在全局决策序列中的序号。
+    #[serde(default)]
+    pub trace_id: u32,
+    /// 当时的逆温度 β（球商与体能决定）。
+    #[serde(default)]
+    pub beta: f32,
+    /// 当时的方差偏好 γ（领先为负、落后为正）。
+    #[serde(default)]
+    pub gamma: f32,
     /// 本决策时刻实际激活的约束，便于解释阶段覆盖和规则缺失。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_constraints: Vec<String>,
@@ -143,6 +179,24 @@ pub struct DebugPlayAdjustment {
 pub struct DebugUtility {
     pub kind: String,
     pub utility: f32,
+    /// 期望得分的七项分解。
+    #[serde(default)]
+    pub epv: DebugEpv,
+    /// 结果的离散度（γ 加权后进入总效用）。
+    #[serde(default)]
+    pub variance: f32,
+    /// 消耗进攻时钟的成本；负值表示紧迫度带来的加成。
+    #[serde(default)]
+    pub clock_cost: f32,
+    /// 犯规风险的成本。
+    #[serde(default)]
+    pub foul_cost: f32,
+    /// 战术先验偏置。
+    #[serde(default)]
+    pub tactical_bonus: f32,
+    /// 玻尔兹曼选择概率。
+    #[serde(default)]
+    pub probability: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -288,6 +342,10 @@ pub struct FrameEvent {
     /// 的事件，禁止回写开始事件造成环。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relations: Vec<EventRelation>,
+    /// 直接产生本条事件的那次决策的快照（候选集、效用分解、概率）。
+    /// 动作事件必带；时钟、节末这类非动作事件不带。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_trace: Option<crate::event::DecisionTrace>,
 }
 
 /// 事件间的关系类型（validation.md §3.2）。方向：本事件 -> `event_id`。
@@ -357,6 +415,7 @@ impl FrameEvent {
             movement_intent_id: None,
             play_instance_id: None,
             relations: Vec::new(),
+            decision_trace: None,
         }
     }
 }

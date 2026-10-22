@@ -273,6 +273,27 @@ pub fn poke_check_success_with_context(
         .clamp(floor.min(ceiling), ceiling.max(floor))
 }
 
+/// 把 0..1 的能力值确定性地映射到一段区间。
+///
+/// 区间端点来自规则数据（`policy.json` 的 `geometry`）：速度评分对应
+/// 最大冲刺速度、球商评分对应决策逆温度。函数本身不持有任何物理常数，
+/// 否则「出手快」这类属性会直接变成概率，而不是先变成秒数再影响干扰几何。
+pub fn map_skill_to_interval(skill: f32, floor: f32, min: f32, max: f32) -> f32 {
+    let ceiling = f32::from(1u8);
+    let t = skill.max(floor).clamp(f32::default(), ceiling);
+    min + (max - min) * t
+}
+
+/// 体能折损：满体能不折损，体能见底时按 `discount` 比例下降。
+///
+/// 决策质量随体能下降是疲劳动力学的一部分：体能透支的球员在同样的
+/// 选项上做出的选择更接近随机。
+pub fn fatigue_attenuation(value: f32, stamina: f32, discount: f32) -> f32 {
+    let ceiling = f32::from(1u8);
+    let s = stamina.clamp(f32::default(), ceiling);
+    value * (ceiling - discount * (ceiling - s))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

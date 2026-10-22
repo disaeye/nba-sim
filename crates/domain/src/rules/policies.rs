@@ -980,6 +980,8 @@ pub struct RotationRules {
     /// 犯满强制换人时选用替补的体能地板（归一化）：达到地板的替补优先
     /// 被选用；没有达标替补时退回「未犯满即可」——犯满离场必须立即执行。
     pub foul_trouble_entry_stamina: f32,
+    /// 对手连续得分达到该值时教练叫暂停止血（真实 NBA 常见的 8:0 叫停）。
+    pub timeout_run_threshold: u32,
 }
 
 impl Default for RotationRules {
@@ -992,6 +994,7 @@ impl Default for RotationRules {
             max_substitutions_per_window: 2,
             garbage_time_fatigue_relief: 0.15,
             foul_trouble_entry_stamina: 0.55,
+            timeout_run_threshold: 8,
         }
     }
 }
@@ -1005,6 +1008,7 @@ impl RotationRules {
             || self.min_rest_seconds < 0.0
             || self.max_substitutions_per_window == 0
             || self.garbage_time_fatigue_relief < 0.0
+            || self.timeout_run_threshold == 0
         {
             return Err("rotation policy contains an invalid value".to_string());
         }
