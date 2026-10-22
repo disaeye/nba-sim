@@ -341,7 +341,7 @@ fn free_throw_facts_match_the_called_foul() {
     let mut sequences = 0;
     for (index, event) in report.events.iter().enumerate() {
         let Fact::Foul {
-            shooting: true,
+            kind: nba_domain::event::FoulKind::Shooting,
             free_throws,
             ..
         } = event.fact

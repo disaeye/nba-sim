@@ -236,6 +236,14 @@ pub struct PolicyTable {
 }
 
 impl PolicyTable {
+    /// EPV 加成项，单位是分。
+    ///
+    /// 旧标度的加成权重与期望得分不同源：直接相加会让「接球就投的时机加成」
+    /// 压过「这次出手本身值多少分」。`epv_bonus_scale` 把两者折到同一标度。
+    pub fn b(&self, key: &str) -> f32 {
+        self.w(key) * self.w("epv_bonus_scale")
+    }
+
     /// 判定带宽（相对误差区间）：未单独登记的准则用 `default`。
     pub fn band(&self, criterion: &str) -> Band {
         self.bands

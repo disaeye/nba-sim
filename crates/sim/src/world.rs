@@ -16,8 +16,8 @@ use crate::resolve;
 use crate::resolve::shot::PendingShot;
 pub use crate::state::Phase;
 use crate::state::{
-    BallState, Clock, DecisionSample, DecisionState, DefenderView, HelpView, OnCourt, PassSample,
-    PlayerState, PossessionKind, PossessionState, ScreenRead, ShotSample, Slot, TeammateView,
+    BallState, Clock, DecisionSample, DecisionState, OnCourt, PassSample, PlayerState,
+    PossessionKind, PossessionState, ScreenRead, ShotSample, Slot,
 };
 
 pub const TICK_SECONDS: f64 = 0.05;
@@ -54,12 +54,25 @@ pub struct TimedFact {
     pub time: f64,
     pub period: u32,
     pub fact: Fact,
+    /// 直接产生这条事实的那次决策（指向 `World::decision_traces`）。
+    pub trace: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct TeamFouls {
+    /// 单节球队犯规（bonus 计数）：进攻犯规与技术犯规不计入。
     pub period: u8,
+    /// 全场球队犯规累计（含进攻犯规）。
     pub total: u8,
+}
+
+/// 轮换状态：换人意图与停表窗口内的换人配额。
+#[derive(Debug, Clone, Default)]
+pub struct RotationState {
+    /// 每队的待执行换人意图。活球期间只登记，不停表就不动阵容。
+    pub pending: [bool; 2],
+    /// 当前停表窗口内已执行的换人数（按队）。
+    pub applied_in_window: [u32; 2],
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +83,12 @@ pub struct PossessionRecord {
     pub start_clock: f64,
     pub end_clock: f64,
     pub duration: f64,
+    /// 回合开始时的比赛钟读数（本节剩余秒数）。
+    ///
+    /// `duration` 是墙钟，含死球停表；回合的节奏必须用比赛钟量。
+    pub start_game_clock: f64,
+    /// 回合结束时的比赛钟读数。
+    pub end_game_clock: f64,
     pub passes: u32,
     pub screens: u32,
     pub drives: u32,
@@ -97,6 +116,11 @@ pub struct World {
     pub rng: ChaCha8Rng,
     pub seed: u64,
     pub fouls: [TeamFouls; 2],
+    pub rotation: RotationState,
+    pub timeouts: [crate::timeouts::TimeoutBudget; 2],
+    /// 最近一次得分方（队下标，0 主 1 客）与这一方的连续得分。
+    pub last_scoring: Option<usize>,
+    pub scoring_run: u32,
     pub possession_count: u64,
     pub period_started_with: TeamSide,
     pub finished: bool,
@@ -118,6 +142,10 @@ pub struct World {
     pub shot_samples: Vec<ShotSample>,
     pub pass_samples: Vec<PassSample>,
     pub decision_samples: Vec<DecisionSample>,
+    /// 逐次决策的完整因果快照：候选集、效用分解与玻尔兹曼概率。
+    pub decision_traces: Vec<crate::state::DecisionTraceSample>,
+    /// 当前生效的决策快照下标：本次决策产生的事实都带着它。
+    pub active_trace: Option<u32>,
     pub shot_zone_counts: [[u32; 4]; 2],
     pub shot_zone_makes: [[u32; 4]; 2],
     pub creation_counts: [u32; 7],
@@ -126,11 +154,19 @@ pub struct World {
     /// 走到篮板结算的投失次数。犯规导致的投失不进入篮板，
     /// 前场篮板率的分子分母必须用这个数对账。
     pub rebound_attempts: u64,
+    /// 连续得分带来的势头（0 = 无，越大越热）。按队存，随时间衰减。
+    pub momentum: [f32; 2],
+    /// 读球历史：防守的协防轮转看的是 `delay` 秒之前的球位。
+    pub(crate) ball_history: Vec<(f64, Vec2)>,
 }
 
 impl World {
     pub fn new(setup: MatchSetup, params: Params, seed: u64) -> Self {
         let rules = setup.rules.clone();
+        // 读球历史按秒数上限预分配：稳态每帧只做写入与裁剪，不再扩容。
+        let history_capacity = ((params.policy.g("ball_history_seconds") as f64 / TICK_SECONDS)
+            .ceil() as usize)
+            + 8;
         let mut players = Vec::new();
         for (index, data) in setup.home.players.iter().enumerate() {
             let on_court = setup.home_lineup.contains(&index);
@@ -192,6 +228,7 @@ impl World {
             .collect();
         let period_seconds = rules.league.period_duration_seconds as f64;
         let shot_clock = rules.league.shot_clock_seconds as f64;
+        let rules_capture = rules.clone();
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let first = if rng.gen::<bool>() {
             TeamSide::Home
@@ -211,7 +248,14 @@ impl World {
                 vel: Vec2::ZERO,
             },
             players,
-            possession: PossessionState::new(first, 0, PossessionKind::Dead, 0.0, shot_clock),
+            possession: PossessionState::new(
+                first,
+                0,
+                PossessionKind::Dead,
+                0.0,
+                shot_clock,
+                period_seconds,
+            ),
             score: [0, 0],
             box_score: BoxScore {
                 home: home_lines,
@@ -224,6 +268,13 @@ impl World {
             rng,
             seed,
             fouls: [TeamFouls::default(), TeamFouls::default()],
+            rotation: RotationState::default(),
+            timeouts: [
+                crate::timeouts::TimeoutBudget::new(&rules_capture),
+                crate::timeouts::TimeoutBudget::new(&rules_capture),
+            ],
+            last_scoring: None,
+            scoring_run: 0,
             possession_count: 0,
             period_started_with: first,
             finished: false,
@@ -243,12 +294,16 @@ impl World {
             shot_samples: Vec::new(),
             pass_samples: Vec::new(),
             decision_samples: Vec::new(),
+            decision_traces: Vec::new(),
+            active_trace: None,
             shot_zone_counts: [[0; 4]; 2],
             shot_zone_makes: [[0; 4]; 2],
             creation_counts: [0; 7],
             next_shot_id: 0,
             next_pass_id: 0,
             rebound_attempts: 0,
+            momentum: [f32::default(); 2],
+            ball_history: Vec::with_capacity(history_capacity),
         };
         world.reset_positions(first);
         world
@@ -310,6 +365,7 @@ impl World {
             shot_samples: std::mem::take(&mut self.shot_samples),
             pass_samples: std::mem::take(&mut self.pass_samples),
             decision_samples: std::mem::take(&mut self.decision_samples),
+            decision_traces: std::mem::take(&mut self.decision_traces),
             shot_zone_counts: self.shot_zone_counts,
             shot_zone_makes: self.shot_zone_makes,
             creation_counts: self.creation_counts,
@@ -344,12 +400,27 @@ impl World {
         self.wall
     }
 
+    pub fn delayed_ball_position(&self, delay: f64) -> Vec2 {
+        crate::motion::delayed_ball_position(self, delay)
+    }
+
     pub fn emit(&mut self, fact: Fact) {
         self.events.push(TimedFact {
             time: self.now(),
             period: self.clock.period,
             fact,
+            trace: self.active_trace,
         });
+    }
+
+    pub fn line(&self, player: usize) -> &PlayerLine {
+        let team = self.players[player].team;
+        let slot = self.line_slot[player] as usize;
+        let lines = match team {
+            TeamSide::Home => &self.box_score.home,
+            TeamSide::Away => &self.box_score.away,
+        };
+        &lines[slot]
     }
 
     pub fn line_mut(&mut self, player: usize) -> &mut PlayerLine {
@@ -366,6 +437,17 @@ impl World {
         let index = Self::team_index(team);
         self.score[index] += points;
         self.possession_points += points;
+        if self.last_scoring == Some(index) {
+            self.scoring_run += points;
+        } else {
+            self.last_scoring = Some(index);
+            self.scoring_run = points;
+        }
+        // 势头：得分方累积，被得分方清零。它按秒衰减，不是一次性标记。
+        let gain = self.params.policy.w("momentum_gain_per_point");
+        let cap = self.params.policy.w("momentum_cap");
+        self.momentum[index] = (self.momentum[index] + gain * points as f32).min(cap);
+        self.momentum[1 - index] = f32::default();
         for player in 0..self.players.len() {
             if !self.players[player].on_court {
                 continue;
@@ -379,9 +461,17 @@ impl World {
         }
     }
 
-    pub fn substitute_if_needed(&mut self) {
-        let rules = self.rules.clone();
-        crate::rotation::substitute_if_needed(self, &rules);
+    /// 谁该叫暂停：对手刚打出一波超过阀值的连续得分时，返回被得分方的队下标。
+    pub fn run_against(&self) -> Option<usize> {
+        let scorer = self.last_scoring?;
+        if self.scoring_run < self.rules.rotation.timeout_run_threshold {
+            return None;
+        }
+        Some(1 - scorer)
+    }
+
+    pub fn apply_dead_ball_window(&mut self) {
+        crate::rotation::apply_dead_ball_window(self);
     }
 
     pub fn on_court(&self, team: TeamSide) -> OnCourt {
@@ -409,63 +499,42 @@ impl World {
     }
 
     fn entry_point(&self, team: TeamSide) -> Vec2 {
-        if self.attacking_right(team) {
-            Vec2::new(28.0, 25.0)
-        } else {
-            Vec2::new(66.0, 25.0)
-        }
+        crate::formation::entry_point(self, team)
     }
 
     fn top_of_key(&self, team: TeamSide) -> Vec2 {
-        if self.attacking_right(team) {
-            Vec2::new(64.0, 25.0)
-        } else {
-            Vec2::new(30.0, 25.0)
-        }
+        crate::formation::top_of_key(self, team)
     }
 
     pub fn reset_positions(&mut self, offense: TeamSide) {
-        let spots = offense_spots(
-            &self.params.formations,
-            self.attacking_right(offense),
-            self.alternate_spacing,
-        );
-        let defense = defense_spots(&self.params.formations, self.attacking_right(offense));
-        let mut offense_index = 0;
-        let mut defense_index = 0;
-        for handle in 0..self.players.len() {
-            if !self.players[handle].on_court {
-                continue;
-            }
-            let is_offense = self.players[handle].team == offense;
-            let target = if is_offense {
-                let spot = spots[offense_index.min(spots.len() - 1)];
-                offense_index += 1;
-                spot
-            } else {
-                let spot = defense[defense_index.min(defense.len() - 1)];
-                defense_index += 1;
-                spot
-            };
-            self.players[handle].pos = target;
-            self.players[handle].vel = Vec2::ZERO;
-            self.players[handle].target = target;
-            self.players[handle].home_spot = target;
-        }
+        crate::formation::reset_positions(self, offense);
     }
 
     pub fn start_possession(&mut self, team: TeamSide, kind: PossessionKind) {
         crate::tactics::close_play_window(self);
-        self.substitute_if_needed();
+        self.active_trace = None;
+        // 新回合的读球历史从头开始：上一个回合的球位不是这次协防的依据。
+        crate::motion::reset_ball_history(self);
         self.possession_count += 1;
-        self.alternate_spacing = self.possession_count % 2 == 0;
+        self.alternate_spacing = self.possession_count.is_multiple_of(2);
         let shot_clock = self.rules.league.shot_clock_seconds as f64;
         self.clock.shot_clock = shot_clock;
-        self.possession =
-            PossessionState::new(team, self.possession_count, kind, self.now(), shot_clock);
+        self.possession = PossessionState::new(
+            team,
+            self.possession_count,
+            kind,
+            self.now(),
+            shot_clock,
+            self.clock.game_clock,
+        );
         self.possession_points = 0;
         self.pending_shot = None;
         self.reset_positions(team);
+        // 死球重启是唯一合法的换人窗口：防守篮板、抢断、快速反击这些
+        // 活球回合开始的进攻不允许在场上换人，现实里教练也换不了。
+        if kind == PossessionKind::Dead {
+            self.apply_dead_ball_window();
+        }
         let handler = self.primary_handler(team);
         let entry = self.entry_point(team);
         self.players[handler].pos = entry;
@@ -476,9 +545,13 @@ impl World {
         // 推进到前场的时长由移动速度决定：速度快则更快进入首个决策，
         // 在固定比赛时钟内产生更多回合。
         let advance_distance = (self.top_of_key(team) - entry).length();
-        let speed = self.players[handler].effective_speed().max(1.0);
+        let speed = self.players[handler]
+            .effective_speed(&self.params.policy)
+            .max(1.0);
         // 推进时长 = 匀速段 + 起步加速段：加速度决定多快到达目标速度。
-        let accel = self.players[handler].effective_acceleration().max(1.0);
+        let accel = self.players[handler]
+            .effective_acceleration(&self.params.policy)
+            .max(1.0);
         // 起步段随推进距离衰减：接球时多半已在移动，长推进接近匀速。
         let ramp_scale = self
             .params
@@ -494,10 +567,15 @@ impl World {
         });
     }
 
-    pub fn start_second_chance(&mut self, team: TeamSide, rebounder: usize) {
+    pub fn start_second_chance(&mut self, team: TeamSide, rebounder: usize, rim_contact: bool) {
         crate::tactics::close_play_window(self);
+        self.active_trace = None;
         self.possession_count += 1;
-        let shot_clock = self.rules.league.offensive_rebound_shot_clock_seconds as f64;
+        // 前场篮板只有球触筐才重置进攻时钟，且只补不足、不削减剩余时间。
+        let shot_clock = self
+            .rules
+            .league
+            .shot_clock_after_offensive_rebound(self.clock.shot_clock, rim_contact);
         self.clock.shot_clock = shot_clock;
         self.possession = PossessionState::new(
             team,
@@ -505,6 +583,7 @@ impl World {
             PossessionKind::Live,
             self.now(),
             shot_clock,
+            self.clock.game_clock,
         );
         self.possession.last_offensive_rebound_at = Some(self.now());
         self.possession.had_offensive_rebound = true;
@@ -531,6 +610,8 @@ impl World {
             start_clock: self.possession.shot_clock_start,
             end_clock: self.clock.shot_clock,
             duration: self.now() - self.possession.started_at,
+            start_game_clock: self.possession.start_game_clock,
+            end_game_clock: self.clock.game_clock,
             passes: self.possession.passes,
             screens: self.possession.screens,
             drives: self.possession.drives,
@@ -543,115 +624,7 @@ impl World {
     }
 
     pub fn decision_state(&self) -> DecisionState {
-        let actor = self.holder().expect("decision requires a ball holder");
-        let team = self.players[actor].team;
-        let hoop = self.hoop_for(team);
-        let pos = self.players[actor].pos;
-        let mut defenders: Vec<(usize, f32)> = self
-            .players
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| p.on_court && p.team != team)
-            .map(|(index, p)| (index, (p.pos - pos).length()))
-            .collect();
-        defenders.sort_by(|a, b| a.1.partial_cmp(&b.1).expect("finite distances"));
-        let primary = defenders.first().map(|(index, distance)| {
-            let defender = &self.players[*index];
-            let closing = (defender.vel - self.players[actor].vel)
-                .dot((pos - defender.pos).normalize_or_zero());
-            DefenderView {
-                index: *index,
-                distance_ft: *distance,
-                closing_speed_ftps: closing,
-                between_ball_and_hoop: crate::state::is_between(defender.pos, pos, hoop),
-                beaten: *distance > 5.0,
-                route: self.screen_read_route(),
-            }
-        });
-        let help = defenders.get(1).map(|(index, distance)| {
-            let defender = &self.players[*index];
-            HelpView {
-                distance_ft: *distance,
-                arrival_seconds: (*distance / defender.effective_speed()).max(0.05),
-            }
-        });
-        let teammates = self
-            .on_court(team)
-            .into_iter()
-            .filter(|handle| *handle != actor)
-            .map(|handle| {
-                let teammate = &self.players[handle];
-                let nearest = self
-                    .players
-                    .iter()
-                    .filter(|p| p.on_court && p.team != team)
-                    .map(|p| (p.pos - teammate.pos).length())
-                    .fold(f32::INFINITY, f32::min);
-                TeammateView {
-                    index: handle,
-                    pos: teammate.pos,
-                    openness: crate::state::contest_from_defender(nearest, false),
-                    defender_distance_ft: nearest,
-                    lane_clearance: crate::state::pass_lane_clearance(
-                        &self.players,
-                        pos,
-                        teammate.pos,
-                        team,
-                    ),
-                    distance_to_hoop: (teammate.pos - hoop).length(),
-                }
-            })
-            .collect();
-        let lane = crate::state::lane_clearance(&self.players, pos, hoop, team);
-        let mismatch = self.mismatch(actor, team);
-        DecisionState {
-            actor,
-            actor_pos: pos,
-            hoop,
-            attacking_right: self.attacking_right(team),
-            clock: self.clock.game_clock,
-            shot_clock: self.clock.shot_clock,
-            margin: self.score[Self::team_index(team)] as i32
-                - self.score[Self::team_index(team.other())] as i32,
-            period: self.clock.period,
-            primary_defender: primary,
-            help,
-            teammates,
-            lane_clearance: lane,
-            mismatch,
-            stamina: self.players[actor].stamina,
-            possession_kind: self.possession.kind,
-            elapsed_in_possession: self.now() - self.possession.started_at,
-        }
-    }
-
-    /// 当前有效的掩护路线读取窗口。路线过期后不再参与决策。
-    fn screen_read_route(&self) -> Option<crate::action::DefenderRoute> {
-        let window = self.params.policy.g("screen_read_window_seconds") as f64;
-        self.possession
-            .last_screen
-            .filter(|read| self.now() - read.at <= window)
-            .map(|read| read.route)
-    }
-
-    fn mismatch(&self, actor: usize, team: TeamSide) -> f32 {        let nearest = self
-            .players
-            .iter()
-            .filter(|p| p.on_court && p.team != team)
-            .min_by(|a, b| {
-                (a.pos - self.players[actor].pos)
-                    .length_squared()
-                    .partial_cmp(&(b.pos - self.players[actor].pos).length_squared())
-                    .expect("finite distances")
-            });
-        let Some(defender) = nearest else {
-            return 0.0;
-        };
-        let offense = self.players[actor].data.attributes.ball_handling
-            + self.players[actor].data.attributes.agility * 0.5;
-        let defense =
-            defender.data.attributes.defense_perimeter + defender.data.attributes.agility * 0.5;
-        (offense - defense).clamp(-1.0, 1.0) * 0.5
+        crate::views::decision_state(self)
     }
 
     pub fn step(&mut self, dt: f64) {
@@ -686,6 +659,7 @@ impl World {
             }
             self.update_stamina(dt);
         }
+        crate::rotation::note_intents(self);
         self.advance_movement(dt);
         self.advance_active();
         self.advance_phase();
@@ -698,14 +672,7 @@ impl World {
     }
 
     fn advance_movement(&mut self, dt: f64) {
-        crate::policy::move_toward_targets(self);
-        for player in self.players.iter_mut() {
-            if !player.on_court {
-                continue;
-            }
-            let target = player.target;
-            resolve::move_player(player, target, dt as f32);
-        }
+        crate::motion::advance_movement(self, dt);
     }
 
     fn advance_active(&mut self) {
@@ -753,6 +720,11 @@ impl World {
                     self.start_possession(team, PossessionKind::Dead);
                 }
             }
+            Phase::Timeout { team, resume_at } => {
+                if now >= resume_at {
+                    self.start_possession(team, PossessionKind::Dead);
+                }
+            }
             Phase::Inbound { team, ready_at } => {
                 if now >= ready_at {
                     self.start_possession(team, PossessionKind::Dead);
@@ -775,10 +747,17 @@ impl World {
                 made,
                 next_at,
                 and_one,
+                retain_possession,
             } => {
                 if now >= next_at {
                     crate::resolve::freethrow::shoot(
-                        self, shooter, total, remaining, made, and_one,
+                        self,
+                        shooter,
+                        total,
+                        remaining,
+                        made,
+                        and_one,
+                        retain_possession,
                     );
                 }
             }
@@ -789,6 +768,11 @@ impl World {
                     self.clock.shot_clock = self.rules.league.shot_clock_seconds as f64;
                     self.fouls[0].period = 0;
                     self.fouls[1].period = 0;
+                    // 换节后最后时段的暂停配额重新计算。
+                    for ledger in self.timeouts.iter_mut() {
+                        ledger.period = self.clock.period;
+                        ledger.used_in_final_window = 0;
+                    }
                     let team = self.period_started_with.other();
                     self.period_started_with = team;
                     self.phase = Phase::DeadBall {
@@ -837,28 +821,35 @@ impl World {
         // 选板与故意犯规都在决策时刻推进：两者都会发事实，
         // 而事实写入会分配内存，稳态 tick 必须保持零分配。
         crate::tactics::update_play_window(self);
-        if let Some(fouler) = crate::endgame::intentional_foul(self) {
-            if let Some(holder) = self.holder() {
-                crate::resolve::foul::apply_non_shooting_foul(self, fouler, holder);
-                return;
-            }
+        if crate::timeouts::coach_stop_run(self) {
+            return;
         }
-        let intent = crate::policy::choose_action(self);        let since_screen = self
+        if let Some(plan) = crate::endgame::intentional_foul(self) {
+            crate::resolve::foul::apply_non_shooting_foul(self, plan.fouler, plan.target);
+            return;
+        }
+        let decision = crate::policy::choose_action(self);
+        let intent = decision.intent.clone();
+        let since_screen = self
             .possession
             .last_screen
             .map(|read| self.now() - read.at)
             .unwrap_or(f64::INFINITY);
-        let shooter_three = self.players[intent.actor]
-            .data
-            .attributes
-            .shooting_three;
+        let shooter_three = self.players[intent.actor].data.attributes.shooting_three;
         self.decision_samples.push(DecisionSample {
-            route: self.screen_read_route(),
+            route: crate::views::screen_read_route(self),
             family: intent.kind.family(),
             shot_clock: self.clock.shot_clock,
             since_screen,
             shooter_three,
+            utility: decision.utility,
+            beta: decision.beta,
+            gamma: decision.gamma,
+            candidates: decision.candidate_count.min(u8::MAX as usize) as u8,
+            trace: Some(self.decision_traces.len() as u32),
         });
+        self.active_trace = Some(self.decision_traces.len() as u32);
+        self.decision_traces.push(decision.trace);
         self.next_decision_at = self.now() + DECISION_INTERVAL;
         if self.possession.first_action_seconds.is_none() {
             self.possession.first_action_seconds = Some(self.now() - self.possession.started_at);
@@ -952,6 +943,8 @@ pub struct GameReport {
     pub shot_samples: Vec<ShotSample>,
     pub pass_samples: Vec<PassSample>,
     pub decision_samples: Vec<DecisionSample>,
+    /// 逐次决策的因果快照，供决定审计与回归比对。
+    pub decision_traces: Vec<crate::state::DecisionTraceSample>,
     pub shot_zone_counts: [[u32; 4]; 2],
     pub shot_zone_makes: [[u32; 4]; 2],
     pub creation_counts: [u32; 7],
@@ -979,6 +972,7 @@ impl GameReport {
             shot_samples: Vec::new(),
             pass_samples: Vec::new(),
             decision_samples: Vec::new(),
+            decision_traces: Vec::new(),
             shot_zone_counts: [[0; 4]; 2],
             shot_zone_makes: [[0; 4]; 2],
             creation_counts: [0; 7],
@@ -1019,7 +1013,20 @@ impl GameReport {
             .extend_from_slice(&other.decision_samples);
         self.violations.extend_from_slice(&other.violations);
         // 过程判据从事实流聚合，因此聚合报告必须保留事件。
+        // 事件里的 `trace` 是局内下标，并入后要按下标偏移重映射，
+        // 否则聚合报告的决策快照会指向另一场比赛的另一手动作。
+        let offset = self.decision_traces.len() as u32;
+        let start = self.events.len();
         self.events.extend_from_slice(&other.events);
+        if offset != 0 {
+            for event in &mut self.events[start..] {
+                if let Some(index) = event.trace {
+                    event.trace = Some(index + offset);
+                }
+            }
+        }
+        self.decision_traces
+            .extend(other.decision_traces.iter().cloned());
         merge_lines(&mut self.box_score.home, &other.box_score.home);
         merge_lines(&mut self.box_score.away, &other.box_score.away);
     }
@@ -1119,41 +1126,4 @@ fn slot_index(slot: Slot) -> usize {
     }
 }
 
-pub fn offense_spots(
-    formations: &crate::params::Formations,
-    attacking_right: bool,
-    alternate: bool,
-) -> [Vec2; 5] {
-    let source = if alternate && !formations.offense_alt.is_empty() {
-        &formations.offense_alt
-    } else {
-        &formations.offense
-    };
-    let spots = [
-        Vec2::from(source[0]),
-        Vec2::from(source[1]),
-        Vec2::from(source[2]),
-        Vec2::from(source[3]),
-        Vec2::from(source[4]),
-    ];
-    mirror(spots, attacking_right)
-}
-
-pub fn defense_spots(formations: &crate::params::Formations, attacking_right: bool) -> [Vec2; 5] {
-    let spots = [
-        Vec2::from(formations.defense[0]),
-        Vec2::from(formations.defense[1]),
-        Vec2::from(formations.defense[2]),
-        Vec2::from(formations.defense[3]),
-        Vec2::from(formations.defense[4]),
-    ];
-    mirror(spots, attacking_right)
-}
-
-fn mirror(spots: [Vec2; 5], attacking_right: bool) -> [Vec2; 5] {
-    if attacking_right {
-        spots
-    } else {
-        spots.map(|point| Vec2::new(94.0 - point.x, 50.0 - point.y))
-    }
-}
+pub use crate::formation::{defense_spots, offense_spots};

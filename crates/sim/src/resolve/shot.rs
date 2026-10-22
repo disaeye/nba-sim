@@ -22,6 +22,9 @@ pub struct PendingShot {
     pub is_three: bool,
     pub assisted_by: Option<usize>,
     pub blocked_by: Option<usize>,
+    /// 球是否触筐：前场篮板后进攻时钟能否重置只看这一项，
+    /// 被封盖的球与三不沾都没有触筐。
+    pub rim_contact: bool,
     pub shot_id: u64,
 }
 
@@ -34,22 +37,6 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     let is_three = zone == "three";
     let distance = (pos - hoop).length();
     let contest = contest_for(world, shooter, pos);
-    // 扑防在出手瞬间才到位时，射手把球收回来继续进攻：
-    // 时钟充裕就不该带着已经到位的强干扰把球投出去。
-    if world.clock.shot_clock > world.params.policy.p("early_clock_seconds") as f64
-        && !matches!(zone, "rim" | "near")
-        && contest > world.params.policy.p("contested_threshold")
-    {
-        world.possession.dribble_state = crate::state::DribbleState::Dribbling;
-        world.possession.gather_pos = None;
-        return ActionOutcome {
-            actor: shooter,
-            kind: ActionKind::Shoot(kind),
-            completion: Completion::Interrupted,
-            delta: StateDelta::default(),
-            facts: Vec::new(),
-        };
-    }
     // 投篮终结了持球状态：收球标志在出手时清掉。
     world.possession.dribble_state = crate::state::DribbleState::Dribbling;
     world.possession.gather_pos = None;
@@ -166,9 +153,17 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         .unwrap_or(f32::INFINITY);
     world.shot_samples.push(crate::state::ShotSample {
         shot_clock: world.clock.shot_clock,
+        game_clock: world.clock.game_clock,
+        period: world.clock.period,
         contest,
         defender_ft,
         zone: zone_index as u8,
+        p_make,
+        fouled,
+        blocked,
+        p_foul,
+        p_block,
+        p_make_cond,
         made,
         points,
     });
@@ -196,6 +191,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         is_three,
         assisted_by,
         blocked_by: blocker,
+        rim_contact: blocker.is_none(),
         shot_id,
     });
     world.players[shooter].facing = (hoop - pos).normalize_or_zero();
@@ -298,7 +294,12 @@ pub fn finish(world: &mut World) {
             ready_at: world.now() + 1.4,
         };
     } else {
-        crate::resolve::rebound::resolve(world, pending.zone, pending.distance_ft);
+        crate::resolve::rebound::resolve(
+            world,
+            pending.zone,
+            pending.distance_ft,
+            pending.rim_contact,
+        );
     }
 }
 
@@ -325,9 +326,11 @@ fn block_probability(
         .filter(|(_, p)| (p.pos - pos).length() < 4.5)
         .max_by(|a, b| {
             let weights = &world.params.policy;
+            let reference = weights.g("vertical_reference_ft");
             let score = |p: &crate::state::PlayerState| {
+                let vertical = crate::physical::Physical::of(p, weights).vertical_ft / reference;
                 p.data.attributes.block * weights.w("block_select_skill")
-                    + p.data.attributes.vertical * weights.w("block_select_height")
+                    + vertical * weights.w("block_select_height")
             };
             score(a.1)
                 .partial_cmp(&score(b.1))
@@ -339,9 +342,12 @@ fn block_probability(
     };
     let defender = &world.players[candidate];
     let skill = defender.data.attributes.block;
-    let vertical = defender.data.attributes.vertical;
     let aggression = defender.data.tendencies.block_aggressiveness;
     let weights = &world.params.policy;
+    // 弹跳通过物理映射换算成英尺，再除以参照起跳高度：模型里没有
+    // 「属性」这个东西，只有能摸到多高。
+    let vertical = crate::physical::Physical::of(defender, weights).vertical_ft
+        / weights.g("vertical_reference_ft");
     let base = weights.w("block_base");
     let range = if is_three {
         weights.w("block_range_factor_three")

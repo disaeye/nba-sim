@@ -4,6 +4,8 @@ import os
 import subprocess
 import sys
 
+import freeze
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 POLICY = os.path.join(ROOT, "data", "calibration", "policy.json")
 PROFILE = os.path.join(ROOT, "data", "calibration", "shot_profile.json")
@@ -111,6 +113,9 @@ def loss(metrics, goal):
 
 
 def main():
+    # 两阶段：命中率/篮板/罚球三张表已在第一阶段冻结，这里只动 policy.json。
+    if freeze.check(verbose=False) != 0:
+        raise SystemExit("冻结表校验失败：policy 优化阶段不允许改动命中率类表")
     goal = targets()
     policy = json.load(open(POLICY))
     weights = policy["weights"]
@@ -141,6 +146,9 @@ def main():
     with open(POLICY, "w") as handle:
         json.dump(policy, handle, indent=2, ensure_ascii=False)
         handle.write("\n")
+    # 写完再验一次：优化过程本身也不能动冻结表。
+    if freeze.check(verbose=False) != 0:
+        raise SystemExit("优化过程改动了冻结表")
     print(f"best loss {best[0]:.4f}")
     metrics = run_sim()
     print(json.dumps(metrics, indent=2))

@@ -13,6 +13,7 @@ pub fn shoot(
     remaining: u8,
     made_so_far: u8,
     and_one: bool,
+    retain_possession: bool,
 ) {
     let table = &world.params.freethrow;
     let attribute = world.players[shooter].data.attributes.free_throw;
@@ -51,7 +52,7 @@ pub fn shoot(
             made_count as u32,
         );
         world.phase = Phase::DeadBall {
-            team: team.other(),
+            team: if retain_possession { team } else { team.other() },
             ready_at: world.now() + 1.2,
         };
         world.ball = BallState::Loose {
@@ -66,8 +67,9 @@ pub fn shoot(
         total,
         remaining: left,
         made: made_count,
-        next_at: world.now() + 1.6,
+        next_at: world.now() + world.rules.free_throw_interval_seconds as f64,
         and_one,
+        retain_possession,
     };
     world.ball = BallState::Held(shooter);
     let _ = PossessionKind::Dead;

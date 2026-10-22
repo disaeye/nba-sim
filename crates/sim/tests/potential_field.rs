@@ -7,7 +7,13 @@ use nba_sim_core::world::TICK_SECONDS;
 use nba_sim_core::{MatchSetup, Params, World};
 
 fn world(seed: u64) -> World {
-    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    // 这些测试用瞬时摆位探测势能场本身，关掉读球延迟：延迟下的
+    // 球位与摆位不一致会把几何断言变成时延断言。
+    params
+        .policy
+        .geometry
+        .insert("defense_reaction_delay_seconds".to_string(), 0.0);
     World::new(MatchSetup::builtin(GameRules::default()), params, seed)
 }
 
@@ -32,6 +38,9 @@ fn live_holder(world: &mut World) -> usize {
 }
 
 /// 找出弱侧离篮最近的无球防守人（Low Man）与其对位对象。
+///
+/// 与 `solve_defense_targets` 同一口径：低位人是弱侧对位人离篮
+/// 最近的那个；比 y 会在场地镜像后把低位人当成高位人。
 fn low_man(world: &World, carrier: usize) -> Option<usize> {
     let offense = world.players[carrier].team;
     let defense = offense.other();
@@ -45,14 +54,17 @@ fn low_man(world: &World, carrier: usize) -> Option<usize> {
             continue;
         }
         let man_pos = world.players[man].pos;
-        if (man_pos.y - ball.y).abs() <= world.rules.tactics.defense.potential_field.weak_side_lateral_ft
+        if (man_pos.y - ball.y).abs()
+            <= world
+                .rules
+                .tactics
+                .defense
+                .potential_field
+                .weak_side_lateral_ft
         {
             continue;
         }
-        if man_pos.y >= ball.y {
-            continue;
-        }
-        let distance = (world.players[*defender].pos - hoop).length();
+        let distance = (hoop - man_pos).length();
         if best.map(|(current, _)| distance < current).unwrap_or(true) {
             best = Some((distance, *defender));
         }
@@ -75,7 +87,13 @@ fn strong_side_corner(world: &World, carrier: usize) -> Option<usize> {
             continue;
         }
         let man_pos = world.players[man].pos;
-        if (man_pos.y - ball.y).abs() <= world.rules.tactics.defense.potential_field.weak_side_lateral_ft
+        if (man_pos.y - ball.y).abs()
+            <= world
+                .rules
+                .tactics
+                .defense
+                .potential_field
+                .weak_side_lateral_ft
         {
             continue;
         }
@@ -131,8 +149,16 @@ fn weak_side_low_man_sinks_to_the_rim_when_carrier_enters_the_paint() {
     let carrier = live_holder(&mut world);
     refresh_matchup(&mut world);
     let hoop = world.hoop_for(world.possession.team);
-    world.players[carrier].pos = hoop + Vec2::new(-3.5, 1.0);
+    let forward = if world.attacking_right(world.possession.team) {
+        1.0
+    } else {
+        -1.0
+    };
+    // 先把持球人放到顶弧：低位人相对球的位置才有意义，球已经贴到篮下时
+    // 弱侧没有人比他更靠近底线。
+    world.players[carrier].pos = hoop + Vec2::new(-25.75 * forward, 0.0);
     let defender = low_man(&world, carrier).expect("a weak-side low man exists");
+    world.players[carrier].pos = hoop + Vec2::new(-3.5 * forward, 0.0);
     let target = target_of(&world, defender);
     let distance = (target - hoop).length();
     assert!(
@@ -149,7 +175,13 @@ fn drive_and_kick_receiver_is_more_open_than_a_perimeter_pass() {
     let hoop = world.hoop_for(world.possession.team);
     let defense = world.possession.team.other();
     let perimeter = world.players[carrier].pos;
+    let forward = if world.attacking_right(world.possession.team) {
+        1.0
+    } else {
+        -1.0
+    };
     // 接球人是弱侧低位人放弃的那个人：他收缩护筐后，自己的对位对象就空了。
+    world.players[carrier].pos = hoop + Vec2::new(-25.75 * forward, 0.0);
     let helper = low_man(&world, carrier).expect("a weak-side low man exists");
     let slot = world
         .on_court(defense)
@@ -158,11 +190,10 @@ fn drive_and_kick_receiver_is_more_open_than_a_perimeter_pass() {
         .position(|handle| *handle == helper)
         .expect("the helper is on court");
     let receiver = world.possession.matchup[slot];
-    let gap = |world: &World| {
-        (solve_defense_targets(world)[slot] - world.players[receiver].pos).length()
-    };
+    let gap =
+        |world: &World| (solve_defense_targets(world)[slot] - world.players[receiver].pos).length();
     let before = gap(&world);
-    world.players[carrier].pos = hoop + Vec2::new(-3.0, 1.0);
+    world.players[carrier].pos = hoop + Vec2::new(-3.0 * forward, 0.0);
     let after = gap(&world);
     world.players[carrier].pos = perimeter;
     let gain = after - before;
@@ -208,4 +239,3 @@ fn matchup_holds_while_no_screen_or_beat_happens() {
     let _ = carrier;
     assert_eq!(world.possession.matchup.len(), MAX_ON_COURT);
 }
-

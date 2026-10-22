@@ -17,6 +17,7 @@ use rand::Rng;
 use crate::action::{
     ActionIntent, ActionKind, ActionOutcome, Completion, Fact, StateDelta, TurnoverKind,
 };
+use crate::params::PolicyTable;
 use crate::state::{DribbleState, PlayerState, PossessionKind, TeamSide};
 use crate::world::World;
 
@@ -125,7 +126,9 @@ pub fn contest_for(world: &World, shooter: usize, pos: Vec2) -> f32 {
             continue;
         }
         let between = crate::state::is_between(defender.pos, pos, hoop);
-        let contest = crate::state::contest_from_defender(distance, between);
+        let reach = crate::physical::Physical::of(defender, &world.params.policy)
+            .reach_excess_ft(&world.params.policy);
+        let contest = crate::state::contest_from_defender(distance, between, reach);
         // 协防倾向高的防守人更早收缩，位置不变时干扰更强。
         let help = defender.data.tendencies.help_aggressiveness;
         let contest = contest
@@ -170,17 +173,18 @@ pub fn weighted_pick<R: Rng>(rng: &mut R, weights: &[f32]) -> usize {
     weights.len() - 1
 }
 
-pub fn move_player(player: &mut PlayerState, target: Vec2, dt: f32) {
+pub fn move_player(player: &mut PlayerState, target: Vec2, dt: f32, policy: &PolicyTable) {
     let delta = target - player.pos;
     let distance = delta.length();
-    let speed = player.effective_speed();
-    if distance < 0.05 {
+    let speed = player.effective_speed(policy);
+    let accel = player.effective_acceleration(policy);
+    let max_change = accel * dt;
+    if distance < policy.g("motion_arrival_epsilon_ft") {
+        // 到位即停：这不是转向，加速上限约束的是转向与加速，不是停步。
         player.vel = Vec2::ZERO;
         return;
     }
     let desired = delta / distance * speed;
-    let accel = player.effective_acceleration();
-    let max_change = accel * dt;
     let change = desired - player.vel;
     let change_length = change.length();
     if change_length > max_change {

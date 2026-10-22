@@ -5,8 +5,8 @@
 
 use nba_domain::court::Court;
 use nba_protocol::{
-    FrameEvent, FrameRules, RenderBall, RenderFrame, RenderPlayer, RenderScore, RenderTeam,
-    StreamTick,
+    DebugEpv, DebugUtility, DecisionDebug, DecisionTrace, FrameEvent, FrameRules, RenderBall,
+    RenderFrame, RenderPlayer, RenderScore, RenderTeam, StreamTick, TraceCandidate,
 };
 use serde_json::json;
 
@@ -21,12 +21,14 @@ impl Fact {
             Self::Pass { .. } => "PASS",
             Self::Screen { .. } => "SCREEN",
             Self::Drive { .. } => "DRIVE",
+            Self::PostUp { .. } => "POST_UP",
             Self::Shot { .. } => "SHOT",
             Self::Foul { .. } => "FOUL",
             Self::FreeThrow { .. } => "FREE_THROW",
             Self::Rebound { .. } => "REBOUND",
             Self::Turnover { .. } => "TURNOVER",
             Self::Substitution { .. } => "SUBSTITUTION",
+            Self::Timeout { .. } => "TIMEOUT",
             Self::PeriodEnd { .. } => "PERIOD_END",
             Self::PlayActivated { .. } => "PLAY_ACTIVATED",
             Self::PlayWindowEnded { .. } => "PLAY_WINDOW_ENDED",
@@ -80,6 +82,9 @@ impl World {
                 "reached": reached,
                 "defender_beaten": defender_beaten,
             }),
+            Fact::PostUp { player } => json!({
+                "player_id": self.player_id(*player),
+            }),
             Fact::Shot {
                 shot_id,
                 shooter,
@@ -105,13 +110,13 @@ impl World {
             Fact::Foul {
                 fouler,
                 fouled,
-                shooting,
+                kind,
                 free_throws,
                 and_one,
             } => json!({
                 "fouler_id": self.player_id(*fouler),
                 "fouled_id": self.player_id(*fouled),
-                "shooting": shooting,
+                "foul_kind": format!("{:?}", kind).to_lowercase(),
                 "free_throws": free_throws,
                 "and_one": and_one,
             }),
@@ -151,6 +156,11 @@ impl World {
             Fact::PlayActivated { play, possession } => {
                 json!({ "play_id": play, "possession": possession })
             }
+            Fact::Timeout { team, remaining } => json!({
+                "team": team.as_str(),
+                "home_remaining": remaining[0],
+                "away_remaining": remaining[1],
+            }),
             Fact::PlayWindowEnded { play, possession } => {
                 json!({ "play_id": play, "possession": possession })
             }
@@ -281,7 +291,14 @@ impl World {
                 target_possessions: 0,
                 callout: None,
                 intensity: None,
-                debug: None,
+                debug: self
+                    .active_trace
+                    .and_then(|index| {
+                        self.decision_traces
+                            .get(index as usize)
+                            .map(|trace| (index, trace))
+                    })
+                    .map(|(index, trace)| Box::new(self.decision_debug(index, trace))),
                 rules: frame_rules(&self.rules),
                 stream_projection: "facts".to_string(),
                 potential_field: Vec::new(),
@@ -315,6 +332,107 @@ impl World {
             movement_intent_id: None,
             play_instance_id: None,
             relations: Vec::new(),
+            decision_trace: self.event_decision_trace(event),
+        }
+    }
+
+    /// 动作事件带上产生它的那次决策的快照。
+    ///
+    /// 时钟、篮板、换人这类事件不在这里附带：它们不是一次决策的直接后果，
+    /// 强行绑定会让「哪个决策导致了这次出手」这个问题失去区分度。
+    fn event_decision_trace(&self, event: &TimedFact) -> Option<DecisionTrace> {
+        let is_action = matches!(
+            event.fact,
+            Fact::Shot { .. } | Fact::Pass { .. } | Fact::Drive { .. } | Fact::PostUp { .. }
+        );
+        if !is_action {
+            return None;
+        }
+        let index = event.trace?;
+        let sample = self.decision_traces.get(index as usize)?;
+        Some(self.decision_trace(index, sample))
+    }
+
+    fn decision_trace(
+        &self,
+        index: u32,
+        sample: &crate::state::DecisionTraceSample,
+    ) -> DecisionTrace {
+        let chosen = sample
+            .candidates
+            .get(sample.chosen)
+            .map(|candidate| candidate.kind.label())
+            .unwrap_or_default()
+            .to_string();
+        DecisionTrace {
+            trace_id: u64::from(index),
+            actor_id: self.player_id(sample.actor),
+            chosen,
+            beta: sample.beta,
+            gamma: sample.gamma,
+            candidates: sample
+                .candidates
+                .iter()
+                .map(|candidate| TraceCandidate {
+                    action: candidate.kind.label().to_string(),
+                    target_id: candidate.target.map(|handle| self.player_id(handle)),
+                    total: candidate.total,
+                    probability: candidate.probability,
+                    epv: epv_of(&candidate.utility),
+                    variance: candidate.utility.variance,
+                    clock_cost: candidate.utility.clock_cost,
+                    foul_cost: candidate.utility.foul_cost,
+                    tactical_bonus: candidate.utility.tactical_bonus,
+                })
+                .collect(),
+        }
+    }
+
+    fn decision_debug(
+        &self,
+        index: u32,
+        sample: &crate::state::DecisionTraceSample,
+    ) -> DecisionDebug {
+        let chosen = sample
+            .candidates
+            .get(sample.chosen)
+            .map(|candidate| candidate.kind.label())
+            .unwrap_or_default()
+            .to_string();
+        DecisionDebug {
+            player: self.player_id(sample.actor),
+            chosen,
+            utilities: sample
+                .candidates
+                .iter()
+                .map(|candidate| DebugUtility {
+                    kind: candidate.kind.label().to_string(),
+                    utility: candidate.total,
+                    epv: epv_of(&candidate.utility),
+                    variance: candidate.utility.variance,
+                    clock_cost: candidate.utility.clock_cost,
+                    foul_cost: candidate.utility.foul_cost,
+                    tactical_bonus: candidate.utility.tactical_bonus,
+                    probability: candidate.probability,
+                })
+                .collect(),
+            probabilities: sample
+                .candidates
+                .iter()
+                .map(|candidate| nba_protocol::DebugProb {
+                    kind: candidate.kind.label().to_string(),
+                    prob: candidate.probability,
+                })
+                .collect(),
+            flags: Vec::new(),
+            blocked: Vec::new(),
+            trace_id: index,
+            beta: sample.beta,
+            gamma: sample.gamma,
+            active_constraints: Vec::new(),
+            enforcement: Vec::new(),
+            active_play_id: None,
+            play_adjustments: Vec::new(),
         }
     }
 
@@ -351,5 +469,18 @@ pub fn frame_rules(rules: &nba_domain::GameRules) -> FrameRules {
         ball_z_max_ft: rules.ball_z_max_ft,
         max_personal_fouls: rules.league.max_personal_fouls,
         bonus_fouls_per_period: rules.league.bonus_fouls_per_period,
+    }
+}
+
+/// 把引擎内的效用分解投影成协议结构。
+fn epv_of(utility: &crate::utility::Utility) -> DebugEpv {
+    DebugEpv {
+        ability: utility.epv.ability,
+        contest: utility.epv.contest,
+        lane: utility.epv.lane,
+        help: utility.epv.help,
+        tendency: utility.epv.tendency,
+        context: utility.epv.context,
+        turnover: utility.epv.turnover,
     }
 }

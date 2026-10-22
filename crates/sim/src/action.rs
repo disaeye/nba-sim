@@ -6,6 +6,8 @@
 
 use glam::Vec2;
 
+pub use nba_domain::event::FoulKind;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TeamSide {
     Home,
@@ -175,6 +177,21 @@ impl ActionKind {
         }
     }
 
+    /// 动作族标签，供决策审计与协议投影使用。
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Shoot(_) => "shoot",
+            Self::Drive => "drive",
+            Self::Pass(_) => "pass",
+            Self::Screen(_) => "screen",
+            Self::Cut => "cut",
+            Self::PostUp => "post_up",
+            Self::Dribble => "hold",
+            Self::Finish => "finish",
+            Self::Relocate => "relocate",
+        }
+    }
+
     /// 动作族编号，供决策观测与过程判据使用。
     pub fn family(self) -> u8 {
         match self {
@@ -295,6 +312,10 @@ pub enum Fact {
         reached: bool,
         defender_beaten: bool,
     },
+    /// 背身单打：持球人进入低位开始背打（本身不产出结果，结果由后续出手给出）。
+    PostUp {
+        player: usize,
+    },
     Shot {
         shot_id: u64,
         shooter: usize,
@@ -309,7 +330,7 @@ pub enum Fact {
     Foul {
         fouler: usize,
         fouled: usize,
-        shooting: bool,
+        kind: FoulKind,
         free_throws: u8,
         and_one: bool,
     },
@@ -332,6 +353,11 @@ pub enum Fact {
         team: TeamSide,
         incoming: usize,
         outgoing: usize,
+    },
+    /// 暂停被批准：比分与两个边界的暂停余额。
+    Timeout {
+        team: TeamSide,
+        remaining: [u32; 2],
     },
     PeriodEnd {
         period: u32,

@@ -6,7 +6,7 @@ use rand::Rng;
 use crate::action::{
     ActionIntent, ActionKind, ActionOutcome, Completion, Fact, StateDelta, TurnoverKind,
 };
-use crate::resolve::{clamp01, sigmoid};
+use crate::resolve::clamp01;
 use crate::state::PossessionKind;
 use crate::world::World;
 
@@ -104,11 +104,11 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
         }
     }
     let help_term = clamp01(1.0 - help_distance / 20.0);
-    let p_beat = sigmoid(
-        world.params.policy.w("drive_beat_base")
-            + world.params.policy.w("drive_beat_skill") * (handle - defense_skill) * 2.0
-            + world.params.policy.w("drive_beat_lane") * lane_norm
-            - world.params.policy.w("drive_beat_help") * help_term,
+    let p_beat = crate::policy::blow_by_probability(
+        world,
+        handle - defense_skill,
+        lane_norm,
+        help_term,
     );
     let beaten = world.rng.gen::<f32>() < p_beat;
 
@@ -246,6 +246,7 @@ pub fn resolve_post(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     world.possession.drives += 1;
     world.possession.last_post_at = Some(world.now());
     world.possession.last_post_actor = Some(actor);
+    world.emit(Fact::PostUp { player: actor });
     ActionOutcome {
         actor,
         kind: ActionKind::PostUp,

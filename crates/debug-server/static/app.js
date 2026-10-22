@@ -4814,11 +4814,49 @@
       el("strong", null, describeDecisionKind(chosen)),
       el("span", null, `${playerNameFromId(debug.player)} · 第 ${decisionIndex} 帧`),
     );
+    // 选中动作的期望得分分解：七项成因 + 三个修正项。
+    const chosenUtility = utilities.find((item) => item.kind === chosen);
+    const epvRows = () => {
+      if (!chosenUtility) return el("span", "muted-label", "该决策没有记录效用分解");
+      const epv = chosenUtility.epv || {};
+      const rows = [
+        ["能力", epv.ability],
+        ["干扰", epv.contest],
+        ["通道", epv.lane],
+        ["协防", epv.help],
+        ["倾向", epv.tendency],
+        ["语境", epv.context],
+        ["失球", epv.turnover],
+        ["方差项", chosenUtility.variance],
+        ["时钟成本", chosenUtility.clock_cost],
+        ["犯规成本", chosenUtility.foul_cost],
+        ["战术偏置", chosenUtility.tactical_bonus],
+      ];
+      const box = el("div", "epv-table");
+      for (const [label, raw] of rows) {
+        const row = el("div", "epv-row");
+        row.append(
+          el("span", "epv-label", label),
+          el("span", "epv-value", two(finite(raw))),
+        );
+        box.appendChild(row);
+      }
+      return box;
+    };
     panel.append(
       head,
       section(
         "候选动作效用评分",
         scoreRows(utilities, (item) => item.utility, 100 / maxUtility),
+      ),
+      section("选中动作的期望得分分解", epvRows()),
+      section(
+        "选择温度与方差偏好",
+        el(
+          "div",
+          "muted-label",
+          `β = ${two(finite(debug.beta))} · γ = ${two(finite(debug.gamma))}`,
+        ),
       ),
       section(
         "候选动作最终概率",

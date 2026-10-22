@@ -35,7 +35,9 @@
     "crates/sim/src/session.rs": 6,
     "crates/sim/src/state.rs": 28,
     "crates/sim/src/stream.rs": 7,
-    "crates/sim/src/world.rs": 45,
+    "crates/sim/src/world.rs": 22,
+    "crates/sim/src/formation.rs": 10,
+    "crates/sim/src/views.rs": 8,
     "crates/validation/src/core_validation.rs": 4,
     "crates/validation/src/mechanism_core.rs": 29
   },
@@ -91,7 +93,9 @@
     "crates/sim/src/session.rs": 6,
     "crates/sim/src/state.rs": 28,
     "crates/sim/src/stream.rs": 7,
-    "crates/sim/src/world.rs": 45,
+    "crates/sim/src/world.rs": 22,
+    "crates/sim/src/formation.rs": 10,
+    "crates/sim/src/views.rs": 8,
     "crates/validation/src/core_validation.rs": 4,
     "crates/validation/src/mechanism_core.rs": 30
   },

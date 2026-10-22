@@ -158,7 +158,7 @@ impl TacticsTable {
             let hosts: Vec<&TacticalSetSpec> = self
                 .systems
                 .values()
-                .filter(|system| system.play_ids.iter().any(|id| *id == play.id))
+                .filter(|system| system.play_ids.contains(&play.id))
                 .collect();
             if hosts.is_empty() {
                 return Err(format!("play {} is not referenced by any system", play.id));
@@ -317,7 +317,7 @@ pub fn close_play_window(world: &mut World) {
 }
 
 /// 当前窗口对应的剧本，未激活时为 `None`。
-pub fn active_play<'a>(world: &'a World) -> Option<&'a PlaySpec> {
+pub fn active_play(world: &World) -> Option<&PlaySpec> {
     world
         .possession
         .play
@@ -342,10 +342,7 @@ fn family_code(family: DecisionActionFamily) -> Option<usize> {
 ///
 /// 硬抑制把整个族从候选集里移除，软抑制扣分，持球人偏好加分；
 /// 规则级偏好只在规则的 `when` 全真时生效。
-pub fn apply_play_effects(
-    world: &World,
-    candidates: &mut Vec<(crate::action::ActionKind, f32, Option<usize>, glam::Vec2)>,
-) {
+pub fn apply_play_effects(world: &World, candidates: &mut Vec<crate::policy::Candidate>) {
     let Some(play) = active_play(world) else {
         return;
     };
@@ -381,7 +378,8 @@ pub fn apply_play_effects(
         "选板的硬抑制不能清空候选集：{}",
         play.id
     );
-    for (kind, score, _, _) in candidates.iter_mut() {
-        *score = (*score + bonus[kind.family() as usize]).max(f32::MIN_POSITIVE);
+    for (kind, _, _, utility) in candidates.iter_mut() {
+        // 战术先验只改效用分解里的战术项：它不该隐式改写期望得分。
+        utility.tactical_bonus += bonus[kind.family() as usize];
     }
 }

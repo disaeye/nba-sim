@@ -9,6 +9,7 @@ use nba_domain::PlayerData;
 
 use crate::action::DefenderRoute;
 pub use crate::action::TeamSide;
+use crate::params::PolicyTable;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Slot {
@@ -51,6 +52,10 @@ pub struct PlayerState {
     pub slot: Slot,
     pub target: Vec2,
     pub home_spot: Vec2,
+    /// 本次上场的时刻：两次换人之间必须隔够 `min_rest_seconds`。
+    pub entered_at: f64,
+    /// 下场后到什么时候才能再上：休息不满的人不能换回来。
+    pub resting_until: f64,
 }
 
 impl PlayerState {
@@ -71,6 +76,8 @@ impl PlayerState {
             slot,
             target: pos,
             home_spot: pos,
+            entered_at: f64::default(),
+            resting_until: f64::default(),
         }
     }
 
@@ -113,14 +120,14 @@ impl PlayerState {
         }
     }
 
-    pub fn effective_speed(&self) -> f32 {
-        let base = 14.0 + 8.0 * self.data.attributes.speed;
-        (base * (0.85 + 0.15 * self.stamina)).min(22.0)
+    /// 移动速度：属性给基础值，体能按数据表里的地板与跨度缩放。
+    pub fn effective_speed(&self, policy: &PolicyTable) -> f32 {
+        crate::physical::Physical::of(self, policy).speed_ftps
     }
 
     /// 加速度能力决定多快到达目标速度，直接影响推进与回合时长。
-    pub fn effective_acceleration(&self) -> f32 {
-        (8.0 + 30.0 * self.data.attributes.acceleration).min(40.0)
+    pub fn effective_acceleration(&self, policy: &PolicyTable) -> f32 {
+        crate::physical::Physical::of(self, policy).accel_ftps2
     }
 }
 
@@ -193,10 +200,17 @@ pub enum Phase {
         made: u8,
         next_at: f64,
         and_one: bool,
+        /// 最后一次罚球后球权是否仍属罚球方（最后时段的无球犯规是一罚一掷）。
+        retain_possession: bool,
     },
     DeadBall {
         team: TeamSide,
         ready_at: f64,
+    },
+    /// 暂停：比赛钟与进攻钟都停，暂停结束时叫暂停方继续持有球权。
+    Timeout {
+        team: TeamSide,
+        resume_at: f64,
     },
     PeriodBreak {
         resume_at: f64,
@@ -234,6 +248,8 @@ pub struct PossessionState {
     pub last_pass_from: Option<usize>,
     pub assist_candidate: Option<(usize, f64)>,
     pub shot_clock_start: f64,
+    /// 回合开始时的比赛钟读数。
+    pub start_game_clock: f64,
     pub last_cut_at: Option<f64>,
     pub last_offensive_rebound_at: Option<f64>,
     pub last_drive_at: Option<f64>,
@@ -258,7 +274,14 @@ pub struct PossessionState {
 }
 
 impl PossessionState {
-    pub fn new(team: TeamSide, id: u64, kind: PossessionKind, now: f64, shot_clock: f64) -> Self {
+    pub fn new(
+        team: TeamSide,
+        id: u64,
+        kind: PossessionKind,
+        now: f64,
+        shot_clock: f64,
+        game_clock: f64,
+    ) -> Self {
         Self {
             team,
             id,
@@ -273,6 +296,7 @@ impl PossessionState {
             last_pass_from: None,
             assist_candidate: None,
             shot_clock_start: shot_clock,
+            start_game_clock: game_clock,
             last_cut_at: None,
             last_offensive_rebound_at: None,
             last_drive_at: None,
@@ -307,10 +331,22 @@ pub struct ScreenRead {
 #[derive(Debug, Clone, Copy)]
 pub struct ShotSample {
     pub shot_clock: f64,
+    /// 出手时的比赛时间与节次：分层诊断需要按末段窗口切样本。
+    pub game_clock: f64,
+    pub period: u32,
     pub contest: f32,
     /// 出手瞬间最近防守人的距离（英尺）。
     pub defender_ft: f32,
     pub zone: u8,
+    /// 模型对这次出手的命中概率（含封盖与犯规的边际）。
+    pub p_make: f32,
+    /// 这次出手是否被吹犯规、是否被封盖（用于核对边际守恒）。
+    pub fouled: bool,
+    pub blocked: bool,
+    /// 抽样时实际使用的三个概率：犯规、封盖、条件化后的命中率。
+    pub p_foul: f32,
+    pub p_block: f32,
+    pub p_make_cond: f32,
     pub made: bool,
     pub points: u8,
 }
@@ -326,7 +362,39 @@ pub struct PassSample {
     pub at: f64,
 }
 
-/// 逐次决策的观测：掩护路线与所选动作族。
+/// 单个候选动作的审计记录。
+#[derive(Debug, Clone, Copy)]
+pub struct CandidateTrace {
+    pub kind: crate::action::ActionKind,
+    pub target: Option<usize>,
+    pub to_ft: Vec2,
+    pub utility: crate::utility::Utility,
+    /// 带 γ 的总效用。
+    pub total: f32,
+    /// 玻尔兹曼概率（全部候选合计为 1）。
+    pub probability: f32,
+}
+
+/// 一次决策的因果快照：候选集、各自的效用分解与概率。
+#[derive(Debug, Clone)]
+pub struct DecisionTraceSample {
+    pub actor: usize,
+    pub beta: f32,
+    pub gamma: f32,
+    /// 按概率降序排列的全部候选。
+    pub candidates: Vec<CandidateTrace>,
+    /// 实际被抽中的候选下标。
+    pub chosen: usize,
+}
+
+impl DecisionTraceSample {
+    /// Top-N 候选（N 大于候选数时返回全部）。
+    pub fn top(&self, count: usize) -> &[CandidateTrace] {
+        &self.candidates[..count.min(self.candidates.len())]
+    }
+}
+
+/// 逐次决策的观测：掩护路线、所选动作族与效用的完整分解。
 #[derive(Debug, Clone, Copy)]
 pub struct DecisionSample {
     pub route: Option<DefenderRoute>,
@@ -336,6 +404,16 @@ pub struct DecisionSample {
     pub since_screen: f64,
     /// 持球人的三分能力，用于限定路线响应的适用人群。
     pub shooter_three: f32,
+    /// 选中动作的效用分解：期望得分的七个成因、方差、时钟成本、犯规成本、战术偏置。
+    pub utility: crate::utility::Utility,
+    /// 当时的逆温度 β。
+    pub beta: f32,
+    /// 当时的方差偏好 γ。
+    pub gamma: f32,
+    /// 当时的候选数量。
+    pub candidates: u8,
+    /// 指向 `World::decision_traces` 的审计快照下标。
+    pub trace: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -346,6 +424,8 @@ pub struct DefenderView {
     pub between_ball_and_hoop: bool,
     pub beaten: bool,
     pub route: Option<DefenderRoute>,
+    /// 摸高超出基准的部分（英尺），与结算层同一个映射。
+    pub reach_excess_ft: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -364,6 +444,21 @@ pub struct TeammateView {
     pub distance_to_hoop: f32,
 }
 
+/// 比赛处境：杠杆、时间稀缺与方差偏好。
+///
+/// 三个量都是连续特征，没有「第四节」或「剩 N 秒」这种阶跃开关：
+/// 第三节末落后 15 分与第四节剩 2 分钟落后 6 分在数学上是同一件事，
+/// 只是 τ 与 ω 不同。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Leverage {
+    /// τ = 分差 / 剩余回合数（持球方视角，落后为负）。
+    pub score_pressure: f32,
+    /// ω = exp(−剩余时间 / 稀缺尺度)：终场前接近 1，垃圾时间接近 0。
+    pub urgency: f32,
+    /// γ：落后为正（偏好高方差），领先为负（压低方差）。
+    pub variance_appetite: f32,
+}
+
 #[derive(Debug, Clone)]
 pub struct DecisionState {
     pub actor: usize,
@@ -378,10 +473,16 @@ pub struct DecisionState {
     pub help: Option<HelpView>,
     pub teammates: Vec<TeammateView>,
     pub lane_clearance: f32,
+    /// 持球人与首要防守人的突破技能差（未截断）。
+    pub skill_edge: f32,
     pub mismatch: f32,
     pub stamina: f32,
     pub possession_kind: PossessionKind,
     pub elapsed_in_possession: f64,
+    /// 本次决策时的比赛处境。
+    pub leverage: Leverage,
+    /// 本方当前的势头（0 = 冷却，越大越热）。
+    pub momentum: f32,
 }
 
 impl DecisionState {
@@ -392,7 +493,11 @@ impl DecisionState {
     pub fn openness(&self) -> f32 {
         match self.primary_defender {
             Some(defender) => {
-                contest_from_defender(defender.distance_ft, defender.between_ball_and_hoop)
+                contest_from_defender(
+                    defender.distance_ft,
+                    defender.between_ball_and_hoop,
+                    defender.reach_excess_ft,
+                )
             }
             None => 1.0,
         }
@@ -401,15 +506,15 @@ impl DecisionState {
     pub fn shot_clock_pressure(&self) -> f32 {
         (((12.0 - self.shot_clock) / 12.0) as f32).clamp(0.0, 1.0)
     }
-
-    pub fn early_clock_slack(&self) -> f32 {
-        (((self.shot_clock - 12.0) / 12.0) as f32).clamp(0.0, 1.0)
-    }
 }
 
-/// 干扰强度：防守人越近、越处在球与篮筐之间，干扰越高。
-pub fn contest_from_defender(distance_ft: f32, between: bool) -> f32 {
-    let base = ((6.0 - distance_ft) / 5.0).clamp(0.0, 1.0);
+/// 干扰强度：防守人越近、越处在球与篮筐之间、摸得越高，干扰越高。
+///
+/// `reach_excess_ft` 来自 [`crate::physical::Physical`]：摸高超出基准的
+/// 部分直接抵掉距离，所以臂展/弹跳是通过物理量而不是属性直接进公式的。
+pub fn contest_from_defender(distance_ft: f32, between: bool, reach_excess_ft: f32) -> f32 {
+    let gap = distance_ft - reach_excess_ft;
+    let base = ((6.0 - gap) / 5.0).clamp(0.0, 1.0);
     if between {
         base
     } else {
@@ -417,7 +522,7 @@ pub fn contest_from_defender(distance_ft: f32, between: bool) -> f32 {
     }
 }
 
-pub fn nearest_opponent<'a>(players: &'a [PlayerState], actor: usize) -> Option<&'a PlayerState> {
+pub fn nearest_opponent(players: &[PlayerState], actor: usize) -> Option<&PlayerState> {
     let team = players[actor].team;
     let pos = players[actor].pos;
     players

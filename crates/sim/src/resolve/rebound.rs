@@ -8,7 +8,7 @@ use crate::resolve::clamp01;
 use crate::state::{BallState, PossessionKind};
 use crate::world::World;
 
-pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32) {
+pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_contact: bool) {
     world.rebound_attempts += 1;
     let offense = world.possession.team;
     let defense = offense.other();
@@ -52,7 +52,7 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32) {
         world.line_mut(rebounder).oreb += 1;
         world.possession.had_offensive_rebound = true;
         world.end_possession("offensive_rebound", 0);
-        world.start_second_chance(offense, rebounder);
+        world.start_second_chance(offense, rebounder, rim_contact);
     } else {
         world.line_mut(rebounder).dreb += 1;
         world.end_possession("defensive_rebound", 0);

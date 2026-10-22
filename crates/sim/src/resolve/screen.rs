@@ -8,7 +8,6 @@ use crate::action::{
     StateDelta, TurnoverKind,
 };
 use crate::resolve::clamp01;
-use crate::state::PossessionKind;
 use crate::world::World;
 
 pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> ActionOutcome {
@@ -76,17 +75,11 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
         * (world.params.policy.w("moving_screen_physicality_base") + screener_physicality);
     if world.rng.gen::<f32>() < moving {
         world.line_mut(screener).turnovers += 1;
-        world.line_mut(screener).fouls += 1;
-        let index = World::team_index(team);
-        world.fouls[index].period += 1;
-        world.fouls[index].total += 1;
-        crate::rotation::record_foul(world, screener);
         world.emit(Fact::Turnover {
             player: screener,
             kind: TurnoverKind::OffensiveFoul,
         });
-        world.end_possession("turnover", 0);
-        world.start_possession(team.other(), PossessionKind::Live);
+        crate::resolve::foul::apply_offensive_foul(world, screener, defender);
         return ActionOutcome {
             actor: intent.actor,
             kind: ActionKind::Screen(kind),
