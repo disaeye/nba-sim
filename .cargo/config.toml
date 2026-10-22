@@ -1,0 +1,6 @@
+# 测试与运行的目标程序统一经 scripts/mem-capped-runner.sh 进入独立的 systemd
+# scope，并受 MemoryHigh / MemoryMax 约束：单个失控的测试只能撞自己的上限，
+# 不会把同一台机器上的其它进程拖进整机内存耗尽。
+# wasm 目标由浏览器侧的执行器运行，不经过这里。
+[target.'cfg(not(target_arch = "wasm32"))']
+runner = ["scripts/mem-capped-runner.sh"]
