@@ -26,6 +26,29 @@ set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$DIR"
 
+# ── 内存上限：整个测试流程放进独立的 systemd scope ──
+# 失控的测试二进制曾经涨到 19 GiB：内核判定整机内存耗尽后按全局规则挑目标终止，
+# systemd 又把被终止进程所在的 scope 标成失败并清理其余进程，于是同一个 tmux
+# 窗格里的编辑器、web 服务都被一起终止。把测试放进自己的 scope 后，超限只会
+# 让内核在这个 scope 内部挑目标终止，scope 之外的进程完全不受影响。
+# 上限可用 NBA_TEST_MEMORY_MAX 调整；
+# 没有可用用户级 systemd 的环境（例如 CI 容器）会跳过这层并提示。
+NBA_TEST_MEMORY_MAX="${NBA_TEST_MEMORY_MAX:-8G}"
+if [ -z "${NBA_TEST_SCOPED:-}" ]; then
+    if timeout 5 systemd-run --user --scope --quiet --collect true >/dev/null 2>&1; then
+        echo "🔒 内存上限：MemoryMax=$NBA_TEST_MEMORY_MAX（scope nba-tests-$$）"
+        export NBA_TEST_SCOPED=1
+        exec systemd-run --user --scope --quiet --collect \
+            --unit "nba-tests-$$" \
+            -p MemoryAccounting=yes \
+            -p MemoryMax="$NBA_TEST_MEMORY_MAX" \
+            -p MemorySwapMax=0 \
+            -p OOMPolicy=continue \
+            -- "$0" "$@"
+    fi
+    echo "⚠️  没有可用的用户级 systemd，本次测试不带内存上限" >&2
+fi
+
 MIN_FREE_MB="${NBA_MIN_FREE_MB:-3072}"
 MAX_TARGET_GB="${NBA_MAX_TARGET_GB:-8}"
 # 临时文件专用根目录（不与 /tmp、/dev/shm 混用）。
@@ -165,6 +188,9 @@ if [ "$STATUS" -eq 0 ]; then
 fi
 if [ "$STATUS" -eq 0 ]; then
     python3 scripts/check_r6_tendency_wiring.py || STATUS=$?
+fi
+if [ "$STATUS" -eq 0 ]; then
+    python3 scripts/calibrate/freeze.py --check || STATUS=$?
 fi
 
 exit "$STATUS"

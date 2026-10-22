@@ -5,4 +5,5 @@
 //! 契约见 `docs/validation.md`。
 
 pub mod core_validation;
+pub mod five_dimension;
 pub mod mechanism_core;

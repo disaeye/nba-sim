@@ -62,6 +62,32 @@ pub(crate) fn run_validate_core(
         .cloned()
         .unwrap_or(serde_json::Value::Null);
     write_json(&out_dir, "branch_coverage.json", &coverage)?;
+    // 五维聚合诊断：随本次验证运行生成，同时写入数据目录与证据目录。
+    let five = nba_validation::five_dimension::run_five_dimension(seed_start, games)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    nba_validation::five_dimension::write_five_dimension(&five, &out_dir)?;
+    let root = nba_sim_core::params::workspace_root();
+    nba_validation::five_dimension::write_five_dimension(
+        &five,
+        &root.join("data").join("diagnostics"),
+    )?;
+    nba_validation::five_dimension::write_five_dimension(
+        &five,
+        &root
+            .join("docs")
+            .join("dev")
+            .join("evidence")
+            .join("action_chain_validation"),
+    )?;
+    for failure in five.failed_metrics() {
+        eprintln!("  五维诊断未通过：{failure}");
+    }
+    println!(
+        "  五维诊断：{}（{} 场，{} 个指标）",
+        if five.passed { "通过" } else { "未通过" },
+        five.seeds.len(),
+        five.dimensions.iter().map(|d| d.metrics.len()).sum::<usize>()
+    );
     write_run_record(
         &out_dir,
         seed_start,

@@ -152,6 +152,7 @@ jobs:
           python3 scripts/check_threshold_integrity.py
           python3 scripts/check_threshold_integrity.py --self-test
           python3 scripts/check_r6_tendency_wiring.py
+          python3 scripts/calibrate/freeze.py --check
           python3 scripts/check_docs.py
           python3 scripts/check_max_source_lines.py
           python3 scripts/check_max_source_lines.py --self-test

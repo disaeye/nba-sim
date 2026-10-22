@@ -1,0 +1,183 @@
+{
+  "seeds": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "dimensions": [
+    {
+      "name": "decision",
+      "metrics": [
+        {
+          "key": "trace_coverage",
+          "value": 0.9972800217598259,
+          "lower": 0.99,
+          "upper": 1.0,
+          "passed": true
+        },
+        {
+          "key": "mean_candidates",
+          "value": 6.305861553107575,
+          "lower": 2.0,
+          "upper": 12.0,
+          "passed": true
+        },
+        {
+          "key": "decomposition_finite_share",
+          "value": 1.0,
+          "lower": 1.0,
+          "upper": 1.0,
+          "passed": true
+        },
+        {
+          "key": "mean_beta",
+          "value": 6.40326325338616,
+          "lower": 3.0,
+          "upper": 10.0,
+          "passed": true
+        }
+      ],
+      "passed": true
+    },
+    {
+      "name": "situation",
+      "metrics": [
+        {
+          "key": "leverage_time_step_gap",
+          "value": 0.000015247613191604614,
+          "lower": 0.0,
+          "upper": 0.01,
+          "passed": true
+        },
+        {
+          "key": "leverage_magnitude_monotone_share",
+          "value": 1.0,
+          "lower": 1.0,
+          "upper": 1.0,
+          "passed": true
+        },
+        {
+          "key": "win_probability_monotone_share",
+          "value": 1.0,
+          "lower": 1.0,
+          "upper": 1.0,
+          "passed": true
+        },
+        {
+          "key": "endgame_three_share",
+          "value": 0.5,
+          "lower": 0.15,
+          "upper": 0.8,
+          "passed": true
+        }
+      ],
+      "passed": true
+    },
+    {
+      "name": "tactics",
+      "metrics": [
+        {
+          "key": "play_activation_share",
+          "value": 0.3635547576301616,
+          "lower": 0.15,
+          "upper": 1.0,
+          "passed": true
+        },
+        {
+          "key": "action_family_entropy_bits",
+          "value": 2.103501007709561,
+          "lower": 1.0,
+          "upper": 3.2,
+          "passed": true
+        },
+        {
+          "key": "pass_share",
+          "value": 0.8171696454731907,
+          "lower": 0.15,
+          "upper": 0.85,
+          "passed": true
+        },
+        {
+          "key": "tactical_bonus_share",
+          "value": 0.09587923296613628,
+          "lower": 0.05,
+          "upper": 1.0,
+          "passed": true
+        }
+      ],
+      "passed": true
+    },
+    {
+      "name": "motion",
+      "metrics": [
+        {
+          "key": "speed_cap_compliance",
+          "value": 1.0,
+          "lower": 1.0,
+          "upper": 1.0,
+          "passed": true
+        },
+        {
+          "key": "accel_cap_compliance",
+          "value": 0.9999997446589026,
+          "lower": 0.9999,
+          "upper": 1.0,
+          "passed": true
+        },
+        {
+          "key": "momentum_cap_compliance",
+          "value": 1.0,
+          "lower": 1.0,
+          "upper": 1.0,
+          "passed": true
+        },
+        {
+          "key": "reaction_delay_seconds",
+          "value": 0.25,
+          "lower": 0.0,
+          "upper": 1.0,
+          "passed": true
+        }
+      ],
+      "passed": true
+    },
+    {
+      "name": "rules",
+      "metrics": [
+        {
+          "key": "violations_per_1k_events",
+          "value": 0.0,
+          "lower": 0.0,
+          "upper": 0.0,
+          "passed": true
+        },
+        {
+          "key": "finished_game_share",
+          "value": 1.0,
+          "lower": 1.0,
+          "upper": 1.0,
+          "passed": true
+        },
+        {
+          "key": "score_reconcile_share",
+          "value": 1.0,
+          "lower": 1.0,
+          "upper": 1.0,
+          "passed": true
+        },
+        {
+          "key": "events_per_game",
+          "value": 1700.5,
+          "lower": 1000.0,
+          "upper": 6000.0,
+          "passed": true
+        }
+      ],
+      "passed": true
+    }
+  ],
+  "passed": true
+}

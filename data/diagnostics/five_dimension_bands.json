@@ -1,0 +1,47 @@
+{
+  "probe": {
+    "leverage_remaining_seconds": 300.0,
+    "leverage_step_seconds": 0.05,
+    "leverage_sweep_steps": 60,
+    "leverage_sweep_step_seconds": 10.0,
+    "win_probability_remaining_seconds": 120.0,
+    "win_probability_max_deficit": 15
+  },
+  "endgame": {
+    "period": 4,
+    "game_clock_seconds": 180.0,
+    "three_point_zone": 3
+  },
+  "tolerance": {
+    "probability_sum": 0.001,
+    "monotone": 0.00001,
+    "win_monotone": 0.00000001,
+    "velocity": 0.001,
+    "acceleration": 0.001,
+    "momentum": 0.0001,
+    "teleport": 0.01
+  },
+  "events_per_thousand": 1000.0,
+  "bands": [
+    { "dimension": "decision", "key": "trace_coverage", "lower": 0.99, "upper": 1.0 },
+    { "dimension": "decision", "key": "mean_candidates", "lower": 2.0, "upper": 12.0 },
+    { "dimension": "decision", "key": "decomposition_finite_share", "lower": 1.0, "upper": 1.0 },
+    { "dimension": "decision", "key": "mean_beta", "lower": 3.0, "upper": 10.0 },
+    { "dimension": "situation", "key": "leverage_time_step_gap", "lower": 0.0, "upper": 0.01 },
+    { "dimension": "situation", "key": "leverage_magnitude_monotone_share", "lower": 1.0, "upper": 1.0 },
+    { "dimension": "situation", "key": "win_probability_monotone_share", "lower": 1.0, "upper": 1.0 },
+    { "dimension": "situation", "key": "endgame_three_share", "lower": 0.15, "upper": 0.8 },
+    { "dimension": "tactics", "key": "play_activation_share", "lower": 0.15, "upper": 1.0 },
+    { "dimension": "tactics", "key": "action_family_entropy_bits", "lower": 1.0, "upper": 3.2 },
+    { "dimension": "tactics", "key": "pass_share", "lower": 0.15, "upper": 0.85 },
+    { "dimension": "tactics", "key": "tactical_bonus_share", "lower": 0.05, "upper": 1.0 },
+    { "dimension": "motion", "key": "speed_cap_compliance", "lower": 1.0, "upper": 1.0 },
+    { "dimension": "motion", "key": "accel_cap_compliance", "lower": 0.9999, "upper": 1.0 },
+    { "dimension": "motion", "key": "momentum_cap_compliance", "lower": 1.0, "upper": 1.0 },
+    { "dimension": "motion", "key": "reaction_delay_seconds", "lower": 0.0, "upper": 1.0 },
+    { "dimension": "rules", "key": "violations_per_1k_events", "lower": 0.0, "upper": 0.0 },
+    { "dimension": "rules", "key": "finished_game_share", "lower": 1.0, "upper": 1.0 },
+    { "dimension": "rules", "key": "score_reconcile_share", "lower": 1.0, "upper": 1.0 },
+    { "dimension": "rules", "key": "events_per_game", "lower": 1000.0, "upper": 6000.0 }
+  ]
+}
