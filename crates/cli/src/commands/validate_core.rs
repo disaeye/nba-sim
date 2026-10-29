@@ -326,14 +326,12 @@ fn git_state(out_dir: &Path) -> (String, bool) {
         .map(|output| {
             String::from_utf8_lossy(&output.stdout)
                 .lines()
-                .filter(|line| {
+                .any(|line| {
                     let path = line.get(3..).unwrap_or("").trim();
                     !relative
                         .as_deref()
                         .is_some_and(|prefix| path.starts_with(prefix))
                 })
-                .next()
-                .is_some()
         })
         .unwrap_or(true);
     (commit, dirty)

@@ -2,6 +2,7 @@ use std::env;
 
 mod commands;
 
+pub(crate) use commands::review::run_review;
 pub(crate) use commands::sim_core::run_sim_core;
 pub(crate) use commands::validate_core::run_validate_core;
 
@@ -36,6 +37,8 @@ fn print_usage() {
                     跑一场或多场比赛；--gate 打印四层判定，--stream 写事件流\n\
            validate-core --seed N --games M [--mechanism] [--out DIR]\n\
                     跑判定批次并写工件；退出码 0 通过、1 缺陷、2 执行错误、3 已知不足\n\
+           review --seed N [--possessions M] [--out DIR]\n\
+                    选出过程清单覆盖的回合，写 review.json 与 review.html\n\
          \n\
          -h, --help  本说明"
     );
@@ -102,6 +105,44 @@ fn main() -> std::io::Result<()> {
                 std::process::exit(2);
             }
         };
+    }
+
+    if args.len() > 1 && args[1] == "review" {
+        let mut seed = 1u64;
+        let mut possessions = 20usize;
+        let mut out: Option<std::path::PathBuf> = None;
+        let mut i = 2;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--seed" => {
+                    seed = parse_option_value(&args, i + 1, "--seed <n>")?
+                        .parse()
+                        .map_err(|_| std::io::Error::other("seed must be a number"))?;
+                    i += 2;
+                }
+                "--possessions" => {
+                    possessions = parse_option_value(&args, i + 1, "--possessions <n>")?
+                        .parse()
+                        .map_err(|_| std::io::Error::other("possessions must be a number"))?;
+                    i += 2;
+                }
+                "--out" => {
+                    out = Some(std::path::PathBuf::from(parse_option_value(
+                        &args,
+                        i + 1,
+                        "--out <dir>",
+                    )?));
+                    i += 2;
+                }
+                other => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("unknown review option `{other}`"),
+                    ));
+                }
+            }
+        }
+        return run_review(seed, possessions, out);
     }
 
     if args.len() > 1 && args[1] == "sim-core" {

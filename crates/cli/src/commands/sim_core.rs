@@ -4,7 +4,7 @@
 //! `--gate` 输出四层判定结果。
 
 use nba_sim_core::{
-    gate, run_game, summarize, MatchSetup, Params, TeamSide, World, CALIBRATION_DIR,
+    gate, run_game, summarize, MatchSetup, Params, RuntimeParams, TeamSide, World, CALIBRATION_DIR,
 };
 use std::io::Write;
 use std::path::Path;
@@ -16,20 +16,16 @@ pub(crate) fn run_sim_core(
     stream: Option<&str>,
 ) -> std::io::Result<()> {
     let calibration = Path::new(CALIBRATION_DIR);
-    let params = Params::load(calibration)
+    let params = RuntimeParams::load(calibration)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
 
     let mut reports = Vec::new();
     for offset in 0..games.max(1) {
-        let report = if offset == 0 && stream.is_some() {
-            export_stream(
-                seed,
-                calibration,
-                params.clone(),
-                stream.expect("stream path"),
-            )?
-        } else {
-            run_game(seed + offset, calibration)
+        let report = match stream {
+            Some(path) if offset == 0 => {
+                export_stream(seed, calibration, params.clone(), path)?
+            }
+            _ => run_game(seed + offset, calibration),
         };
         print_game(&report);
         reports.push(report);
@@ -68,11 +64,13 @@ pub(crate) fn run_sim_core(
     }
 
     if gate {
+        let validation = Params::load(calibration)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
         let mut batch = Vec::new();
         for batch_seed in 1..=16u64 {
             batch.push(run_game(batch_seed, calibration));
         }
-        let report = gate::evaluate_batch(&batch, &params);
+        let report = gate::evaluate_batch(&batch, &validation);
         println!();
         println!(
             "几何违规 {}  语境违规 {}  分布失败 {}",
@@ -99,7 +97,7 @@ pub(crate) fn run_sim_core(
 fn export_stream(
     seed: u64,
     calibration: &Path,
-    params: Params,
+    params: RuntimeParams,
     path: &str,
 ) -> std::io::Result<nba_sim_core::GameReport> {
     let rules = nba_domain::GameRules::default();

@@ -3,7 +3,7 @@
 //! JavaScript 只能观察快照与事实，不能改写比分、球权、球员位置或出手结果。
 //! 校准表通过编译期内嵌加载，因此 WASM 目标不需要文件系统。
 
-use nba_sim_core::params::Params;
+use nba_sim_core::params::RuntimeParams;
 use nba_sim_core::SessionService;
 use wasm_bindgen::prelude::*;
 
@@ -14,7 +14,7 @@ pub struct WasmMatchService {
 
 fn setup(service: &mut SessionService, seed: u64) -> Result<String, JsError> {
     let info = service
-        .setup(Params::embedded(), seed)
+        .setup(RuntimeParams::embedded(), seed)
         .map_err(|error| JsError::new(&error))?;
     serde_json::to_string(&info).map_err(|error| JsError::new(&error.to_string()))
 }
@@ -141,7 +141,7 @@ pub fn simulate_to_ndjson(
 ) -> Result<String, JsError> {
     let mut service = SessionService::new(seed);
     service
-        .setup(Params::embedded(), seed)
+        .setup(RuntimeParams::embedded(), seed)
         .map_err(|error| JsError::new(&error))?;
     service.start().map_err(|error| JsError::new(&error))?;
 
