@@ -38,17 +38,13 @@
 | 联赛档案 | verified | `GameRules::league` 参数化节时长、进攻时钟、个人犯满、bonus 与三分几何 | 干扰球与技术犯规没有程序 |
 | 动作模型 | verified | `ActionIntent` 加 `resolve` 分支覆盖 9 类动作 | — |
 | 文档守卫 | verified | `scripts/check_docs.py` 扫 30 份文档 204 处引用；常数、阈值、身份与行数守卫接入 CI | 工作面豁免路径实在性检查，本文件引用已删路径不会变红 |
-| 验证基础设施 | partial | `crates/validation` 提供判定批次、机制实验与四态裁决 | 机制实验中 `stamina` 登记为 `mechanism_change` |
+| 验证基础设施 | partial | `crates/validation` 提供判定批次、机制实验与四态裁决；最新当前工作区报告为 `defects_found` | 32 场训练组的 `shooting_fouls_per_game` 未达验收带；40 种子机制实验中 speed、acceleration、strength、defensive_rebound、decision_iq 仍为 `insufficient` |
 | 性能预算 | verified | 实测单场 0.03 s、58,936 tick；稳态每 tick 堆分配 0，由 `crates/sim/tests/allocation_budget.rs` 在一千个以上稳态 tick 上逐 tick 计数 | `--stream` 仍逐帧序列化，单场 1.46 s；按回合回放是替代路径 |
+| 观测视图 | verified | 2.5D 正交斜视视图 `crates/debug-server/static/court3d.js` 与二维战术板共用协议帧；`node scripts/test_court3d.mjs` 覆盖十名球员可见、位置与插值坐标误差 0、小人偏航与 facing 误差 0、资产前向对齐误差 0、背向镜头的球员全部显示背面、落地最低点 0.04 英尺与头高 6.12 英尺、卡通渐层材质 60 个、全场四角在镜头内、正交投影下同一高度尺寸一致（比值 1.0000）、平移限制在球场内；二维动效 `scripts/test_court_visuals.py` 以 `?court=2d` 运行通过 | 引擎不下发腾空高度与动作标签，一次性动作由 `eventType` 与 `events` 推导；小人朝向直接取 facing，固定镜头下背面会被遮挡 |
 
 ## 3. 当前未完成工作
 
-P0–P5 六个阶段与文档状态层同步已经结束，正文归档在 `docs/dev/cycles/20261021_engine_rebuild/`。剩余的是聚合判定校准，按 `docs/protocol.md` §1 第 7 条单独成一次改动：
-
-1. 近筐份额：让突破在 5–14 英尺稳定产生抛投，属于出手种类生成的结构改动；
-2. 空切份额：把空切接进目标生成，而不是调基础分；
-3. 回合数：节奏由动作时长与决策间隔决定，不在效用权重上；
-4. 使用率层级：按原型改写 `data/roster/` 的 `shoot_frequency`。
+`crates/sim` 当前实现与观测视图已提交至本地分支；发布门禁尚未通过。最新当前工作区验证在 32 场训练组中有一项分布判定失败，机制实验有五项响应不足。需要按第一性原理继续检查速度、加速度、力量、防守篮板、决策球商和投篮犯规的因果链，并刷新证据后再评估发布状态。
 
 ## 4. 证据入口
 
@@ -56,28 +52,21 @@ P0–P5 六个阶段与文档状态层同步已经结束，正文归档在 `docs
 - 跨周期差距与关闭条件：[`gap.md`](gap.md)
 - 稳定里程碑顺序：[`roadmap.md`](roadmap.md)
 - 已结束周期：[`cycles/`](cycles/)
-- 基线指纹工件：`.work/baseline/fingerprint.json`（16 种子，已被版本控制忽略；记录方式见测试文件头部注释）
+- 基线指纹工件：`crates/sim/tests/baseline/fingerprint.json`（16 种子，随仓库提交，新 checkout 不依赖本地残留文件；记录方式见测试文件头部注释）
 - 判定批次工件：`validate-core --out <目录>`
 
 ## 5. 判定批次
 
-`nba-sim validate-core --seed 1 --games 32` 的当前结论是 `defects_found`：几何违规 0、语境违规 0、账本失败 0，二十一条聚合判据里 `zone_share_near`、`creation_share_cut`、`possessions_per_game`、`usage_top1_over_fifth` 四项越界，十八条过程判据里 `usage_top1_over_fifth` 越界。
+当前工作区最新命令为 `cargo run --release -p nba-sim-cli -- validate-core --seed 1 --games 32 --mechanism`。32 场训练组有 1 项分布判定失败：`shooting_fouls_per_game` 为 16.531，目标为 19.597；其余 36 项分布与过程判定通过，几何违规、语境违规及账本失败均为 0。五维诊断通过。40 种子机制实验有 5 项 `insufficient`，认证为 `defects_found`。
 
 | 指标 | 观测 | 基准 |
 | --- | --- | --- |
-| 得分 | 229.0 | 227.59 |
-| 回合 | 209.8 | 198.20 |
-| 近筐份额 | 0.139 | 0.191 |
-| 空切份额 | 0.035 | 0.045 |
-| 使用率比值 | 1.390 | 2.100 |
-| 单场换人 | 21.4 | ≥ 8 |
-| 战术激活率 | 0.705 | 0.65..0.85 |
-| 背身中锋三分份额 | 0.012 | ≤ 0.04 |
-| 定点射手三分份额 | 0.650 | ≥ 0.35 |
+| 得分 | 207.06 | 227.59 |
+| 回合 | 198.78 | 198.20 |
+| 投篮出手 | 0.945 次/回合 | 0.898 次/回合 |
+| 罚球 | 46.66 次/场 | 43.33 次/场 |
+| 投篮犯规 | 16.531 次/场 | 19.597 次/场 |
+| 进攻篮板 | 26.78 次/场 | 依当批可争抢投失量计算 |
 
-这四项各有具体成因，都不是现有系数能解决的：
+本工作区的 `shooting_fouls_per_game` 为 16.531，未达到验收区间下限 16.657。40 种子机制实验中，`speed`、`acceleration`、`strength`、`defensive_rebound`、`decision_iq` 的配对 bootstrap 区间未完全位于预期方向，均判为 `insufficient`。
 
-- `zone_share_near`：模型里落到 5–14 英尺的出手只来自背身勾手与突破抛投，而抛投在时钟充裕时被 `too_contested_early` 挡掉；`post_base` 从 0.13 抬到 0.28 能把近筐份额推到 0.173，代价是背身份额越界。要同时满足两者，需要让突破在近筐带稳定产生抛投，属于出手种类生成的结构改动。
-- `possessions_per_game`：回合数 208.8 比基准高 5.3%，差在回合时长；`dribble_base` 从 0.35 扫到 0.75 都改不动它，说明节奏由动作时长与决策间隔决定，不在效用权重上。
-- `creation_share_cut`：`cut_base` 从 0.055 抬到 0.07 能把空切份额推过下界，代价是 `steals_per_game` 与 `shot_points_by_clock` 同时越界；两项之间的取舍需要把空切单独接进动作链的目标生成，而不是调基础分。
-- `usage_top1_over_fifth`：轮换把八人出场时间拉平后，队内使用率层级被压平；要重建层级需要按原型改写名册的 `shoot_frequency`，而 `data/roster/` 不在本次改动范围之内。

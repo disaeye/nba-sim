@@ -5,6 +5,7 @@
 ## 0. 当前入口
 
 - **当前状态**：[`status.md`](status.md)
+- **观测视图**：[`visualization.md`](visualization.md)
 - **当前计划**：[`current/plan.md`](current/plan.md)
 - **跨周期差距程序**：[`gap.md`](gap.md)
 - **里程碑路线**：[`roadmap.md`](roadmap.md)
