@@ -68,7 +68,7 @@ def main():
 
     chrome_cmd = [
         "google-chrome", "--headless=new", "--disable-gpu", "--no-sandbox",
-        "--remote-debugging-port=9224", f"{SERVER}/"
+        "--remote-debugging-port=9224", f"{SERVER}/?court=2d"
     ]
     proc = subprocess.Popen(chrome_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(3.5)
