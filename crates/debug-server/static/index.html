@@ -116,10 +116,21 @@
         </div>
 
         <!-- 球场画布与 HUD -->
-        <div class="court-stage-wrap">
+        <div class="court-stage-wrap" id="courtStage">
           <canvas id="courtCanvas" width="1000" height="560"></canvas>
+          <canvas id="court3dCanvas" aria-label="2.5D 球场视图"></canvas>
+          <div id="court3dLoading" class="court3d-loading">球场加载中…</div>
+          <div id="court3dStatus" hidden></div>
 
           <div class="court-hud-toolbar">
+            <button id="courtViewToggle" class="hud-pill-btn active" type="button" aria-pressed="true" title="切换 2.5D 球场与二维战术板 (快捷键: V)">
+              <span class="hud-indicator-dot emerald"></span>
+              <span id="courtViewLabel">2.5D 球场</span>
+            </button>
+            <button id="cameraModeToggle" class="hud-pill-btn" type="button" title="切换镜头：全场 / 跟拍 / 俯视 (快捷键: C)">
+              <span class="hud-indicator-dot emerald"></span>
+              <span id="cameraModeLabel">全场镜头</span>
+            </button>
             <button id="potentialFieldToggle" class="hud-pill-btn" type="button" aria-pressed="false" title="切换全场空间势能控制图层 (快捷键: P)">
               <span class="hud-indicator-dot emerald"></span>
               <span>势能场</span>
@@ -480,6 +491,14 @@
     </div>
   </div>
 
-  <script type="module" src="/app.js?v=20261003_kinetics"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/vendor/three/three.module.js",
+        "three/addons/": "/vendor/three/addons/"
+      }
+    }
+  </script>
+  <script type="module" src="/app.js?v=20261023_court3d"></script>
 </body>
 </html>

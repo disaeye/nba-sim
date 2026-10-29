@@ -123,6 +123,8 @@
     accumulator: 0,
     teamPerspective: "home",
     courtMode: "full",
+    viewMode: "3d",
+    court3d: null,
     // 势能场是内部分析图层，默认隐藏：它铺满大半个球场，不透明填充会盖掉
     // 地板与三分线，与「看比赛」的视觉目标冲突。需要时用侧栏开关（P）打开。
     potentialFieldVisible: false,
@@ -2576,11 +2578,72 @@
     $("runStatus").style.color = error ? "var(--color-urgent)" : "";
   }
 
+  function supportsWebGL() {
+    const probe = document.createElement("canvas");
+    return Boolean(probe.getContext("webgl2") || probe.getContext("webgl"));
+  }
+
+  function setCourtView(mode) {
+    const next = mode === "2d" ? "2d" : "3d";
+    state.viewMode = next;
+    const stage = $("courtStage");
+    if (stage) stage.classList.toggle("view-3d", next === "3d");
+    const toggle = $("courtViewToggle");
+    if (toggle) {
+      toggle.classList.toggle("active", next === "3d");
+      toggle.setAttribute("aria-pressed", String(next === "3d"));
+    }
+    const label = $("courtViewLabel");
+    if (label) label.textContent = next === "3d" ? "2.5D 球场" : "战术板";
+    state.court3d?.setVisible(next === "3d");
+    if (next === "2d" && state.ticks[state.idx]) drawCourt(state.ticks[state.idx]);
+  }
+
+  function toggleCourtView() {
+    setCourtView(state.viewMode === "3d" ? "2d" : "3d");
+  }
+
+  const CAMERA_LABELS = {
+    broadcast: "全场镜头",
+    follow: "跟拍镜头",
+    top: "俯视镜头",
+  };
+
+  function cycleCamera() {
+    if (state.viewMode !== "3d" || !state.court3d) return;
+    const preset = state.court3d.cyclePreset();
+    const label = $("cameraModeLabel");
+    if (label) label.textContent = CAMERA_LABELS[preset] ?? preset;
+  }
+
+  async function initCourt3d() {
+    const canvas = $("court3dCanvas");
+    const statusEl = $("court3dStatus");
+    const overlay = $("court3dLoading");
+    if (!canvas || !statusEl) return;
+    if (!supportsWebGL()) {
+      if (overlay) overlay.hidden = true;
+      statusEl.dataset.error = "webgl-unavailable";
+      setCourtView("2d");
+      return;
+    }
+    const module = await import("./court3d.js");
+    const court = await module.mountCourt3d({
+      canvas,
+      state,
+      statusEl,
+      overlayEl: overlay,
+      assetUrl: "/assets/players.glb",
+    });
+    state.court3d = court;
+    setCourtView("3d");
+  }
+
   function renderCurrent(forceJson = false) {
     const tick = state.ticks[state.idx];
     if (!tick) return;
     updateHud(tick);
-    drawCourt(tick);
+    if (!(state.viewMode === "3d" && state.court3d)) drawCourt(tick);
     updateTimelineCursor();
     updateMatchFlowCursor();
     $("progressInput").value = String(state.idx);
@@ -5070,10 +5133,6 @@
     if (name === "default") rules = { ...state.rules };
     if (name === "fast") {
       rules.tick_seconds = 0.02;
-      rules.decision_interval_seconds = Math.min(
-        finite(rules.decision_interval_seconds, 0.8),
-        0.4,
-      );
     }
     if (name === "contest") {
       rules.shot_contest_sensitivity = Math.min(
@@ -5360,9 +5419,15 @@
         state.potentialFieldVisible = !state.potentialFieldVisible;
         potentialToggle.classList.toggle("active", state.potentialFieldVisible);
         potentialToggle.setAttribute("aria-pressed", String(state.potentialFieldVisible));
-        if (state.ticks[state.idx]) drawCourt(state.ticks[state.idx]);
+        if (state.ticks[state.idx] && state.viewMode === "2d") drawCourt(state.ticks[state.idx]);
       });
     }
+
+    const courtToggle = $("courtViewToggle");
+    if (courtToggle) courtToggle.addEventListener("click", toggleCourtView);
+    const cameraToggle = $("cameraModeToggle");
+    if (cameraToggle) cameraToggle.addEventListener("click", cycleCamera);
+    window.__nbaCourtView = { setMode: setCourtView, mode: () => state.viewMode, cycleCamera };
 
     const quickBtn = $("quickSimBtn");
     if (quickBtn) quickBtn.addEventListener("click", () => runSimulation());
@@ -5495,6 +5560,14 @@
         event.preventDefault();
         $("potentialFieldToggle")?.click();
       }
+      if (event.code === "KeyV") {
+        event.preventDefault();
+        toggleCourtView();
+      }
+      if (event.code === "KeyC") {
+        event.preventDefault();
+        cycleCamera();
+      }
     });
   }
 
@@ -5502,6 +5575,9 @@
     wire();
     await loadDefaultRules();
     await runSimulation();
+    await initCourt3d();
+    const requestedView = new URLSearchParams(window.location.search).get("court");
+    if (requestedView === "2d") setCourtView("2d");
   }
   boot().catch((error) => {
     setRunStatus(`启动失败：${error.message}`, true);

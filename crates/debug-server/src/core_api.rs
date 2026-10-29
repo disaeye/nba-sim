@@ -190,9 +190,9 @@ pub(crate) fn api_core_simulate(req: &Request) -> Response {
 ///
 /// 范围口径与旧入口一致：`<n>p` 表示回合数，`1q` 表示一节，`full` 表示整场。
 pub(crate) fn run_core_simulation(seed: u64, scope: &str) -> Result<(Vec<u8>, usize), String> {
-    use nba_sim_core::{MatchSetup, Params, World};
+    use nba_sim_core::{MatchSetup, RuntimeParams, World};
 
-    let params = Params::load(&workspace_calibration_dir())?;
+    let params = RuntimeParams::load(&workspace_calibration_dir())?;
     let setup = MatchSetup::builtin(nba_domain::GameRules::default());
     let mut world = World::new(setup, params, seed);
     let possession_target = match scope {

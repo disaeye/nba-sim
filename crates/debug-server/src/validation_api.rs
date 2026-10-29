@@ -21,12 +21,14 @@ pub struct CachedGame {
 }
 
 /// 面板状态：缓存比赛与最近一次判定（快照供状态轮询，详单供账本对账）。
-pub enum ValidationState {
-    Idle {
-        cached_game: Option<CachedGame>,
-        last_snapshot: Option<Value>,
-        last_report: Option<Value>,
-    },
+///
+/// 单一结构体而不是枚举：状态位只有一个，枚举会让每个匹配点都写成
+/// 恒真分支。
+#[derive(Default)]
+pub struct ValidationState {
+    pub cached_game: Option<CachedGame>,
+    pub last_snapshot: Option<Value>,
+    pub last_report: Option<Value>,
 }
 
 pub type SharedValidation = Arc<Mutex<ValidationState>>;
@@ -73,15 +75,8 @@ pub fn api_validation_run(_req: &crate::Request, validation: &SharedValidation) 
     let detail = report_json(&report);
     {
         let mut state = validation.lock().expect("validation state");
-        if let ValidationState::Idle {
-            last_snapshot,
-            last_report,
-            ..
-        } = &mut *state
-        {
-            *last_snapshot = Some(snapshot.clone());
-            *last_report = Some(detail);
-        }
+        state.last_snapshot = Some(snapshot.clone());
+        state.last_report = Some(detail);
     }
     json_response(&serde_json::json!({ "result": snapshot }))
 }
@@ -89,11 +84,9 @@ pub fn api_validation_run(_req: &crate::Request, validation: &SharedValidation) 
 /// GET /api/validation/status：最近一次判定的摘要。
 pub fn api_validation_status(validation: &SharedValidation) -> Response {
     let state = validation.lock().expect("validation state");
-    let body = match &*state {
-        ValidationState::Idle { last_snapshot, .. } => match last_snapshot {
-            Some(result) => serde_json::json!({ "status": "done", "result": result }),
-            None => serde_json::json!({ "status": "idle" }),
-        },
+    let body = match &state.last_snapshot {
+        Some(result) => serde_json::json!({ "status": "done", "result": result }),
+        None => serde_json::json!({ "status": "idle" }),
     };
     json_response(&body)
 }
@@ -101,13 +94,9 @@ pub fn api_validation_status(validation: &SharedValidation) -> Response {
 /// GET /api/validation/report：上一次判定的逐场账本详单。
 pub fn api_validation_report(validation: &SharedValidation) -> Response {
     let state = validation.lock().expect("validation state");
-    match &*state {
-        ValidationState::Idle { last_report, .. } => match last_report {
-            Some(report) => json_response(report),
-            None => {
-                bad_request("no validation result: run a simulation and validate first".to_string())
-            }
-        },
+    match &state.last_report {
+        Some(report) => json_response(report),
+        None => bad_request("no validation result: run a simulation and validate first".to_string()),
     }
 }
 
@@ -203,36 +192,27 @@ fn report_json(report: &CoreValidationReport) -> Value {
 /// 缓存页面正在查看的比赛种子，供 `/api/validation/run` 重放。
 pub fn cache_game(validation: &SharedValidation, seed: u64, scope: &str) {
     let mut state = validation.lock().expect("validation state");
-    if let ValidationState::Idle { cached_game, .. } = &mut *state {
-        *cached_game = Some(CachedGame {
-            seed,
-            scope: scope.to_string(),
-        });
-    }
+    state.cached_game = Some(CachedGame {
+        seed,
+        scope: scope.to_string(),
+    });
 }
 
 pub fn idle_state() -> ValidationState {
-    ValidationState::Idle {
-        cached_game: None,
-        last_snapshot: None,
-        last_report: None,
-    }
+    ValidationState::default()
 }
 
 pub fn cached_scope(validation: &SharedValidation) -> Option<String> {
     let state = validation.lock().expect("validation state");
-    match &*state {
-        ValidationState::Idle { cached_game, .. } => {
-            cached_game.as_ref().map(|game| game.scope.clone())
-        }
-    }
+    state
+        .cached_game
+        .as_ref()
+        .map(|game| game.scope.clone())
 }
 
 pub fn cached_seed(validation: &SharedValidation) -> Option<u64> {
     let state = validation.lock().expect("validation state");
-    match &*state {
-        ValidationState::Idle { cached_game, .. } => cached_game.as_ref().map(|game| game.seed),
-    }
+    state.cached_game.as_ref().map(|game| game.seed)
 }
 
 pub fn no_cached_game() -> Response {

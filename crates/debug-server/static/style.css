@@ -586,6 +586,50 @@ body {
   object-fit: contain;
 }
 
+#court3dCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: none;
+  touch-action: none;
+}
+
+.court-stage-wrap.view-3d {
+  background: #0a1018;
+}
+
+.court-stage-wrap.view-3d #courtCanvas {
+  display: none;
+}
+
+.court-stage-wrap.view-3d #court3dCanvas {
+  display: block;
+}
+
+.court-stage-wrap:not(.view-3d) #cameraModeToggle {
+  display: none;
+}
+
+.court3d-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a1018;
+  color: #cbd5e1;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.court3d-loading[hidden] {
+  display: none;
+}
+
 /* 悬浮在右上角的专业 HUD 控制栏 */
 .court-hud-toolbar {
   position: absolute;
@@ -593,6 +637,8 @@ body {
   right: 14px;
   z-index: 40;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
 }

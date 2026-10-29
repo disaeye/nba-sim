@@ -12,7 +12,7 @@ use nba_sim_core::SessionService;
 use serde_json::Value;
 
 mod core_api;
-mod static_page;
+mod static_files;
 mod validation_api;
 
 use core_api::SharedCore;
@@ -143,31 +143,6 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
 
 fn route(req: &Request, core: &SharedCore, validation: &SharedValidation) -> Response {
     match (req.method.as_str(), req.path.as_str()) {
-        ("GET", "/") => (
-            "200 OK",
-            "text/html; charset=utf-8",
-            static_page::HTML.as_bytes().to_vec(),
-        ),
-        ("GET", "/style.css") => (
-            "200 OK",
-            "text/css; charset=utf-8",
-            static_page::CSS.as_bytes().to_vec(),
-        ),
-        ("GET", "/app.js") => (
-            "200 OK",
-            "application/javascript; charset=utf-8",
-            static_page::JS.as_bytes().to_vec(),
-        ),
-        ("GET", "/wasm/nba_wasm.js") => (
-            "200 OK",
-            "application/javascript; charset=utf-8",
-            static_page::WASM_JS.as_bytes().to_vec(),
-        ),
-        ("GET", "/wasm/nba_wasm_bg.wasm") => (
-            "200 OK",
-            "application/wasm",
-            static_page::WASM_BIN.to_vec(),
-        ),
         ("GET", "/api/rules") => match serde_json::to_vec_pretty(&GameRules::default()) {
             Ok(json) => ("200 OK", "application/json; charset=utf-8", json),
             Err(e) => internal_error(e.to_string()),
@@ -196,6 +171,11 @@ fn route(req: &Request, core: &SharedCore, validation: &SharedValidation) -> Res
         _ => {
             if req.path.starts_with("/api/core/") {
                 if let Some(response) = core_api::route_core(req, core) {
+                    return response;
+                }
+            }
+            if req.method == "GET" {
+                if let Some(response) = static_files::serve(&req.path) {
                     return response;
                 }
             }
