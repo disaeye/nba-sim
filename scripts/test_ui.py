@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """UI E2E regression check (headless Chrome dump-dom + console check)."""
-import subprocess, sys, time, urllib.request
+import os
+import subprocess
 
 def check_dom():
-    cmd = ["google-chrome", "--headless=new", "--disable-gpu", "--no-sandbox",
+    browser = os.environ.get("CHROME_BIN", "google-chrome")
+    cmd = [browser, "--headless=new", "--disable-gpu", "--no-sandbox",
            "--virtual-time-budget=10000", "--dump-dom", "http://127.0.0.1:31100/"]
     out = subprocess.check_output(cmd, timeout=30).decode()
     assert "ticks" in out and "运行失败" not in out, "runStatus must show ticks, not failure"
