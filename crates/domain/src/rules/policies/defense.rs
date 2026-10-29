@@ -254,7 +254,16 @@ impl DefenseRules {
     }
 
     /// 全部方案档案（顺序与 `schemes.json` 一致）。
+    ///
+    /// 档案解析与 id 泄漏只做一次：方案 id 泄为 `'static` 才能满足返回类型，
+    /// 若每次调用都重新解析，每场比赛都会泄掉一批字符串。
     pub fn all() -> Vec<(&'static str, Self)> {
+        static SCHEMES: std::sync::OnceLock<Vec<(&'static str, DefenseRules)>> =
+            std::sync::OnceLock::new();
+        SCHEMES.get_or_init(Self::parse_all).clone()
+    }
+
+    fn parse_all() -> Vec<(&'static str, Self)> {
         #[derive(serde::Deserialize)]
         struct File {
             help_blend: HelpBlend,
@@ -292,7 +301,9 @@ impl DefenseRules {
             .into_iter()
             .map(|e| {
                 (
-                    // 泄漏为 'static：档案在编译期内联，生命周期与程序一致。
+                    // 方案 id 泄为 'static：档案在编译期内联，生命周期与程序
+                    // 一致。解析只做一次（见 all 的 OnceLock），所以这个泄漏
+                    // 每个进程只发生一次。
                     Box::leak(e.id.into_boxed_str()) as &'static str,
                     Self {
                         sag_multiplier: e.sag_multiplier,

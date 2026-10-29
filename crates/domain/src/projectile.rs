@@ -37,6 +37,23 @@ impl ProjectileArc {
         z0 + self.vz0 * t - 0.5 * g * t * t
     }
 
+    /// 同一段时间里改用更高的顶点：同样的飞行时间，弧线抬得更高。
+    ///
+    /// 高吊球需要从防守人头顶飞过：用更高的顶点可以在不改变飞行时间的前
+    /// 提下落进防守人的伸手范围。
+    ///
+    /// `apex_height` 是顶点相对释放点的高度；顶点出现在飞行时间的中点。
+    pub fn with_apex(self, duration: f32, apex_height: f32, g: f32) -> Self {
+        let half = (duration * 0.5).max(1.0e-3);
+        // 抛物线 z(t) = z0 + vz0·t − ½·g·t²，在 t = half 处达到顶点高度：
+        // vz0 = (apex_height + ½·g·half²) / half。
+        //
+        // 顶点抬高后，末端的落点会比原来更低；这里把落点补回来：末端高度
+        // 与释放点相同，才不会「球从篮筐高度掉下来」。
+        let vz0 = (apex_height + 0.5 * g * half * half) / half;
+        ProjectileArc { vz0 }
+    }
+
     /// 抛物线自然顶点高度（vz0 ≤ 0 时为起点高度）。
     pub fn peak_height(&self, z0: f32, g: f32) -> f32 {
         let g_safe = g.max(f32::EPSILON);

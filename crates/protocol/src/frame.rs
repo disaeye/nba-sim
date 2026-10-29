@@ -27,6 +27,12 @@ pub struct RenderPlayer {
     /// 当前动作窗口阶段；没有活动窗口时省略。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action_phase: Option<String>,
+    /// 当前无球职责；没有职责时省略。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job: Option<String>,
+    /// 当前防守责任；没有责任时省略。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub responsibility: Option<String>,
     pub slot: String,
     pub morale: String,
     pub stm: f32,
@@ -81,6 +87,12 @@ pub struct RenderBall {
     pub x: f32,
     pub y: f32,
     pub z: f32,
+    #[serde(default)]
+    pub vx: f32,
+    #[serde(default)]
+    pub vy: f32,
+    #[serde(default)]
+    pub vz: f32,
     pub status: String,
     #[serde(rename = "holderId")]
     pub holder_id: Option<String>,
@@ -139,6 +151,15 @@ pub struct DecisionDebug {
     /// 本决策在全局决策序列中的序号。
     #[serde(default)]
     pub trace_id: u32,
+    /// 实际决策记录的稳定 ID；未关联记录时为 0。
+    #[serde(default)]
+    pub decision_id: u64,
+    /// 观察集合的稳定摘要；反事实与信息干预用它判断输入是否改变。
+    #[serde(default)]
+    pub observation_digest: u64,
+    /// 执行前重校验结果；`accepted`、`cancelled:<原因>` 或省略。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revalidation: Option<String>,
     /// 当时的逆温度 β（球商与体能决定）。
     #[serde(default)]
     pub beta: f32,
@@ -303,6 +324,19 @@ pub struct FrameEvent {
     pub sequence: u64,
     pub time: f32,
     pub kind: String,
+    /// 事件几何：发生位置（英尺，球场坐标系）。无几何时省略。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z: Option<f32>,
+    /// 同一 tick 内的子步序号。
+    #[serde(default)]
+    pub sub_tick: u16,
+    /// 连续接触时刻；只在接触类事件上出现。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contact_time: Option<f32>,
     /// Domain event payload retained for replay, analytics, and debugging.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
@@ -402,6 +436,11 @@ impl FrameEvent {
             sequence,
             time,
             kind,
+            x: None,
+            y: None,
+            z: None,
+            sub_tick: 0,
+            contact_time: None,
             data: None,
             event_id: 0,
             parent_event_id: None,

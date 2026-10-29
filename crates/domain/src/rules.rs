@@ -15,6 +15,9 @@ pub use policies::{
     SemanticRules, TacticalRules,
 };
 
+/// 固定步长。所有图与推演都以这个值为唯一时间源。
+pub const TICK_SECONDS: f64 = 0.05;
+
 /// Match rules and timing policy shared by the simulation subsystems.
 ///
 /// The engine consumes this value rather than embedding competition-specific
@@ -40,10 +43,10 @@ pub struct GameRules {
     pub three_second_lane_seconds: f32,
     pub period_break_seconds: f32,
     pub tactical_initiation_seconds: f32,
-    pub decision_interval_seconds: f32,
-    /// 发球决策间隔（秒）：发球是「尽快发进场」程序，不套用阵地节奏
-    ///（套用曾致 37% 发球判五秒违例）。
-    pub inbound_decision_interval_seconds: f32,
+    /// 无事件触发时的最小重决策间隔（秒）。决策由动作完成、球权变化、
+    /// 接球、掩护接触、协防承诺等事件触发；没有事件时，持球人至少
+    /// 隔这么久才重新评估。
+    pub redecide_interval_seconds: f32,
     pub free_throw_interval_seconds: f32,
     pub ball_max_speed_ftps: f32,
     pub min_pass_duration_seconds: f32,
@@ -407,7 +410,7 @@ fn default_backboard_vertical_restitution() -> f32 {
 impl Default for GameRules {
     fn default() -> Self {
         Self {
-            tick_seconds: 0.04,
+            tick_seconds: TICK_SECONDS as f32,
             travel_enforcement: true,
             league: crate::league::LeagueProfile::nba(),
             estimated_possessions_per_period: 35,
@@ -418,8 +421,7 @@ impl Default for GameRules {
             three_second_lane_seconds: 3.0,
             period_break_seconds: 15.0,
             tactical_initiation_seconds: 6.5,
-            decision_interval_seconds: 3.0,
-            inbound_decision_interval_seconds: 0.4,
+            redecide_interval_seconds: 0.5,
             free_throw_interval_seconds: 2.2,
             ball_max_speed_ftps: 85.0,
             min_pass_duration_seconds: 0.45,

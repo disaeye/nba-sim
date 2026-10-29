@@ -34,7 +34,7 @@ impl GameRules {
             self.backcourt_seconds,
             self.period_break_seconds,
             self.tactical_initiation_seconds,
-            self.decision_interval_seconds,
+            self.redecide_interval_seconds,
             self.free_throw_interval_seconds,
             self.min_pass_duration_seconds,
             self.max_pass_duration_seconds,
@@ -175,7 +175,8 @@ impl GameRules {
             || self.three_second_lane_seconds <= 0.0
             || self.period_break_seconds < 0.0
             || self.tactical_initiation_seconds < 0.0
-            || self.decision_interval_seconds <= 0.0
+            || self.redecide_interval_seconds <= 0.0
+            || self.redecide_interval_seconds > 5.0
             || self.free_throw_interval_seconds <= 0.0
             || self.league.regulation_periods == 0
             || self.league.bonus_final_seconds < f32::default()
