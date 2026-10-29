@@ -11,7 +11,7 @@
 use rand::Rng;
 
 /// 期望得分的分项。总和就是要比较的期望得分。
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EpvTerms {
     /// 能力项：执行者的技术属性把动作做成的基本产出。
     pub ability: f32,
@@ -37,7 +37,7 @@ impl EpvTerms {
 }
 
 /// 一次候选动作的效用。
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Utility {
     pub epv: EpvTerms,
     /// 结果的离散度：领先方厌恶，落后方偏好。
@@ -96,13 +96,18 @@ pub fn softmax_probabilities(totals: &[f32], beta: f32) -> Vec<f32> {
 
 /// 玻尔兹曼选择：`P(a) ∝ exp(β·(U(a) − max U))`。
 pub fn softmax_pick<R: Rng>(rng: &mut R, totals: &[f32], beta: f32) -> usize {
+    softmax_pick_at(rng.gen::<f32>(), totals, beta)
+}
+
+/// 用外部给定的 `[0, 1)` 抽样做玻尔兹曼选择。
+pub fn softmax_pick_at(unit: f32, totals: &[f32], beta: f32) -> usize {
     let weights = softmax_weights(totals, beta);
     let total: f32 = weights.iter().sum();
     assert!(
         total.is_finite() && total > f32::default(),
         "the softmax distribution degenerated to zero mass"
     );
-    let mut threshold = rng.gen::<f32>() * total;
+    let mut threshold = unit * total;
     for (index, weight) in weights.iter().enumerate() {
         threshold -= weight;
         if threshold <= f32::default() {

@@ -217,6 +217,73 @@ pub struct Band {
     pub upper: f64,
 }
 
+/// 出手类型 × 距离的真实命中率曲线（运行时表）。
+///
+/// 这一段是「距离衰减」组的实测数据：每个出手类型在每个距离档上的真实
+/// 命中率。投篮模型用它把目标命中率换成瞄准误差，因此模型预测的命中率
+/// 就是实测命中率，而不是靠一组手调的倍率近似出来的。
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ShotDistanceCell {
+    pub upper_ft: f32,
+    pub rate: f32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ShotDistanceProfile {
+    /// 距离上限（ft）到命中率的序列，按距离升序。
+    pub cells: Vec<ShotDistanceCell>,
+}
+
+impl ShotDistanceProfile {
+    /// 距离对应的实测命中率：落在哪个档就取那个档的值；超出最后一档时
+    /// 取最后一档（远距离的命中率趋近于零）。
+    pub fn rate_at(&self, distance_ft: f32) -> f32 {
+        for cell in &self.cells {
+            if distance_ft < cell.upper_ft {
+                return cell.rate;
+            }
+        }
+        self.cells
+            .last()
+            .map(|cell| cell.rate)
+            .unwrap_or_default()
+    }
+}
+
+/// 出手类型 × 是否三分 × 距离的真实命中率表（运行时表）。
+///
+/// 这是「距离衰减」组的实测数据：每个出手类型在每个距离档上的真实命中
+/// 率。投篮模型用它把目标命中率换成瞄准误差，因此模型预测的命中率就是
+/// 实测命中率，而不是靠一组手调的倍率近似出来的。
+#[derive(Debug, Clone, Deserialize)]
+pub struct ShotDistanceTable {
+    pub provenance: Provenance,
+    pub profiles: BTreeMap<String, ShotDistanceProfile>,
+}
+
+impl ShotDistanceTable {
+    pub fn rate_at(&self, kind: &str, is_three: bool, distance_ft: f32) -> Option<f32> {
+        let side = if is_three { "three" } else { "two" };
+        self.profiles
+            .get(&format!("{kind}_{side}"))
+            .map(|profile| profile.rate_at(distance_ft))
+    }
+
+    pub fn embedded() -> Self {
+        let table: ShotDistanceTable =
+            serde_json::from_str(include_str!("../../../data/calibration/shot_distance.json"))
+                .expect("embedded shot distance table must parse");
+        table
+    }
+
+    pub fn load(dir: &Path) -> Result<Self, String> {
+        let path = dir.join("shot_distance.json");
+        let text = std::fs::read_to_string(&path)
+            .map_err(|error| format!("shot_distance table must be readable: {error}"))?;
+        serde_json::from_str(&text).map_err(|error| format!("shot_distance table must parse: {error}"))
+    }
+}
+
 /// 策略响应系数。由 `scripts/calibrate/fit_policy.py` 做矩匹配写入，
 /// 目标是让引擎产生的出手与回合分布贴近 `shot_profile` 与 `possession`。
 #[derive(Debug, Clone, Deserialize)]
@@ -233,6 +300,9 @@ pub struct PolicyTable {
     /// 不是联盟实测分布。
     #[serde(default)]
     pub process: BTreeMap<String, f32>,
+    /// 出手类型 × 是否三分 × 距离的真实命中率曲线。
+    #[serde(default)]
+    pub shot_distance: BTreeMap<String, ShotDistanceProfile>,
 }
 
 impl PolicyTable {
@@ -242,6 +312,16 @@ impl PolicyTable {
     /// 压过「这次出手本身值多少分」。`epv_bonus_scale` 把两者折到同一标度。
     pub fn b(&self, key: &str) -> f32 {
         self.w(key) * self.w("epv_bonus_scale")
+    }
+
+    /// 出手类型在给定距离上的实测命中率。
+    ///
+    /// 键是「出手类型_三分/两分」。没有这一段曲线时用区域基准值兜底。
+    pub fn shot_rate_at(&self, kind: &str, is_three: bool, distance_ft: f32) -> Option<f32> {
+        let side = if is_three { "three" } else { "two" };
+        self.shot_distance
+            .get(&format!("{kind}_{side}"))
+            .map(|profile| profile.rate_at(distance_ft))
     }
 
     /// 判定带宽（相对误差区间）：未单独登记的准则用 `default`。
@@ -293,6 +373,226 @@ pub struct Params {
     pub policy: PolicyTable,
     pub formations: Formations,
     pub tactics: TacticsTable,
+}
+
+/// 表的用途分类。运行时只允许加载机制、程序、策略三类。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableKind {
+    Mechanism,
+    Procedure,
+    Policy,
+    Validation,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TableSpec {
+    pub name: &'static str,
+    pub kind: TableKind,
+}
+
+/// 运行时表清单。结果表不在这里；它们只由验证器加载。
+pub const RUNTIME_TABLES: &[TableSpec] = &[
+    TableSpec {
+        name: "formations",
+        kind: TableKind::Procedure,
+    },
+    TableSpec {
+        name: "policy",
+        kind: TableKind::Policy,
+    },
+    TableSpec {
+        name: "tactics",
+        kind: TableKind::Procedure,
+    },
+    TableSpec {
+        name: "shot_distance",
+        kind: TableKind::Procedure,
+    },
+];
+
+/// 验证表清单。`known_insufficient` 只由验证器读取。
+pub const VALIDATION_TABLES: &[TableSpec] = &[
+    TableSpec {
+        name: "shot_make",
+        kind: TableKind::Validation,
+    },
+    TableSpec {
+        name: "shot_profile",
+        kind: TableKind::Validation,
+    },
+    TableSpec {
+        name: "possession",
+        kind: TableKind::Validation,
+    },
+    TableSpec {
+        name: "rebound",
+        kind: TableKind::Validation,
+    },
+    TableSpec {
+        name: "freethrow",
+        kind: TableKind::Validation,
+    },
+    TableSpec {
+        name: "policy_bands",
+        kind: TableKind::Validation,
+    },
+    TableSpec {
+        name: "acceptance",
+        kind: TableKind::Validation,
+    },
+    TableSpec {
+        name: "known_insufficient",
+        kind: TableKind::Validation,
+    },
+];
+
+/// 运行时参数。S7 之后引擎只读这一组表。
+#[derive(Debug, Clone)]
+pub struct RuntimeParams {
+    pub policy: PolicyTable,
+    pub formations: Formations,
+    pub tactics: TacticsTable,
+    /// 出手类型 × 距离的实测命中率。
+    pub shot_distance: ShotDistanceTable,
+}
+
+impl RuntimeParams {
+    pub fn embedded() -> Self {
+        let params = Self {
+            policy: embedded("policy"),
+            formations: embedded("formations"),
+            tactics: TacticsTable::embedded(),
+            shot_distance: ShotDistanceTable::embedded(),
+        };
+        params
+            .validate()
+            .expect("embedded runtime tables must validate");
+        params
+    }
+
+    pub fn load(dir: &Path) -> Result<Self, String> {
+        let params = Self {
+            policy: read(dir, "policy")?,
+            formations: read(dir, "formations")?,
+            tactics: TacticsTable::load(dir)?,
+            shot_distance: ShotDistanceTable::load(dir)?,
+        };
+        params.validate()?;
+        Ok(params)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        for (name, provenance) in [
+            ("policy", &self.policy.provenance),
+            ("formations", &self.formations.provenance),
+            ("shot_distance", &self.shot_distance.provenance),
+        ] {
+            if provenance.source.trim().is_empty() || provenance.method.trim().is_empty() {
+                return Err(format!(
+                    "{name} table must document source and method in provenance"
+                ));
+            }
+        }
+        if self.formations.offense.len() != 5 || self.formations.defense.len() != 5 {
+            return Err(
+                "formations table must define five offense and five defense slots".to_string(),
+            );
+        }
+        self.tactics.validate()?;
+        Ok(())
+    }
+}
+
+impl From<Params> for RuntimeParams {
+    fn from(params: Params) -> Self {
+        Self {
+            policy: params.policy,
+            formations: params.formations,
+            tactics: params.tactics,
+            shot_distance: ShotDistanceTable::embedded(),
+        }
+    }
+}
+
+impl From<&Params> for RuntimeParams {
+    fn from(params: &Params) -> Self {
+        Self {
+            policy: params.policy.clone(),
+            formations: params.formations.clone(),
+            tactics: params.tactics.clone(),
+            shot_distance: ShotDistanceTable::embedded(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AcceptanceTable {
+    pub table: String,
+    pub provenance: Provenance,
+    pub s3: S3Acceptance,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct S3Acceptance {
+    pub stable_path_ratio: BTreeMap<String, f64>,
+    pub on_ball_follow_ratio: f64,
+    pub on_ball_paired_min_ft: f64,
+    pub recovery_path_extra_ft: f64,
+    pub max_continuous_yielding_seconds: f64,
+    pub rationale: String,
+    pub set_at: String,
+}
+
+/// 验证参数。只由验证器读取，运行时不加载。
+#[derive(Debug, Clone)]
+pub struct ValidationParams {
+    pub shot_make: ShotMakeTable,
+    pub shot_profile: ShotProfileTable,
+    pub possession: PossessionTable,
+    pub rebound: ReboundTable,
+    pub freethrow: FreeThrowTable,
+    pub acceptance: AcceptanceTable,
+}
+
+impl ValidationParams {
+    pub fn load(dir: &Path) -> Result<Self, String> {
+        let params = Self {
+            shot_make: read(dir, "shot_make")?,
+            shot_profile: read(dir, "shot_profile")?,
+            possession: read(dir, "possession")?,
+            rebound: read(dir, "rebound")?,
+            freethrow: read(dir, "freethrow")?,
+            acceptance: read(dir, "acceptance")?,
+        };
+        params.validate()?;
+        Ok(params)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.shot_make.provenance.sample == 0 {
+            return Err("shot_make table carries no sample provenance".to_string());
+        }
+        if self.shot_profile.provenance.sample == 0 {
+            return Err("shot_profile table carries no sample provenance".to_string());
+        }
+        if self.possession.provenance.sample == 0 {
+            return Err("possession table carries no sample provenance".to_string());
+        }
+        if self.rebound.provenance.source.trim().is_empty()
+            || self.rebound.provenance.method.trim().is_empty()
+        {
+            return Err("rebound table must document source and method in provenance".to_string());
+        }
+        if self.freethrow.attempts_observed == 0 {
+            return Err("freethrow table carries no observed attempts".to_string());
+        }
+        if self.acceptance.provenance.source.trim().is_empty()
+            || self.acceptance.provenance.method.trim().is_empty()
+        {
+            return Err("acceptance table must document source and method".to_string());
+        }
+        Ok(())
+    }
 }
 
 impl Params {
@@ -405,4 +705,47 @@ fn embedded<T: serde::de::DeserializeOwned>(name: &str) -> T {
     };
     serde_json::from_str(text)
         .unwrap_or_else(|error| panic!("embedded calibration table {name} is invalid: {error}"))
+}
+
+#[cfg(test)]
+mod manifest_tests {
+    use super::*;
+
+    #[test]
+    fn runtime_and_validation_tables_are_disjoint() {
+        for runtime in RUNTIME_TABLES {
+            assert_ne!(runtime.kind, TableKind::Validation, "{runtime:?}");
+            assert!(
+                !VALIDATION_TABLES
+                    .iter()
+                    .any(|validation| validation.name == runtime.name),
+                "{} is both runtime and validation",
+                runtime.name
+            );
+        }
+    }
+
+    #[test]
+    fn known_insufficient_is_validation_only() {
+        assert!(!RUNTIME_TABLES
+            .iter()
+            .any(|table| table.name == "known_insufficient"));
+        assert!(VALIDATION_TABLES
+            .iter()
+            .any(|table| table.name == "known_insufficient"));
+    }
+
+    #[test]
+    fn runtime_params_load_from_runtime_tables_only() {
+        let params = RuntimeParams::load(&workspace_calibration_dir())
+            .expect("runtime tables must load");
+        assert!(params.policy.w("shot_quality_base_rim") > 0.0);
+    }
+
+    #[test]
+    fn validation_params_load_from_validation_tables() {
+        let params = ValidationParams::load(&workspace_calibration_dir())
+            .expect("validation tables must load");
+        assert!(params.shot_make.provenance.sample > 0);
+    }
 }

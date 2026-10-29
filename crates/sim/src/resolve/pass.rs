@@ -1,13 +1,10 @@
 //! 传球结算：拦截判定、接球质量、接球人控制权。
 
 use glam::Vec2;
-use rand::Rng;
 
 use crate::action::{
-    ActionIntent, ActionKind, Completion, Fact, PassKind, StateDelta, TurnoverKind,
+    ActionIntent, ActionKind, Completion, Fact, PassKind, StateDelta,
 };
-use crate::resolve::{clamp01, sigmoid};
-use crate::state::PossessionKind;
 use crate::world::World;
 
 pub fn resolve(
@@ -18,132 +15,80 @@ pub fn resolve(
     let from = intent.actor;
     let to = intent.target.expect("pass requires a receiver");
     let pass_id = world.new_pass_id();
-    let team = world.players[from].team;
-    let lane = crate::state::pass_lane_clearance(
-        &world.players,
-        world.players[from].pos,
-        world.players[to].pos,
-        team,
-    );
-    let passer_skill = world.players[from].data.attributes.passing;
-    let decision = world.players[from].data.attributes.decision_iq;
-    let receiver_handling = world.players[to].data.attributes.ball_handling;
     // 传球终结了持球状态：收球标志在出手时清掉。
     world.possession.dribble_state = crate::state::DribbleState::Dribbling;
     world.possession.gather_pos = None;
-    let base = world.params.policy.w("pass_turnover_rate");
-    let lane_risk = (1.0 - clamp01(lane / 6.0)).max(0.0);
-    let skill_relief = 0.5 + passer_skill + 0.8 * decision;
-    // 抢断归因于卡在传球路线上的那个人：自己的 steal 与冒险倾向决定
-    // 拦截机会，传球人的视野与传球能力决定风险被压低多少。
-    let defender = lane_defender(world, from, to);
-    let steal_scale = world.params.policy.w("steal_skill_scale");
-    let skill_base = world.params.policy.w("steal_skill_base");
-    let gamble_base = world.params.policy.w("steal_gamble_base");
-    let gamble_slope = world.params.policy.w("steal_gamble_slope");
-    let (steal_credit, p_intercept) = match defender {
-        Some((index, skill, gamble)) => (
-            Some(index),
-            clamp01(
-                base * lane_risk / skill_relief
-                    * steal_scale
-                    * (skill_base + skill)
-                    * (gamble_base + gamble_slope * gamble),
-            ),
-        ),
-        None => (None, f32::MIN_POSITIVE),
-    };
-
-    if world.rng.gen::<f32>() < p_intercept {
-        world.line_mut(from).turnovers += 1;
-        if let Some(defender) = steal_credit {
-            world.line_mut(defender).steals += 1;
-        }
-        world.emit(Fact::Turnover {
-            player: from,
-            kind: TurnoverKind::BadPass,
-        });
-        world.end_possession("turnover", 0);
-        world.start_possession(team.other(), PossessionKind::Live);
-        return crate::action::ActionOutcome {
-            actor: from,
-            kind: ActionKind::Pass(kind),
-            completion: Completion::Failed,
-            delta: StateDelta {
-                turnover: Some(TurnoverKind::BadPass),
-                ..Default::default()
-            },
-            facts: Vec::new(),
-        };
-    }
-
-    // 非抢断失误：传球直接出界。这类回合计入失误但不给任何人记抢断；
-    // 传球技巧决定出界的概率，判断力已经作用在上面的拦截风险里。
-    let bad_pass = clamp01(
-        world.params.policy.w("bad_pass_rate")
-            / (world.params.policy.w("bad_pass_skill_base") + passer_skill),
-    );
-    if world.rng.gen::<f32>() < bad_pass {
-        world.line_mut(from).turnovers += 1;
-        world.emit(Fact::Turnover {
-            player: from,
-            kind: TurnoverKind::BadPass,
-        });
-        world.end_possession("turnover", 0);
-        world.start_possession(team.other(), PossessionKind::Live);
-        return crate::action::ActionOutcome {
-            actor: from,
-            kind: ActionKind::Pass(kind),
-            completion: Completion::Failed,
-            delta: StateDelta {
-                turnover: Some(TurnoverKind::BadPass),
-                ..Default::default()
-            },
-            facts: Vec::new(),
-        };
-    }
-
-    let catch_quality = clamp01(
-        0.55 + 0.6 * receiver_handling - 0.25 * (1.0 - clamp01(lane / 8.0)) + 0.2 * passer_skill,
-    );
-    let mut facts = vec![Fact::Pass {
-        pass_id,
-        from,
-        to,
-        kind,
-        completed: true,
-    }];
-    if catch_quality < 0.35 {
-        facts.push(Fact::Turnover {
-            player: to,
-            kind: TurnoverKind::LostBall,
-        });
-        world.line_mut(to).turnovers += 1;
-        world.end_possession("turnover", 0);
-        world.start_possession(team.other(), PossessionKind::Live);
-        return crate::action::ActionOutcome {
-            actor: from,
-            kind: ActionKind::Pass(kind),
-            completion: Completion::Failed,
-            delta: StateDelta {
-                turnover: Some(TurnoverKind::LostBall),
-                ..Default::default()
-            },
-            facts,
-        };
-    }
-
+    world.possession.ball_phase = crate::state::BallPhase::Dribble;
     world.possession.passes += 1;
     world.possession.last_pass_at = Some(world.now());
     world.possession.last_pass_from = Some(from);
     world.possession.assist_candidate = Some((from, world.now()));
     world.last_pass_kind = Some(kind);
+    let now = world.now();
+    let rules = world.rules.clone();
+    let from_player = world.players[from].clone();
+    let mut to_player = world.players[to].clone();
+    // 高吊球在空中等切入人跑到接球点：飞行时间由切入人的跑动时间决定，
+    // 落点是切入人将要到达的接球点。
+    let (landing, flight) = if kind == crate::action::PassKind::Lob {
+        let (spot, flight) = crate::resolve::pass::cut_plan(world, to);
+        (Some(spot), Some(flight))
+    } else {
+        // 普通传球瞄向接球人将要到达的位置（他的站位），而不是他此刻站的
+        // 地方。瞄向他此刻的位置会让接球人往回跑，球落在他原来的位置上，
+        // 进攻于是离筐越来越远。
+        let point = crate::value::catch_point(world, to);
+        to_player.pos = point;
+        (None, None)
+    };
+    let distance = (to_player.pos - from_player.pos).length();
+    let duration = flight.unwrap_or_else(|| f64::from(rules.pass_duration(distance, false)));
+    world.ball.release_pass(crate::ball::PassRelease {
+        rules: &rules,
+        from_player: &from_player,
+        to_player: &to_player,
+        now,
+        pass_id,
+        from,
+        to,
+        kind,
+        landing,
+        flight,
+    });
+    world.pass_in_flight = Some(crate::ball::PassInFlight {
+        pass_id,
+        from,
+        to,
+        kind,
+    });
+    if let crate::state::BallState::Pass { to_pos, .. } = world.ball.state {
+        world.players[to].target = to_pos;
+        world.players[to].target_kind = crate::state::TargetKind::Window;
+        world.players[to].target_partner = to;
+    }
+    let passing = world.players[from].data.attributes.passing;
+    let base = world.params.policy.w("bad_pass_rate");
+    let skill_base = world.params.policy.w("bad_pass_skill_base");
+    let defense_gamble = world
+        .players
+        .iter()
+        .filter(|p| p.on_court && p.team != world.players[from].team)
+        .map(|p| p.data.tendencies.gamble_steal)
+        .fold(0.0f32, f32::max);
+    let gamble_effect = 1.0 + (defense_gamble - 0.5) * 0.1;
+    let rate = (base * (1.0 + (skill_base - passing) * 1.0) * gamble_effect).clamp(0.005, 0.018);
+    if world.draw(crate::draw::Stream::Pass, from, crate::draw::purpose::BAD_PASS, 0) < rate {
+        world.pass_result = Some(crate::ball::PassResult::Incomplete);
+    }
+    world.phase = crate::world::Phase::PassFlight {
+        resolve_at: now + duration + 0.5,
+    };
     world.emit(Fact::Pass {
         pass_id,
         from,
         to,
         kind,
-        completed: true,
+        completed: false,
     });
     world.pass_samples.push(crate::state::PassSample {
         possession: world.possession.id,
@@ -161,116 +106,85 @@ pub fn resolve(
             control: None,
             ..Default::default()
         },
-        facts,
-    }
-}
-
-pub fn resolve_cut(world: &mut World, intent: &ActionIntent) -> crate::action::ActionOutcome {
-    let cutter = intent.target.expect("cut requires a cutter");
-    let team = world.players[cutter].team;
-    let hoop = world.hoop_for(team);
-    let defender_distance = world
-        .players
-        .iter()
-        .filter(|p| p.on_court && p.team != team)
-        .map(|p| (p.pos - hoop).length())
-        .fold(f32::INFINITY, f32::min);
-    let open = clamp01(defender_distance / 8.0);
-    let completion =
-        clamp01(0.35 + 0.6 * open + 0.3 * world.players[cutter].data.attributes.off_ball_sense);
-    if world.rng.gen::<f32>() > completion {
-        return crate::action::ActionOutcome {
-            actor: intent.actor,
-            kind: ActionKind::Cut,
-            completion: Completion::Failed,
-            delta: StateDelta::default(),
-            facts: Vec::new(),
-        };
-    }
-    world.players[cutter].pos = hoop
-        + (Vec2::new(-1.0, 0.0)
-            * if world.attacking_right(team) {
-                1.0
-            } else {
-                -1.0
-            })
-            * 2.5;
-    world.players[cutter].target = world.players[cutter].pos;
-    world.ball = crate::state::BallState::Held(cutter);
-    world.possession.last_pass_at = Some(world.now());
-    world.possession.last_pass_from = Some(intent.actor);
-    world.possession.assist_candidate = Some((intent.actor, world.now()));
-    world.possession.dribble_state = crate::state::DribbleState::Dribbling;
-    world.possession.gather_pos = None;
-    world.possession.last_cut_at = Some(world.now());
-    world.possession.last_cut_actor = Some(cutter);
-    let pass_id = world.new_pass_id();
-    world.emit(Fact::Pass {
-        pass_id,
-        from: intent.actor,
-        to: cutter,
-        kind: PassKind::Lob,
-        completed: true,
-    });
-    crate::action::ActionOutcome {
-        actor: intent.actor,
-        kind: ActionKind::Cut,
-        completion: Completion::Completed,
-        delta: StateDelta {
-            control: Some(cutter),
-            ..Default::default()
-        },
         facts: Vec::new(),
     }
 }
 
-/// 谁去做这次抢断：位置与能力一起参与。距离越近权重越高，同时
-/// `steal` 与 `gamble_steal` 高的防守人即使离得稍远也可能扑上来。
-fn lane_defender(world: &mut World, from: usize, to: usize) -> Option<(usize, f32, f32)> {
-    let start = world.players[from].pos;
-    let end = world.players[to].pos;
-    let team = world.players[from].team;
-    let policy = &world.params.policy;
-    let skill_base = policy.w("steal_skill_base");
-    let gamble_base = policy.w("steal_gamble_base");
-    let gamble_slope = policy.w("steal_gamble_slope");
-    let distance_offset = policy.w("steal_distance_offset");
-    let distance_scale = policy.w("steal_distance_scale");
-    let candidates: Vec<(usize, f32, f32, f32)> = world
-        .players
-        .iter()
-        .enumerate()
-        .filter(|(_, p)| p.on_court && p.team != team)
-        .map(|(index, p)| {
-            let distance = segment_distance(start, end, p.pos);
-            let skill = p.data.attributes.steal;
-            let gamble = p.data.tendencies.gamble_steal;
-            let weight = (distance_scale / (distance + distance_offset))
-                * (skill_base + skill)
-                * (gamble_base + gamble_slope * gamble);
-            (index, skill, gamble, weight.max(f32::MIN_POSITIVE))
-        })
-        .collect();
-    if candidates.is_empty() {
-        return None;
+/// 高吊球的飞行时间：球按传球速度到篮下。
+/// 高吊球的飞行时间：等切入人跑到篮下。
+///
+/// 高吊球是「球在空中等切入人到位」：球飞到篮下的时间必须等于切入人
+/// 跑到篮下的时间，否则球要么提前落地（切入人还没到），要么球到时切入人
+/// 已经被防守人挡住。
+/// 空切计划：接球点与飞行时间。
+///
+/// 高吊球是「球在空中等切入人到位」：球飞到接球点的飞行时间必须等于
+/// 切入人跑到接���点的���间，接球点因此是切入人在这段时间里真能跑到的
+/// 位置——而不是他无论如何也跑不到的篮下。
+pub fn cut_plan(world: &World, cutter: usize) -> (Vec2, f64) {
+    let basket = cut_target(world, cutter);
+    let to_basket = basket - world.players[cutter].pos;
+    let distance = to_basket.length();
+    let speed = world.players[cutter]
+        .effective_speed(&world.params.policy)
+        .max(1.0);
+    let accel = world.players[cutter]
+        .effective_acceleration(&world.params.policy)
+        .max(1.0);
+    // 切入人从静止起步：先花一段加速时间，然后匀速跑。球在空中飞的时间
+    // 必须与他真的能跑到的时间一致，球才落在他手里。
+    //
+    // 跑动不是直线：绕开防守人要多走一点路，因此这里按七成效率估计实际
+    // 能跑到的距离，接球点就是他那时真在的位置。
+    let startup = speed / accel;
+    let mut flight = startup;
+    let mut covered = 0.5 * accel * flight * flight;
+    while covered < distance && flight < 2.0 {
+        flight += 0.05;
+        covered = 0.5 * accel * startup * startup
+            + speed * (flight - startup).max(0.0);
     }
-    let weights: Vec<f32> = candidates.iter().map(|entry| entry.3).collect();
-    let pick = crate::resolve::weighted_pick(&mut world.rng, &weights);
-    let (index, skill, gamble, _) = candidates[pick];
-    Some((index, skill, gamble))
+    let flight = f64::from(flight.clamp(0.6, 1.8));
+    // 接球点就是切入人在这段时间里能跑到的位置：球飞到他手里，而不是
+    // 飞到一个他还没到的点上。跑动会绕开防守人，实际能跑到的距离比直线
+    // 短，因此按九成估计。
+    // 实际能跑到的距离比直线短：切入人从静止起步，跑动还要绕开防守人。
+    // 系数按引擎里实测的切入速度与自由跑速度之比取值。
+    // 切入人实际能跑到的距离要按引擎里真实的跑动估计：跑动会被防守人挡住
+    // 绕行，因此比自由跑慢。按四成估计，接球点才是他真的能到的地方。
+    let reachable = (covered * 0.4).min(distance);
+    let landing = world.players[cutter].pos + to_basket.normalize_or_zero() * reachable;
+    (landing, flight)
 }
 
-fn segment_distance(start: Vec2, end: Vec2, point: Vec2) -> f32 {
-    let span = end - start;
-    let length_squared = span.length_squared();
-    if length_squared <= f32::EPSILON {
-        return (point - start).length();
-    }
-    let t = (point - start).dot(span) / length_squared;
-    (point - (start + span * t)).length()
+/// 高吊球的飞行时间：等切入人跑到接球点。
+pub fn lob_flight_time(world: &World, cutter: usize) -> f64 {
+    cut_plan(world, cutter).1
 }
 
-pub fn pass_speed_reference() -> f32 {
-    let _ = sigmoid(0.0);
-    28.0
+/// 空切的接球点：切入人跑到的篮下位置。
+pub fn cut_target(world: &World, cutter: usize) -> Vec2 {
+    let team = world.players[cutter].team;
+    world.hoop_for(team)
+        + Vec2::new(
+            -if world.attacking_right(team) { 1.0 } else { -1.0 },
+            0.0,
+        ) * 2.5
 }
+
+pub fn resolve_cut(world: &mut World, intent: &ActionIntent) -> crate::action::ActionOutcome {
+    let cutter = intent.target.expect("cut requires a cutter");
+    let mut pass_intent = intent.clone();
+    pass_intent.kind = ActionKind::Pass(PassKind::Lob);
+    pass_intent.target = Some(cutter);
+    // 高吊球瞄向切入人跑到的接球点，而不是他此刻的位置。
+    pass_intent.to_ft = crate::resolve::pass::cut_plan(world, cutter).0;
+    let outcome = resolve(world, &pass_intent, PassKind::Lob);
+    // 空切是一次「球在空中等切入人到位」的传球：发球之后切入人必须真的
+    // 跑到接球点接球。发球完成不等于空切完成。
+    world.players[cutter].target = crate::resolve::pass::cut_plan(world, cutter).0;
+    world.players[cutter].target_kind = crate::state::TargetKind::Window;
+    world.players[cutter].target_partner = cutter;
+    outcome
+}
+

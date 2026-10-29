@@ -17,8 +17,7 @@ use rand::Rng;
 use crate::action::{
     ActionIntent, ActionKind, ActionOutcome, Completion, Fact, StateDelta, TurnoverKind,
 };
-use crate::params::PolicyTable;
-use crate::state::{DribbleState, PlayerState, PossessionKind, TeamSide};
+use crate::state::{DribbleState, PossessionKind, TeamSide};
 use crate::world::World;
 
 pub fn resolve(world: &mut World) -> ActionOutcome {
@@ -26,7 +25,7 @@ pub fn resolve(world: &mut World) -> ActionOutcome {
         .active
         .take()
         .expect("resolve requires an active action");
-    match intent.kind {
+    let outcome = match intent.kind {
         ActionKind::Pass(kind) => pass::resolve(world, &intent, kind),
         ActionKind::Screen(kind) => screen::resolve(world, &intent, kind),
         ActionKind::Drive => drive::resolve(world, &intent),
@@ -42,7 +41,9 @@ pub fn resolve(world: &mut World) -> ActionOutcome {
             delta: StateDelta::default(),
             facts: Vec::new(),
         },
-    }
+    };
+    world.screen_defender = None;
+    outcome
 }
 
 /// 运球：正常运球结束即收球并记下位置；已收球再运球是二次运球。
@@ -68,17 +69,24 @@ fn resolve_dribble(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
             facts: Vec::new(),
         };
     }
-    // 只有站定的调整运球才以收球结束；移动中的运球是持球推进，
-    // 收球留到真正的终结动作。
+    // 只有在能出手的位置上收球才成立：收球是「把球收起来投」的��备动作。
+    // 远离篮筐的站定运球只是把球拿稳（调整步），此时球权仍然在手上，
+    // 持球人还可以继续找机会；把它算成收球会让「二次运球」规则禁掉
+    // 持球候选，于是球手在三分线外被逼着出手一个必失的球。
     let player = &world.players[actor];
     let stationary =
         (player.target - player.pos).length() < world.params.policy.g("gather_stationary_ft");
-    if stationary {
+    let hoop = world.hoop_for(world.players[actor].team);
+    let in_shooting_range =
+        (player.pos - hoop).length() <= world.params.policy.g("finish_zone_ft");
+    if stationary && in_shooting_range {
         world.possession.dribble_state = DribbleState::Gathered;
         world.possession.gather_pos = Some(player.pos);
+        world.possession.ball_phase = crate::state::BallPhase::Gather;
     } else {
         world.possession.dribble_state = DribbleState::Dribbling;
         world.possession.gather_pos = None;
+        world.possession.ball_phase = crate::state::BallPhase::Dribble;
     }
     ActionOutcome {
         actor,
@@ -161,9 +169,13 @@ pub fn contest_for(world: &World, shooter: usize, pos: Vec2) -> f32 {
 }
 
 pub fn weighted_pick<R: Rng>(rng: &mut R, weights: &[f32]) -> usize {
+    weighted_pick_at(rng.gen::<f32>(), weights)
+}
+
+pub fn weighted_pick_at(unit: f32, weights: &[f32]) -> usize {
     let total: f32 = weights.iter().sum();
     assert!(total > 0.0, "action weights must not all be zero");
-    let mut threshold = rng.gen::<f32>() * total;
+    let mut threshold = unit * total;
     for (index, weight) in weights.iter().enumerate() {
         threshold -= weight;
         if threshold <= 0.0 {
@@ -173,25 +185,3 @@ pub fn weighted_pick<R: Rng>(rng: &mut R, weights: &[f32]) -> usize {
     weights.len() - 1
 }
 
-pub fn move_player(player: &mut PlayerState, target: Vec2, dt: f32, policy: &PolicyTable) {
-    let delta = target - player.pos;
-    let distance = delta.length();
-    let speed = player.effective_speed(policy);
-    let accel = player.effective_acceleration(policy);
-    let max_change = accel * dt;
-    if distance < policy.g("motion_arrival_epsilon_ft") {
-        // 到位即停：这不是转向，加速上限约束的是转向与加速，不是停步。
-        player.vel = Vec2::ZERO;
-        return;
-    }
-    let desired = delta / distance * speed;
-    let change = desired - player.vel;
-    let change_length = change.length();
-    if change_length > max_change {
-        player.vel += change / change_length * max_change;
-    } else {
-        player.vel = desired;
-    }
-    player.pos += player.vel * dt;
-    player.facing = delta.normalize_or_zero();
-}

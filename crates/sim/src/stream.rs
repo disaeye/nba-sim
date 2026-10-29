@@ -26,12 +26,20 @@ impl Fact {
             Self::Foul { .. } => "FOUL",
             Self::FreeThrow { .. } => "FREE_THROW",
             Self::Rebound { .. } => "REBOUND",
+            Self::ReboundOpportunity { .. } => "REBOUND_OPPORTUNITY",
+            Self::SecondChanceStarted { .. } => "SECOND_CHANCE_STARTED",
+            Self::Cut { .. } => "CUT",
+            Self::BoxOut { .. } => "BOX_OUT",
+            Self::DefenseResponsibilityChanged { .. } => "DEFENSE_RESPONSIBILITY_CHANGED",
             Self::Turnover { .. } => "TURNOVER",
+            Self::Steal { .. } => "STEAL",
             Self::Substitution { .. } => "SUBSTITUTION",
             Self::Timeout { .. } => "TIMEOUT",
             Self::PeriodEnd { .. } => "PERIOD_END",
             Self::PlayActivated { .. } => "PLAY_ACTIVATED",
             Self::PlayWindowEnded { .. } => "PLAY_WINDOW_ENDED",
+            Self::BallContact { .. } => "BALL_CONTACT",
+            Self::PlacementApplied { .. } => "PLACEMENT_APPLIED",
             Self::GameEnd => "GAME_END",
         }
     }
@@ -62,25 +70,35 @@ impl World {
             }),
             Fact::Screen {
                 screener,
+                team,
                 on_ball,
                 contact,
                 route,
                 separation_ft,
+                strength,
+                displacement_ft,
             } => json!({
                 "screener_id": self.player_id(*screener),
+                "team": team.as_str(),
                 "on_ball": on_ball,
                 "contact": contact,
                 "route": format!("{route:?}"),
                 "separation_ft": separation_ft,
+                "strength": strength,
+                "displacement_ft": displacement_ft,
             }),
             Fact::Drive {
                 driver,
                 reached,
                 defender_beaten,
+                distance_ft,
+                separation_ft,
             } => json!({
                 "driver_id": self.player_id(*driver),
                 "reached": reached,
                 "defender_beaten": defender_beaten,
+                "distance_ft": distance_ft,
+                "separation_ft": separation_ft,
             }),
             Fact::PostUp { player } => json!({
                 "player_id": self.player_id(*player),
@@ -140,9 +158,48 @@ impl World {
                 "offensive": offensive,
                 "distance_ft": distance_ft,
             }),
+            Fact::ReboundOpportunity {
+                players,
+                contestable,
+            } => json!({
+                "players": players,
+                "contestable": contestable,
+            }),
+            Fact::SecondChanceStarted {
+                rebounder,
+                possession,
+            } => json!({
+                "rebounder_id": self.player_id(*rebounder),
+                "possession": possession,
+            }),
+            Fact::Cut {
+                cutter,
+                arrived,
+                defender_distance_ft,
+            } => json!({
+                "cutter_id": self.player_id(*cutter),
+                "arrived": arrived,
+                "defender_distance_ft": defender_distance_ft,
+            }),
+            Fact::BoxOut {
+                player,
+                distance_ft,
+            } => json!({
+                "player_id": self.player_id(*player),
+                "distance_ft": distance_ft,
+            }),
+            Fact::DefenseResponsibilityChanged { player, from, to } => json!({
+                "player_id": self.player_id(*player),
+                "from": from,
+                "to": to,
+            }),
             Fact::Turnover { player, kind } => json!({
                 "player_id": self.player_id(*player),
                 "turnover_kind": kind.as_str(),
+            }),
+            Fact::Steal { player, victim } => json!({
+                "player_id": self.player_id(*player),
+                "victim_id": self.player_id(*victim),
             }),
             Fact::Substitution {
                 team,
@@ -165,6 +222,27 @@ impl World {
                 json!({ "play_id": play, "possession": possession })
             }
             Fact::PeriodEnd { period } => json!({ "period": period }),
+            Fact::BallContact {
+                kind,
+                entity,
+                time,
+                x,
+                y,
+                z,
+                sub_tick,
+            } => json!({
+                "contact_kind": kind,
+                "player_id": entity.map(|handle| self.player_id(handle)),
+                "contact_time": time,
+                "x": x,
+                "y": y,
+                "z": z,
+                "sub_tick": sub_tick,
+            }),
+            Fact::PlacementApplied { player, reason } => json!({
+                "player_id": self.player_id(*player),
+                "reason": reason,
+            }),
             Fact::GameEnd => json!({}),
         }
     }
@@ -194,7 +272,9 @@ impl World {
                 has_ball: self.holder() == Some(self.player_index(&player.id)),
                 on_court: true,
                 action: player.slot.as_str().to_string(),
-                action_phase: None,
+                action_phase: self.active.as_ref().map(|_| "execute".to_string()),
+                job: Some(player.offense_job.as_str().to_string()),
+                responsibility: Some(player.defense_responsibility.as_str().to_string()),
                 slot: player.slot.as_str().to_string(),
                 morale: "steady".to_string(),
                 stm: player.stamina * 10.0,
@@ -214,24 +294,30 @@ impl World {
         }
 
         let holder = self.holder();
-        let (ball_pos, ball_z, ball_status) = match &self.ball {
-            BallState::Held(handle) => (self.players[*handle].pos, 4.0, "held"),
-            BallState::Pass { to_pos, .. } => (*to_pos, 6.0, "pass"),
-            BallState::Shot { to_pos, .. } => (*to_pos, 12.0, "shot"),
-            BallState::Loose { pos, .. } => (*pos, 0.5, "loose"),
+        let (ball_pos, ball_z, ball_status) = match &self.ball.state {
+            BallState::Held => (
+                self.players[self.holder().expect("held ball must have a holder")].pos,
+                4.0,
+                "held",
+            ),
+            BallState::Pass { .. } => (self.ball.pos, self.ball.z, "pass"),
+            BallState::Shot { .. } => (self.ball.pos, self.ball.z, "shot"),
+            BallState::Loose { .. } => (self.ball.pos, self.ball.z.max(0.5), "loose"),
         };
         let ball_norm = Court::ft_to_norm_with_geometry(ball_pos, self.rules.court);
 
-        let recent: Vec<FrameEvent> = self
+        let recent_start = self
             .events
             .iter()
-            .rev()
-            .take_while(|event| self.wall - event.time < 0.051)
+            .rposition(|event| self.wall - event.time >= 0.051)
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let recent: Vec<FrameEvent> = self.events[recent_start..]
+            .iter()
             .enumerate()
-            .map(|(offset, event)| self.frame_event(event, offset as u64))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
+            .map(|(offset, event)| {
+                self.frame_event(event, (recent_start + offset + 1) as u64, offset as u64)
+            })
             .collect();
 
         let event_names: Vec<String> = recent.iter().map(|event| event.kind.clone()).collect();
@@ -266,6 +352,9 @@ impl World {
                     x: ball_norm.x,
                     y: ball_norm.y,
                     z: ball_z,
+                    vx: self.ball.vel.x,
+                    vy: self.ball.vel.y,
+                    vz: self.ball.vz,
                     status: ball_status.to_string(),
                     holder_id: holder.map(|handle| self.player_id(handle)),
                 },
@@ -309,18 +398,24 @@ impl World {
         }
     }
 
-    fn frame_event(&self, event: &TimedFact, offset: u64) -> FrameEvent {
+    fn frame_event(&self, event: &TimedFact, event_id: u64, offset: u64) -> FrameEvent {
         let (shot_id, pass_id) = match &event.fact {
             Fact::Shot { shot_id, .. } => (Some(format!("shot-{shot_id:06}")), None),
             Fact::Pass { pass_id, .. } => (None, Some(format!("pass-{pass_id:06}"))),
             _ => (None, None),
         };
+        let contact = contact_geometry(&event.fact);
         FrameEvent {
             sequence: offset,
             time: event.time as f32,
             kind: event.fact.kind().to_string(),
+            x: contact.map(|geometry| geometry.0),
+            y: contact.map(|geometry| geometry.1),
+            z: contact.map(|geometry| geometry.2),
+            sub_tick: contact.map_or(0, |geometry| geometry.3),
+            contact_time: contact.map(|geometry| geometry.4 as f32),
             data: Some(self.fact_payload(&event.fact)),
-            event_id: 0,
+            event_id,
             parent_event_id: None,
             tick_index: self.clock.tick,
             action_id: None,
@@ -399,6 +494,22 @@ impl World {
             .map(|candidate| candidate.kind.label())
             .unwrap_or_default()
             .to_string();
+        let record = self
+            .decision_records
+            .iter()
+            .rev()
+            .find(|record| record.actor == sample.actor);
+        let (decision_id, observation_digest, revalidation) = match record {
+            Some(record) => (
+                record.decision_id,
+                record.observation_digest,
+                Some(match &record.revalidation {
+                    crate::state::Revalidation::Accepted => "accepted".to_string(),
+                    crate::state::Revalidation::Cancelled(reason) => format!("cancelled:{reason}"),
+                }),
+            ),
+            None => (0, 0, None),
+        };
         DecisionDebug {
             player: self.player_id(sample.actor),
             chosen,
@@ -427,6 +538,9 @@ impl World {
             flags: Vec::new(),
             blocked: Vec::new(),
             trace_id: index,
+            decision_id,
+            observation_digest,
+            revalidation,
             beta: sample.beta,
             gamma: sample.gamma,
             active_constraints: Vec::new(),
@@ -469,6 +583,21 @@ pub fn frame_rules(rules: &nba_domain::GameRules) -> FrameRules {
         ball_z_max_ft: rules.ball_z_max_ft,
         max_personal_fouls: rules.league.max_personal_fouls,
         bonus_fouls_per_period: rules.league.bonus_fouls_per_period,
+    }
+}
+
+/// 接触事实的几何与连续时刻。
+fn contact_geometry(fact: &Fact) -> Option<(f32, f32, f32, u16, f64)> {
+    match fact {
+        Fact::BallContact {
+            time,
+            x,
+            y,
+            z,
+            sub_tick,
+            ..
+        } => Some((*x, *y, *z, *sub_tick, *time)),
+        _ => None,
     }
 }
 

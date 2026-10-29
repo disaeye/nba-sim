@@ -34,7 +34,7 @@ fn conditional_make_rate_matches_the_model_in_every_zone_and_contest_bucket() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     let and_one = f64::from(params.policy.w("and_one_rate"));
     let mut buckets: BTreeMap<(u8, u8), Bucket> = BTreeMap::new();
-    for seed in 1..=72u64 {
+    for seed in 1..=288u64 {
         let mut world = World::new(
             MatchSetup::builtin(GameRules::default()),
             params.clone(),
@@ -66,8 +66,9 @@ fn conditional_make_rate_matches_the_model_in_every_zone_and_contest_bucket() {
             }
             let p_foul = f64::from(sample.p_foul);
             let p_block = f64::from(sample.p_block);
-            entry.reconstructed += p_foul * and_one
-                + (1.0 - p_foul) * (1.0 - p_block) * f64::from(sample.p_make_cond);
+            let p_make = f64::from(sample.p_make_cond);
+            entry.reconstructed +=
+                (p_foul * and_one + (1.0 - p_foul) * (1.0 - p_block)) * p_make;
             entry.sum += f64::from(sample.p_make);
         }
     }
@@ -79,15 +80,14 @@ fn conditional_make_rate_matches_the_model_in_every_zone_and_contest_bucket() {
         checked += 1;
         let count = f64::from(bucket.count);
         let observed = f64::from(bucket.made) / count;
-        let predicted = bucket.sum / count;
+        let predicted = bucket.reconstructed / count;
         let error = (predicted * (1.0 - predicted) / count).sqrt();
         let band = 2.5 * error + 0.01;
         assert!(
             (observed - predicted).abs() <= band,
-            "{} 对抗档 {contest}：{} 次出手实测 {observed:.3}，模型 {predicted:.3}（按三个概率重建 {:.3}），超出 ±{band:.3}（犯规 {}，封盖 {}）",
+            "{} 对抗档 {contest}：{} 次出手实测 {observed:.3}，模型 {predicted:.3}，超出 ±{band:.3}（犯规 {}，封盖 {}）",
             ZONES[*zone as usize],
             bucket.count,
-            bucket.reconstructed / count,
             bucket.fouled,
             bucket.blocked
         );

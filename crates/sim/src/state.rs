@@ -12,6 +12,80 @@ pub use crate::action::TeamSide;
 use crate::params::PolicyTable;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OffenseJob {
+    Handler,
+    SpotUp,
+    Cut,
+    Screen,
+    Roll,
+    PostUp,
+    Rebound,
+}
+
+impl OffenseJob {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Handler => "handler",
+            Self::SpotUp => "spot_up",
+            Self::Cut => "cut",
+            Self::Screen => "screen",
+            Self::Roll => "roll",
+            Self::PostUp => "post_up",
+            Self::Rebound => "rebound",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetKind {
+    Station,
+    Pressure,
+    Contact,
+    Window,
+}
+
+impl TargetKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Station => "station",
+            Self::Pressure => "pressure",
+            Self::Contact => "contact",
+            Self::Window => "window",
+        }
+    }
+
+    pub fn index(self) -> usize {
+        match self {
+            Self::Station => 0,
+            Self::Pressure => 1,
+            Self::Contact => 2,
+            Self::Window => 3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefenseResponsibility {
+    OnBall,
+    Deny,
+    Sink,
+    Help,
+    BoxOut,
+}
+
+impl DefenseResponsibility {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OnBall => "on_ball",
+            Self::Deny => "deny",
+            Self::Sink => "sink",
+            Self::Help => "help",
+            Self::BoxOut => "box_out",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Slot {
     Handler,
     Wing,
@@ -34,6 +108,37 @@ impl Slot {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecisionTrigger {
+    PossessionStart,
+    ActionComplete,
+    BallHolderChanged,
+    PassReceived,
+    ScreenContact,
+    HelpCommitted,
+    ShotClockBelow(u8),
+    Periodic,
+}
+
+/// 单个球员的重决策调度。
+///
+/// 决策由事件触发；`next_redecide_at` 是无事件时的回退时刻。
+/// `pending` 记录尚未消费的触发来源，供审计与协议投影。
+#[derive(Debug, Clone, Copy)]
+pub struct DecisionSchedule {
+    pub next_redecide_at: f64,
+    pub pending: Option<DecisionTrigger>,
+}
+
+impl Default for DecisionSchedule {
+    fn default() -> Self {
+        Self {
+            next_redecide_at: 0.0,
+            pending: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PlayerState {
     pub id: String,
@@ -50,12 +155,44 @@ pub struct PlayerState {
     /// 犯满离场：置位后不再上场。
     pub disqualified: bool,
     pub slot: Slot,
+    pub offense_job: OffenseJob,
+    pub defense_responsibility: DefenseResponsibility,
     pub target: Vec2,
+    pub target_kind: TargetKind,
+    /// Pressure/Contact/Window 的关联对象；Station 为 usize::MAX。
+    pub target_partner: usize,
+    /// 提交时被拒绝的次数，供职责段测量。
+    pub invalid_commits: u32,
+    pub invalid_commits_by_kind: [u32; 4],
+    /// 重选恢复段的起点与起点到目标的距离；0 表示不在恢复段。
+    pub recovery_since: f64,
+    pub recovery_d0_ft: f32,
+    pub recovery_path_ft: f32,
+    /// 目标点最近一次变更的时刻：职责变更与目标变化阈值都读它。
+    pub target_changed_at: f64,
+    /// 当前职责开始生效的时刻。
+    pub assignment_since: f64,
+    /// 本次避让选定的绕行侧：-1 左，1 右，0 未避让。
+    pub avoidance_side: i8,
+    /// 当前阻挡通路的球员句柄；`usize::MAX` 表示没有阻挡。
+    pub avoidance_blocker: usize,
+    /// 通道被挡住且没有净接近的起始时刻；0 表示没有在等待。
+    pub yielding_since: f64,
+    /// 对当前目标连续没有净接近的秒数。
+    pub nonprogress_seconds: f64,
+    /// 对当前目标达到过的最小距离。
+    pub progress_best_ft: f32,
+    /// 本 tick 运动积分产生的位移，供职责段测量。
+    pub last_motion_ft: f32,
+    /// 本 tick 碰撞分离产生的位移，供职责段测量。
+    pub last_separation_ft: f32,
     pub home_spot: Vec2,
     /// 本次上场的时刻：两次换人之间必须隔够 `min_rest_seconds`。
     pub entered_at: f64,
     /// 下场后到什么时候才能再上：休息不满的人不能换回来。
     pub resting_until: f64,
+    /// 重决策调度：事件触发加最小间隔。
+    pub schedule: DecisionSchedule,
 }
 
 impl PlayerState {
@@ -74,10 +211,29 @@ impl PlayerState {
             fouls: 0,
             disqualified: false,
             slot,
+            offense_job: OffenseJob::Handler,
+            defense_responsibility: DefenseResponsibility::OnBall,
             target: pos,
+            target_kind: TargetKind::Station,
+            target_partner: usize::MAX,
+            invalid_commits: 0,
+            invalid_commits_by_kind: [0; 4],
+            recovery_since: 0.0,
+            recovery_d0_ft: 0.0,
+            recovery_path_ft: 0.0,
+            target_changed_at: f64::default(),
+            assignment_since: f64::default(),
+            avoidance_side: 0,
+            avoidance_blocker: usize::MAX,
+            yielding_since: 0.0,
+            nonprogress_seconds: 0.0,
+            progress_best_ft: f32::MAX,
+            last_motion_ft: 0.0,
+            last_separation_ft: 0.0,
             home_spot: pos,
             entered_at: f64::default(),
             resting_until: f64::default(),
+            schedule: DecisionSchedule::default(),
         }
     }
 
@@ -154,25 +310,29 @@ impl Clock {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum BallState {
-    Held(usize),
+    Held,
     Pass {
+        pass_id: u64,
         from: usize,
         to: usize,
+        kind: crate::action::PassKind,
         from_pos: Vec2,
         to_pos: Vec2,
         start: f64,
         duration: f64,
-        completed: bool,
     },
     Shot {
+        shot_id: u64,
         shooter: usize,
         from_pos: Vec2,
-        to_pos: Vec2,
+        target: Vec2,
         start: f64,
-        duration: f64,
-        made: bool,
+        /// 出手时算出的有效筐口：价值层与执行层共用同一个值。
+        aperture_ft: f32,
+        /// 球心在筐平面上的落点偏移（瞄准误差）。
+        aim_offset: Vec2,
     },
     Loose {
         pos: Vec2,
@@ -180,7 +340,7 @@ pub enum BallState {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Phase {
     Inbound {
         team: TeamSide,
@@ -227,6 +387,32 @@ pub enum PossessionKind {
 /// 持球状态：运球中或已收球。收球后只允许终结（投篮/传球）或两步
 /// 内的调整；再运球是二次运球，收球后超步幅位移是走步。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BallPhase {
+    #[default]
+    Dribble,
+    Catch,
+    Drive,
+    Post,
+    Cut,
+    Gather,
+    Putback,
+}
+
+impl BallPhase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Dribble => "dribble",
+            Self::Catch => "catch",
+            Self::Drive => "drive",
+            Self::Post => "post",
+            Self::Cut => "cut",
+            Self::Gather => "gather",
+            Self::Putback => "putback",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DribbleState {
     #[default]
     Dribbling,
@@ -252,6 +438,7 @@ pub struct PossessionState {
     pub start_game_clock: f64,
     pub last_cut_at: Option<f64>,
     pub last_offensive_rebound_at: Option<f64>,
+    pub last_offensive_rebound_actor: Option<usize>,
     pub last_drive_at: Option<f64>,
     pub last_post_at: Option<f64>,
     pub last_drive_actor: Option<usize>,
@@ -259,9 +446,13 @@ pub struct PossessionState {
     pub last_cut_actor: Option<usize>,
     /// 回合开始到首个动作起手的秒数。
     pub first_action_seconds: Option<f64>,
+    /// 对位表最后一次被重算的时刻：职责层据此立刻换人。
+    pub pairing_changed_at: f64,
     /// 持球状态与收球位置。
     pub dribble_state: DribbleState,
     pub gather_pos: Option<Vec2>,
+    /// 当前进攻阶段：由实际动作结算写入，出手类型只读这里。
+    pub ball_phase: BallPhase,
     /// 最近一次掩护结算出的防守人路线，供下一次决策读取。
     pub last_screen: Option<ScreenRead>,
     /// 对位表：`matchup[防守人在场序号] = 所对位的进攻人 handle`，未分配时为 `usize::MAX`。
@@ -299,14 +490,17 @@ impl PossessionState {
             start_game_clock: game_clock,
             last_cut_at: None,
             last_offensive_rebound_at: None,
+            last_offensive_rebound_actor: None,
             last_drive_at: None,
             last_post_at: None,
             last_drive_actor: None,
             last_post_actor: None,
             last_cut_actor: None,
             first_action_seconds: None,
+            pairing_changed_at: 0.0,
             dribble_state: DribbleState::Dribbling,
             gather_pos: None,
+            ball_phase: BallPhase::Dribble,
             last_screen: None,
             matchup: [usize::MAX; MAX_ON_COURT],
             play: None,
@@ -338,6 +532,16 @@ pub struct ShotSample {
     /// 出手瞬间最近防守人的距离（英尺）。
     pub defender_ft: f32,
     pub zone: u8,
+    /// 出手时由动作结算写入的持球阶段。
+    pub phase: &'static str,
+    /// 出手点到篮筐的平面距离。
+    pub distance_ft: f32,
+    /// 本次出手抽样得到的瞄准半径。
+    pub target_radius_ft: f32,
+    /// 出手时的有效筐口：模型预测与执行层判定用的是同一个值。
+    pub aperture_ft: f32,
+    /// 出手时的瞄准误差标准差。
+    pub sigma_ft: f32,
     /// 模型对这次出手的命中概率（含封盖与犯规的边际）。
     pub p_make: f32,
     /// 这次出手是否被吹犯规、是否被封盖（用于核对边际守恒）。
@@ -347,6 +551,8 @@ pub struct ShotSample {
     pub p_foul: f32,
     pub p_block: f32,
     pub p_make_cond: f32,
+    /// 球体结算给出的结果类别：made / missed / blocked。
+    pub result: &'static str,
     pub made: bool,
     pub points: u8,
 }
@@ -363,7 +569,7 @@ pub struct PassSample {
 }
 
 /// 单个候选动作的审计记录。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CandidateTrace {
     pub kind: crate::action::ActionKind,
     pub target: Option<usize>,
@@ -376,6 +582,27 @@ pub struct CandidateTrace {
 }
 
 /// 一次决策的因果快照：候选集、各自的效用分解与概率。
+/// 一次实际决策的审计记录。
+///
+/// `observation_digest` 是观察集合的稳定摘要；反事实与信息干预用它
+/// 判断「决策输入是否改变」。`revalidation` 记录执行前重校验结果。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DecisionRecord {
+    pub decision_id: u64,
+    pub tick: u64,
+    pub actor: usize,
+    pub observation_digest: u64,
+    pub candidates: Vec<CandidateTrace>,
+    pub chosen: usize,
+    pub revalidation: Revalidation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Revalidation {
+    Accepted,
+    Cancelled(String),
+}
+
 #[derive(Debug, Clone)]
 pub struct DecisionTraceSample {
     pub actor: usize,
@@ -493,11 +720,11 @@ impl DecisionState {
     pub fn openness(&self) -> f32 {
         match self.primary_defender {
             Some(defender) => {
-                contest_from_defender(
+                (1.0 - contest_from_defender(
                     defender.distance_ft,
                     defender.between_ball_and_hoop,
                     defender.reach_excess_ft,
-                )
+                )).clamp(0.0, 1.0)
             }
             None => 1.0,
         }

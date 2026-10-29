@@ -150,11 +150,9 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
 
     let possessions = report.possessions.len().max(1) as f64;
     let games = report.games.max(1) as f64;
-    let turnovers = report
-        .possessions
-        .iter()
-        .filter(|record| record.ended_by.starts_with("turnover"))
-        .count() as f64;
+    let home_line = report.box_score.team_totals(crate::TeamSide::Home);
+    let away_line = report.box_score.team_totals(crate::TeamSide::Away);
+    let turnovers = (home_line.turnovers + away_line.turnovers) as f64;
     push(
         "turnover_per_possession",
         turnovers / possessions,
@@ -162,15 +160,13 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
     );
 
     let league = &params.possession.league;
-    let fga = report.box_score.team_totals(crate::TeamSide::Home).fga
-        + report.box_score.team_totals(crate::TeamSide::Away).fga;
+    let fga = home_line.fga + away_line.fga;
     push(
         "fga_per_possession",
         fga as f64 / possessions,
         league.fga_per_possession as f64,
     );
-    let fta = report.box_score.team_totals(crate::TeamSide::Home).fta
-        + report.box_score.team_totals(crate::TeamSide::Away).fta;
+    let fta = home_line.fta + away_line.fta;
     push(
         "fta_per_game",
         fta as f64 / games,
@@ -197,8 +193,6 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
         possessions / games,
         league.possessions_per_game as f64,
     );
-    let home_line = report.box_score.team_totals(crate::TeamSide::Home);
-    let away_line = report.box_score.team_totals(crate::TeamSide::Away);
     push(
         "blocks_per_game",
         (home_line.blocks + away_line.blocks) as f64 / games,
@@ -336,7 +330,7 @@ fn push_process_layers(gate: &mut GateReport, report: &GameReport, params: &Para
     );
 
     // 路线响应只算掩护后的第一个决策步，且限三分能力达标的持球人。
-    let first_step = crate::world::DECISION_INTERVAL + crate::world::TICK_SECONDS;
+    let first_step = report.redecide_interval_seconds + 3.0 * crate::world::TICK_SECONDS;
     let capable = p("screen_read_shooter_min") as f32;
     let under_total = report
         .decision_samples
@@ -544,12 +538,16 @@ fn push_process_layers(gate: &mut GateReport, report: &GameReport, params: &Para
             _ => {}
         }
     }
-    // 每个活球回合最多叫一次战术，所以激活数除以活球回合数就是覆盖率。
+    // 每个阵地回合最多叫一次战术，所以激活数除以阵地回合数就是覆盖率。
     // 回合 id 逐场重置，批次合并后不能拿 id 做匹配。
+    let transition_window = f64::from(params.policy.g("transition_window_seconds"));
     let halfcourt = report
         .possessions
         .iter()
-        .filter(|record| record.kind == crate::state::PossessionKind::Live)
+        .filter(|record| {
+            record.kind == crate::state::PossessionKind::Live
+                && record.duration >= transition_window
+        })
         .count();
     push_process_range(
         gate,
@@ -592,10 +590,20 @@ fn push_process_layers(gate: &mut GateReport, report: &GameReport, params: &Para
 }
 
 /// 多场聚合后再判分布，避免单场采样噪声把判定打穿。
+///
+/// 聚合时只保留判定要读的量：过程判据读 `events` 与 `decision_samples`，
+/// 决策快照（逐次决策的完整候选集）不需要进入聚合报告。
 pub fn evaluate_batch(reports: &[GameReport], params: &Params) -> GateReport {
     let mut merged = GameReport::empty();
     for report in reports {
-        merged.merge(report);
+        merged.merge_for_gate(report);
     }
-    evaluate(&merged, params)
+    evaluate_merged(&merged, params)
+}
+
+/// 对已经聚合好的报告判分布。
+///
+/// 批次可以自己逐场累加再调用这里，避免把每场的报告整批留在堆上。
+pub fn evaluate_merged(merged: &GameReport, params: &Params) -> GateReport {
+    evaluate(merged, params)
 }

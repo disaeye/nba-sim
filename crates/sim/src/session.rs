@@ -8,7 +8,7 @@ use std::path::Path;
 use nba_protocol::{FrameEvent, StreamTick};
 use serde::{Deserialize, Serialize};
 
-use crate::params::Params;
+use crate::params::RuntimeParams;
 use crate::world::{GameReport, MatchSetup, World, TICK_SECONDS};
 
 const MAX_STEPS_PER_CALL: usize = 200_000;
@@ -75,7 +75,7 @@ impl SessionService {
         self.world.is_some()
     }
 
-    pub fn setup(&mut self, params: Params, seed: u64) -> Result<MatchInfo, String> {
+    pub fn setup<P: Into<RuntimeParams>>(&mut self, params: P, seed: u64) -> Result<MatchInfo, String> {
         let rules = nba_domain::GameRules::default();
         let setup = MatchSetup::builtin(rules);
         let info = MatchInfo {
@@ -99,7 +99,7 @@ impl SessionService {
         calibration: &Path,
         seed: u64,
     ) -> Result<MatchInfo, String> {
-        let params = Params::load(calibration)?;
+        let params = RuntimeParams::load(calibration)?;
         self.setup(params, seed)
     }
 

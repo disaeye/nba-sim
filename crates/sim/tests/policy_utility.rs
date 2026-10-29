@@ -4,6 +4,7 @@
 //! 是否只在对应那一项上生效」。它们不检查数值是否好看——那是校准表的事。
 
 use nba_domain::rules::GameRules;
+use rand::SeedableRng;
 use nba_sim_core::action::ActionKind;
 use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::policy::{
@@ -117,7 +118,7 @@ fn a_better_shooter_earns_a_higher_shot_epv() {
     let team = world.players[actor].team;
     // 把持球人放到弧顶，三分才是可选项。
     let hoop = world.hoop_for(team);
-    let spot = hoop + (hoop - world.players[actor].pos).normalize_or_zero() * 25.0;
+    let spot = hoop + (world.players[actor].pos - hoop).normalize_or_zero() * 25.0;
     world.players[actor].pos = spot;
     world.players[actor].target = spot;
     world.players[actor].data.attributes.shooting_three = 0.15;
@@ -136,15 +137,22 @@ fn a_closer_defender_lowers_the_shot_epv() {
     let actor = world.decision_state().actor;
     let team = world.players[actor].team;
     let hoop = world.hoop_for(team);
-    let spot = hoop + (hoop - world.players[actor].pos).normalize_or_zero() * 25.0;
+    let spot = hoop + (world.players[actor].pos - hoop).normalize_or_zero() * 25.0;
     world.players[actor].pos = spot;
     world.players[actor].target = spot;
-    let defender = world.on_court(team.other()).as_slice()[0];
+    world.possession.ball_phase = nba_sim_core::state::BallPhase::Dribble;
+    let other_team = team.other();
+    for d in world.on_court(other_team).as_slice().to_vec() {
+        world.players[d].pos = hoop;
+        world.players[d].target = hoop;
+    }
+    let defender = world.on_court(other_team).as_slice()[0];
+    let toward_hoop = (hoop - spot).normalize_or_zero();
     // 先把防守人放到远处，再压到脸上：只有干扰变了。
-    world.players[defender].pos = spot + glam::Vec2::new(12.0, 0.0);
+    world.players[defender].pos = spot + toward_hoop * 12.0;
     world.players[defender].target = world.players[defender].pos;
     let open = shot_epv(&world).expect("an open three must be a candidate");
-    world.players[defender].pos = spot + glam::Vec2::new(0.6, 0.0);
+    world.players[defender].pos = spot + toward_hoop * 2.0;
     world.players[defender].target = world.players[defender].pos;
     let contested = shot_epv(&world).expect("a contested three is still a candidate");
     assert!(
@@ -245,12 +253,12 @@ fn the_variance_appetite_flips_sign_between_leading_and_trailing() {
 
 #[test]
 fn the_boltzmann_pick_favours_the_higher_utility() {
-    let mut world = live_world(13);
     let high = 1.4;
     let low = 0.2;
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(13);
     let mut picked_high = 0;
     for _ in 0..2000 {
-        if softmax_pick(&mut world.rng, &[low, high], 6.0) == 1 {
+        if softmax_pick(&mut rng, &[low, high], 6.0) == 1 {
             picked_high += 1;
         }
     }
@@ -266,7 +274,7 @@ fn a_stationary_arc_holder_has_a_shot_candidate() {
     let actor = world.decision_state().actor;
     let team = world.players[actor].team;
     let hoop = world.hoop_for(team);
-    let spot = hoop + (hoop - world.players[actor].pos).normalize_or_zero() * 25.0;
+    let spot = hoop + (world.players[actor].pos - hoop).normalize_or_zero() * 25.0;
     world.players[actor].pos = spot;
     world.players[actor].target = spot;
     world.possession.last_screen = None;

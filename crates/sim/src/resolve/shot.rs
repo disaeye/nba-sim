@@ -1,12 +1,18 @@
 //! 出手结算：干扰、技巧、体能进 logit，命中率来自校准表。
 
 use glam::Vec2;
-use rand::Rng;
 
 use crate::action::{ActionIntent, ActionKind, ActionOutcome, Completion, ShotKind, StateDelta};
-use crate::resolve::{clamp01, contest_for, shooter_zone, sigmoid};
-use crate::state::BallState;
+use crate::draw::{purpose, Stream};
+use crate::resolve::{clamp01, shooter_zone};
 use crate::world::{Phase, World};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShotResult {
+    Made,
+    Missed { rim_contact: bool },
+    Blocked { by: usize },
+}
 
 #[derive(Debug, Clone)]
 pub struct PendingShot {
@@ -15,17 +21,16 @@ pub struct PendingShot {
     pub zone: &'static str,
     pub distance_ft: f32,
     pub contest: f32,
-    pub made: bool,
     pub fouled: bool,
+    pub and_one: bool,
     pub free_throws: u8,
     pub points: u8,
     pub is_three: bool,
     pub assisted_by: Option<usize>,
-    pub blocked_by: Option<usize>,
-    /// 球是否触筐：前场篮板后进攻时钟能否重置只看这一项，
-    /// 被封盖的球与三不沾都没有触筐。
-    pub rim_contact: bool,
     pub shot_id: u64,
+    pub free_throw: Option<crate::resolve::freethrow::FreeThrowMeta>,
+    /// 球穿过筐口、触筐、触地或触手后才有值；出手瞬间保持未定。
+    pub result: Option<ShotResult>,
 }
 
 pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> ActionOutcome {
@@ -36,109 +41,128 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     let zone = shooter_zone(world, pos, team);
     let is_three = zone == "three";
     let distance = (pos - hoop).length();
-    let contest = contest_for(world, shooter, pos);
+    let phase = world.possession.ball_phase;
+    let model = crate::shot_quality::evaluate(world, shooter, kind, phase, pos);
+    let contest = model.contest;
+    let ball_phase = phase.as_str();
     // 投篮终结了持球状态：收球标志在出手时清掉。
     world.possession.dribble_state = crate::state::DribbleState::Dribbling;
     world.possession.gather_pos = None;
-    let table = &world.params.shot_make;
-    let base = table.base_rate(kind.as_str(), distance, is_three);
-    let skill = world.players[shooter].shooting_attribute(zone);
-    let spread = table.skill_spread(zone);
-    let stamina = world.players[shooter].stamina;
-    let p_skill = (base + (skill - 0.5) * spread).clamp(0.02, 0.98);
-    let logit = logit(p_skill)
-        + table.contest_sensitivity * (table.contest_center - contest)
-        + table.stamina_sensitivity * (stamina - 1.0);
-    let p_make = sigmoid(logit).clamp(0.02, 0.98);
+    world.possession.ball_phase = crate::state::BallPhase::Dribble;
+    let p_make = model.p_make;
 
     let foul_rate = world.params.policy.w("shooting_foul_rate");
     let p_foul = clamp01(foul_rate * (0.6 + 0.9 * contest));
-    // 封盖尝试先于命中判定。校准表给的是包含封盖在内的边际命中率，
-    // 所以先抽封盖，再把命中率条件化到「未被封盖」，两次抽样合起来
-    // 保持边际命中率不变，同时让封盖归属与次数随防守人变化。
-    let (block_candidate, p_block) = block_probability(world, shooter, pos, contest, is_three);
+    // 封盖是球飞到手上才发生的事件，不在出手时抽结果。这里只保留封盖
+    // 尝试带来的犯规风险；封盖本身由手部接触事实决定。
+    let (block_candidate, _physical_block) = block_probability(world, shooter, pos, contest, is_three);
     let block_foul = match block_candidate {
-        Some(candidate) => world.rng.gen::<f32>() < block_foul_probability(world, candidate),
+        Some(candidate) => {
+            world.draw(Stream::Foul, candidate, purpose::SHOT_BLOCK_FOUL, 0)
+                < block_foul_probability(world, candidate)
+        }
         None => false,
     };
-    let fouled = block_foul || world.rng.gen::<f32>() < p_foul;
-    let and_one_rate = world.params.policy.w("and_one_rate");
-    // 封盖概率不能超过“这球本来会进”的那部分，否则条件化后的命中率被夹断，
-    // 边际命中率不再守恒。
-    let p_block = p_block.min(1.0 - p_make);
-    let blocked = !fouled && block_candidate.is_some() && world.rng.gen::<f32>() < p_block;
-    // 校准表给的是包含封盖与犯规在内的边际命中率。封盖与犯规两条分支都
-    // 只能以各自的概率投进，其余情况一律算投失，所以未曾封盖、未被犯规
-    // 的出手要把这两部分先扣掉再条件化，边际命中率才守恒。分母用
-    // 1 − p_block 与 1 − p_foul 的乘积；当条件化后的命中率超过 1 时，
-    // 上界只能夹到 1，那一小段边际会在最高命中率区域丢失。
-    let p_make_cond = ((p_make - p_foul * and_one_rate) / ((1.0 - p_block) * (1.0 - p_foul)))
-        .max(f32::MIN_POSITIVE)
-        .min(1.0);
-    let mut made = if blocked {
-        false
-    } else if fouled {
-        world.rng.gen::<f32>() < and_one_rate
+    let fouled = block_foul
+        || world.draw(Stream::Foul, shooter, purpose::SHOOTING_FOUL, 0) < p_foul;
+    let and_one = fouled
+        && world.draw(Stream::Foul, shooter, purpose::AND_ONE, 0)
+            < world.params.policy.w("and_one_rate");
+    let free_throws = if fouled {
+        if is_three {
+            3
+        } else {
+            2
+        }
     } else {
-        world.rng.gen::<f32>() < p_make_cond
+        0
     };
+    let points = if is_three { 3 } else { 2 };
     let shot_id = world.new_shot_id();
-    let blocker = if blocked { block_candidate } else { None };
-    if blocker.is_some() {
-        made = false;
-    }
-    let (free_throws, points) = if made && fouled {
-        (1, if is_three { 3 } else { 2 })
-    } else if fouled {
-        (if is_three { 3 } else { 2 }, 0)
-    } else {
-        (
-            0,
-            if made {
-                if is_three {
-                    3
-                } else {
-                    2
-                }
-            } else {
-                0
-            },
-        )
-    };
+    // 瞄准误差是出手时唯一的随机结果：命中由球是否穿过筐口决定。
+    let u1 = world
+        .draw(Stream::Aim, shooter, purpose::SHOT_MAKE, 0)
+        .max(1e-6);
+    let u2 = world.draw(Stream::Aim, shooter, purpose::SHOT_MAKE, 1);
+    let sigma = model.sigma_ft;
+    let spread = sigma * (-2.0 * u1.ln()).sqrt();
+    let angle = u2 * std::f32::consts::TAU;
+    // 瞄准误差是球心在筐平面上的落点偏移：抛体与释放点仍由出手计划决定，
+    // 因此模型预测的入射角就是实际飞行的入射角。
+    let aim_offset = Vec2::new(angle.cos(), angle.sin()) * spread;
+    // 封盖风险用这一手真实的落点轨迹来算：球从释放点飞向落点，防守人
+    // 的手在这条轨迹附近就可能碰到球。执行层用同一条轨迹判定接触，
+    // 因此模型预测的封盖率与实际封盖率描述同一件事。
+    let block_risk = crate::shot_quality::block_risk_for_path(
+        world,
+        shooter,
+        model.origin,
+        hoop + aim_offset,
+        &model.plan,
+        model.release_z_ft,
+    );
+    let p_block = block_risk;
 
-    let assisted_by = if made {
-        world
-            .possession
-            .assist_candidate
-            .filter(|(passer, time)| *passer != shooter && world.now() - *time < 4.0)
-            .map(|(passer, _)| passer)
-    } else {
-        None
-    };
+    let assisted_by = world
+        .possession
+        .assist_candidate
+        .filter(|(passer, time)| *passer != shooter && world.now() - *time < 4.0)
+        .map(|(passer, _)| passer);
 
     world.possession.had_shot = true;
+    // 判据要和决策时刻一致：出手动作在决策之后才结算，因此这里按这次
+    // 出手动作的起始时刻判断「是不是刚接到球」，而不是按结算时刻。
     let just_received = world
         .possession
         .last_pass_at
-        .map(|time| world.now() - time < 1.2)
+        .map(|time| intent.start_time - time < 1.2)
         .unwrap_or(false);
-    match kind.creation() {
-        "set" if !just_received => world
+    // 判据按「这次出手实际属于哪种进攻」来判，而不是按出手类型的粗分类：
+    // 只有真正的接球就投（收到球之后立刻出手）才需要前面有一次传球；
+    // 收球步之后的篮下完成不需要。
+    let catch_and_shoot_without_pass =
+        matches!(kind, crate::action::ShotKind::CatchShoot) && !just_received;
+    // 判据按「这次出手实际属于哪种进攻」来判，而不是按出手类型的粗分类：
+    // 只有真正的接球就投（收到球之后立刻出手）才需要前面有一次传球。
+    let recent = |at: Option<f64>| at.is_some_and(|time| world.now() - time < 6.0);
+    let drive_finish = matches!(
+        kind,
+        crate::action::ShotKind::DrivingLayup
+            | crate::action::ShotKind::DrivingDunk
+            | crate::action::ShotKind::ReverseLayup
+    ) && !recent(world.possession.last_drive_at);
+    let cut_finish = matches!(
+        kind,
+        crate::action::ShotKind::CuttingLayup | crate::action::ShotKind::CuttingDunk
+    ) && !recent(world.possession.last_cut_at);
+    let post_finish = matches!(
+        kind,
+        crate::action::ShotKind::Hook | crate::action::ShotKind::Turnaround
+    ) && !recent(world.possession.last_post_at);
+    if catch_and_shoot_without_pass {
+        world
             .violations
-            .push("context: catch-and-shoot without a preceding pass".to_string()),
-        "putback" if !world.possession.had_offensive_rebound => world
+            .push("context: catch-and-shoot without a preceding pass".to_string());
+    }
+    if drive_finish {
+        world
             .violations
-            .push("context: putback without an offensive rebound".to_string()),
-        "cut" if world.possession.last_cut_at.is_none() => world
+            .push("context: drive finish without a drive action".to_string());
+    }
+    if cut_finish {
+        world
             .violations
-            .push("context: cut finish without a cut action".to_string()),
-        "post" if world.possession.last_post_at.is_none() => world
+            .push("context: cut finish without a cut action".to_string());
+    }
+    if post_finish {
+        world
             .violations
-            .push("context: post finish without a post action".to_string()),
-        "drive" if world.possession.last_drive_at.is_none() => world
+            .push("context: post finish without a post action".to_string());
+    }
+    if matches!(kind, crate::action::ShotKind::Putback) && !world.possession.had_offensive_rebound {
+        world
             .violations
-            .push("context: drive finish without a drive action".to_string()),
-        _ => {}
+            .push("context: putback without an offensive rebound".to_string());
     }
     world.shot_clock_at_release.push(world.clock.shot_clock);
     world.contest_samples.push(contest);
@@ -158,13 +182,19 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         contest,
         defender_ft,
         zone: zone_index as u8,
+        phase: ball_phase,
+        distance_ft: distance,
+        target_radius_ft: spread,
+        aperture_ft: model.effective_aperture_ft,
+        sigma_ft: model.sigma_ft,
         p_make,
         fouled,
-        blocked,
+        blocked: false,
         p_foul,
         p_block,
-        p_make_cond,
-        made,
+        p_make_cond: p_make,
+        result: "pending",
+        made: false,
         points,
     });
     world.shot_zone_counts[crate::world::World::team_index(team)][zone_index] += 1;
@@ -184,27 +214,33 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         zone,
         distance_ft: distance,
         contest,
-        made,
         fouled,
+        and_one,
         free_throws,
         points,
         is_three,
         assisted_by,
-        blocked_by: blocker,
-        rim_contact: blocker.is_none(),
         shot_id,
+        free_throw: None,
+        result: None,
     });
+    let now = world.now();
     world.players[shooter].facing = (hoop - pos).normalize_or_zero();
-    world.ball = BallState::Shot {
+    let rules = world.rules.clone();
+    world.ball.release_shot(crate::ball::ShotRelease {
+        rules: &rules,
+        now,
+        shot_id,
         shooter,
-        from_pos: pos,
-        to_pos: hoop,
-        start: world.now(),
-        duration: 1.1,
-        made,
-    };
+        hoop,
+        release_z: model.release_z_ft,
+        aperture_ft: model.effective_aperture_ft,
+        origin: model.origin,
+        plan: model.plan,
+        aim_offset,
+    });
     world.phase = Phase::ShotFlight {
-        resolve_at: world.now() + 1.1,
+        resolve_at: now + f64::from(rules.max_shot_duration_seconds) + 2.0,
     };
 
     ActionOutcome {
@@ -225,19 +261,48 @@ pub fn finish(world: &mut World) {
         .pending_shot
         .take()
         .expect("shot flight must carry a pending shot");
+    if let Some(meta) = pending.free_throw {
+        crate::resolve::freethrow::finish(world, pending, meta);
+        return;
+    }
     let shooter = pending.shooter;
     let team = world.players[shooter].team;
+    let result = pending
+        .result
+        .expect("shot flight must resolve before settlement");
+    let made_ball = result == ShotResult::Made;
+    let waived = pending.fouled && !pending.and_one;
+    let made = made_ball && !waived;
+    let blocked_by = match result {
+        ShotResult::Blocked { by } => Some(by),
+        _ => None,
+    };
+    let rim_contact = matches!(result, ShotResult::Missed { rim_contact: true });
+    let points = if made { pending.points } else { 0 };
+    let free_throws = if pending.fouled {
+        if pending.and_one && made_ball {
+            1
+        } else if pending.is_three {
+            3
+        } else {
+            2
+        }
+    } else {
+        0
+    };
     let line = world.line_mut(shooter);
+    // 被犯规的出手仍然是一次出手：NBA 统计里它计入 FGA，只是得分作废。
+    // 把犯规出手排除在 FGA 之外会让出手数与命中率同时失真。
     line.fga += 1;
     if pending.is_three {
         line.tpa += 1;
     }
-    if pending.made {
+    if made {
         line.fgm += 1;
         if pending.is_three {
             line.tpm += 1;
         }
-        line.points += pending.points as u32;
+        line.points += points as u32;
         let made_zone = match pending.zone {
             "rim" => 0,
             "near" => 1,
@@ -245,13 +310,23 @@ pub fn finish(world: &mut World) {
             _ => 3,
         };
         world.shot_zone_makes[crate::world::World::team_index(team)][made_zone] += 1;
-        world.add_points(team, pending.points as u32);
+        world.add_points(team, points as u32);
         if let Some(passer) = pending.assisted_by {
             world.line_mut(passer).assists += 1;
         }
     }
-    if let Some(blocker) = pending.blocked_by {
+    if let Some(blocker) = blocked_by {
         world.line_mut(blocker).blocks += 1;
+    }
+    if let Some(sample) = world.shot_samples.last_mut() {
+        sample.made = made;
+        sample.blocked = blocked_by.is_some();
+        sample.result = match result {
+            ShotResult::Made => "made",
+            ShotResult::Missed { rim_contact: true } => "missed_rim",
+            ShotResult::Missed { rim_contact: false } => "missed",
+            ShotResult::Blocked { .. } => "blocked",
+        };
     }
     world.emit(crate::action::Fact::Shot {
         shot_id: pending.shot_id,
@@ -260,9 +335,9 @@ pub fn finish(world: &mut World) {
         zone: pending.zone,
         distance_ft: pending.distance_ft,
         contest: pending.contest,
-        made: pending.made,
-        points: pending.points,
-        assisted_by: pending.assisted_by,
+        made,
+        points,
+        assisted_by: if made { pending.assisted_by } else { None },
     });
     if pending.fouled {
         let fouler = world
@@ -282,13 +357,13 @@ pub fn finish(world: &mut World) {
             world,
             fouler,
             shooter,
-            pending.free_throws,
-            pending.made,
+            free_throws,
+            made,
         );
         return;
     }
-    if pending.made {
-        world.end_possession("score", pending.points as u32);
+    if made {
+        world.end_possession("score", points as u32);
         world.phase = Phase::DeadBall {
             team: team.other(),
             ready_at: world.now() + 1.4,
@@ -298,14 +373,9 @@ pub fn finish(world: &mut World) {
             world,
             pending.zone,
             pending.distance_ft,
-            pending.rim_contact,
+            rim_contact,
         );
     }
-}
-
-fn logit(p: f32) -> f32 {
-    let p = p.clamp(1e-4, 1.0 - 1e-4);
-    (p / (1.0 - p)).ln()
 }
 
 /// 封盖：出手点附近、封盖与弹跳更强的防守人更可能起跳。返回被选中的
@@ -323,7 +393,7 @@ fn block_probability(
         .iter()
         .enumerate()
         .filter(|(_, p)| p.on_court && p.team != team)
-        .filter(|(_, p)| (p.pos - pos).length() < 4.5)
+        .filter(|(_, p)| (p.pos - pos).length() < 5.5)
         .max_by(|a, b| {
             let weights = &world.params.policy;
             let reference = weights.g("vertical_reference_ft");

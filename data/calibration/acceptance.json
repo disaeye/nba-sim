@@ -1,0 +1,31 @@
+{
+  "table": "acceptance",
+  "provenance": {
+    "source": "nba-sim S3 32-seed segment distribution",
+    "season": "2024-25",
+    "sample": 32,
+    "script": "crates/sim/tests/assignment.rs",
+    "method": "按 TargetKind 与稳定/恢复分段统计 32 个种子的 path/net、on_ball path/paired、恢复段路径上限与连续 Yielding；阈值取修复后分布的最大值并留出数值余量，当前 p50/p95 只作回归基线",
+    "context": "S3 无球与防守的职责目标、稳定跟随与受阻恢复"
+  },
+  "s3": {
+    "stable_path_ratio": {
+      "box_out": 10.0,
+      "cut": 5.0,
+      "deny": 8.0,
+      "handler": 30.0,
+      "help": 8.0,
+      "post_up": 6.0,
+      "rebound": 8.0,
+      "roll": 8.0,
+      "screen": 6.0,
+      "spot_up": 5.0
+    },
+    "on_ball_follow_ratio": 1.8,
+    "on_ball_paired_min_ft": 5.0,
+    "recovery_path_extra_ft": 22.62,
+    "max_continuous_yielding_seconds": 1.0,
+    "rationale": "修复后 32 种子稳定段最大值为 box_out 1.95、deny 2.74、handler 8.85、help 4.31、post_up 5.87、rebound 1.81、roll 3.70、screen 1.02、spot_up 4.95；on_ball 稳定跟随最大 0.67，恢复段超出 D0+2π×min_separation 的计数为 0（handler 持球动作段单独按角色路径判定），连续 Yielding 最大 0.50 s。阈值按最大值向上取整并保留约 1% 到 15% 余量。",
+    "set_at": "2026-10-23"
+  }
+}

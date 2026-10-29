@@ -3,9 +3,9 @@ use std::path::Path;
 
 use nba_domain::play::{DecisionActionFamily, PlayCourtSide, PlayInhibitionMode, PlayPredicate, PlaySpec};
 use nba_domain::tactics::TacticalSetSpec;
-use rand::Rng;
 
 use crate::action::Fact;
+use crate::draw::{purpose, Stream};
 use crate::state::PossessionKind;
 use crate::world::World;
 
@@ -263,6 +263,10 @@ pub fn update_play_window(world: &mut World) {
     if world.possession.kind != PossessionKind::Live {
         return;
     }
+    let transition_window = f64::from(world.params.policy.g("transition_window_seconds"));
+    if world.now() - world.possession.started_at < transition_window {
+        return;
+    }
     if world.possession.play_called {
         return;
     }
@@ -281,7 +285,13 @@ pub fn update_play_window(world: &mut World) {
             }
             // 叫战术是教练组的取舍：不是每个阵地回合都跑套路，剩下的回合打自由进攻。
             let call_rate = world.params.policy.w("play_call_rate");
-            if world.rng.gen::<f32>() >= call_rate {
+            if world.draw(
+                Stream::Play,
+                World::team_index(world.possession.team),
+                purpose::PLAY_CALL,
+                0,
+            ) >= call_rate
+            {
                 world.possession.play_called = true;
                 return;
             }

@@ -30,7 +30,7 @@ impl TeamSide {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ShotKind {
     CatchShoot,
     PullUp,
@@ -76,43 +76,26 @@ impl ShotKind {
         }
     }
 
-    pub fn from_str(value: &str) -> Self {
-        match value {
-            "catch_shoot" => Self::CatchShoot,
-            "pull_up" => Self::PullUp,
-            "step_back" => Self::StepBack,
-            "turnaround" => Self::Turnaround,
-            "hook" => Self::Hook,
-            "floater" => Self::Floater,
-            "layup" => Self::Layup,
-            "driving_layup" => Self::DrivingLayup,
-            "cutting_layup" => Self::CuttingLayup,
-            "running_layup" => Self::RunningLayup,
-            "reverse_layup" => Self::ReverseLayup,
-            "dunk" => Self::Dunk,
-            "driving_dunk" => Self::DrivingDunk,
-            "cutting_dunk" => Self::CuttingDunk,
-            "running_dunk" => Self::RunningDunk,
-            "alley_oop" => Self::AlleyOop,
-            "putback" => Self::Putback,
-            "running_jump" => Self::RunningJump,
-            other => panic!("unknown shot kind `{other}`"),
-        }
-    }
-
     /// 出手来源：drive / cut / post / pull_up / putback / transition / set。
+    /// 出手在进攻分类里的归属。
+    ///
+    /// 分类与档案的 `kind_by_creation` 一致：接球投与站着完成的扣篮、上篮
+    /// 属于 set；突破后的上篮、抛投属于 drive；低位与转身属于 post；空切
+    /// 属于 cut；快攻属于 transition；补篮属于 putback。
     pub fn creation(self) -> &'static str {
         match self {
-            Self::CatchShoot => "set",
-            Self::PullUp | Self::StepBack | Self::Floater => "pull_up",
+            Self::CatchShoot | Self::Dunk | Self::Layup => "set",
+            Self::PullUp | Self::StepBack => "pull_up",
             Self::Turnaround | Self::Hook => "post",
-            Self::Layup | Self::DrivingLayup | Self::DrivingDunk | Self::ReverseLayup => "drive",
+            Self::DrivingLayup
+            | Self::DrivingDunk
+            | Self::ReverseLayup
+            | Self::Floater => "drive",
             Self::CuttingLayup | Self::CuttingDunk => "cut",
             Self::RunningLayup | Self::RunningDunk | Self::RunningJump | Self::AlleyOop => {
                 "transition"
             }
             Self::Putback => "putback",
-            Self::Dunk => "cut",
         }
     }
 
@@ -134,7 +117,7 @@ impl ShotKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PassKind {
     Chest,
     Bounce,
@@ -142,14 +125,14 @@ pub enum PassKind {
     Outlet,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ScreenKind {
     OnBall,
     OffBall,
     HandOff,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ActionKind {
     Dribble,
     Drive,
@@ -302,15 +285,22 @@ pub enum Fact {
     },
     Screen {
         screener: usize,
+        team: TeamSide,
         on_ball: bool,
         contact: bool,
         route: DefenderRoute,
         separation_ft: f32,
+        /// 掩护人与防守人接触时，掩护人的力量值。
+        strength: f32,
+        /// 掩护接触使防守人改变的位置距离（英尺）。
+        displacement_ft: f32,
     },
     Drive {
         driver: usize,
         reached: bool,
         defender_beaten: bool,
+        distance_ft: f32,
+        separation_ft: f32,
     },
     /// 背身单打：持球人进入低位开始背打（本身不产出结果，结果由后续出手给出）。
     PostUp {
@@ -345,9 +335,37 @@ pub enum Fact {
         offensive: bool,
         distance_ft: f32,
     },
+    /// 投失后产生的真实篮板机会：场上人数与满足控球半径的人数。
+    ReboundOpportunity {
+        players: u8,
+        contestable: u8,
+    },
+    /// 二次进攻回合的边界：前场篮板被控制后开启。
+    SecondChanceStarted {
+        rebounder: usize,
+        possession: u64,
+    },
+    Cut {
+        cutter: usize,
+        arrived: bool,
+        defender_distance_ft: f32,
+    },
+    BoxOut {
+        player: usize,
+        distance_ft: f32,
+    },
+    DefenseResponsibilityChanged {
+        player: usize,
+        from: &'static str,
+        to: &'static str,
+    },
     Turnover {
         player: usize,
         kind: TurnoverKind,
+    },
+    Steal {
+        player: usize,
+        victim: usize,
     },
     Substitution {
         team: TeamSide,
@@ -372,5 +390,50 @@ pub enum Fact {
         play: String,
         possession: u64,
     },
+    /// 球与地板、篮筐、篮板、球员或手部的接触。
+    BallContact {
+        kind: &'static str,
+        entity: Option<usize>,
+        time: f64,
+        x: f32,
+        y: f32,
+        z: f32,
+        sub_tick: u16,
+    },
+    PlacementApplied {
+        player: usize,
+        reason: &'static str,
+    },
     GameEnd,
+}
+
+impl Fact {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::PossessionStarted { .. } => "PossessionStarted",
+            Self::Pass { .. } => "Pass",
+            Self::Screen { .. } => "Screen",
+            Self::Drive { .. } => "Drive",
+            Self::PostUp { .. } => "PostUp",
+            Self::Shot { .. } => "Shot",
+            Self::Foul { .. } => "Foul",
+            Self::FreeThrow { .. } => "FreeThrow",
+            Self::Rebound { .. } => "Rebound",
+            Self::ReboundOpportunity { .. } => "ReboundOpportunity",
+            Self::SecondChanceStarted { .. } => "SecondChanceStarted",
+            Self::Cut { .. } => "Cut",
+            Self::BoxOut { .. } => "BoxOut",
+            Self::DefenseResponsibilityChanged { .. } => "DefenseResponsibilityChanged",
+            Self::Turnover { .. } => "Turnover",
+            Self::Steal { .. } => "Steal",
+            Self::Substitution { .. } => "Substitution",
+            Self::Timeout { .. } => "Timeout",
+            Self::PeriodEnd { .. } => "PeriodEnd",
+            Self::PlayActivated { .. } => "PlayActivated",
+            Self::PlayWindowEnded { .. } => "PlayWindowEnded",
+            Self::BallContact { kind, .. } => kind,
+            Self::PlacementApplied { .. } => "PlacementApplied",
+            Self::GameEnd => "GameEnd",
+        }
+    }
 }

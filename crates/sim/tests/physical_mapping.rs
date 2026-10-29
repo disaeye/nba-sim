@@ -87,6 +87,12 @@ fn decision_and_resolution_share_the_same_reach() {
     let defender = before_state
         .primary_defender
         .expect("a primary defender exists");
+    let team = world.players[before_state.actor].team;
+    let hoop = world.hoop_for(team);
+    let toward_hoop = (hoop - before_state.actor_pos).normalize_or_zero();
+    world.players[defender.index].pos = before_state.actor_pos + toward_hoop * 4.0;
+    world.players[defender.index].target = world.players[defender.index].pos;
+    let before_state = world.decision_state();
     let policy = world.params.policy.clone();
     let physical = Physical::of(&world.players[defender.index], &policy);
     assert!(
@@ -99,17 +105,17 @@ fn decision_and_resolution_share_the_same_reach() {
     let shooter = before_state.actor;
     let pos = before_state.actor_pos;
     let before_resolution = nba_sim_core::resolve::contest_for(&world, shooter, pos);
-    let before_openness = before_state.openness();
+    let before_contest = 1.0 - before_state.openness();
     world.params.policy.geometry.insert(
         "reach_per_cm_ft".to_string(),
         policy.g("reach_per_cm_ft") * 1.5,
     );
     let after_state = world.decision_state();
     let after_resolution = nba_sim_core::resolve::contest_for(&world, shooter, pos);
-    let after_openness = after_state.openness();
+    let after_contest = 1.0 - after_state.openness();
     assert!(
-        after_openness > before_openness,
-        "决策层的干扰没有随摸高上升：{before_openness} -> {after_openness}"
+        after_contest > before_contest,
+        "决策层的干扰没有随摸高上升：{before_contest} -> {after_contest}"
     );
     assert!(
         after_resolution > before_resolution,
@@ -123,12 +129,7 @@ fn taller_defender_contests_from_farther() {
     let mut world = world(9);
     let _ = live_holder(&mut world);
     let policy = world.params.policy.clone();
-    let handles: Vec<usize> = world
-        .on_court(TeamSide::Away)
-        .as_slice()
-        .iter()
-        .copied()
-        .collect();
+    let handles: Vec<usize> = world.on_court(TeamSide::Away).as_slice().to_vec();
     let mut shortest = handles[0];
     let mut tallest = handles[0];
     for handle in &handles {

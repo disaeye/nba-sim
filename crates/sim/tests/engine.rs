@@ -484,7 +484,7 @@ fn stream_ticks_round_trip_through_protocol() {
     let mut checked = 0;
     for _ in 0..3000 {
         world.step(0.05);
-        if world.clock.tick % 250 != 0 {
+        if !world.clock.tick.is_multiple_of(250) {
             continue;
         }
         let tick = world.stream_tick();

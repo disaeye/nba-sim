@@ -41,14 +41,31 @@ const TICK: f64 = 0.05;
 fn steady_tick(world: &World) -> bool {
     matches!(world.phase, Phase::Live)
         && world.active.is_none()
-        && world.now() + TICK < world.next_decision_at
+        && world.holder().is_some_and(|handle| {
+            world.now() + TICK < world.players[handle].schedule.next_redecide_at
+        })
         && world.clock.shot_clock > 0.2
 }
 
 fn measure(world: &mut World) -> usize {
     let before = ALLOCATIONS.load(Ordering::Relaxed);
     world.step(TICK);
-    ALLOCATIONS.load(Ordering::Relaxed) - before
+    let delta = ALLOCATIONS.load(Ordering::Relaxed) - before;
+    if delta > 0 {
+        eprintln!(
+            "allocation {delta} phase={:?} events {}/{} shots {}/{} traces {}/{} records {}/{}",
+            world.phase,
+            world.events.len(),
+            world.events.capacity(),
+            world.shot_samples.len(),
+            world.shot_samples.capacity(),
+            world.decision_traces.len(),
+            world.decision_traces.capacity(),
+            world.decision_records.len(),
+            world.decision_records.capacity()
+        );
+    }
+    delta
 }
 
 #[test]

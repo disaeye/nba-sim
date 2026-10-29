@@ -9,27 +9,15 @@ use crate::TeamSide;
 pub fn update_stamina(world: &mut World, dt: f64) {
     let drain_rate = world.params.policy.w("stamina_drain_rate");
     let bench_recovery = world.params.policy.w("stamina_bench_recovery");
-    let dead_ball_recovery = world.params.policy.w("stamina_dead_ball_recovery");
-    let stopped = matches!(
-        world.phase,
-        Phase::FreeThrows { .. }
-            | Phase::DeadBall { .. }
-            | Phase::PeriodBreak { .. }
-            | Phase::Inbound { .. }
-            | Phase::Timeout { .. }
-    );
+    let dt_f32 = dt as f32;
+    let drain_step = drain_rate * dt_f32;
+    let bench_step = bench_recovery * dt_f32;
     for player in world.players.iter_mut() {
         if player.on_court {
-            if stopped {
-                player.stamina =
-                    (player.stamina + dead_ball_recovery * dt as f32).min(f32::from(1u8));
-            } else {
-                let drain = drain_rate * (f32::from(1u8) - player.data.attributes.stamina);
-                player.stamina =
-                    (player.stamina - drain * dt as f32).clamp(f32::default(), f32::from(1u8));
-            }
+            let drain = drain_step * (f32::from(1u8) - player.data.attributes.stamina);
+            player.stamina = (player.stamina - drain).clamp(f32::default(), f32::from(1u8));
         } else {
-            player.stamina = (player.stamina + bench_recovery * dt as f32).min(f32::from(1u8));
+            player.stamina = (player.stamina + bench_step).min(f32::from(1u8));
         }
     }
 }
@@ -60,8 +48,6 @@ fn rest_priority(world: &World, handle: usize) -> Option<f32> {
     if player.disqualified || player.fouls >= rules.league.max_personal_fouls {
         return Some(f32::MAX);
     }
-    let has_ball = world.possession.team == player.team;
-    let wp = crate::endgame::win_probability(world, player.team, has_ball) as f32;
     // 刚换上场的人不能立刻被换下去：否则替补上去一个回合就被当成
     // 「需要休息」再换下来，窗口配额在来回拉锯中耗尽。开场就在场上的人
     // 不受这条限制，`entered_at` 为零就是「从开场就没下过」。
@@ -69,16 +55,8 @@ fn rest_priority(world: &World, handle: usize) -> Option<f32> {
     if player.entered_at > f64::default() && world.now() - player.entered_at < settle {
         return None;
     }
-    let one = f32::from(1u8);
-    let closeness = (wp * (one - wp) * policy.w("closeness_scale")).clamp(f32::default(), one);
-    let threshold = policy.w("stamina_rest_threshold")
-        * (one - policy.w("clutch_stamina_retention") * closeness);
-    let mut priority = f32::default();
-    if player.stamina < threshold {
-        priority = priority.max(policy.w("rest_priority_stamina") + (threshold - player.stamina));
-    }
-    if player.data.starter {
-        // 犯规危机：一节两犯、两节三犯、三节四犯都要先坐下来。
+    let base_threshold = policy.w("stamina_rest_threshold");
+    let in_foul_trouble = if player.data.starter {
         let foul_limit = rules.league.max_personal_fouls;
         let threshold = match world.clock.period {
             1 => policy.w("foul_trouble_first") as u8,
@@ -86,9 +64,25 @@ fn rest_priority(world: &World, handle: usize) -> Option<f32> {
             3 => policy.w("foul_trouble_third") as u8,
             _ => foul_limit,
         };
-        if player.fouls >= threshold {
-            priority = priority.max(policy.w("rest_priority_foul_trouble") + player.stamina);
-        }
+        player.fouls >= threshold
+    } else {
+        false
+    };
+    if player.stamina >= base_threshold && !in_foul_trouble {
+        return None;
+    }
+    let has_ball = world.possession.team == player.team;
+    let wp = crate::endgame::win_probability(world, player.team, has_ball) as f32;
+    let one = f32::from(1u8);
+    let closeness = (wp * (one - wp) * policy.w("closeness_scale")).clamp(f32::default(), one);
+    let threshold = base_threshold
+        * (one - policy.w("clutch_stamina_retention") * closeness);
+    let mut priority = f32::default();
+    if player.stamina < threshold {
+        priority = priority.max(policy.w("rest_priority_stamina") + (threshold - player.stamina));
+    }
+    if in_foul_trouble {
+        priority = priority.max(policy.w("rest_priority_foul_trouble") + player.stamina);
     }
     // 垃圾时间：胜率已经贴到 0 或 1。它不在「需要休息」里处理，因为
     // 换人的顺序不是「谁最累」，而是「谁打得最久」，在清场那一处统一处理。
@@ -133,6 +127,7 @@ fn empty_the_bench(world: &mut World, team: TeamSide, index: usize) {
                     .line(*left)
                     .seconds
                     .total_cmp(&world.line(*right).seconds)
+                    .then_with(|| right.cmp(left))
             });
         let Some(outgoing) = outgoing else {
             break;
@@ -140,15 +135,13 @@ fn empty_the_bench(world: &mut World, team: TeamSide, index: usize) {
         let incoming = (0..world.players.len())
             .filter(|candidate| {
                 let player = &world.players[*candidate];
-                // 替补席随时可上；首发只有在出场时间比被换下者少时才可上。
-                // 前者保证替补席能全部上桌，后者挡住「刚换下去的人又被
-                // 换回来」的循环。
+                // 垃圾时间只上替补席的人：把刚下场的主力再换回来会让
+                // 「清场」变成来回拉锯，核心球员永远留在场上。
                 player.team == team
                     && !player.on_court
+                    && !player.data.starter
                     && player.fouls < foul_limit
                     && !player.disqualified
-                    && (!player.data.starter
-                        || world.line(*candidate).seconds < world.line(outgoing).seconds)
             })
             .max_by(|left, right| {
                 // 先在替补席里找体能最好的人，替补席用尽才用已经歇够的
@@ -243,7 +236,6 @@ fn best_bench(world: &World, team: TeamSide, handle: usize) -> Option<usize> {
 
 /// 执行换人：替补继承被换下者的位置、目标与槽位。
 fn swap(world: &mut World, team: TeamSide, outgoing: usize, incoming: usize) {
-    let position = world.players[outgoing].pos;
     let target = world.players[outgoing].target;
     let slot = world.players[outgoing].slot;
     world.players[incoming].on_court = true;
@@ -252,12 +244,21 @@ fn swap(world: &mut World, team: TeamSide, outgoing: usize, incoming: usize) {
     // 「主力下去、替补上来、替补又被当成该休息、主力回来」里无限拉锯。
     world.players[outgoing].resting_until =
         world.now() + world.rules.rotation.min_rest_seconds as f64;
-    world.players[incoming].pos = position;
     world.players[incoming].target = target;
+    world.players[incoming].target_kind = crate::state::TargetKind::Station;
+    world.players[incoming].target_partner = usize::MAX;
+    world.players[incoming].target_changed_at = world.now();
     world.players[incoming].slot = slot;
     world.players[outgoing].on_court = false;
+    let on_court = match team {
+        TeamSide::Home => &mut world.on_court_home,
+        TeamSide::Away => &mut world.on_court_away,
+    };
+    if let Some(pos) = on_court.as_slice().iter().position(|h| *h == outgoing) {
+        on_court.as_mut_slice()[pos] = incoming;
+    }
     if world.holder() == Some(outgoing) {
-        world.ball = crate::state::BallState::Held(incoming);
+        world.ball.set_held(incoming);
     }
     world.emit(crate::action::Fact::Substitution {
         team,

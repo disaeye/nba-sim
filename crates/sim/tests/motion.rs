@@ -1,8 +1,8 @@
 use glam::Vec2;
 use nba_domain::rules::GameRules;
 use nba_sim_core::defense::{refresh_matchup, solve_defense_targets};
+use nba_sim_core::body::integrate;
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::resolve::move_player;
 use nba_sim_core::state::{Phase, MAX_ON_COURT};
 use nba_sim_core::world::TICK_SECONDS;
 use nba_sim_core::{MatchSetup, Params, TeamSide, World};
@@ -44,8 +44,9 @@ fn acceleration_limits_direction_change() {
     world.players[handle].vel = Vec2::new(speed, 0.0);
     let before = world.players[handle].vel;
     // 目标放在正后方：允许瞬间转向的实现会让速度立刻变成 -x。
-    let target = world.players[handle].pos + Vec2::new(-10.0, 0.0);
-    move_player(&mut world.players[handle], target, dt, &policy);
+    world.players[handle].target = world.players[handle].pos + Vec2::new(-10.0, 0.0);
+    world.active = None;
+    integrate(&mut world, TICK_SECONDS);
     let after = world.players[handle].vel;
     let change = (after - before).length();
     assert!(
@@ -159,7 +160,7 @@ fn momentum_builds_on_scoring_and_decays() {
 /// 运动参数来自校准表，改表就改行为。
 #[test]
 fn motion_parameters_are_read_from_the_calibration_table() {
-    let mut world = world(9);
+    let world = world(9);
     let handle = world.on_court(TeamSide::Home).as_slice()[0];
     let policy = world.params.policy.clone();
     let speed = world.players[handle].effective_speed(&policy);

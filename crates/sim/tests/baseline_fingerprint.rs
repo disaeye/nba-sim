@@ -5,7 +5,8 @@
 //! 路径报告，便于定位是哪一个量先动。
 //!
 //! 记录基线：`cargo test --test baseline_fingerprint -- --ignored record_baseline_fingerprint`
-//! 工件路径：`.work/baseline/fingerprint.json`（已被 `.gitignore` 忽略）
+//! 工件路径：`crates/sim/tests/baseline/fingerprint.json`（随仓库提交，
+//! ��验在新 checkout 上不依赖本地残留文件）
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -16,7 +17,7 @@ use nba_sim_core::{run_game, GameReport};
 use serde_json::{json, Map, Value};
 
 const BASELINE_SEEDS: u64 = 16;
-const BASELINE_PATH: &str = ".work/baseline/fingerprint.json";
+const BASELINE_PATH: &str = "crates/sim/tests/baseline/fingerprint.json";
 
 fn baseline_path() -> PathBuf {
     workspace_root().join(BASELINE_PATH)
@@ -33,10 +34,18 @@ fn fact_kind(fact: &Fact) -> &'static str {
         Fact::Foul { .. } => "foul",
         Fact::FreeThrow { .. } => "free_throw",
         Fact::Rebound { .. } => "rebound",
+        Fact::ReboundOpportunity { .. } => "rebound_opportunity",
+        Fact::SecondChanceStarted { .. } => "second_chance_started",
+        Fact::Cut { .. } => "cut",
+        Fact::BoxOut { .. } => "box_out",
+        Fact::DefenseResponsibilityChanged { .. } => "defense_responsibility_changed",
         Fact::Turnover { .. } => "turnover",
+        Fact::Steal { .. } => "steal",
         Fact::Substitution { .. } => "substitution",
         Fact::Timeout { .. } => "timeout",
         Fact::PeriodEnd { .. } => "period_end",
+        Fact::BallContact { .. } => "ball_contact",
+        Fact::PlacementApplied { .. } => "placement_applied",
         Fact::PlayActivated { .. } => "play_activated",
         Fact::PlayWindowEnded { .. } => "play_window_ended",
         Fact::GameEnd => "game_end",

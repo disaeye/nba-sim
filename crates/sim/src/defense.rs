@@ -24,7 +24,40 @@ pub fn refresh_matchup(world: &mut World) {
         .matchup
         .iter()
         .any(|handle| *handle == UNASSIGNED || !world.players[*handle].on_court);
-    if !stale {
+    // 对位在每次传球之后必须重算：传球人一交球，防守人就该跟到新的
+    // 持球人身上。对位不换时，接球人面前往往没有防守人，投篮命中率因此
+    // 高得不像真实比赛。
+    //
+    // `matchup[slot]` 是「防守人 slot 对位的进攻人」，所以持球人被防住
+    // 等价于持球人出现在 matchup 里。此外，如果被指派对位持球人的那个
+    // 防守人离持球人太远（他其实在守别人），对位也已经失效。
+    let carrier = world.holder();
+    let carrier_is_guarded = match carrier {
+        Some(handle) => world.possession.matchup.contains(&handle),
+        None => true,
+    };
+    let on_ball_defender_is_far = match carrier {
+        Some(handle) => world
+            .possession
+            .matchup
+            .iter()
+            .position(|man| *man == handle)
+            .map(|slot| {
+                // `matchup[slot]` 是被这个防守人守住的进攻人；防守人本身是
+                // 该 slot 上的那名防守人。
+                match defenders.as_slice().get(slot) {
+                    Some(defender) => {
+                        (world.players[*defender].pos - world.players[handle].pos)
+                            .length_squared()
+                            > 64.0
+                    }
+                    None => false,
+                }
+            })
+            .unwrap_or(false),
+        None => false,
+    };
+    if !stale && carrier_is_guarded && !on_ball_defender_is_far {
         return;
     }
     // 贪心最近匹配：25 个候选对全部落在栈上，排序不产生堆分配。
@@ -47,13 +80,22 @@ pub fn refresh_matchup(world: &mut World) {
     }
     let mut taken_defender = [false; MAX_ON_COURT];
     let mut taken_attacker = [false; MAX_ON_COURT];
+    let mut changed = false;
     for (_, slot, rank) in pairs.iter().take(count) {
         if taken_defender[*slot] || taken_attacker[*rank] {
             continue;
         }
         taken_defender[*slot] = true;
         taken_attacker[*rank] = true;
-        world.possession.matchup[*slot] = attackers.as_slice()[*rank];
+        let attacker = attackers.as_slice()[*rank];
+        if world.possession.matchup[*slot] != attacker {
+            changed = true;
+        }
+        world.possession.matchup[*slot] = attacker;
+    }
+    if changed {
+        // 对位换了：职责层必须立刻改人，否则会出现好几个人同时是对位防守人。
+        world.possession.pairing_changed_at = world.now();
     }
 }
 
@@ -97,12 +139,23 @@ pub fn solve_defense_targets(world: &World) -> [Vec2; MAX_ON_COURT] {
     // 协防看的是延迟读球的位置：防守人反应要时间，轮转因此总慢半拍。
     let read_ball =
         world.delayed_ball_position(policy.g("defense_reaction_delay_seconds") as f64);
-    let to_hoop = (hoop - ball).normalize_or_zero();
+    let ball_delta = hoop - ball;
+    let live_distance = ball_delta.length();
+    let to_hoop = if live_distance > f32::MIN_POSITIVE {
+        ball_delta / live_distance
+    } else {
+        Vec2::ZERO
+    };
     let carrier_distance = (hoop - read_ball).length();
     // 球的篮筐威胁：越靠近篮筐越接近 1。
     let threat = (f32::from(1u8) - carrier_distance / potential.threat_radius_ft)
         .clamp(f32::default(), f32::from(1u8));
-    let rim_help = hoop + (read_ball - hoop).normalize_or_zero() * potential.rim_buffer_ft;
+    let rim_dir = if carrier_distance > f32::MIN_POSITIVE {
+        (read_ball - hoop) / carrier_distance
+    } else {
+        Vec2::ZERO
+    };
+    let rim_help = hoop + rim_dir * potential.rim_buffer_ft;
     // 落后方的防守赌得更凶（夹击、轮转早），领先方收得更紧；
     // γ 连续变化，所以“第几节”不参与判断。
     let defense_margin = world.score[World::team_index(defense)] as i32
@@ -129,7 +182,8 @@ pub fn solve_defense_targets(world: &World) -> [Vec2; MAX_ON_COURT] {
         let man_pos = world.players[man].pos;
         // 只有进入弱侧混合带的人才参与「低位人」竞争：带边缘的人的
         // 弱侧权重本来就是 0，所以这个集合变化不影响连续性。
-        if (man_pos.y - read_ball.y).abs() <= potential.weak_side_lateral_ft - blend {
+        let same_side = (man_pos.y - 25.0) * (ball.y - 25.0) > 0.0;
+        if same_side || (man_pos.y - read_ball.y).abs() <= potential.weak_side_lateral_ft - blend {
             continue;
         }
         nearest_any = nearest_any.min((hoop - man_pos).length());
@@ -138,15 +192,32 @@ pub fn solve_defense_targets(world: &World) -> [Vec2; MAX_ON_COURT] {
         let man = world.possession.matchup[slot];
         let player = &world.players[*defender];
         let stamina = player.stamina.clamp(f32::default(), f32::from(1u8));
+        let stamina_pow = if (potential.stamina_gain - 1.5).abs() < 1e-4 {
+            stamina * stamina.sqrt()
+        } else {
+            stamina.powf(potential.stamina_gain)
+        };
         let stamina_factor = potential.stamina_floor
-            + (f32::from(1u8) - potential.stamina_floor) * stamina.powf(potential.stamina_gain);
+            + (f32::from(1u8) - potential.stamina_floor) * stamina_pow;
         if Some(man) == carrier {
             // 领防间隔：基础间隔按方案倍率缩放，并且不超过持球人距篮距离的固定比例。
             // 领防人看的是此刻的球，延迟只影响协防轮转。
-            let live_distance = (hoop - ball).length();
-            let gap = (potential.on_ball_gap_min_ft * scheme.on_ball_gap_multiplier)
+            let tactical_gap = (potential.on_ball_gap_min_ft * scheme.on_ball_gap_multiplier)
                 .min(potential.on_ball_gap_hoop_ratio * live_distance);
-            targets[slot] = ball + to_hoop * gap;
+            // 贴身防守允许进到贴身间隔：目标点不能小于贴身间隔，
+            // 否则会落在非法区域。
+            let pressure = crate::assignment::pressure_separation(world);
+            let gap = tactical_gap.max(pressure);
+            // 持球人已经进入身体间隔以内时，目标不能继续放在他与篮筐之间，
+            // 否则目标会越过篮筐并随方向翻转。此时站到持球人背向篮筐的一侧。
+            let target = if live_distance > gap {
+                ball + to_hoop * gap
+            } else {
+                let away = (ball - hoop).normalize_or_zero();
+                let direction = if away == Vec2::ZERO { Vec2::X } else { away };
+                ball + direction * gap
+            };
+            targets[slot] = target;
             continue;
         }
         if man == UNASSIGNED || !world.players[man].on_court {
@@ -162,10 +233,15 @@ pub fn solve_defense_targets(world: &World) -> [Vec2; MAX_ON_COURT] {
         } * scheme.sag_multiplier;
         let sagged = man_pos + (hoop - man_pos).normalize_or_zero() * sag;
         let lateral = (man_pos.y - read_ball.y).abs();
+        let same_side = (man_pos.y - 25.0) * (ball.y - 25.0) > 0.0;
         // 弱侧从「门限减一个混合带」开始渐变、到门限时算完全弱侧：
         // 门限仍是弱侧的定义，只是分类边界不再是一道阶跃。
-        let weak = ((lateral - (potential.weak_side_lateral_ft - blend)) / blend)
-            .clamp(f32::default(), f32::from(1u8));
+        let weak = if same_side {
+            f32::default()
+        } else {
+            ((lateral - (potential.weak_side_lateral_ft - blend)) / blend)
+                .clamp(f32::default(), f32::from(1u8))
+        };
         let low_closeness = if nearest_any.is_finite() {
             (f32::from(1u8) - (man_to_hoop - nearest_any) / blend)
                 .clamp(f32::default(), f32::from(1u8))
@@ -174,8 +250,12 @@ pub fn solve_defense_targets(world: &World) -> [Vec2; MAX_ON_COURT] {
         };
         let weak_gain = potential.high_man_threat_gain
             + (potential.low_man_threat_gain - potential.high_man_threat_gain) * low_closeness;
-        let gain = potential.default_threat_gain
-            + (weak_gain - potential.default_threat_gain) * weak;
+        let gain = if same_side {
+            f32::default()
+        } else {
+            potential.default_threat_gain
+                + (weak_gain - potential.default_threat_gain) * weak
+        };
         let drive_boost = if world.possession.last_drive_at.is_some() {
             potential.drive_help_threat_gain
         } else {
@@ -208,7 +288,79 @@ pub fn apply_defense_targets(world: &mut World) {
     let defense = world.possession.team.other();
     let defenders = world.on_court(defense);
     let targets = solve_defense_targets(world);
+    crate::assignment::assign_defense_responsibilities(world, &targets);
+    let carrier = world.holder();
+    let pressure = crate::assignment::pressure_separation(world);
+    let hoop = world.hoop_for(world.possession.team);
     for (slot, handle) in defenders.as_slice().iter().enumerate() {
-        world.players[*handle].target = targets[slot];
+        let man = world.possession.matchup[slot];
+        let responsibility = world.players[*handle].defense_responsibility;
+        let (kind, partner, target) = match responsibility {
+            crate::state::DefenseResponsibility::OnBall => {
+                // 对位防守人的目标点：站在持球人与篮筐之间，并与持球人保持
+                // 一个身位的间隔。已经贴得更近时目标点就是当前位置——把目标
+                // 强行拉到间隔之外会落在非法区域，职责层会把它算成一次无效
+                // 提交。
+                let target = if let Some(carrier) = carrier {
+                    let direction = (hoop - world.players[carrier].pos).normalize_or_zero();
+                    let distance = (world.players[carrier].pos - world.players[*handle].pos).length();
+                    if distance <= pressure {
+                        world.players[*handle].pos
+                    } else {
+                        world.players[carrier].pos + direction * pressure
+                    }
+                } else {
+                    targets[slot]
+                };
+                (
+                    crate::state::TargetKind::Pressure,
+                    carrier.unwrap_or(usize::MAX),
+                    target,
+                )
+            }
+            crate::state::DefenseResponsibility::Deny => {
+                let target = if man != usize::MAX && world.players[man].on_court {
+                    let ball = carrier
+                        .map(|carrier| world.players[carrier].pos)
+                        .unwrap_or(world.players[*handle].pos);
+                    let direction =
+                        (ball - world.players[man].pos).normalize_or_zero();
+                    // 已经比间隔更近时保持在当前位置，目标是合法且可达的。
+                    let distance = (world.players[man].pos - world.players[*handle].pos).length();
+                    if distance <= pressure {
+                        world.players[*handle].pos
+                    } else {
+                        world.players[man].pos + direction * pressure
+                    }
+                } else {
+                    targets[slot]
+                };
+                (
+                    crate::state::TargetKind::Pressure,
+                    man,
+                    target,
+                )
+            }
+            crate::state::DefenseResponsibility::BoxOut => {
+                let target = if man != usize::MAX && world.players[man].on_court {
+                    let direction =
+                        (hoop - world.players[man].pos).normalize_or_zero();
+                    world.players[man].pos + direction * pressure
+                } else {
+                    targets[slot]
+                };
+                (
+                    crate::state::TargetKind::Pressure,
+                    man,
+                    target,
+                )
+            }
+            crate::state::DefenseResponsibility::Help
+            | crate::state::DefenseResponsibility::Sink => {
+                (crate::state::TargetKind::Station, usize::MAX, targets[slot])
+            }
+        };
+        crate::assignment::commit_target_as(world, *handle, target, kind, partner);
+        crate::assignment::reselect_yielding(world, *handle, target);
     }
 }

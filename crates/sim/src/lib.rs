@@ -4,8 +4,12 @@
 //! 出手位置与命中率都是动作链的后果，参数表来自真实赛季数据。
 
 pub mod action;
+pub mod assignment;
+pub mod ball;
+pub mod body;
 pub mod boxscore;
 pub mod defense;
+pub mod draw;
 pub mod endgame;
 pub mod formation;
 pub mod gate;
@@ -14,34 +18,40 @@ pub mod params;
 pub mod physical;
 pub mod policy;
 pub mod replay;
+pub mod report;
 pub mod resolve;
+pub mod review;
 pub mod rotation;
 pub mod session;
+pub mod shot_quality;
 pub mod state;
 pub mod stream;
 pub mod tactics;
 pub mod timeouts;
 pub mod utility;
+pub mod value;
 pub mod views;
 pub mod world;
 
 pub use action::{ActionKind, Fact, ShotKind, TeamSide};
 pub use boxscore::{BoxScore, PlayerLine, TeamLine};
-pub use params::{Params, CALIBRATION_DIR};
+pub use params::{Params, RuntimeParams, CALIBRATION_DIR};
 pub use replay::{replay_possession, PossessionFrames};
+pub use review::{build_review, write_review, ReviewReport};
+pub use report::GameReport;
 pub use session::{MatchInfo, SessionService, SessionState};
-pub use world::{GameReport, MatchSetup, PossessionRecord, TimedFact, World};
+pub use world::{MatchSetup, PossessionRecord, TimedFact, World};
 
 use std::path::Path;
 
 pub fn run_game(seed: u64, calibration_dir: &Path) -> GameReport {
-    let params = Params::load(calibration_dir).expect("calibration tables must load");
+    let params = RuntimeParams::load(calibration_dir).expect("runtime tables must load");
     let setup = MatchSetup::builtin(nba_domain::GameRules::default());
     run_game_with_setup(seed, params, setup)
 }
 
 /// 用指定阵容与参数跑一场。机制实验通过它注入属性扰动。
-pub fn run_game_with_setup(seed: u64, params: Params, setup: MatchSetup) -> GameReport {
+pub fn run_game_with_setup<P: Into<RuntimeParams>>(seed: u64, params: P, setup: MatchSetup) -> GameReport {
     let mut world = World::new(setup, params, seed);
     world.run()
 }

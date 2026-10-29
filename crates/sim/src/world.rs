@@ -6,24 +6,21 @@
 
 use glam::Vec2;
 use nba_domain::{GameRules, TeamData};
-use rand::{Rng, SeedableRng};
-use rand_chacha::ChaCha8Rng;
 
 use crate::action::{ActionIntent, Fact, TeamSide};
+use crate::ball::BallBody;
 use crate::boxscore::{BoxScore, PlayerLine};
-use crate::params::Params;
+use crate::draw::{purpose, DrawKey, DrawSource, Stream};
+use crate::params::RuntimeParams;
 use crate::resolve;
 use crate::resolve::shot::PendingShot;
 pub use crate::state::Phase;
 use crate::state::{
-    BallState, Clock, DecisionSample, DecisionState, OnCourt, PassSample, PlayerState,
+    Clock, DecisionRecord, DecisionSample, DecisionState, OnCourt, PassSample, PlayerState,
     PossessionKind, PossessionState, ScreenRead, ShotSample, Slot,
 };
 
-pub const TICK_SECONDS: f64 = 0.05;
-pub const DECISION_INTERVAL: f64 = 0.55;
-/// 推进到前场之后的落位时间：持球人到达顶弧还需要给队友落位的时间。
-pub const POSSESSION_SETUP_SECONDS: f64 = 3.25;
+pub use nba_domain::rules::TICK_SECONDS;
 const MAX_TICKS: u64 = 400_000;
 
 #[derive(Debug, Clone)]
@@ -98,12 +95,15 @@ pub struct PossessionRecord {
     pub first_action_seconds: Option<f64>,
 }
 
+#[derive(Debug, Clone)]
 pub struct World {
-    pub params: Params,
+    pub params: RuntimeParams,
     pub rules: GameRules,
     pub clock: Clock,
     pub phase: Phase,
-    pub ball: BallState,
+    pub ball: BallBody,
+    pub pass_result: Option<crate::ball::PassResult>,
+    pub pass_in_flight: Option<crate::ball::PassInFlight>,
     pub players: Vec<PlayerState>,
     pub possession: PossessionState,
     pub score: [u32; 2],
@@ -111,9 +111,9 @@ pub struct World {
     /// 球员句柄到所属队伍箱体行下标的映射。构建期算一次，换人不重排行序。
     pub line_slot: Vec<u8>,
     pub active: Option<ActionIntent>,
-    pub next_decision_at: f64,
+    pub screen_defender: Option<usize>,
     pub events: Vec<TimedFact>,
-    pub rng: ChaCha8Rng,
+    pub draws: DrawSource,
     pub seed: u64,
     pub fouls: [TeamFouls; 2],
     pub rotation: RotationState,
@@ -129,8 +129,10 @@ pub struct World {
     pub last_pass_kind: Option<crate::action::PassKind>,
     pub possession_log: Vec<PossessionRecord>,
     pub pending_shot: Option<PendingShot>,
+    pub pending_rebound: Option<crate::resolve::rebound::PendingRebound>,
     pub possession_points: u32,
     pub wall: f64,
+    pub inbound_passer: Option<usize>,
     pub violations: Vec<String>,
     pub last_separation: Option<(usize, f32, f64)>,
     /// 选板冷却表：剧本下标 → 可再次激活的时刻。
@@ -144,6 +146,8 @@ pub struct World {
     pub decision_samples: Vec<DecisionSample>,
     /// 逐次决策的完整因果快照：候选集、效用分解与玻尔兹曼概率。
     pub decision_traces: Vec<crate::state::DecisionTraceSample>,
+    /// 逐次实际决策的审计记录（观察摘要、执行前重校验）。
+    pub decision_records: Vec<DecisionRecord>,
     /// 当前生效的决策快照下标：本次决策产生的事实都带着它。
     pub active_trace: Option<u32>,
     pub shot_zone_counts: [[u32; 4]; 2],
@@ -158,15 +162,20 @@ pub struct World {
     pub momentum: [f32; 2],
     /// 读球历史：防守的协防轮转看的是 `delay` 秒之前的球位。
     pub(crate) ball_history: Vec<(f64, Vec2)>,
+    /// 逐 tick 运动积分的暂存缓冲，稳态不分配。
+    pub(crate) body_before: Vec<Vec2>,
+    pub on_court_home: OnCourt,
+    pub on_court_away: OnCourt,
 }
 
 impl World {
-    pub fn new(setup: MatchSetup, params: Params, seed: u64) -> Self {
+    pub fn new<P: Into<RuntimeParams>>(setup: MatchSetup, params: P, seed: u64) -> Self {
+        let params = params.into();
         let rules = setup.rules.clone();
         // 读球历史按秒数上限预分配：稳态每帧只做写入与裁剪，不再扩容。
         let history_capacity = ((params.policy.g("ball_history_seconds") as f64 / TICK_SECONDS)
             .ceil() as usize)
-            + 8;
+            + 64;
         let mut players = Vec::new();
         for (index, data) in setup.home.players.iter().enumerate() {
             let on_court = setup.home_lineup.contains(&index);
@@ -182,10 +191,11 @@ impl World {
             player.on_court = on_court;
             players.push(player);
         }
-        assign_slots(&mut players, TeamSide::Home);
-        assign_slots(&mut players, TeamSide::Away);
+        crate::formation::assign_slots(&mut players, TeamSide::Home);
+        crate::formation::assign_slots(&mut players, TeamSide::Away);
         // 箱体行序由队伍过滤的次序固定，换人不重排，因此下标可一次算定。
         let mut line_slot = vec![0u8; players.len()];
+        let player_count = players.len();
         let mut home_slot = 0u8;
         let mut away_slot = 0u8;
         for (handle, player) in players.iter().enumerate() {
@@ -229,12 +239,24 @@ impl World {
         let period_seconds = rules.league.period_duration_seconds as f64;
         let shot_clock = rules.league.shot_clock_seconds as f64;
         let rules_capture = rules.clone();
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        let first = if rng.gen::<bool>() {
+        let draws = DrawSource::new(seed);
+        let first = if draws.f32(DrawKey {
+            stream: Stream::Decision,
+            possession: 0,
+            tick: 0,
+            entity: 0,
+            purpose: purpose::OPENING_TIP,
+            ordinal: 0,
+        }) < 0.5
+        {
             TeamSide::Home
         } else {
             TeamSide::Away
         };
+        let mut play_cooldowns = std::collections::BTreeMap::new();
+        for index in 0..params.tactics.plays.len() {
+            play_cooldowns.insert(index, 0.0);
+        }
         let mut world = Self {
             params,
             rules,
@@ -243,10 +265,9 @@ impl World {
                 team: first,
                 ready_at: 0.6,
             },
-            ball: BallState::Loose {
-                pos: Vec2::new(47.0, 25.0),
-                vel: Vec2::ZERO,
-            },
+            ball: BallBody::loose(Vec2::new(47.0, 25.0), Vec2::ZERO),
+            pass_result: None,
+            pass_in_flight: None,
             players,
             possession: PossessionState::new(
                 first,
@@ -263,9 +284,9 @@ impl World {
             },
             line_slot,
             active: None,
-            next_decision_at: 0.0,
-            events: Vec::new(),
-            rng,
+            screen_defender: None,
+            events: Vec::with_capacity(4096),
+            draws,
             seed,
             fouls: [TeamFouls::default(), TeamFouls::default()],
             rotation: RotationState::default(),
@@ -281,13 +302,16 @@ impl World {
             home_team_name: setup.home.name.clone(),
             away_team_name: setup.away.name.clone(),
             last_pass_kind: None,
-            possession_log: Vec::new(),
+            // 回合记录每回合一条；预分配容量，避免在稳态 tick 里扩容。
+            possession_log: Vec::with_capacity(256),
             pending_shot: None,
+            pending_rebound: None,
             possession_points: 0,
             wall: 0.0,
+            inbound_passer: None,
             violations: Vec::new(),
             last_separation: None,
-            play_cooldowns: std::collections::BTreeMap::new(),
+            play_cooldowns,
             alternate_spacing: false,
             shot_clock_at_release: Vec::new(),
             contest_samples: Vec::new(),
@@ -295,6 +319,7 @@ impl World {
             pass_samples: Vec::new(),
             decision_samples: Vec::new(),
             decision_traces: Vec::new(),
+            decision_records: Vec::new(),
             active_trace: None,
             shot_zone_counts: [[0; 4]; 2],
             shot_zone_makes: [[0; 4]; 2],
@@ -304,7 +329,26 @@ impl World {
             rebound_attempts: 0,
             momentum: [f32::default(); 2],
             ball_history: Vec::with_capacity(history_capacity),
+            body_before: vec![Vec2::ZERO; player_count],
+            on_court_home: OnCourt::new(),
+            on_court_away: OnCourt::new(),
         };
+        world.sync_on_court();
+        let mut bench_placements = Vec::new();
+        let mut bench_counts = [0usize; 2];
+        for (handle, player) in world.players.iter().enumerate() {
+            if player.on_court {
+                continue;
+            }
+            let team = player.team;
+            let index = bench_counts[World::team_index(team)];
+            bench_counts[World::team_index(team)] += 1;
+            let spot = crate::formation::bench_spot(&world, team, index);
+            bench_placements.push((handle, spot));
+        }
+        for (handle, spot) in bench_placements {
+            crate::body::place(&mut world, handle, spot);
+        }
         world.reset_positions(first);
         world
     }
@@ -338,7 +382,7 @@ impl World {
     /// 流尾部尚未结算的业务实例：飞行中的出手、飞行中的传球、未执行完的罚球。
     pub fn open_business_instances(&self) -> u64 {
         let shot = u64::from(self.pending_shot.is_some());
-        let pass = u64::from(matches!(self.ball, BallState::Pass { .. }));
+        let pass = u64::from(self.pass_in_flight.is_some());
         let free_throws = match self.phase {
             Phase::FreeThrows { remaining, .. } => u64::from(remaining),
             _ => 0,
@@ -355,6 +399,7 @@ impl World {
             away_score: self.score[1],
             periods: self.clock.period,
             ticks: self.clock.tick,
+            redecide_interval_seconds: self.rules.redecide_interval_seconds as f64,
             open_business_instances: self.open_business_instances(),
             rebound_attempts: self.rebound_attempts,
             possessions: self.possession_log.clone(),
@@ -366,6 +411,7 @@ impl World {
             pass_samples: std::mem::take(&mut self.pass_samples),
             decision_samples: std::mem::take(&mut self.decision_samples),
             decision_traces: std::mem::take(&mut self.decision_traces),
+            decision_records: std::mem::take(&mut self.decision_records),
             shot_zone_counts: self.shot_zone_counts,
             shot_zone_makes: self.shot_zone_makes,
             creation_counts: self.creation_counts,
@@ -390,14 +436,40 @@ impl World {
     }
 
     pub fn holder(&self) -> Option<usize> {
-        match self.ball {
-            BallState::Held(index) => Some(index),
-            _ => None,
-        }
+        self.ball.holder
     }
 
     pub fn now(&self) -> f64 {
         self.wall
+    }
+
+    /// 按地址抽样。`entity` 是球员句柄或球队下标；`ordinal` 是语义序号。
+    pub fn draw(&self, stream: Stream, entity: usize, purpose: u16, ordinal: u16) -> f32 {
+        self.draws.f32(DrawKey {
+            stream,
+            possession: self.possession.id,
+            tick: self.clock.tick,
+            entity: entity as u32,
+            purpose,
+            ordinal,
+        })
+    }
+
+    /// 克隆重放：保留世界状态与随机源地址，清空审计日志。
+    /// 反事实推演用不同的 `base_seed`，同地址在各分支取同一个值。
+    pub fn fork(&self, base_seed: u64) -> Self {
+        let mut fork = self.clone();
+        fork.draws = DrawSource::new(base_seed);
+        fork.events.clear();
+        fork.shot_samples.clear();
+        fork.pass_samples.clear();
+        fork.decision_samples.clear();
+        fork.decision_traces.clear();
+        fork.decision_records.clear();
+        fork.possession_log.clear();
+        fork.active_trace = None;
+        fork.finished = false;
+        fork
     }
 
     pub fn delayed_ball_position(&self, delay: f64) -> Vec2 {
@@ -474,14 +546,26 @@ impl World {
         crate::rotation::apply_dead_ball_window(self);
     }
 
-    pub fn on_court(&self, team: TeamSide) -> OnCourt {
-        let mut set = OnCourt::new();
+    pub fn sync_on_court(&mut self) {
+        let mut home = OnCourt::new();
+        let mut away = OnCourt::new();
         for (handle, player) in self.players.iter().enumerate() {
-            if player.on_court && player.team == team {
-                set.push(handle);
+            if player.on_court {
+                match player.team {
+                    TeamSide::Home => home.push(handle),
+                    TeamSide::Away => away.push(handle),
+                }
             }
         }
-        set
+        self.on_court_home = home;
+        self.on_court_away = away;
+    }
+
+    pub fn on_court(&self, team: TeamSide) -> OnCourt {
+        match team {
+            TeamSide::Home => self.on_court_home,
+            TeamSide::Away => self.on_court_away,
+        }
     }
 
     pub fn primary_handler(&self, team: TeamSide) -> usize {
@@ -498,21 +582,67 @@ impl World {
             .expect("every team must have an on-court handler")
     }
 
-    fn entry_point(&self, team: TeamSide) -> Vec2 {
-        crate::formation::entry_point(self, team)
-    }
-
     fn top_of_key(&self, team: TeamSide) -> Vec2 {
         crate::formation::top_of_key(self, team)
     }
 
     pub fn reset_positions(&mut self, offense: TeamSide) {
-        crate::formation::reset_positions(self, offense);
+        crate::formation::place_opening_positions(self, offense);
+    }
+
+    fn begin_inbound(&mut self, team: TeamSide) {
+        let width = self.rules.court.width_ft;
+        let height = self.rules.court.height_ft;
+        // 发球点在本方底线：进攻方向是右就在左底线，反之在右底线。
+        let baseline_x = if self.attacking_right(team) {
+            self.rules.ball_radius_ft
+        } else {
+            width - self.rules.ball_radius_ft
+        };
+        let inbound_spot = glam::Vec2::new(baseline_x, height * 0.5);
+        // 发球由离发球点最近的队员执行：他就在本方底线附近，不用瞬移，也
+        // 不用把进攻时钟耗在走位上。
+        let handler = self
+            .on_court(team)
+            .into_iter()
+            .min_by(|a, b| {
+                let distance = |handle: usize| {
+                    (self.players[handle].pos - inbound_spot).length()
+                };
+                distance(*a).total_cmp(&distance(*b))
+            })
+            .expect("every team must have an on-court player");
+        self.inbound_passer = Some(handler);
+        self.active = None;
+        self.screen_defender = None;
+        self.ball.set_held(handler);
+        crate::formation::set_targets(self, team);
+        // 发球队员必须自己走到发球点，不能被瞬移过去：瞬移会让球员在
+        // 回合之间跳几十英尺，看起来像系统重排而不是真实移动。
+        self.players[handler].target = inbound_spot;
+        self.players[handler].target_kind = crate::state::TargetKind::Station;
+        self.players[handler].target_partner = usize::MAX;
+        self.players[handler].target_changed_at = self.now();
+        self.emit(crate::action::Fact::PlacementApplied {
+            player: handler,
+            reason: "inbound",
+        });
+
+        // 发球时间要足够发球队员走到发球点，但不能把进攻时钟耗在走位上。
+        let walk = (self.players[handler].pos - inbound_spot).length()
+            / self.rules.max_player_speed_ftps.max(f32::MIN_POSITIVE);
+        self.phase = Phase::Inbound {
+            team,
+            ready_at: self.now() + 0.5 + f64::from(walk.clamp(0.0, 1.5)),
+        };
     }
 
     pub fn start_possession(&mut self, team: TeamSide, kind: PossessionKind) {
+        let inbound_passer = self.inbound_passer;
+        self.inbound_passer = None;
         crate::tactics::close_play_window(self);
         self.active_trace = None;
+        self.screen_defender = None;
         // 新回合的读球历史从头开始：上一个回合的球位不是这次协防的依据。
         crate::motion::reset_ball_history(self);
         self.possession_count += 1;
@@ -527,24 +657,34 @@ impl World {
             shot_clock,
             self.clock.game_clock,
         );
+        // 发球也是一次传球：接球人接到发球后直接出手是合法的进攻选择，
+        // 不应该被判成「没有接球就投」。
+        self.possession.last_pass_at = Some(self.now());
+        self.possession.last_pass_from = inbound_passer;
+        self.possession.assist_candidate = inbound_passer.map(|handler| (handler, self.now()));
         self.possession_points = 0;
         self.pending_shot = None;
-        self.reset_positions(team);
+        self.pending_rebound = None;
+        self.pass_result = None;
+        self.pass_in_flight = None;
+        crate::formation::set_targets(self, team);
         // 死球重启是唯一合法的换人窗口：防守篮板、抢断、快速反击这些
         // 活球回合开始的进攻不允许在场上换人，现实里教练也换不了。
         if kind == PossessionKind::Dead {
             self.apply_dead_ball_window();
         }
         let handler = self.primary_handler(team);
-        let entry = self.entry_point(team);
-        self.players[handler].pos = entry;
         self.players[handler].target = self.top_of_key(team);
-        self.ball = BallState::Held(handler);
+        self.players[handler].target_kind = crate::state::TargetKind::Station;
+        self.players[handler].target_partner = usize::MAX;
+        self.ball.set_held(handler);
         self.phase = Phase::Live;
         self.active = None;
         // 推进到前场的时长由移动速度决定：速度快则更快进入首个决策，
         // 在固定比赛时钟内产生更多回合。
-        let advance_distance = (self.top_of_key(team) - entry).length();
+        //
+        // 推进距离以当前持球人的位置为起点；速度与加速度只影响实际需要的推进段。
+        let advance_distance = (self.top_of_key(team) - self.players[handler].pos).length();
         let speed = self.players[handler]
             .effective_speed(&self.params.policy)
             .max(1.0);
@@ -560,7 +700,12 @@ impl World {
             .max(f32::EPSILON);
         let startup = (speed / accel) * (-advance_distance / ramp_scale).exp();
         let advance_seconds = (advance_distance / speed + startup).max(0.8) as f64;
-        self.next_decision_at = self.now() + advance_seconds + POSSESSION_SETUP_SECONDS;
+        self.players[handler].schedule = crate::state::DecisionSchedule {
+            next_redecide_at: self.now()
+                + advance_seconds
+                + f64::from(self.params.policy.g("possession_setup_seconds")),
+            pending: Some(crate::state::DecisionTrigger::PossessionStart),
+        };
         self.emit(Fact::PossessionStarted {
             team,
             live: kind == PossessionKind::Live,
@@ -586,16 +731,31 @@ impl World {
             self.clock.game_clock,
         );
         self.possession.last_offensive_rebound_at = Some(self.now());
+        self.possession.last_offensive_rebound_actor = Some(rebounder);
         self.possession.had_offensive_rebound = true;
+        self.possession.ball_phase = crate::state::BallPhase::Putback;
         self.possession_points = 0;
         self.pending_shot = None;
-        self.reset_positions(team);
+        self.pending_rebound = None;
+        self.pass_result = None;
+        self.pass_in_flight = None;
+        crate::formation::set_targets(self, team);
         self.players[rebounder].target = self.players[rebounder].pos;
-        self.ball = BallState::Held(rebounder);
+        self.players[rebounder].target_kind = crate::state::TargetKind::Station;
+        self.players[rebounder].target_partner = usize::MAX;
+        self.ball.set_held(rebounder);
         self.phase = Phase::Live;
         self.active = None;
-        self.next_decision_at = self.now() + 0.3;
+        self.screen_defender = None;
+        self.players[rebounder].schedule = crate::state::DecisionSchedule {
+            next_redecide_at: self.now() + 0.3,
+            pending: Some(crate::state::DecisionTrigger::PossessionStart),
+        };
         self.emit(Fact::PossessionStarted { team, live: true });
+        self.emit(Fact::SecondChanceStarted {
+            rebounder,
+            possession: self.possession.id,
+        });
     }
 
     pub fn end_possession(&mut self, cause: &'static str, points: u32) {
@@ -637,13 +797,7 @@ impl World {
             self.phase,
             Phase::Live | Phase::PassFlight { .. } | Phase::ShotFlight { .. }
         );
-        let clock_running = matches!(
-            self.phase,
-            Phase::Live
-                | Phase::PassFlight { .. }
-                | Phase::ShotFlight { .. }
-                | Phase::DeadBall { .. }
-        );
+        let clock_running = live;
         if clock_running {
             self.clock.game_clock = (self.clock.game_clock - dt).max(0.0);
         }
@@ -652,18 +806,26 @@ impl World {
             if matches!(self.phase, Phase::Live) {
                 self.clock.shot_clock = (self.clock.shot_clock - dt).max(0.0);
             }
-            for handle in 0..self.players.len() {
-                if self.players[handle].on_court {
-                    self.line_mut(handle).seconds += dt;
-                }
+            for &handle in self.on_court_home.as_slice() {
+                let slot = self.line_slot[handle] as usize;
+                self.box_score.home[slot].seconds += dt;
+            }
+            for &handle in self.on_court_away.as_slice() {
+                let slot = self.line_slot[handle] as usize;
+                self.box_score.away[slot].seconds += dt;
             }
             self.update_stamina(dt);
         }
         crate::rotation::note_intents(self);
         self.advance_movement(dt);
-        self.advance_active();
+        crate::ball::step(self, dt);
+        if self.active.is_some() {
+            self.advance_active();
+        }
         self.advance_phase();
-        self.maybe_decide();
+        if matches!(self.phase, Phase::Live) && self.active.is_none() {
+            self.maybe_decide();
+        }
         self.check_period_end();
     }
 
@@ -689,7 +851,11 @@ impl World {
             self.emit(fact);
         }
         if let Some(control) = outcome.delta.control {
-            self.ball = BallState::Held(control);
+            self.ball.set_held(control);
+            self.players[control].schedule.next_redecide_at =
+                self.now() + f64::from(self.rules.redecide_interval_seconds);
+            self.players[control].schedule.pending =
+                Some(crate::state::DecisionTrigger::PassReceived);
         }
         if let Some(separation) = outcome.delta.separation_ft {
             self.last_separation = Some((outcome.actor, separation, self.now()));
@@ -709,15 +875,18 @@ impl World {
             }
         }
         self.active = None;
-        self.next_decision_at = self.now() + DECISION_INTERVAL;
+        self.players[outcome.actor].schedule.next_redecide_at =
+            self.now() + f64::from(self.rules.redecide_interval_seconds);
+        self.players[outcome.actor].schedule.pending =
+            Some(crate::state::DecisionTrigger::ActionComplete);
     }
 
     fn advance_phase(&mut self) {
         let now = self.now();
-        match self.phase.clone() {
+        match self.phase {
             Phase::DeadBall { team, ready_at } => {
                 if now >= ready_at {
-                    self.start_possession(team, PossessionKind::Dead);
+                    self.begin_inbound(team);
                 }
             }
             Phase::Timeout { team, resume_at } => {
@@ -731,12 +900,17 @@ impl World {
                 }
             }
             Phase::PassFlight { resolve_at } => {
-                if now >= resolve_at {
+                if self.pass_result.is_some() || now >= resolve_at {
                     self.finish_pass();
                 }
             }
             Phase::ShotFlight { resolve_at } => {
-                if now >= resolve_at {
+                if self
+                    .pending_shot
+                    .as_ref()
+                    .is_some_and(|pending| pending.result.is_some())
+                    || now >= resolve_at
+                {
                     crate::resolve::shot::finish(self);
                 }
             }
@@ -782,14 +956,14 @@ impl World {
                 }
             }
             Phase::Live => {
-                if self.clock.shot_clock <= 0.0 {
-                    let actor = self.holder().unwrap_or(0);
+                if self.clock.shot_clock <= 0.0 && self.pending_rebound.is_none() {
+                    let team = self.possession.team;
+                    let actor = self.holder().unwrap_or_else(|| self.primary_handler(team));
                     self.line_mut(actor).turnovers += 1;
                     self.emit(Fact::Turnover {
                         player: actor,
                         kind: crate::action::TurnoverKind::ShotClock,
                     });
-                    let team = self.players[actor].team;
                     self.end_possession("shot_clock", 0);
                     self.start_possession(team.other(), PossessionKind::Live);
                 }
@@ -799,92 +973,79 @@ impl World {
     }
 
     fn finish_pass(&mut self) {
-        let BallState::Pass { to, .. } = self.ball.clone() else {
+        let Some(info) = self.pass_in_flight.take() else {
             return;
         };
-        self.ball = BallState::Held(to);
-        self.phase = Phase::Live;
-        self.active = None;
-        self.next_decision_at = self.now() + DECISION_INTERVAL;
+        let pass_id = info.pass_id;
+        let from = info.from;
+        let kind = info.kind;
+        match self.pass_result.take() {
+            Some(crate::ball::PassResult::Caught { to: caught }) => {
+                self.ball.set_held(caught);
+                self.phase = Phase::Live;
+                self.active = None;
+                self.screen_defender = None;
+                self.possession.last_pass_at = Some(self.now());
+                self.possession.ball_phase = crate::state::BallPhase::Catch;
+                self.emit(Fact::Pass {
+                    pass_id,
+                    from,
+                    to: caught,
+                    kind,
+                    completed: true,
+                });
+                if kind == crate::action::PassKind::Lob {
+                    let cutter = caught;
+                    let defender_distance = self
+                        .players
+                        .iter()
+                        .filter(|player| player.on_court && player.team != self.players[cutter].team)
+                        .map(|player| (player.pos - self.players[cutter].pos).length())
+                        .fold(f32::INFINITY, f32::min);
+                    self.possession.last_cut_at = Some(self.now());
+                    self.possession.last_cut_actor = Some(cutter);
+                    self.possession.ball_phase = crate::state::BallPhase::Cut;
+                    self.emit(Fact::Cut {
+                        cutter,
+                        arrived: true,
+                        defender_distance_ft: defender_distance,
+                    });
+                }
+                self.players[caught].schedule.next_redecide_at =
+                    self.now() + f64::from(self.rules.redecide_interval_seconds);
+                self.players[caught].schedule.pending =
+                    Some(crate::state::DecisionTrigger::PassReceived);
+            }
+            Some(crate::ball::PassResult::Intercepted { by }) => {
+                self.line_mut(from).turnovers += 1;
+                self.line_mut(by).steals += 1;
+                self.emit(Fact::Steal {
+                    player: by,
+                    victim: from,
+                });
+                self.emit(Fact::Turnover {
+                    player: from,
+                    kind: crate::action::TurnoverKind::BadPass,
+                });
+                let team = self.players[from].team;
+                self.end_possession("turnover", 0);
+                self.start_possession(team.other(), PossessionKind::Live);
+            }
+            Some(crate::ball::PassResult::Incomplete) | None => {
+                self.line_mut(from).turnovers += 1;
+                self.emit(Fact::Turnover {
+                    player: from,
+                    kind: crate::action::TurnoverKind::BadPass,
+                });
+                let team = self.players[from].team;
+                self.end_possession("turnover", 0);
+                self.start_possession(team.other(), PossessionKind::Live);
+            }
+        }
     }
 
     fn maybe_decide(&mut self) {
-        if !matches!(self.phase, Phase::Live) {
-            return;
-        }
-        if self.active.is_some() {
-            return;
-        }
-        if self.now() < self.next_decision_at {
-            return;
-        }
-        // 选板与故意犯规都在决策时刻推进：两者都会发事实，
-        // 而事实写入会分配内存，稳态 tick 必须保持零分配。
-        crate::tactics::update_play_window(self);
-        if crate::timeouts::coach_stop_run(self) {
-            return;
-        }
-        if let Some(plan) = crate::endgame::intentional_foul(self) {
-            crate::resolve::foul::apply_non_shooting_foul(self, plan.fouler, plan.target);
-            return;
-        }
-        let decision = crate::policy::choose_action(self);
-        let intent = decision.intent.clone();
-        let since_screen = self
-            .possession
-            .last_screen
-            .map(|read| self.now() - read.at)
-            .unwrap_or(f64::INFINITY);
-        let shooter_three = self.players[intent.actor].data.attributes.shooting_three;
-        self.decision_samples.push(DecisionSample {
-            route: crate::views::screen_read_route(self),
-            family: intent.kind.family(),
-            shot_clock: self.clock.shot_clock,
-            since_screen,
-            shooter_three,
-            utility: decision.utility,
-            beta: decision.beta,
-            gamma: decision.gamma,
-            candidates: decision.candidate_count.min(u8::MAX as usize) as u8,
-            trace: Some(self.decision_traces.len() as u32),
-        });
-        self.active_trace = Some(self.decision_traces.len() as u32);
-        self.decision_traces.push(decision.trace);
-        self.next_decision_at = self.now() + DECISION_INTERVAL;
-        if self.possession.first_action_seconds.is_none() {
-            self.possession.first_action_seconds = Some(self.now() - self.possession.started_at);
-        }
-        match intent.kind {
-            crate::action::ActionKind::Drive
-            | crate::action::ActionKind::Finish
-            | crate::action::ActionKind::Dribble
-            | crate::action::ActionKind::PostUp
-            | crate::action::ActionKind::Relocate => {
-                self.players[intent.actor].target = intent.to_ft;
-            }
-            crate::action::ActionKind::Cut => {
-                if let Some(cutter) = intent.target {
-                    self.players[cutter].target = self.hoop_for(self.players[cutter].team);
-                }
-            }
-            _ => {}
-        }
-        if let crate::action::ActionKind::Pass(_) = intent.kind {
-            let target = intent.target.expect("pass requires a target");
-            self.ball = BallState::Pass {
-                from: intent.actor,
-                to: target,
-                from_pos: intent.from_ft,
-                to_pos: intent.to_ft,
-                start: intent.start_time,
-                duration: intent.duration,
-                completed: true,
-            };
-            self.phase = Phase::PassFlight {
-                resolve_at: intent.end_time(),
-            };
-        }
-        self.active = Some(intent);
+        crate::policy::tick(self);
     }
 
     fn check_period_end(&mut self) {
@@ -925,205 +1086,5 @@ impl World {
     }
 }
 
-pub struct GameReport {
-    pub seed: u64,
-    pub home_team: String,
-    pub away_team: String,
-    pub home_score: u32,
-    pub away_score: u32,
-    pub periods: u32,
-    pub ticks: u64,
-    pub open_business_instances: u64,
-    pub rebound_attempts: u64,
-    pub possessions: Vec<PossessionRecord>,
-    pub box_score: BoxScore,
-    pub events: Vec<TimedFact>,
-    pub shot_clock_at_release: Vec<f64>,
-    pub contest_samples: Vec<f32>,
-    pub shot_samples: Vec<ShotSample>,
-    pub pass_samples: Vec<PassSample>,
-    pub decision_samples: Vec<DecisionSample>,
-    /// 逐次决策的因果快照，供决定审计与回归比对。
-    pub decision_traces: Vec<crate::state::DecisionTraceSample>,
-    pub shot_zone_counts: [[u32; 4]; 2],
-    pub shot_zone_makes: [[u32; 4]; 2],
-    pub creation_counts: [u32; 7],
-    pub violations: Vec<String>,
-    pub games: u32,
-}
-
-impl GameReport {
-    pub fn empty() -> Self {
-        Self {
-            seed: 0,
-            home_team: String::new(),
-            away_team: String::new(),
-            home_score: 0,
-            away_score: 0,
-            periods: 0,
-            ticks: 0,
-            open_business_instances: 0,
-            rebound_attempts: 0,
-            possessions: Vec::new(),
-            box_score: BoxScore::default(),
-            events: Vec::new(),
-            shot_clock_at_release: Vec::new(),
-            contest_samples: Vec::new(),
-            shot_samples: Vec::new(),
-            pass_samples: Vec::new(),
-            decision_samples: Vec::new(),
-            decision_traces: Vec::new(),
-            shot_zone_counts: [[0; 4]; 2],
-            shot_zone_makes: [[0; 4]; 2],
-            creation_counts: [0; 7],
-            violations: Vec::new(),
-            games: 0,
-        }
-    }
-
-    pub fn merge(&mut self, other: &GameReport) {
-        self.games += other.games;
-        self.ticks += other.ticks;
-        self.rebound_attempts += other.rebound_attempts;
-        // 未结算实例是单场比赛的流尾性质，聚合后没有对应物，不累加。
-        self.open_business_instances = 0;
-        self.home_score += other.home_score;
-        self.away_score += other.away_score;
-        self.possessions.extend_from_slice(&other.possessions);
-        for team in [0usize, 1] {
-            for zone in 0..4 {
-                self.shot_zone_counts[team][zone] += other.shot_zone_counts[team][zone];
-                self.shot_zone_makes[team][zone] += other.shot_zone_makes[team][zone];
-            }
-        }
-        for (mine, theirs) in self
-            .creation_counts
-            .iter_mut()
-            .zip(other.creation_counts.iter())
-        {
-            *mine += theirs;
-        }
-        self.contest_samples
-            .extend_from_slice(&other.contest_samples);
-        self.shot_clock_at_release
-            .extend_from_slice(&other.shot_clock_at_release);
-        self.shot_samples.extend_from_slice(&other.shot_samples);
-        self.pass_samples.extend_from_slice(&other.pass_samples);
-        self.decision_samples
-            .extend_from_slice(&other.decision_samples);
-        self.violations.extend_from_slice(&other.violations);
-        // 过程判据从事实流聚合，因此聚合报告必须保留事件。
-        // 事件里的 `trace` 是局内下标，并入后要按下标偏移重映射，
-        // 否则聚合报告的决策快照会指向另一场比赛的另一手动作。
-        let offset = self.decision_traces.len() as u32;
-        let start = self.events.len();
-        self.events.extend_from_slice(&other.events);
-        if offset != 0 {
-            for event in &mut self.events[start..] {
-                if let Some(index) = event.trace {
-                    event.trace = Some(index + offset);
-                }
-            }
-        }
-        self.decision_traces
-            .extend(other.decision_traces.iter().cloned());
-        merge_lines(&mut self.box_score.home, &other.box_score.home);
-        merge_lines(&mut self.box_score.away, &other.box_score.away);
-    }
-}
-
-fn merge_lines(mine: &mut Vec<PlayerLine>, theirs: &[PlayerLine]) {
-    for line in theirs {
-        match mine.iter_mut().find(|existing| existing.id == line.id) {
-            Some(existing) => {
-                existing.seconds += line.seconds;
-                existing.points += line.points;
-                existing.fgm += line.fgm;
-                existing.fga += line.fga;
-                existing.tpm += line.tpm;
-                existing.tpa += line.tpa;
-                existing.ftm += line.ftm;
-                existing.fta += line.fta;
-                existing.oreb += line.oreb;
-                existing.dreb += line.dreb;
-                existing.assists += line.assists;
-                existing.steals += line.steals;
-                existing.blocks += line.blocks;
-                existing.turnovers += line.turnovers;
-                existing.fouls += line.fouls;
-                existing.shooting_fouls += line.shooting_fouls;
-                existing.and_one += line.and_one;
-                existing.plus_minus += line.plus_minus;
-            }
-            None => mine.push(line.clone()),
-        }
-    }
-}
-
-fn assign_slots(players: &mut [PlayerState], team: TeamSide) {
-    let mut used = [false; 5];
-    for player in players.iter_mut().filter(|p| p.on_court && p.team == team) {
-        player.slot = slot_for_position(player.data.position, &mut used);
-    }
-}
-
-fn slot_for_position(position: nba_domain::PlayerPosition, used: &mut [bool; 5]) -> Slot {
-    let order: [Slot; 5] = match position {
-        nba_domain::PlayerPosition::Point | nba_domain::PlayerPosition::Combo => [
-            Slot::Handler,
-            Slot::Wing,
-            Slot::Corner,
-            Slot::Post,
-            Slot::DunkerSpot,
-        ],
-        nba_domain::PlayerPosition::Wing => [
-            Slot::Wing,
-            Slot::Corner,
-            Slot::Handler,
-            Slot::Post,
-            Slot::DunkerSpot,
-        ],
-        nba_domain::PlayerPosition::Forward => [
-            Slot::Corner,
-            Slot::Post,
-            Slot::Wing,
-            Slot::DunkerSpot,
-            Slot::Handler,
-        ],
-        nba_domain::PlayerPosition::Big => [
-            Slot::Post,
-            Slot::DunkerSpot,
-            Slot::Corner,
-            Slot::Wing,
-            Slot::Handler,
-        ],
-        nba_domain::PlayerPosition::Center => [
-            Slot::DunkerSpot,
-            Slot::Post,
-            Slot::Corner,
-            Slot::Wing,
-            Slot::Handler,
-        ],
-    };
-    for slot in order {
-        let index = slot_index(slot);
-        if !used[index] {
-            used[index] = true;
-            return slot;
-        }
-    }
-    Slot::DunkerSpot
-}
-
-fn slot_index(slot: Slot) -> usize {
-    match slot {
-        Slot::Handler => 0,
-        Slot::Wing => 1,
-        Slot::Corner => 2,
-        Slot::Post => 3,
-        Slot::DunkerSpot => 4,
-        Slot::Top => 0,
-    }
-}
-
 pub use crate::formation::{defense_spots, offense_spots};
+pub use crate::report::GameReport;

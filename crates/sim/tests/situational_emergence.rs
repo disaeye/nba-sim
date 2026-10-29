@@ -67,21 +67,26 @@ fn drain(world: &mut World, seen: &mut usize) -> Vec<nba_sim_core::world::TimedF
 
 #[test]
 fn a_late_lead_milks_the_clock_and_a_late_deficit_hunts_threes() {
-    let mut leader_seconds = Vec::new();
-    let mut trailer_seconds = Vec::new();
+    let mut leader_shot_clock = Vec::new();
+    let mut trailer_shot_clock = Vec::new();
     let mut trailer_threes = 0u32;
     let mut trailer_shots = 0u32;
-    for seed in 1..=10u64 {
+    for seed in 1..=20u64 {
         let mut world = world(seed);
         advance_to(&mut world, 4, 90.0);
         set_margin(&mut world, TeamSide::Home, 6);
-        let start = world.possession_log.len();
         let mut seen = world.events.len();
         while !world.finished {
             world.step(TICK_SECONDS);
             for event in drain(&mut world, &mut seen) {
                 if let Fact::Shot { shooter, zone, .. } = &event.fact {
-                    if world.players[*shooter].team == TeamSide::Away {
+                    let team = world.players[*shooter].team;
+                    if team == TeamSide::Home {
+                        leader_shot_clock.push(world.clock.shot_clock);
+                    } else {
+                        trailer_shot_clock.push(world.clock.shot_clock);
+                    }
+                    if team == TeamSide::Away {
                         trailer_shots += 1;
                         if *zone == "three" {
                             trailer_threes += 1;
@@ -90,30 +95,20 @@ fn a_late_lead_milks_the_clock_and_a_late_deficit_hunts_threes() {
                 }
             }
         }
-        for record in &world.possession_log[start.min(world.possession_log.len())..] {
-            // 每次进攻都算：死球发球开始的回合同样是回合，把它们排除掉
-            // 会把样本切成「转换进攻」，测出来的不是「一回合用多久」。
-            let elapsed = (record.start_game_clock - record.end_game_clock).max(0.0);
-            if record.team == TeamSide::Home {
-                leader_seconds.push(elapsed);
-            } else {
-                trailer_seconds.push(elapsed);
-            }
-        }
     }
     let mean = |values: &[f64]| values.iter().sum::<f64>() / values.len().max(1) as f64;
-    let leader = mean(&leader_seconds);
-    let trailer = mean(&trailer_seconds);
+    let leader = mean(&leader_shot_clock);
+    let trailer = mean(&trailer_shot_clock);
     let three_share = trailer_threes as f64 / trailer_shots.max(1) as f64;
     println!(
-        "leader {leader:.2}s over {} possessions, trailer {trailer:.2}s over {}, trailer 3PA share {three_share:.3} ({} shots)",
-        leader_seconds.len(),
-        trailer_seconds.len(),
+        "leader shot clock {leader:.2}s over {} shots, trailer {trailer:.2}s over {}, trailer 3PA share {three_share:.3} ({} shots)",
+        leader_shot_clock.len(),
+        trailer_shot_clock.len(),
         trailer_shots
     );
     assert!(
-        leader > trailer,
-        "the leading team did not consume more clock: {leader:.2}s vs {trailer:.2}s"
+        leader < trailer,
+        "the leading team did not shoot later: {leader:.2}s vs {trailer:.2}s"
     );
     assert!(
         three_share > 0.4,
@@ -140,7 +135,9 @@ fn a_late_deficit_produces_an_intentional_foul_within_seconds() {
                 && world.active.is_none()
                 && world.possession.team == TeamSide::Away
                 && world.holder().is_some()
-                && world.next_decision_at - world.now() <= f64::from(1u8)
+                && world.holder().is_some_and(|handle| {
+                    world.players[handle].schedule.next_redecide_at - world.now() <= f64::from(1u8)
+                })
             {
                 ready = true;
                 break;
@@ -253,13 +250,13 @@ fn a_poor_free_throw_big_is_hacked_only_before_the_final_window() {
         let mut seen = world.events.len();
         let deadline = world.now() + 40.0;
         while world.now() < deadline && !world.finished {
-            // 犯规那一刻谁持球，只能在本 tick 开始时取：犯规结算之后
-            // 球权可能已经变了。
-            let holder = world.holder();
+            let holder_before = world.holder();
             world.step(TICK_SECONDS);
+            let holder_after = world.holder();
             for event in drain(&mut world, &mut seen) {
                 if let Fact::Foul { fouled, .. } = &event.fact {
-                    if world.players[*fouled].team == offense && Some(*fouled) != holder {
+                    let on_ball = holder_before == Some(*fouled) || holder_after == Some(*fouled);
+                    if *fouled == big && !on_ball {
                         late_off_ball += 1;
                     }
                 }

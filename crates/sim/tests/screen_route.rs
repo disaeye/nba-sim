@@ -19,7 +19,15 @@ fn screen_route_reaches_the_next_decision() {
     for _ in 0..40_000 {
         world.step(0.05);
         while cursor < world.events.len() {
-            if let Fact::Screen { route, .. } = &world.events[cursor].fact {
+            if let Fact::Screen {
+                route,
+                displacement_ft,
+                strength,
+                ..
+            } = &world.events[cursor].fact
+            {
+                assert!(displacement_ft.is_finite() && *displacement_ft >= 0.0);
+                assert!((0.0..=1.0).contains(strength));
                 resolved = Some(*route);
             }
             cursor += 1;

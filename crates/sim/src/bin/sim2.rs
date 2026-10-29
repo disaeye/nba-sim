@@ -301,4 +301,14 @@ fn report_distributions(report: &nba_sim_core::GameReport) {
             report.creation_counts[6] as f32 / total as f32
         );
     }
+    let mut counts: std::collections::BTreeMap<&'static str, usize> = std::collections::BTreeMap::new();
+    let mut tovs: std::collections::BTreeMap<(usize, &'static str), usize> = std::collections::BTreeMap::new();
+    for event in &report.events {
+        *counts.entry(event.fact.name()).or_default() += 1;
+        if let nba_sim_core::action::Fact::Turnover { player, kind } = &event.fact {
+            *tovs.entry((*player, kind.as_str())).or_default() += 1;
+        }
+    }
+    println!("  events breakdown (total {}): {:?}", report.events.len(), counts);
+    println!("  turnovers breakdown: {:?}", tovs);
 }

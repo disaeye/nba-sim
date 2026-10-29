@@ -132,8 +132,9 @@ fn strong_side_corner_holds_position_when_carrier_enters_the_paint() {
     let corner = strong_side_corner(&world, carrier).expect("a strong-side corner defender exists");
     let perimeter = world.players[carrier].pos;
     let outside = target_of(&world, corner);
-    // 持球人突到篮下。
-    world.players[carrier].pos = hoop + Vec2::new(-4.0, 1.5);
+    // 持球人突到篮下（保持在同侧油漆区）。
+    let side_offset = if perimeter.y >= hoop.y { 1.5 } else { -1.5 };
+    world.players[carrier].pos = hoop + Vec2::new(-4.0, side_offset);
     let inside = target_of(&world, corner);
     world.players[carrier].pos = perimeter;
     let shift = (inside - outside).length();

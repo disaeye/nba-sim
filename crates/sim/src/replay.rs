@@ -8,7 +8,7 @@ use std::path::Path;
 
 use nba_protocol::StreamTick;
 
-use crate::params::Params;
+use crate::params::RuntimeParams;
 use crate::world::{MatchSetup, World, TICK_SECONDS};
 
 /// 单个回合的帧流。
@@ -34,7 +34,7 @@ pub fn replay_possession(
     calibration_dir: &Path,
     possession_id: u64,
 ) -> Result<PossessionFrames, String> {
-    let params = Params::load(calibration_dir)?;
+    let params = RuntimeParams::load(calibration_dir)?;
     let setup = MatchSetup::builtin(nba_domain::GameRules::default());
     let mut world = World::new(setup, params, seed);
     let mut frames = Vec::new();

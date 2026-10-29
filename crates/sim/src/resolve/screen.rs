@@ -1,79 +1,74 @@
 //! 掩护结算：接触、防守人路线、分离距离。
 
 use glam::Vec2;
-use rand::Rng;
 
 use crate::action::{
     ActionIntent, ActionKind, ActionOutcome, Completion, DefenderRoute, Fact, ScreenKind,
     StateDelta, TurnoverKind,
 };
-use crate::resolve::clamp01;
 use crate::world::World;
 
 pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> ActionOutcome {
     let screener = intent.target.expect("screen requires a screener");
     let team = world.players[screener].team;
-    let handler_pos = world.players[intent.actor].pos;
     let defender = world
-        .players
-        .iter()
-        .enumerate()
-        .filter(|(_, p)| p.on_court && p.team != team)
-        .min_by(|a, b| {
-            (a.1.pos - handler_pos)
-                .length_squared()
-                .partial_cmp(&(b.1.pos - handler_pos).length_squared())
-                .expect("finite distances")
-        })
-        .map(|(index, _)| index);
+        .screen_defender
+        .expect("screen resolution requires its decision-time defender");
+    assert!(
+        world.players[defender].on_court && world.players[defender].team != team,
+        "screen defender must remain on court and opposite the screener's team"
+    );
 
-    let Some(defender) = defender else {
-        return ActionOutcome {
-            actor: intent.actor,
-            kind: ActionKind::Screen(kind),
-            completion: Completion::Failed,
-            delta: StateDelta::default(),
-            facts: Vec::new(),
-        };
-    };
-
-    // 掩护人走向防守人，形成真实接触位置。
     let defender_pos = world.players[defender].pos;
-    let handler_pos = world.players[intent.actor].pos;
-    let toward_handler = (handler_pos - defender_pos).normalize_or_zero();
-    let contact_point = defender_pos + toward_handler * 1.6;
-    world.players[screener].pos = contact_point;
-    world.players[screener].target = contact_point;
 
     let strength = world.players[screener].data.attributes.strength;
     let defender_skill = world.players[defender].data.attributes.defense_perimeter;
-    let agility = world.players[defender].data.attributes.agility;
-    let contact = true;
+    let contact_threshold = world.params.policy.g("pressure_separation_ft")
+        + world.rules.contact_margin_ft;
+    let contact = (world.players[screener].pos - defender_pos).length() <= contact_threshold;
 
-    let switch_pressure = clamp01(0.12 + 0.55 * (strength - defender_skill));
-    let under_pressure = clamp01(0.20 + 0.45 * (strength - agility));
-    let roll = world.rng.gen::<f32>();
-    let route = if roll < switch_pressure {
+    let shooter_three = world.players[intent.actor].data.attributes.shooting_three;
+    let roll = world.draw(crate::draw::Stream::Decision, defender, crate::draw::purpose::ACTION_CHOICE, 0);
+    // 力量连续调制防守路线与推开距离；防守抵抗力经 capability 映射计算。
+    let defender_attributes = &world.players[defender].data.attributes;
+    let resistance = nba_domain::capability::effective_post_defense_physicality(
+        &world.rules,
+        defender_attributes,
+    );
+    let separation_before = (world.players[screener].pos - defender_pos).length();
+    let contact_window = (world.params.policy.g("screen_contact_range_ft") - separation_before)
+        .clamp(0.0, world.params.policy.g("screen_contact_range_ft"))
+        / world.params.policy.g("screen_contact_range_ft");
+    let strength_edge = strength - defender_skill;
+    let push_chance = crate::resolve::sigmoid(
+        world.params.policy.w("screen_push_strength_gain") * strength_edge - 1.0,
+    ) * contact_window;
+    let route = if roll < push_chance {
         DefenderRoute::Switch
-    } else if roll < switch_pressure + under_pressure {
+    } else if shooter_three >= 0.70 {
+        if roll < 0.45 {
+            DefenderRoute::Under
+        } else {
+            DefenderRoute::Over
+        }
+    } else if roll < 0.65 {
         DefenderRoute::Under
     } else {
         DefenderRoute::Over
     };
+    let strength_edge = strength - resistance;
+    let displacement_ft = strength_edge.max(0.0)
+        * world.params.policy.w("screen_push_displacement_gain_ft")
+        * contact_window;
+    let separation = (world.players[screener].pos - world.players[defender].pos)
+        .length()
+        .max(0.2);
 
-    let separation = match route {
-        DefenderRoute::Switch => 0.4,
-        DefenderRoute::Under => 2.4 + 2.0 * strength,
-        DefenderRoute::Over => 1.0 + 1.2 * strength,
-        DefenderRoute::Trapped => 0.2,
-    };
-
-    // 移动掩护：掩护人没站住，吹进攻犯规，球权转换。对抗强度高的
-    // 掩护人更容易推着防守人走。
+    // 移动掩护只在真实接触且掩护人仍以明显速度移动时成立。
     let screener_physicality = world.players[screener].data.tendencies.physicality;
-    let moving = world.params.policy.w("moving_screen_foul_rate")
-        * (world.params.policy.w("moving_screen_physicality_base") + screener_physicality);
-    if world.rng.gen::<f32>() < moving {
+    let screener_speed = world.players[screener].vel.length();
+    let moving = contact && screener_speed > 2.0 - 0.8 * screener_physicality;
+    if moving {
         world.line_mut(screener).turnovers += 1;
         world.emit(Fact::Turnover {
             player: screener,
@@ -95,10 +90,13 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
     world.possession.screens += 1;
     world.emit(Fact::Screen {
         screener,
+        team,
         on_ball: kind == ScreenKind::OnBall,
         contact,
         route,
         separation_ft: separation,
+        strength,
+        displacement_ft,
     });
 
     ActionOutcome {

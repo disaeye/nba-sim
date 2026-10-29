@@ -28,6 +28,22 @@ fn live_world(seed: u64) -> World {
     panic!("the engine never reached a live ball state");
 }
 
+fn world_with_rules(seed: u64, rules: GameRules) -> World {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    World::new(MatchSetup::builtin(rules), params, seed)
+}
+
+fn live_world_with_rules(seed: u64, rules: GameRules) -> World {
+    let mut world = world_with_rules(seed, rules);
+    for _ in 0..40_000 {
+        world.step(TICK_SECONDS);
+        if matches!(world.phase, Phase::Live) && world.holder().is_some() {
+            return world;
+        }
+    }
+    panic!("the engine never reached a live ball state");
+}
+
 fn is_dead_ball(phase: &Phase) -> bool {
     !matches!(
         phase,
@@ -241,7 +257,7 @@ fn one_hundred_full_games_never_change_the_lineup_while_the_ball_is_live() {
     for seed in 1..=100u64 {
         let mut world = world(seed);
         while !world.finished && world.clock.tick < 2_000_000 {
-            let before = world.phase.clone();
+            let before = world.phase;
             let lineup_before: Vec<usize> = world
                 .players
                 .iter()
@@ -350,5 +366,133 @@ fn play_resumes_with_the_ball_after_a_timeout() {
     assert_eq!(
         world.possession.team, offense,
         "the team that called the timeout lost the ball"
+    );
+}
+
+const RULE_COVERAGE: [(&str, &str, bool, bool, bool, bool); 6] = [
+    (
+        "shot_clock_reset",
+        "a_second_chance_clock_only_resets_when_the_ball_touched_the_rim",
+        true,
+        true,
+        true,
+        true,
+    ),
+    (
+        "team_bonus",
+        "the_fifth_team_foul_awards_free_throws_while_the_fourth_only_restarts_play",
+        true,
+        true,
+        true,
+        true,
+    ),
+    (
+        "offensive_foul",
+        "an_offensive_foul_counts_personally_but_never_sends_the_other_team_to_the_line",
+        true,
+        true,
+        true,
+        true,
+    ),
+    (
+        "away_from_play",
+        "an_away_from_play_foul_in_the_last_two_minutes_is_one_free_throw_and_the_ball",
+        true,
+        true,
+        true,
+        true,
+    ),
+    (
+        "timeout_budget",
+        "only_the_team_in_control_may_stop_the_clock_and_the_budget_is_capped",
+        true,
+        true,
+        true,
+        true,
+    ),
+    (
+        "substitution_window",
+        "one_hundred_full_games_never_change_the_lineup_while_the_ball_is_live",
+        true,
+        true,
+        true,
+        true,
+    ),
+];
+
+#[test]
+fn rule_coverage_matrix_is_complete() {
+    let mut seen = Vec::new();
+    for (rule, test, positive, negative, exemption, interaction) in RULE_COVERAGE {
+        assert!(!rule.is_empty() && !test.is_empty());
+        assert!(positive && negative && exemption && interaction, "{rule} is incomplete");
+        assert!(!seen.contains(&rule), "{rule} is registered twice");
+        seen.push(rule);
+    }
+    assert_eq!(seen.len(), RULE_COVERAGE.len());
+}
+
+#[test]
+fn mutating_the_league_profile_changes_the_called_rule() {
+    let mut rules = GameRules::default();
+    rules.league.bonus_fouls_per_period = 1;
+    rules.league.bonus_fouls_final = 1;
+    let mut world = live_world_with_rules(31, rules);
+    let offense = world.possession.team;
+    let fouler = world
+        .on_court(offense.other())
+        .as_slice()
+        .iter()
+        .copied()
+        .next()
+        .expect("a defender is on the court");
+    let fouled = world.holder().expect("live possession has a holder");
+    apply_non_shooting_foul(&mut world, fouler, fouled);
+    assert_eq!(
+        last_foul(&world).0,
+        2,
+        "mutating the bonus threshold must move the first foul into the penalty"
+    );
+
+    let mut rules = GameRules::default();
+    rules.league.offensive_rebound_shot_clock_seconds = 6.0;
+    let mut world = live_world_with_rules(31, rules);
+    let offense = world.possession.team;
+    let rebounder = world.holder().expect("live possession has a holder");
+    world.clock.shot_clock = 3.0;
+    world.start_second_chance(offense, rebounder, true);
+    assert_eq!(
+        world.clock.shot_clock, 6.0,
+        "mutating the offensive rebound reset must be observed by the clock"
+    );
+
+    let mut rules = GameRules::default();
+    rules.league.max_personal_fouls = 1;
+    let mut world = live_world_with_rules(31, rules);
+    let offense = world.possession.team;
+    let fouler = world
+        .on_court(offense.other())
+        .as_slice()
+        .iter()
+        .copied()
+        .next()
+        .expect("a defender is on the court");
+    let fouled = world.holder().expect("live possession has a holder");
+    apply_non_shooting_foul(&mut world, fouler, fouled);
+    assert!(
+        world.players[fouler].disqualified,
+        "mutating the personal foul limit must disqualify the fouler"
+    );
+
+    let mut rules = GameRules::default();
+    rules.league.timeouts_final_max = 1;
+    let mut world = live_world_with_rules(31, rules);
+    world.clock.period = 4;
+    world.clock.game_clock = 90.0;
+    let offense = world.possession.team;
+    assert!(request(&mut world, offense));
+    assert!(
+        !request(&mut world, offense),
+        "mutating the final-window timeout cap must refuse the second request"
     );
 }

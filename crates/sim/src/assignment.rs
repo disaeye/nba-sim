@@ -1,0 +1,408 @@
+//! 职责与目标点的提交。
+//!
+//! 目标点不是每 tick 重写的：候选目标先经过最小变化阈值与职责停留时间，
+//! 只有越过阈值才提交。职责标签只在变化时更新，换人或球权变化等事件可
+//! 以强制提交。
+
+use glam::Vec2;
+
+use crate::action::ActionKind;
+use crate::state::{DefenseResponsibility, OffenseJob, Phase, Slot, TargetKind};
+use crate::world::World;
+
+pub fn commit_target(world: &mut World, handle: usize, desired: Vec2) -> bool {
+    commit_target_as(world, handle, desired, TargetKind::Station, usize::MAX)
+}
+
+pub fn commit_target_as(
+    world: &mut World,
+    handle: usize,
+    desired: Vec2,
+    kind: TargetKind,
+    partner: usize,
+) -> bool {
+    if kind == TargetKind::Pressure
+        && (partner == usize::MAX || !world.players[partner].on_court)
+    {
+        return false;
+    }
+    let deadband = if kind == TargetKind::Pressure {
+        0.2
+    } else {
+        world.params.policy.g("assignment_deadband_ft")
+    };
+    let dwell = if kind == TargetKind::Pressure {
+        0.1
+    } else {
+        f64::from(world.params.policy.g("assignment_dwell_seconds"))
+    };
+    let max_step = world.params.policy.g("assignment_max_step_ft");
+    let now = world.now();
+    let (current, changed_at) = {
+        let player = &world.players[handle];
+        (player.target, player.target_changed_at)
+    };
+    let delta = desired - current;
+    if delta.length_squared() <= deadband * deadband {
+        return false;
+    }
+    if now - changed_at < dwell {
+        return false;
+    }
+    let mut candidate = current + delta.clamp_length_max(max_step);
+    if !validate_target(world, handle, candidate, kind, partner) {
+        if validate_target(world, handle, desired, kind, partner) {
+            candidate = desired;
+        } else if let Some(alt) = alternative_target(world, handle, desired, kind, partner) {
+            candidate = alt;
+        } else {
+            let player = &mut world.players[handle];
+            player.invalid_commits += 1;
+            player.invalid_commits_by_kind[kind.index()] += 1;
+            return false;
+        }
+    }
+    let player = &mut world.players[handle];
+    player.target = candidate;
+    player.target_kind = kind;
+    player.target_partner = partner;
+    player.target_changed_at = now;
+    player.progress_best_ft = f32::MAX;
+    player.nonprogress_seconds = 0.0;
+    player.yielding_since = 0.0;
+    player.recovery_path_ft = 0.0;
+    true
+}
+
+/// 事件触发的提交：球权变化、掩护接触、换人后立即生效。
+pub fn force_target(world: &mut World, handle: usize, desired: Vec2) {
+    force_target_as(world, handle, desired, TargetKind::Station, usize::MAX);
+}
+
+pub fn force_target_as(
+    world: &mut World,
+    handle: usize,
+    desired: Vec2,
+    kind: TargetKind,
+    partner: usize,
+) -> bool {
+    let mut target = desired;
+    if !validate_target(world, handle, target, kind, partner) {
+        if kind == TargetKind::Station {
+            if let Some(alt) = alternative_target(world, handle, desired, kind, partner) {
+                target = alt;
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    let now = world.now();
+    let player = &mut world.players[handle];
+    player.target = target;
+    player.target_kind = kind;
+    player.target_partner = partner;
+    player.target_changed_at = now;
+    player.progress_best_ft = f32::MAX;
+    player.nonprogress_seconds = 0.0;
+    player.yielding_since = 0.0;
+    player.recovery_path_ft = 0.0;
+    true
+}
+
+pub fn pressure_separation(world: &World) -> f32 {
+    world.params.policy.g("pressure_separation_ft")
+}
+
+pub fn mark_target(world: &mut World, handle: usize, kind: TargetKind, partner: usize) {
+    let player = &mut world.players[handle];
+    player.target_kind = kind;
+    player.target_partner = partner;
+}
+
+pub fn station_target_valid(world: &World, handle: usize, target: Vec2) -> bool {
+    let radius = world.rules.player_radius_ft;
+    if target.x < radius
+        || target.y < radius
+        || target.x > world.rules.court.width_ft - radius
+        || target.y > world.rules.court.height_ft - radius
+    {
+        return false;
+    }
+    let min_separation = world.rules.min_player_separation_ft;
+    for (other, player) in world.players.iter().enumerate() {
+        if other == handle || !player.on_court {
+            continue;
+        }
+        if (player.pos - target).length() < min_separation {
+            return false;
+        }
+    }
+    true
+}
+
+fn validate_target(
+    world: &World,
+    handle: usize,
+    target: Vec2,
+    kind: TargetKind,
+    partner: usize,
+) -> bool {
+    let radius = world.rules.player_radius_ft;
+    if target.x < radius
+        || target.y < radius
+        || target.x > world.rules.court.width_ft - radius
+        || target.y > world.rules.court.height_ft - radius
+    {
+        return false;
+    }
+    match kind {
+        TargetKind::Station => station_target_valid(world, handle, target),
+        TargetKind::Pressure => {
+            if partner == usize::MAX || !world.players[partner].on_court {
+                return false;
+            }
+            let separation = if world.players[handle].defense_responsibility
+                == DefenseResponsibility::Deny
+            {
+                pressure_separation(world)
+            } else {
+                world.rules.min_player_separation_ft
+            };
+            let distance = (target - world.players[partner].pos).length();
+            distance >= separation - 0.25 && distance <= separation + 2.5
+        }
+        TargetKind::Contact => {
+            if partner == usize::MAX || !world.players[partner].on_court {
+                return false;
+            }
+            let reach = world.rules.player_radius_ft
+                + world.rules.body_contact_radius_ft
+                + world.rules.contact_margin_ft;
+            let distance = (target - world.players[partner].pos).length();
+            distance <= reach && distance >= world.rules.min_player_separation_ft - 0.1
+        }
+        TargetKind::Window => true,
+    }
+}
+
+fn alternative_target(
+    world: &World,
+    handle: usize,
+    desired: Vec2,
+    kind: TargetKind,
+    partner: usize,
+) -> Option<Vec2> {
+    const DIRECTIONS: [(f32, f32); 8] = [
+        (1.0, 0.0),
+        (-1.0, 0.0),
+        (0.0, 1.0),
+        (0.0, -1.0),
+        (0.707, 0.707),
+        (-0.707, 0.707),
+        (0.707, -0.707),
+        (-0.707, -0.707),
+    ];
+    let offset = world.rules.min_player_separation_ft
+        + world.rules.separation_safety_margin_ft;
+    if kind == TargetKind::Pressure && partner != usize::MAX && world.players[partner].on_court {
+        let separation = if world.players[handle].defense_responsibility
+            == DefenseResponsibility::Deny
+        {
+            pressure_separation(world)
+        } else {
+            world.rules.min_player_separation_ft
+        };
+        let center = world.players[partner].pos;
+        for radius in [separation, separation + 0.5, separation + 1.0] {
+            for (x, y) in DIRECTIONS {
+                let candidate = center + Vec2::new(x, y) * radius;
+                if validate_target(world, handle, candidate, kind, partner) {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    for factor in [1.0_f32, 2.0, 3.0] {
+        for (x, y) in DIRECTIONS {
+            let candidate = desired + Vec2::new(x, y) * offset * factor;
+            if validate_target(world, handle, candidate, kind, partner) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// 被挡住超过 0.5 s 后，由职责层在同一个职责下换一个可达点；
+/// 底层运动积分只负责等待和绕行，不能自行改写职责。
+pub fn reselect_yielding(world: &mut World, handle: usize, desired: Vec2) -> bool {
+    let now = world.now();
+    let player = &world.players[handle];
+    if player.yielding_since == 0.0 || now - player.yielding_since < 0.5 {
+        return false;
+    }
+    let blocker = player.avoidance_blocker;
+    let side = if player.avoidance_side == 0 {
+        1
+    } else {
+        player.avoidance_side
+    };
+    let kind = player.target_kind;
+    let partner = player.target_partner;
+    let lateral = if blocker != usize::MAX && world.players[blocker].on_court {
+        let away = (player.pos - world.players[blocker].pos).normalize_or_zero();
+        away.perp() * f32::from(side)
+    } else {
+        Vec2::ZERO
+    };
+    let width = world.rules.court.width_ft;
+    let height = world.rules.court.height_ft;
+    let radius = world.rules.player_radius_ft;
+    let offset = world.rules.min_player_separation_ft
+        + world.rules.separation_safety_margin_ft;
+    let mut target = desired + lateral * offset;
+    if !validate_target(world, handle, target, kind, partner) {
+        const DIRECTIONS: [(f32, f32); 8] = [
+            (1.0, 0.0),
+            (-1.0, 0.0),
+            (0.0, 1.0),
+            (0.0, -1.0),
+            (0.707, 0.707),
+            (-0.707, 0.707),
+            (0.707, -0.707),
+            (-0.707, -0.707),
+        ];
+        for (x, y) in DIRECTIONS {
+            let candidate = desired + Vec2::new(x, y) * offset;
+            if validate_target(world, handle, candidate, kind, partner) {
+                target = candidate;
+                break;
+            }
+        }
+    }
+    let target = target.clamp(
+        Vec2::new(radius, radius),
+        Vec2::new(width - radius, height - radius),
+    );
+    if !force_target_as(world, handle, target, kind, partner)
+        && !force_target_as(
+            world,
+            handle,
+            world.players[handle].pos,
+            crate::state::TargetKind::Window,
+            usize::MAX,
+        )
+    {
+        return false;
+    }
+    let actual = world.players[handle].target;
+    let distance = (actual - world.players[handle].pos).length();
+    let player = &mut world.players[handle];
+    player.recovery_since = now;
+    player.recovery_d0_ft = distance;
+    player.recovery_path_ft = 0.0;
+    player.yielding_since = 0.0;
+    player.avoidance_blocker = usize::MAX;
+    player.nonprogress_seconds = 0.0;
+    player.progress_best_ft = f32::MAX;
+    true
+}
+
+pub fn assign_offense_jobs(world: &mut World) {
+    let offense = world.possession.team;
+    let holder = world.holder();
+    let now = world.now();
+    let dwell = f64::from(world.params.policy.g("assignment_dwell_seconds"));
+    for &handle in world.on_court(offense).as_slice() {
+        let job = if Some(handle) == holder {
+            OffenseJob::Handler
+        } else if world.active.as_ref().is_some_and(|active| {
+            matches!(active.kind, ActionKind::Screen(_)) && active.target == Some(handle)
+        }) {
+            OffenseJob::Screen
+        } else if world.active.as_ref().is_some_and(|active| {
+            matches!(active.kind, ActionKind::Cut) && active.target == Some(handle)
+        }) || world.possession.last_cut_actor == Some(handle) {
+            OffenseJob::Cut
+        } else if world
+            .possession
+            .last_screen
+            .as_ref()
+            .is_some_and(|screen| screen.screener == handle)
+        {
+            OffenseJob::Roll
+        } else if matches!(world.phase, Phase::ShotFlight { .. })
+            && (world.players[handle].pos - world.hoop_for(offense)).length() < 12.0
+        {
+            OffenseJob::Rebound
+        } else {
+            match world.players[handle].slot {
+                Slot::Post => OffenseJob::PostUp,
+                Slot::DunkerSpot => OffenseJob::Roll,
+                _ => OffenseJob::SpotUp,
+            }
+        };
+        let player = &mut world.players[handle];
+        if player.offense_job != job && now - player.assignment_since >= dwell {
+            player.offense_job = job;
+            player.assignment_since = now;
+            player.recovery_since = 0.0;
+            player.recovery_d0_ft = 0.0;
+        }
+    }
+}
+
+pub fn assign_defense_responsibilities(world: &mut World, targets: &[Vec2]) {
+    let defense = world.possession.team.other();
+    let defenders = world.on_court(defense);
+    let carrier = world.holder().or_else(|| world.pass_in_flight.map(|info| info.to));
+    let hoop = world.hoop_for(world.possession.team);
+    let now = world.now();
+    let dwell = f64::from(world.params.policy.g("assignment_dwell_seconds"));
+    let responsibility_dwell = dwell.max(12.0);
+    for (slot, handle) in defenders.as_slice().iter().enumerate() {
+        let man = world.possession.matchup[slot];
+        let current = world.players[*handle].defense_responsibility;
+        let help_threshold = if current == DefenseResponsibility::Help { 9.0 } else { 7.5 };
+        let sink_threshold = if current == DefenseResponsibility::Sink { 11.0 } else { 9.5 };
+        let responsibility = if Some(man) == carrier {
+            DefenseResponsibility::OnBall
+        } else if world
+            .possession
+            .last_offensive_rebound_at
+            .map(|t| now - t < 1.5)
+            .unwrap_or(false)
+            && (world.players[*handle].pos - hoop).length_squared() < 144.0
+        {
+            DefenseResponsibility::BoxOut
+        } else if (targets[slot] - hoop).length_squared() < help_threshold * help_threshold {
+            DefenseResponsibility::Help
+        } else if man != usize::MAX && (world.players[man].pos - hoop).length_squared() < sink_threshold * sink_threshold {
+            DefenseResponsibility::Sink
+        } else {
+            DefenseResponsibility::Deny
+        };
+        let player = &mut world.players[*handle];
+        // 对位刚换人时立刻改职责：对位表刚被重算，负责新持球人的防守人
+        // 必须马上接手，否则会出现好几个人同时是「对位防守人」。
+        let pairing_changed = world.possession.pairing_changed_at > player.assignment_since
+            && (responsibility == DefenseResponsibility::OnBall
+                || player.defense_responsibility == DefenseResponsibility::OnBall);
+        if player.defense_responsibility != responsibility
+            && (pairing_changed || now - player.assignment_since >= responsibility_dwell)
+        {
+            let from = player.defense_responsibility.as_str();
+            player.defense_responsibility = responsibility;
+            player.assignment_since = now;
+            player.recovery_since = 0.0;
+            player.recovery_d0_ft = 0.0;
+            world.emit(crate::action::Fact::DefenseResponsibilityChanged {
+                player: *handle,
+                from,
+                to: responsibility.as_str(),
+            });
+        }
+    }
+}

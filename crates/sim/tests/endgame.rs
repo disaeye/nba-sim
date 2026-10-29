@@ -49,7 +49,7 @@ fn set_score(world: &mut World, team: TeamSide, diff: i32) {
 
 fn place_at_arc(world: &mut World, carrier: usize, team: TeamSide) {
     let hoop = world.hoop_for(team);
-    let spot = hoop + (hoop - world.players[carrier].pos).normalize_or_zero() * 25.0;
+    let spot = hoop + (world.players[carrier].pos - hoop).normalize_or_zero() * 25.0;
     world.players[carrier].pos = spot;
     world.players[carrier].target = spot;
 }
@@ -135,6 +135,7 @@ fn a_trailing_team_late_prefers_three_point_attempts() {
     let mut threes = 0;
     let mut twos = 0;
     for _ in 0..400 {
+        world.clock.tick += 1;
         let decision = nba_sim_core::policy::choose_action(&mut world);
         let intent = decision.intent;
         if let ActionKind::Shoot(_) = intent.kind {
@@ -161,9 +162,11 @@ fn a_leading_team_late_shoots_less_than_a_trailing_one() {
         set_score(&mut world, team, diff);
         world.clock.game_clock = 26.0;
         world.clock.shot_clock = 20.0;
+        place_at_arc(&mut world, carrier, team);
         clear_screen_read(&mut world);
         let mut shots = 0;
         for _ in 0..400 {
+            world.clock.tick += 1;
             let decision = nba_sim_core::policy::choose_action(&mut world);
             if matches!(decision.intent.kind, ActionKind::Shoot(_)) {
                 shots += 1;

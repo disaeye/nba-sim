@@ -5,27 +5,72 @@
     "season": "2024-25",
     "sample": 0,
     "script": "hand-authored formation geometry, reviewed against the shot zone shares",
-    "method": "half-court slot coordinates in feet for a team attacking right; the alternate formation brings the handler to the elbow so pull-ups are not all above the break"
+    "method": "半-court 站位（英尺，进攻向右）：持球 19 ft、弱侧翼 16.4 ft、底角 22.4 ft（真实三分）、低位 8.9 ft、顺下 7.8 ft；除底角外都在弧内，站位决定出手区域分布"
   },
   "offense": [
-    [63.0, 25.0],
-    [73.0, 8.0],
-    [84.0, 2.5],
-    [82.0, 30.0],
-    [85.0, 32.0]
+    [
+      66.5,
+      25.0
+    ],
+    [
+      73.0,
+      8.0
+    ],
+    [
+      85.0,
+      3.0
+    ],
+    [
+      81.0,
+      29.0
+    ],
+    [
+      84.0,
+      31.0
+    ]
   ],
   "offense_alt": [
-    [67.0, 19.0],
-    [73.0, 8.0],
-    [84.0, 2.5],
-    [82.0, 33.0],
-    [85.0, 32.0]
+    [
+      67.0,
+      25.0
+    ],
+    [
+      73.0,
+      8.0
+    ],
+    [
+      85.0,
+      3.0
+    ],
+    [
+      81.0,
+      29.0
+    ],
+    [
+      84.0,
+      31.0
+    ]
   ],
   "defense": [
-    [69.0, 25.0],
-    [75.0, 11.0],
-    [82.0, 5.0],
-    [80.0, 28.0],
-    [83.0, 30.0]
+    [
+      69.0,
+      25.0
+    ],
+    [
+      75.0,
+      11.0
+    ],
+    [
+      82.0,
+      5.0
+    ],
+    [
+      80.0,
+      28.0
+    ],
+    [
+      83.0,
+      30.0
+    ]
   ]
 }
