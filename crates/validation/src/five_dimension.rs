@@ -13,7 +13,7 @@ use nba_domain::rules::GameRules;
 use nba_sim_core::action::Fact;
 use nba_sim_core::endgame::{leverage, win_probability_at};
 use nba_sim_core::params::{workspace_calibration_dir, workspace_root};
-use nba_sim_core::physical::Physical;
+use nba_sim_core::physical::{Coefficients, Physical};
 use nba_sim_core::state::CandidateTrace;
 use nba_sim_core::world::TICK_SECONDS;
 use nba_sim_core::{MatchSetup, Params, TeamSide, World};
@@ -326,14 +326,16 @@ pub fn run_five_dimension(seed_start: u64, games: u64) -> Result<FiveDimensionRe
         let mut previous_target: Vec<_> = world.players.iter().map(|player| player.target).collect();
         let arrival = world.params.policy.g("motion_arrival_epsilon_ft");
         let momentum_cap = world.params.policy.w("momentum_cap");
+        // 物理映射系数在整场开始前解析一次：逐 tick 克隆整张策略表会把
+        // 判定批次变成内存大户，也会让诊断本身变成最慢的一段。
+        let coefficients = Coefficients::from_policy(&world.params.policy);
         while !world.finished {
             world.step(TICK_SECONDS);
-            let policy = world.params.policy.clone();
             for (index, player) in world.players.iter().enumerate() {
                 if !player.on_court {
                     continue;
                 }
-                let physical = Physical::of(player, &policy);
+                let physical = Physical::with(player, &coefficients);
                 tally.player_ticks += 1;
                 if player.vel.length() > physical.speed_ftps + tolerance.velocity {
                     tally.speed_violations += 1;

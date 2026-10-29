@@ -6,4 +6,5 @@
 
 pub mod core_validation;
 pub mod five_dimension;
+pub mod g4;
 pub mod mechanism_core;

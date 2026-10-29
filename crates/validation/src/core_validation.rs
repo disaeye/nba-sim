@@ -120,6 +120,11 @@ impl ValidationScope {
     }
 }
 
+/// 验证器与引擎共用的规则档案。验证器不另建一套阈值。
+pub fn rule_profile() -> nba_domain::GameRules {
+    nba_domain::GameRules::default()
+}
+
 /// 跑一组种子并产出判定报告。单场调用用于面板「对屏幕这一场判定」；
 /// 批次结论由 `validate-core` 的 32 场口径负责。
 pub fn run_core_validation(seed_start: u64, games: u64) -> Result<CoreValidationReport, String> {
@@ -155,11 +160,12 @@ pub fn run_core_validation_scoped_with_dir(
         return Err("core validation requires at least one game".to_string());
     }
     let params = Params::load(calibration)?;
-    let mut reports = Vec::new();
     let mut results = Vec::new();
+    // 聚合报告按场累加：每场跑完就并入并放掉，批次不会把整批事件挂在堆上。
+    let mut merged = GameReport::empty();
     for offset in 0..games {
         let seed = seed_start + offset;
-        let report = run_scoped_game(seed, &params, scope);
+        let mut report = run_scoped_game(seed, &params, scope);
         let ledger = check_ledger(seed, &report);
         results.push(CoreGameResult {
             seed,
@@ -173,12 +179,14 @@ pub fn run_core_validation_scoped_with_dir(
             ledger,
             violations: report.violations.clone(),
         });
-        reports.push(report);
+        merged.merge_for_gate(&report);
+        // 账本对账、违规计数与分布判定都已用完这一场的事件流。
+        drop_event_stream(&mut report);
     }
     // 分布层只在整场比赛口径下判定；部分比赛的得分、回合数与区域份额
     // 与赛季基准不可比。
     let gate = if scope.is_full() {
-        gate::evaluate_batch(&reports, &params)
+        gate::evaluate_merged(&merged, &params)
     } else {
         gate::GateReport::default()
     };
@@ -214,7 +222,7 @@ pub fn run_core_validation_scoped_with_dir(
 }
 
 fn run_scoped_game(seed: u64, params: &Params, scope: ValidationScope) -> GameReport {
-    let setup = MatchSetup::builtin(nba_domain::GameRules::default());
+    let setup = MatchSetup::builtin(rule_profile());
     let mut world = World::new(setup, params.clone(), seed);
     match scope {
         ValidationScope::Full => world.run(),
@@ -231,6 +239,23 @@ fn run_scoped_game(seed: u64, params: &Params, scope: ValidationScope) -> GameRe
             world.report()
         }
     }
+}
+
+/// 账本对账需要事实流；判定完成后把流放掉。
+///
+/// 判定批次只保留每场的箱体、回合与统计。事实流、决策快照与逐次样本在
+/// 判定之外没有消费者，全部留在报告里会让 32 场批次吃掉数百兆。
+/// 几何与语境违规由结算时写入 violations，分布层只读箱体与聚合计数，
+/// 账本对账在流放掉之前完成。
+fn drop_event_stream(report: &mut GameReport) {
+    report.events.clear();
+    report.events.shrink_to_fit();
+    report.decision_traces.clear();
+    report.decision_traces.shrink_to_fit();
+    report.decision_records.clear();
+    report.decision_records.shrink_to_fit();
+    report.decision_samples.clear();
+    report.decision_samples.shrink_to_fit();
 }
 
 fn check_ledger(seed: u64, report: &GameReport) -> LedgerCheck {
@@ -517,9 +542,12 @@ pub fn certification_artifact(
     })
 }
 
-/// 已登记的分布准则。新增判据必须在此登记，否则 `coverage.uncovered`
+/// 已登记的判定准则。新增判据必须在此登记，否则 `coverage.uncovered`
 /// 会暴露缺口。
-pub const REGISTERED_GATE_CRITERIA: [&str; 21] = [
+///
+/// 分布层 21 条与过程层 16 条都在此列：过程判据同样是一次判定，
+/// 未登记就等于覆盖统计看不出它已经被评估过。
+pub const REGISTERED_GATE_CRITERIA: [&str; 37] = [
     "zone_share_rim",
     "zone_share_near",
     "zone_share_mid",
@@ -541,6 +569,23 @@ pub const REGISTERED_GATE_CRITERIA: [&str; 21] = [
     "steals_per_game",
     "shooting_fouls_per_game",
     "and_one_per_game",
+    // 过程层：设计边界类判据，与分布层同样一次判定一次登记。
+    "early_contested_rate",
+    "usage_top1_over_fifth",
+    "assisted_fg_spread",
+    "ping_pong_rate",
+    "minutes_max",
+    "shot_clock_buckets_complete",
+    "defender_distance_buckets_complete",
+    "post_scorer_three_share",
+    "stationary_shooter_three_share",
+    "play_activation_rate",
+    "play_window_gap",
+    "substitutions_per_game",
+    "pass_chain_mean",
+    "screen_read_under_shoot",
+    "screen_read_over_drive",
+    "shot_points_by_clock",
 ];
 
 /// 逐准则的观测值与基准，供批次统计工件消费。

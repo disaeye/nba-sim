@@ -78,9 +78,10 @@ impl MechanismAttribute {
             Self::FreeThrow => Metric::FreeThrowPct,
             Self::Speed | Self::Acceleration => Metric::MeanFirstActionSeconds,
             Self::Stamina => Metric::FieldGoalPct,
-            Self::Strength | Self::OffensiveRebound => Metric::OffensiveReboundRate,
+            Self::Strength => Metric::ScreenDisplacement,
+            Self::OffensiveRebound => Metric::OffensiveReboundRate,
             Self::DefensiveRebound => Metric::DefensiveReboundRate,
-            Self::DecisionIq => Metric::TurnoverRate,
+            Self::DecisionIq => Metric::TurnoversPerPass,
             Self::Block => Metric::BlocksPerShot,
             Self::Steal => Metric::StealsPerPossession,
         }
@@ -137,6 +138,8 @@ pub enum Metric {
     FieldGoalPct,
     Possessions,
     MeanFirstActionSeconds,
+    TurnoversPerPass,
+    ScreenDisplacement,
     OffensiveReboundRate,
     DefensiveReboundRate,
     TurnoverRate,
@@ -155,6 +158,8 @@ impl Metric {
             Self::FieldGoalPct => "field_goal_pct",
             Self::Possessions => "possessions",
             Self::MeanFirstActionSeconds => "mean_first_action_seconds",
+            Self::TurnoversPerPass => "turnovers_per_pass",
+            Self::ScreenDisplacement => "screen_displacement_ft",
             Self::OffensiveReboundRate => "offensive_rebound_rate",
             Self::DefensiveReboundRate => "defensive_rebound_rate",
             Self::TurnoverRate => "turnover_rate",
@@ -324,10 +329,10 @@ pub fn validate_known_entries(entries: &[KnownInsufficient]) -> Result<(), Strin
     Ok(())
 }
 
-fn declared<'a>(
-    known: &'a [KnownInsufficient],
+fn declared(
+    known: &[KnownInsufficient],
     attribute: MechanismAttribute,
-) -> Option<&'a KnownInsufficient> {
+) -> Option<&KnownInsufficient> {
     known
         .iter()
         .find(|entry| entry.attribute == attribute.key())
@@ -589,6 +594,16 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
                 .collect();
             (values.iter().sum(), values.len().max(1) as f64)
         }
+        Metric::ScreenDisplacement => {
+            let values: Vec<f64> = report.events.iter().filter_map(|event| {
+                if let nba_sim_core::action::Fact::Screen { team, displacement_ft, .. } = &event.fact {
+                    (*team == TeamSide::Home).then_some(f64::from(*displacement_ft))
+                } else {
+                    None
+                }
+            }).collect();
+            (values.iter().sum(), values.len().max(1) as f64)
+        }
         Metric::OffensiveReboundRate => (home.oreb as f64, (home.fga - home.fgm).max(1) as f64),
         Metric::DefensiveReboundRate => (home.dreb as f64, (home.dreb + away.oreb).max(1) as f64),
         Metric::TurnoverRate => {
@@ -599,6 +614,15 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
                 .count()
                 .max(1) as f64;
             (home.turnovers as f64, home_possessions)
+        }
+        Metric::TurnoversPerPass => {
+            let home_passes: u32 = report
+                .possessions
+                .iter()
+                .filter(|record| record.team == TeamSide::Home)
+                .map(|record| record.passes)
+                .sum();
+            (home.turnovers as f64, home_passes.max(1) as f64)
         }
         // 主队封盖 ÷ 客队出手：封盖是对手出手上的防守产物。
         Metric::BlocksPerShot => {

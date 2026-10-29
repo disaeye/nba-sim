@@ -1,6 +1,6 @@
 use nba_validation::mechanism_core::{
     run_mechanism_experiment, validate_known_entries, KnownInsufficient, MechanismAttribute,
-    MechanismConfig,
+    MechanismConfig, Metric,
 };
 
 /// 登记表只接受两种 resolution，`more_games` 必须写明所需场次。
@@ -40,6 +40,18 @@ fn known_insufficient_entries_require_a_valid_resolution() {
         ..more_games
     };
     assert!(validate_known_entries(&[structural]).is_ok());
+}
+
+/// 力量的观测量必须对应属性规格中的「掩护推开距离」。
+#[test]
+fn strength_mechanism_uses_screen_displacement_observable() {
+    assert_eq!(MechanismAttribute::Strength.metric(), Metric::ScreenDisplacement);
+}
+
+/// 决策智商的观测量使用每次传球的失误比，避免回合长度改变分母。
+#[test]
+fn decision_iq_mechanism_uses_turnovers_per_pass() {
+    assert_eq!(MechanismAttribute::DecisionIq.metric(), Metric::TurnoversPerPass);
 }
 
 /// 机制实验的契约：每个属性都产出已知裁决、数值有限、样本缺失时给出明确原因。
