@@ -2,7 +2,7 @@
   "calibration": {
     "formations": {
       "contest": "",
-      "method": "half-court slot coordinates in feet for a team attacking right; the alternate formation brings the handler to the elbow so pull-ups are not all above the break",
+      "method": "半-court 站位（英尺，进攻向右）：持球 19 ft、弱侧翼 16.4 ft、底角 22.4 ft（真实三分）、低位 8.9 ft、顺下 7.8 ft；除底角外都在弧内，站位决定出手区域分布",
       "sample": 0,
       "script": "hand-authored formation geometry, reviewed against the shot zone shares",
       "season": "2024-25",
@@ -18,11 +18,11 @@
     },
     "policy": {
       "contest": "",
-      "method": "coordinate descent on the induced shot and possession distributions",
+      "method": "coordinate descent on the induced shot and possession distributions; parameter groups are declared in scripts/calibrate/fit_policy.py and each group owns its own bounds",
       "sample": 0,
       "script": "scripts/calibrate/fit_policy.py",
       "season": "2024-25",
-      "source": "prior; refined by scripts/calibrate/fit_policy.py moment matching"
+      "source": "restored from the pre-failure-fit snapshot (scripts/calibrate/fit_policy.py --group all, 2026-10-26)"
     },
     "possession": {
       "contest": "",
@@ -57,7 +57,7 @@
       "source": "shufinskiy/nba_data shotdetail"
     }
   },
-  "commit": "5a4a755d3ed2b4a5676a5d394e1727032fc02da6",
+  "commit": "a7228e0c8f44e5eea2605f002d502beb23946b3c",
   "games": 32,
   "mechanism": {
     "high_value": 0.95,
@@ -67,5 +67,5 @@
     "seeds": 40
   },
   "seed_start": 1,
-  "working_tree_dirty": false
+  "working_tree_dirty": true
 }
