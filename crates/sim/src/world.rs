@@ -1611,10 +1611,8 @@ impl World {
         // 发球时间要足够发球队员走到发球点，但不能把进攻时钟耗在走位上。
         let walk = (self.players[handler].pos - inbound_spot).length()
             / self.rules.max_player_speed_ftps.max(f32::MIN_POSITIVE);
-        self.set_phase(Phase::Inbound {
-            team,
-            ready_at: self.now() + 0.5 + f64::from(walk.clamp(0.0, 1.5)),
-        });
+        let ready_at = self.now() + 0.5 + f64::from(walk.clamp(0.0, 1.5));
+        self.set_phase(Phase::Inbound { team, ready_at });
     }
 
     pub fn start_possession(&mut self, team: TeamSide, kind: PossessionKind) {
@@ -1928,6 +1926,7 @@ impl World {
             self.maybe_decide();
         }
         self.check_closely_guarded(dt);
+        self.check_backcourt();
         self.check_period_end();
     }
 
@@ -1974,6 +1973,50 @@ impl World {
         });
         self.end_possession(PossessionEndCause::TurnoverViolation, "closely_guarded", 0);
         self.start_possession(team.other(), PossessionKind::Live);
+    }
+
+    /// 后场八秒：控球方在后场停留超过规则秒数即违例。
+    fn check_backcourt(&mut self) {
+        if !matches!(self.phase, Phase::Live) {
+            self.possession.backcourt_deadline = None;
+            return;
+        }
+        let Some(holder) = self.holder() else {
+            return;
+        };
+        let team = self.possession.team;
+        let attacking_right = self.attacking_right(team);
+        let mid = self.rules.court.width_ft * 0.5;
+        let pos = self.players[holder].pos;
+        let in_backcourt = if attacking_right {
+            pos.x < mid
+        } else {
+            pos.x > mid
+        };
+        if !in_backcourt {
+            self.possession.backcourt_deadline = None;
+            return;
+        }
+        let now = self.now();
+        let limit = f64::from(self.rules.backcourt_seconds);
+        match self.possession.backcourt_deadline {
+            None => self.possession.backcourt_deadline = Some(now + limit),
+            Some(deadline) if now >= deadline => {
+                self.possession.backcourt_deadline = None;
+                self.line_mut(holder).turnovers += 1;
+                self.emit(Fact::Turnover {
+                    player: holder,
+                    kind: TurnoverKind::EightSecond,
+                });
+                self.end_possession(PossessionEndCause::TurnoverViolation, "eight_second", 0);
+                self.cancel_actions("eight_second");
+                self.set_phase(Phase::DeadBall {
+                    team: team.other(),
+                    ready_at: self.now() + f64::from(self.rules.inbound_setup_seconds),
+                });
+            }
+            Some(_) => {}
+        }
     }
 
     /// 快攻窗口关闭：跑向前场的球员回到各自的阵型站位。

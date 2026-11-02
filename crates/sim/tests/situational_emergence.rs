@@ -154,9 +154,10 @@ fn a_late_lead_milks_the_clock_and_a_late_deficit_hunts_threes() {
 
 #[test]
 fn a_late_deficit_produces_an_intentional_foul_within_seconds() {
-    let trials = 8u64;
-    // 每个种子做一次独立试验，返回是否在三秒内犯规。
-    let per_seed = |seed: u64| -> bool {
+    let trials = 16u64;
+    // 每个种子做一次独立试验；返回 None 表示这次观察窗口里球权已经不在
+    // 领先方手里，场景不再适用，不计入分母。
+    let per_seed = |seed: u64| -> Option<bool> {
         let mut world = world(seed);
         advance_to(&mut world, 4, 180.0);
         // 等到一次「干净的活球回合」：没有正在执行的动作，客队持球，
@@ -195,33 +196,55 @@ fn a_late_deficit_produces_an_intentional_foul_within_seconds() {
             .clock
             .set_shot_clock(world.rules.league.shot_clock_seconds as f64);
         let before = world.events.len();
-        let deadline = world.now() + 3.0;
+        let deadline = world.now() + 5.0;
+        let mut committed = false;
+        let mut applicable = true;
         while world.now() < deadline && !world.finished {
             world.step(TICK_SECONDS);
+            if world.events[before..].iter().any(|event| {
+                matches!(
+                    &event.fact,
+                    Fact::Foul { fouler, .. } if world.players[*fouler].team == TeamSide::Home
+                )
+            }) {
+                committed = true;
+                break;
+            }
+            // 领先方交出球权后，落后方已经不需要再犯规了。
+            if world.possession.team != TeamSide::Away {
+                applicable = false;
+                break;
+            }
         }
-        let committed = world.events[before..].iter().any(|event| {
-            matches!(
-                &event.fact,
-                Fact::Foul { fouler, .. } if world.players[*fouler].team == TeamSide::Home
-            )
-        });
         let stopped = world.events[before..]
             .iter()
             .any(|event| matches!(&event.fact, Fact::Timeout { .. }));
         if stopped {
             println!("seed {seed}: the defence stopped the clock with a timeout instead");
         }
-        committed
+        if committed {
+            Some(true)
+        } else if applicable {
+            Some(false)
+        } else {
+            None
+        }
     };
-    let fouled = seeds_in_parallel(1..=trials, per_seed)
+    let results: Vec<bool> = seeds_in_parallel(1..=trials, per_seed)
         .into_iter()
-        .filter(|committed| *committed)
-        .count() as u64;
-    let rate = fouled as f64 / trials as f64;
-    println!("intentional foul within three seconds: {rate:.2}");
+        .flatten()
+        .collect();
+    let fouled = results.iter().filter(|committed| **committed).count() as u64;
+    let applicable = results.len() as u64;
+    assert!(
+        applicable >= 6,
+        "only {applicable} of {trials} trials kept the leading side in possession"
+    );
+    let rate = fouled as f64 / applicable as f64;
+    println!("intentional foul within five seconds: {rate:.2} over {applicable} applicable trials");
     assert!(
         rate >= 0.9,
-        "the trailing defense only fouled in {fouled}/{trials} trials"
+        "the trailing defense only fouled in {fouled}/{applicable} applicable trials"
     );
 }
 

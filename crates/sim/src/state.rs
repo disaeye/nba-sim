@@ -1046,6 +1046,8 @@ pub struct PossessionState {
     pub break_return: Vec<(usize, Vec2)>,
     /// 持球人被紧逼盯防的累计秒数：一旦不再紧逼就清零。
     pub closely_guarded_seconds: f32,
+    /// 后场八秒的到期时刻：球过中线即清空。
+    pub backcourt_deadline: Option<f64>,
 }
 
 impl PossessionState {
@@ -1094,6 +1096,7 @@ impl PossessionState {
             play_called: false,
             break_return: Vec::new(),
             closely_guarded_seconds: 0.0,
+            backcourt_deadline: None,
         }
     }
 }

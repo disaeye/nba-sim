@@ -476,6 +476,8 @@ pub enum TurnoverKind {
     ShotClock,
     OutOfBounds,
     CloselyGuarded,
+    /// 后场八秒未过中线。
+    EightSecond,
 }
 
 impl TurnoverKind {
@@ -489,6 +491,7 @@ impl TurnoverKind {
             Self::ShotClock => "shot_clock",
             Self::OutOfBounds => "out_of_bounds",
             Self::CloselyGuarded => "closely_guarded",
+            Self::EightSecond => "eight_second",
         }
     }
 }
