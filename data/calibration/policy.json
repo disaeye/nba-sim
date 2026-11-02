@@ -54,6 +54,7 @@
     "drive_lane": 0.35,
     "drive_mismatch": 0.6,
     "drive_tight": 0.5,
+    "drive_screen_bonus": 0.9,
     "drive_help": 0.25,
     "drive_tendency": 3.0,
     "pass_base": 1.2,

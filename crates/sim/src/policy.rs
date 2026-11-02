@@ -1312,6 +1312,10 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     };
     epv.tendency = weights.b("drive_tendency")
         * (world.players[state.actor].data.tendencies.drive_frequency - 0.5);
+    // 掩护读完（防守人绕上沿）之后就是突破窗口：这一段按策略加成。
+    if screen_over {
+        epv.context += weights.b("drive_screen_bonus");
+    }
     epv.turnover = -weights.w("epv_turnover_cost")
         * possession_value
         * (f32::from(1u8) - p_beat)
