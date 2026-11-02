@@ -35,6 +35,8 @@ pub enum ViolationKind {
     ShotClock,
     Travel,
     DoubleDribble,
+    /// 罚球人没有在规定时限内出手。
+    FreeThrowTimeout,
 }
 
 impl ViolationKind {
@@ -47,6 +49,7 @@ impl ViolationKind {
             Self::ShotClock => "shot_clock",
             Self::Travel => "travel",
             Self::DoubleDribble => "double_dribble",
+            Self::FreeThrowTimeout => "free_throw_timeout",
         }
     }
 }
@@ -300,6 +303,8 @@ impl World {
                 technical_retained_team,
                 after_technical,
             } => {
+                // 每次罚球出手的时限从这一刻开始算。
+                self.free_throw_started = Some(self.now());
                 self.set_phase(Phase::FreeThrows {
                     shooter,
                     total,

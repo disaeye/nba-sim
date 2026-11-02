@@ -68,6 +68,9 @@ pub struct LeagueProfile {
     /// 复核窗口：本节剩余时间不超过该值时才能申请复核。
     #[serde(default = "default_challenge_final_seconds")]
     pub challenge_final_seconds: f32,
+    /// 罚球人必须在这么多秒内出手，否则违例。
+    #[serde(default = "default_free_throw_time_limit_seconds")]
+    pub free_throw_time_limit_seconds: f32,
     /// 投篮犯规基础罚球数。
     pub shooting_foul_free_throws: u8,
     /// 球队犯规进入罚则后的罚球数。
@@ -129,6 +132,10 @@ fn default_challenges_per_game() -> u32 {
 
 fn default_challenge_final_seconds() -> f32 {
     120.0
+}
+
+fn default_free_throw_time_limit_seconds() -> f32 {
+    10.0
 }
 
 fn default_closely_guarded_distance_ft() -> f32 {

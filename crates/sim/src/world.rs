@@ -204,6 +204,8 @@ pub struct World {
     pub last_ruling: Option<crate::challenge::Ruling>,
     /// 两队各自剩余的教练挑战额度。
     pub challenges_left: [u8; 2],
+    /// 罚球程序开始时刻：罚球人必须在联赛规定的时限内出手。
+    pub free_throw_started: Option<f64>,
     /// 最近一次得分方（队下标，0 主 1 客）与这一方的连续得分。
     pub last_scoring: Option<usize>,
     pub scoring_run: u32,
@@ -951,6 +953,7 @@ impl World {
                 rules_capture.league.challenges_per_game.min(u8::MAX as u32) as u8,
                 rules_capture.league.challenges_per_game.min(u8::MAX as u32) as u8,
             ],
+            free_throw_started: None,
             last_scoring: None,
             scoring_run: 0,
             possession_count: 0,
@@ -2972,6 +2975,31 @@ impl World {
                 technical_retained_team: _,
                 after_technical: _,
             } => {
+                // 罚球人有出手时限：超时判违例，球权交给对方。
+                if let Some(started) = self.free_throw_started {
+                    let limit = f64::from(self.rules.league.free_throw_time_limit_seconds);
+                    if now - started > limit {
+                        self.free_throw_started = None;
+                        let opponent = self.players[shooter].team.other();
+                        self.adjudicate(
+                            crate::adjudicate::Adjudication::new(
+                                crate::adjudicate::StoppageCause::Violation(
+                                    crate::adjudicate::ViolationKind::FreeThrowTimeout,
+                                ),
+                                crate::adjudicate::RestartPlan::Inbound {
+                                    team: opponent,
+                                    location: crate::adjudicate::InboundLocation::OwnBaseline,
+                                    ready_after: None,
+                                },
+                            )
+                            .ending(
+                                nba_domain::event::PossessionEndCause::TurnoverViolation,
+                                "free_throw_timeout",
+                            ),
+                        );
+                        return;
+                    }
+                }
                 if now >= next_at {
                     crate::resolve::freethrow::shoot(
                         self,

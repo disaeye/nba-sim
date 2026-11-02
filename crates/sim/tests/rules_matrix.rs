@@ -202,3 +202,37 @@ fn team_period_fouls_reset_at_the_next_period() {
         world.fouls[0].total
     );
 }
+
+#[test]
+fn a_free_throw_shooter_who_never_releases_is_called_for_delay() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 631);
+    let shooter = world.on_court(TeamSide::Home).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == shooter;
+        player.vel = Vec2::ZERO;
+    }
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.ball.set_held(shooter);
+    // 已经超过联赛时限，而且下一次出手排在很久以后。
+    world.free_throw_started = Some(world.now() - 20.0);
+    world.set_phase(Phase::FreeThrows {
+        shooter,
+        total: 2,
+        remaining: 2,
+        made: 0,
+        next_at: world.now() + 100.0,
+        and_one: false,
+        retain_possession: false,
+        foul_id: 7,
+        technical_retained_team: None,
+        after_technical: None,
+    });
+    world.step(TICK_SECONDS);
+    let team = match world.phase() {
+        Phase::DeadBall { team, .. } | Phase::Inbound { team, .. } => team,
+        other => panic!("罚球超时必须停表换边，实际 {other:?}"),
+    };
+    assert_eq!(team, TeamSide::Away, "罚球超时由对方获得球权");
+}
