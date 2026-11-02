@@ -178,3 +178,27 @@ fn a_defensive_foul_restarts_the_eight_second_count() {
         "防守犯规之后八秒计时必须重新开始"
     );
 }
+
+#[test]
+fn team_period_fouls_reset_at_the_next_period() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(short_rules()), params, 619);
+    world.fouls[0].period = 4;
+    world.fouls[0].total = 9;
+    let period = world.clock.period();
+    let mut guard = 0;
+    while world.clock.period() == period && guard < 400_000 {
+        world.step(TICK_SECONDS);
+        guard += 1;
+    }
+    assert!(world.clock.period() > period, "必须进入下一节");
+    assert_eq!(
+        world.fouls[0].period, 0,
+        "下一节球队犯规计数必须清零"
+    );
+    assert!(
+        world.fouls[0].total >= 9,
+        "全场累计犯规不得被清零，实际 {}",
+        world.fouls[0].total
+    );
+}
