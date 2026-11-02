@@ -223,7 +223,7 @@ pub fn off_ball_tick(world: &mut World) {
         let intent = decision.intent;
         world.possession.off_ball_actions += 1;
         // 掩护后的下一次动作已经兑现，顺下与外弹的偏好随之取消。
-        world.players[actor].screened_at = 0.0;
+        world.players[actor].screened_at = f64::NEG_INFINITY;
         world.players[actor].target = intent.to_ft;
         world.players[actor].target_kind = crate::state::TargetKind::Window;
         world.players[actor].target_partner = actor;
@@ -370,8 +370,7 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
     let cut_open = marker >= weights.g("cut_open_distance_ft") * 0.6;
     // 拆完掩护的顺下是掩护本身的后续，不是凭空发起的空切：它的收益要求
     // 只面对防守人是否跟丢，不适用普通空切的机会比率。
-    let just_screened = world.players[actor].screened_at > 0.0
-        && now - world.players[actor].screened_at < 2.0;
+    let just_screened = now - world.players[actor].screened_at < 2.0;
     let payoff_ratio = if just_screened {
         weights.g("screen_roll_payoff_ratio")
     } else {
@@ -409,8 +408,7 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
     // 候选集只放真正成立的动作：空切不成立时就只剩跑位。
     // 掩护后的顺下与外弹：掩护人刚才设了掩护，就必须用下一次动作
     // 兑现它。对位人往缩就顺下，对位人贴上就外弹。
-    let post_screen = world.players[actor].screened_at > 0.0
-        && now - world.players[actor].screened_at < 2.0;
+    let post_screen = now - world.players[actor].screened_at < 2.0;
     if post_screen {
         cut_available = true;
         if marker >= 4.0 {
@@ -1198,6 +1196,14 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
         "near" => weights.b("shoot_near_bonus"),
         _ => 0.0,
     };
+    // 持球跳投是自主创造出来的出手：运球到位的干拔不等接球窗口，否则
+    // 决策模型只会在球刚到手时出手。
+    let pull_up_bonus = if !just_received && matches!(phase, crate::state::BallPhase::Dribble)
+    {
+        weights.b("shoot_pull_up_bonus")
+    } else {
+        0.0
+    };
     let buzzer_urgency = if quality.is_three {
         if three_needed {
             (6.0 - state.shot_clock as f32).max(0.0) * 8.0
@@ -1238,6 +1244,7 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
         + weights.b("momentum_shot_bonus") * state.momentum
         + endgame_three
         + zone_bonus
+        + pull_up_bonus
         + buzzer_urgency
         + three_context
         - weights.b("shoot_off_dribble_penalty") * f32::from(!just_received && !is_putback);

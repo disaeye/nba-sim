@@ -501,7 +501,8 @@ fn the_screener_rolls_or_pops_after_setting_a_screen() {
             );
         }
         assert_eq!(
-            world.players[screener].screened_at, 0.0,
+            world.players[screener].screened_at,
+            f64::NEG_INFINITY,
             "兑现之后不得继续挂着掩护偏好"
         );
     }

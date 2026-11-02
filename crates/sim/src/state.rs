@@ -274,7 +274,7 @@ impl PlayerState {
             home_spot: pos,
             entered_at: f64::default(),
             resting_until: f64::default(),
-            screened_at: f64::default(),
+            screened_at: f64::NEG_INFINITY,
             schedule: DecisionSchedule::default(),
             action: None,
             bait: None,
