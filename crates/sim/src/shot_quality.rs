@@ -803,10 +803,20 @@ pub fn free_throw_model(world: &World, shooter: usize) -> ShotModel {
     }
 }
 
-/// 补篮只属于开启二次进攻的那个抢板人，并且只在二次进攻的当前阶段成立。
+/// 补篮只属于开启二次进攻的那个抢板人，并且只在抢板后的窗口内成立。
+///
+/// 用时间窗口而不是精确阶段：抢到板后先做一个收球步再起跳仍是补篮，
+/// 而那个动作会把阶段从 `Putback` 改成 `Gather`。
 pub fn putback_available(world: &World, actor: usize) -> bool {
-    world.possession.ball_phase == BallPhase::Putback
-        && world.possession.last_offensive_rebound_actor == Some(actor)
+    if world.possession.last_offensive_rebound_actor != Some(actor) {
+        return false;
+    }
+    let window = f64::from(world.params.policy.g("putback_window_seconds"));
+    world
+        .possession
+        .last_offensive_rebound_at
+        .map(|at| world.now() - at <= window)
+        .unwrap_or(false)
 }
 
 pub fn shot_choice(world: &World, state: &DecisionState) -> Option<(ShotKind, &'static str)> {

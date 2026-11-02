@@ -157,6 +157,8 @@ fn putback_is_bound_to_the_actual_rebounder_not_a_global_timer() {
     let mut world = finishing_world(Vec2::new(85.0, 25.0));
     world.possession.ball_phase = BallPhase::Putback;
     world.possession.last_offensive_rebound_actor = Some(0);
+    // 补篮按抢到板后的时间窗口判定：刚抢到板才成立。
+    world.possession.last_offensive_rebound_at = Some(world.now());
     assert!(putback_available(&world, 0));
     assert!(!putback_available(&world, 1));
 
