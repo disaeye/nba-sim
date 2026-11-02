@@ -1,6 +1,6 @@
 # 当前实施进度
 
-> 唯一权威实施范围、依赖和验收条件见 [`full_simulation_plan.md`](full_simulation_plan.md)。本文件只记录进度、已完成验证和下一项工作，不另立方案。
+> 唯一权威实施范围、依赖和验收条件见 [`full_simulation_plan.md`](full_simulation_plan.md)。本文件只记录进度、已完成验证和下一项工作，不另立方案。阶段与证据的逐项对应见 [`../evidence/stage_gate_map.md`](../evidence/stage_gate_map.md)。
 
 ## 当前目标
 
@@ -56,7 +56,7 @@
 
 ## 校准记录适用范围
 
-完整校准验收尚未运行，因为规则程序和动作实现仍有未闭合项，现有证据不能证明方案 §12 G 的机制与规则前置验收已满足。本节数字来自 2026-10-21 历史批次。`docs/dev/status.md` 的总体校准结果早于本轮内核修改。`shooting_fouls_per_game` 16.531、目标下限 19.597，以及 40 种子机制实验中五项指标的 `insufficient` 结论，仅适用于当时的代码和参数，不能代表当前工作区。现阶段不运行会改写 `data/calibration/policy.json` 的拟合程序；完成规则和动作验收后，再按完整方案执行校准、机制实验、独立验证与资源测量。
+校准阶段已启动：`scripts/calibrate/fit_policy.py` 按职责分组调 `policy.json` 的权重，目标是 `shot_profile.json` 的区域与创造方式份额，以及 `possession.json` 的回合数、每回合出手、失误率、罚球与得分。引擎侧原先写死的系数已陆续搬进参数表，可被标定：封盖手部半径 `block_hand_radius_base_ft`、投篮犯规率 `shooting_foul_rate_two_point/three_point`、篮板伸手折减与加成 `rebound_offense_reach_penalty_ft`/`rebound_defense_reach_bonus_ft`、包夹半径与权重、回场判定带宽 `backcourt_advance_ft`/`backcourt_margin_ft`。每次拟合后用 `sim2 --seeds 1..33` 与 `validate-core` 记录残差；历史批次（2026-10-21）的数字仅作参考。
 
 ## 已确认的待修复项
 
