@@ -367,12 +367,19 @@ pub fn run_mechanism_experiments_with_dir(
     let known = load_known_insufficient(calibration)?;
     let mut results = Vec::new();
     for attribute in MechanismAttribute::all() {
-        results.push(experiment(
-            &params,
-            attribute,
-            config,
-            declared(&known, attribute),
-        )?);
+        // 逐项输出：机制实验是长跑，崩在中间时至少要能看出是哪一项。
+        let started = std::time::Instant::now();
+        let result = experiment(&params, attribute, config, declared(&known, attribute))?;
+        eprintln!(
+            "MECHANISM {} {} rel={:.4} seeds={}/{} {:.1}s",
+            attribute.key(),
+            result.verdict,
+            result.relative_change,
+            result.seeds_in_expected_direction,
+            result.seeds,
+            started.elapsed().as_secs_f64()
+        );
+        results.push(result);
     }
     Ok(MechanismReport {
         config: MechanismConfigReport {
