@@ -51,15 +51,19 @@ pub struct Adjudication {
 
 提交顺序固定为：比分与犯规账本、回合结束、时钟调整、恢复阶段与发球地点。任何结算分支只负责构造 `Adjudication` 并调用 `adjudicate`，不再直接写 `score`、`clock`、`Phase::DeadBall`。
 
-## 迁移顺序
+## 迁移状态
 
-1. 违例类：出界、后场八秒、回场、紧逼五秒、24 秒。这五处已有类型化 `TurnoverKind` 与 `PossessionEndCause`，可直接构造 `Adjudication`。
-2. 球权变更类：防守篮板、松球易主、二次进攻。需要 `RestartPlan::Live` 与进攻时钟调整。
-3. 犯规类：非投篮、投篮、进攻、技术。需要 `PenaltyPlan` 与保留球权语义，是迁移量最大的一组。
-4. 节末与终场：需要 `restart: RestartPlan::PeriodBreak | GameOver` 与时钟归零。
-5. 暂停与换人恢复：需要 `ResumeContext` 保存被中断的程序。
+| 步骤 | 内容 | 状态 |
+| --- | --- | --- |
+| 1 | 违例类：出界、后场八秒、回场、紧逼五秒、24 秒、二次运球、走步 | 已迁移 |
+| 2 | 球权变更类：防守篮板、松球易主、抢断传球、丢球 | 已迁移 |
+| 3 | 得分与罚球：投篮命中、罚球结算（含保留球权） | 已迁移 |
+| 4 | 犯规类：进攻犯规已迁移；非投篮、投篮、技术犯规仍直接写阶段 | 进行中 |
+| 5 | 节末、终场、暂停与换人恢复 | 待迁移（需要 `PeriodBreak` 与 `ResumeContext`） |
 
-每一步迁移都以现有测试为回归基线（`rules_flow`、`rule_violations`、`rotation`、`event_ledger`），迁移完成后旧分支删除，不保留两份写入路径。
+已迁移的调用点只构造 `Adjudication` 并调用 `World::adjudicate`，不再直接写 `end_possession`、`cancel_actions` 与 `Phase::DeadBall`。移植时保留原有的停表时长（命中 1.4 秒、罚球 1.2 秒、其余用 `inbound_setup_seconds`），并通过 `RestartPlan::Inbound::ready_after` 传入。
+
+每一步迁移以现有测试为回归基线（`rules_flow`、`rule_violations`、`rotation`、`event_ledger`、`action_scenarios`），迁移后旧分支删除，不保留两份写入路径。
 
 ## 与验证的关系
 
