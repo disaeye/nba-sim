@@ -58,8 +58,8 @@ pub struct Adjudication {
 | 1 | 违例类：出界、后场八秒、回场、紧逼五秒、24 秒、二次运球、走步 | 已迁移 |
 | 2 | 球权变更类：防守篮板、松球易主、抢断传球、丢球 | 已迁移 |
 | 3 | 得分与罚球：投篮命中、罚球结算（含保留球权） | 已迁移 |
-| 4 | 犯规类：进攻犯规与非投篮犯规已迁移；投篮与技术犯规仍走罚球程序 | 进行中 |
-| 5 | 节末与终场已迁移（`RestartPlan::PeriodBreak` / `GameOver`）；暂停与换人恢复待迁移（需要 `ResumeContext`） | 进行中 |
+| 4 | 犯规类：进攻、非投篮、投篮与技术犯规的回合结束与罚球程序都经 `adjudicate` 打开 | 已完成 |
+| 5 | 节末与终场已迁移（`RestartPlan::PeriodBreak` / `GameOver`）；换人窗口已迁移（`RestartPlan::Stoppage`）；暂停恢复仍用 `ResumePhase` | 进行中 |
 
 已迁移的调用点只构造 `Adjudication` 并调用 `World::adjudicate`，不再直接写 `end_possession`、`cancel_actions` 与 `Phase::DeadBall`。移植时保留原有的停表时长（命中 1.4 秒、罚球 1.2 秒、其余用 `inbound_setup_seconds`），并通过 `RestartPlan::Inbound::ready_after` 传入。
 
