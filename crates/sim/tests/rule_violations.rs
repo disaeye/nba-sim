@@ -361,3 +361,63 @@ fn a_frontcourt_foul_inbounds_from_the_nearest_sideline() {
         "发球点必须保留中断处的纵向位置：{inbound:?} 对 {ball_before:?}"
     );
 }
+
+#[test]
+fn a_made_basket_inbounds_from_the_conceding_baseline() {
+    let mut world = world(349);
+    let shooter = world.on_court(TeamSide::Home).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == shooter;
+        player.vel = Vec2::ZERO;
+    }
+    let hoop = world.hoop_for(TeamSide::Home);
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(shooter);
+    world.players[shooter].pos = hoop + Vec2::new(-4.0, 0.0);
+    world.players[shooter].target = world.players[shooter].pos;
+    world.ball.pos = world.players[shooter].pos;
+    world.ball.z = world.rules.ball_radius_ft;
+    let intent = nba_sim_core::action::ActionIntent {
+        actor: shooter,
+        kind: nba_sim_core::action::ActionKind::Shoot(nba_sim_core::action::ShotKind::Layup),
+        target: None,
+        from_ft: world.players[shooter].pos,
+        to_ft: world.players[shooter].pos,
+        start_time: world.now(),
+        duration: 0.4,
+    };
+    nba_sim_core::resolve::shot::resolve(
+        &mut world,
+        &intent,
+        nba_sim_core::action::ShotKind::Layup,
+    );
+    if let Some(pending) = world.pending_shot.as_mut() {
+        pending.result = Some(nba_sim_core::resolve::shot::ShotResult::Made);
+    }
+    // 命中→死球→对方底线发球。
+    for _ in 0..200 {
+        if matches!(world.phase(), Phase::Inbound { .. }) {
+            break;
+        }
+        world.step(TICK_SECONDS);
+    }
+    assert!(
+        matches!(world.phase(), Phase::Inbound { .. }),
+        "命中后必须进入发球阶段，实际 {:?}",
+        world.phase()
+    );
+    let passer = world.inbound_passer.expect("发球人必须已确定");
+    let target = world.players[passer].target;
+    let width = world.rules.court.width_ft;
+    let height = world.rules.court.height_ft;
+    assert!(
+        target.x <= 5.0 || target.x >= width - 5.0,
+        "命中后的发球点必须在底线上：{target:?}"
+    );
+    assert!(
+        (target.y - height * 0.5).abs() <= 2.0,
+        "底线发球点在中点附近：{target:?}"
+    );
+}
