@@ -6,7 +6,7 @@
 //! 停下来一次。
 
 use crate::action::{Fact, FoulKind};
-use crate::state::{Phase, TeamSide};
+use crate::state::TeamSide;
 use crate::world::World;
 
 /// 犯规的公共计账：个人累计、球队单节犯规、bonus 判定与犯规事实。

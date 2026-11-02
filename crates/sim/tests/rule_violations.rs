@@ -462,3 +462,67 @@ fn a_late_timeout_may_inbound_in_the_frontcourt() {
     };
     assert!(in_frontcourt, "末段暂停的发球点必须在前场：{spot:?}");
 }
+
+#[test]
+fn a_foul_before_the_horn_still_produces_free_throws() {
+    let mut world = world(359);
+    let shooter = world.on_court(TeamSide::Home).as_slice()[0];
+    let fouler = world.on_court(TeamSide::Away).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == shooter || index == fouler;
+        player.vel = Vec2::ZERO;
+    }
+    let hoop = world.hoop_for(TeamSide::Home);
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(shooter);
+    world.players[shooter].pos = hoop + Vec2::new(-16.0, 0.0);
+    world.players[shooter].target = world.players[shooter].pos;
+    world.ball.pos = world.players[shooter].pos;
+    world.ball.z = world.rules.ball_radius_ft;
+    let intent = nba_sim_core::action::ActionIntent {
+        actor: shooter,
+        kind: nba_sim_core::action::ActionKind::Shoot(
+            nba_sim_core::action::ShotKind::CatchShoot,
+        ),
+        target: None,
+        from_ft: world.players[shooter].pos,
+        to_ft: world.players[shooter].pos,
+        start_time: world.now(),
+        duration: 0.4,
+    };
+    nba_sim_core::resolve::shot::resolve(
+        &mut world,
+        &intent,
+        nba_sim_core::action::ShotKind::CatchShoot,
+    );
+    // 球还在空中时比赛钟归零，此时防守人犯规。
+    world.clock.set_game_clock(0.0);
+    nba_sim_core::resolve::foul::apply_shooting_foul(&mut world, fouler, shooter, 2, false);
+    assert!(
+        matches!(world.phase(), Phase::FreeThrows { .. }),
+        "投篮犯规必须先进入罚球程序，实际 {:?}",
+        world.phase()
+    );
+    // 罚球程序走完之前不得结束本节。
+    let mut saw_free_throw = false;
+    for _ in 0..600 {
+        if matches!(world.phase(), Phase::PeriodBreak { .. } | Phase::Finished) {
+            break;
+        }
+        let before = world.events.len();
+        world.step(TICK_SECONDS);
+        for event in &world.events[before..] {
+            if matches!(&event.fact, Fact::FreeThrow { .. }) {
+                saw_free_throw = true;
+            }
+        }
+    }
+    assert!(saw_free_throw, "吹罚之后必须真的执行罚球");
+    assert!(
+        matches!(world.phase(), Phase::PeriodBreak { .. } | Phase::Finished),
+        "罚球结束后本节必须收尾，实际 {:?}",
+        world.phase()
+    );
+}
