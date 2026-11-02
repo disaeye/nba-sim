@@ -1184,10 +1184,10 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
         ability: weights.w("shoot_expected_points") * net,
         ..Default::default()
     };
-    let mid_bonus = if shot_zone == "mid" {
-        weights.b("shoot_mid_bonus")
-    } else {
-        0.0
+    let zone_bonus = match shot_zone {
+        "mid" => weights.b("shoot_mid_bonus"),
+        "near" => weights.b("shoot_near_bonus"),
+        _ => 0.0,
     };
     let buzzer_urgency = if quality.is_three {
         if three_needed {
@@ -1228,7 +1228,7 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
         + weights.b("shoot_separation_bonus") * separation_bonus
         + weights.b("momentum_shot_bonus") * state.momentum
         + endgame_three
-        + mid_bonus
+        + zone_bonus
         + buzzer_urgency
         + three_context
         - weights.b("shoot_off_dribble_penalty") * f32::from(!just_received && !is_putback);
@@ -1262,6 +1262,18 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
         state.actor_pos,
         utility,
     ))
+}
+
+/// 把球员句柄映射到 [0, 1)：同一名球员整场比赛得到同一个值，用来在
+/// 同一档能力的球员之间区分技术偏好。
+fn hash_unit(seed: u64) -> f32 {
+    let mut x = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    x ^= x >> 30;
+    x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x ^= x >> 27;
+    x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^= x >> 31;
+    (x >> 40) as f32 / 16_777_216.0
 }
 
 fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
@@ -1325,9 +1337,14 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     // 否则每一条突破都变成篮下出手，出手的区域分布整段压在篮下。
     let finishing = world.players[state.actor].data.attributes.finishing;
     // 终结能力决定突破停在哪里：强的到篮下收球，弱的在抛投区提前收球。
-    // 阈值与四个几何参数都在参数表里，不写死系数。
+    // 阈值与四个几何参数都在参数表里，不写死系数。同一档终结能力的球员
+    // 里有人偏爱抛投、有人偏爱篮下，用球员句柄上的固定偏移把这一档拆开，
+    // 不用随机数也不会同一档全体走同一条路。
+    let tiebreak =
+        weights.g("drive_finish_tiebreak_spread") * hash_unit(state.actor as u64);
+    let finishes_at_rim = finishing + tiebreak > weights.g("drive_rim_finishing_threshold");
     let shortfall = (1.0 - finishing).clamp(0.0, 1.0);
-    let drive_target_distance = if finishing > weights.g("drive_rim_finishing_threshold") {
+    let drive_target_distance = if finishes_at_rim {
         weights.g("drive_rim_finish_ft") + weights.g("drive_rim_spread_ft") * shortfall
     } else {
         weights.g("drive_finish_distance_ft") + weights.g("drive_finish_spread_ft") * shortfall

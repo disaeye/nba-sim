@@ -1242,12 +1242,26 @@ fn a_deflected_pass_becomes_a_loose_ball_decided_by_control() {
                 continue;
             };
             deflections += 1;
-            let recovered = report.events[index..].iter().any(|other| {
-                matches!(&other.fact, Fact::LooseBallRecovered { .. })
-            });
+            // 被点到的球要么成为松球争抢，要么直接被碰到球的人控下来
+            // 记作失误，要么两人同时抱住形成争球；三种都是控制权的转移。
+            // 窗口只看到随后六十个事件，不能拿很久以后的结果来充数。
+            let settled = report.events[index + 1..]
+                .iter()
+                .take(60)
+                .any(|other| {
+                    matches!(
+                        &other.fact,
+                        Fact::LooseBallRecovered { .. }
+                            | Fact::Turnover { .. }
+                            | Fact::PossessionEnded {
+                                end_reason: nba_domain::event::PossessionEndCause::HeldBall,
+                                ..
+                            }
+                    )
+                });
             assert!(
-                recovered,
-                "被点到的传球必须进入松球争夺（seed {seed}, defender {defender}）"
+                settled,
+                "被点到的传球必须进入松球争夺或形成争球（seed {seed}, defender {defender}）"
             );
         }
     }

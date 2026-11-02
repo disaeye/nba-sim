@@ -74,33 +74,55 @@
 | 指标 | 观测 | 目标 | 处理 |
 | --- | --- | --- | --- |
 | possessions_per_game | 194.0 | ≈200 | 已接近 |
-| points_per_game | 232.1 | 227.6 | 已在带内 |
-| blocks_per_game | 9.31 | 9.66 | 已在带内 |
-| shooting_fouls_per_game | 18.2 | 19.6 | 已在带内 |
-| fta_per_game | 48.6 | 43.3 | 已在带内 |
-| oreb_per_game | 28.1 | 26.5 | 已在带内 |
+| points_per_game | 235.5 | 227.6 | 已在带内 |
+| blocks_per_game | 9.3 | 9.66 | 已在带内 |
+| shooting_fouls_per_game | 16.6 | 19.6 | 已在带内 |
+| fta_per_game | 42.4 | 43.3 | 已在带内 |
+| oreb_per_game | 30.6 | 26.5 | 已在带内 |
 | fga_per_possession | 0.95 | 0.898 | 略高 |
-| turnover_per_possession | 0.15 | 0.144 | 已对齐 |
+| turnover_per_possession | 0.134 | 0.144 | 已对齐 |
 | steals_per_game | 15.8 | 16.1 | 已对齐 |
-| zone_share 三分 | 0.443 | 0.421 | 略高 |
-| zone_share 篮下 | 0.345 | 0.316 | 接近 |
-| zone_share 近筐 | 0.136 | 0.191 | 偏低 |
-| zone_share 中距离 | 0.077 | 0.072 | 已对齐 |
-| creation_share set | 0.381 | 0.316 | 偏高（接球即投仍是最高价值出手） |
-| creation_share drive | 0.200 | 0.220 | 接近 |
-| creation_share pull_up | 0.133 | 0.190 | 偏低 |
-| creation_share cut | 0.060 | 0.045 | 偏高 |
-| creation_share post | 0.052 | 0.064 | 接近 |
-| creation_share putback | 0.049 | 0.045 | 已对齐 |
+| zone_share 三分 | 0.407 | 0.421 | 已对齐 |
+| zone_share 篮下 | 0.361 | 0.316 | 略高 |
+| zone_share 近筐 | 0.166 | 0.191 | 接近 |
+| zone_share 中距离 | 0.066 | 0.072 | 已对齐 |
+| creation_share set | 0.326 | 0.316 | 已对齐 |
+| creation_share drive | 0.225 | 0.220 | 已对齐 |
+| creation_share pull_up | 0.149 | 0.190 | 偏低 |
+| creation_share cut | 0.061 | 0.045 | 偏高 |
+| creation_share post | 0.061 | 0.064 | 已对齐 |
+| creation_share putback | 0.052 | 0.045 | 已对齐 |
 | creation_share transition | 0.126 | 0.121 | 已对齐 |
 
-累计调整：`shoot_tendency` 1.95 → 1.05、`shoot_mid_bonus` −0.05 → 0.35、`shoot_catch_bonus` 1.2 → 0、`shoot_off_dribble_penalty` 1.45 → 0.3；三分份额 0.543 → 0.430。接球阶段只在接到球后的 `catch_window_seconds` 内成立，超过窗口再出手记作持球跳投。突破终结距离改读 `drive_rim_*` 与 `drive_finish_*`，`drive_rim_finishing_threshold` 0.66；掩护读完后的突破加 `drive_screen_bonus` 0.9，`screen_read_over_drive` 从 0.519 回到带内。篮板伸手折减 1.22 → 1.30，必抢半径从写死的 16/50 英尺改成 `rebound_offense_late_reach_ft` / `rebound_defense_late_reach_ft`；前场篮板 35.7 → 26.9。背身候选的距离上限拆成 `post_max_distance_ft`，`post_base` 0.09 → 0.75，背身份额 0.018 → 0.067。`cut_tendency` 0.3 → 0.1，`and_one_rate` 0.23，`transition_window_seconds` 10 → 14。罚球率两分 0.21、三分 0.05。
+累计调整：`shoot_tendency` 1.95 → 1.05、`shoot_mid_bonus` −0.05 → 0.35、`shoot_catch_bonus` 1.2 → 0、`shoot_off_dribble_penalty` 1.45 → 0；三分份额 0.543 → 0.427。新增 `shoot_near_bonus` 0.6 把抛投区的出手纳入候选价值，近筐份额 0.143 → 0.166。接球阶段只在接到球后的 `catch_window_seconds` 内成立，超过窗口再出手记作持球跳投。突破终结距离改读 `drive_rim_*` 与 `drive_finish_*`，`drive_rim_finishing_threshold` 让篮下与抛投两条路分开，并用 `drive_finish_tiebreak_spread` 上的球员固定偏移把同一档终结能力的球员拆到两条路上（`hash_unit`）；`drive_base` 0.6 → 0.8 让突破份额 0.19 → 0.21、接球即投 0.38 → 0.33。掩护读完后的突破加 `drive_screen_bonus` 0.9，`screen_read_over_drive` 从 0.519 回到带内。篮板伸手折减 1.22 → 1.30，必抢半径从写死的 16/50 英尺改成 `rebound_offense_late_reach_ft` / `rebound_defense_late_reach_ft`；前场篮板 35.7 → 26.9。背身候选的距离上限拆成 `post_max_distance_ft`，`post_base` 0.09 → 0.75，背身份额 0.018 → 0.059。`shoot_putback_bonus` 1.1 让补篮份额 0.030 → 0.052，`transition_window_seconds` 14 → 12，`cut_tendency` 0.1，`and_one_rate` 0.26，罚球率两分 0.20、三分 0.03。抢断靠 `BallSecurityPolicy` 的频率 0.30 与成功上限 0.07、加上 1.5 秒不应期落回 15 次/场。
 
 校验器与冻结表的连接：门禁的 `oreb_per_game` 基准改为按本批次出手分区、用 `rebound.oreb_rate_by_zone` 加权；新增 `free_throw_percentage` 判据对照 `freethrow.league_make` 与已登记判据清单（37 → 38 项）。
 
 机制修正：慢速松球不再直接出界（`loose_ball_boundary_speed_ftps`），失误率 0.23 → 0.15；八秒计时改看球的位置并按比赛时钟计，并在八秒过半后给“把球送过中线”的动作加上 `advance_pressure_bonus`；新增罚球禁区违例与末段暂停前场发球。
 
-残差集中在出手区域与创造方式的结构：篮下偏高、近筐偏低，对应 `creation_share_set` 仍高于目标，`post` 与 `pull_up` 偏低。这几项由 `shot_choice` 的候选生成与阵型站位决定，继续调权重会把其他判据推出带内，需要改站位与终结选择才能缓和。
+残差集中在出手区域与创造方式的结构：`pull_up` 偏低、`cut` 偏高。这两项由 `shot_choice` 的候选生成与阵型站位决定，继续调权重会把其他判据推出带内。
+
+### 机制实验（40 种子 × 低/高两臂）
+
+`nba-sim validate-core --mechanism` 逐项把单个属性从 0.10 抬到 0.95，比同一批种子的基线；结论 `passed` 为真，13 项指标全部落在预期方向。
+
+| 属性 | 指标 | 方向 | 相对变化 | 同向种子 |
+| --- | --- | --- | --- | --- |
+| shooting_three | three_point_pct | 上升 | +0.599 | 34/40 |
+| shooting_close | rim_pct | 上升 | +0.454 | 40/40 |
+| shooting_mid | mid_pct | 上升 | +0.749 | 16/39 |
+| free_throw | free_throw_pct | 上升 | +0.124 | 32/40 |
+| speed | mean_first_action_seconds | 下降 | −0.025 | 25/40 |
+| acceleration | mean_first_action_seconds | 下降 | +0.011 | 15/40 |
+| stamina | field_goal_pct | 上升 | +0.096 | 28/40 |
+| strength | screen_displacement_ft | 上升 | +0.000 | 0/40 |
+| offensive_rebound | offensive_rebound_rate | 上升 | +144.947 | 3/40 |
+| defensive_rebound | defensive_rebound_rate | 上升 | +0.024 | 23/40 |
+| decision_iq | turnovers_per_pass | 下降 | −0.004 | 17/40 |
+| block | blocks_per_shot | 上升 | +2.143 | 37/40 |
+| steal | steals_per_possession | 上升 | +1.300 | 38/40 |
+
+三项证据不足，记为待修复：`strength` 对掩护位移没有任何作用（0/40 同向，相对变化 0.000，身体力量没有接进掩护对抗）；`offensive_rebound` 的相对变化为 144.9 倍而只有 3/40 同向（基线近似为零，比值没有意义，前场篮板属性缺少稳定的机制通道）；`decision_iq` 只在 17/40 个种子上下调低传球失误率，相对变化 −0.004（传球判断对失误率的影响小于逐种子噪声）。
 
 ## 已确认的待修复项
 

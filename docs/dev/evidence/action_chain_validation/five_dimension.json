@@ -7,7 +7,23 @@
     5,
     6,
     7,
-    8
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24
   ],
   "dimensions": [
     {
@@ -15,14 +31,14 @@
       "metrics": [
         {
           "key": "trace_coverage",
-          "value": 0.9958136394328156,
+          "value": 0.99767784575537,
           "lower": 0.99,
           "upper": 1.0,
           "passed": true
         },
         {
           "key": "mean_candidates",
-          "value": 4.334503713706955,
+          "value": 4.373196981199482,
           "lower": 2.0,
           "upper": 12.0,
           "passed": true
@@ -36,7 +52,7 @@
         },
         {
           "key": "mean_beta",
-          "value": 5.535730731237748,
+          "value": 5.625834958537237,
           "lower": 3.0,
           "upper": 10.0,
           "passed": true
@@ -70,7 +86,7 @@
         },
         {
           "key": "endgame_three_share",
-          "value": 0.44155844155844154,
+          "value": 0.40585774058577406,
           "lower": 0.15,
           "upper": 0.8,
           "passed": true
@@ -83,28 +99,28 @@
       "metrics": [
         {
           "key": "play_activation_share",
-          "value": 0.2471190781049936,
+          "value": 0.2576400679117148,
           "lower": 0.15,
           "upper": 1.0,
           "passed": true
         },
         {
           "key": "action_family_entropy_bits",
-          "value": 2.766044830557409,
+          "value": 2.7467930637080196,
           "lower": 1.0,
           "upper": 3.2,
           "passed": true
         },
         {
           "key": "pass_share",
-          "value": 0.7137870855148342,
+          "value": 0.7051389317010877,
           "lower": 0.15,
           "upper": 0.85,
           "passed": true
         },
         {
           "key": "tactical_bonus_share",
-          "value": 0.11916126832594613,
+          "value": 0.11713947323896001,
           "lower": 0.04,
           "upper": 1.0,
           "passed": true
@@ -172,7 +188,7 @@
         },
         {
           "key": "events_per_game",
-          "value": 9503.625,
+          "value": 9606.041666666666,
           "lower": 1000.0,
           "upper": 10000.0,
           "passed": true
