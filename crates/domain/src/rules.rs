@@ -599,6 +599,28 @@ impl GameRules {
         }
     }
 
+    /// 缩短节时长的同一套规则：行为测试用它与完整时长走同一条生产路径，
+    /// tick 数按缩短比例下降。每节预计回合数按比例缩放，其余规则阈值
+    /// （末段秒数、罚则次数、暂停额度等）保持不变。
+    pub fn shortened(&self, period_seconds: f32, overtime_seconds: f32) -> Self {
+        assert!(
+            period_seconds >= self.league.shot_clock_seconds,
+            "shortened period must be at least one shot clock"
+        );
+        assert!(
+            overtime_seconds >= self.league.shot_clock_seconds,
+            "shortened overtime must be at least one shot clock"
+        );
+        let mut rules = self.clone();
+        let scale = period_seconds / self.league.period_duration_seconds;
+        rules.league.period_duration_seconds = period_seconds;
+        rules.league.overtime_duration_seconds = overtime_seconds;
+        rules.estimated_possessions_per_period =
+            ((self.estimated_possessions_per_period as f32 * scale).ceil() as u32).max(1);
+        rules.validate().expect("shortened rules must stay valid");
+        rules
+    }
+
     pub fn period_duration(&self, period: u32) -> f32 {
         let league = &self.league;
         if period > league.regulation_periods {

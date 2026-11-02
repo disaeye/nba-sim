@@ -74,6 +74,8 @@ impl GameRules {
             self.free_throw_distance_ft,
             self.shot_pct_floor,
             self.shot_pct_ceiling,
+            self.league.center_circle_radius_ft,
+            self.league.jump_ball_receiver_distance_ft,
             self.tip_off_duration_seconds,
             self.ball_bounce_base_ft,
             self.ball_bounce_amplitude_ft,
@@ -169,6 +171,7 @@ impl GameRules {
             || self.tip_off_tap_speed_ftps <= 0.0
             || self.tip_off_tap_distance_ft <= 0.0
             || self.tip_off_tap_height_ft <= 0.0
+            || self.tip_off_tap_height_ft > self.ball_z_max_ft
             || self.tip_off_tap_vel_z_ftps <= 0.0
             || self.inbound_setup_seconds < 0.0
             || self.backcourt_seconds <= 0.0
@@ -179,6 +182,10 @@ impl GameRules {
             || self.redecide_interval_seconds > 5.0
             || self.free_throw_interval_seconds <= 0.0
             || self.league.regulation_periods == 0
+            || self.league.center_circle_radius_ft <= 0.0
+            || self.league.jump_ball_receiver_distance_ft <= self.league.center_circle_radius_ft
+            || self.league.jump_ball_receiver_distance_ft >= self.court.width_ft * 0.5
+            || self.league.center_circle_radius_ft >= self.court.width_ft * 0.25
             || self.league.bonus_final_seconds < f32::default()
             || (self.league.bonus_fouls_final != 0
                 && self.league.bonus_fouls_final > self.league.bonus_fouls_per_period)

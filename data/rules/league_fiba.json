@@ -1,6 +1,14 @@
 {
   "id": "fiba",
   "name": "FIBA",
+  "ruleset_version": "2026-v1.1",
+  "source": {
+    "title": "Official Basketball Rules 2026 v1.1",
+    "url": "https://assets.fiba.basketball/image/upload/documents-corporate-fiba-official-rules-2026-v1-1.pdf",
+    "published": "2026-08",
+    "effective": "2026-10-01",
+    "reviewed": "2026-10-29"
+  },
   "regulation_periods": 4,
   "period_duration_seconds": 600.0,
   "overtime_duration_seconds": 300.0,

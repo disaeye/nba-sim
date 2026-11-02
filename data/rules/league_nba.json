@@ -1,6 +1,14 @@
 {
   "id": "nba",
   "name": "NBA",
+  "ruleset_version": "2025-26",
+  "source": {
+    "title": "Official 2025-26 NBA Playing Rules",
+    "url": "https://cdn.nba.com/manage/2026/01/Official-2025-26-NBA-Playing-Rules.pdf",
+    "published": "2025-10",
+    "effective": "2025-10-01",
+    "reviewed": "2026-10-29"
+  },
   "regulation_periods": 4,
   "period_duration_seconds": 720.0,
   "overtime_duration_seconds": 300.0,

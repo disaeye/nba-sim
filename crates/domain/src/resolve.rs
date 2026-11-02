@@ -188,9 +188,12 @@ impl Default for BallSecurityPolicy {
             // 不应期（1.5s）的组合；main 的 1.2/0.11 是 r38 批量校准值。
             // 保留 main 值 + ui 不应期（两套标定的频率-成功率-不应期三元
             // 组不能混搭，TOV 批量口径以 main 为准）。
-            poke_attempt_rate_per_sec: 1.2,
-            poke_success_ceiling: 0.11,
-            poke_success_floor: 0.008,
+            poke_attempt_rate_per_sec: 0.26,
+            // 成功上限按实测重标：每场 26.6 次抢断里有约 20 次来自贴身拍球，
+            // 真实 NBA 的这一项只有个位数。0.11 的上限配上保护/压迫两项，
+            // 单次尝试成功约 8%，一个回合就要丢一成球权。
+            poke_success_ceiling: 0.042,
+            poke_success_floor: 0.004,
             poke_defender_skill_weight: 0.55,
             poke_handler_skill_weight: 0.70,
             poke_handler_tendency_weight: 0.25,

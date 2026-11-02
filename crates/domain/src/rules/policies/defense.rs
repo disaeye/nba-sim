@@ -103,6 +103,12 @@ pub struct PotentialFieldRules {
     pub sag_distance_perimeter_ft: f32,
     /// 中距离/内线对位的下沉距离（ft）。
     pub sag_distance_interior_ft: f32,
+    /// 弱侧外线对位的下沉距离（ft）。
+    ///
+    /// 弱侧人先站进禁区、再按威胁轮转：下沉量按弱侧权重从
+    /// `sag_distance_perimeter_ft` 连续过渡到本值。强度由持球位置触发的轮转
+    /// 追不上突破（一次突破只需一秒），因此护筐必须先由站位兑现。
+    pub sag_distance_weak_side_ft: f32,
     /// 下沉锚点方向「朝篮筐」权重的合成配方（`help_blend`，与朝持球人权重互补，两者和应为 1）。
     ///
     /// 实际锚点权重 = `clamp(base + tilt_gain × help_priority, min, max)`，
@@ -342,8 +348,9 @@ impl Default for PotentialFieldRules {
             k_man_base: 1.0,
             k_threat_base: 1.6,
             k_void_base: 1.2,
-            sag_distance_perimeter_ft: 2.0,
+            sag_distance_perimeter_ft: 5.5,
             sag_distance_interior_ft: 5.5,
+            sag_distance_weak_side_ft: 11.0,
             help_hoop_weight_base,
             help_priority_tilt_gain,
             help_hoop_weight_min,
@@ -367,7 +374,7 @@ impl Default for PotentialFieldRules {
             switch_anchor_gap_ft: 3.0,
             switch_screener_gap_ft: 2.5,
             on_ball_gap_hoop_ratio: 0.4,
-            on_ball_gap_min_ft: 2.5,
+            on_ball_gap_min_ft: 3.5,
             sag_multiplier_min: 0.5,
             sag_multiplier_max: 2.5,
             total_weight_floor: 0.001,

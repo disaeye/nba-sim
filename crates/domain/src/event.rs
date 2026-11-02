@@ -615,6 +615,8 @@ pub enum PossessionEndCause {
     TurnoverLooseBall,
     /// 违例（24 秒/8 秒/回场/出界等）。
     TurnoverViolation,
+    /// 走步导致的失误。
+    TurnoverTravel,
     /// 节末/终场导致的回合终结。
     PeriodEnd,
 }
@@ -630,6 +632,7 @@ impl PossessionEndCause {
             PossessionEndCause::TurnoverOffensiveFoul => "TURNOVER_OFFENSIVE_FOUL",
             PossessionEndCause::TurnoverLooseBall => "TURNOVER_LOOSE_BALL",
             PossessionEndCause::TurnoverViolation => "TURNOVER_VIOLATION",
+            PossessionEndCause::TurnoverTravel => "TURNOVER_TRAVEL",
             PossessionEndCause::PeriodEnd => "PERIOD_END",
         }
     }

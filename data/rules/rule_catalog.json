@@ -1,0 +1,108 @@
+{
+  "catalog_version": 1,
+  "scope": ["nba", "fiba"],
+  "profiles": {
+    "nba": {
+      "ruleset_version": "2025-26",
+      "source": "https://cdn.nba.com/manage/2026/01/Official-2025-26-NBA-Playing-Rules.pdf",
+      "source_status": "official_pdf_indexed; official_rule_pages_read; pdf_text_confirmation_pending",
+      "team_foul_policy": {
+        "regulation_fouls_to_penalty": 5,
+        "first_quota": 4,
+        "first_quota_duration_seconds": 600,
+        "overtime_fouls_to_penalty": 4,
+        "overtime_foul_allowance": 3,
+        "overtime_first_quota_duration_seconds": 180,
+        "overtime_final_window_seconds": 120,
+        "overtime_final_fouls_to_penalty": 2,
+        "overtime_final_quota_allowance": 1,
+        "regulation_late_quota_allowance": 1,
+        "regulation_quota_check_first_seconds": 600
+      },
+      "related_official_pages": [
+        "https://official.nba.com/rule-no-2-duties-of-the-officials/",
+        "https://official.nba.com/rule-no-3-players-substitutes-and-coaches/",
+        "https://official.nba.com/rule-no-4-definitions/",
+        "https://official.nba.com/rule-no-5-scoring-and-timing/",
+        "https://official.nba.com/rule-no-6-putting-ball-in-play-live-dead-ball/",
+        "https://official.nba.com/rule-no-7-24-second-clock/",
+        "https://official.nba.com/rule-no-8-out-of-bounds-and-throw-in/",
+        "https://official.nba.com/rule-no-9-free-throws-and-penalties/",
+        "https://official.nba.com/rule-no-10-violations-and-penalties/",
+        "https://official.nba.com/rule-no-11-basket-interference-goaltending/",
+        "https://official.nba.com/rule-no-12-fouls-and-penalties/",
+        "https://official.nba.com/rule-no-13-instant-replay/",
+        "https://official.nba.com/rule-no-14-coachs-challenge/"
+      ]
+    },
+    "fiba": {
+      "ruleset_version": "2026-v1.1",
+      "source": "https://assets.fiba.basketball/image/upload/documents-corporate-fiba-official-rules-2026-v1-1.pdf",
+      "interpretations": "https://assets.fiba.basketball/image/upload/documents-corporate-fiba-official-rules-2026-interpretations-v1-0.pdf",
+      "changes": "https://assets.fiba.basketball/image/upload/documents-corporate-fiba-official-rules-2026-rule-changes-v1-1-en.pdf",
+      "effective": "2026-10-01",
+      "source_status": "official_pdf_fetched; 108 pages",
+      "team_foul_policy": {
+        "regulation_fouls_to_penalty": 5,
+        "first_quota": 4,
+        "overtime_team_fouls_carry_from_fourth": true,
+        "quarter_fouls_to_penalty": 5,
+        "overtime_fouls_add_to_fourth_quarter": true,
+        "counts_player_personal_fouls": ["personal", "technical_category_1", "technical_category_2", "disruptive", "flagrant", "disqualifying"],
+        "counts_team_fouls": ["personal", "technical_player", "disruptive", "flagrant", "disqualifying"],
+        "coach_technical_counts_team_foul": false
+      }
+    }
+  },
+  "procedures": [
+    {"id":"PROC-PREGAME","name":"赛前与名单检查","nba":["Rule 2","Rule 3"],"fiba":["Articles 3-7"],"scenarios":["RULE-PREGAME-ACTIVE-LIST","RULE-PREGAME-ROSTER-LIMIT","RULE-PREGAME-INELIGIBLE-PLAYER"],"implementation":"planned"},
+    {"id":"PROC-OPENING-JUMP","name":"开场跳球","nba":["Rule 6 §I, §V, §VII"],"fiba":["Articles 9, 12"],"scenarios":["RULE-JUMP-LEGAL-TAP","RULE-JUMP-EARLY-TOUCH","RULE-JUMP-DOUBLE-VIOLATION","RULE-JUMP-ARROW-INITIALIZATION","RULE-JUMP-OPENING-POSSESSION-ESTABLISHED","RULE-JUMP-FIBA-ARROW-AFTER-OPENING"],"implementation":"partial","passing_scenarios":["RULE-JUMP-OPENING-POSSESSION-ESTABLISHED","RULE-JUMP-FIBA-ARROW-AFTER-OPENING"],"missing_scenarios":["RULE-JUMP-LEGAL-TAP","RULE-JUMP-EARLY-TOUCH","RULE-JUMP-DOUBLE-VIOLATION","RULE-JUMP-ARROW-INITIALIZATION"],"scenario_tests":{"RULE-JUMP-OPENING-POSSESSION-ESTABLISHED":"nba_sim_core::jump_ball::nba_opening_possession_is_established_by_a_resolved_center_jump_ball","RULE-JUMP-FIBA-ARROW-AFTER-OPENING":"nba_sim_core::jump_ball::fiba_period_starts_follow_the_alternating_possession_arrow"}},
+    {"id":"PROC-PERIOD-START","name":"节次开始与发球权","nba":["Rule 6 §I"],"fiba":["Articles 9, 12"],"scenarios":["RULE-PERIOD-NBA-START-ALLOCATION","RULE-PERIOD-FIBA-ARROW-THROW-IN","RULE-PERIOD-BASKET-DIRECTION","RULE-PERIOD-NBA-SECOND-AND-THIRD-ALLOCATION","RULE-PERIOD-FIBA-SECOND-AND-THIRD-ARROW-THROW-IN","RULE-PERIOD-ARROW-REJUMP-UPDATE"],"implementation":"partial","passing_scenarios":["RULE-PERIOD-NBA-SECOND-AND-THIRD-ALLOCATION","RULE-PERIOD-FIBA-SECOND-AND-THIRD-ARROW-THROW-IN"],"missing_scenarios":["RULE-PERIOD-BASKET-DIRECTION","RULE-PERIOD-ARROW-REJUMP-UPDATE"],"scenario_tests":{"RULE-PERIOD-NBA-SECOND-AND-THIRD-ALLOCATION":"nba_sim_core::jump_ball::nba_non_overtime_periods_alternate_the_opening_throw_in","RULE-PERIOD-FIBA-SECOND-AND-THIRD-ARROW-THROW-IN":"nba_sim_core::jump_ball::fiba_period_starts_follow_the_alternating_possession_arrow"}},
+    {"id":"PROC-OVERTIME","name":"加时与平分后续比赛","nba":["Rule 5 §II, §IV; Rule 6 §I"],"fiba":["Articles 8, 9, 12"],"scenarios":["RULE-OT-NBA-FIVE-MINUTES","RULE-OT-FIBA-FIVE-MINUTES","RULE-OT-TIED-REPEATS","RULE-OT-FOUL-COUNTERS","RULE-OT-TIMEOUT-BUDGET","RULE-OT-NBA-CENTER-JUMP-START","RULE-OT-POSSESSION-COUNTED-ON-CONTROL"],"implementation":"partial","passing_scenarios":["RULE-OT-NBA-FIVE-MINUTES","RULE-OT-NBA-CENTER-JUMP-START","RULE-OT-POSSESSION-COUNTED-ON-CONTROL"],"missing_scenarios":["RULE-OT-FIBA-FIVE-MINUTES","RULE-OT-TIED-REPEATS","RULE-OT-FOUL-COUNTERS","RULE-OT-TIMEOUT-BUDGET"],"scenario_tests":{"RULE-OT-NBA-FIVE-MINUTES":"nba_sim_core::jump_ball::nba_overtime_starts_with_a_fresh_jump_ball","RULE-OT-NBA-CENTER-JUMP-START":"nba_sim_core::jump_ball::nba_overtime_starts_with_a_fresh_jump_ball","RULE-OT-POSSESSION-COUNTED-ON-CONTROL":"nba_sim_core::jump_ball::nba_overtime_starts_with_a_fresh_jump_ball"}},
+    {"id":"PROC-GAME-CLOCK","name":"比赛时钟运行、停止与启动","nba":["Rule 5 §II, §V, §VIII; Rule 6 §II-IV"],"fiba":["Articles 8-10, 50"],"scenarios":["RULE-CLOCK-PASS-FLIGHT-RUNS","RULE-CLOCK-FREE-THROW-FLIGHT-STOPPED","RULE-CLOCK-INBOUND-LEGAL-TOUCH","RULE-CLOCK-MADE-GOAL-LATE-PERIOD","RULE-CLOCK-WHISTLE-STOPS"],"implementation":"partial"},
+    {"id":"PROC-SHOT-CLOCK","name":"进攻时钟启动、继续与重置","nba":["Rule 7 §II-IV"],"fiba":["Article 29"],"scenarios":["RULE-SHOT-CLOCK-NEW-CONTROL-24","RULE-SHOT-CLOCK-RIM-REBOUND-14","RULE-SHOT-CLOCK-FRONTCOURT-FOUL","RULE-SHOT-CLOCK-BACKCOURT-RESET","RULE-SHOT-CLOCK-DEFLECTION-CONTINUES","RULE-SHOT-CLOCK-SIGNAL-AFTER-RELEASE"],"implementation":"partial","existing_test":"nba_sim_core::rules_flow::a_second_chance_clock_only_resets_when_the_ball_touched_the_rim"},
+    {"id":"PROC-BACKCOURT-CLOCK","name":"后场推进计时","nba":["Rule 10 §VIII"],"fiba":["Article 28"],"scenarios":["RULE-BACKCOURT-8S-EXPIRES","RULE-BACKCOURT-CROSSES-BEFORE-8S","RULE-BACKCOURT-CLOCK-RESET-DEFENSE-FOUL","RULE-BACKCOURT-CLOCK-RESET-KICK"],"implementation":"planned"},
+    {"id":"PROC-LANE-CLOCKS","name":"限制区与持球连续计时","nba":["Rule 10 §VI-VII, §XVI"],"fiba":["Articles 26, 27"],"scenarios":["RULE-OFFENSE-3S-EXPIRES","RULE-OFFENSE-3S-LEGAL-EXIT","RULE-DEFENSE-3S-NBA-TECHNICAL","RULE-CLOSE-GUARD-5S-FIBA","RULE-POST-UP-5S-NBA"],"implementation":"planned"},
+    {"id":"PROC-FIELD-GOAL","name":"投篮与得分裁决","nba":["Rule 5 §I, §III; Rule 11"],"fiba":["Articles 15, 16, 31"],"scenarios":["RULE-SHOT-2-POINT","RULE-SHOT-3-POINT-FOOT-STATUS","RULE-SHOT-PERIOD-END-IN-FLIGHT","RULE-SHOT-MAKE-ON-RING-PLANE","RULE-SHOT-BLOCK-AND-REBOUND"],"implementation":"partial"},
+    {"id":"PROC-GOALTENDING","name":"干扰球与篮筐干涉","nba":["Rule 11"],"fiba":["Article 31"],"scenarios":["RULE-GOALTENDING-DOWNWARD-FLIGHT","RULE-GOALTENDING-AFTER-BACKBOARD","RULE-INTERFERENCE-BALL-ON-RING","RULE-GOALTENDING-NO-VIOLATION-UPWARD"],"implementation":"planned"},
+    {"id":"PROC-PASS-CONTROL","name":"传球、触球与控制建立","nba":["Rule 4 §XV-XVII; Rule 7 §II"],"fiba":["Articles 10, 13, 14"],"scenarios":["RULE-PASS-CAUGHT-CONTROL","RULE-PASS-TIPPED-LOOSE","RULE-PASS-INTERCEPTED","RULE-PASS-DROPPED-LOOSE","RULE-PASS-OUT-OF-BOUNDS"],"implementation":"partial","existing_test":"nba_sim_core::action_chain::cut_uses_lob_flight_and_received_fact_before_control"},
+    {"id":"PROC-OUT-OF-BOUNDS","name":"出界归属、地点与恢复","nba":["Rule 8 §I-II; Rule 10 §I"],"fiba":["Articles 23, 17"],"scenarios":["RULE-OOB-LAST-TOUCH","RULE-OOB-SIMULTANEOUS-TOUCH","RULE-OOB-SIDELINE-LOCATION","RULE-OOB-BASELINE-LOCATION","RULE-OOB-BACKBOARD-OUT"],"implementation":"planned"},
+    {"id":"PROC-INBOUND","name":"界外发球与发球违例","nba":["Rule 6 §I-II; Rule 8 §III; Rule 10 §III"],"fiba":["Articles 17, 9"],"scenarios":["RULE-INBOUND-AFTER-MADE-GOAL-ENDLINE","RULE-INBOUND-FOUL-SPOT","RULE-INBOUND-TIMEOUT-FRONTCOURT-OPTION","RULE-INBOUND-FIVE-SECONDS","RULE-INBOUND-STEP-ON-LINE","RULE-INBOUND-UNTOUCHED-OUT"],"implementation":"partial"},
+    {"id":"PROC-DRIBBLE-FOOTWORK","name":"运球、收球、走步与回场","nba":["Rule 4 §II, §V, §VII-IX; Rule 10 §II, §IX, §XIII"],"fiba":["Articles 24, 25, 30"],"scenarios":["RULE-DRIBBLE-SECOND-DRIBBLE","RULE-DRIBBLE-CARRYING","RULE-DRIBBLE-LEGAL-RECOVERY","RULE-TRAVEL-GATHER-STEPS","RULE-BACKCOURT-RETURN-TEAM-CONTROL"],"implementation":"partial"},
+    {"id":"PROC-FOUL-PERSONAL","name":"个人、投篮、进攻与松球犯规","nba":["Rule 12B §I-III, §VII-VIII"],"fiba":["Articles 32-35, 42-43"],"scenarios":["RULE-FOUL-SHOOTING-2PT","RULE-FOUL-SHOOTING-3PT","RULE-FOUL-AND-ONE","RULE-FOUL-OFFENSIVE-NO-TEAM-COUNT-NBA","RULE-FOUL-LOOSE-BALL-PENALTY","RULE-FOUL-DOUBLE-RETAINS-CONTROL"],"implementation":"partial","existing_test":"nba_sim_core::rules_flow::an_offensive_foul_counts_personally_but_never_sends_the_other_team_to_the_line","scenario_status":{"passing":["RULE-FOUL-OFFENSIVE-NO-TEAM-COUNT-NBA"],"missing":["RULE-FOUL-SHOOTING-2PT","RULE-FOUL-SHOOTING-3PT","RULE-FOUL-AND-ONE","RULE-FOUL-LOOSE-BALL-PENALTY","RULE-FOUL-DOUBLE-RETAINS-CONTROL"]}},
+    {"id":"PROC-FOUL-TEAM-PENALTY","name":"球队犯规罚则与加时累计","nba":["Rule 12B §V"],"fiba":["Articles 41-42"],"scenarios":["RULE-TEAM-FOUL-NBA-FIFTH-REGULATION","RULE-TEAM-FOUL-NBA-FOURTH-OVERTIME","RULE-TEAM-FOUL-NBA-FINAL-TWO-MINUTES","RULE-TEAM-FOUL-FIBA-FIFTH-QUARTER","RULE-TEAM-FOUL-FIBA-OVERTIME-CARRIES-Q4"],"implementation":"partial","existing_test":"nba_sim_core::rules_flow::the_fifth_team_foul_awards_free_throws_while_the_fourth_only_restarts_play","scenario_status":{"passing":["RULE-TEAM-FOUL-NBA-FIFTH-REGULATION"],"missing":["RULE-TEAM-FOUL-NBA-FOURTH-OVERTIME","RULE-TEAM-FOUL-NBA-FINAL-TWO-MINUTES","RULE-TEAM-FOUL-FIBA-FIFTH-QUARTER","RULE-TEAM-FOUL-FIBA-OVERTIME-CARRIES-Q4"]}},
+    {"id":"PROC-FOUL-SPECIAL","name":"技术、恶意、转换与特殊犯规","nba":["Rule 12A; Rule 12B §IV, §IX-X"],"fiba":["Articles 36-40"],"scenarios":["RULE-TECHNICAL-FREE-THROW-AND-RESUME","RULE-FLAGRANT-1-AND-2","RULE-CLEAR-PATH-FREE-THROWS-AND-POSSESSION","RULE-AWAY-FROM-PLAY-ONE-AND-POSSESSION","RULE-FIBA-DISRUPTIVE-FOUL","RULE-FIBA-FLAGRANT-FOUL-DISQUALIFICATION"],"implementation":"partial","existing_test":"nba_sim_core::rules_flow::an_away_from_play_foul_in_the_last_two_minutes_is_one_free_throw_and_the_ball","scenario_status":{"passing":["RULE-AWAY-FROM-PLAY-ONE-AND-POSSESSION"],"missing":["RULE-TECHNICAL-FREE-THROW-AND-RESUME","RULE-FLAGRANT-1-AND-2","RULE-CLEAR-PATH-FREE-THROWS-AND-POSSESSION","RULE-FIBA-DISRUPTIVE-FOUL","RULE-FIBA-FLAGRANT-FOUL-DISQUALIFICATION"]}},
+    {"id":"PROC-FREE-THROW","name":"罚球授权、站位、结果与罚球后恢复","nba":["Rule 9 §I-III"],"fiba":["Article 44"],"scenarios":["RULE-FT-SHOOTER-TIME-LIMIT","RULE-FT-LANE-VIOLATION","RULE-FT-DOUBLE-VIOLATION","RULE-FT-LAST-MISS-REBOUND","RULE-FT-LAST-MAKE-INBOUND","RULE-FT-SHOOTER-REPLACEMENT"],"implementation":"partial"},
+    {"id":"PROC-TIMEOUT","name":"球队暂停、强制暂停与暂停后继续","nba":["Rule 5 §VI-VIII"],"fiba":["Article 18"],"scenarios":["RULE-TIMEOUT-NBA-REGULATION-BUDGET","RULE-TIMEOUT-NBA-FOURTH-QUARTER-CAP","RULE-TIMEOUT-NBA-MANDATORY","RULE-TIMEOUT-NBA-OVERTIME-BUDGET","RULE-TIMEOUT-FIBA-HALF-BUDGET","RULE-TIMEOUT-FIBA-FOURTH-QUARTER-CAP","RULE-TIMEOUT-RESUME-SAVED-PROGRAM"],"implementation":"partial","existing_test":"nba_sim_core::rules_flow::only_the_team_in_control_may_stop_the_clock_and_the_budget_is_capped","scenario_status":{"passing":["RULE-TIMEOUT-NBA-REGULATION-BUDGET","RULE-TIMEOUT-NBA-FOURTH-QUARTER-CAP","RULE-TIMEOUT-RESUME-SAVED-PROGRAM"],"missing":["RULE-TIMEOUT-NBA-MANDATORY","RULE-TIMEOUT-NBA-OVERTIME-BUDGET","RULE-TIMEOUT-FIBA-HALF-BUDGET","RULE-TIMEOUT-FIBA-FOURTH-QUARTER-CAP"]}},
+    {"id":"PROC-SUBSTITUTION","name":"换人资格、暂停窗口与犯满离场","nba":["Rule 3 §I, §V"],"fiba":["Articles 19, 41"],"scenarios":["RULE-SUB-LIVE-BALL-BLOCKED","RULE-SUB-DEAD-BALL-ALLOWED","RULE-SUB-DISQUALIFIED-PLAYER","RULE-SUB-PLAYER-FOUL-LIMIT","RULE-SUB-REQUIRED-FREE-THROW-REPLACEMENT"],"implementation":"partial","existing_test":"nba_sim_core::rules_flow::one_hundred_full_games_never_change_the_lineup_while_the_ball_is_live","scenario_status":{"passing":["RULE-SUB-LIVE-BALL-BLOCKED","RULE-SUB-DEAD-BALL-ALLOWED"],"missing":["RULE-SUB-DISQUALIFIED-PLAYER","RULE-SUB-PLAYER-FOUL-LIMIT","RULE-SUB-REQUIRED-FREE-THROW-REPLACEMENT"]}},
+    {"id":"PROC-REVIEW","name":"录像复核、教练挑战与裁决更正","nba":["Rule 13; Rule 14"],"fiba":["Appendix F"],"scenarios":["RULE-REVIEW-ELIGIBLE-CLOCK-EXPIRATION","RULE-REVIEW-NBA-CHALLENGE-COST","RULE-REVIEW-FIBA-IRS-CLEAR-EVIDENCE","RULE-REVIEW-PRESERVE-ORIGINAL-RULING"],"implementation":"planned"},
+    {"id":"PROC-PERIOD-FINALIZE","name":"节末待决事项与终场","nba":["Rule 5 §III-IV; Rule 13"],"fiba":["Articles 8-9, 45-46"],"scenarios":["RULE-PERIOD-ZERO-DEAD-BALL","RULE-PERIOD-SHOT-IN-FLIGHT","RULE-PERIOD-FOUL-BEFORE-HORN","RULE-PERIOD-TIED-ENTERS-OT","RULE-GAME-END-FREEZES-SCORE"],"implementation":"partial"}
+  ],
+  "violations": [
+    {"id":"VIOLATION-TRAVEL","nba":["Rule 4 §VIII; Rule 10 §XIII"],"fiba":["Article 25"]},
+    {"id":"VIOLATION-DOUBLE-DRIBBLE","nba":["Rule 10 §II"],"fiba":["Article 24"]},
+    {"id":"VIOLATION-CARRYING","nba":["Rule 10 §II"],"fiba":["Article 24"]},
+    {"id":"VIOLATION-OUT-OF-BOUNDS","nba":["Rule 8 §II; Rule 10 §I"],"fiba":["Articles 17, 23"]},
+    {"id":"VIOLATION-SHOT-CLOCK","nba":["Rule 7"],"fiba":["Article 29"]},
+    {"id":"VIOLATION-EIGHT-SECONDS","nba":["Rule 10 §VIII"],"fiba":["Article 28"]},
+    {"id":"VIOLATION-BACKCOURT","nba":["Rule 10 §IX"],"fiba":["Article 30"]},
+    {"id":"VIOLATION-OFFENSIVE-THREE-SECONDS","nba":["Rule 10 §VI"],"fiba":["Article 26"]},
+    {"id":"VIOLATION-DEFENSIVE-THREE-SECONDS","nba":["Rule 10 §VII"],"fiba":[]},
+    {"id":"VIOLATION-CLOSELY-GUARDED-FIVE-SECONDS","nba":[],"fiba":["Article 27"]},
+    {"id":"VIOLATION-POST-UP-FIVE-SECONDS","nba":["Rule 10 §XVI"],"fiba":[]},
+    {"id":"VIOLATION-INBOUND-FIVE-SECONDS","nba":["Rule 8 §III; Rule 10 §III"],"fiba":["Article 17"]},
+    {"id":"VIOLATION-KICKED-BALL","nba":["Rule 10 §IV"],"fiba":["Article 13"]},
+    {"id":"VIOLATION-GOALTENDING","nba":["Rule 11"],"fiba":["Article 31"]},
+    {"id":"VIOLATION-BASKET-INTERFERENCE","nba":["Rule 11"],"fiba":["Article 31"]},
+    {"id":"VIOLATION-FREE-THROW","nba":["Rule 9"],"fiba":["Article 44"]}
+  ],
+  "known_current_gaps": [
+    "NBA Profile does not yet distinguish regulation and overtime team-foul thresholds.",
+    "NBA Profile does not encode mandatory timeout triggers and timeout durations by source.",
+    "FIBA Profile does not encode 2026 technical foul categories 1 and 2 or disruptive and flagrant foul distinctions.",
+    "FIBA Profile does not encode Article 27 closely guarded five-second handling.",
+    "FIBA team penalty begins after 4 team fouls in a quarter; the fifth qualifying foul is penalised. Overtime fouls count into the fourth-quarter total under Article 42.1.3.",
+    "Neither profile encodes throw-in location categories, per-violation restart spots, referee authorization or review scope.",
+    "Both profiles require a full rule-program audit before their existing scalar fields can certify compliance."
+  ]
+}
