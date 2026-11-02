@@ -292,3 +292,39 @@ fn relocate_changes_the_position_and_keeps_the_receive_window() {
         "编队不得把跑位的落点改回去"
     );
 }
+
+/// 协防与回位：真实比赛里必须有防守人承担协防，并且该责任会收回。
+#[test]
+fn help_coverage_is_assigned_and_recovers() {
+    let mut help_seen = false;
+    let mut recovered = false;
+    for seed in 1..=3u64 {
+        let mut world = world(seed);
+        let mut guard = 0;
+        let mut helped: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+        while !world.finished && guard < 200_000 {
+            world.step(TICK_SECONDS);
+            guard += 1;
+            for handle in world
+                .on_court_home
+                .as_slice()
+                .iter()
+                .chain(world.on_court_away.as_slice())
+            {
+                let player = &world.players[*handle];
+                if player.on_court
+                    && player.defense_responsibility
+                        == nba_sim_core::state::DefenseResponsibility::Help
+                {
+                    helped.insert(*handle);
+                    help_seen = true;
+                } else if helped.contains(handle) {
+                    // 曾经协防的人后来又承担了别的责任：责任确实收回了。
+                    recovered = true;
+                }
+            }
+        }
+    }
+    assert!(help_seen, "真实比赛里必须有防守人承担协防");
+    assert!(recovered, "协防责任必须会收回，而不是一直挂着");
+}

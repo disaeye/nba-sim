@@ -178,11 +178,11 @@
       "existing_types": ["nba_sim_core::state::DefenseResponsibility", "nba_sim_core::action::DefenderRoute", "nba_domain::event::DefenseResponsibility"],
       "production_paths": ["crates/sim/src/defense.rs::apply_defense_targets", "crates/sim/src/resolve/screen.rs::resolve", "crates/sim/src/assignment.rs::assign_defense_responsibilities"],
       "consumer_status": "Help targets and screen-route response exist, and responsibility-aware off-ball segments are measured. Concurrent defender action lifecycles and complete responsibility transfer/recovery remain incomplete.",
-      "evidence": ["crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision", "crates/sim/tests/assignment.rs::role_segments_are_measured_by_responsibility", "crates/sim/tests/assignment.rs::off_ball_facts_are_emitted"],
+      "evidence": ["crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision", "crates/sim/tests/assignment.rs::role_segments_are_measured_by_responsibility", "crates/sim/tests/assignment.rs::off_ball_facts_are_emitted", "crates/sim/tests/action_scenarios.rs::help_coverage_is_assigned_and_recovers"],
       "rule_refs": ["NBA Rule 4 §IX; Rule 11-12", "FIBA Articles 31-33"],
       "scenarios": ["ACTION-DEFENSE-SCREEN-ROUTE-IS-READ", "ACTION-DEFENSE-RESPONSIBILITY-SEGMENTS-MEASURED", "ACTION-DEFENSE-OFF-BALL-FACTS-EMITTED", "ACTION-DEFENSE-HELP-ASSIGNS-COVERAGE", "ACTION-DEFENSE-ROTATION-HAS-RECOVERY", "ACTION-DEFENSE-BLOCK-CONTACT-CHANGES-BALL"],
-      "scenario_tests": {"ACTION-DEFENSE-SCREEN-ROUTE-IS-READ": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision", "ACTION-DEFENSE-RESPONSIBILITY-SEGMENTS-MEASURED": "crates/sim/tests/assignment.rs::role_segments_are_measured_by_responsibility", "ACTION-DEFENSE-OFF-BALL-FACTS-EMITTED": "crates/sim/tests/assignment.rs::off_ball_facts_are_emitted"},
-      "missing_evidence": ["ACTION-DEFENSE-HELP-ASSIGNS-COVERAGE", "ACTION-DEFENSE-ROTATION-HAS-RECOVERY", "ACTION-DEFENSE-BLOCK-CONTACT-CHANGES-BALL"]
+      "scenario_tests": {"ACTION-DEFENSE-SCREEN-ROUTE-IS-READ": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision", "ACTION-DEFENSE-RESPONSIBILITY-SEGMENTS-MEASURED": "crates/sim/tests/assignment.rs::role_segments_are_measured_by_responsibility", "ACTION-DEFENSE-OFF-BALL-FACTS-EMITTED": "crates/sim/tests/assignment.rs::off_ball_facts_are_emitted", "ACTION-DEFENSE-HELP-ASSIGNS-COVERAGE": "crates/sim/tests/action_scenarios.rs::help_coverage_is_assigned_and_recovers", "ACTION-DEFENSE-ROTATION-HAS-RECOVERY": "crates/sim/tests/action_scenarios.rs::help_coverage_is_assigned_and_recovers"},
+      "missing_evidence": ["ACTION-DEFENSE-BLOCK-CONTACT-CHANGES-BALL"]
     },
     {
       "id": "ACTION-CLOSEOUT",
