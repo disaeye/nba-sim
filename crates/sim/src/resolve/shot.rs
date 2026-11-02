@@ -7,6 +7,63 @@ use crate::draw::{purpose, Stream};
 use crate::resolve::{clamp01, shooter_zone};
 use crate::world::{Phase, World};
 
+/// 干扰球：球在下落、水平位置还在篮筐上方的筐柱范围内时被防守人碰到，
+/// 出手直接记中。球越过最高点之前可以合法封盖，越过后就是干扰。
+pub fn check_goaltending(world: &mut World) -> bool {
+    if !matches!(world.phase(), Phase::ShotFlight { .. }) {
+        return false;
+    }
+    let (shooter, shot_id, pending) = match world.pending_shot.as_ref() {
+        Some(pending) if pending.result.is_none() && pending.free_throw.is_none() => {
+            (pending.shooter, pending.shot_id, true)
+        }
+        _ => (0, 0, false),
+    };
+    if !pending {
+        return false;
+    }
+    let team = world.players[shooter].team;
+    let hoop = world.hoop_for(team);
+    let policy = &world.params.policy;
+    let rim_height = world.rules.rim_height_ft;
+    if world.ball.vz >= 0.0 {
+        return false;
+    }
+    // 球在下落，并且已经进入筐上方到筐下的圆柱段：这一段里碰球就是干扰，
+    // 无论它原本会不会进。
+    if world.ball.z > rim_height + 0.75 || world.ball.z < rim_height * 0.5 {
+        return false;
+    }
+    if (world.ball.pos - hoop).length() > policy.g("goaltending_cylinder_radius_ft") {
+        return false;
+    }
+    let reach = policy.g("goaltending_reach_ft");
+    let ball_pos = world.ball.pos;
+    let ball_z = world.ball.z;
+    let offender = world.players.iter().enumerate().find_map(|(index, player)| {
+        if !player.on_court || player.team == team {
+            return None;
+        }
+        let physical = crate::physical::Physical::of(player, policy);
+        let hand = physical.contest_reach_ft(policy);
+        let flat = (player.pos - ball_pos).length();
+        (flat <= reach && ball_z <= hand + 0.5).then_some(index)
+    });
+    let Some(defender) = offender else {
+        return false;
+    };
+    world.emit(Fact::Goaltending {
+        defender,
+        shooter,
+        shot_id,
+        time: world.now(),
+    });
+    if let Some(pending) = world.pending_shot.as_mut() {
+        pending.result = Some(ShotResult::Made);
+    }
+    true
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShotResult {
     Made,
@@ -427,7 +484,7 @@ pub fn finish(world: &mut World) {
                 crate::adjudicate::StoppageCause::MadeBasket,
                 crate::adjudicate::RestartPlan::Inbound {
                     team: team.other(),
-                    spot: None,
+                    location: crate::adjudicate::InboundLocation::OwnBaseline,
                     ready_after: Some(1.4),
                 },
             )

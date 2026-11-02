@@ -803,6 +803,13 @@ pub enum Fact {
         z: f32,
         sub_tick: u16,
     },
+    /// 干扰球：球在下落的筐柱内被防守人碰到，出手直接记中。
+    Goaltending {
+        defender: usize,
+        shooter: usize,
+        shot_id: u64,
+        time: f64,
+    },
     PlacementApplied {
         player: usize,
         reason: &'static str,
@@ -833,8 +840,7 @@ impl Fact {
             Self::Foul { .. } => "Foul",
             Self::FreeThrow { .. } => "FreeThrow",
             Self::FreeThrowLaneViolation { .. } => "FreeThrowLaneViolation",
-            Self::Rebound { .. } => "Rebound",
-            Self::ReboundOpportunity { .. } => "ReboundOpportunity",
+            Self::Rebound { .. } => "Rebound",            Self::ReboundOpportunity { .. } => "ReboundOpportunity",
             Self::LooseBallRecovered { .. } => "LooseBallRecovered",
             Self::SecondChanceStarted { .. } => "SecondChanceStarted",
             Self::Cut { .. } => "Cut",
@@ -856,6 +862,7 @@ impl Fact {
             Self::PlayActivated { .. } => "PlayActivated",
             Self::PlayWindowEnded { .. } => "PlayWindowEnded",
             Self::BallContact { kind, .. } => kind,
+            Self::Goaltending { .. } => "Goaltending",
             Self::PlacementApplied { .. } => "PlacementApplied",
             Self::GameEnd => "GameEnd",
         }

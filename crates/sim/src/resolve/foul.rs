@@ -176,17 +176,25 @@ pub fn apply_shooting_foul(
         made,
     );
     world.pending_rebound = None;
+    // 罚则计划：一次犯规判几次罚球、有没有加罚、之后谁拿球。
+    let penalty = crate::adjudicate::PenaltyPlan {
+        free_throws: booking.free_throws,
+        and_one: made,
+        retain_possession: false,
+        possession_after: None,
+        technical: booking.team_technical_id.is_some(),
+    };
     // 新罚球程序：清空上一轮的禁区记录。
     world.free_throw_lane = Some(crate::world::FreeThrowLane::default());
     world.adjudicate(crate::adjudicate::Adjudication::new(
         crate::adjudicate::StoppageCause::Foul,
         crate::adjudicate::RestartPlan::FreeThrows {
             shooter,
-            total: booking.free_throws,
-            remaining: booking.free_throws,
+            total: penalty.free_throws,
+            remaining: penalty.free_throws,
             made: 0,
-            and_one: made,
-            retain_possession: false,
+            and_one: penalty.and_one,
+            retain_possession: penalty.retain_possession,
             foul_id: booking.foul_id,
             technical_retained_team: None,
             after_technical: None,
@@ -248,7 +256,7 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
             crate::adjudicate::StoppageCause::Foul,
             crate::adjudicate::RestartPlan::Inbound {
                 team: world.players[fouled].team,
-                spot: Some(spot),
+                location: crate::adjudicate::InboundLocation::Spot(spot),
                 ready_after: None,
             },
         ));
@@ -292,7 +300,7 @@ pub fn apply_offensive_foul(world: &mut World, fouler: usize, fouled: usize) {
             crate::adjudicate::StoppageCause::Foul,
             crate::adjudicate::RestartPlan::Inbound {
                 team: team.other(),
-                spot: Some(spot),
+                location: crate::adjudicate::InboundLocation::Spot(spot),
                 ready_after: None,
             },
         )

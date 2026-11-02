@@ -56,15 +56,97 @@ impl ViolationKind {
 pub struct ClockAdjustment {
     /// 进攻时钟要设定的值；`None` 表示不改。
     pub shot_clock: Option<f64>,
+    /// 比赛钟要设定的值；`None` 表示不改。
+    pub game_clock: Option<f64>,
+}
+
+impl ClockAdjustment {
+    /// 展开成时钟要求：裁决只描述要什么，改钟由 `ClockController` 执行。
+    pub fn directives(&self) -> Vec<crate::clock::ClockDirective> {
+        let mut directives = Vec::new();
+        if let Some(seconds) = self.shot_clock {
+            directives.push(crate::clock::ClockDirective::ShotClock(seconds));
+        }
+        if let Some(seconds) = self.game_clock {
+            directives.push(crate::clock::ClockDirective::GameClock(seconds));
+        }
+        directives
+    }
+}
+
+/// 球权的控制状态：谁拿着球、球是否活着。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlState {
+    /// 某名球员持球。
+    Held(usize),
+    /// 活球无人控制（地滚球、拍飞的球）。
+    Loose,
+    /// 球在空中（传球或投篮飞行中）。
+    InFlight,
+    /// 死球程序期间。
+    DeadBall,
+}
+
+/// 发球地点：底线发球与本场地点发球分开记。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InboundLocation {
+    /// 本方底线（得分后、节开局）。
+    OwnBaseline,
+    /// 指定的场地坐标（边线发球、违例的干扰点）。
+    Spot(Vec2),
+}
+
+/// 罚则计划：一次犯规判什么，与它怎么恢复分开描述。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PenaltyPlan {
+    pub free_throws: u8,
+    pub and_one: bool,
+    pub retain_possession: bool,
+    pub possession_after: Option<TeamSide>,
+    pub technical: bool,
+}
+
+impl PenaltyPlan {
+    pub fn none() -> Self {
+        Self {
+            free_throws: 0,
+            and_one: false,
+            retain_possession: false,
+            possession_after: None,
+            technical: false,
+        }
+    }
+
+    pub fn turnover(team: TeamSide) -> Self {
+        Self {
+            possession_after: Some(team),
+            ..Self::none()
+        }
+    }
+
+    pub fn free_throws(count: u8) -> Self {
+        Self {
+            free_throws: count,
+            ..Self::none()
+        }
+    }
+}
+
+/// 恢复上下文：一次停表之后在哪个阶段、什么时间、哪队发球。
+#[derive(Debug, Clone, Copy)]
+pub struct ResumeContext {
+    pub team: TeamSide,
+    pub inbound: InboundLocation,
+    pub ready_at: f64,
 }
 
 /// 恢复方式。
 #[derive(Debug, Clone, Copy)]
 pub enum RestartPlan {
-    /// 在给定地点（`None` 表示本方底线）发球；`ready_after` 是停表时长。
+    /// 在给定地点（`OwnBaseline` 表示本方底线）发球；`ready_after` 是停表时长。
     Inbound {
         team: TeamSide,
-        spot: Option<Vec2>,
+        location: InboundLocation,
         ready_after: Option<f64>,
     },
     /// 直接开始活球回合。
@@ -147,16 +229,22 @@ impl World {
         if let Some((cause, detail)) = adjudication.possession_end {
             self.end_possession(cause, detail, adjudication.points);
         }
-        if let Some(shot_clock) = adjudication.clock.shot_clock {
-            self.clock.set_shot_clock(shot_clock);
+        if !adjudication.clock.directives().is_empty() {
+            let mut controller = crate::clock::ClockController::new(&mut self.clock);
+            for directive in adjudication.clock.directives() {
+                controller.apply(directive);
+            }
         }
         match adjudication.restart {
             RestartPlan::Inbound {
                 team,
-                spot,
+                location,
                 ready_after,
             } => {
-                self.inbound_spot = spot;
+                self.inbound_spot = match location {
+                    InboundLocation::OwnBaseline => None,
+                    InboundLocation::Spot(spot) => Some(spot),
+                };
                 // 取消动作的原因就是停表原因：事实里保留违例名，便于回放与审计。
                 let reason = match adjudication.cause {
                     StoppageCause::Violation(kind) => kind.as_str(),
@@ -168,11 +256,18 @@ impl World {
                     StoppageCause::GameEnd => "game_end",
                     StoppageCause::PossessionChange => "possession_change",
                 };
-                self.cancel_actions(reason);
-                let wait = ready_after.unwrap_or(f64::from(self.rules.inbound_setup_seconds));
-                self.set_phase(Phase::DeadBall {
+                // 恢复上下文把「哪队、在哪发、什么时候能发」打成一包：
+                // 阶段赋值、发球地点与计时都读同一份描述，不各算一遍。
+                let resume = ResumeContext {
                     team,
-                    ready_at: self.now() + wait,
+                    inbound: location,
+                    ready_at: self.now()
+                        + ready_after.unwrap_or(f64::from(self.rules.inbound_setup_seconds)),
+                };
+                self.cancel_actions(reason);
+                self.set_phase(Phase::DeadBall {
+                    team: resume.team,
+                    ready_at: resume.ready_at,
                 });
             }
             RestartPlan::Live { team } => {

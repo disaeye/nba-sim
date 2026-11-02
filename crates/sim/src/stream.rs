@@ -67,6 +67,7 @@ impl Fact {
             Self::PlayActivated { .. } => "PLAY_ACTIVATED",
             Self::PlayWindowEnded { .. } => "PLAY_WINDOW_ENDED",
             Self::BallContact { .. } => "BALL_CONTACT",
+            Self::Goaltending { .. } => "GOALTENDING",
             Self::PlacementApplied { .. } => "PLACEMENT_APPLIED",
             Self::GameEnd => "GAME_END",
         }
@@ -541,6 +542,17 @@ impl World {
                 "reason": reason,
             }),
             Fact::GameEnd => json!({}),
+            Fact::Goaltending {
+                defender,
+                shooter,
+                shot_id,
+                time,
+            } => json!({
+                "defender_id": self.player_id(*defender),
+                "shooter_id": self.player_id(*shooter),
+                "shot_id": shot_id,
+                "time": time,
+            }),
         }
     }
 

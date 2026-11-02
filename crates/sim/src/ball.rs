@@ -346,7 +346,7 @@ fn out_of_bounds(world: &mut World, spot: Vec2) {
         crate::adjudicate::ViolationKind::OutOfBounds,
         crate::adjudicate::RestartPlan::Inbound {
             team: recipient,
-            spot: Some(spot),
+            location: crate::adjudicate::InboundLocation::Spot(spot),
             ready_after: None,
         },
     ));

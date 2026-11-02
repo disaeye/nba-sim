@@ -59,6 +59,9 @@ pub struct LeagueProfile {
     pub offensive_rebound_shot_clock_seconds: f32,
     /// 个人犯满离场次数。
     pub max_personal_fouls: u8,
+    /// 赛前名单上限（NBA 15，FIBA 12）。
+    #[serde(default = "default_roster_limit")]
+    pub roster_limit: u32,
     /// 投篮犯规基础罚球数。
     pub shooting_foul_free_throws: u8,
     /// 球队犯规进入罚则后的罚球数。
@@ -108,6 +111,10 @@ pub struct LeagueProfile {
 
 fn default_closely_guarded_seconds() -> f32 {
     5.0
+}
+
+fn default_roster_limit() -> u32 {
+    15
 }
 
 fn default_closely_guarded_distance_ft() -> f32 {

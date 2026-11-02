@@ -295,7 +295,7 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
             crate::adjudicate::StoppageCause::FreeThrow,
             crate::adjudicate::RestartPlan::Inbound {
                 team: restart_team,
-                spot: None,
+                location: crate::adjudicate::InboundLocation::OwnBaseline,
                 ready_after: Some(1.2),
             },
         );

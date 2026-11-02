@@ -720,6 +720,11 @@ pub fn evaluate(
         (swish + (contact - swish) * rim_in).clamp(0.0, 1.0)
     };
     let p_make = (p_make_cond * survive).clamp(0.0, 1.0);
+    // 体能直接压低出手概率：累了的人脚步与手腕都跟不上，落点误差更大。
+    // 系数在参数表里，不在代码里写死。
+    let fatigue = world.players[shooter].stamina.clamp(0.0, 1.0);
+    let p_make = (p_make * (1.0 - policy.w("shot_fatigue_penalty") * (1.0 - fatigue)))
+        .clamp(0.0, 1.0);
     if std::env::var_os("NBA_TRACE_RATE").is_some() {
         use std::sync::atomic::{AtomicU32, Ordering};
         static SEEN: AtomicU32 = AtomicU32::new(0);

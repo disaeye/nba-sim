@@ -591,3 +591,111 @@ fn the_final_score_does_not_change_after_the_game_ends() {
         "终场之后不得再产生得分事件"
     );
 }
+
+#[test]
+fn touching_a_descending_shot_inside_the_cylinder_is_goaltending() {
+    let mut world = world(379);
+    let shooter = world.on_court(TeamSide::Home).as_slice()[0];
+    let defender = world.on_court(TeamSide::Away).as_slice()[1];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == shooter || index == defender;
+        player.vel = Vec2::ZERO;
+    }
+    let hoop = world.hoop_for(TeamSide::Home);
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(shooter);
+    let spot = hoop + Vec2::new(-14.0, 0.0);
+    world.players[shooter].pos = spot;
+    world.players[shooter].target = spot;
+    world.ball.pos = spot;
+    world.ball.z = world.rules.ball_radius_ft;
+    let intent = nba_sim_core::action::ActionIntent {
+        actor: shooter,
+        kind: nba_sim_core::action::ActionKind::Shoot(
+            nba_sim_core::action::ShotKind::CatchShoot,
+        ),
+        target: None,
+        from_ft: spot,
+        to_ft: spot,
+        start_time: world.now(),
+        duration: 0.4,
+    };
+    nba_sim_core::resolve::shot::resolve(
+        &mut world,
+        &intent,
+        nba_sim_core::action::ShotKind::CatchShoot,
+    );
+    // 球在下落、已经进入篮筐上下的圆柱段，防守人在筐下伸手碰到它。
+    let home = World::team_index(TeamSide::Home);
+    let before = world.score[home];
+    world.ball.pos = hoop;
+    world.ball.z = world.rules.rim_height_ft - 0.2;
+    world.ball.vz = -4.0;
+    world.players[defender].pos = hoop + Vec2::new(0.4, 0.0);
+    world.players[defender].target = world.players[defender].pos;
+    let start = world.events.len();
+    world.step(TICK_SECONDS);
+    assert!(
+        world.events[start..]
+            .iter()
+            .any(|event| matches!(event.fact, Fact::Goaltending { .. })),
+        "干扰球必须被记录"
+    );
+    assert!(world.score[home] > before, "干扰球直接记中");
+}
+
+#[test]
+fn an_ascending_ball_may_be_blocked_without_goaltending() {
+    let mut world = world(383);
+    let shooter = world.on_court(TeamSide::Home).as_slice()[0];
+    let defender = world.on_court(TeamSide::Away).as_slice()[1];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == shooter || index == defender;
+        player.vel = Vec2::ZERO;
+    }
+    let hoop = world.hoop_for(TeamSide::Home);
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(shooter);
+    let spot = hoop + Vec2::new(-14.0, 0.0);
+    world.players[shooter].pos = spot;
+    world.players[shooter].target = spot;
+    world.ball.pos = spot;
+    world.ball.z = world.rules.ball_radius_ft;
+    let intent = nba_sim_core::action::ActionIntent {
+        actor: shooter,
+        kind: nba_sim_core::action::ActionKind::Shoot(
+            nba_sim_core::action::ShotKind::CatchShoot,
+        ),
+        target: None,
+        from_ft: spot,
+        to_ft: spot,
+        start_time: world.now(),
+        duration: 0.4,
+    };
+    nba_sim_core::resolve::shot::resolve(
+        &mut world,
+        &intent,
+        nba_sim_core::action::ShotKind::CatchShoot,
+    );
+    // 球还在上升、处在筐柱范围内：此时碰球是合法封盖，不是干扰球。
+    let home = World::team_index(TeamSide::Home);
+    let before = world.score[home];
+    world.ball.pos = hoop;
+    world.ball.z = world.rules.rim_height_ft + 0.4;
+    world.ball.vz = 4.0;
+    world.players[defender].pos = hoop + Vec2::new(0.4, 0.0);
+    world.players[defender].target = world.players[defender].pos;
+    let start = world.events.len();
+    world.step(TICK_SECONDS);
+    assert!(
+        !world.events[start..]
+            .iter()
+            .any(|event| matches!(event.fact, Fact::Goaltending { .. })),
+        "上升中的球不得判干扰球"
+    );
+    assert_eq!(world.score[home], before, "上升中的球不得直接记中");
+}

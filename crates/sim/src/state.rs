@@ -409,6 +409,15 @@ impl Clock {
         self.shot_clock
     }
 
+    /// 时钟快照：账本与验证只读这三个数，不碰计时器的其余内部状态。
+    pub fn state(&self) -> crate::clock::ClockState {
+        crate::clock::ClockState {
+            period: self.period,
+            game_clock: self.game_clock,
+            shot_clock: self.shot_clock,
+        }
+    }
+
     pub fn set_shot_clock(&mut self, seconds: f64) {
         assert!(
             seconds.is_finite() && seconds >= 0.0,

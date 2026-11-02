@@ -2,6 +2,45 @@
 
 use crate::state::{Clock, ClockAdvance, Phase};
 
+/// 时钟快照：期次、比赛钟、进攻钟。账本、协议与验证只依赖这三个数。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClockState {
+    pub period: u32,
+    pub game_clock: f64,
+    pub shot_clock: f64,
+}
+
+/// 对时钟的一次要求：把哪个钟改成多少。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ClockDirective {
+    /// 设定进攻钟（抢到进攻篮板、犯规重置、节开局）。
+    ShotClock(f64),
+    /// 设定比赛钟（节间重置、复核回表）。
+    GameClock(f64),
+}
+
+/// 执行时钟要求的入口：所有改钟的代码都经它，不在各处直接写字段。
+pub struct ClockController<'a> {
+    clock: &'a mut Clock,
+}
+
+impl<'a> ClockController<'a> {
+    pub fn new(clock: &'a mut Clock) -> Self {
+        Self { clock }
+    }
+
+    pub fn apply(&mut self, directive: ClockDirective) {
+        match directive {
+            ClockDirective::ShotClock(seconds) => self.clock.set_shot_clock(seconds),
+            ClockDirective::GameClock(seconds) => self.clock.set_game_clock(seconds),
+        }
+    }
+
+    pub fn state(&self) -> ClockState {
+        self.clock.state()
+    }
+}
+
 /// 根据当前比赛阶段推进对应时钟。
 pub fn advance(phase: Phase, clock: &mut Clock, seconds: f64) -> ClockAdvance {
     let clocks = phase.clocks();

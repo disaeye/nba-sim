@@ -49,6 +49,49 @@ impl MatchSetup {
             rules,
         }
     }
+
+    /// 赛前名单检查：名单人数、首发索引与号码唯一性。比赛创建时执行，
+    /// 不合规的名单就地报错，不带进跳球。
+    pub fn validate(&self) -> Result<(), String> {
+        let league = &self.rules.league;
+        for (side, team, lineup) in [
+            ("home", &self.home, self.home_lineup),
+            ("away", &self.away, self.away_lineup),
+        ] {
+            if team.players.len() < 5 {
+                return Err(format!(
+                    "{side} roster has {} players, at least 5 required",
+                    team.players.len()
+                ));
+            }
+            if team.players.len() > league.roster_limit as usize {
+                return Err(format!(
+                    "{side} roster has {} players, limit is {}",
+                    team.players.len(),
+                    league.roster_limit
+                ));
+            }
+            let mut starters = std::collections::BTreeSet::new();
+            for index in lineup {
+                if index >= team.players.len() {
+                    return Err(format!(" {side} starter {index} is not on the roster"));
+                }
+                if !starters.insert(index) {
+                    return Err(format!("{side} starter {index} is listed twice"));
+                }
+            }
+            let mut jerseys = std::collections::BTreeSet::new();
+            for player in &team.players {
+                if !jerseys.insert(player.jersey.clone()) {
+                    return Err(format!(
+                        "{side} jersey {} belongs to two players",
+                        player.jersey
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -781,6 +824,8 @@ impl World {
     }
 
     pub fn new<P: Into<RuntimeParams>>(setup: MatchSetup, params: P, seed: u64) -> Self {
+        // 赛前名单检查先于一切：不合规的名单就地失败，不带进跳球。
+        setup.validate().expect("pregame roster check");
         let params = params.into();
         let rules = setup.rules.clone();
         // 读球历史按秒数上限预分配：稳态每帧只做写入与裁剪，不再扩容。
@@ -1389,6 +1434,26 @@ impl World {
 
     pub fn holder(&self) -> Option<usize> {
         self.ball.holder()
+    }
+
+    /// 当前控制状态：死球程序、持球、飞行中、还是松球。
+    pub fn control_state(&self) -> crate::adjudicate::ControlState {
+        use crate::adjudicate::ControlState;
+        match self.phase() {
+            Phase::Pregame
+            | Phase::DeadBall { .. }
+            | Phase::Inbound { .. }
+            | Phase::FreeThrows { .. }
+            | Phase::PeriodBreak { .. }
+            | Phase::Finished => ControlState::DeadBall,
+            _ => match self.ball.state() {
+                crate::state::BallState::Held { holder } => ControlState::Held(holder),
+                crate::state::BallState::Pass { .. } | crate::state::BallState::Shot { .. } => {
+                    ControlState::InFlight
+                }
+                crate::state::BallState::Loose { .. } => ControlState::Loose,
+            },
+        }
     }
 
     /// 持球人是否被包夹：两名以上对手挤在包夹半径内。
@@ -2122,7 +2187,7 @@ impl World {
                 crate::adjudicate::ViolationKind::Backcourt,
                 crate::adjudicate::RestartPlan::Inbound {
                     team: team.other(),
-                    spot: Some(spot),
+                    location: crate::adjudicate::InboundLocation::Spot(spot),
                     ready_after: None,
                 },
             ));
@@ -2145,7 +2210,7 @@ impl World {
                     crate::adjudicate::ViolationKind::EightSecond,
                     crate::adjudicate::RestartPlan::Inbound {
                         team: team.other(),
-                        spot: Some(spot),
+                        location: crate::adjudicate::InboundLocation::Spot(spot),
                         ready_after: None,
                     },
                 ));
@@ -2860,6 +2925,7 @@ impl World {
                 }
             }
             Phase::ShotFlight { resolve_at } | Phase::FreeThrowFlight { resolve_at } => {
+                crate::resolve::shot::check_goaltending(self);
                 if self
                     .pending_shot
                     .as_ref()

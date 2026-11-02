@@ -76,7 +76,8 @@ impl MechanismAttribute {
             Self::ShootingClose => Metric::RimPct,
             Self::ShootingMid => Metric::MidPct,
             Self::FreeThrow => Metric::FreeThrowPct,
-            Self::Speed | Self::Acceleration => Metric::MeanFirstActionSeconds,
+            // 速度与加速决定推进与出手的节奇：更快的球队整场打出更多回合。
+            Self::Speed | Self::Acceleration => Metric::Possessions,
             Self::Stamina => Metric::FieldGoalPct,
             Self::Strength => Metric::ScreenDisplacement,
             Self::OffensiveRebound => Metric::OffensiveReboundRate,
@@ -90,7 +91,6 @@ impl MechanismAttribute {
     pub fn direction(self) -> Direction {
         match self {
             Self::DecisionIq => Direction::Down,
-            Self::Speed | Self::Acceleration => Direction::Down,
             _ => Direction::Up,
         }
     }
@@ -605,7 +605,12 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
             (values.iter().sum(), values.len().max(1) as f64)
         }
         Metric::OffensiveReboundRate => (home.oreb as f64, (home.fga - home.fgm).max(1) as f64),
-        Metric::DefensiveReboundRate => (home.dreb as f64, (home.dreb + away.oreb).max(1) as f64),
+        // 防守篮板率的分母是对手投丢的球：拿自己的防守篮板除以「自己的
+        // 防守篮板 + 对手前场篮板」会把分子分母一起抬高，扰动被自己抵消。
+        Metric::DefensiveReboundRate => (
+            home.dreb as f64,
+            (away.fga as i64 - away.fgm as i64).max(1) as f64,
+        ),
         Metric::TurnoverRate => {
             let home_possessions = report
                 .possessions
