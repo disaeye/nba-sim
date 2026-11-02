@@ -497,6 +497,8 @@ fn try_control_loose(world: &mut World) {
     let base = world.params.policy.w("loose_ball_catch_base_ft");
     let skill = world.params.policy.w("loose_ball_catch_skill_ft");
     let mut best: Option<(usize, f32)> = None;
+    let mut best_home: Option<(usize, f32)> = None;
+    let mut best_away: Option<(usize, f32)> = None;
     for &handle in world
         .on_court_home
         .as_slice()
@@ -527,8 +529,43 @@ fn try_control_loose(world: &mut World) {
         let vertical = (world.ball.z - 4.0).max(0.0);
         let distance = (player.pos - world.ball.pos).length().hypot(vertical);
         let margin = reach - distance;
-        if margin >= 0.0 && best.is_none_or(|(_, current)| margin > current) {
-            best = Some((handle, margin));
+        if margin >= 0.0 {
+            if best.is_none_or(|(_, current)| margin > current) {
+                best = Some((handle, margin));
+            }
+            let per_team = if player.team == crate::action::TeamSide::Home {
+                &mut best_home
+            } else {
+                &mut best_away
+            };
+            if per_team.is_none_or(|(_, current)| distance < current) {
+                *per_team = Some((handle, distance));
+            }
+        }
+    }
+    // 双方同时够到球：停表跳球，而不是让先算到的人直接拿走。
+    if let (Some((home, home_distance)), Some((away, away_distance))) = (best_home, best_away) {
+        let tie_margin = world.params.policy.g("held_ball_tie_margin_ft");
+        if (home_distance - away_distance).abs() <= tie_margin {
+            let position = world.ball.pos;
+            let z = world.ball.z;
+            world.pending_rebound = None;
+            world.emit(Fact::BallContact {
+                kind: "held_ball",
+                entity: None,
+                time: world.now(),
+                x: position.x,
+                y: position.y,
+                z,
+                sub_tick: 0,
+            });
+            world.end_possession(
+                nba_domain::event::PossessionEndCause::HeldBall,
+                "held_ball",
+                0,
+            );
+            world.begin_held_ball_jump_ball(home, away);
+            return;
         }
     }
     if let Some((handle, _)) = best {

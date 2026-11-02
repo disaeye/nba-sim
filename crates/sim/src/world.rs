@@ -449,6 +449,15 @@ impl World {
         });
     }
 
+    /// 双方同时控住球：停表并在中圈跳球，双方各出一名当事人。
+    pub(crate) fn begin_held_ball_jump_ball(&mut self, home_jumper: usize, away_jumper: usize) {
+        self.begin_period_jump_ball(
+            home_jumper,
+            away_jumper,
+            crate::action::JumpBallKind::HeldBall,
+        );
+    }
+
     fn resolve_opening_jump_ball(
         &mut self,
         home_jumper: usize,

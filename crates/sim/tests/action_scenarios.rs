@@ -1328,3 +1328,59 @@ fn fakes_and_protection_keep_the_pivot_foot_planted() {
         );
     }
 }
+
+/// 双方同时够到球：停表进入中圈跳球，而不是把球判给某一个人。
+#[test]
+fn a_tie_for_the_ball_enters_a_held_ball_jump_ball() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 233);
+    let offense = world.on_court(TeamSide::Home).as_slice()[0];
+    let defense = world.on_court(TeamSide::Away).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == offense || index == defense;
+        player.vel = Vec2::ZERO;
+    }
+    let ball_spot = Vec2::new(62.0, 25.0);
+    // 两人到球的距离只差五分之一英尺：同时够到，谁也没有先控制。
+    world.players[offense].pos = ball_spot + Vec2::new(5.0, 0.0);
+    world.players[offense].target = world.players[offense].pos;
+    world.players[defense].pos = ball_spot + Vec2::new(0.0, 5.05);
+    world.players[defense].target = world.players[defense].pos;
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball = nba_sim_core::ball::BallBody::loose(ball_spot, Vec2::ZERO);
+    world.ball.z = world.rules.ball_radius_ft;
+    // 争抢已经超过两秒：双方都在必抢半径内。
+    world.pending_rebound = Some(nba_sim_core::resolve::rebound::PendingRebound {
+        offense: TeamSide::Home,
+        zone: "test",
+        shot_distance: 0.0,
+        rim_contact: false,
+        started_at: world.now() - 3.0,
+        turnover: false,
+        poke_by: None,
+        pass_by: None,
+    });
+    let before = world.events.len();
+    nba_sim_core::ball::step(&mut world, TICK_SECONDS);
+    let held_ball = world.events[before..].iter().any(|event| {
+        matches!(&event.fact, Fact::BallContact { kind: "held_ball", .. })
+    });
+    assert!(held_ball, "同时够到球必须发出停表事实");
+    match world.phase() {
+        Phase::JumpBall {
+            kind: nba_sim_core::action::JumpBallKind::HeldBall,
+            ..
+        } => {}
+        other => panic!("双方同时控球必须进入跳球，实际 {other:?}"),
+    }
+    assert_eq!(
+        world.possession.id, 0,
+        "跳球前原来那个回合必须按双方控球结清"
+    );
+    assert!(
+        world.pending_rebound.is_none(),
+        "跳球时不得留下未结算的篮板"
+    );
+}
