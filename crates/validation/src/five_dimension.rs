@@ -150,6 +150,10 @@ struct Tally {
     finite_candidates: u64,
     families: Vec<u32>,
     traces_with_bonus: u32,
+    /// 持球人做出的决策数：战术先验份额的分母。
+    on_ball_decisions: u32,
+    /// 其中带战术先验的数量。
+    on_ball_with_bonus: u32,
     passes: u32,
     shots: u32,
     drives: u32,
@@ -207,6 +211,21 @@ fn accumulate(tally: &mut Tally, world: &World, config: &DiagnosticConfig) {
         }
     }
     for sample in &world.decision_samples {
+        // 战术先验只由持球人的决策携带：无球球员的决策不计入这个份额的分母。
+        if sample.on_ball {
+            tally.on_ball_decisions += 1;
+            if sample.trace.is_some_and(|index| {
+                world
+                    .decision_traces
+                    .get(index as usize)
+                    .and_then(|trace| trace.candidates.get(trace.chosen))
+                    .is_some_and(|candidate| {
+                        candidate.utility.tactical_bonus != f32::default()
+                    })
+            }) {
+                tally.on_ball_with_bonus += 1;
+            }
+        }
         let slot = sample.family as usize;
         if slot >= tally.families.len() {
             tally.families.resize(slot + 1, u32::default());
@@ -314,6 +333,8 @@ fn merge_tally(target: &mut Tally, part: Tally) {
         target.families[slot] += count;
     }
     target.traces_with_bonus += part.traces_with_bonus;
+    target.on_ball_decisions += part.on_ball_decisions;
+    target.on_ball_with_bonus += part.on_ball_with_bonus;
     target.passes += part.passes;
     target.shots += part.shots;
     target.drives += part.drives;
@@ -575,7 +596,10 @@ pub fn run_five_dimension(
                 &config,
                 "tactics",
                 "tactical_bonus_share",
-                share(u64::from(tally.traces_with_bonus), decisions),
+                share(
+                    u64::from(tally.on_ball_with_bonus),
+                    u64::from(tally.on_ball_decisions),
+                ),
             ),
         ],
     );
