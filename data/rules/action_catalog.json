@@ -24,11 +24,11 @@
       "existing_types": ["nba_sim_core::action::ActionKind::Drive", "nba_sim_core::action::ActionKind::Finish"],
       "production_paths": ["crates/sim/src/policy.rs::drive_candidate", "crates/sim/src/resolve/drive.rs::resolve"],
       "consumer_status": "Drive candidate selects a target from finishing ability. Contact, stop and driving-pass technique variants are not separately represented.",
-      "evidence": ["crates/sim/tests/action_chain.rs::drive_resolution_reports_actual_arrival_and_separation"],
+      "evidence": ["crates/sim/tests/action_chain.rs::drive_resolution_reports_actual_arrival_and_separation", "crates/sim/tests/action_scenarios.rs::a_drive_can_stop_and_pass_within_the_same_possession"],
       "rule_refs": ["NBA Rule 4 §III, §VIII; Rule 12B §II", "FIBA Articles 24-25, 32"],
       "scenarios": ["ACTION-DRIVE-RESOLVER-REPORTS-ARRIVAL-AND-SEPARATION", "ACTION-DRIVE-LEGAL-BODY-CONTACT", "ACTION-DRIVE-CHARGE-LEGAL-GUARDING-POSITION", "ACTION-DRIVE-STOP-AND-PASS"],
-      "scenario_tests": {"ACTION-DRIVE-RESOLVER-REPORTS-ARRIVAL-AND-SEPARATION": "crates/sim/tests/action_chain.rs::drive_resolution_reports_actual_arrival_and_separation"},
-      "missing_evidence": ["ACTION-DRIVE-LEGAL-BODY-CONTACT", "ACTION-DRIVE-CHARGE-LEGAL-GUARDING-POSITION", "ACTION-DRIVE-STOP-AND-PASS"]
+      "scenario_tests": {"ACTION-DRIVE-RESOLVER-REPORTS-ARRIVAL-AND-SEPARATION": "crates/sim/tests/action_chain.rs::drive_resolution_reports_actual_arrival_and_separation", "ACTION-DRIVE-STOP-AND-PASS": "crates/sim/tests/action_scenarios.rs::a_drive_can_stop_and_pass_within_the_same_possession"},
+      "missing_evidence": ["ACTION-DRIVE-LEGAL-BODY-CONTACT", "ACTION-DRIVE-CHARGE-LEGAL-GUARDING-POSITION"]
     },
     {
       "id": "ACTION-FINISH",

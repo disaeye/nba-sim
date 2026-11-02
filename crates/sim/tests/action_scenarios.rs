@@ -549,3 +549,39 @@ fn only_gather_steps_beyond_the_allowance_are_travels() {
     }
     assert!(caught, "超过容限的收球必须被判走步");
 }
+
+/// 突破后的收球分球：同一次进攻里突破之后仍然可以把球传出去。
+#[test]
+fn a_drive_can_stop_and_pass_within_the_same_possession() {
+    let mut kick_outs = 0u32;
+    for seed in 1..=3u64 {
+        let report = world(seed).run();
+        // 按回合分组：突破起手之后、回合结束之前出现传球就是收球分球。
+        let mut current: u64 = 0;
+        let mut drove = false;
+        for event in &report.events {
+            match &event.fact {
+                Fact::PossessionStarted { possession_id, .. } => {
+                    current = *possession_id;
+                    drove = false;
+                }
+                Fact::PossessionEnded { .. } => {
+                    current = 0;
+                    drove = false;
+                }
+                Fact::ActionStarted { kind, .. } if *kind == "Drive" && current != 0 => {
+                    drove = true;
+                }
+                Fact::Pass { .. } if drove => {
+                    kick_outs += 1;
+                    drove = false;
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(
+        kick_outs > 0,
+        "真实比赛里必须有突破之后收球分球的回合，观测到 {kick_outs}"
+    );
+}
