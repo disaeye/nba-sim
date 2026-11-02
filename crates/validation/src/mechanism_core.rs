@@ -555,20 +555,34 @@ fn run_limited(
     possessions: Option<u32>,
 ) -> Result<GameReport, String> {
     let mut world = World::new(setup, params, seed);
-    match possessions {
-        None => Ok(world.run()),
-        Some(target) => {
-            let mut steps = 0usize;
-            while !world.finished && steps < 400_000 {
-                world.step(TICK_SECONDS);
-                steps += 1;
-                if world.possession_log.len() as u32 >= target {
-                    break;
-                }
+    // 步数上限是硬约束：没有它，一场走不完的比赛会一直堆事件，
+    // 直到把内存吃光为止。超限就地报错，不让它静默跑下去。
+    const STEP_LIMIT: usize = 400_000;
+    // 事件上限：一场比赛的事件量有确定上界，越过它说明内核在原地打转。
+    // 在这里就地报错，不让事件日志涨到把内存吃光。
+    const EVENT_LIMIT: usize = 200_000;
+    let mut steps = 0usize;
+    while !world.finished && steps < STEP_LIMIT {
+        world.step(TICK_SECONDS);
+        steps += 1;
+        if world.events.len() > EVENT_LIMIT {
+            return Err(format!(
+                "seed {seed} emitted {} events after {steps} steps",
+                world.events.len()
+            ));
+        }
+        if let Some(target) = possessions {
+            if world.possession_log.len() as u32 >= target {
+                break;
             }
-            Ok(world.report())
         }
     }
+    if !world.finished && possessions.is_none() {
+        return Err(format!(
+            "seed {seed} did not finish within {STEP_LIMIT} steps"
+        ));
+    }
+    Ok(world.report())
 }
 
 fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {

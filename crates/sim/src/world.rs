@@ -27,6 +27,8 @@ use crate::state::{
 
 pub use nba_domain::rules::TICK_SECONDS;
 const MAX_TICKS: u64 = 400_000;
+/// 单场比赛的事件上限：越过它意味着内核在原地打转，不再往下记。
+const EVENT_LOG_LIMIT: usize = 500_000;
 
 #[derive(Debug, Clone)]
 pub struct MatchSetup {
@@ -1536,6 +1538,20 @@ impl World {
     }
 
     pub fn emit(&mut self, fact: Fact) {
+        // 事件日志有确定上界：越过它说明内核在没有推进地反复发布事实。
+        // 就地失败，不让内存跟着一起增长。
+        if self.events.len() >= EVENT_LOG_LIMIT {
+            let tail: Vec<String> = self.events
+                [self.events.len().saturating_sub(3)..]
+                .iter()
+                .map(|event| format!("{:?}", event.fact))
+                .collect();
+            panic!(
+                "event log exceeded {EVENT_LOG_LIMIT} entries at tick {} ({}), last events {tail:?}",
+                self.clock.tick(),
+                fact.kind()
+            );
+        }
         let tick_index = self.clock.tick();
         if tick_index != self.last_event_tick {
             self.last_event_tick = tick_index;

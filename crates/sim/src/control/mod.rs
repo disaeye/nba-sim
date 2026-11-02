@@ -443,7 +443,9 @@ fn step_jump_ball_flight(world: &mut World, dt: f32) {
                 previous_z + ball.vz * contact_time - 0.5 * gravity * contact_time * contact_time
             };
             ball.vz = if crossed_floor {
-                (ball.vz - gravity * contact_time).abs() * 0.45
+                // 落地反弹必须有最小回弹速度：停在地板上的球不会再离开地面，
+                // 时间推进就再也走不动，循环会原地堆事实。
+                ((ball.vz - gravity * contact_time).abs() * 0.45).max(0.8)
             } else {
                 0.0
             };
@@ -475,7 +477,13 @@ fn step_jump_ball_flight(world: &mut World, dt: f32) {
                 sub_tick,
             });
             world.ball = ball.clone();
-            remaining -= contact_time;
+            // 接触时刻为零时整步都被“贴地”吃掉了：不能减 0，否则循环不前进。
+            let consumed = if contact_time > f32::EPSILON {
+                contact_time
+            } else {
+                step
+            };
+            remaining -= consumed;
             if remaining_step <= f32::MIN_POSITIVE {
                 continue;
             }
