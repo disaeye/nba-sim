@@ -5,7 +5,7 @@
 
 use glam::Vec2;
 use nba_domain::rules::GameRules;
-use nba_sim_core::action::{DefensiveActionKind, DefensiveActionRuntime, Fact};
+use nba_sim_core::action::{DefensiveActionKind, DefensiveActionRuntime, Fact, ShotKind};
 use nba_sim_core::params::{workspace_calibration_dir, Params};
 use nba_sim_core::state::{DefenseResponsibility, DribbleState, Phase};
 use nba_sim_core::{MatchSetup, TeamSide, World};
