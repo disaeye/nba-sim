@@ -330,6 +330,7 @@
     "finish_zone_ft": 16.0,
     "drive_max_zone_ft": 32.0,
     "finish_min_distance_ft": 3.0,
+    "step_back_distance_ft": 3.2,
     "closeout_contest_weight": 0.04,
     "drive_rim_finish_ft": 0.5,
     "drive_rim_spread_ft": 4.0,

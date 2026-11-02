@@ -1046,3 +1046,52 @@ fn the_on_ball_defender_closes_the_gap() {
         "滑步不得贴到身位以内：{after:.2}"
     );
 }
+
+/// 后撤步跳投：出手前真的把身体撤开，空间不是名义上的。
+#[test]
+fn a_step_back_shot_creates_space_before_the_release() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let separation_after = |kind: ShotKind| -> f32 {
+        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 199);
+        let shooter = world.on_court(TeamSide::Home).as_slice()[0];
+        let defender = world.on_court(TeamSide::Away).as_slice()[0];
+        for (index, player) in world.players.iter_mut().enumerate() {
+            player.on_court = index == shooter || index == defender;
+            player.vel = Vec2::ZERO;
+        }
+        let hoop = world.hoop_for(TeamSide::Home);
+        let spot = hoop + Vec2::new(-20.0, 0.0);
+        world.players[shooter].pos = spot;
+        world.players[shooter].target = spot;
+        world.players[shooter].facing = (hoop - spot).normalize_or_zero();
+        world.players[defender].pos = spot + Vec2::new(1.4, 0.0);
+        world.players[defender].target = world.players[defender].pos;
+        world.possession.team = TeamSide::Home;
+        world.start_possession(TeamSide::Home, PossessionKind::Live);
+        world.set_phase(Phase::Live);
+        world.ball.set_held(shooter);
+        world.ball.pos = spot;
+        world.ball.z = world.rules.ball_radius_ft;
+        let intent = ActionIntent {
+            actor: shooter,
+            kind: ActionKind::Shoot(kind),
+            target: None,
+            from_ft: spot,
+            to_ft: spot,
+            start_time: world.now(),
+            duration: 0.6,
+        };
+        nba_sim_core::resolve::shot::resolve(&mut world, &intent, kind);
+        (world.players[shooter].pos - world.players[defender].pos).length()
+    };
+    let catch_shoot = separation_after(ShotKind::CatchShoot);
+    let step_back = separation_after(ShotKind::StepBack);
+    assert!(
+        (catch_shoot - 1.4).abs() < 0.05,
+        "接球就投不得改变站位：{catch_shoot:.2}"
+    );
+    assert!(
+        step_back > catch_shoot + 2.0,
+        "后撤步必须真的拉开空间：{catch_shoot:.2} → {step_back:.2}"
+    );
+}

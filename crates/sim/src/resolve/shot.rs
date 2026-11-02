@@ -40,7 +40,35 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     let shooter = intent.actor;
     let team = world.players[shooter].team;
     let hoop = world.hoop_for(team);
-    let pos = world.players[shooter].pos;
+    // 后撤步：出手前先把投篮人撤向远离防守人的方向，空间是这一步换来的。
+    let start_pos = world.players[shooter].pos;
+    let pos = if kind == ShotKind::StepBack {
+        let pos = start_pos;
+        let nearest = world
+            .players
+            .iter()
+            .filter(|player| player.on_court && player.team != team)
+            .min_by(|left, right| {
+                (left.pos - pos)
+                    .length_squared()
+                    .total_cmp(&(right.pos - pos).length_squared())
+            });
+        let away = nearest
+            .map(|player| (pos - player.pos).normalize_or_zero())
+            .unwrap_or(Vec2::ZERO);
+        let radius = world.rules.player_radius_ft;
+        let target = (pos + away * world.params.policy.g("step_back_distance_ft")).clamp(
+            Vec2::new(radius, radius),
+            Vec2::new(
+                world.rules.court.width_ft - radius,
+                world.rules.court.height_ft - radius,
+            ),
+        );
+        crate::body::place(world, shooter, target);
+        target
+    } else {
+        start_pos
+    };
     let zone = shooter_zone(world, pos, team);
     let is_three = zone == "three";
     let distance = (pos - hoop).length();
