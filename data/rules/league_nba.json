@@ -29,5 +29,7 @@
   "overtime_timeouts": 2,
   "three_point_distance_ft": 23.75,
   "corner_three_distance_ft": 22.0,
-  "use_alternate_possession_arrow": false
+  "use_alternate_possession_arrow": false,
+  "closely_guarded_seconds": 5.0,
+  "closely_guarded_distance_ft": 6.0
 }

@@ -1028,11 +1028,12 @@ pub struct PossessionState {
     /// 只在掩护换防或突破得手时重算，其余时间保持不变。
     pub matchup: [usize; MAX_ON_COURT],
     /// 当前生效的选板窗口，未激活时为 `None`。
-    pub play: Option<crate::tactics::PlayWindow>,
-    /// 本回合是否已经叫过战术：每个回合只叫一次，之后进自由进攻。
+    pub play: Option<crate::tactics::PlayWindow>,    /// 本回合是否已经叫过战术：每个回合只叫一次，之后进自由进攻。
     pub play_called: bool,
     /// 快攻跑位改过的球员及其原站位：窗口结束时按这里还回去。
     pub break_return: Vec<(usize, Vec2)>,
+    /// 持球人被紧逼盯防的累计秒数：一旦不再紧逼就清零。
+    pub closely_guarded_seconds: f32,
 }
 
 impl PossessionState {
@@ -1080,6 +1081,7 @@ impl PossessionState {
             play: None,
             play_called: false,
             break_return: Vec::new(),
+            closely_guarded_seconds: 0.0,
         }
     }
 }

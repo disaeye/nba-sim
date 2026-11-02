@@ -439,6 +439,7 @@ pub enum TurnoverKind {
     DoubleDribble,
     ShotClock,
     OutOfBounds,
+    CloselyGuarded,
 }
 
 impl TurnoverKind {
@@ -451,6 +452,7 @@ impl TurnoverKind {
             Self::DoubleDribble => "double_dribble",
             Self::ShotClock => "shot_clock",
             Self::OutOfBounds => "out_of_bounds",
+            Self::CloselyGuarded => "closely_guarded",
         }
     }
 }

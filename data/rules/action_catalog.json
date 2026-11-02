@@ -65,12 +65,12 @@
       "current_status": "partial",
       "existing_types": ["nba_sim_core::action::ActionKind::PostUp", "nba_domain::action_window::PostMoveKind"],
       "production_paths": ["crates/sim/src/policy.rs::post_candidate", "crates/sim/src/resolve/drive.rs::resolve_post"],
-      "consumer_status": "PostUp is generated in the finish zone and its resolver updates target and possession phase and emits PostUp. PostMoveKind has no sim consumer; the back-to-basket five-second timer is absent.",
-      "evidence": ["crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points"],
+      "consumer_status": "PostUp is generated in the finish zone and its resolver updates target and possession phase and emits PostUp. PostMoveKind has no sim consumer; the closely-guarded five-second timer now ends a gathered possession that stays guarded, but backdown legality and post footwork remain unmodelled.",
+      "evidence": ["crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points", "crates/sim/tests/action_scenarios.rs::holding_the_ball_closely_guarded_for_five_seconds_is_a_violation", "crates/sim/tests/action_scenarios.rs::the_closely_guarded_timer_resets_and_spares_the_dribbler"],
       "rule_refs": ["NBA Rule 4 §VII-IX; Rule 10 §XVI; Rule 12B", "FIBA Articles 24-25, 32"],
-      "scenarios": ["ACTION-POSTUP-UPDATES-POSSESSION-PHASE", "ACTION-POST-UP-LEGAL-BACKDOWN", "ACTION-POST-UP-FOOTWORK", "ACTION-POST-UP-TIMER-RESET-AND-EXPIRE"],
-      "scenario_tests": {"ACTION-POSTUP-UPDATES-POSSESSION-PHASE": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points"},
-      "missing_evidence": ["ACTION-POST-UP-LEGAL-BACKDOWN", "ACTION-POST-UP-FOOTWORK", "ACTION-POST-UP-TIMER-RESET-AND-EXPIRE"]
+      "scenarios": ["ACTION-POSTUP-UPDATES-POSSESSION-PHASE", "ACTION-POST-UP-LEGAL-BACKDOWN", "ACTION-POST-UP-FOOTWORK", "ACTION-POST-UP-TIMER-RESET-AND-EXPIRE", "ACTION-POST-UP-CLOSELY-GUARDED-VIOLATION"],
+      "scenario_tests": {"ACTION-POSTUP-UPDATES-POSSESSION-PHASE": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points", "ACTION-POST-UP-TIMER-RESET-AND-EXPIRE": "crates/sim/tests/action_scenarios.rs::the_closely_guarded_timer_resets_and_spares_the_dribbler", "ACTION-POST-UP-CLOSELY-GUARDED-VIOLATION": "crates/sim/tests/action_scenarios.rs::holding_the_ball_closely_guarded_for_five_seconds_is_a_violation"},
+      "missing_evidence": ["ACTION-POST-UP-LEGAL-BACKDOWN", "ACTION-POST-UP-FOOTWORK"]
     },
     {
       "id": "ACTION-PASS",

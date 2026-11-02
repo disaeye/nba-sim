@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use crate::action::{
     ActionIntent, ActionKind, ActionRuntime, DefensiveActionKind, DefensiveActionRuntime, Fact,
-    Interaction, TeamSide,
+    Interaction, TeamSide, TurnoverKind,
 };
 use crate::ball::BallBody;
 use crate::boxscore::{BoxScore, PlayerLine};
@@ -1775,7 +1775,53 @@ impl World {
         if matches!(self.phase, Phase::Live) && self.holder().is_some() {
             self.maybe_decide();
         }
+        self.check_closely_guarded(dt);
         self.check_period_end();
+    }
+
+    /// 紧逼盯防五秒：收球后被贴身盯住且不再推进，五秒必吹违例。
+    fn check_closely_guarded(&mut self, dt: f64) {
+        if !self.rules.league.closely_guarded_seconds.is_finite()
+            || !matches!(self.phase, Phase::Live)
+        {
+            self.possession.closely_guarded_seconds = 0.0;
+            return;
+        }
+        let Some(holder) = self.holder() else {
+            self.possession.closely_guarded_seconds = 0.0;
+            return;
+        };
+        // 只有收球后算持球：还在运球时不受这条规则限制。
+        if self.possession.dribble_state != crate::state::DribbleState::Gathered {
+            self.possession.closely_guarded_seconds = 0.0;
+            return;
+        }
+        let limit = self.rules.league.closely_guarded_distance_ft;
+        let team = self.players[holder].team;
+        let guarded = self.players.iter().enumerate().any(|(index, player)| {
+            index != holder
+                && player.on_court
+                && player.team != team
+                && (player.pos - self.players[holder].pos).length() <= limit
+        });
+        if !guarded {
+            self.possession.closely_guarded_seconds = 0.0;
+            return;
+        }
+        self.possession.closely_guarded_seconds += dt as f32;
+        if self.possession.closely_guarded_seconds + f32::EPSILON
+            < self.rules.league.closely_guarded_seconds
+        {
+            return;
+        }
+        self.possession.closely_guarded_seconds = 0.0;
+        self.line_mut(holder).turnovers += 1;
+        self.emit(Fact::Turnover {
+            player: holder,
+            kind: TurnoverKind::CloselyGuarded,
+        });
+        self.end_possession(PossessionEndCause::TurnoverViolation, "closely_guarded", 0);
+        self.start_possession(team.other(), PossessionKind::Live);
     }
 
     /// 快攻窗口关闭：跑向前场的球员回到各自的阵型站位。

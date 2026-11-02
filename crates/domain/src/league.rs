@@ -98,6 +98,20 @@ pub struct LeagueProfile {
     /// 跳球时场上接应队员距中圈的最小站位距离（英尺）。
     #[serde(default = "default_jump_ball_receiver_distance_ft")]
     pub jump_ball_receiver_distance_ft: f32,
+    /// 持球人被紧逼盯防的最长持球秒数（NBA 五秒、FIBA 五秒）。
+    #[serde(default = "default_closely_guarded_seconds")]
+    pub closely_guarded_seconds: f32,
+    /// 判定为「紧逼盯防」的防守距离上限（英尺）。
+    #[serde(default = "default_closely_guarded_distance_ft")]
+    pub closely_guarded_distance_ft: f32,
+}
+
+fn default_closely_guarded_seconds() -> f32 {
+    5.0
+}
+
+fn default_closely_guarded_distance_ft() -> f32 {
+    6.0
 }
 
 fn default_center_circle_radius_ft() -> f32 {

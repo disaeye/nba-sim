@@ -648,3 +648,133 @@ fn a_charge_requires_a_planted_defender() {
     assert!(planted > 0, "站定的防守人必须能造进攻犯规，观测到 {planted}");
     assert_eq!(sliding, 0, "滑步中的防守人不得造成进攻犯规，观测到 {sliding}");
 }
+
+/// 紧逼盯防五秒：收球后被贴身盯住不动，超过限时就是违例。
+#[test]
+fn holding_the_ball_closely_guarded_for_five_seconds_is_a_violation() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let limit = GameRules::default().league.closely_guarded_seconds;
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 179);
+    let holder = world.on_court(TeamSide::Home).as_slice()[0];
+    let defender = world.on_court(TeamSide::Away).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == holder || index == defender;
+        player.vel = Vec2::ZERO;
+    }
+    let hoop = world.hoop_for(TeamSide::Home);
+    let spot = hoop + Vec2::new(-18.0, 0.0);
+    world.players[holder].pos = spot;
+    world.players[holder].target = spot;
+    world.players[defender].pos = spot + Vec2::new(0.0, 1.5);
+    world.players[defender].target = world.players[defender].pos;
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(holder);
+    world.ball.pos = spot;
+    world.ball.z = world.rules.ball_radius_ft;
+    world.players[holder].schedule.next_redecide_at = world.now() + 1_000.0;
+    world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
+
+    let mut ticks = 0;
+    let mut violation = None;
+    while ticks < 400 && violation.is_none() {
+        world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
+        world.possession.team = TeamSide::Home;
+        let before = world.events.len();
+        world.step(TICK_SECONDS);
+        ticks += 1;
+        for event in &world.events[before..] {
+            if matches!(
+                &event.fact,
+                Fact::Turnover { kind: TurnoverKind::CloselyGuarded, .. }
+            ) {
+                violation = Some(world.now());
+            }
+        }
+    }
+    let at = violation.expect("紧逼五秒必须吹违例");
+    assert!(
+        at >= f64::from(limit) - 1.0,
+        "违例时刻必须接近限时 {limit} 秒，实际 {at:.2}"
+    );
+    assert_eq!(
+        world.possession.team,
+        TeamSide::Away,
+        "违例之后球权必须交给对方"
+    );
+}
+
+/// 紧逼计时会被打断：防守人走开就清零，运球状态不受这条规则限制。
+#[test]
+fn the_closely_guarded_timer_resets_and_spares_the_dribbler() {
+    let limit = GameRules::default().league.closely_guarded_seconds;
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 181);
+    let holder = world.on_court(TeamSide::Home).as_slice()[0];
+    let defender = world.on_court(TeamSide::Away).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == holder || index == defender;
+        player.vel = Vec2::ZERO;
+    }
+    let hoop = world.hoop_for(TeamSide::Home);
+    let spot = hoop + Vec2::new(-18.0, 0.0);
+    world.players[holder].pos = spot;
+    world.players[holder].target = spot;
+    world.players[defender].pos = spot + Vec2::new(0.0, 1.5);
+    world.players[defender].target = world.players[defender].pos;
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(holder);
+    world.ball.pos = spot;
+    world.ball.z = world.rules.ball_radius_ft;
+    world.players[holder].schedule.next_redecide_at = world.now() + 1_000.0;
+
+    let violations = |world: &World| -> usize {
+        world
+            .events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    &event.fact,
+                    Fact::Turnover { kind: TurnoverKind::CloselyGuarded, .. }
+                )
+            })
+            .count()
+    };
+
+    // 运球状态：贴近防守也不吹。
+    for _ in 0..(limit as usize + 2) * 20 + 20 {
+        world.possession.dribble_state = nba_sim_core::state::DribbleState::Dribbling;
+        world.step(TICK_SECONDS);
+    }
+    assert_eq!(violations(&world), 0, "运球中不得吹紧逼违例");
+
+    // 收球后紧逼一半时间，然后防守人走开：计时必须清零。
+    for _ in 0..(limit as usize * 20) / 2 {
+        world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
+        world.step(TICK_SECONDS);
+    }
+    world.players[defender].pos = spot + Vec2::new(0.0, 14.0);
+    world.players[defender].target = world.players[defender].pos;
+    for _ in 0..(limit as usize * 20) / 2 + 20 {
+        world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
+        world.step(TICK_SECONDS);
+    }
+    assert_eq!(violations(&world), 0, "防守人走开后计时必须清零");
+
+    // 重新贴上：必须重新计满限时才吹。
+    world.players[defender].pos = spot + Vec2::new(0.0, 1.5);
+    world.players[defender].target = world.players[defender].pos;
+    for _ in 0..(limit as usize * 20) - 10 {
+        world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
+        world.step(TICK_SECONDS);
+    }
+    assert_eq!(violations(&world), 0, "重新紧逼未满限时不得吹违例");
+    for _ in 0..40 {
+        world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
+        world.step(TICK_SECONDS);
+    }
+    assert_eq!(violations(&world), 1, "重新紧逼满限时必须吹违例");
+}
