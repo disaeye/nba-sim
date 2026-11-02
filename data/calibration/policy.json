@@ -348,6 +348,7 @@
     "euro_step_allowance_ft": 1.5,
     "closeout_contest_weight": 0.04,
     "drive_rim_finish_ft": 0.5,
+    "drive_rim_finishing_threshold": 0.58,
     "drive_rim_spread_ft": 4.0,
     "transition_window_seconds": 10.0,
     "play_activation_after_seconds": 8.0,

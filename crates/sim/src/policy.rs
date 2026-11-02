@@ -1292,9 +1292,9 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     // 否则每一条突破都变成篮下出手，出手的区域分布整段压在篮下。
     let finishing = world.players[state.actor].data.attributes.finishing;
     // 终结能力决定突破停在哪里：强的到篮下收球，弱的在抛投区提前收球。
-    // `drive_rim_*` 与 `drive_finish_*` 四个几何参数都在这里生效。
+    // 阈值与四个几何参数都在参数表里，不写死系数。
     let shortfall = (1.0 - finishing).clamp(0.0, 1.0);
-    let drive_target_distance = if finishing > 0.40 {
+    let drive_target_distance = if finishing > weights.g("drive_rim_finishing_threshold") {
         weights.g("drive_rim_finish_ft") + weights.g("drive_rim_spread_ft") * shortfall
     } else {
         weights.g("drive_finish_distance_ft") + weights.g("drive_finish_spread_ft") * shortfall
