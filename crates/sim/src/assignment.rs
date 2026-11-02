@@ -399,6 +399,12 @@ pub fn assign_defense_responsibilities(world: &mut World, targets: &[Vec2]) {
             && (world.players[man].pos - hoop).length_squared() < sink_threshold * sink_threshold
         {
             DefenseResponsibility::Sink
+        } else if man != usize::MAX
+            && (world.players[man].pos - world.players[*handle].pos).length()
+                > world.params.policy.g("recover_distance_ft")
+        {
+            // 被过掉或换防后期在人不在：先回到自己的对位人身上。
+            DefenseResponsibility::Recover
         } else {
             DefenseResponsibility::Deny
         };

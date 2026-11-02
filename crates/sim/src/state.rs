@@ -77,6 +77,8 @@ pub enum DefenseResponsibility {
     GoUnder,
     /// 被掩护后直接换防。
     Switch,
+    /// 失去位置后回位：先回到自己的对位人身上。
+    Recover,
 }
 
 impl DefenseResponsibility {
@@ -90,6 +92,7 @@ impl DefenseResponsibility {
             Self::GoOver => "go_over",
             Self::GoUnder => "go_under",
             Self::Switch => "switch",
+            Self::Recover => "recover",
         }
     }
 }

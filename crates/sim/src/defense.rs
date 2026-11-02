@@ -372,6 +372,19 @@ pub fn apply_defense_targets(world: &mut World) {
                 };
                 (crate::state::TargetKind::Pressure, man, target)
             }
+            // 回位：直接回到自己的对位人与球之间。
+            crate::state::DefenseResponsibility::Recover => {
+                let target = if man != usize::MAX && world.players[man].on_court {
+                    let ball = carrier
+                        .map(|carrier| world.players[carrier].pos)
+                        .unwrap_or(world.players[*handle].pos);
+                    let direction = (ball - world.players[man].pos).normalize_or_zero();
+                    world.players[man].pos + direction * pressure
+                } else {
+                    targets[slot]
+                };
+                (crate::state::TargetKind::Pressure, man, target)
+            }
         };
         let used_closeout = responsibility == crate::state::DefenseResponsibility::OnBall
             && world.apply_defensive_closeout_target(*handle);

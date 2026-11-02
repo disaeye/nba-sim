@@ -1673,3 +1673,67 @@ fn screen_navigation_route_decides_the_defender_target() {
         "两条路线的落点必须不同：{over_target:?} vs {under_target:?}"
     );
 }
+
+/// 回位：离自己的对位人太远时，职责必须变成回位并指向那个人。
+#[test]
+fn a_defender_out_of_position_recovers_to_his_man() {
+    use nba_sim_core::state::{DefenseResponsibility, TargetKind};
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let run = |gap_ft: f32| {
+        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 257);
+        let carrier = world.on_court(TeamSide::Home).as_slice()[0];
+        let man = world.on_court(TeamSide::Home).as_slice()[1];
+        let lost = world.on_court(TeamSide::Away).as_slice()[0];
+        let ball_guard = world.on_court(TeamSide::Away).as_slice()[1];
+        for (index, player) in world.players.iter_mut().enumerate() {
+            player.on_court = index == carrier || index == man || index == lost || index == ball_guard;
+            player.vel = Vec2::ZERO;
+        }
+        let hoop = world.hoop_for(TeamSide::Home);
+        let carrier_spot = hoop + Vec2::new(-20.0, 0.0);
+        world.players[carrier].pos = carrier_spot;
+        world.players[carrier].target = carrier_spot;
+        world.players[man].pos = Vec2::new(66.0, 8.0);
+        world.players[man].target = world.players[man].pos;
+        world.players[ball_guard].pos = carrier_spot + Vec2::new(0.0, 2.0);
+        world.players[ball_guard].target = world.players[ball_guard].pos;
+        // 失位防守人离自己的对位人 gap_ft 英尺。
+        world.players[lost].pos = world.players[man].pos + Vec2::new(gap_ft, 0.0);
+        world.players[lost].target = world.players[lost].pos;
+        world.possession.team = TeamSide::Home;
+        world.start_possession(TeamSide::Home, PossessionKind::Live);
+        world.set_phase(Phase::Live);
+        world.ball.set_held(carrier);
+        world.ball.pos = carrier_spot;
+        world.ball.z = world.rules.ball_radius_ft;
+        nba_sim_core::defense::refresh_matchup(&mut world);
+        world.possession.pairing_changed_at = world.now() + 1.0;
+        world.clock.advance_simulation_time(1.0);
+        nba_sim_core::defense::apply_defense_targets(&mut world);
+        (
+            world.players[lost].defense_responsibility,
+            world.players[lost].target_kind,
+            world.players[lost].target_partner,
+            man,
+            (world.players[lost].target - world.players[man].pos).length(),
+        )
+    };
+    let (far_role, far_kind, far_partner, man, far_gap) = run(12.0);
+    assert_eq!(
+        far_role,
+        DefenseResponsibility::Recover,
+        "离对位人十二英尺必须进入回位"
+    );
+    assert_eq!(far_kind, TargetKind::Pressure, "回位也是压迫目标");
+    assert_eq!(far_partner, man, "回位必须指向自己的对位人");
+    assert!(
+        far_gap < 6.0,
+        "回位目标必须落在对位人身边：{far_gap:.2} 英尺"
+    );
+    let (near_role, _, _, _, _) = run(3.0);
+    assert_ne!(
+        near_role,
+        DefenseResponsibility::Recover,
+        "贴在対位人身边时不该进入回位"
+    );
+}

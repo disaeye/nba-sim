@@ -334,6 +334,7 @@
     "held_ball_tie_margin_ft": 0.12,
     "jump_ball_staging_seconds": 2.5,
     "screen_nav_seconds": 3.0,
+    "recover_distance_ft": 8.0,
     "rebound_offense_reach_penalty_ft": 1.22,
     "rebound_defense_reach_bonus_ft": 1.75,
     "trap_radius_ft": 4.0,
