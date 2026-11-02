@@ -741,3 +741,39 @@ fn the_last_made_free_throw_sends_the_other_team_to_its_own_baseline() {
         world.inbound_spot
     );
 }
+
+#[test]
+fn a_ball_leaving_behind_the_baseline_inbounds_from_that_baseline() {
+    let mut world = world(433);
+    let handler = world.on_court(TeamSide::Home).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == handler;
+        player.vel = Vec2::ZERO;
+    }
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.players[handler].pos = Vec2::new(10.0, 25.0);
+    world.players[handler].target = world.players[handler].pos;
+    world.last_touch = Some(handler);
+    // 球从底线出界：发球点必须是这条底线上的点。
+    world.ball = nba_sim_core::ball::BallBody::loose(Vec2::new(1.0, 25.0), Vec2::new(-30.0, 0.0));
+    let mut contact = false;
+    for _ in 0..40 {
+        let before = world.events.len();
+        world.step(TICK_SECONDS);
+        if world.events[before..].iter().any(|event| {
+            matches!(&event.fact, Fact::BallContact { kind: "out_of_bounds", .. })
+        }) {
+            contact = true;
+            break;
+        }
+    }
+    assert!(contact, "底线出界必须发布出界接触");
+    let spot = world.inbound_spot.expect("出界必须记录发球地点");
+    let radius = world.rules.player_radius_ft;
+    assert!(
+        spot.x <= radius + 1.0 || spot.x >= world.rules.court.width_ft - radius - 1.0,
+        "底线出界的发球点必须在底线附近，实际 {spot:?}"
+    );
+}
