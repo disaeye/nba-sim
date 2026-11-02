@@ -36,7 +36,7 @@
     "pass_completion_open": 0.0,
     "pass_completion_risk": 0.05,
     "shoot_open": 0.55,
-    "shoot_off_dribble_penalty": 0.45,
+    "shoot_off_dribble_penalty": 0.3,
     "shoot_expected_points": 1.0,
     "shoot_pressure": 2.5,
     "shoot_early_slack": 10.0,

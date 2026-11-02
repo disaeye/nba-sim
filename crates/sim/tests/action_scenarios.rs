@@ -1229,7 +1229,8 @@ fn post_footwork_follows_the_defenders_stance() {
 #[test]
 fn a_deflected_pass_becomes_a_loose_ball_decided_by_control() {
     let mut deflections = 0u32;
-    for seed in 1..=8u64 {
+    // 点到传球是低频率事件：样本取十六场，否则会被单场节奏波动掩盖。
+    for seed in 1..=16u64 {
         let report = world(seed).run();
         for (index, event) in report.events.iter().enumerate() {
             let Fact::BallContact {
