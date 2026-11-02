@@ -3,12 +3,14 @@
 //! 结构：世界状态 → 策略选动作 → 结算产出状态变化 → 下一次决策读新状态。
 //! 出手位置与命中率都是动作链的后果，参数表来自真实赛季数据。
 
-pub mod action;
-pub mod adjudicate;
+pub mod actions;
+pub use actions as action;
 pub mod assignment;
-pub mod ball;
+pub mod control;
+pub use control as ball;
 pub mod body;
-pub mod boxscore;
+pub mod ledger;
+pub use ledger::{boxscore, report};
 pub mod challenge;
 pub mod clock;
 pub mod defense;
@@ -17,20 +19,21 @@ pub mod endgame;
 pub mod formation;
 pub mod gate;
 pub mod motion;
+pub mod officiating;
+pub use officiating as adjudicate;
 pub mod params;
 pub mod physical;
 pub mod policy;
+pub mod program;
+pub use program::{rotation, timeouts};
 pub mod replay;
-pub mod report;
 pub mod resolve;
 pub mod review;
-pub mod rotation;
 pub mod session;
 pub mod shot_quality;
 pub mod state;
 pub mod stream;
 pub mod tactics;
-pub mod timeouts;
 pub mod utility;
 pub mod value;
 pub mod views;
