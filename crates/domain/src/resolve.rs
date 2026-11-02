@@ -321,7 +321,7 @@ impl Default for BallSecurityPolicy {
             // 真实 NBA 双方合计约 15 次抢断、失误率 0.145/回合；0.30/s 频率
             // 配 0.07 成功上限与 1.5 秒不应期，实测 15.0 次/场、失误率 0.15。
             poke_attempt_rate_per_sec: 0.30,
-            poke_success_ceiling: 0.07,
+            poke_success_ceiling: 0.10,
             poke_success_floor: 0.004,
             poke_defender_skill_weight: 0.55,
             poke_handler_skill_weight: 0.70,
