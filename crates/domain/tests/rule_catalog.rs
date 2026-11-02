@@ -139,7 +139,8 @@ fn rule_catalog_has_versioned_sources_and_unique_scenario_ids() {
         .iter()
         .find(|procedure| procedure.id == "PROC-OVERTIME")
         .expect("overtime procedure");
-    assert_eq!(overtime.implementation, "partial");
+    // 加时的 7 个场景全部有直接回归：这个程序不再有缺失场景。
+    assert_eq!(overtime.implementation, "implemented");
 
     let fiba = catalog.profiles.get("fiba").expect("FIBA profile exists");
     assert_eq!(fiba.ruleset_version, "2026-v1.1");
