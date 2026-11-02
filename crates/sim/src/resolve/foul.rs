@@ -251,6 +251,8 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
     } else {
         // 无罚球的犯规同样停表换边（保留球权方为被犯规方）：
         // 阶段写入走同一个提交入口，发球位置取中断点的就近边线。
+        // 被犯规方重新从后场发球，八秒计时随之重新开始。
+        world.possession.backcourt_started_game_clock = None;
         let spot = world.inbound_point_of_interruption();
         world.adjudicate(crate::adjudicate::Adjudication::new(
             crate::adjudicate::StoppageCause::Foul,

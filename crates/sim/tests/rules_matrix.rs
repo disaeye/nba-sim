@@ -141,3 +141,40 @@ fn the_second_period_switches_basket_direction() {
         "第二节必须换边，主队进攻篮筐 {first:?} → {second:?}"
     );
 }
+
+#[test]
+fn a_defensive_foul_restarts_the_eight_second_count() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 617);
+    let holder = world.on_court(TeamSide::Home).as_slice()[0];
+    let fouler = world.on_court(TeamSide::Away).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == holder || index == fouler;
+        player.vel = Vec2::ZERO;
+    }
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(holder);
+    let hoop = world.hoop_for(TeamSide::Home);
+    let away_hoop = world.hoop_for(TeamSide::Away);
+    let midcourt = (hoop.x + away_hoop.x) * 0.5;
+    let backcourt_x = midcourt + if hoop.x > midcourt { -25.0 } else { 25.0 };
+    world.players[holder].pos = Vec2::new(backcourt_x, 25.0);
+    world.players[holder].target = world.players[holder].pos;
+    world.ball.pos = world.players[holder].pos;
+    world.ball.z = world.rules.ball_radius_ft;
+    world.clock.set_shot_clock(24.0);
+    world.step(TICK_SECONDS);
+    assert!(
+        world.possession.backcourt_started_game_clock.is_some(),
+        "后场持球必须开始八秒计时"
+    );
+    // 防守犯规：被犯规方重新从后场发球，八秒从新时刻算起。
+    world.players[fouler].pos = world.players[holder].pos + Vec2::new(0.8, 0.0);
+    nba_sim_core::resolve::foul::apply_non_shooting_foul(&mut world, fouler, holder);
+    assert!(
+        world.possession.backcourt_started_game_clock.is_none(),
+        "防守犯规之后八秒计时必须重新开始"
+    );
+}
