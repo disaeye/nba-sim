@@ -159,6 +159,8 @@ pub struct World {
     pub pending_rebound: Option<crate::resolve::rebound::PendingRebound>,
     /// 刚被切掉球的持球人，以及恢复之前不可再次被切的截止时间。
     pub poke_cooldown: Option<(usize, f64)>,
+    /// 当前生效的护球姿态。开始其他动作或窗口到期即失效。
+    pub protection: Option<crate::state::BallProtection>,
     pub possession_points: u32,
     pub inbound_passer: Option<usize>,
     pub violations: Vec<String>,
@@ -781,6 +783,7 @@ impl World {
             pending_shot: None,
             pending_rebound: None,
             poke_cooldown: None,
+            protection: None,
             possession_points: 0,
             inbound_passer: None,
             violations: Vec::new(),
@@ -892,6 +895,10 @@ impl World {
             });
             return false;
         }
+        // 护球是一种姿态，不是持续的屏障：开始其他动作就退出护球。
+        if !matches!(intent.kind, crate::action::ActionKind::Protect(_)) {
+            self.protection = None;
+        }
         self.next_interaction_id += 1;
         let interaction_id = self.next_interaction_id;
         let (preparation, execution, follow_through) = self.action_windows(&intent);
@@ -928,6 +935,7 @@ impl World {
                 id: interaction_id,
                 action_id,
                 intent,
+                screen_defender: self.screen_defender,
             },
         );
         self.action_turn = None;
@@ -966,6 +974,17 @@ impl World {
             ActionKind::Drive | ActionKind::Dribble | ActionKind::Cut | ActionKind::PostUp | ActionKind::Relocate => (
                 rules.tactics.drive_min_duration_seconds,
                 rules.tactics.drive_max_duration_seconds,
+                rules.tactical_initiation_seconds,
+            ),
+            // 假动作与护球都是短技术动作：准备、执行、回收各占一份。
+            ActionKind::Fake(_) => (
+                rules.tactics.drive_min_duration_seconds,
+                rules.tactics.drive_min_duration_seconds,
+                rules.tactical_initiation_seconds,
+            ),
+            ActionKind::Protect(_) => (
+                rules.tactics.drive_min_duration_seconds,
+                rules.tactics.drive_min_duration_seconds,
                 rules.tactical_initiation_seconds,
             ),
         };
@@ -1055,6 +1074,22 @@ impl World {
         }
     }
 
+    /// 只取消指定种类的防守动作：并发动作结算时不能互相清掉。
+    fn cancel_defensive_actions_of(
+        &mut self,
+        kind: DefensiveActionKind,
+        reason: &'static str,
+    ) {
+        for defender in 0..self.defensive_actions.len() {
+            if self.defensive_actions[defender]
+                .as_ref()
+                .is_some_and(|action| action.kind == kind)
+            {
+                self.cancel_defensive_action(defender, reason);
+            }
+        }
+    }
+
     fn cancel_defensive_action(&mut self, defender: usize, reason: &'static str) {
         let Some(runtime) = self.defensive_actions[defender].take() else {
             return;
@@ -1063,9 +1098,33 @@ impl World {
             action_id: runtime.action_id,
             defender: runtime.defender,
             shooter: runtime.shooter,
-            kind: DefensiveActionKind::CloseoutContest.as_str(),
+            kind: runtime.kind.as_str(),
             reason,
         });
+    }
+
+    /// 取消指定球员的当前动作；没有动作时什么也不做。
+    pub(crate) fn cancel_player_action(&mut self, player: usize, reason: &'static str) {
+        let Some(runtime) = self.players[player].action.take() else {
+            return;
+        };
+        if self.players[player].target_kind == crate::state::TargetKind::Contact {
+            self.players[player].target_kind = crate::state::TargetKind::Station;
+            self.players[player].target_partner = usize::MAX;
+        }
+        self.emit(Fact::ActionCancelled {
+            action_id: runtime.action_id,
+            player,
+            kind: runtime.intent.kind.as_str(),
+            reason,
+        });
+        let alive: Vec<u64> = self
+            .players
+            .iter()
+            .filter_map(|player| player.action.as_ref().map(|runtime| runtime.action_id))
+            .collect();
+        self.interactions
+            .retain(|_, interaction| alive.contains(&interaction.action_id));
     }
 
     /// 流尾部尚未结算的业务实例：飞行中的出手、飞行中的传球、未执行完的罚球。
@@ -1155,6 +1214,23 @@ impl World {
             crate::state::TargetKind::Window,
             usize::MAX,
         )
+    }
+
+    /// 各类累积缓冲的长度与容量：分配预算是「稳态 tick 不增长」，
+    /// 判据要能看见所有会增长的缓冲。
+    pub fn buffer_footprint(&self) -> [usize; 10] {
+        [
+            self.events.capacity(),
+            self.decision_traces.capacity(),
+            self.decision_samples.capacity(),
+            self.decision_records.capacity(),
+            self.shot_samples.capacity() + self.shot_samples.len(),
+            self.pass_samples.len(),
+            self.possession_log.len(),
+            self.violations.len(),
+            self.shot_clock_at_release.len() + self.contest_samples.len(),
+            self.ball_history.len(),
+        ]
     }
 
     pub fn holder(&self) -> Option<usize> {
@@ -1389,6 +1465,7 @@ impl World {
             assert_eq!(self.possession.team, team, "dead-ball restart must preserve possession team");
         }
         crate::motion::reset_ball_history(self);
+        self.possession.off_ball_actions = 0;
         let next_possession_id = if continuing_possession {
             self.possession.id
         } else {
@@ -1569,6 +1646,7 @@ impl World {
         if self.possession.id == 0 {
             return;
         }
+        self.protection = None;
         crate::tactics::close_play_window(self);
         let record = PossessionRecord {
             team: self.possession.team,
@@ -1653,6 +1731,7 @@ impl World {
         crate::rotation::note_intents(self);
         self.advance_action_phases();
         self.advance_defensive_actions();
+        self.advance_steal_attempts();
         if matches!(phase_before_step, Phase::JumpBallFlight) {
             self.move_jump_ball_receiver(dt);
         } else if !matches!(phase_before_step, Phase::JumpBall { .. }) {
@@ -1737,7 +1816,7 @@ impl World {
             self.phase(),
             Phase::Live | Phase::ShotFlight { .. }
         ) {
-            self.cancel_defensive_actions("shot_action_ended");
+            self.cancel_defensive_actions_of(DefensiveActionKind::CloseoutContest, "shot_action_ended");
             return;
         }
         let shooting_player = self.players.iter().position(|player| {
@@ -1756,19 +1835,25 @@ impl World {
                 self.players[*handle].defense_responsibility
                     == crate::state::DefenseResponsibility::OnBall
             }) else {
-                self.cancel_defensive_actions("on_ball_defender_unavailable");
+                self.cancel_defensive_actions_of(
+                    DefensiveActionKind::CloseoutContest,
+                    "on_ball_defender_unavailable",
+                );
                 return;
             };
             (defender, shooter)
         } else {
-            self.cancel_defensive_actions("shot_action_ended");
+            self.cancel_defensive_actions_of(
+                DefensiveActionKind::CloseoutContest,
+                "shot_action_ended",
+            );
             return;
         };
         for player in 0..self.defensive_actions.len() {
-            if self.defensive_actions[player]
-                .as_ref()
-                .is_some_and(|action| action.shooter != shooter || action.defender != defender)
-            {
+            if self.defensive_actions[player].as_ref().is_some_and(|action| {
+                action.kind == DefensiveActionKind::CloseoutContest
+                    && (action.shooter != shooter || action.defender != defender)
+            }) {
                 self.cancel_defensive_action(player, "matchup_changed");
             }
         }
@@ -1788,7 +1873,7 @@ impl World {
                 action_id: runtime.action_id,
                 defender,
                 shooter,
-                kind: DefensiveActionKind::CloseoutContest.as_str(),
+                kind: runtime.kind.as_str(),
                 reason: "participant_left_court",
             });
             return;
@@ -1809,11 +1894,155 @@ impl World {
                 action_id: runtime.action_id,
                 defender,
                 shooter,
-                kind: DefensiveActionKind::CloseoutContest.as_str(),
+                kind: runtime.kind.as_str(),
                 displacement_ft: (self.players[defender].pos - runtime.start_position).length(),
             });
         }
         self.defensive_actions[defender] = Some(runtime);
+    }
+
+    /// 防守人自己的伸手切球决策：贴身且有切球倾向时赌一次。
+    ///
+    /// 执行窗口内切球成功率提高，收势窗口内该防守人失去干扰。两者都由
+    /// 其他结算直接读取，因此这次赌博有真实的代价。
+    fn advance_steal_attempts(&mut self) {
+        // 活球飞行阶段（传球、出手在空中）仍然算这次赌博在继续；
+        // 只有死球或球权易主才取消。
+        if !matches!(
+            self.phase(),
+            Phase::Live | Phase::PassFlight { .. } | Phase::ShotFlight { .. }
+        ) {
+            self.cancel_defensive_actions_of(DefensiveActionKind::StealAttempt, "not_live");
+            return;
+        }
+        let now = self.now();
+        // 推进已有动作：球在空中也继续，等落地或有人接球再判定。
+        for defender in 0..self.defensive_actions.len() {
+            let Some(mut runtime) = self.defensive_actions[defender].take() else {
+                continue;
+            };
+            if runtime.kind != DefensiveActionKind::StealAttempt {
+                self.defensive_actions[defender] = Some(runtime);
+                continue;
+            }
+            if !self.players[defender].on_court || !self.players[runtime.shooter].on_court {
+                self.emit(Fact::DefensiveActionCancelled {
+                    action_id: runtime.action_id,
+                    defender,
+                    shooter: runtime.shooter,
+                    kind: runtime.kind.as_str(),
+                    reason: "participant_changed",
+                });
+                continue;
+            }
+            if let Some(to) = runtime.phase_at(now) {
+                let from = runtime.phase;
+                runtime.phase = to;
+                self.emit(Fact::DefensiveActionPhaseChanged {
+                    action_id: runtime.action_id,
+                    defender,
+                    from,
+                    to,
+                });
+            }
+            if now >= runtime.ends_at {
+                self.emit(Fact::DefensiveActionCompleted {
+                    action_id: runtime.action_id,
+                    defender,
+                    shooter: runtime.shooter,
+                    kind: runtime.kind.as_str(),
+                    displacement_ft: (self.players[defender].pos - runtime.start_position).length(),
+                });
+                self.players[defender].schedule.next_redecide_at = now
+                    + f64::from(self.rules.redecide_interval_seconds);
+                continue;
+            }
+            self.defensive_actions[defender] = Some(runtime);
+        }
+        // 发起新的切球尝试：贴身的对位防守人按自己的调度决定。
+        let Some(holder) = self.holder() else {
+            return;
+        };
+        let offense = self.possession.team;
+        let policy = self.rules.resolve.technique.clone();
+        let security = self.rules.resolve.ball_security.clone();
+        let ball = self.ball.pos;
+        // 逐 tick 走这条路径，不能分配：按句柄遍历并在循环内过滤。
+        for defender in 0..self.players.len() {
+            if !self.players[defender].on_court
+                || self.players[defender].team != offense.other()
+                || self.players[defender].defense_responsibility
+                    != crate::state::DefenseResponsibility::OnBall
+            {
+                continue;
+            }
+            if self.defensive_actions[defender].is_some() {
+                continue;
+            }
+            if now < self.players[defender].schedule.next_redecide_at {
+                continue;
+            }
+            // 评估过就后退调度：否则不满足条件的防守人每 tick 都被重新评估。
+            // 主动赌博是稀有动作：每名防守人每 4 秒才考虑一次。
+            self.players[defender].schedule.next_redecide_at =
+                now + f64::from(self.rules.redecide_interval_seconds) * 8.0;
+            let gap = self.players[defender].pos.distance(ball);
+            if gap > security.poke_pressure_radius_ft {
+                continue;
+            }
+            // 赌博倾向低的防守人很少伸手：用抢断倾向做概率筛选。
+            let gamble = self.players[defender].data.tendencies.gamble_steal;
+            let chance = f64::from((0.05 + 0.35 * gamble).clamp(0.0, 0.5));
+            let roll = f64::from(self.draw(
+                crate::draw::Stream::Decision,
+                defender,
+                crate::draw::purpose::STEAL_CREDIT,
+                7,
+            ));
+            if roll >= chance {
+                continue;
+            }
+            self.start_defensive_steal(defender, holder, &policy);
+        }
+    }
+
+    fn start_defensive_steal(
+        &mut self,
+        defender: usize,
+        holder: usize,
+        policy: &nba_domain::resolve::TechniquePolicy,
+    ) {
+        let start_time = self.now();
+        let preparation_ends_at = start_time + f64::from(policy.steal_attempt_prep_seconds);
+        let execution_ends_at = preparation_ends_at + f64::from(policy.steal_attempt_exec_seconds);
+        let ends_at = execution_ends_at + f64::from(policy.steal_attempt_follow_seconds);
+        self.next_action_id += 1;
+        self.next_interaction_id += 1;
+        let action_id = self.next_action_id;
+        let interaction_id = self.next_interaction_id;
+        let start_position = self.players[defender].pos;
+        self.defensive_actions[defender] = Some(DefensiveActionRuntime {
+            action_id,
+            interaction_id,
+            kind: DefensiveActionKind::StealAttempt,
+            defender,
+            shooter: holder,
+            phase: nba_domain::action_window::ActionPhase::Preparation,
+            preparation_ends_at,
+            execution_ends_at,
+            ends_at,
+            start_position,
+            target_position: self.ball.pos,
+            completed: false,
+        });
+        self.emit(Fact::DefensiveActionStarted {
+            action_id,
+            interaction_id,
+            defender,
+            shooter: holder,
+            kind: DefensiveActionKind::StealAttempt.as_str(),
+            start_position,
+        });
     }
 
     fn start_defensive_closeout(&mut self, defender: usize, shooter: usize) {
@@ -1848,6 +2077,7 @@ impl World {
         self.defensive_actions[defender] = Some(DefensiveActionRuntime {
             action_id,
             interaction_id,
+            kind: DefensiveActionKind::CloseoutContest,
             defender,
             shooter,
             phase,
@@ -1893,17 +2123,24 @@ impl World {
     /// 升序结算，回放因此确定。
     fn resolve_due_interactions(&mut self) {
         let now = self.now();
-        let due: Vec<u64> = self
-            .interactions
-            .iter()
-            .filter(|(_, interaction)| now >= interaction.intent.end_time())
-            .map(|(id, _)| *id)
-            .collect();
-        for interaction_id in due {
-            let interaction = self
-                .interactions
-                .remove(&interaction_id)
-                .expect("due interaction must still be present");
+        // 逐 tick 走这条路径，不能分配：到期交互装进固定缓冲。
+        const MAX_DUE: usize = 64;
+        let mut due = [0u64; MAX_DUE];
+        let mut count = 0usize;
+        for (id, interaction) in self.interactions.iter() {
+            if now < interaction.intent.end_time() {
+                continue;
+            }
+            assert!(count < MAX_DUE, "同一 tick 到期的交互超过 {MAX_DUE} 个");
+            due[count] = *id;
+            count += 1;
+        }
+        for interaction_id in due[..count].iter() {
+            // 前一个交互结算时可能取消别的动作（球权变化、犯规、信号），
+            // 被取消的交互已经从表里移除，这里直接跳过。
+            let Some(interaction) = self.interactions.remove(interaction_id) else {
+                continue;
+            };
             let actor_running = self.players[interaction.intent.actor]
                 .action
                 .as_ref()
@@ -1920,7 +2157,10 @@ impl World {
         let action_id = interaction.action_id;
         let screen_screener = interaction.intent.target;
         self.action_turn = Some((action_id, crate::action::ActionTurn::Resolve));
+        // 掩护防守人跟着交互走：并发动作结算时不会互相覆盖。
+        self.screen_defender = interaction.screen_defender;
         let outcome = resolve::resolve(self, interaction.intent);
+        self.screen_defender = None;
         self.apply_outcome(outcome, screen_screener, action_id);
         self.action_turn = None;
     }
@@ -2397,6 +2637,8 @@ impl World {
 
     fn maybe_decide(&mut self) {
         crate::policy::tick(self);
+        // 无球球员各自决策：持球人的决策不覆盖他们的动作。
+        crate::policy::off_ball_tick(self);
     }
 
     fn check_period_end(&mut self) {

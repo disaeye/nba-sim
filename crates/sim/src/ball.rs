@@ -977,9 +977,20 @@ pub fn pass_intercept_radius(world: &World, defender: &crate::state::PlayerState
     // 半径是防守人的手掌在身侧能够到的范围：只有手臂正好在传球
     // 线路上的防守人才碰得到球，站得离开线路半个身位就碰不到。
     // 抄球半径随抢断属性放大：抢断能力强的防守人真的能把球断下来。
-    world.rules.ball_radius_ft
+    let base = world.rules.ball_radius_ft
         + world.params.policy.g("pass_intercept_base_ft")
-        + defender.attribute("steal") * world.params.policy.g("pass_intercept_steal_ft")
+        + defender.attribute("steal") * world.params.policy.g("pass_intercept_steal_ft");
+    // 被传球假动作骗到的防守人重心已偏向假目标，真实线路上的手位收窄。
+    let bait_relief = match defender.bait {
+        Some(bait)
+            if bait.until > world.now()
+                && matches!(bait.kind, crate::action::FakeKind::Pass) =>
+        {
+            world.rules.resolve.technique.fake_pass_lane_ft
+        }
+        _ => f32::default(),
+    };
+    (base - bait_relief).max(world.rules.ball_radius_ft)
 }
 
 /// 出手时已经抽出「这一球被封盖」，这里只等球飞到那只手的球体里。

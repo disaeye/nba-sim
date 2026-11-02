@@ -346,7 +346,8 @@ fn family_code(family: DecisionActionFamily) -> Option<usize> {
         DecisionActionFamily::Pass => Some(2),
         DecisionActionFamily::PostUp => Some(5),
         DecisionActionFamily::Dwell => Some(6),
-        DecisionActionFamily::TripleThreatJab => None,
+        // 试探步是真实的假动作族动作：档案里的三威胁试探步由它执行。
+        DecisionActionFamily::TripleThreatJab => Some(9),
     }
 }
 
@@ -358,8 +359,8 @@ pub fn apply_play_effects(world: &World, candidates: &mut Vec<crate::policy::Can
     let Some(play) = active_play(world) else {
         return;
     };
-    let mut bonus = [f32::default(); 9];
-    let mut hard = [false; 9];
+    let mut bonus = [f32::default(); crate::action::FAMILY_COUNT];
+    let mut hard = [false; crate::action::FAMILY_COUNT];
     for inhibition in &play.inhibitions {
         let Some(code) = family_code(inhibition.action_family) else {
             continue;

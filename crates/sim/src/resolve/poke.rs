@@ -7,6 +7,52 @@ use crate::draw::{purpose, Stream};
 use crate::state::BallState;
 use crate::world::{Phase, World};
 
+/// 单次伸手的成功概率：几何、能力与当前姿态（护球、失衡）全部计入。
+///
+/// 抽样在 [`step`] 里，概率在这里：测试与审计读同一个函数，避免
+/// 「模型说的成功率」与「执行时用的成功率」分家。
+pub fn poke_success(world: &World, thief: usize, holder: usize, nearest: f32, now: f64) -> f32 {
+    let ball = world.ball.pos;
+    let exposure = nba_domain::capability::poke_ball_exposure(
+        &world.rules,
+        ball.distance(world.players[holder].pos),
+    );
+    let towards_ball = (ball - world.players[thief].pos).normalize_or_zero();
+    let closing = world.players[thief].vel.dot(towards_ball);
+    let facing = nba_domain::capability::poke_pressure_factor(&world.rules, nearest);
+    let mut success = nba_domain::capability::poke_check_success_with_context(
+        &world.rules,
+        &world.players[thief].data.attributes,
+        &world.players[holder].data.attributes,
+        world.players[holder].data.tendencies.risk_tolerance,
+        exposure,
+        world.ball.vel.length(),
+        closing,
+        facing,
+    );
+    // 护球姿态与持球人被假动作骗过的防守人都会改变这一下伸手的结果。
+    if world
+        .protection
+        .is_some_and(|protection| protection.holder == holder && protection.until > now)
+    {
+        success *= f32::from(1u8) - world.rules.resolve.technique.protection_poke_relief;
+    }
+    if world.players[thief]
+        .bait
+        .is_some_and(|bait| bait.until > now)
+    {
+        success *= f32::from(1u8) - world.rules.resolve.technique.fake_bait_contest_relief;
+    }
+    // 主动伸手的动作在执行窗口内是赌对了时机：成功率按策略加成。
+    if world.defensive_actions[thief].as_ref().is_some_and(|action| {
+        action.kind == crate::action::DefensiveActionKind::StealAttempt
+            && action.phase == nba_domain::action_window::ActionPhase::Execution
+    }) {
+        success *= f32::from(1u8) + world.rules.resolve.technique.steal_attempt_exec_bonus;
+    }
+    success
+}
+
 /// 每个 tick 判定一次：几何筛出最近的贴身防守人，按速率抽样是否伸手，
 /// 伸手后用领域层的模型判定是否拍到球。
 pub fn step(world: &mut World, dt: f64) {
@@ -54,24 +100,17 @@ pub fn step(world: &mut World, dt: f64) {
     if f64::from(world.draw(Stream::Decision, thief, purpose::STEAL_CREDIT, 0)) >= attempt {
         return;
     }
-    let exposure = nba_domain::capability::poke_ball_exposure(
-        &world.rules,
-        world.ball.pos.distance(world.players[holder].pos),
-    );
-    let towards_ball = (ball - world.players[thief].pos).normalize_or_zero();
-    let closing = world.players[thief].vel.dot(towards_ball);
-    let facing = nba_domain::capability::poke_pressure_factor(&world.rules, nearest);
-    let success = nba_domain::capability::poke_check_success_with_context(
-        &world.rules,
-        &world.players[thief].data.attributes,
-        &world.players[holder].data.attributes,
-        world.players[holder].data.tendencies.risk_tolerance,
-        exposure,
-        world.ball.vel.length(),
-        closing,
-        facing,
-    );
+    let success = poke_success(world, thief, holder, nearest, now);
     if world.draw(Stream::Decision, thief, purpose::STEAL_CREDIT, 1) >= success {
+        if let Some(protection) = world.protection.filter(|protection| {
+            protection.holder == holder && protection.until > now
+        }) {
+            world.emit(Fact::PokePrevented {
+                player: holder,
+                defender: thief,
+                kind: protection.kind,
+            });
+        }
         return;
     }
     let axis = (world.players[thief].pos - world.players[holder].pos).normalize_or_zero();

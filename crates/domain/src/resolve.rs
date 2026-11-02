@@ -33,6 +33,126 @@ pub struct ResolveConfig {
     pub ball_security: BallSecurityPolicy,
     /// 封盖裁定策略：出手过程中的触摸判定（D25）。
     pub block: BlockPolicy,
+    /// 假动作与护球技术的执行策略。
+    pub technique: TechniquePolicy,
+}
+
+/// 假动作与护球技术策略。
+///
+/// 假动作的效果必须落在真实状态上：被骗到的防守人进入失衡窗口，
+/// 这个窗口同时改变干扰、抄截半径与切球成功率；护球姿态改变切球成功率。
+/// 三者都是其他结算直接读取的量，因此假动作与护球不是只有名字的动作。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TechniquePolicy {
+    /// 假动作生效的防守人距离上限（ft）：太远的防守人没有被骗的意义。
+    pub fake_pressure_radius_ft: f32,
+    /// 假动作被识破的基础概率（技能调制前的基准）。
+    pub fake_read_base: f32,
+    /// 防守人外线防守能力对识破概率的权重。
+    pub fake_read_defense_weight: f32,
+    /// 持球人控球能力对骗到概率的权重。
+    pub fake_bait_handler_weight: f32,
+    /// 被骗到之后防守人的失衡持续时间（秒）。
+    pub fake_bait_seconds: f32,
+    /// 失衡窗口内防守人干扰的折减比例（0 = 不折减，1 = 完全无效）。
+    pub fake_bait_contest_relief: f32,
+    /// 投篮假动作把防守人重心拉向持球人的距离（ft）。
+    pub fake_shot_displacement_ft: f32,
+    /// 失衡窗口内防守人抄截半径的折减（ft）。
+    pub fake_pass_lane_ft: f32,
+    /// 试探步的位移（ft）。
+    pub jab_step_ft: f32,
+    /// 护球姿态的基础持续时间（秒）。
+    pub protection_seconds: f32,
+    /// 护球姿态对切球成功率的折减比例（0 = 无效果，1 = 完全免疫）。
+    pub protection_poke_relief: f32,
+    /// 主动伸手切球的准备窗口（秒）。
+    pub steal_attempt_prep_seconds: f32,
+    /// 主动伸手切球的执行窗口（秒）。
+    pub steal_attempt_exec_seconds: f32,
+    /// 主动伸手切球的收势窗口（秒）。
+    pub steal_attempt_follow_seconds: f32,
+    /// 执行窗口内切球成功率的加成比例（0 = 无加成）。
+    pub steal_attempt_exec_bonus: f32,
+    /// 收势窗口内该防守人干扰的折减比例（0 = 无损失，1 = 完全失去干扰）。
+    pub steal_attempt_follow_penalty: f32,
+}
+
+impl Default for TechniquePolicy {
+    fn default() -> Self {
+        Self {
+            fake_pressure_radius_ft: 6.0,
+            fake_read_base: 0.52,
+            fake_read_defense_weight: 0.55,
+            fake_bait_handler_weight: 0.45,
+            fake_bait_seconds: 0.9,
+            fake_bait_contest_relief: 0.55,
+            fake_shot_displacement_ft: 1.3,
+            fake_pass_lane_ft: 2.2,
+            jab_step_ft: 1.1,
+            protection_seconds: 1.2,
+            protection_poke_relief: 0.65,
+            steal_attempt_prep_seconds: 0.12,
+            steal_attempt_exec_seconds: 0.18,
+            steal_attempt_follow_seconds: 0.35,
+            steal_attempt_exec_bonus: 0.9,
+            steal_attempt_follow_penalty: 0.5,
+        }
+    }
+}
+
+impl TechniquePolicy {
+    /// 识破概率：防守人能力抬高，持球人控球压低，结果夹在 0.05..=0.95。
+    pub fn read_probability(&self, defense_skill: f32, handler_skill: f32) -> f32 {
+        let raw = self.fake_read_base + self.fake_read_defense_weight * defense_skill
+            - self.fake_bait_handler_weight * handler_skill;
+        raw.clamp(0.05, 0.95)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        let probabilities = [
+            self.fake_read_base,
+            self.fake_read_defense_weight,
+            self.fake_bait_handler_weight,
+            self.fake_bait_contest_relief,
+            self.protection_poke_relief,
+            self.steal_attempt_exec_bonus,
+            self.steal_attempt_follow_penalty,
+        ];
+        if probabilities
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+        {
+            return Err("technique probabilities must be finite and within 0..=1".to_string());
+        }
+        let lengths = [
+            self.fake_pressure_radius_ft,
+            self.fake_shot_displacement_ft,
+            self.fake_pass_lane_ft,
+            self.jab_step_ft,
+        ];
+        if lengths
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err("technique distances must be finite and non-negative".to_string());
+        }
+        let durations = [
+            self.fake_bait_seconds,
+            self.protection_seconds,
+            self.steal_attempt_prep_seconds,
+            self.steal_attempt_exec_seconds,
+            self.steal_attempt_follow_seconds,
+        ];
+        if durations
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+        {
+            return Err("technique durations must be finite and positive".to_string());
+        }
+        Ok(())
+    }
 }
 
 /// 持球安全（on-ball security）裁决策略。
@@ -630,6 +750,7 @@ impl Default for ResolveConfig {
             pass: PassPolicy::default(),
             ball_security: BallSecurityPolicy::default(),
             block: BlockPolicy::default(),
+            technique: TechniquePolicy::default(),
         }
     }
 }
@@ -695,6 +816,7 @@ impl ResolveConfig {
         {
             return Err("ball-security policy bounds are invalid".to_string());
         }
+        self.technique.validate()?;
         if [
             self.player_skill.shooting_weight,
             self.player_skill.finishing_weight,

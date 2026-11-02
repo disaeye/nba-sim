@@ -5,6 +5,7 @@
 //! 伸手犯规、掩护犯规各有自己的裁定路径，本模块补上「球在别处、两个人贴着
 //! 身子互相较劲」这一类。持球人不在此列，他的对位由 `drive` 的伸手犯规处理。
 
+use crate::action::{ActionIntent, ActionKind, ActionOutcome, Completion, Fact, StateDelta};
 use crate::draw::{purpose, Stream};
 use crate::state::Phase;
 use crate::world::World;
@@ -62,5 +63,46 @@ pub fn step(world: &mut World, dt: f64) {
     }
     if let Some((fouler, fouled)) = called {
         crate::resolve::foul::apply_non_shooting_foul(world, fouler, fouled);
+    }
+}
+
+/// 无球空切路线：切入人自己决定起跑，动作结束时按实际位置判定是否到位。
+///
+/// 与持球人发起的空切（高吊球送到切入点）不同，这条路线的产出是位置与
+/// 接球窗口：切入人真的跑到篮下，后续的传球候选按他的新位置估值。
+pub fn cut_route(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
+    let cutter = intent.actor;
+    // 到位容差按接球半径量级取：停在接球点一个身位以内就算切到了。
+    let tolerance = world
+        .params
+        .policy
+        .g("motion_arrival_epsilon_ft")
+        .max(world.rules.catch_radius_base_ft);
+    let arrived = (world.players[cutter].pos - intent.to_ft).length() <= tolerance;
+    let defender_distance = world
+        .players
+        .iter()
+        .filter(|player| player.on_court && player.team != world.players[cutter].team)
+        .map(|player| (player.pos - world.players[cutter].pos).length())
+        .fold(f32::INFINITY, f32::min);
+    if arrived {
+        world.possession.last_cut_at = Some(world.now());
+        world.possession.last_cut_actor = Some(cutter);
+    }
+    world.emit(Fact::Cut {
+        cutter,
+        arrived,
+        defender_distance_ft: defender_distance,
+    });
+    ActionOutcome {
+        actor: cutter,
+        kind: ActionKind::Cut,
+        completion: if arrived {
+            Completion::Completed
+        } else {
+            Completion::Failed
+        },
+        delta: StateDelta::default(),
+        facts: Vec::new(),
     }
 }

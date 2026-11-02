@@ -130,6 +130,26 @@ pub struct DecisionSchedule {
     pub pending: Option<DecisionTrigger>,
 }
 
+/// 被假动作骗到之后的失衡窗口。
+///
+/// 三种假动作造成同一个状态，但消费者不同：投篮假动作降低干扰，
+/// 传球假动作压缩抄截半径，试探步两者都轻微受影响。窗口到期即恢复。
+#[derive(Debug, Clone, Copy)]
+pub struct Bait {
+    pub kind: crate::action::FakeKind,
+    pub until: f64,
+    /// 被骗后实际移动的距离（英尺）。
+    pub displacement_ft: f32,
+}
+
+/// 持球人的护球姿态：在窗口内降低切球成功率。
+#[derive(Debug, Clone, Copy)]
+pub struct BallProtection {
+    pub holder: usize,
+    pub kind: crate::action::ProtectKind,
+    pub until: f64,
+}
+
 impl Default for DecisionSchedule {
     fn default() -> Self {
         Self {
@@ -197,6 +217,8 @@ pub struct PlayerState {
     pub schedule: DecisionSchedule,
     /// 本球员当前执行的身体动作；多人配合使用相同的 interaction_id。
     pub action: Option<ActionRuntime>,
+    /// 被假动作骗到后的失衡窗口：干扰、抄截半径与切球成功率都读它。
+    pub bait: Option<Bait>,
 }
 
 impl PlayerState {
@@ -240,6 +262,7 @@ impl PlayerState {
             resting_until: f64::default(),
             schedule: DecisionSchedule::default(),
             action: None,
+            bait: None,
         }
     }
 
@@ -983,6 +1006,8 @@ pub struct PossessionState {
     pub last_cut_actor: Option<usize>,
     /// 回合开始到首个动作起手的秒数。
     pub first_action_seconds: Option<f64>,
+    /// 本回合已经发生的无球自主动作数：无球球员每个回合只另起一次动作。
+    pub off_ball_actions: u8,
     /// 对位表最后一次被重算的时刻：职责层据此立刻换人。
     pub pairing_changed_at: f64,
     /// 持球状态与收球位置。
@@ -1036,6 +1061,7 @@ impl PossessionState {
             last_post_actor: None,
             last_cut_actor: None,
             first_action_seconds: None,
+            off_ball_actions: 0,
             pairing_changed_at: 0.0,
             dribble_state: DribbleState::Dribbling,
             gather_pos: None,
@@ -1183,6 +1209,8 @@ pub struct DecisionSample {
     pub gamma: f32,
     /// 当时的候选数量。
     pub candidates: u8,
+    /// 这次决策是否由持球人做出：无球球员的决策不计入持球决策的统计口径。
+    pub on_ball: bool,
     /// 指向 `World::decision_traces` 的审计快照下标。
     pub trace: Option<u32>,
 }

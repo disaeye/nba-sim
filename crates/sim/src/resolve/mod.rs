@@ -4,11 +4,13 @@
 //! 进入事实流。任何结算都不读取动作历史，也不预采样未来动作的结果。
 
 pub mod drive;
+pub mod fake;
 pub mod foul;
 pub mod freethrow;
 pub mod offball;
 pub mod pass;
 pub mod poke;
+pub mod protect;
 pub mod rebound;
 pub mod screen;
 pub mod shot;
@@ -30,8 +32,12 @@ pub fn resolve(world: &mut World, intent: ActionIntent) -> ActionOutcome {
         ActionKind::Finish => drive::resolve_finish(world, &intent),
         ActionKind::Shoot(kind) => shot::resolve(world, &intent, kind),
         ActionKind::PostUp => drive::resolve_post(world, &intent),
-        ActionKind::Cut => pass::resolve_cut(world, &intent),
+        // 切入人自己发起的空切只跑路线；持球人发起的空切同时送出高吊球。
+        ActionKind::Cut if intent.target.is_some() => pass::resolve_cut(world, &intent),
+        ActionKind::Cut => offball::cut_route(world, &intent),
         ActionKind::Dribble => resolve_dribble(world, &intent),
+        ActionKind::Fake(kind) => fake::resolve(world, &intent, kind),
+        ActionKind::Protect(kind) => protect::resolve(world, &intent, kind),
         ActionKind::Relocate => ActionOutcome {
             actor: intent.actor,
             kind: intent.kind,
@@ -125,10 +131,11 @@ pub fn contest_for(world: &World, shooter: usize, pos: Vec2) -> f32 {
     let team = world.players[shooter].team;
     let hoop = world.hoop_for(team);
     let mut best = 0.0_f32;
-    for defender in world
+    for (defender_index, defender) in world
         .players
         .iter()
-        .filter(|p| p.on_court && p.team != team)
+        .enumerate()
+        .filter(|(_, p)| p.on_court && p.team != team)
     {
         let distance = (defender.pos - pos).length();
         if distance > 9.0 {
@@ -138,6 +145,28 @@ pub fn contest_for(world: &World, shooter: usize, pos: Vec2) -> f32 {
         let reach = crate::physical::Physical::of(defender, &world.params.policy)
             .reach_excess_ft(&world.params.policy);
         let contest = crate::state::contest_from_defender(distance, between, reach);
+        // 被投篮假动作骗起的防守人不在封盖位置上：失衡窗口内的干扰折减。
+        let bait_relief = match defender.bait {
+            Some(bait)
+                if bait.until > world.now()
+                    && matches!(bait.kind, crate::action::FakeKind::Shot) =>
+            {
+                f32::from(1u8) - world.rules.resolve.technique.fake_bait_contest_relief
+            }
+            _ => f32::from(1u8),
+        };
+        let contest = contest * bait_relief;
+        // 伸手切球的收势窗口里，防守人重心已经前送：干扰折减。
+        let steal_penalty = match world.defensive_actions[defender_index].as_ref() {
+            Some(action)
+                if action.kind == crate::action::DefensiveActionKind::StealAttempt
+                    && action.phase == nba_domain::action_window::ActionPhase::FollowThrough =>
+            {
+                f32::from(1u8) - world.rules.resolve.technique.steal_attempt_follow_penalty
+            }
+            _ => f32::from(1u8),
+        };
+        let contest = contest * steal_penalty;
         // 协防倾向高的防守人更早收缩，位置不变时干扰更强。
         let help = defender.data.tendencies.help_aggressiveness;
         let contest = contest

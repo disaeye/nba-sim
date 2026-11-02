@@ -335,6 +335,22 @@ pub fn move_toward_targets(world: &mut World) {
         }) {
             continue;
         }
+        // 球员自己发起的无球动作持有自己的落点：编队站位不能把它覆写回去，
+        // 否则切入人永远到不了切入点，动作只能以失败结束。
+        if let Some(own) = world.players[handle].action.as_ref().filter(|action| {
+            action.intent.actor == handle
+                && matches!(action.intent.kind, ActionKind::Cut | ActionKind::Relocate)
+        }) {
+            let spot = own.intent.to_ft;
+            crate::assignment::force_target_as(
+                world,
+                handle,
+                spot,
+                crate::state::TargetKind::Window,
+                handle,
+            );
+            continue;
+        }
         let desired = spot_target_for(world, handle, &spots);
         if world.players[handle].target_kind != crate::state::TargetKind::Contact {
             crate::assignment::commit_target(world, handle, desired);

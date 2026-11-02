@@ -48,6 +48,9 @@ impl Fact {
             Self::LooseBallRecovered { .. } => "LOOSE_BALL_RECOVERED",
             Self::SecondChanceStarted { .. } => "SECOND_CHANCE_STARTED",
             Self::Cut { .. } => "CUT",
+            Self::FakeAction { .. } => "FAKE_ACTION",
+            Self::BallProtection { .. } => "BALL_PROTECTION",
+            Self::PokePrevented { .. } => "POKE_PREVENTED",
             Self::BoxOut { .. } => "BOX_OUT",
             Self::DefenseResponsibilityChanged { .. } => "DEFENSE_RESPONSIBILITY_CHANGED",
             Self::Turnover { .. } => "TURNOVER",
@@ -356,6 +359,37 @@ impl World {
                 "cutter_id": self.player_id(*cutter),
                 "arrived": arrived,
                 "defender_distance_ft": defender_distance_ft,
+            }),
+            Fact::FakeAction {
+                player,
+                defender,
+                kind,
+                bitten,
+                displacement_ft,
+            } => json!({
+                "player_id": self.player_id(*player),
+                "defender_id": defender.map(|handle| self.player_id(handle)),
+                "fake": kind.as_str(),
+                "bitten": bitten,
+                "displacement_ft": displacement_ft,
+            }),
+            Fact::BallProtection {
+                player,
+                kind,
+                seconds,
+            } => json!({
+                "player_id": self.player_id(*player),
+                "protection": kind.as_str(),
+                "seconds": seconds,
+            }),
+            Fact::PokePrevented {
+                player,
+                defender,
+                kind,
+            } => json!({
+                "player_id": self.player_id(*player),
+                "defender_id": self.player_id(*defender),
+                "protection": kind.as_str(),
             }),
             Fact::BoxOut {
                 player,

@@ -111,4 +111,5 @@ pub mod purpose {
     pub const DRIVE_CHARGE: u16 = 27;
     pub const GATHER_TRAVEL: u16 = 28;
     pub const SCREEN_FOUL: u16 = 29;
+    pub const FAKE_READ: u16 = 30;
 }

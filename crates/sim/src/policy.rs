@@ -79,6 +79,7 @@ pub fn tick(world: &mut World) {
         beta: decision.beta,
         gamma: decision.gamma,
         candidates: decision.candidate_count.min(u8::MAX as usize) as u8,
+        on_ball: true,
         trace: Some(trace_index),
     });
     world.active_trace = Some(trace_index);
@@ -108,6 +109,8 @@ pub fn tick(world: &mut World) {
         | ActionKind::Pass(_)
         | ActionKind::Cut
         | ActionKind::Screen(_)
+        | ActionKind::Fake(_)
+        | ActionKind::Protect(_)
         | ActionKind::Relocate => crate::state::BallPhase::Dribble,
         ActionKind::Shoot(_) => world.possession.ball_phase,
     };
@@ -157,6 +160,265 @@ pub fn tick(world: &mut World) {
         _ => {}
     }
     assert!(world.start_action(intent, &participants));
+}
+
+/// 无球球员的独立决策：每名不在持球位置上的进攻球员按自己的候选集与
+/// 自己的逆温度选择动作，并由他本人执行。
+///
+/// 这条路径与持球人的决策完全分开：动作的执行人是无球球员自己，动作的
+/// 后果（跑位、切入、接球窗口）由他自己的运行时产出，不是持球人代选的。
+pub fn off_ball_tick(world: &mut World) {
+    if !matches!(world.phase(), Phase::Live) {
+        return;
+    }
+    let Some(holder) = world.holder() else {
+        return;
+    };
+    let team = world.possession.team;
+    let now = world.now();
+    // 逐 tick 走这条路径，不能分配：按句柄遍历，在循环内过滤。
+    for actor in 0..world.players.len() {
+        if actor == holder
+            || !world.players[actor].on_court
+            || world.players[actor].team != team
+        {
+            continue;
+        }
+        // 正在重选恢复段的球员先把自己的路线走完，不叠加新的无球动作。
+        if world.players[actor].recovery_since > 0.0 {
+            continue;
+        }
+        // 已经在做动作的球员不重新决策：同一时刻只有一个身体动作。
+        if world.players[actor].action.is_some() {
+            continue;
+        }
+        if now < world.players[actor].schedule.next_redecide_at {
+            continue;
+        }
+        // 无球动作只发生在回合前段：进攻时钟进入后段时，球权和出手
+        // 都由持球人的决策决定，无球球员不再另起动作。
+        if world.clock.shot_clock() < 10.0 {
+            continue;
+        }
+        // 剧本窗口内的动作由剧本编排：无球球员此时不另起动作，
+        // 否则剧本的候选集与战术先验会被打散。
+        if crate::tactics::active_play(world).is_some() {
+            continue;
+        }
+        // 每个回合只允许一次无球自主动作：无球跑位是补充，不是主循环。
+        if world.possession.off_ball_actions > 0 {
+            continue;
+        }
+        // 回合开头的几秒属于战术发动：无球球员等剧本窗口有了结论再动，
+        // 否则剧本还没被读到就被无球跑位顶掉。
+        if now - world.possession.started_at < 3.0 {
+            continue;
+        }
+        // 无球动作不需要和持球人一样频繁：间隔放长，避免每名球员
+        // 每个决策周期都产生一套生命周期事实。已经评估过就后退调度，
+        // 否则每 tick 都会重新评估同一个人。
+        world.players[actor].schedule.next_redecide_at =
+            now + f64::from(world.rules.redecide_interval_seconds) * 12.0;
+        world.players[actor].schedule.pending = None;
+        let Some(decision) = off_ball_decision(world, actor) else {
+            continue;
+        };
+        let intent = decision.intent;
+        world.possession.off_ball_actions += 1;
+        world.players[actor].target = intent.to_ft;
+        world.players[actor].target_kind = crate::state::TargetKind::Window;
+        world.players[actor].target_partner = actor;
+        let trace_index = world.decision_traces.len() as u32;
+        world.decision_samples.push(DecisionSample {
+            route: crate::views::screen_read_route(world),
+            family: intent.kind.family(),
+            shot_clock: world.clock.shot_clock(),
+            since_screen: f64::INFINITY,
+            shooter_three: world.players[actor].data.attributes.shooting_three,
+            utility: decision.utility,
+            beta: decision.beta,
+            gamma: decision.gamma,
+            candidates: decision.candidate_count.min(u8::MAX as usize) as u8,
+            on_ball: false,
+            trace: Some(trace_index),
+        });
+        world.decision_traces.push(decision.trace.clone());
+        world.decision_records.push(DecisionRecord {
+            decision_id: u64::from(trace_index),
+            tick: world.clock.tick(),
+            actor,
+            observation_digest: crate::views::observation_digest(world, actor),
+            candidates: decision.trace.candidates.clone(),
+            chosen: decision.trace.chosen,
+            revalidation: Revalidation::Accepted,
+        });
+        let participants = [(actor, crate::action::ActionIntentRole::Primary)];
+        assert!(
+            world.start_action(intent, &participants),
+            "无球球员 {actor} 的动作必须能开始"
+        );
+    }
+}
+
+/// 无球候选：跑位到编队空位，或切入篮下。
+///
+/// 两者都由该球员自己的能力与位置估值；选择用他自己的逆温度，因此
+/// 不同球员在同一时刻会做出不同的无球决定。
+fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
+    let team = world.players[actor].team;
+    let now = world.now();
+    let hoop = world.hoop_for(team);
+    let pos = world.players[actor].pos;
+    let shot_clock = world.clock.shot_clock();
+    let beta = decision_temperature(world, actor);
+    let weights = &world.params.policy;
+
+    // 跑位：回到编队空位。价值是该位置的接球价值，成本是跑动占用的时钟。
+    let spot = crate::formation::spot_target(world, actor);
+    let travel = (spot - pos).length();
+    let relocate: Candidate = (
+        ActionKind::Relocate,
+        None,
+        spot,
+        Utility {
+            epv: EpvTerms {
+                ability: crate::value::catch_value(world, spot, actor, 0.0),
+                ..Default::default()
+            },
+            variance: f32::default(),
+            clock_cost: clock_cost(world, shot_clock)
+                * (travel / weights.g("relocate_reference_ft").max(f32::EPSILON)).clamp(0.0, 1.0),
+            foul_cost: f32::default(),
+            tactical_bonus: f32::default(),
+        },
+    );
+
+    // 切入：篮下接球点的价值，减掉被对位跟住的折损。
+    let cut_spot = hoop
+        + (pos - hoop).normalize_or_zero() * weights.g("finish_min_distance_ft");
+    let marker = world
+        .players
+        .iter()
+        .filter(|player| player.on_court && player.team != team)
+        .map(|player| (player.pos - pos).length())
+        .fold(f32::INFINITY, f32::min);
+    let openness = (marker / weights.g("cut_open_distance_ft").max(f32::EPSILON)).clamp(0.0, 1.0);
+    // 空切是机会动作，不是常规站位：只有对位人确实跟丢、且篮下接球
+    // 比留在自己的位置更值时才是候选；否则一律靠跑位解决。
+    let cut_value = crate::value::catch_value(world, cut_spot, actor, 0.0);
+    let spot_value = crate::value::catch_value(world, spot, actor, 0.0);
+    let cut_open = marker >= weights.g("cut_open_distance_ft") * 0.6;
+    let cut_pays = cut_value > spot_value * 1.2;
+    let cut_available = cut_open && cut_pays && travel > 3.0;
+    let cut: Candidate = (
+        ActionKind::Cut,
+        None,
+        cut_spot,
+        Utility {
+            epv: EpvTerms {
+                ability: cut_value * openness,
+                tendency: weights.b("cut_tendency")
+                    * (world.players[actor].data.tendencies.cut_frequency - 0.5),
+                ..Default::default()
+            },
+            variance: f32::default(),
+            clock_cost: clock_cost(world, shot_clock) * 0.5,
+            foul_cost: f32::default(),
+            tactical_bonus: f32::default(),
+        },
+    );
+
+    // 候选集只放真正成立的动作：空切不成立时就只剩跑位。
+    let mut candidates = [relocate; 2];
+    let mut count = 1usize;
+    if cut_available {
+        candidates[1] = cut;
+        count = 2;
+    }
+    let gamma = f32::default();
+    // 固定数组，逐 tick 的热路径上不分配。
+    let mut totals = [0.0f32; 2];
+    for (slot, candidate) in candidates[..count].iter().enumerate() {
+        totals[slot] = candidate.3.total(gamma);
+    }
+    assert!(beta > 0.0, "逆温度必须为正：{beta}");
+    let peak = totals[..count]
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
+    let mut weights_soft = [0.0f32; 2];
+    for slot in 0..count {
+        weights_soft[slot] = (beta * (totals[slot] - peak)).exp();
+    }
+    // 归一化后才能作为候选概率写进审计快照：未归一化的权重会让
+    // 「候选概率合计为 1」的判据失效。
+    let total_weight: f32 = weights_soft[..count].iter().sum();
+    assert!(total_weight > 0.0, "无球候选权重必须为正");
+    for slot in 0..count {
+        weights_soft[slot] /= total_weight;
+    }
+    let roll = world.draw(
+        crate::draw::Stream::Decision,
+        actor,
+        crate::draw::purpose::ACTION_CHOICE,
+        9,
+    );
+    let chosen = crate::resolve::weighted_pick_at(roll, &weights_soft[..count]);
+    let candidate = candidates[chosen];
+    let kind = candidate.0;
+    let to_ft = candidate.2;
+    // 已经站在该站的位置上就不必再跑一趟：没有位移的跑位不产生动作。
+    if matches!(kind, ActionKind::Relocate) && travel < 4.0 {
+        return None;
+    }
+    let speed = world.players[actor]
+        .effective_speed(&world.params.policy)
+        .max(1.0);
+    let cut_travel = (cut_spot - pos).length();
+    // 空切必须跑得到：超过一个动作窗口能跑的距离就不成立。
+    if matches!(kind, ActionKind::Cut) && cut_travel > speed * 2.6 * 0.85 {
+        return None;
+    }
+    let duration = match kind {
+        ActionKind::Cut => (cut_travel / speed * 1.35).clamp(1.2, 2.6) as f64,
+        _ => ((to_ft - pos).length() / speed * 1.2).clamp(0.8, 2.6) as f64,
+    };
+    let trace = crate::state::DecisionTraceSample {
+        actor,
+        beta,
+        gamma,
+        chosen,
+        candidates: candidates
+            .iter()
+            .zip(&totals)
+            .zip(&weights_soft)
+            .map(|((candidate, total), probability)| crate::state::CandidateTrace {
+                kind: candidate.0,
+                target: candidate.1,
+                to_ft: candidate.2,
+                utility: candidate.3,
+                total: *total,
+                probability: *probability,
+            })
+            .collect(),
+    };
+    Some(Decision {
+        intent: ActionIntent {
+            actor,
+            kind,
+            target: None,
+            from_ft: pos,
+            to_ft,
+            start_time: now,
+            duration,
+        },
+        utility: candidate.3,
+        beta,
+        gamma,
+        candidate_count: candidates.len(),
+        screen_defender: None,
+        trace,
+    })
 }
 
 /// 候选动作：动作本身、目标球员、落点与它的效用分解。
@@ -374,6 +636,9 @@ fn action_duration(
         ActionKind::PostUp => 1.6,
         ActionKind::Shoot(_) => 0.55,
         ActionKind::Dribble | ActionKind::Relocate => 1.4,
+        // 假动作与护球都是短技术动作，时长由规则档案的战术下限决定。
+        ActionKind::Fake(_) => 0.45,
+        ActionKind::Protect(_) => 0.35,
     }
 }
 
@@ -403,6 +668,8 @@ pub fn candidate_utilities(world: &World, state: &DecisionState) -> Vec<Candidat
         screen_candidate(world, state),
         cut_candidate(world, state),
         post_candidate(world, state),
+        fake_candidate(world, state),
+        protect_candidate(world, state),
         hold_candidate(world, state),
     ]
     .into_iter()
@@ -1122,9 +1389,11 @@ fn screen_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     {
         return None;
     }
+    // 正在执行自己动作的队友不能被拉来掩护：同一时刻只有一个身体动作。
     let screener = state
         .teammates
         .iter()
+        .filter(|view| world.players[view.index].action.is_none())
         .max_by(|a, b| {
             world.players[a.index]
                 .data
@@ -1195,9 +1464,11 @@ fn screen_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
 fn cut_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     let weights = &world.params.policy;
     let lane_norm = (state.lane_clearance / 8.0).clamp(0.0, 1.0);
+    // 正在执行自己动作的队友不能被派去空切。
     let cutter = state
         .teammates
         .iter()
+        .filter(|view| world.players[view.index].action.is_none())
         .max_by(|a, b| {
             b.defender_distance_ft
                 .partial_cmp(&a.defender_distance_ft)
@@ -1338,6 +1609,128 @@ fn post_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
             variance: variance_of(0.5, net.max(0.1)) * weights.w("variance_choice_weight"),
             clock_cost: clock_cost(world, state.shot_clock) * weights.w("post_clock_weight"),
             foul_cost: weights.w("offensive_foul_rate_post") * crate::value::retained_value(world),
+            tactical_bonus: f32::default(),
+        },
+    ))
+}
+
+/// 假动作候选：防守人贴得足够近时，骗一次比硬投或硬突更值。
+///
+/// 收益来自真实后果：被骗到的防守人在失衡窗口内干扰折减（投篮假动作）
+/// 或抄截半径收窄（传球假动作）。没骗到时只剩时钟成本。
+fn fake_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
+    if world.possession.dribble_state != crate::state::DribbleState::Dribbling {
+        return None;
+    }
+    // 时钟不够做完假动作再出手时，假动作只是白白消耗时间。
+    if state.shot_clock < 3.5 {
+        return None;
+    }
+    let defender = state.primary_defender?;
+    let policy = &world.rules.resolve.technique;
+    if defender.distance_ft > policy.fake_pressure_radius_ft {
+        return None;
+    }
+    let read = policy.read_probability(
+        world.players[defender.index].attribute("defense_perimeter"),
+        world.players[state.actor].attribute("ball_handling"),
+    );
+    let bait = f32::from(1u8) - read;
+    let quality = shot_quality(
+        world,
+        state.actor_pos,
+        state.actor,
+        crate::action::ShotKind::PullUp,
+        crate::state::BallPhase::Dribble,
+    );
+    // 假动作的技术选择由处境决定：能投就骗投，传球线路被堵就骗传，
+    // 其余情况用试探步换半步空间。
+    // 干扰折减只改变出手的一部分价值：按出手价值的四分之一计入，
+    // 否则假动作会被估成「一次没人防的出手」，在候选里压过所有真实动作。
+    let fake_share = 0.25;
+    let (kind, gain) = if state.shot_clock < 9.0 {
+        (
+            crate::action::FakeKind::Shot,
+            quality.p_make * quality.points * policy.fake_bait_contest_relief * bait * fake_share,
+        )
+    } else if state.lane_clearance < 3.0 {
+        // 传球假动作的价值是下一次传球：按打开宽度占抄截半径基准的比例折算。
+        let opening = (policy.fake_pass_lane_ft
+            / world.params.policy.g("pass_intercept_base_ft").max(f32::EPSILON))
+        .clamp(f32::default(), f32::from(1u8));
+        (
+            crate::action::FakeKind::Pass,
+            quality.points * 0.25 * opening * bait,
+        )
+    } else {
+        (
+            crate::action::FakeKind::JabStep,
+            quality.p_make * quality.points * fake_share * bait,
+        )
+    };
+    Some((
+        ActionKind::Fake(kind),
+        Some(defender.index),
+        state.actor_pos,
+        Utility {
+            epv: EpvTerms {
+                // 假动作不冒丢球风险，球权价值与持球相同；骗到的空间是额外收益。
+                ability: crate::value::dribble_value(world, state.shot_clock),
+                context: gain,
+                ..Default::default()
+            },
+            variance: f32::default(),
+            clock_cost: clock_cost(world, state.shot_clock) * 0.5,
+            foul_cost: f32::default(),
+            tactical_bonus: f32::default(),
+        },
+    ))
+}
+
+/// 护球候选：贴身施压下丢球风险高时，护一下比硬着运更值。
+///
+/// 收益是被挡下的切球乘上回合价值；成本是这段时间占用的进攻时钟。
+fn protect_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
+    if world.possession.dribble_state != crate::state::DribbleState::Dribbling {
+        return None;
+    }
+    if state.shot_clock < 2.0 {
+        return None;
+    }
+    let defender = state.primary_defender?;
+    let security = &world.rules.resolve.ball_security;
+    if defender.distance_ft > security.poke_pressure_radius_ft {
+        return None;
+    }
+    let policy = &world.rules.resolve.technique;
+    // 每秒钟的切球危险：尝试速率乘上典型成功率，再乘护球窗口长度。
+    let attempt_rate = f64::from(security.poke_attempt_rate_per_sec);
+    let typical = f64::from((security.poke_success_floor + security.poke_success_ceiling) * 0.5);
+    let hazard = (attempt_rate * typical * f64::from(policy.protection_seconds)) as f32;
+    let avoided =
+        hazard * policy.protection_poke_relief * world.params.policy.w("possession_value").max(0.0);
+    // 护球技术选择：低位用背身，防守人在球与筐之间时用转身，其余面框。
+    let kind = if state.distance_to_hoop() < 12.0 {
+        crate::action::ProtectKind::Post
+    } else if defender.between_ball_and_hoop {
+        crate::action::ProtectKind::Spin
+    } else {
+        crate::action::ProtectKind::FaceUp
+    };
+    Some((
+        ActionKind::Protect(kind),
+        Some(defender.index),
+        state.actor_pos,
+        Utility {
+            epv: EpvTerms {
+                // 护球同样保住球权；被挡下的切球是额外收益。
+                ability: crate::value::dribble_value(world, state.shot_clock),
+                context: avoided,
+                ..Default::default()
+            },
+            variance: f32::default(),
+            clock_cost: clock_cost(world, state.shot_clock) * 0.5,
+            foul_cost: f32::default(),
             tactical_bonus: f32::default(),
         },
     ))

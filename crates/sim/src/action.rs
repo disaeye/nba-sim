@@ -138,9 +138,48 @@ pub enum ScreenKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum FakeKind {
+    /// 投篮假动作：骗起防守人的重心，随后的出手不再被他干扰。
+    Shot,
+    /// 传球假动作：把防守人的重心引向假目标，真实传球线路变宽。
+    Pass,
+    /// 试探步：向篮筐方向的脚步试探，换回半步空间。
+    JabStep,
+}
+
+impl FakeKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Shot => "shot_fake",
+            Self::Pass => "pass_fake",
+            Self::JabStep => "jab_step",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ProtectKind {
+    /// 面框护球：把球挡在防守人与身体之间。
+    FaceUp,
+    /// 背身护球：用身体宽度隔开防守人。
+    Post,
+    /// 转身护球：转体把球带到远离防守的一侧。
+    Spin,
+}
+
+impl ProtectKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::FaceUp => "face_up_protect",
+            Self::Post => "post_protect",
+            Self::Spin => "spin_protect",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ActionKind {
-    Dribble,
-    Drive,
+    Dribble,    Drive,
     Finish,
     Pass(PassKind),
     Screen(ScreenKind),
@@ -148,6 +187,8 @@ pub enum ActionKind {
     PostUp,
     Shoot(ShotKind),
     Relocate,
+    Fake(FakeKind),
+    Protect(ProtectKind),
 }
 
 impl ActionKind {
@@ -162,6 +203,8 @@ impl ActionKind {
             Self::PostUp => "PostUp",
             Self::Shoot(_) => "Shoot",
             Self::Relocate => "Relocate",
+            Self::Fake(_) => "Fake",
+            Self::Protect(_) => "Protect",
         }
     }
 
@@ -177,6 +220,8 @@ impl ActionKind {
             Self::Dribble => "hold",
             Self::Finish => "finish",
             Self::Relocate => "relocate",
+            Self::Fake(_) => "fake",
+            Self::Protect(_) => "protect",
         }
     }
 
@@ -192,9 +237,14 @@ impl ActionKind {
             Self::Dribble => 6,
             Self::Finish => 7,
             Self::Relocate => 8,
+            Self::Fake(_) => 9,
+            Self::Protect(_) => 10,
         }
     }
 }
+
+/// 动作族总数：族编号直接用作按族索引的数组长度。
+pub const FAMILY_COUNT: usize = 11;
 
 #[derive(Debug, Clone)]
 pub struct ActionIntent {
@@ -236,6 +286,8 @@ pub struct Interaction {
     pub id: u64,
     pub action_id: u64,
     pub intent: ActionIntent,
+    /// 掩护的决策时刻防守人：随交互保存，避免并发动作互相清掉这份状态。
+    pub screen_defender: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -310,12 +362,15 @@ impl ActionRuntime {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefensiveActionKind {
     CloseoutContest,
+    /// 伸手切球：主动赌一次抄截，执行窗口内成功率提高，收势窗口内失去干扰。
+    StealAttempt,
 }
 
 impl DefensiveActionKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::CloseoutContest => "closeout_contest",
+            Self::StealAttempt => "steal_attempt",
         }
     }
 }
@@ -324,6 +379,7 @@ impl DefensiveActionKind {
 pub struct DefensiveActionRuntime {
     pub action_id: u64,
     pub interaction_id: u64,
+    pub kind: DefensiveActionKind,
     pub defender: usize,
     pub shooter: usize,
     pub phase: nba_domain::action_window::ActionPhase,
@@ -583,6 +639,28 @@ pub enum Fact {
         arrived: bool,
         defender_distance_ft: f32,
     },
+    /// 假动作：持球人做出投篮、传球或试探步的假动作，防守人的反应可观察。
+    FakeAction {
+        player: usize,
+        defender: Option<usize>,
+        kind: FakeKind,
+        /// 防守人是否被骗到；未骗到时没有任何后续效果。
+        bitten: bool,
+        /// 防守人被骗后实际移动的距离（英尺）。
+        displacement_ft: f32,
+    },
+    /// 护球姿态：持球人进入护球，切球成功率随之折减。
+    BallProtection {
+        player: usize,
+        kind: ProtectKind,
+        seconds: f32,
+    },
+    /// 护球姿态实际挡下一次切球：防守人伸手，球没有丢。
+    PokePrevented {
+        player: usize,
+        defender: usize,
+        kind: ProtectKind,
+    },
     BoxOut {
         player: usize,
         distance_ft: f32,
@@ -689,6 +767,9 @@ impl Fact {
             Self::LooseBallRecovered { .. } => "LooseBallRecovered",
             Self::SecondChanceStarted { .. } => "SecondChanceStarted",
             Self::Cut { .. } => "Cut",
+            Self::FakeAction { .. } => "FakeAction",
+            Self::BallProtection { .. } => "BallProtection",
+            Self::PokePrevented { .. } => "PokePrevented",
             Self::BoxOut { .. } => "BoxOut",
             Self::DefenseResponsibilityChanged { .. } => "DefenseResponsibilityChanged",
             Self::Turnover { .. } => "Turnover",
