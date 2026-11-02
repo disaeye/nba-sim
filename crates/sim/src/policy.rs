@@ -369,7 +369,7 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
     let spot_value = crate::value::catch_value(world, spot, actor, 0.0);
     let cut_open = marker >= weights.g("cut_open_distance_ft") * 0.6;
     let cut_pays = if rim_attack {
-        cut_value > spot_value * 1.2
+        cut_value > spot_value * weights.g("cut_payoff_ratio")
     } else {
         cut_value > spot_value
     };
