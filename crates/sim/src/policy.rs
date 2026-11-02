@@ -1757,7 +1757,7 @@ fn post_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     // 走不到位就变成在三分线外投一个勾手。这里只提供真正在低位范围内
     // 的选项。
     let distance = (state.actor_pos - state.hoop).length();
-    if distance > weights.g("finish_zone_ft") {
+    if distance > weights.g("post_max_distance_ft") {
         return None;
     }
     let post_pos = state.hoop + (state.actor_pos - state.hoop).normalize_or_zero() * 7.0;
