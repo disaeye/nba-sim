@@ -2,7 +2,7 @@
   "calibration": "data/calibration",
   "entries": {
     "1": {
-      "digest": "0x8391861c807fdf5a",
+      "digest": "0x4d2cb0b676bc91b1",
       "fields": {
         "box": {
           "away": [
@@ -318,9 +318,9 @@
         },
         "event_kinds": {
           "action_cancelled": 6,
-          "action_completed": 137,
+          "action_completed": 150,
           "action_phase_changed": 280,
-          "action_started": 143,
+          "action_started": 156,
           "ball_contact": 159,
           "box_out": 5,
           "cut": 10,
@@ -392,7 +392,7 @@
       }
     },
     "10": {
-      "digest": "0x6d5f10cf3dfdda56",
+      "digest": "0xe71035ccc011a8af",
       "fields": {
         "box": {
           "away": [
@@ -708,9 +708,9 @@
         },
         "event_kinds": {
           "action_cancelled": 4,
-          "action_completed": 148,
+          "action_completed": 160,
           "action_phase_changed": 299,
-          "action_started": 152,
+          "action_started": 164,
           "ball_contact": 134,
           "box_out": 4,
           "cut": 8,
@@ -782,7 +782,7 @@
       }
     },
     "11": {
-      "digest": "0x3ceb5049f5c1b55c",
+      "digest": "0x4242ec8189069687",
       "fields": {
         "box": {
           "away": [
@@ -1099,10 +1099,10 @@
         },
         "event_kinds": {
           "action_cancelled": 5,
-          "action_completed": 143,
+          "action_completed": 158,
           "action_failed": 1,
           "action_phase_changed": 295,
-          "action_started": 149,
+          "action_started": 164,
           "ball_contact": 136,
           "ball_protection": 1,
           "box_out": 5,
@@ -1176,7 +1176,7 @@
       }
     },
     "12": {
-      "digest": "0x40b7b8041e0d37ca",
+      "digest": "0xfe8556bb83473dbd",
       "fields": {
         "box": {
           "away": [
@@ -1494,9 +1494,9 @@
         },
         "event_kinds": {
           "action_cancelled": 9,
-          "action_completed": 130,
+          "action_completed": 141,
           "action_phase_changed": 273,
-          "action_started": 139,
+          "action_started": 150,
           "ball_contact": 140,
           "box_out": 5,
           "cut": 7,
@@ -1570,7 +1570,7 @@
       }
     },
     "13": {
-      "digest": "0xec3b836765bb9e5b",
+      "digest": "0xc508ad79fb8c8b6a",
       "fields": {
         "box": {
           "away": [
@@ -1885,9 +1885,9 @@
         },
         "event_kinds": {
           "action_cancelled": 15,
-          "action_completed": 138,
+          "action_completed": 150,
           "action_phase_changed": 302,
-          "action_started": 153,
+          "action_started": 165,
           "ball_contact": 151,
           "box_out": 3,
           "cut": 3,
@@ -1959,7 +1959,7 @@
       }
     },
     "14": {
-      "digest": "0x1cf233a36b9f9c2f",
+      "digest": "0xf7db63a08aefab9f",
       "fields": {
         "box": {
           "away": [
@@ -2273,9 +2273,9 @@
         },
         "event_kinds": {
           "action_cancelled": 8,
-          "action_completed": 149,
+          "action_completed": 168,
           "action_phase_changed": 312,
-          "action_started": 157,
+          "action_started": 176,
           "ball_contact": 157,
           "box_out": 7,
           "cut": 5,
@@ -2348,7 +2348,7 @@
       }
     },
     "15": {
-      "digest": "0x0338ee7f3bfb9be3",
+      "digest": "0x645b33e630f38579",
       "fields": {
         "box": {
           "away": [
@@ -2663,9 +2663,9 @@
         },
         "event_kinds": {
           "action_cancelled": 10,
-          "action_completed": 135,
+          "action_completed": 148,
           "action_phase_changed": 284,
-          "action_started": 145,
+          "action_started": 158,
           "ball_contact": 139,
           "ball_protection": 1,
           "box_out": 7,
@@ -2738,7 +2738,7 @@
       }
     },
     "16": {
-      "digest": "0x5f48e318f29e050d",
+      "digest": "0x3de6ebe2200df4d5",
       "fields": {
         "box": {
           "away": [
@@ -3054,9 +3054,9 @@
         },
         "event_kinds": {
           "action_cancelled": 7,
-          "action_completed": 130,
+          "action_completed": 142,
           "action_phase_changed": 268,
-          "action_started": 137,
+          "action_started": 149,
           "ball_contact": 129,
           "box_out": 10,
           "cut": 4,
@@ -3125,7 +3125,7 @@
       }
     },
     "2": {
-      "digest": "0x0bed351941accd0b",
+      "digest": "0xcc437f41cd1fc8ee",
       "fields": {
         "box": {
           "away": [
@@ -3443,10 +3443,10 @@
         },
         "event_kinds": {
           "action_cancelled": 12,
-          "action_completed": 129,
+          "action_completed": 141,
           "action_failed": 3,
           "action_phase_changed": 283,
-          "action_started": 144,
+          "action_started": 156,
           "ball_contact": 145,
           "box_out": 6,
           "cut": 6,
@@ -3518,7 +3518,7 @@
       }
     },
     "3": {
-      "digest": "0xf580daa9ad8a7f97",
+      "digest": "0x16b480010fdc6dd1",
       "fields": {
         "box": {
           "away": [
@@ -3835,10 +3835,10 @@
         },
         "event_kinds": {
           "action_cancelled": 7,
-          "action_completed": 139,
+          "action_completed": 149,
           "action_failed": 1,
           "action_phase_changed": 290,
-          "action_started": 147,
+          "action_started": 157,
           "ball_contact": 140,
           "box_out": 6,
           "cut": 4,
@@ -3910,7 +3910,7 @@
       }
     },
     "4": {
-      "digest": "0x809b4af7d4e9f66d",
+      "digest": "0xb7d0375fb8fe9b82",
       "fields": {
         "box": {
           "away": [
@@ -4226,10 +4226,10 @@
         },
         "event_kinds": {
           "action_cancelled": 11,
-          "action_completed": 142,
+          "action_completed": 159,
           "action_failed": 1,
           "action_phase_changed": 304,
-          "action_started": 154,
+          "action_started": 171,
           "ball_contact": 154,
           "box_out": 6,
           "cut": 4,
@@ -4302,7 +4302,7 @@
       }
     },
     "5": {
-      "digest": "0xf6b305fa4ea67554",
+      "digest": "0x75573d08ce154e16",
       "fields": {
         "box": {
           "away": [
@@ -4619,10 +4619,10 @@
         },
         "event_kinds": {
           "action_cancelled": 5,
-          "action_completed": 144,
+          "action_completed": 158,
           "action_failed": 1,
           "action_phase_changed": 296,
-          "action_started": 150,
+          "action_started": 164,
           "ball_contact": 158,
           "box_out": 8,
           "cut": 11,
@@ -4693,7 +4693,7 @@
       }
     },
     "6": {
-      "digest": "0xf801322529396462",
+      "digest": "0x18dfc1158f98680e",
       "fields": {
         "box": {
           "away": [
@@ -5010,10 +5010,10 @@
         },
         "event_kinds": {
           "action_cancelled": 10,
-          "action_completed": 144,
+          "action_completed": 164,
           "action_failed": 1,
           "action_phase_changed": 306,
-          "action_started": 155,
+          "action_started": 175,
           "ball_contact": 150,
           "box_out": 7,
           "cut": 8,
@@ -5084,7 +5084,7 @@
       }
     },
     "7": {
-      "digest": "0xbe52ecbc77dda988",
+      "digest": "0x76671d0aacd4a1d0",
       "fields": {
         "box": {
           "away": [
@@ -5400,10 +5400,10 @@
         },
         "event_kinds": {
           "action_cancelled": 6,
-          "action_completed": 139,
+          "action_completed": 151,
           "action_failed": 3,
           "action_phase_changed": 292,
-          "action_started": 148,
+          "action_started": 160,
           "ball_contact": 146,
           "box_out": 3,
           "cut": 8,
@@ -5475,7 +5475,7 @@
       }
     },
     "8": {
-      "digest": "0x180aef2769a85e56",
+      "digest": "0x1f626b8ac09e2e60",
       "fields": {
         "box": {
           "away": [
@@ -5789,9 +5789,9 @@
         },
         "event_kinds": {
           "action_cancelled": 5,
-          "action_completed": 143,
+          "action_completed": 154,
           "action_phase_changed": 293,
-          "action_started": 148,
+          "action_started": 159,
           "ball_contact": 126,
           "ball_protection": 2,
           "box_out": 6,
@@ -5862,7 +5862,7 @@
       }
     },
     "9": {
-      "digest": "0xd51413b35353c924",
+      "digest": "0x5731e187c613a4cc",
       "fields": {
         "box": {
           "away": [
@@ -6179,10 +6179,10 @@
         },
         "event_kinds": {
           "action_cancelled": 10,
-          "action_completed": 127,
+          "action_completed": 143,
           "action_failed": 1,
           "action_phase_changed": 266,
-          "action_started": 138,
+          "action_started": 154,
           "ball_contact": 141,
           "box_out": 6,
           "cut": 7,

@@ -193,6 +193,24 @@ pub fn control(world: &mut World, handle: usize) {
     }
     let offensive = world.players[handle].team == state.offense;
     let defense = state.offense.other();
+    // 抢到篮板是一次起跳争抢：动作账上记一对开始与结束，结束窗口用联赛的
+    // 篮板跟随时长，抢到球的人要等落地收势之后才能再动作。
+    world.next_action_id += 1;
+    let jump_action = world.next_action_id;
+    world.emit(Fact::ActionStarted {
+        action_id: jump_action,
+        interaction_id: 0,
+        player: handle,
+        kind: "ReboundJump",
+        target: None,
+    });
+    world.emit(Fact::ActionCompleted {
+        action_id: jump_action,
+        player: handle,
+        kind: "ReboundJump",
+    });
+    let settle_until = world.now() + f64::from(world.rules.rebound_follow_seconds);
+    world.players[handle].schedule.next_redecide_at = settle_until;
     let distance_ft = (world.ball.pos - world.hoop_for(state.offense)).length();
     world.emit(Fact::Rebound {
         player: handle,
