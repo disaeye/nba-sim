@@ -51,6 +51,14 @@ pub fn poke_success(world: &World, thief: usize, holder: usize, nearest: f32, no
     {
         success *= f32::from(1u8) - world.rules.resolve.technique.fake_bait_contest_relief;
     }
+    // 包夹：两张手同时伸过来，持球人无处可退，伸手成功率上升；
+    // 护球姿态把这段劣势收回一部分。
+    if world.trapped(holder) {
+        success *= world.params.policy.g("trap_poke_bonus");
+        if world.protected(holder, now) {
+            success *= world.params.policy.g("trap_protection_relief");
+        }
+    }
     // 主动伸手的动作在执行窗口内是赌对了时机：成功率按策略加成。
     if world.defensive_actions[thief]
         .as_ref()

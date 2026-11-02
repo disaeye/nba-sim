@@ -1265,6 +1265,29 @@ impl World {
         self.ball.holder()
     }
 
+    /// 持球人是否被包夹：两名以上对手挤在包夹半径内。
+    pub fn trapped(&self, holder: usize) -> bool {
+        let radius = self.params.policy.g("trap_radius_ft");
+        let team = self.players[holder].team;
+        let pos = self.players[holder].pos;
+        let mut count = 0u8;
+        for player in &self.players {
+            if player.on_court && player.team != team && (player.pos - pos).length() <= radius {
+                count += 1;
+                if count >= 2 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// 护球姿态是否正在生效。
+    pub fn protected(&self, holder: usize, now: f64) -> bool {
+        self.protection
+            .is_some_and(|protection| protection.holder == holder && protection.until > now)
+    }
+
     pub fn now(&self) -> f64 {
         self.clock.simulation_time()
     }

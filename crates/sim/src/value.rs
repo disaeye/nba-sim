@@ -234,7 +234,18 @@ pub fn pass_completion_probability(
     // 必须远低于走廊项。
     let distance_fail = (distance / 45.0).powi(2) * 0.10;
     let catch_factor = (1.0 - distance_fail - 0.03 * (1.0 - touch)).clamp(0.60, 0.985);
-    lane_factor * catch_factor
+    let mut probability = lane_factor * catch_factor;
+    // 被包夹时出球更难：两张手就在球前面，传球线路被堵住。
+    // 护球姿态能把一部分劣势补回来：球护在身体一侧，出手点仍然存在。
+    if world.trapped(from) {
+        let relief = if world.protected(from, world.now()) {
+            world.params.policy.g("trap_protection_relief")
+        } else {
+            1.0
+        };
+        probability *= world.params.policy.g("trap_pass_penalty") / relief;
+    }
+    probability
 }
 
 /// 接球点：接球人按当前速度、在球飞完全程的那一刻所在的位置。

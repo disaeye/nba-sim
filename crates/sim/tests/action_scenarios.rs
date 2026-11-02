@@ -1384,3 +1384,91 @@ fn a_tie_for_the_ball_enters_a_held_ball_jump_ball() {
         "跳球时不得留下未结算的篮板"
     );
 }
+
+/// 包夹与护球出球：两张手让伸手更容易、出球更难，护球把它补回来。
+#[test]
+fn a_trap_raises_poke_risk_and_protection_helps_the_exit() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let build = |trapped: bool, protection: bool| {
+        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 239);
+        let holder = world.on_court(TeamSide::Home).as_slice()[0];
+        let receiver = world.on_court(TeamSide::Home).as_slice()[1];
+        let first = world.on_court(TeamSide::Away).as_slice()[0];
+        let second = world.on_court(TeamSide::Away).as_slice()[1];
+        for (index, player) in world.players.iter_mut().enumerate() {
+            player.on_court = index == holder || index == receiver || index == first
+                || (trapped && index == second);
+            player.vel = Vec2::ZERO;
+        }
+        let spot = Vec2::new(55.0, 25.0);
+        world.players[holder].pos = spot;
+        world.players[holder].target = spot;
+        world.players[receiver].pos = Vec2::new(75.0, 25.0);
+        world.players[receiver].target = world.players[receiver].pos;
+        world.players[first].pos = spot + Vec2::new(0.0, 2.0);
+        world.players[first].target = world.players[first].pos;
+        world.players[second].pos = spot + Vec2::new(0.0, -2.0);
+        world.players[second].target = world.players[second].pos;
+        world.possession.team = TeamSide::Home;
+        world.start_possession(TeamSide::Home, PossessionKind::Live);
+        world.set_phase(Phase::Live);
+        world.ball.set_held(holder);
+        world.ball.pos = spot;
+        world.ball.z = world.rules.ball_radius_ft;
+        if protection {
+            world.protection = Some(nba_sim_core::state::BallProtection {
+                holder,
+                kind: ProtectKind::Post,
+                until: world.now() + 3.0,
+            });
+        }
+        (world, holder, receiver, first)
+    };
+
+    let (single, holder, receiver, thief) = build(false, false);
+    let single_poke = nba_sim_core::resolve::poke::poke_success(&single, thief, holder, 2.0, single.now());
+    let single_pass = nba_sim_core::value::pass_completion_probability(
+        &single,
+        holder,
+        receiver,
+        nba_sim_core::action::PassKind::Chest,
+    );
+    let (trapped, holder, receiver, thief) = build(true, false);
+    assert!(trapped.trapped(holder), "两名防守人贴身必须判定为包夹");
+    let trapped_poke = nba_sim_core::resolve::poke::poke_success(&trapped, thief, holder, 2.0, trapped.now());
+    let trapped_pass = nba_sim_core::value::pass_completion_probability(
+        &trapped,
+        holder,
+        receiver,
+        nba_sim_core::action::PassKind::Chest,
+    );
+    let (protected, holder, receiver, thief) = build(true, true);
+    let protected_poke = nba_sim_core::resolve::poke::poke_success(&protected, thief, holder, 2.0, protected.now());
+    let protected_pass = nba_sim_core::value::pass_completion_probability(
+        &protected,
+        holder,
+        receiver,
+        nba_sim_core::action::PassKind::Chest,
+    );
+
+    assert!(
+        trapped_poke > single_poke,
+        "包夹必须抬高伸手成功率：{single_poke:.3} → {trapped_poke:.3}"
+    );
+    assert!(
+        protected_poke < trapped_poke,
+        "护球必须压低包夹下的伸手成功率：{trapped_poke:.3} → {protected_poke:.3}"
+    );
+    assert!(
+        trapped_pass < single_pass,
+        "包夹必须压低出球成功率：{single_pass:.3} → {trapped_pass:.3}"
+    );
+    assert!(
+        protected_pass > trapped_pass,
+        "护球必须抬高包夹下的出球成功率：{trapped_pass:.3} → {protected_pass:.3}"
+    );
+    assert!(
+        protected_pass > 0.05,
+        "护球出球必须仍然有成功的可能：{protected_pass:.3}"
+    );
+}
