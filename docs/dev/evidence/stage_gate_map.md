@@ -63,7 +63,7 @@
 - 交付物：参数校准、统计参考与来源更新、机制实验、独立验证、文档刷新。
 - 代码与数据：`scripts/calibrate/fit_policy.py`、`scripts/calibrate/fit_tables.py`、`scripts/calibrate/freeze.py`、`data/calibration/*.json`。
 - 证据：`crates/sim/tests/runtime_tables.rs`（运行时表加载与来源校验）、`python3 scripts/calibrate/freeze.py --check`（三张冻结表哈希）、`nba-sim validate-core`（四层判定、批次统计、分支覆盖与认证工件）、`nba-sim validate-core --mechanism`（属性机制实验写入 `mechanism_core.json`）。
-- 状态：校准已执行。参数已从写死系数搬入表中（封盖手部半径、投篮犯规率、篮板伸手折减与加成、包夹权重、回场判定带宽、抛投区价值、突破落点偏移）；机制实验 `--mechanism` 结论为通过（13 项属性/指标全部落在预期方向）；32 场 `validate-core` 上 38 条分布判据全部在带内（得分 243.8、回合 200.6、几何违规 0、语境违规 0、账本失败 0），认证为 `pass`；残差与已试杠杆记在 `docs/dev/current/implementation.md` 的校准一节。
+- 状态：校准已执行。参数已从写死系数搬入表中（封盖手部半径、投篮犯规率、篮板伸手折减与加成、包夹权重、回场判定带宽、抛投区价值、突破落点偏移）；机制实验 `--mechanism` 逐项输出结论，当前通过项与未通过项记在 `docs/dev/current/implementation.md` 的机制实验一节；32 场 `validate-core` 上 38 条分布判据全部在带内（得分 243.8、回合 200.6、几何违规 0、语境违规 0、账本失败 0），认证为 `pass`；残差与已试杠杆记在 `docs/dev/current/implementation.md` 的校准一节。
 
 ## 未闭合项汇总
 
