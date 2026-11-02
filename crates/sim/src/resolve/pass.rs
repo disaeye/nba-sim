@@ -57,6 +57,7 @@ pub fn resolve(
         from,
         to,
         kind,
+        bounced: false,
     });
     if let crate::state::BallState::Pass { to_pos, .. } = world.ball.state() {
         world.players[to].target = to_pos;

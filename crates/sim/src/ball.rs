@@ -26,6 +26,8 @@ pub struct PassInFlight {
     pub from: usize,
     pub to: usize,
     pub kind: PassKind,
+    /// 击地传球已经触过地：触地只算一次，之后按普通飞行处理。
+    pub bounced: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -185,7 +187,13 @@ impl BallBody {
         self.pos = origin;
         self.z = z0;
         self.vel = (target - origin) / duration as f32;
-        self.vz = arc.vz0;
+        // 击地传球：球在飞行过半时触地，弹起后继续飞向接球人。
+        self.vz = if release.kind == PassKind::Bounce {
+            let t1 = duration as f32 * 0.55;
+            (rules.ball_radius_ft - z0 + 0.5 * rules.ball_gravity_ftps2 * t1 * t1) / t1
+        } else {
+            arc.vz0
+        };
     }
 }
 
@@ -629,6 +637,37 @@ fn step_flight(world: &mut World, dt: f64) {
                 let contact = prev_pos + ball.vel * t;
                 ball.pos = contact;
                 ball.z = radius;
+                let bounces_now = matches!(
+                    &ball.state,
+                    BallState::Pass {
+                        kind: PassKind::Bounce,
+                        ..
+                    }
+                ) && world
+                    .pass_in_flight
+                    .as_ref()
+                    .is_some_and(|info| !info.bounced);
+                if bounces_now {
+                    if let Some(info) = world.pass_in_flight.as_mut() {
+                        info.bounced = true;
+                    }
+                    // 击地传球：触地后弹起继续飞向接球人，而不是判为传球失败。
+                    ball.vel *= 0.85;
+                    ball.vz = -ball.vz * 0.62;
+                    world.emit(Fact::BallContact {
+                        kind: "floor",
+                        entity: None,
+                        time: start_time + f64::from(elapsed + t),
+                        x: contact.x,
+                        y: contact.y,
+                        z: radius,
+                        sub_tick,
+                    });
+                    elapsed += t;
+                    remaining -= t;
+                    sub_tick += 1;
+                    continue;
+                }
                 ball.vel *= 0.8;
                 ball.vz = -ball.vz * 0.55;
                 world.emit(Fact::BallContact {

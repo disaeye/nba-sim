@@ -101,6 +101,7 @@ fn pass_is_caught_or_intercepted_by_swept_contact() {
         from,
         to,
         kind: PassKind::Chest,
+        bounced: false,
     });
     let rules = world.rules.clone();
     world.ball.release_pass(crate::ball::PassRelease {
@@ -297,6 +298,7 @@ fn a_fast_ball_does_not_tunnel_through_a_defender() {
         from,
         to,
         kind: PassKind::Chest,
+        bounced: false,
     });
     world.clock.advance_simulation_time(TICK_SECONDS);
     ball::step(&mut world, TICK_SECONDS);
@@ -419,4 +421,70 @@ fn frame_ball_height_and_velocity_are_finite_and_bounded() {
             break;
         }
     }
+}
+
+/// 击地传球：球在飞行中途触地，弹起后仍然被接住。
+#[test]
+fn a_bounce_pass_touches_the_floor_and_is_still_caught() {
+    let mut world = world(59);
+    let passer = world.on_court(TeamSide::Home).as_slice()[0];
+    let receiver = world.on_court(TeamSide::Home).as_slice()[1];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == passer || index == receiver;
+        player.vel = Vec2::ZERO;
+        player.action = None;
+    }
+    let from = Vec2::new(40.0, 25.0);
+    let to = Vec2::new(64.0, 25.0);
+    world.players[passer].pos = from;
+    world.players[passer].target = from;
+    world.players[passer].facing = Vec2::X;
+    world.players[receiver].pos = to;
+    world.players[receiver].target = to;
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, nba_sim_core::state::PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(passer);
+    world.ball.pos = from;
+    world.ball.z = world.rules.ball_radius_ft;
+
+    let intent = ActionIntent {
+        actor: passer,
+        kind: ActionKind::Pass(PassKind::Bounce),
+        target: Some(receiver),
+        from_ft: from,
+        to_ft: to,
+        start_time: world.now(),
+        duration: 0.1,
+    };
+    nba_sim_core::resolve::pass::resolve(&mut world, &intent, PassKind::Bounce);
+    let kind_in_flight = world.pass_in_flight.map(|info| info.kind);
+    assert_eq!(
+        Some(PassKind::Bounce),
+        kind_in_flight,
+        "击地传球必须进入飞行状态"
+    );
+
+    let mut floor_touched = false;
+    let mut guard = 0;
+    while guard < 400 && world.pass_in_flight.is_some() {
+        let before = world.events.len();
+        world.step(TICK_SECONDS);
+        guard += 1;
+        for event in &world.events[before..] {
+            if matches!(&event.fact, Fact::BallContact { kind: "floor", .. }) {
+                floor_touched = true;
+            }
+        }
+    }
+    assert!(floor_touched, "击地传球必须真的触地");
+    assert!(
+        world.pass_in_flight.is_none(),
+        "触地之后传球必须继续飞完，而不是卡在飞行状态"
+    );
+    assert_eq!(
+        world.ball.holder(),
+        Some(receiver),
+        "击地传球必须仍然被接球人接住"
+    );
 }
