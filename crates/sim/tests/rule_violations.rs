@@ -526,3 +526,68 @@ fn a_foul_before_the_horn_still_produces_free_throws() {
         world.phase()
     );
 }
+
+#[test]
+fn the_period_ends_when_the_clock_hits_zero_during_a_dead_ball() {
+    let mut world = world(367);
+    let handler = world.on_court(TeamSide::Home).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == handler;
+        player.vel = Vec2::ZERO;
+    }
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.ball.set_held(handler);
+    // 死球状态且比赛钟归零：本节的收尾不能被跳过。
+    world.set_phase(Phase::DeadBall {
+        team: TeamSide::Home,
+        ready_at: world.now() + 3.0,
+    });
+    world.clock.set_game_clock(0.0);
+    let before = world.events.len();
+    for _ in 0..40 {
+        world.step(TICK_SECONDS);
+        if matches!(world.phase(), Phase::PeriodBreak { .. } | Phase::Finished) {
+            break;
+        }
+    }
+    assert!(
+        world.events[before..]
+            .iter()
+            .any(|event| matches!(&event.fact, Fact::PeriodEnd { .. })),
+        "死球且时钟归零必须发布节末事实"
+    );
+    assert!(
+        matches!(world.phase(), Phase::PeriodBreak { .. } | Phase::Finished),
+        "死球且时钟归零必须收尾本节，实际 {:?}",
+        world.phase()
+    );
+}
+
+#[test]
+fn the_final_score_does_not_change_after_the_game_ends() {
+    // 短节次：几步之内就能打到终场。
+    let mut rules = GameRules::default();
+    rules.league.period_duration_seconds = 2.0;
+    rules.league.overtime_duration_seconds = 2.0;
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(rules), params, 373);
+    let mut guard = 0;
+    while !world.finished && guard < 200_000 {
+        world.step(TICK_SECONDS);
+        guard += 1;
+    }
+    assert!(world.finished, "比赛必须在限步内结束");
+    let score = world.score;
+    let before = world.events.len();
+    for _ in 0..40 {
+        world.step(TICK_SECONDS);
+    }
+    assert_eq!(world.score, score, "终场之后比分不得再变");
+    assert!(
+        !world.events[before..]
+            .iter()
+            .any(|event| matches!(&event.fact, Fact::FreeThrow { .. } | Fact::Shot { .. })),
+        "终场之后不得再产生得分事件"
+    );
+}
