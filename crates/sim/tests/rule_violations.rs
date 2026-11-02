@@ -82,7 +82,7 @@ fn a_loose_ball_over_the_sideline_hands_possession_to_the_opponent() {
     // 进攻人把球碰出边线：最后触球是进攻方，按违例交出球权。
     world.last_touch = Some(handler);
     world.ball =
-        nba_sim_core::ball::BallBody::loose(Vec2::new(2.0, 25.0), Vec2::new(-12.0, 0.0));
+        nba_sim_core::ball::BallBody::loose(Vec2::new(2.0, 25.0), Vec2::new(-30.0, 0.0));
 
     let mut contact = false;
     for _ in 0..40 {

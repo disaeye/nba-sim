@@ -1987,7 +1987,7 @@ impl World {
     /// 后场八秒：控球方在后场停留超过规则秒数即违例。
     fn check_backcourt(&mut self) {
         if !matches!(self.phase, Phase::Live) {
-            self.possession.backcourt_deadline = None;
+            self.possession.backcourt_started_game_clock = None;
             return;
         }
         let Some(holder) = self.holder() else {
@@ -1996,7 +1996,9 @@ impl World {
         let team = self.possession.team;
         let attacking_right = self.attacking_right(team);
         let mid = self.rules.court.width_ft * 0.5;
-        let pos = self.players[holder].pos;
+        // 八秒与回场都看球的位置：传球越过中线同样算推进，不能因为持球人
+        // 还在原地就把计时继续下去。
+        let pos = self.ball.pos;
         // 中线附近有一段混沌带：只有真正推进到前场深处才算建立前场控制，
         // 只有真正退回后场才算回场，避免持球人在中线上来回晃动被吹。
         let advance = self.params.policy.g("backcourt_advance_ft");
@@ -2025,7 +2027,7 @@ impl World {
         }
         if past_mid {
             // 过中线就停八秒计时；只有推进到前场深处才算建立前场控制。
-            self.possession.backcourt_deadline = None;
+            self.possession.backcourt_started_game_clock = None;
         }
         if frontcourt_deep {
             self.possession.frontcourt_established = true;
@@ -2036,7 +2038,7 @@ impl World {
         // 已经在前场建立控制又把球带回后场：回场违例。
         if self.possession.frontcourt_established {
             self.possession.frontcourt_established = false;
-            self.possession.backcourt_deadline = None;
+            self.possession.backcourt_started_game_clock = None;
             self.line_mut(holder).turnovers += 1;
             self.emit(Fact::Turnover {
                 player: holder,
@@ -2052,12 +2054,13 @@ impl World {
             ));
             return;
         }
-        let now = self.now();
+        // 八秒按比赛时钟计：死球停表期间不消耗后场推进时间。
+        let game_clock = self.clock.game_clock();
         let limit = f64::from(self.rules.backcourt_seconds);
-        match self.possession.backcourt_deadline {
-            None => self.possession.backcourt_deadline = Some(now + limit),
-            Some(deadline) if now >= deadline => {
-                self.possession.backcourt_deadline = None;
+        match self.possession.backcourt_started_game_clock {
+            None => self.possession.backcourt_started_game_clock = Some(game_clock),
+            Some(start) if start - game_clock >= limit => {
+                self.possession.backcourt_started_game_clock = None;
                 self.line_mut(holder).turnovers += 1;
                 self.emit(Fact::Turnover {
                     player: holder,

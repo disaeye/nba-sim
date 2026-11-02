@@ -925,6 +925,11 @@ fn a_defensive_rebound_advances_past_midcourt_within_the_transition_window() {
                 continue;
             };
             let elapsed = world.now() - since;
+            // 球权再次易主后，这次防守篮板的推进不再属于监控范围。
+            if world.possession.team != team {
+                pending = None;
+                continue;
+            }
             let holder_side = world
                 .holder()
                 .map(|handle| (world.players[handle].pos, world.players[handle].team));

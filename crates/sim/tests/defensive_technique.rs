@@ -301,11 +301,14 @@ fn a_blocked_shot_is_hand_contact_and_leaves_the_ball_loose() {
             assert!(hand, "封盖必须由手碰球产生：blocker={blocker}");
             // 被盖之后球必须是松球，而不是直接落到某个人手里；
             // 被盖的球滚出边线同样是活球争夺的结果。
+            // 被盖之后要么进入松球争夺，要么因封盖犯规走上罚球线。
             let loose = report.events[index..].iter().any(|other| {
                 matches!(
                     &other.fact,
                     Fact::ReboundOpportunity { .. }
                         | Fact::LooseBallRecovered { .. }
+                        | Fact::Rebound { .. }
+                        | Fact::Foul { .. }
                         | Fact::Turnover {
                             kind: TurnoverKind::OutOfBounds,
                             ..
@@ -316,7 +319,10 @@ fn a_blocked_shot_is_hand_contact_and_leaves_the_ball_loose() {
                     || record.ended_by.contains("loose")
                     || record.ended_by.contains("out_of_bounds")
             });
-            assert!(loose, "被盖之后必须进入松球争夺：blocker={blocker}");
+            assert!(
+                loose,
+                "被盖之后必须进入松球争夺或吹罚犯规：blocker={blocker}"
+            );
         }
     }
     assert!(blocked > 0, "真实比赛里必须出现封盖");

@@ -532,6 +532,35 @@ pub fn choose_action(world: &mut World) -> Decision {
     let gamma = variance_appetite(&state);
     let beta = decision_temperature(world, actor);
     let candidates = candidate_utilities(world, &state);
+    let mut candidates = candidates;
+    // 后场推进：八秒计时过半后，优先选把球送过中线的动作。
+    let mid = world.rules.court.width_ft * 0.5;
+    let attacking_right = state.attacking_right;
+    let ball_x = world.ball.pos.x;
+    let in_backcourt = if attacking_right {
+        ball_x < mid
+    } else {
+        ball_x > mid
+    };
+    if in_backcourt {
+        if let Some(start) = world.possession.backcourt_started_game_clock {
+            let elapsed = (start - world.clock.game_clock()).max(0.0);
+            let limit = f64::from(world.rules.backcourt_seconds);
+            if elapsed >= limit * 0.5 {
+                let bonus = world.params.policy.b("advance_pressure_bonus");
+                for candidate in &mut candidates {
+                    let advances = if attacking_right {
+                        candidate.2.x > mid
+                    } else {
+                        candidate.2.x < mid
+                    };
+                    if advances {
+                        candidate.3.tactical_bonus += bonus;
+                    }
+                }
+            }
+        }
+    }
     let screen_defender = state
         .primary_defender
         .map(|defender| defender.index)
@@ -1422,6 +1451,18 @@ fn pass_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
     );
     let mut best: Option<(usize, Vec2, Utility, f32)> = None;
     for teammate in &state.teammates {
+        // 已建立前场控制后不把球传回后场：那是回场违例。
+        if world.possession.frontcourt_established {
+            let mid = world.rules.court.width_ft * 0.5;
+            let backcourt = if state.attacking_right {
+                teammate.pos.x < mid
+            } else {
+                teammate.pos.x > mid
+            };
+            if backcourt {
+                continue;
+            }
+        }
         let advancement = if state.attacking_right {
             teammate.pos.x - state.actor_pos.x
         } else {

@@ -254,6 +254,29 @@ fn step_loose(world: &mut World, dt: f64) {
         || ball.pos.y < radius
         || ball.pos.y > height - radius;
     if outside {
+        // 慢球停在边线上、由球员捡起；只有真正带着向外速度的球才会出界。
+        let inward = if ball.pos.x < radius {
+            Vec2::X
+        } else if ball.pos.x > width - radius {
+            Vec2::NEG_X
+        } else if ball.pos.y < radius {
+            Vec2::Y
+        } else {
+            Vec2::NEG_Y
+        };
+        let threshold = world.params.policy.w("loose_ball_boundary_speed_ftps");
+        let outward_speed = -ball.vel.dot(inward);
+        if outward_speed <= threshold && ball.vz.abs() <= threshold {
+            ball.pos = Vec2::new(
+                ball.pos.x.clamp(radius, width - radius),
+                ball.pos.y.clamp(radius, height - radius),
+            );
+            ball.vel = inward * threshold * 0.1;
+            ball.z = ball.z.max(radius);
+            world.ball = ball;
+            try_control_loose(world);
+            return;
+        }
         let spot = Vec2::new(
             ball.pos.x.clamp(radius, width - radius),
             ball.pos.y.clamp(radius, height - radius),
