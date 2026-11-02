@@ -73,34 +73,34 @@
 
 | 指标 | 观测 | 目标 | 处理 |
 | --- | --- | --- | --- |
-| possessions_per_game | 199.8 | ≈200 | 已对齐 |
-| points_per_game | 238.0 | 227.6 | 已在带内 |
-| blocks_per_game | 8.94 | 9.66 | 已在带内 |
-| shooting_fouls_per_game | 18.5 | 19.6 | 已在带内 |
-| fta_per_game | 47.9 | 43.3 | 已在带内 |
-| oreb_per_game | 26.1 | 26.5 | 已对齐 |
-| fga_per_possession | 0.948 | 0.898 | 略高 |
-| turnover_per_possession | 0.138 | 0.144 | 已对齐 |
-| steals_per_game | 16.0 | 16.1 | 已对齐 |
-| zone_share 三分 | 0.419 | 0.421 | 已对齐 |
-| zone_share 篮下 | 0.335 | 0.316 | 接近 |
-| zone_share 近筐 | 0.182 | 0.191 | 已对齐 |
-| zone_share 中距离 | 0.064 | 0.072 | 已在带内 |
-| creation_share set | 0.317 | 0.316 | 已对齐 |
-| creation_share drive | 0.221 | 0.220 | 已对齐 |
-| creation_share pull_up | 0.161 | 0.190 | 已在带内 |
-| creation_share cut | 0.063 | 0.045 | 偏高 |
-| creation_share post | 0.069 | 0.064 | 已在带内 |
-| creation_share putback | 0.045 | 0.045 | 已对齐 |
-| creation_share transition | 0.125 | 0.121 | 已对齐 |
+| possessions_per_game | 201.0 | ≈200 | 已对齐 |
+| points_per_game | 236.7 | 227.6 | 已在带内 |
+| blocks_per_game | 9.34 | 9.66 | 已在带内 |
+| shooting_fouls_per_game | 18.3 | 19.6 | 已在带内 |
+| fta_per_game | 46.9 | 43.3 | 已在带内 |
+| oreb_per_game | 25.7 | 26.5 | 已对齐 |
+| fga_per_possession | 0.953 | 0.898 | 略高 |
+| turnover_per_possession | 0.133 | 0.144 | 已在带内 |
+| steals_per_game | 15.4 | 16.1 | 已对齐 |
+| zone_share 三分 | 0.409 | 0.421 | 已对齐 |
+| zone_share 篮下 | 0.298 | 0.316 | 已对齐 |
+| zone_share 近筐 | 0.215 | 0.191 | 已在带内 |
+| zone_share 中距离 | 0.078 | 0.072 | 已对齐 |
+| creation_share set | 0.284 | 0.316 | 已在带内 |
+| creation_share drive | 0.236 | 0.220 | 已对齐 |
+| creation_share pull_up | 0.188 | 0.190 | 已对齐 |
+| creation_share cut | 0.042 | 0.045 | 已对齐 |
+| creation_share post | 0.070 | 0.064 | 已在带内 |
+| creation_share putback | 0.047 | 0.045 | 已对齐 |
+| creation_share transition | 0.132 | 0.121 | 已对齐 |
 
 累计调整：`shoot_tendency` 1.95 → 1.05、`shoot_mid_bonus` −0.05 → 0.35、`shoot_catch_bonus` 1.2 → 0、`shoot_off_dribble_penalty` 1.45 → 0；三分份额 0.543 → 0.427。新增 `shoot_near_bonus` 0.6 把抛投区的出手纳入候选价值，近筐份额 0.143 → 0.166。接球阶段只在接到球后的 `catch_window_seconds` 内成立，超过窗口再出手记作持球跳投。突破终结距离改读 `drive_rim_*` 与 `drive_finish_*`，`drive_rim_finishing_threshold` 让篮下与抛投两条路分开，并用 `drive_finish_tiebreak_spread` 上的球员固定偏移把同一档终结能力的球员拆到两条路上（`hash_unit`）；`drive_base` 0.6 → 0.8 让突破份额 0.19 → 0.21、接球即投 0.38 → 0.33。掩护读完后的突破加 `drive_screen_bonus` 0.9，`screen_read_over_drive` 从 0.519 回到带内。篮板伸手折减 1.22 → 1.30，必抢半径从写死的 16/50 英尺改成 `rebound_offense_late_reach_ft` / `rebound_defense_late_reach_ft`；前场篮板 35.7 → 26.9。背身候选的距离上限拆成 `post_max_distance_ft`，`post_base` 0.09 → 0.75，背身份额 0.018 → 0.059。`shoot_putback_bonus` 1.1 让补篮份额 0.030 → 0.052，`transition_window_seconds` 14 → 12，`cut_tendency` 0.1，`and_one_rate` 0.26，罚球率两分 0.20、三分 0.03。抢断靠 `BallSecurityPolicy` 的频率 0.30 与成功上限 0.07、加上 1.5 秒不应期落回 15 次/场。
 
 校验器与冻结表的连接：门禁的 `oreb_per_game` 基准改为按本批次出手分区、用 `rebound.oreb_rate_by_zone` 加权；新增 `free_throw_percentage` 判据对照 `freethrow.league_make` 与已登记判据清单（37 → 38 项）。
 
-机制修正：慢速松球不再直接出界（`loose_ball_boundary_speed_ftps`），失误率 0.23 → 0.15；八秒计时改看球的位置并按比赛时钟计，并在八秒过半后给“把球送过中线”的动作加上 `advance_pressure_bonus`；新增罚球禁区违例与末段暂停前场发球。
+机制修正：慢速松球不再直接出界（`loose_ball_boundary_speed_ftps`），失误率 0.23 → 0.15；八秒计时改看球的位置并按比赛时钟计，并在八秒过半后给“把球送过中线”的动作加上 `advance_pressure_bonus`；新增罚球禁区违例与末段暂停前场发球；体能按 `shot_fatigue_penalty` 直接压低出手命中，传球判断按 `bad_pass_iq_weight` 决定坏传率，防守卡位曲线接进篮板争抢，掩护接触按力量产生位移。跳球飞行中停在地板上的球原本会让子步循环不再前进（`remaining -= 0`），事件日志因此无界增长到数 GB；现在落地反弹给最小回弹速度、接触时刻为零时按整步推进，`World::emit` 另设 50 万条事实的硬上限，越界就地报错。
 
-残差只剩 `cut` 一项：0.063 对目标 0.045。它来自空切上篮的份额；`cut_open_distance_ft` 9.0 已把可达范围收到带内，`cut_payoff_ratio` 继续收紧会卡住掩护后的顺下（因此顺下改用独立的 `screen_roll_payoff_ratio` 1.0，不再受空切机会比率约束），而 `cut_open_distance_ft` 再往上会在 16 场门禁上把 `creation_share_post` 与 `play_activation_rate` 拖出带。其余 37 条判据在门禁上全部在带内。
+32 场门禁的 38 条分布判据全部在带内（`validate-core --seed 1 --games 32` 退出码为零、认证 `pass`），上表是同一批种子的实测值。
 
 ### 机制实验（40 种子 × 低/高两臂）
 
