@@ -721,17 +721,9 @@ pub fn evaluate(
     };
     let p_make = (p_make_cond * survive).clamp(0.0, 1.0);
     // 体能直接压低出手概率：累了的人脚步与手腕都跟不上，落点误差更大。
-    // 系数在参数表里，不在代码里写死。
+    // 耐力属性把同一次疲劳放大，均值保持不变。
     let fatigue = world.players[shooter].stamina.clamp(0.0, 1.0);
-    // 同样的疲劳对耐力差的人更致命：体能属性放大这一次的命中损失，
-    // 不再只靠掉能量快慢差一点——轮换会把在场能量拉平，只看掉能量分不出差距。
-    let endurance = world.players[shooter]
-        .data
-        .attributes
-        .stamina
-        .clamp(0.0, 1.0);
-    // 均值保持不变、区间拉开：平均耐力下系数仍为 1，低耐力的人明显放大、
-    // 高耐力的人明显缩小，否则轮换把在场能量拉平之后就看不出差别。
+    let endurance = world.players[shooter].data.attributes.stamina.clamp(0.0, 1.0);
     let fatigue_scale = 1.0 + 1.2 * (0.5 - endurance);
     let p_make = (p_make
         * (1.0 - policy.w("shot_fatigue_penalty") * (1.0 - fatigue) * fatigue_scale))

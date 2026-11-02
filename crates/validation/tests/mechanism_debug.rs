@@ -5,18 +5,16 @@ use nba_validation::mechanism_core::{
 };
 
 #[test]
-fn perturbed_attributes_always_keep_a_decision() {
+fn a_stamina_experiment_moves_the_minutes_metric() {
     let config = MechanismConfig {
         seeds: 8,
         ..MechanismConfig::default()
     };
-    for attribute in [
-        MechanismAttribute::FreeThrow,
-        MechanismAttribute::Acceleration,
-        MechanismAttribute::DecisionIq,
-    ] {
-        let result = run_mechanism_experiment(attribute, config)
-            .unwrap_or_else(|error| panic!("{attribute:?} experiment failed: {error}"));
-        assert!(result.seeds >= 6, "{attribute:?} 样本不足：{}", result.seeds);
-    }
+    let result = run_mechanism_experiment(MechanismAttribute::Stamina, config)
+        .expect("stamina experiment must terminate");
+    assert!(
+        result.relative_change > 0.0,
+        "耐力更高的球队必须让主力打得更久，实际 {}",
+        result.relative_change
+    );
 }

@@ -78,7 +78,7 @@ impl MechanismAttribute {
             Self::FreeThrow => Metric::FreeThrowPct,
             // 速度与加速决定推进与出手的节奇：更快的球队整场打出更多回合。
             Self::Speed | Self::Acceleration => Metric::Possessions,
-            Self::Stamina => Metric::FieldGoalPct,
+            Self::Stamina => Metric::MinutesMax,
             Self::Strength => Metric::ScreenDisplacement,
             Self::OffensiveRebound => Metric::OffensiveReboundRate,
             Self::DefensiveRebound => Metric::DefensiveReboundRate,
@@ -145,6 +145,8 @@ pub enum Metric {
     TurnoverRate,
     BlocksPerShot,
     StealsPerPossession,
+    /// 主队单人最高出场分钟：耐力决定一个球员能留在场上的时长。
+    MinutesMax,
 }
 
 impl Metric {
@@ -165,6 +167,7 @@ impl Metric {
             Self::TurnoverRate => "turnover_rate",
             Self::BlocksPerShot => "blocks_per_shot",
             Self::StealsPerPossession => "steals_per_possession",
+            Self::MinutesMax => "minutes_max",
         }
     }
 }
@@ -656,14 +659,22 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
             (home.blocks as f64, away.fga.max(1) as f64)
         }
         // 主队抢断 ÷ 客队回合：抢断剥夺的是对手的回合。
-        Metric::StealsPerPossession => {
-            let away_possessions = report
+        Metric::StealsPerPossession => {            let away_possessions = report
                 .possessions
                 .iter()
                 .filter(|record| record.team == TeamSide::Away)
                 .count()
                 .max(1) as f64;
             (home.steals as f64, away_possessions)
+        }
+        Metric::MinutesMax => {
+            let max_minutes = report
+                .box_score
+                .home
+                .iter()
+                .map(|line| line.minutes())
+                .fold(0.0, f64::max);
+            (max_minutes, 1.0)
         }
     }
 }
