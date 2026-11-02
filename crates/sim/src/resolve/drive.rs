@@ -121,15 +121,13 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
                 player: driver,
                 kind: TurnoverKind::LostBall,
             });
-            world.adjudicate(crate::adjudicate::Adjudication {
-                cause: crate::adjudicate::StoppageCause::PossessionChange,
-                possession_end: Some((
-                    nba_domain::event::PossessionEndCause::TurnoverSteal,
-                    "lost_ball",
-                )),
-                clock: crate::adjudicate::ClockAdjustment::default(),
-                restart: crate::adjudicate::RestartPlan::Live { team: team.other() },
-            });
+            world.adjudicate(
+                crate::adjudicate::Adjudication::new(
+                    crate::adjudicate::StoppageCause::PossessionChange,
+                    crate::adjudicate::RestartPlan::Live { team: team.other() },
+                )
+                .ending(nba_domain::event::PossessionEndCause::TurnoverSteal, "lost_ball"),
+            );
             return ActionOutcome {
                 actor: driver,
                 kind: ActionKind::Drive,
@@ -181,6 +179,22 @@ pub fn travel_on_drive(gather: Vec2, finish: Vec2, allowance: f32) -> bool {
 
 /// 收球步：从触球点向篮筐迈两步。位移超过容限就是走步，容限是
 /// 两步加起跳的英尺量，来自 `policy.geometry`。
+/// 走步的账本与裁决：两条触发路径共用这里的写入。
+fn book_travel(world: &mut World, actor: usize, team: crate::TeamSide) {
+    world.line_mut(actor).turnovers += 1;
+    world.emit(Fact::Turnover {
+        player: actor,
+        kind: TurnoverKind::Travel,
+    });
+    world.adjudicate(
+        crate::adjudicate::Adjudication::new(
+            crate::adjudicate::StoppageCause::Violation(crate::adjudicate::ViolationKind::Travel),
+            crate::adjudicate::RestartPlan::Live { team: team.other() },
+        )
+        .ending(nba_domain::event::PossessionEndCause::TurnoverTravel, "travel"),
+    );
+}
+
 pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     let actor = intent.actor;
     let team = world.players[actor].team;
@@ -229,22 +243,7 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
         allowance += world.params.policy.g("euro_step_allowance_ft");
     }
     if travel_on_drive(gather, finish, allowance) {
-        world.line_mut(actor).turnovers += 1;
-        world.emit(Fact::Turnover {
-            player: actor,
-            kind: TurnoverKind::Travel,
-        });
-        world.adjudicate(crate::adjudicate::Adjudication {
-            cause: crate::adjudicate::StoppageCause::Violation(
-                crate::adjudicate::ViolationKind::Travel,
-            ),
-            possession_end: Some((
-                nba_domain::event::PossessionEndCause::TurnoverTravel,
-                "travel",
-            )),
-            clock: crate::adjudicate::ClockAdjustment::default(),
-            restart: crate::adjudicate::RestartPlan::Live { team: team.other() },
-        });
+        book_travel(world, actor, team);
         return ActionOutcome {
             actor,
             kind: ActionKind::Finish,
@@ -261,22 +260,7 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
     if world.draw(Stream::Decision, actor, purpose::GATHER_TRAVEL, 0)
         < world.params.policy.w("gather_travel_rate")
     {
-        world.line_mut(actor).turnovers += 1;
-        world.emit(Fact::Turnover {
-            player: actor,
-            kind: TurnoverKind::Travel,
-        });
-        world.adjudicate(crate::adjudicate::Adjudication {
-            cause: crate::adjudicate::StoppageCause::Violation(
-                crate::adjudicate::ViolationKind::Travel,
-            ),
-            possession_end: Some((
-                nba_domain::event::PossessionEndCause::TurnoverTravel,
-                "travel",
-            )),
-            clock: crate::adjudicate::ClockAdjustment::default(),
-            restart: crate::adjudicate::RestartPlan::Live { team: team.other() },
-        });
+        book_travel(world, actor, team);
         return ActionOutcome {
             actor,
             kind: ActionKind::Finish,

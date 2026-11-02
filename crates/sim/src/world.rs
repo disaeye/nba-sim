@@ -2047,6 +2047,7 @@ impl World {
                 crate::adjudicate::RestartPlan::Inbound {
                     team: team.other(),
                     spot: None,
+                    ready_after: None,
                 },
             ));
             return;
@@ -2067,6 +2068,7 @@ impl World {
                     crate::adjudicate::RestartPlan::Inbound {
                         team: team.other(),
                         spot: None,
+                        ready_after: None,
                     },
                 ));
             }
@@ -3054,15 +3056,13 @@ impl World {
                     kind: crate::action::TurnoverKind::BadPass,
                 });
                 let team = self.players[from].team;
-                self.adjudicate(crate::adjudicate::Adjudication {
-                    cause: crate::adjudicate::StoppageCause::PossessionChange,
-                    possession_end: Some((
-                        PossessionEndCause::TurnoverSteal,
-                        "pass_intercepted",
-                    )),
-                    clock: crate::adjudicate::ClockAdjustment::default(),
-                    restart: crate::adjudicate::RestartPlan::Live { team: team.other() },
-                });
+                self.adjudicate(
+                    crate::adjudicate::Adjudication::new(
+                        crate::adjudicate::StoppageCause::PossessionChange,
+                        crate::adjudicate::RestartPlan::Live { team: team.other() },
+                    )
+                    .ending(PossessionEndCause::TurnoverSteal, "pass_intercepted"),
+                );
                 self.set_ball_held(by);
                 self.players[by].target = self.top_of_key(team.other());
                 self.players[by].target_kind = crate::state::TargetKind::Window;

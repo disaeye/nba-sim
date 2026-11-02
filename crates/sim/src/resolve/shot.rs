@@ -422,15 +422,18 @@ pub fn finish(world: &mut World) {
         return;
     }
     if made {
-        world.end_possession(
-            nba_domain::event::PossessionEndCause::Score,
-            "score",
-            points as u32,
+        world.adjudicate(
+            crate::adjudicate::Adjudication::new(
+                crate::adjudicate::StoppageCause::MadeBasket,
+                crate::adjudicate::RestartPlan::Inbound {
+                    team: team.other(),
+                    spot: None,
+                    ready_after: Some(1.4),
+                },
+            )
+            .ending(nba_domain::event::PossessionEndCause::Score, "score")
+            .scoring(points as u32),
         );
-        world.set_phase(Phase::DeadBall {
-            team: team.other(),
-            ready_at: world.now() + 1.4,
-        });
     } else {
         crate::resolve::rebound::resolve(world, pending.zone, pending.distance_ft, rim_contact);
     }

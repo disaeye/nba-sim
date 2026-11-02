@@ -180,12 +180,13 @@ pub fn control(world: &mut World, handle: usize) {
                     "loose_ball_recovered",
                 )
             };
-            world.adjudicate(crate::adjudicate::Adjudication {
-                cause: crate::adjudicate::StoppageCause::PossessionChange,
-                possession_end: Some(end),
-                clock: crate::adjudicate::ClockAdjustment::default(),
-                restart: crate::adjudicate::RestartPlan::Live { team },
-            });
+            world.adjudicate(
+                crate::adjudicate::Adjudication::new(
+                    crate::adjudicate::StoppageCause::PossessionChange,
+                    crate::adjudicate::RestartPlan::Live { team },
+                )
+                .ending(end.0, end.1),
+            );
         }
         take_live_ball(world, handle);
         return;
@@ -204,15 +205,16 @@ pub fn control(world: &mut World, handle: usize) {
         world.start_second_chance(state.offense, handle, state.rim_contact);
     } else {
         world.line_mut(handle).dreb += 1;
-        world.adjudicate(crate::adjudicate::Adjudication {
-            cause: crate::adjudicate::StoppageCause::PossessionChange,
-            possession_end: Some((
+        world.adjudicate(
+            crate::adjudicate::Adjudication::new(
+                crate::adjudicate::StoppageCause::PossessionChange,
+                crate::adjudicate::RestartPlan::Live { team: defense },
+            )
+            .ending(
                 nba_domain::event::PossessionEndCause::DefensiveRebound,
                 "defensive_rebound",
-            )),
-            clock: crate::adjudicate::ClockAdjustment::default(),
-            restart: crate::adjudicate::RestartPlan::Live { team: defense },
-        });
+            ),
+        );
         take_live_ball(world, handle);
     }
 }

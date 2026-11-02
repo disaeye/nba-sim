@@ -237,31 +237,32 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
             return;
         }
         world.possession.shot_clock_start = world.clock.shot_clock();
+        let restart_team = if meta.technical_retained_team.is_some() || meta.retain_possession {
+            team
+        } else {
+            team.other()
+        };
+        let mut adjudication = crate::adjudicate::Adjudication::new(
+            crate::adjudicate::StoppageCause::FreeThrow,
+            crate::adjudicate::RestartPlan::Inbound {
+                team: restart_team,
+                spot: None,
+                ready_after: Some(1.2),
+            },
+        );
         if meta.technical_retained_team.is_none() && !meta.retain_possession {
-            if made_count > 0 {
-                world.end_possession(
-                    nba_domain::event::PossessionEndCause::Score,
-                    "free_throw",
-                    made_count as u32,
-                );
+            adjudication = if made_count > 0 {
+                adjudication
+                    .ending(nba_domain::event::PossessionEndCause::Score, "free_throw")
+                    .scoring(made_count as u32)
             } else {
-                world.end_possession(
+                adjudication.ending(
                     nba_domain::event::PossessionEndCause::TurnoverViolation,
                     "free_throw_miss_without_rim_rebound",
-                    0,
-                );
-            }
+                )
+            };
         }
-        world.set_phase(Phase::DeadBall {
-            team: if meta.technical_retained_team.is_some() {
-                team
-            } else if meta.retain_possession {
-                team
-            } else {
-                team.other()
-            },
-            ready_at: world.now() + 1.2,
-        });
+        world.adjudicate(adjudication);
         world.ball.release(BallState::Loose {
             pos: world.hoop_for(team),
             vel: Vec2::ZERO,

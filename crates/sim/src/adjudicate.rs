@@ -14,6 +14,8 @@ use crate::TeamSide;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoppageCause {
     MadeBasket,
+    /// 罚球程序的结算（不论命中与否）。
+    FreeThrow,
     Violation(ViolationKind),
     Foul,
     Timeout,
@@ -59,10 +61,11 @@ pub struct ClockAdjustment {
 /// 恢复方式。
 #[derive(Debug, Clone, Copy)]
 pub enum RestartPlan {
-    /// 在给定地点（`None` 表示本方底线）发球。
+    /// 在给定地点（`None` 表示本方底线）发球；`ready_after` 是停表时长。
     Inbound {
         team: TeamSide,
         spot: Option<Vec2>,
+        ready_after: Option<f64>,
     },
     /// 直接开始活球回合。
     Live { team: TeamSide },
@@ -76,22 +79,46 @@ pub struct Adjudication {
     pub cause: StoppageCause,
     /// 需要结束当前统计回合时给出原因与明细。
     pub possession_end: Option<(PossessionEndCause, &'static str)>,
+    /// 本次得分（命中或罚球结算），已结束的回合带上它。
+    pub points: u32,
     pub clock: ClockAdjustment,
     pub restart: RestartPlan,
 }
 
 impl Adjudication {
-    /// 违例裁决的常用形状：结束回合并由对方在给定地点发球。
-    pub fn violation(kind: ViolationKind, restart: RestartPlan) -> Self {
+    /// 基础形状：只有停表原因与恢复方式，不结束回合、不得分、不改时钟。
+    pub fn new(cause: StoppageCause, restart: RestartPlan) -> Self {
         Self {
-            cause: StoppageCause::Violation(kind),
-            possession_end: Some((
-                PossessionEndCause::TurnoverViolation,
-                kind.as_str(),
-            )),
+            cause,
+            possession_end: None,
+            points: 0,
             clock: ClockAdjustment::default(),
             restart,
         }
+    }
+
+    /// 结束当前统计回合。
+    pub fn ending(mut self, cause: PossessionEndCause, detail: &'static str) -> Self {
+        self.possession_end = Some((cause, detail));
+        self
+    }
+
+    /// 本次得分。
+    pub fn scoring(mut self, points: u32) -> Self {
+        self.points = points;
+        self
+    }
+
+    /// 时钟调整。
+    pub fn clock(mut self, clock: ClockAdjustment) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// 违例裁决的常用形状：结束回合并由对方在给定地点发球。
+    pub fn violation(kind: ViolationKind, restart: RestartPlan) -> Self {
+        Self::new(StoppageCause::Violation(kind), restart)
+            .ending(PossessionEndCause::TurnoverViolation, kind.as_str())
     }
 }
 
@@ -99,18 +126,23 @@ impl World {
     /// 唯一写入入口：比分之外的停表后果都在这里落。
     pub fn adjudicate(&mut self, adjudication: Adjudication) {
         if let Some((cause, detail)) = adjudication.possession_end {
-            self.end_possession(cause, detail, 0);
+            self.end_possession(cause, detail, adjudication.points);
         }
         if let Some(shot_clock) = adjudication.clock.shot_clock {
             self.clock.set_shot_clock(shot_clock);
         }
         match adjudication.restart {
-            RestartPlan::Inbound { team, spot } => {
+            RestartPlan::Inbound {
+                team,
+                spot,
+                ready_after,
+            } => {
                 self.inbound_spot = spot;
                 // 取消动作的原因就是停表原因：事实里保留违例名，便于回放与审计。
                 let reason = match adjudication.cause {
                     StoppageCause::Violation(kind) => kind.as_str(),
                     StoppageCause::MadeBasket => "made_basket",
+                    StoppageCause::FreeThrow => "free_throw",
                     StoppageCause::Foul => "foul",
                     StoppageCause::Timeout => "timeout",
                     StoppageCause::PeriodEnd => "period_end",
@@ -118,9 +150,10 @@ impl World {
                     StoppageCause::PossessionChange => "possession_change",
                 };
                 self.cancel_actions(reason);
+                let wait = ready_after.unwrap_or(f64::from(self.rules.inbound_setup_seconds));
                 self.set_phase(Phase::DeadBall {
                     team,
-                    ready_at: self.now() + f64::from(self.rules.inbound_setup_seconds),
+                    ready_at: self.now() + wait,
                 });
             }
             RestartPlan::Live { team } => {

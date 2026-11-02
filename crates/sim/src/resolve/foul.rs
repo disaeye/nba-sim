@@ -273,16 +273,21 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
 pub fn apply_offensive_foul(world: &mut World, fouler: usize, fouled: usize) {
     let team = world.players[fouler].team;
     let booking = book(world, fouler, fouled, FoulKind::Offensive, 0, false);
-    world.cancel_actions("offensive_foul");
-    world.end_possession(
-        nba_domain::event::PossessionEndCause::TurnoverOffensiveFoul,
-        "offensive_foul",
-        0,
+    // 进攻犯规停表换边：取消动作、结束回合与恢复方式都经同一个提交入口。
+    world.adjudicate(
+        crate::adjudicate::Adjudication::new(
+            crate::adjudicate::StoppageCause::Foul,
+            crate::adjudicate::RestartPlan::Inbound {
+                team: team.other(),
+                spot: None,
+                ready_after: None,
+            },
+        )
+        .ending(
+            nba_domain::event::PossessionEndCause::TurnoverOffensiveFoul,
+            "offensive_foul",
+        ),
     );
-    world.set_phase(Phase::DeadBall {
-        team: team.other(),
-        ready_at: world.now() + world.rules.inbound_setup_seconds as f64,
-    });
     world.apply_dead_ball_window();
     let retained_team = team.other();
     start_roster_technical(

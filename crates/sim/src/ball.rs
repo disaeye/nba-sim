@@ -319,20 +319,14 @@ fn out_of_bounds(world: &mut World, spot: Vec2) {
         }
     }
     // 停表后果统一走裁决提交入口：结束回合、记录发球地点与恢复方式。
-    world.adjudicate(crate::adjudicate::Adjudication {
-        cause: crate::adjudicate::StoppageCause::Violation(
-            crate::adjudicate::ViolationKind::OutOfBounds,
-        ),
-        possession_end: Some((
-            nba_domain::event::PossessionEndCause::TurnoverViolation,
-            "out_of_bounds",
-        )),
-        clock: crate::adjudicate::ClockAdjustment::default(),
-        restart: crate::adjudicate::RestartPlan::Inbound {
+    world.adjudicate(crate::adjudicate::Adjudication::violation(
+        crate::adjudicate::ViolationKind::OutOfBounds,
+        crate::adjudicate::RestartPlan::Inbound {
             team: recipient,
             spot: Some(spot),
+            ready_after: None,
         },
-    });
+    ));
     // 球必须在死球期间离手：否则下一 tick 的活球争抢会在回合已关闭
     //（possession.id == 0）的情况下接管球。发球流程稍后自己把球交给发球人。
     let handler = world

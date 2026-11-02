@@ -77,12 +77,10 @@ fn resolve_dribble(
             kind: TurnoverKind::DoubleDribble,
         });
         let team = world.players[actor].team;
-        world.end_possession(
-            nba_domain::event::PossessionEndCause::TurnoverViolation,
-            "double_dribble",
-            0,
-        );
-        world.start_possession(team.other(), PossessionKind::Live);
+        world.adjudicate(crate::adjudicate::Adjudication::violation(
+            crate::adjudicate::ViolationKind::DoubleDribble,
+            crate::adjudicate::RestartPlan::Live { team: team.other() },
+        ));
         return ActionOutcome {
             actor,
             kind: ActionKind::Dribble(kind),

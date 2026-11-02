@@ -1179,7 +1179,7 @@
       }
     },
     "12": {
-      "digest": "0x147e6c22155a50e1",
+      "digest": "0x31de6ca65d4e6f3e",
       "fields": {
         "box": {
           "away": [
@@ -1495,8 +1495,8 @@
           "score": 15
         },
         "event_kinds": {
-          "action_cancelled": 9,
-          "action_completed": 149,
+          "action_cancelled": 10,
+          "action_completed": 148,
           "action_phase_changed": 312,
           "action_started": 158,
           "ball_contact": 156,
@@ -4302,30 +4302,30 @@
       }
     },
     "5": {
-      "digest": "0x016489b87a5df241",
+      "digest": "0x3ccada4c54e0f6af",
       "fields": {
         "box": {
           "away": [
             [
-              480000,
-              5,
+              472300,
+              3,
               1,
               5,
               1,
               4,
-              2,
-              2,
+              0,
+              0,
               1,
               0,
               2,
               1,
               0,
-              3,
-              1,
-              1
+              2,
+              0,
+              4
             ],
             [
-              480000,
+              472300,
               12,
               4,
               6,
@@ -4340,10 +4340,10 @@
               1,
               1,
               0,
-              1
+              4
             ],
             [
-              480000,
+              472300,
               0,
               0,
               1,
@@ -4357,8 +4357,8 @@
               1,
               0,
               0,
-              1,
-              1
+              0,
+              4
             ],
             [
               480000,
@@ -4371,33 +4371,33 @@
               0,
               1,
               2,
-              1,
+              2,
               1,
               1,
               1,
               0,
-              1
+              4
             ],
             [
               480000,
+              4,
               2,
-              1,
-              1,
-              0,
-              0,
-              0,
-              0,
-              0,
-              1,
-              1,
-              0,
-              0,
-              0,
               2,
-              1
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              0,
+              0,
+              0,
+              3,
+              4
             ],
             [
-              0,
+              7700,
               0,
               0,
               0,
@@ -4415,7 +4415,7 @@
               0
             ],
             [
-              0,
+              7700,
               0,
               0,
               0,
@@ -4433,7 +4433,7 @@
               0
             ],
             [
-              0,
+              7700,
               0,
               0,
               0,
@@ -4453,25 +4453,25 @@
           ],
           "home": [
             [
-              480000,
-              5,
+              472300,
+              3,
               1,
               6,
               1,
               4,
-              2,
-              2,
+              0,
+              0,
               1,
               4,
               5,
-              1,
+              0,
               0,
               2,
               0,
-              -1
+              -4
             ],
             [
-              480000,
+              472300,
               9,
               3,
               4,
@@ -4485,65 +4485,65 @@
               0,
               0,
               0,
-              2,
-              -1
+              0,
+              -4
+            ],
+            [
+              472300,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              -4
             ],
             [
               480000,
+              2,
+              1,
+              2,
+              0,
+              1,
               0,
               0,
               0,
+              1,
               0,
               0,
+              1,
               0,
               0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              -1
+              -4
             ],
             [
               480000,
-              2,
-              1,
-              2,
-              0,
-              1,
-              0,
-              0,
-              0,
-              1,
-              0,
-              0,
-              2,
-              0,
-              0,
-              -1
-            ],
-            [
-              480000,
-              5,
-              1,
               4,
-              0,
-              0,
+              1,
               3,
-              6,
+              0,
+              0,
               2,
+              4,
+              1,
               0,
               0,
               1,
               0,
               3,
               0,
-              -1
+              -4
             ],
             [
-              0,
+              7700,
               0,
               0,
               0,
@@ -4561,7 +4561,7 @@
               0
             ],
             [
-              0,
+              7700,
               0,
               0,
               0,
@@ -4579,7 +4579,7 @@
               0
             ],
             [
-              0,
+              7700,
               0,
               0,
               0,
@@ -4599,8 +4599,8 @@
           ]
         },
         "creation_counts": [
-          2,
-          2,
+          3,
+          1,
           0,
           6,
           2,
@@ -4611,70 +4611,71 @@
           "backcourt": 1,
           "defensive_rebound": 11,
           "eight_second": 1,
-          "free_throw": 3,
+          "free_throw": 1,
           "loose_ball_recovered": 1,
           "out_of_bounds": 2,
           "pass_incomplete": 1,
-          "pass_intercepted": 3,
+          "pass_intercepted": 2,
           "period_end": 4,
-          "score": 13
+          "score": 14
         },
         "event_kinds": {
-          "action_cancelled": 10,
-          "action_completed": 133,
-          "action_failed": 2,
-          "action_phase_changed": 287,
-          "action_started": 145,
-          "ball_contact": 155,
+          "action_cancelled": 12,
+          "action_completed": 131,
+          "action_failed": 1,
+          "action_phase_changed": 284,
+          "action_started": 144,
+          "ball_contact": 143,
           "ball_protection": 1,
           "box_out": 11,
-          "cut": 12,
-          "defense_responsibility_changed": 270,
-          "defensive_action_cancelled": 22,
+          "cut": 13,
+          "defense_responsibility_changed": 259,
+          "defensive_action_cancelled": 21,
           "defensive_action_completed": 16,
-          "defensive_action_phase_changed": 74,
-          "defensive_action_started": 38,
-          "dribble_move": 4,
+          "defensive_action_phase_changed": 73,
+          "defensive_action_started": 37,
+          "dribble_move": 3,
           "drive": 3,
           "fake_action": 1,
-          "foul": 6,
-          "free_throw": 10,
+          "foul": 3,
+          "free_throw": 4,
           "game_end": 1,
           "jump_ball": 1,
           "loose_ball_recovered": 5,
-          "pass": 88,
+          "pass": 89,
           "period_end": 3,
-          "placement_applied": 27,
-          "play_activated": 9,
-          "play_window_ended": 9,
-          "possession_ended": 40,
-          "possession_started": 40,
-          "rebound": 17,
-          "rebound_opportunity": 19,
+          "placement_applied": 26,
+          "play_activated": 8,
+          "play_window_ended": 8,
+          "possession_ended": 38,
+          "possession_started": 38,
+          "rebound": 16,
+          "rebound_opportunity": 18,
           "screen": 1,
-          "second_chance_started": 6,
+          "second_chance_started": 5,
           "shot": 33,
-          "steal": 5,
+          "steal": 4,
+          "substitution": 6,
           "timeout": 1,
-          "turnover": 10
+          "turnover": 9
         },
-        "possessions": 40,
+        "possessions": 38,
         "score": [
-          21,
+          18,
           22
         ],
         "seed": 5,
-        "ticks": 13020,
+        "ticks": 12531,
         "zone_counts": [
           [
-            5,
+            4,
             1,
             1,
             9
           ],
           [
             2,
-            1,
+            2,
             0,
             14
           ]
@@ -4688,7 +4689,7 @@
           ],
           [
             1,
-            0,
+            1,
             0,
             6
           ]
