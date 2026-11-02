@@ -245,9 +245,10 @@ fn defensive_skill_changes_blocks_and_steals() {
     let mut strong_blocks = 0u32;
     let mut weak_steals = 0u32;
     let mut strong_steals = 0u32;
-    // 六个种子两种防守强度，四个线程分摊。
-    let weak_lines = run_skill_lines(&weak, &base, 31u64..37);
-    let strong_lines = run_skill_lines(&strong, &base, 31u64..37);
+    // 十八个种子两种防守强度，四个线程分摊：封盖是低频率事件，样本小了
+    // 分不出能力差异。
+    let weak_lines = run_skill_lines(&weak, &base, 31u64..49);
+    let strong_lines = run_skill_lines(&strong, &base, 31u64..49);
     for line in weak_lines {
         weak_blocks += line.blocks;
         weak_steals += line.steals;
