@@ -25,11 +25,11 @@
   - 跳球与交替拥有：`crates/sim/tests/jump_ball.rs` 5 项。
   - 罚球与计数：`crates/sim/tests/engine.rs`、`crates/sim/tests/rules_flow.rs` 11 项。
   - 规则矩阵：`crates/validation/tests/rule_matrix.rs` 10 项。
-  - 违例：`crates/sim/tests/rule_violations.rs` 3 项（后场八秒、回场、出界归属与边线发球点）。
+  - 违例与发球地点：`crates/sim/tests/rule_violations.rs` 9 项（后场八秒、回场、出界归属与边线发球点、罚球禁区记录/重罚/换边、前场犯规边线发球、命中后底线发球、末段暂停前场发球）。
   - 紧逼五秒：`crates/sim/tests/action_scenarios.rs::holding_the_ball_closely_guarded_for_five_seconds_is_a_violation`、`the_closely_guarded_timer_resets_and_spares_the_dribbler`。
   - 停表跳球：`crates/sim/tests/action_scenarios.rs::a_tie_for_the_ball_enters_a_held_ball_jump_ball`（参跳四人走到中圈后才掷球，无瞬移）。
   - 阵容与犯满：`crates/sim/tests/rotation.rs` 5 项。
-- 未闭合：进攻三秒、罚球禁区违例、复核、非法触球；发球地点只覆盖出界点与本方底线两类。
+- 未闭合：进攻三秒（需要先重做无球清空禁区的站位，见 `rule_catalog_sources.md`）、复核、非法触球、发球五秒与踩线（引擎自动出手，无持續窗口）。
 
 ## D. 并行动作与执行证据
 
