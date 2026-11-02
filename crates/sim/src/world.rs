@@ -1995,10 +1995,24 @@ impl World {
         let attacking_right = self.attacking_right(team);
         let mid = self.rules.court.width_ft * 0.5;
         let pos = self.players[holder].pos;
-        let in_backcourt = if attacking_right {
-            pos.x < mid
+        // 中线附近有一段混沌带：只有真正推进到前场深处才算建立前场控制，
+        // 只有真正退回后场才算回场，避免持球人在中线上来回晃动被吹。
+        let advance = self.params.policy.g("backcourt_advance_ft");
+        let margin = self.params.policy.g("backcourt_margin_ft");
+        let frontcourt_deep = if attacking_right {
+            pos.x >= mid + advance
         } else {
+            pos.x <= mid - advance
+        };
+        let past_mid = if attacking_right {
             pos.x > mid
+        } else {
+            pos.x < mid
+        };
+        let in_backcourt = if attacking_right {
+            pos.x <= mid - margin
+        } else {
+            pos.x >= mid + margin
         };
         // 防守人碰过球后球回到后场是合法的：那段控制不算进攻方建立的前场控制。
         if self
@@ -2007,9 +2021,14 @@ impl World {
         {
             self.possession.frontcourt_established = false;
         }
-        if !in_backcourt {
+        if past_mid {
+            // 过中线就停八秒计时；只有推进到前场深处才算建立前场控制。
             self.possession.backcourt_deadline = None;
+        }
+        if frontcourt_deep {
             self.possession.frontcourt_established = true;
+        }
+        if !in_backcourt {
             return;
         }
         // 已经在前场建立控制又把球带回后场：回场违例。
