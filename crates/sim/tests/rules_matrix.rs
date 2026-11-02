@@ -238,3 +238,54 @@ fn a_free_throw_shooter_who_never_releases_is_called_for_delay() {
 }
 
 
+
+#[test]
+fn a_pass_nobody_controls_becomes_loose() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 653);
+    let passer = world.on_court(TeamSide::Home).as_slice()[0];
+    let receiver = world.on_court(TeamSide::Home).as_slice()[1];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == passer || index == receiver;
+        player.vel = Vec2::ZERO;
+    }
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(passer);
+    let spot = Vec2::new(60.0, 25.0);
+    world.players[passer].pos = spot;
+    world.players[passer].target = spot;
+    world.players[receiver].pos = Vec2::new(66.0, 27.0);
+    world.players[receiver].target = world.players[receiver].pos;
+    world.ball.pos = spot;
+    world.ball.z = world.rules.ball_radius_ft;
+    let intent = nba_sim_core::action::ActionIntent {
+        actor: passer,
+        kind: nba_sim_core::action::ActionKind::Pass(nba_sim_core::action::PassKind::Chest),
+        target: Some(receiver),
+        from_ft: spot,
+        to_ft: world.players[receiver].pos,
+        start_time: world.now(),
+        duration: 0.3,
+    };
+    nba_sim_core::resolve::pass::resolve(
+        &mut world,
+        &intent,
+        nba_sim_core::action::PassKind::Chest,
+    );
+    // 接球人没拿住：这次传球的结果记为未完成。
+    world.pass_result = Some(nba_sim_core::ball::PassResult::Incomplete);
+    let mut loose = false;
+    for _ in 0..180 {
+        world.step(TICK_SECONDS);
+        if matches!(
+            world.ball.state(),
+            nba_sim_core::state::BallState::Loose { .. }
+        ) {
+            loose = true;
+            break;
+        }
+    }
+    assert!(loose, "无人接住的传球必须成为松球");
+}
