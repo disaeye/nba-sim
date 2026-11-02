@@ -721,13 +721,14 @@ pub fn certification_artifact(
 }
 
 /// 已登记的判定准则。
-pub const REGISTERED_GATE_CRITERIA: [&str; 37] = [
+pub const REGISTERED_GATE_CRITERIA: [&str; 38] = [
     "zone_share_rim", "zone_share_near", "zone_share_mid", "zone_share_three",
     "creation_share_drive", "creation_share_cut", "creation_share_post",
     "creation_share_pull_up", "creation_share_putback", "creation_share_transition",
     "creation_share_set", "turnover_per_possession", "fga_per_possession",
     "fta_per_game", "points_per_game", "oreb_per_game", "possessions_per_game",
     "blocks_per_game", "steals_per_game", "shooting_fouls_per_game", "and_one_per_game",
+    "free_throw_percentage",
     "early_contested_rate", "usage_top1_over_fifth", "assisted_fg_spread", "ping_pong_rate",
     "minutes_max", "shot_clock_buckets_complete", "defender_distance_buckets_complete",
     "post_scorer_three_share", "stationary_shooter_three_share", "play_activation_rate",

@@ -239,6 +239,17 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
         (home_line.and_one + away_line.and_one) as f64 / games,
         league.and_one_per_game as f64,
     );
+    // 罚球命中率对照冻结的 `freethrow` 表：两队的命中与出手直接合并。
+    let (ftm, attempts) = (home_line.ftm + away_line.ftm, home_line.fta + away_line.fta);
+    push(
+        "free_throw_percentage",
+        if attempts > 0 {
+            ftm as f64 / attempts as f64
+        } else {
+            0.0
+        },
+        f64::from(params.freethrow.league_make),
+    );
 
     push_process_layers(&mut gate, report, params);
 
