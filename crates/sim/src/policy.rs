@@ -178,10 +178,7 @@ pub fn off_ball_tick(world: &mut World) {
     let now = world.now();
     // 逐 tick 走这条路径，不能分配：按句柄遍历，在循环内过滤。
     for actor in 0..world.players.len() {
-        if actor == holder
-            || !world.players[actor].on_court
-            || world.players[actor].team != team
-        {
+        if actor == holder || !world.players[actor].on_court || world.players[actor].team != team {
             continue;
         }
         // 正在重选恢复段的球员先把自己的路线走完，不叠加新的无球动作。
@@ -225,6 +222,8 @@ pub fn off_ball_tick(world: &mut World) {
         };
         let intent = decision.intent;
         world.possession.off_ball_actions += 1;
+        // 掩护后的下一次动作已经兑现，顺下与外弹的偏好随之取消。
+        world.players[actor].screened_at = 0.0;
         world.players[actor].target = intent.to_ft;
         world.players[actor].target_kind = crate::state::TargetKind::Window;
         world.players[actor].target_partner = actor;
@@ -294,8 +293,7 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
     );
 
     // 切入：篮下接球点的价值，减掉被对位跟住的折损。
-    let cut_spot = hoop
-        + (pos - hoop).normalize_or_zero() * weights.g("finish_min_distance_ft");
+    let cut_spot = hoop + (pos - hoop).normalize_or_zero() * weights.g("finish_min_distance_ft");
     let marker = world
         .players
         .iter()
@@ -309,8 +307,9 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
     let spot_value = crate::value::catch_value(world, spot, actor, 0.0);
     let cut_open = marker >= weights.g("cut_open_distance_ft") * 0.6;
     let cut_pays = cut_value > spot_value * 1.2;
-    let cut_available = cut_open && cut_pays && travel > 3.0;
-    let cut: Candidate = (
+    let mut cut_available = cut_open && cut_pays && travel > 3.0;
+    let mut relocate = relocate;
+    let mut cut: Candidate = (
         ActionKind::Cut,
         None,
         cut_spot,
@@ -329,6 +328,18 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
     );
 
     // 候选集只放真正成立的动作：空切不成立时就只剩跑位。
+    // 掩护后的顺下与外弹：掩护人刚才设了掩护，就必须用下一次动作
+    // 兑现它。对位人往缩就顺下，对位人贴上就外弹。
+    let post_screen = world.players[actor].screened_at > 0.0
+        && now - world.players[actor].screened_at < 2.0;
+    if post_screen {
+        cut_available = true;
+        if marker >= 4.0 {
+            cut.3.tactical_bonus += weights.g("cut_open_distance_ft") * 0.5;
+        } else {
+            relocate.3.tactical_bonus += weights.g("cut_open_distance_ft") * 0.5;
+        }
+    }
     let mut candidates = [relocate; 2];
     let mut count = 1usize;
     if cut_available {
@@ -392,14 +403,16 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
             .iter()
             .zip(&totals)
             .zip(&weights_soft)
-            .map(|((candidate, total), probability)| crate::state::CandidateTrace {
-                kind: candidate.0,
-                target: candidate.1,
-                to_ft: candidate.2,
-                utility: candidate.3,
-                total: *total,
-                probability: *probability,
-            })
+            .map(
+                |((candidate, total), probability)| crate::state::CandidateTrace {
+                    kind: candidate.0,
+                    target: candidate.1,
+                    to_ft: candidate.2,
+                    utility: candidate.3,
+                    total: *total,
+                    probability: *probability,
+                },
+            )
             .collect(),
     };
     Some(Decision {
@@ -606,7 +619,11 @@ fn action_duration(
             let accel = world.players[state.actor]
                 .effective_acceleration(&world.params.policy)
                 .max(1.0);
-            let ramp = world.params.policy.g("advance_ramp_distance_ft").max(f32::EPSILON);
+            let ramp = world
+                .params
+                .policy
+                .g("advance_ramp_distance_ft")
+                .max(f32::EPSILON);
             let startup = (speed / accel) * (-travel / ramp).exp();
             ((travel / speed + startup) * 1.3).clamp(0.8, 4.0) as f64
         }
@@ -723,7 +740,9 @@ pub fn candidate_utilities(world: &World, state: &DecisionState) -> Vec<Candidat
         let shortest = durations.iter().copied().fold(f64::INFINITY, f64::min);
         let mut kept = Vec::new();
         for (candidate, duration) in candidates.drain(..).zip(durations) {
-            if matches!(candidate.0, ActionKind::Shoot(_)) || duration <= clock || duration == shortest
+            if matches!(candidate.0, ActionKind::Shoot(_))
+                || duration <= clock
+                || duration == shortest
             {
                 kept.push(candidate);
             }
@@ -770,7 +789,10 @@ pub fn candidate_utilities(world: &World, state: &DecisionState) -> Vec<Candidat
     if std::env::var_os("NBA_TRACE_CAND").is_some() {
         eprintln!(
             "CANDCALL last_screen={:?} window={} now={:.3}",
-            world.possession.last_screen.map(|read| (read.route, read.at)),
+            world
+                .possession
+                .last_screen
+                .map(|read| (read.route, read.at)),
             world.params.policy.g("screen_read_window_seconds"),
             world.now()
         );
@@ -993,7 +1015,8 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
             .last_screen
             .map(|read| world.now() - read.at <= 2.2)
             .unwrap_or(false)
-        && state.primary_defender.and_then(|d| d.route) == Some(crate::action::DefenderRoute::Under)
+        && state.primary_defender.and_then(|d| d.route)
+            == Some(crate::action::DefenderRoute::Under)
         && world.players[actor].data.attributes.shooting_three >= 0.7;
     if !shot_origin_legal(world, actor) {
         if trace {
@@ -1657,7 +1680,11 @@ fn fake_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     } else if state.lane_clearance < 3.0 {
         // 传球假动作的价值是下一次传球：按打开宽度占抄截半径基准的比例折算。
         let opening = (policy.fake_pass_lane_ft
-            / world.params.policy.g("pass_intercept_base_ft").max(f32::EPSILON))
+            / world
+                .params
+                .policy
+                .g("pass_intercept_base_ft")
+                .max(f32::EPSILON))
         .clamp(f32::default(), f32::from(1u8));
         (
             crate::action::FakeKind::Pass,

@@ -51,9 +51,8 @@ pub fn step(world: &mut World, dt: f64) {
             } else {
                 1.0
             };
-            let rate = f64::from(
-                rate_base * (physicality_base + physicality) * exposure * discipline,
-            );
+            let rate =
+                f64::from(rate_base * (physicality_base + physicality) * exposure * discipline);
             let chance = 1.0 - (-rate * dt).exp();
             if f64::from(world.draw(Stream::Foul, defender, purpose::OFF_BALL_HOLD, 0)) < chance {
                 called = Some((defender, offender));

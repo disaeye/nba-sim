@@ -107,6 +107,8 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
     }
 
     world.possession.screens += 1;
+    // 掩护完成后掩护人必须选择顺下或外弹：记下时刻，无球决策读它。
+    world.players[screener].screened_at = world.now();
     world.emit(Fact::Screen {
         screener,
         team,

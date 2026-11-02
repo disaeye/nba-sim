@@ -504,7 +504,11 @@ fn try_control_loose(world: &mut World) {
         };
         let base_reach = base + player.attribute(attribute) * skill;
         let reach = if force_pickup {
-            if is_offense { 16.0 } else { 50.0 }
+            if is_offense {
+                16.0
+            } else {
+                50.0
+            }
         } else if state.turnover {
             base_reach
         } else if is_offense {
@@ -680,7 +684,9 @@ fn step_flight(world: &mut World, dt: f64) {
                 _ => f32::INFINITY,
             };
             let rim_in = match &ball.state {
-                BallState::Shot { rim_in_probability, .. } => *rim_in_probability,
+                BallState::Shot {
+                    rim_in_probability, ..
+                } => *rim_in_probability,
                 _ => 0.0,
             };
             // 「是否穿筐口」必须按球心穿过筐平面的位置判断：球在筐口
@@ -764,16 +770,7 @@ fn step_flight(world: &mut World, dt: f64) {
             .is_some_and(|pending| pending.free_throw.is_some())
         {
         } else if let Some((handle, kind)) = shot_swat(world, next_pos, next_z)
-            .or_else(|| {
-                player_contact(
-                    world,
-                    next_pos,
-                    next_z,
-                    &rules,
-                    &coefficients,
-                    reach_share,
-                )
-            })
+            .or_else(|| player_contact(world, next_pos, next_z, &rules, &coefficients, reach_share))
         {
             let contact = prev_pos.lerp(next_pos, 0.5);
             ball.pos = contact;
@@ -983,8 +980,7 @@ pub fn pass_intercept_radius(world: &World, defender: &crate::state::PlayerState
     // 被传球假动作骗到的防守人重心已偏向假目标，真实线路上的手位收窄。
     let bait_relief = match defender.bait {
         Some(bait)
-            if bait.until > world.now()
-                && matches!(bait.kind, crate::action::FakeKind::Pass) =>
+            if bait.until > world.now() && matches!(bait.kind, crate::action::FakeKind::Pass) =>
         {
             world.rules.resolve.technique.fake_pass_lane_ft
         }

@@ -113,24 +113,46 @@ impl World {
                 "action": kind,
                 "target_id": target.map(|handle| self.player_id(handle)),
             }),
-            Fact::ActionIntentRejected { player, kind, reason } => json!({
+            Fact::ActionIntentRejected {
+                player,
+                kind,
+                reason,
+            } => json!({
                 "player_id": self.player_id(*player),
                 "action": kind,
                 "reason": reason,
             }),
-            Fact::ActionPhaseChanged { action_id, player, from, to } => json!({
+            Fact::ActionPhaseChanged {
+                action_id,
+                player,
+                from,
+                to,
+            } => json!({
                 "action_id": action_id,
                 "player_id": self.player_id(*player),
                 "from": format!("{from:?}"),
                 "to": format!("{to:?}"),
             }),
-            Fact::ActionCompleted { action_id, player, kind }
-            | Fact::ActionFailed { action_id, player, kind } => json!({
+            Fact::ActionCompleted {
+                action_id,
+                player,
+                kind,
+            }
+            | Fact::ActionFailed {
+                action_id,
+                player,
+                kind,
+            } => json!({
                 "action_id": action_id,
                 "player_id": self.player_id(*player),
                 "action": kind,
             }),
-            Fact::ActionCancelled { action_id, player, kind, reason } => json!({
+            Fact::ActionCancelled {
+                action_id,
+                player,
+                kind,
+                reason,
+            } => json!({
                 "action_id": action_id,
                 "player_id": self.player_id(*player),
                 "action": kind,
@@ -151,7 +173,12 @@ impl World {
                 "action": kind,
                 "start_position_ft": [start_position.x, start_position.y],
             }),
-            Fact::DefensiveActionPhaseChanged { action_id, defender, from, to } => json!({
+            Fact::DefensiveActionPhaseChanged {
+                action_id,
+                defender,
+                from,
+                to,
+            } => json!({
                 "action_id": action_id,
                 "defender_id": self.player_id(*defender),
                 "from": format!("{from:?}"),
@@ -170,7 +197,13 @@ impl World {
                 "action": kind,
                 "displacement_ft": displacement_ft,
             }),
-            Fact::DefensiveActionCancelled { action_id, defender, shooter, kind, reason } => json!({
+            Fact::DefensiveActionCancelled {
+                action_id,
+                defender,
+                shooter,
+                kind,
+                reason,
+            } => json!({
                 "action_id": action_id,
                 "defender_id": self.player_id(*defender),
                 "shooter_id": self.player_id(*shooter),
@@ -522,14 +555,14 @@ impl World {
                 has_ball: self.holder() == Some(self.player_index(&player.id)),
                 on_court: true,
                 action: player.slot.as_str().to_string(),
-                action_phase: player
-                    .action
-                    .as_ref()
-                    .map(|runtime| match runtime.phase {
+                action_phase: player.action.as_ref().map(|runtime| {
+                    match runtime.phase {
                         nba_domain::action_window::ActionPhase::Preparation => "preparation",
                         nba_domain::action_window::ActionPhase::Execution => "execution",
                         nba_domain::action_window::ActionPhase::FollowThrough => "follow_through",
-                    }.to_string()),
+                    }
+                    .to_string()
+                }),
                 job: Some(player.offense_job.as_str().to_string()),
                 responsibility: Some(player.defense_responsibility.as_str().to_string()),
                 slot: player.slot.as_str().to_string(),

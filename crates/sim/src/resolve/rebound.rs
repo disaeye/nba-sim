@@ -43,9 +43,9 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
         world.players[handle].target_kind = TargetKind::Window;
         world.players[handle].target_partner = handle;
         // 跳起封盖的人还在空中：他没有落脚点去卡位，这一球他不参与 box-out。
-        let airborne = world.defensive_actions[handle].as_ref().is_some_and(|action| {
-            action.kind == crate::action::DefensiveActionKind::BlockJump
-        });
+        let airborne = world.defensive_actions[handle]
+            .as_ref()
+            .is_some_and(|action| action.kind == crate::action::DefensiveActionKind::BlockJump);
         if world.players[handle].team != offense && distance < 12.0 && !airborne {
             world.emit(Fact::BoxOut {
                 player: handle,
@@ -138,7 +138,10 @@ pub fn control(world: &mut World, handle: usize) {
     let Some(state) = world.pending_rebound.take() else {
         return;
     };
-    assert_ne!(world.possession.id, 0, "a rebound control requires an active possession");
+    assert_ne!(
+        world.possession.id, 0,
+        "a rebound control requires an active possession"
+    );
     if state.turnover {
         let team = world.players[handle].team;
         world.emit(Fact::LooseBallRecovered {
@@ -153,11 +156,7 @@ pub fn control(world: &mut World, handle: usize) {
             let charge = state
                 .poke_by
                 .map(|(_, victim)| (victim, TurnoverKind::LostBall))
-                .or_else(|| {
-                    state
-                        .pass_by
-                        .map(|passer| (passer, TurnoverKind::BadPass))
-                });
+                .or_else(|| state.pass_by.map(|passer| (passer, TurnoverKind::BadPass)));
             if let Some((victim, kind)) = charge {
                 world.line_mut(handle).steals += 1;
                 world.line_mut(victim).turnovers += 1;

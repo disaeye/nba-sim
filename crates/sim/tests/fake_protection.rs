@@ -203,7 +203,8 @@ fn ball_protection_reduces_poke_success() {
 
     let nearest = 2.0;
     let now = guarded.now();
-    let before = nba_sim_core::resolve::poke::poke_success(&exposed, defender, holder, nearest, now);
+    let before =
+        nba_sim_core::resolve::poke::poke_success(&exposed, defender, holder, nearest, now);
     let after = nba_sim_core::resolve::poke::poke_success(&guarded, defender, holder, nearest, now);
     let relief = guarded.rules.resolve.technique.protection_poke_relief;
     assert!(before > 0.0, "场景无效：基础成功率必须为正");
@@ -257,10 +258,7 @@ fn starting_another_action_ends_the_protection_window() {
     };
     let participants = [(holder, nba_sim_core::action::ActionIntentRole::Primary)];
     assert!(world.start_action(dribble, &participants));
-    assert!(
-        world.protection.is_none(),
-        "开始其他动作必须退出护球姿态"
-    );
+    assert!(world.protection.is_none(), "开始其他动作必须退出护球姿态");
 }
 
 #[test]

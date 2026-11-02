@@ -4,7 +4,9 @@
 //! `PlayerState::bait` 上，由干扰计算、抄截半径与切球判定分别读取，
 //! 因此一次假动作的后果可以在后续几个真实结算里被观察到。
 
-use crate::action::{ActionIntent, ActionKind, ActionOutcome, Completion, Fact, FakeKind, StateDelta};
+use crate::action::{
+    ActionIntent, ActionKind, ActionOutcome, Completion, Fact, FakeKind, StateDelta,
+};
 use crate::state::{Bait, Phase};
 use crate::world::World;
 
@@ -40,7 +42,12 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: FakeKind) -> Acti
         let defense_skill = world.players[defender].attribute("defense_perimeter");
         let handler_skill = world.players[actor].attribute("ball_handling");
         let read = policy.read_probability(defense_skill, handler_skill);
-        let roll = world.draw(crate::draw::Stream::Decision, actor, crate::draw::purpose::FAKE_READ, 0);
+        let roll = world.draw(
+            crate::draw::Stream::Decision,
+            actor,
+            crate::draw::purpose::FAKE_READ,
+            0,
+        );
         bitten = roll >= read;
         if bitten {
             let until = now + f64::from(policy.fake_bait_seconds);

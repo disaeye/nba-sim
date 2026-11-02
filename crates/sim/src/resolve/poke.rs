@@ -52,10 +52,13 @@ pub fn poke_success(world: &World, thief: usize, holder: usize, nearest: f32, no
         success *= f32::from(1u8) - world.rules.resolve.technique.fake_bait_contest_relief;
     }
     // 主动伸手的动作在执行窗口内是赌对了时机：成功率按策略加成。
-    if world.defensive_actions[thief].as_ref().is_some_and(|action| {
-        action.kind == crate::action::DefensiveActionKind::StealAttempt
-            && action.phase == nba_domain::action_window::ActionPhase::Execution
-    }) {
+    if world.defensive_actions[thief]
+        .as_ref()
+        .is_some_and(|action| {
+            action.kind == crate::action::DefensiveActionKind::StealAttempt
+                && action.phase == nba_domain::action_window::ActionPhase::Execution
+        })
+    {
         success *= f32::from(1u8) + world.rules.resolve.technique.steal_attempt_exec_bonus;
     }
     success
@@ -110,9 +113,10 @@ pub fn step(world: &mut World, dt: f64) {
     }
     let success = poke_success(world, thief, holder, nearest, now);
     if world.draw(Stream::Decision, thief, purpose::STEAL_CREDIT, 1) >= success {
-        if let Some(protection) = world.protection.filter(|protection| {
-            protection.holder == holder && protection.until > now
-        }) {
+        if let Some(protection) = world
+            .protection
+            .filter(|protection| protection.holder == holder && protection.until > now)
+        {
             world.emit(Fact::PokePrevented {
                 player: holder,
                 defender: thief,
@@ -127,8 +131,7 @@ pub fn step(world: &mut World, dt: f64) {
     } else {
         1.0
     };
-    let wobble =
-        (world.draw(Stream::Aim, thief, purpose::STEAL_CREDIT, 3) - 0.5) * 2.0 * spread;
+    let wobble = (world.draw(Stream::Aim, thief, purpose::STEAL_CREDIT, 3) - 0.5) * 2.0 * spread;
     let lateral = Vec2::new(-axis.y * side, axis.x * side);
     let dir = Vec2::new(
         lateral.x * wobble.cos() - lateral.y * wobble.sin(),

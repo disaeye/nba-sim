@@ -31,7 +31,10 @@ pub fn book(
     and_one: bool,
 ) -> FoulBooking {
     let team = world.players[fouler].team;
-    assert!(world.players[fouler].on_court, "only an on-court player can foul");
+    assert!(
+        world.players[fouler].on_court,
+        "only an on-court player can foul"
+    );
     let was_disqualified = world.players[fouler].disqualified;
     let foul_limit = world.rules.league.max_personal_fouls;
     let exhausted_bench = world.rules.league.id == nba_domain::league::LeagueId::Nba
@@ -256,7 +259,12 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
         }
     };
     if booking.team_technical_id.is_some() {
-        start_roster_technical(world, booking, world.players[fouler].team.other(), follow_up);
+        start_roster_technical(
+            world,
+            booking,
+            world.players[fouler].team.other(),
+            follow_up,
+        );
     }
 }
 
@@ -284,6 +292,8 @@ pub fn apply_offensive_foul(world: &mut World, fouler: usize, fouled: usize) {
             ..booking
         },
         retained_team,
-        crate::resolve::freethrow::FreeThrowFollowUp::DeadBall { team: retained_team },
+        crate::resolve::freethrow::FreeThrowFollowUp::DeadBall {
+            team: retained_team,
+        },
     );
 }

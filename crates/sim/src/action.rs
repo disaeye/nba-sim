@@ -182,7 +182,8 @@ impl ProtectKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ActionKind {
-    Dribble(nba_domain::action_window::DribbleMoveKind),    Drive,
+    Dribble(nba_domain::action_window::DribbleMoveKind),
+    Drive,
     Finish,
     Pass(PassKind),
     Screen(ScreenKind),
@@ -323,11 +324,13 @@ impl ActionRuntime {
         assert!(execution_seconds.is_finite() && execution_seconds >= 0.0);
         assert!(follow_through_seconds.is_finite() && follow_through_seconds >= 0.0);
         let window_total = preparation_seconds + execution_seconds + follow_through_seconds;
-        assert!(window_total > 0.0, "action window must have positive duration");
+        assert!(
+            window_total > 0.0,
+            "action window must have positive duration"
+        );
         let scale = intent.duration / window_total;
         let preparation_ends_at = intent.start_time + preparation_seconds * scale;
-        let execution_ends_at =
-            preparation_ends_at + execution_seconds * scale;
+        let execution_ends_at = preparation_ends_at + execution_seconds * scale;
         let ends_at = intent.end_time();
         Self {
             action_id,

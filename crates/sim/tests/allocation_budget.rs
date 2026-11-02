@@ -22,7 +22,11 @@ unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
         if CAPTURE.load(Ordering::Relaxed) && CAPTURED.fetch_add(1, Ordering::Relaxed) < 4 {
-            eprintln!("ALLOC {} bytes\n{}", layout.size(), std::backtrace::Backtrace::force_capture());
+            eprintln!(
+                "ALLOC {} bytes\n{}",
+                layout.size(),
+                std::backtrace::Backtrace::force_capture()
+            );
         }
         System.alloc(layout)
     }
@@ -47,9 +51,10 @@ const TICK: f64 = 0.05;
 fn quiet_tick(world: &World) -> bool {
     let horizon = world.now() + TICK;
     matches!(world.phase(), Phase::Live)
-        && world.players.iter().all(|player| {
-            !player.on_court || horizon < player.schedule.next_redecide_at
-        })
+        && world
+            .players
+            .iter()
+            .all(|player| !player.on_court || horizon < player.schedule.next_redecide_at)
         && world
             .interactions
             .values()
@@ -65,7 +70,11 @@ fn measure(world: &mut World) -> usize {
     let shots = world.shot_samples.len();
     let interactions = world.interactions.len();
     let actions = world.players.iter().filter(|p| p.action.is_some()).count();
-    let defensive = world.defensive_actions.iter().filter(|a| a.is_some()).count();
+    let defensive = world
+        .defensive_actions
+        .iter()
+        .filter(|a| a.is_some())
+        .count();
     // 缓冲扩容本身就是分配：足迹变化说明这一 tick 走了会增长的路径。
     let footprint = world.buffer_footprint();
     let phase = world.phase();
@@ -80,7 +89,12 @@ fn measure(world: &mut World) -> usize {
         || world.shot_samples.len() != shots
         || world.interactions.len() != interactions
         || world.players.iter().filter(|p| p.action.is_some()).count() != actions
-        || world.defensive_actions.iter().filter(|a| a.is_some()).count() != defensive
+        || world
+            .defensive_actions
+            .iter()
+            .filter(|a| a.is_some())
+            .count()
+            != defensive
         || world.buffer_footprint() != footprint
         || world.phase() != phase
         || world.possession.id != possession;
@@ -96,11 +110,14 @@ fn measure(world: &mut World) -> usize {
             world.decision_records.capacity(),
             world.interactions.len()
         );
-
     }
     // 只有活球 tick 属于运动与计时的稳态路径；传球与出手的飞行阶段
     // 跑的是球体物理与接触判定，不在本预算范围内。
-    if produced || !live { 0 } else { delta }
+    if produced || !live {
+        0
+    } else {
+        delta
+    }
 }
 
 #[test]

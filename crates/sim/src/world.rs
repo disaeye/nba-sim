@@ -881,7 +881,9 @@ impl World {
             .iter()
             .all(|(player, _)| self.players[*player].on_court));
         assert!(
-            intent.target.is_none_or(|target| target < self.players.len()),
+            intent
+                .target
+                .is_none_or(|target| target < self.players.len()),
             "action target must reference a player"
         );
         let conflict = participants
@@ -904,7 +906,9 @@ impl World {
         let (preparation, execution, follow_through) = self.action_windows(&intent);
         let configured_total = preparation + execution + follow_through;
         assert!(configured_total.is_finite() && configured_total > 0.0);
-        assert!(intent.start_time.is_finite() && (intent.start_time - self.now()).abs() <= f64::EPSILON);
+        assert!(
+            intent.start_time.is_finite() && (intent.start_time - self.now()).abs() <= f64::EPSILON
+        );
         assert!(intent.duration.is_finite() && intent.duration > 0.0);
         let scale = intent.duration / configured_total;
         let preparation = preparation * scale;
@@ -946,12 +950,27 @@ impl World {
         use crate::action::{ActionKind, ShotKind};
         let rules = &self.rules;
         let (preparation, execution, follow_through) = match intent.kind {
-            ActionKind::Shoot(ShotKind::Dunk | ShotKind::DrivingDunk | ShotKind::CuttingDunk | ShotKind::RunningDunk) => (
+            ActionKind::Shoot(
+                ShotKind::Dunk
+                | ShotKind::DrivingDunk
+                | ShotKind::CuttingDunk
+                | ShotKind::RunningDunk,
+            ) => (
                 rules.dunk_prep_seconds,
                 rules.dunk_exec_seconds,
                 rules.dunk_follow_seconds,
             ),
-            ActionKind::Shoot(ShotKind::Layup | ShotKind::DrivingLayup | ShotKind::CuttingLayup | ShotKind::RunningLayup | ShotKind::ReverseLayup | ShotKind::Floater | ShotKind::AlleyOop | ShotKind::Putback) | ActionKind::Finish => (
+            ActionKind::Shoot(
+                ShotKind::Layup
+                | ShotKind::DrivingLayup
+                | ShotKind::CuttingLayup
+                | ShotKind::RunningLayup
+                | ShotKind::ReverseLayup
+                | ShotKind::Floater
+                | ShotKind::AlleyOop
+                | ShotKind::Putback,
+            )
+            | ActionKind::Finish => (
                 rules.layup_prep_seconds,
                 rules.layup_exec_seconds,
                 rules.layup_follow_seconds,
@@ -971,7 +990,11 @@ impl World {
                 rules.screen_exec_seconds,
                 rules.screen_follow_seconds,
             ),
-            ActionKind::Drive | ActionKind::Dribble(_) | ActionKind::Cut | ActionKind::PostUp | ActionKind::Relocate => (
+            ActionKind::Drive
+            | ActionKind::Dribble(_)
+            | ActionKind::Cut
+            | ActionKind::PostUp
+            | ActionKind::Relocate => (
                 rules.tactics.drive_min_duration_seconds,
                 rules.tactics.drive_max_duration_seconds,
                 rules.tactical_initiation_seconds,
@@ -1075,11 +1098,7 @@ impl World {
     }
 
     /// 只取消指定种类的防守动作：并发动作结算时不能互相清掉。
-    fn cancel_defensive_actions_of(
-        &mut self,
-        kind: DefensiveActionKind,
-        reason: &'static str,
-    ) {
+    fn cancel_defensive_actions_of(&mut self, kind: DefensiveActionKind, reason: &'static str) {
         for defender in 0..self.defensive_actions.len() {
             if self.defensive_actions[defender]
                 .as_ref()
@@ -1462,7 +1481,10 @@ impl World {
         self.active_trace = None;
         self.cancel_actions("possession_start");
         if continuing_possession {
-            assert_eq!(self.possession.team, team, "dead-ball restart must preserve possession team");
+            assert_eq!(
+                self.possession.team, team,
+                "dead-ball restart must preserve possession team"
+            );
         }
         crate::motion::reset_ball_history(self);
         self.possession.off_ball_actions = 0;
@@ -1596,7 +1618,10 @@ impl World {
     }
 
     pub fn start_second_chance(&mut self, team: TeamSide, rebounder: usize, rim_contact: bool) {
-        assert_eq!(self.possession.team, team, "an offensive rebound must keep the offense");
+        assert_eq!(
+            self.possession.team, team,
+            "an offensive rebound must keep the offense"
+        );
         assert_ne!(
             self.possession.id,
             0,
@@ -1712,7 +1737,10 @@ impl World {
         } else {
             0.0
         };
-        if !matches!(momentum_phase, Phase::Live | Phase::PassFlight { .. } | Phase::ShotFlight { .. }) {
+        if !matches!(
+            momentum_phase,
+            Phase::Live | Phase::PassFlight { .. } | Phase::ShotFlight { .. }
+        ) {
             crate::motion::decay_momentum(self, dt);
         }
         if player_time_seconds > 0.0 {
@@ -1813,11 +1841,11 @@ impl World {
     }
 
     fn advance_defensive_actions(&mut self) {
-        if !matches!(
-            self.phase(),
-            Phase::Live | Phase::ShotFlight { .. }
-        ) {
-            self.cancel_defensive_actions_of(DefensiveActionKind::CloseoutContest, "shot_action_ended");
+        if !matches!(self.phase(), Phase::Live | Phase::ShotFlight { .. }) {
+            self.cancel_defensive_actions_of(
+                DefensiveActionKind::CloseoutContest,
+                "shot_action_ended",
+            );
             return;
         }
         let shooting_player = self.players.iter().position(|player| {
@@ -1851,10 +1879,13 @@ impl World {
             return;
         };
         for player in 0..self.defensive_actions.len() {
-            if self.defensive_actions[player].as_ref().is_some_and(|action| {
-                action.kind == DefensiveActionKind::CloseoutContest
-                    && (action.shooter != shooter || action.defender != defender)
-            }) {
+            if self.defensive_actions[player]
+                .as_ref()
+                .is_some_and(|action| {
+                    action.kind == DefensiveActionKind::CloseoutContest
+                        && (action.shooter != shooter || action.defender != defender)
+                })
+            {
                 self.cancel_defensive_action(player, "matchup_changed");
             }
         }
@@ -1954,8 +1985,8 @@ impl World {
                     kind: runtime.kind.as_str(),
                     displacement_ft: (self.players[defender].pos - runtime.start_position).length(),
                 });
-                self.players[defender].schedule.next_redecide_at = now
-                    + f64::from(self.rules.redecide_interval_seconds);
+                self.players[defender].schedule.next_redecide_at =
+                    now + f64::from(self.rules.redecide_interval_seconds);
                 continue;
             }
             self.defensive_actions[defender] = Some(runtime);
@@ -2513,12 +2544,9 @@ impl World {
             Phase::Live => {
                 // 球在空中时时钟走完不是违例：那一球会自己解出进与不进，
                 // 违例只在计时归零时球还在某个球员手里成立。
-                let shooting = self
-                    .any_interaction(|intent| matches!(&intent.kind, ActionKind::Shoot(_)));
-                if self.clock.shot_clock() <= 0.0
-                    && self.pending_rebound.is_none()
-                    && !shooting
-                {
+                let shooting =
+                    self.any_interaction(|intent| matches!(&intent.kind, ActionKind::Shoot(_)));
+                if self.clock.shot_clock() <= 0.0 && self.pending_rebound.is_none() && !shooting {
                     if std::env::var("NBA_TRACE_CLOCK").is_ok() {
                         eprintln!(
                             "CLOCK VIOLATION now={:.2} started={:.2} elapsed={:.2} phase={:?} holder={:?} next_decide={:.2} pending={:?} active={:?} play={:?}",
@@ -2544,11 +2572,7 @@ impl World {
                         player: actor,
                         kind: crate::action::TurnoverKind::ShotClock,
                     });
-                    self.end_possession(
-                        PossessionEndCause::TurnoverViolation,
-                        "shot_clock",
-                        0,
-                    );
+                    self.end_possession(PossessionEndCause::TurnoverViolation, "shot_clock", 0);
                     self.start_possession(team.other(), PossessionKind::Live);
                 }
             }
@@ -2595,7 +2619,9 @@ impl World {
         // 高吊球到篮下时是贴身争抢：防守人就在接球人身边，手够到球就能把它
         // 打掉。空接本身不是稳的两分。
         let result = match self.pass_result.take() {
-            Some(crate::ball::PassResult::Caught { to }) if kind == crate::action::PassKind::Lob => {
+            Some(crate::ball::PassResult::Caught { to })
+                if kind == crate::action::PassKind::Lob =>
+            {
                 match self.contest_lob_catch(to) {
                     Some(by) => Some(crate::ball::PassResult::Intercepted { by }),
                     None => Some(crate::ball::PassResult::Caught { to }),
@@ -2646,7 +2672,8 @@ impl World {
                 // 手碰到球和把球拿住是两件事：碰到只说明站位对了，能不能
                 // 抓住看他的抢断与球感。拿不住就是打掉的活球，谁抢到算谁的。
                 let catch = self.params.policy.w("pass_catch_base")
-                    + self.players[by].attribute("steal") * self.params.policy.w("pass_catch_steal")
+                    + self.players[by].attribute("steal")
+                        * self.params.policy.w("pass_catch_steal")
                     + self.players[by].attribute("ball_handling")
                         * self.params.policy.w("pass_catch_handling");
                 if self.draw(
@@ -2701,11 +2728,7 @@ impl World {
                     kind: crate::action::TurnoverKind::BadPass,
                 });
                 let team = self.players[from].team;
-                self.end_possession(
-                    PossessionEndCause::TurnoverSteal,
-                    "pass_intercepted",
-                    0,
-                );
+                self.end_possession(PossessionEndCause::TurnoverSteal, "pass_intercepted", 0);
                 self.start_possession(team.other(), PossessionKind::Live);
                 self.set_ball_held(by);
                 self.players[by].target = self.top_of_key(team.other());
@@ -2719,11 +2742,7 @@ impl World {
             Some(crate::ball::PassResult::Incomplete) => {
                 if std::env::var("NBA_TRACE_MISS").is_ok() {
                     let d = (self.ball.pos - self.players[info.to].pos).length();
-                    eprintln!(
-                        "MISS dice to={} dist={d:.1} z={:.2}",
-                        info.to,
-                        self.ball.z
-                    );
+                    eprintln!("MISS dice to={} dist={d:.1} z={:.2}", info.to, self.ball.z);
                 }
                 self.finish_bad_pass(from);
             }
@@ -2764,12 +2783,17 @@ impl World {
         if self.clock.game_clock() > 0.0 || self.finished {
             return;
         }
-        if matches!(self.phase(), Phase::FreeThrows { .. } | Phase::FreeThrowFlight { .. }) {
+        if matches!(
+            self.phase(),
+            Phase::FreeThrows { .. } | Phase::FreeThrowFlight { .. }
+        ) {
             return;
         }
-        if self.pending_shot.as_ref().is_some_and(|shot| {
-            shot.result.is_none() && shot.free_throw.is_none()
-        }) {
+        if self
+            .pending_shot
+            .as_ref()
+            .is_some_and(|shot| shot.result.is_none() && shot.free_throw.is_none())
+        {
             return;
         }
         crate::tactics::close_play_window(self);

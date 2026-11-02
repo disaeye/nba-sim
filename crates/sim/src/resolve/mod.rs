@@ -121,7 +121,9 @@ fn resolve_dribble(
         .players
         .iter()
         .enumerate()
-        .filter(|(handle, player)| *handle != actor && player.on_court && player.team != world.players[actor].team)
+        .filter(|(handle, player)| {
+            *handle != actor && player.on_court && player.team != world.players[actor].team
+        })
         .map(|(handle, player)| (handle, (player.pos - world.players[actor].pos).length()))
         .min_by(|left, right| left.1.partial_cmp(&right.1).expect("finite distance"));
     if let Some((defender, _)) = defender {
@@ -131,7 +133,8 @@ fn resolve_dribble(
             | DribbleMoveKind::BehindTheBack
             | DribbleMoveKind::SpinMove
             | DribbleMoveKind::Retreat => {
-                let away = (world.players[actor].pos - world.players[defender].pos).normalize_or_zero();
+                let away =
+                    (world.players[actor].pos - world.players[defender].pos).normalize_or_zero();
                 let lateral = Vec2::new(-away.y, away.x);
                 let step = match kind {
                     DribbleMoveKind::Crossover | DribbleMoveKind::BetweenTheLegs => lateral,
@@ -149,8 +152,8 @@ fn resolve_dribble(
             }
             DribbleMoveKind::Hesitation => {
                 // 迟疑步冻结防守人的伸手时机：留下一个短失衡窗口。
-                let until = world.now()
-                    + f64::from(world.rules.resolve.technique.fake_bait_seconds) * 0.5;
+                let until =
+                    world.now() + f64::from(world.rules.resolve.technique.fake_bait_seconds) * 0.5;
                 world.players[defender].bait = Some(crate::state::Bait {
                     kind: crate::action::FakeKind::Hesitation,
                     until,

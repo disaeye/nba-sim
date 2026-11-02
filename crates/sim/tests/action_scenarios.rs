@@ -209,7 +209,11 @@ fn shot_after_a_bitten_fake_is_less_contested() {
             start_time: world.now(),
             duration: 0.45,
         };
-        nba_sim_core::resolve::fake::resolve(&mut world, &intent, nba_sim_core::action::FakeKind::Shot);
+        nba_sim_core::resolve::fake::resolve(
+            &mut world,
+            &intent,
+            nba_sim_core::action::FakeKind::Shot,
+        );
         if world.players[defender].bait.is_some() {
             bitten = true;
             break;
@@ -389,4 +393,63 @@ fn a_set_screen_contacts_without_a_foul() {
     }
     assert!(contacts > 0, "站定的掩护人必须有真实的接触");
     assert_eq!(fouls, 0, "站定的掩护不得被判进攻犯规");
+}
+
+/// 掩护后的顺下与外弹：掩护人必须用自己的下一次动作兑现掩护。
+#[test]
+fn the_screener_rolls_or_pops_after_setting_a_screen() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    for sagging in [true, false] {
+        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 167);
+        let holder = world.on_court(TeamSide::Home).as_slice()[0];
+        let screener = world.on_court(TeamSide::Home).as_slice()[1];
+        let marker = world.on_court(TeamSide::Away).as_slice()[0];
+        for (index, player) in world.players.iter_mut().enumerate() {
+            player.on_court = index == holder || index == screener || index == marker;
+            player.vel = Vec2::ZERO;
+            player.action = None;
+            player.recovery_since = 0.0;
+        }
+        let hoop = world.hoop_for(TeamSide::Home);
+        world.players[holder].pos = hoop + Vec2::new(-20.0, 8.0);
+        world.players[holder].target = world.players[holder].pos;
+        world.players[screener].pos = hoop + Vec2::new(-14.0, 2.0);
+        world.players[screener].target = world.players[screener].pos;
+        // 对位人贴身还是在收缩，决定顺下还是外弹。
+        world.players[marker].pos = world.players[screener].pos
+            + if sagging {
+                Vec2::new(-9.0, 0.0)
+            } else {
+                Vec2::new(0.6, 0.4)
+            };
+        world.players[marker].target = world.players[marker].pos;
+        world.possession.team = TeamSide::Home;
+        world.start_possession(TeamSide::Home, PossessionKind::Live);
+        world.set_phase(Phase::Live);
+        world.ball.set_held(holder);
+        world.ball.pos = world.players[holder].pos;
+        world.ball.z = world.rules.ball_radius_ft;
+        world.clock.set_shot_clock(20.0);
+        world.possession.started_at = world.now() - 5.0;
+        world.possession.off_ball_actions = 0;
+        world.players[screener].screened_at = world.now();
+        world.players[screener].schedule.next_redecide_at = 0.0;
+
+        nba_sim_core::policy::off_ball_tick(&mut world);
+        let kind = world.players[screener]
+            .action
+            .as_ref()
+            .map(|action| action.intent.kind);
+        assert!(
+            matches!(kind, Some(ActionKind::Cut) | Some(ActionKind::Relocate)),
+            "掩护人必须顺下或外弹，实际 {kind:?}（sagging={sagging}）"
+        );
+        if sagging {
+            assert_eq!(kind, Some(ActionKind::Cut), "对位人收缩时必须顺下");
+        }
+        assert_eq!(
+            world.players[screener].screened_at, 0.0,
+            "兑现之后不得继续挂着掩护偏好"
+        );
+    }
 }

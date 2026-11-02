@@ -219,9 +219,7 @@ fn accumulate(tally: &mut Tally, world: &World, config: &DiagnosticConfig) {
                     .decision_traces
                     .get(index as usize)
                     .and_then(|trace| trace.candidates.get(trace.chosen))
-                    .is_some_and(|candidate| {
-                        candidate.utility.tactical_bonus != f32::default()
-                    })
+                    .is_some_and(|candidate| candidate.utility.tactical_bonus != f32::default())
             }) {
                 tally.on_ball_with_bonus += 1;
             }

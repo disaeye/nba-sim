@@ -88,7 +88,8 @@ fn steal_attempt_boosts_poke_success_only_in_its_execution_window() {
         DefensiveActionKind::StealAttempt,
         nba_domain::action_window::ActionPhase::Execution,
     );
-    let executing = nba_sim_core::resolve::poke::poke_success(&world, defender, holder, nearest, now);
+    let executing =
+        nba_sim_core::resolve::poke::poke_success(&world, defender, holder, nearest, now);
     let bonus = world.rules.resolve.technique.steal_attempt_exec_bonus;
     assert!(
         (executing - base * (1.0 + bonus)).abs() < 1e-6,
@@ -102,7 +103,8 @@ fn steal_attempt_boosts_poke_success_only_in_its_execution_window() {
         DefensiveActionKind::StealAttempt,
         nba_domain::action_window::ActionPhase::Preparation,
     );
-    let preparing = nba_sim_core::resolve::poke::poke_success(&world, defender, holder, nearest, now);
+    let preparing =
+        nba_sim_core::resolve::poke::poke_success(&world, defender, holder, nearest, now);
     assert!(
         (preparing - base).abs() < 1e-6,
         "准备窗口不该有加成：{base:.4} -> {preparing:.4}"

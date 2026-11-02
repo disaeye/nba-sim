@@ -7,8 +7,8 @@
 use glam::Vec2;
 use nba_domain::PlayerData;
 
-use crate::action::{ActionRuntime, DefenderRoute};
 pub use crate::action::TeamSide;
+use crate::action::{ActionRuntime, DefenderRoute};
 use crate::params::PolicyTable;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,6 +219,8 @@ pub struct PlayerState {
     pub action: Option<ActionRuntime>,
     /// 被假动作骗到后的失衡窗口：干扰、抄截半径与切球成功率都读它。
     pub bait: Option<Bait>,
+    /// 最近一次完成掩护的时刻：掩护结束后掩护人要顺下或外弹。
+    pub screened_at: f64,
 }
 
 impl PlayerState {
@@ -260,6 +262,7 @@ impl PlayerState {
             home_spot: pos,
             entered_at: f64::default(),
             resting_until: f64::default(),
+            screened_at: f64::default(),
             schedule: DecisionSchedule::default(),
             action: None,
             bait: None,
