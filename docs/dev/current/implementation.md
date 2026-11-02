@@ -98,7 +98,7 @@
 
 校验器与冻结表的连接：门禁的 `oreb_per_game` 基准改为按本批次出手分区、用 `rebound.oreb_rate_by_zone` 加权；新增 `free_throw_percentage` 判据对照 `freethrow.league_make` 与已登记判据清单（37 → 38 项）。
 
-机制修正：慢速松球不再直接出界（`loose_ball_boundary_speed_ftps`），失误率 0.23 → 0.15；八秒计时改看球的位置并按比赛时钟计，并在八秒过半后给“把球送过中线”的动作加上 `advance_pressure_bonus`；新增罚球禁区违例与末段暂停前场发球；体能按 `shot_fatigue_penalty` 直接压低出手命中，传球判断按 `bad_pass_iq_weight` 决定坏传率，防守卡位曲线接进篮板争抢，掩护接触按力量产生位移。跳球飞行中停在地板上的球原本会让子步循环不再前进（`remaining -= 0`），事件日志因此无界增长到数 GB；现在落地反弹给最小回弹速度、接触时刻为零时按整步推进，`World::emit` 另设 50 万条事实的硬上限，越界就地报错。
+机制修正：慢速松球不再直接出界（`loose_ball_boundary_speed_ftps`），失误率 0.23 → 0.15；八秒计时改看球的位置并按比赛时钟计，并在八秒过半后给“把球送过中线”的动作加上 `advance_pressure_bonus`；新增罚球禁区违例与末段暂停前场发球；体能按 `shot_fatigue_penalty` 直接压低出手命中，传球判断按 `bad_pass_iq_weight` 决定坏传率，防守卡位曲线接进篮板争抢，掩护接触按力量产生位移。跳球飞行中停在地板上的球原本会让子步循环不再前进（`remaining -= 0`），事件日志因此无界增长到数 GB；现在落地反弹给最小回弹速度、接触时刻为零时按整步推进，`World::emit` 另设 50 万条事实的硬上限，越界就地报错。防守卡位加成只在有人贴身争抢时生效（`boxout_contest_radius_ft` 5.0），无人竞争的防守篮板不受影响；体能属性按 `1.5 − stamina` 放大同一次疲劳的命中损失，因为轮换会把在场能量拉平；`bad_pass_iq_weight` 1.5 让传球判断直接决定坏传率与传向何处无关。
 
 32 场门禁的 38 条分布判据全部在带内（`validate-core --seed 1 --games 32` 退出码为零、认证 `pass`），上表是同一批种子的实测值。
 
