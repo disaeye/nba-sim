@@ -398,6 +398,53 @@ fn a_set_screen_contacts_without_a_foul() {
     assert_eq!(fouls, 0, "站定的掩护不得被判进攻犯规");
 }
 
+/// 掩护的力量顶开防守人：力量越高推开越远，位置真的跟着变。
+#[test]
+fn a_stronger_screener_pushes_the_defender_further() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut pushed = Vec::new();
+    for strength in [0.10f32, 0.95] {
+        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 151);
+        let offense = world.on_court(TeamSide::Home).as_slice()[0];
+        let screener = world.on_court(TeamSide::Home).as_slice()[1];
+        let defender = world.on_court(TeamSide::Away).as_slice()[0];
+        for (index, player) in world.players.iter_mut().enumerate() {
+            player.on_court = index == offense || index == screener || index == defender;
+            player.vel = Vec2::ZERO;
+        }
+        world.players[screener].data.attributes.strength = strength;
+        let spot = Vec2::new(60.0, 25.0);
+        world.players[offense].pos = spot;
+        world.players[offense].target = spot;
+        world.players[screener].pos = spot + Vec2::new(0.8, 0.6);
+        world.players[screener].target = world.players[screener].pos;
+        world.players[defender].pos = spot + Vec2::new(1.0, 0.9);
+        world.players[defender].target = world.players[defender].pos;
+        world.possession.team = TeamSide::Home;
+        world.start_possession(TeamSide::Home, PossessionKind::Live);
+        world.set_phase(Phase::Live);
+        world.screen_defender = Some(defender);
+        let before = world.players[defender].pos;
+        let intent = ActionIntent {
+            actor: offense,
+            kind: ActionKind::Screen(ScreenKind::OnBall),
+            target: Some(screener),
+            from_ft: spot,
+            to_ft: spot,
+            start_time: world.now(),
+            duration: 1.0,
+        };
+        nba_sim_core::resolve::screen::resolve(&mut world, &intent, ScreenKind::OnBall);
+        pushed.push((world.players[defender].pos - before).length());
+    }
+    assert!(
+        pushed[1] > pushed[0] + 0.02,
+        "力量更高的掩护必须把防守人推得更远，实际 {:.3} 与 {:.3}",
+        pushed[1],
+        pushed[0]
+    );
+}
+
 /// 掩护后的顺下与外弹：掩护人必须用自己的下一次动作兑现掩护。
 #[test]
 fn the_screener_rolls_or_pops_after_setting_a_screen() {

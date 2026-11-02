@@ -68,6 +68,13 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
     let separation = (world.players[screener].pos - world.players[defender].pos)
         .length()
         .max(0.2);
+    // 掩护的身体接触把防守人顶开：位移直接作用在位置上，防守人随后自己
+    // 走回对位点。单次顶开有上限，不能一记掩护把人送出几步。
+    if displacement_ft > 0.0 {
+        let away = (world.players[defender].pos - world.players[screener].pos).normalize_or_zero();
+        let pushed = world.players[defender].pos + away * displacement_ft.min(0.6);
+        world.players[defender].pos = pushed;
+    }
 
     // 移动掩护：掩护人还没落位就撞上防守人。接触本身是掩护的常态，
     // 裁判只在其中吹罚一部分；physicality 越高越不容易被吹。
