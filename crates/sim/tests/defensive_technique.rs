@@ -5,7 +5,7 @@
 
 use glam::Vec2;
 use nba_domain::rules::GameRules;
-use nba_sim_core::action::{DefensiveActionKind, DefensiveActionRuntime, Fact, ShotKind};
+use nba_sim_core::action::{DefensiveActionKind, DefensiveActionRuntime, Fact, ShotKind, TurnoverKind};
 use nba_sim_core::params::{workspace_calibration_dir, Params};
 use nba_sim_core::state::{DefenseResponsibility, DribbleState, Phase};
 use nba_sim_core::{MatchSetup, TeamSide, World};
@@ -299,11 +299,22 @@ fn a_blocked_shot_is_hand_contact_and_leaves_the_ball_loose() {
                 )
             });
             assert!(hand, "封盖必须由手碰球产生：blocker={blocker}");
-            // 被盖之后球必须是松球，而不是直接落到某个人手里。
+            // 被盖之后球必须是松球，而不是直接落到某个人手里；
+            // 被盖的球滚出边线同样是活球争夺的结果。
             let loose = report.events[index..].iter().any(|other| {
-                matches!(&other.fact, Fact::ReboundOpportunity { .. } | Fact::LooseBallRecovered { .. })
+                matches!(
+                    &other.fact,
+                    Fact::ReboundOpportunity { .. }
+                        | Fact::LooseBallRecovered { .. }
+                        | Fact::Turnover {
+                            kind: TurnoverKind::OutOfBounds,
+                            ..
+                        }
+                )
             }) || report.possessions.iter().any(|record| {
-                record.ended_by.contains("block") || record.ended_by.contains("loose")
+                record.ended_by.contains("block")
+                    || record.ended_by.contains("loose")
+                    || record.ended_by.contains("out_of_bounds")
             });
             assert!(loose, "被盖之后必须进入松球争夺：blocker={blocker}");
         }

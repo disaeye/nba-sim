@@ -290,6 +290,8 @@ fn step_loose(world: &mut World, dt: f64) {
 fn out_of_bounds(world: &mut World, spot: Vec2) {
     let touched = world.last_touch;
     let offense = world.possession.team;
+    // 发球地点就是出界点：球从哪条线出去，就从哪里发回来。
+    world.inbound_spot = Some(spot);
     world.emit(Fact::BallContact {
         kind: "out_of_bounds",
         entity: touched,

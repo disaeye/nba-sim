@@ -119,4 +119,21 @@ fn a_loose_ball_over_the_sideline_hands_possession_to_the_opponent() {
         Phase::DeadBall { team, .. } => assert_eq!(team, TeamSide::Away, "出界后由对方发球"),
         other => panic!("出界后必须停表换边，实际 {other:?}"),
     }
+    // 发球地点是出界点：等停表结束，发球人的目标点必须落在边线那一侧。
+    for _ in 0..200 {
+        if matches!(world.phase(), Phase::Inbound { .. }) {
+            break;
+        }
+        world.step(TICK_SECONDS);
+    }
+    let passer = world.inbound_passer.expect("发球人必须已确定");
+    let target = world.players[passer].target;
+    assert!(
+        target.x <= 4.0,
+        "出界后的发球点必须在边线一侧：{target:?}"
+    );
+    assert!(
+        (target.y - 25.0).abs() <= 3.0,
+        "发球点必须留在出界处的纵向位置：{target:?}"
+    );
 }

@@ -177,6 +177,8 @@ pub struct World {
     pub protection: Option<crate::state::BallProtection>,
     pub possession_points: u32,
     pub inbound_passer: Option<usize>,
+    /// 本次发球的地点：由停表原因写入（出界点、违例点）；无记录时用本方底线。
+    pub inbound_spot: Option<Vec2>,
     pub violations: Vec<String>,
     pub last_separation: Option<(usize, f32, f64)>,
     /// 选板冷却表：剧本下标 → 可再次激活的时刻。
@@ -908,6 +910,7 @@ impl World {
             protection: None,
             possession_points: 0,
             inbound_passer: None,
+            inbound_spot: None,
             violations: Vec::new(),
             last_separation: None,
             play_cooldowns,
@@ -1582,7 +1585,11 @@ impl World {
         } else {
             width - self.rules.ball_radius_ft
         };
-        let inbound_spot = glam::Vec2::new(baseline_x, height * 0.5);
+        // 发球地点优先用停表时记录的位置：出界在边线上发，违例在断点发；
+        // 没有记录时（命中、节次开局）回到本方底线。
+        let inbound_spot = self.inbound_spot.take().unwrap_or_else(|| {
+            glam::Vec2::new(baseline_x, height * 0.5)
+        });
         // 发球由离发球点最近的队员执行：他就在本方底线附近，不用瞬移，也
         // 不用把进攻时钟耗在走位上。
         let handler = self
