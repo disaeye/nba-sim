@@ -3,14 +3,18 @@
 > 状态类型：当前快照，不是执行日志。
 > 动作链内核（`crates/sim`）的设计与缺口清单见 `docs/dev/action_chain_engine.md`。
 > 证据原则：本文件只写当前工作区可以由代码、测试或守卫复核的结论。旧引擎的记录保留在 `docs/dev/cycles/`、`docs/dev/evidence/` 与 `docs/decisions.md`，本文件不再复述。
-> 复核日期：2026-10-30。
-> 校准批次数据仍来自 2026-10-21 的内核快照；本轮内核改动后尚未重新运行完整校准，不能作为当前验收结论。
+> 复核日期：2026-11-02。
+> 校准正在按 `full_simulation_plan.md` §12 G 进行；残差记录在 `docs/dev/current/implementation.md` 的校准一节。
 
 ## 1. 当前工作区状态
 
-当前实施阶段按 `docs/dev/current/full_simulation_plan.md` 执行；完整进度与逐项缺口见 `docs/dev/current/implementation.md`。`crates/sim` 是唯一比赛模拟实现，同一完成比赛的 CLI 与 WASM 入口已通过 seed 211 的摘要和投影事件对比。独立事件账本、会话检查点恢复、事件游标、规则场景和若干 NBA/FIBA 程序已有对应测试。
+当前实施阶段按 `docs/dev/current/full_simulation_plan.md` 执行；阶段与证据的逐项对应见 `docs/dev/evidence/stage_gate_map.md`。`crates/sim` 是唯一比赛模拟实现，同一完成比赛的 CLI 与 WASM 入口已通过 seed 211 的摘要和投影事件对比。独立事件账本、会话检查点恢复与磁盘检查点、事件游标、规则场景矩阵与动作场景矩阵已有对应测试。
 
-全方案尚未完成：进攻 `ActionRuntime` 记录球员动作阶段和交互身份；另有独立 `DefensiveActionRuntime::CloseoutContest` 在投篮准备期间并行执行，改变防守者移动位置并影响真实投篮干扰几何。主要动作解析仍依赖 `World::active`，十名球员独立候选及完整攻防响应链未完成。完整动作候选到结果的因果链、完整 NBA/FIBA 程序裁决和规则场景矩阵、规则档案全部行为字段验证，以及当前内核上的全量校准仍有缺口。工作区全量测试状态记录于实施文档；最近一次完整工作区运行早于 CloseoutContest 修改，仅 `baseline_fingerprint_matches_recorded_artifact` 失败，过期基线工件未更新。Closeout 定向验证中，`action_chain` 5/5、`assignment` 2/2、`continuity` 2/2、`shot_model_invariants` 4/4、`allocation_budget` 1/1、`engine` 17/17、`rules_flow` 10/10 通过；不能据此认定完整工作区测试或全部并行动作通过。
+全局单动作 `World::active` 已移除：`World::advance_parallel_actions` 逐人推进每名球员自己的 `ActionRuntime`，多人配合由交互编号结算，防守动作另有 `CloseoutContest`、`StealAttempt`、`BlockJump` 三种运行时。并发性由 `crates/sim/tests/parallel_actions.rs` 4 项直接验证（多人运行时同一 tick 共存且种类不同、出手期间防守并行、每个 `ActionStarted` 恰有一个终态、死球终态不起手）。
+
+动作目录的 16 个族全部有生产路径与通过测试，`missing_evidence` 为空；传球八种技术、切入六种路线、背身步法、欧洲步、后撤步、包夹与护球、挤过与绕过、回位均已接入候选与后果消费者。规则侧已接入后场八秒、回场、出界归属与边线发球点、紧逼五秒、停表跳球准备。
+
+完整工作区测试（70 个二进制）在最近一次运行中全部通过，基线指纹已按当前行为重记。未闭合项：进攻三秒与清空禁区行为、罚球禁区违例与复核、发球地点细分、裁决计划单一提交入口（清单见 `docs/dev/current/adjudication_design.md`）以及校准残差。
 
 ## 2. 历史门矩阵：2026-10-21
 
