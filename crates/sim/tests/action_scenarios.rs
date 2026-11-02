@@ -1472,3 +1472,59 @@ fn a_trap_raises_poke_risk_and_protection_helps_the_exit() {
         "护球出球必须仍然有成功的可能：{protected_pass:.3}"
     );
 }
+
+/// 欧洲步：直线路上有人时收球步往侧面绕，没人时走直线。
+#[test]
+fn a_contested_lane_finish_takes_a_euro_step_around_the_defender() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let lateral_offset = |blocked: bool| -> f32 {
+        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 241);
+        let finisher = world.on_court(TeamSide::Home).as_slice()[0];
+        let defender = world.on_court(TeamSide::Away).as_slice()[0];
+        for (index, player) in world.players.iter_mut().enumerate() {
+            player.on_court = index == finisher || index == defender;
+            player.vel = Vec2::ZERO;
+        }
+        let hoop = world.hoop_for(TeamSide::Home);
+        let spot = hoop + Vec2::new(-14.0, 0.0);
+        let gather = hoop + Vec2::new(-8.0, 0.0);
+        world.players[finisher].pos = gather;
+        world.players[finisher].target = gather;
+        world.players[defender].pos = if blocked {
+            // 站在收球步的直线路上。
+            hoop + Vec2::new(-4.0, 0.4)
+        } else {
+            // 站在路外十英尺。
+            hoop + Vec2::new(-4.0, 10.0)
+        };
+        world.players[defender].target = world.players[defender].pos;
+        world.possession.team = TeamSide::Home;
+        world.start_possession(TeamSide::Home, PossessionKind::Live);
+        world.set_phase(Phase::Live);
+        world.ball.set_held(finisher);
+        world.ball.pos = gather;
+        world.ball.z = world.rules.ball_radius_ft;
+        world.possession.gather_pos = Some(hoop + Vec2::new(-2.0, 0.0));
+        let intent = ActionIntent {
+            actor: finisher,
+            kind: ActionKind::Finish,
+            target: None,
+            from_ft: spot,
+            to_ft: hoop,
+            start_time: world.now(),
+            duration: 0.5,
+        };
+        nba_sim_core::resolve::drive::resolve_finish(&mut world, &intent);
+        world.players[finisher].target.y - hoop.y
+    };
+    let straight = lateral_offset(false);
+    let around = lateral_offset(true);
+    assert!(
+        straight.abs() < 0.2,
+        "无人堵路时收球步必须走直线：{straight:.2}"
+    );
+    assert!(
+        around.abs() > 1.0,
+        "有人堵路时必须绕着走：{around:.2}"
+    );
+}

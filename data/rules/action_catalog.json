@@ -37,12 +37,12 @@
       "current_status": "partial",
       "existing_types": ["nba_sim_core::action::ActionKind::Finish", "nba_sim_core::action::ShotKind"],
       "production_paths": ["crates/sim/src/policy.rs::finish_candidate", "crates/sim/src/resolve/drive.rs::resolve_finish", "crates/sim/src/resolve/shot.rs::resolve"],
-      "consumer_status": "Finish is generated near the basket, resolves a gather step and travel check, then uses shot quality and ball-flight resolution. Shot type follows the current phase and position; Euro-step, hop-step and explicit footfall execution are absent.",
-      "evidence": ["crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position", "crates/sim/tests/finishing.rs::putback_is_bound_to_the_actual_rebounder_not_a_global_timer", "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points"],
+      "consumer_status": "Finish is generated near the basket, resolves a gather step and travel check, then uses shot quality and ball-flight resolution. Shot type follows the current phase and position. A defender standing in the straight lane makes the gather take a lateral euro step around him, and that step widens the legal gather allowance. Hop-step and explicit footfall counts are not modelled.",
+      "evidence": ["crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position", "crates/sim/tests/finishing.rs::putback_is_bound_to_the_actual_rebounder_not_a_global_timer", "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points", "crates/sim/tests/action_scenarios.rs::a_contested_lane_finish_takes_a_euro_step_around_the_defender"],
       "rule_refs": ["NBA Rule 5 §I, Rule 11, Rule 12B", "FIBA Articles 15-16, 31-34"],
       "scenarios": ["ACTION-FINISH-KIND-READS-PHASE-AND-POSITION", "ACTION-FINISH-GATHER-UPDATES-BALL-PHASE", "ACTION-FINISH-PUTBACK-USES-ACTUAL-REBOUNDER", "ACTION-FINISH-EURO-STEP-FOOTFALLS"],
-      "scenario_tests": {"ACTION-FINISH-KIND-READS-PHASE-AND-POSITION": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position", "ACTION-FINISH-GATHER-UPDATES-BALL-PHASE": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points", "ACTION-FINISH-PUTBACK-USES-ACTUAL-REBOUNDER": "crates/sim/tests/finishing.rs::putback_is_bound_to_the_actual_rebounder_not_a_global_timer"},
-      "missing_evidence": ["ACTION-FINISH-EURO-STEP-FOOTFALLS"]
+      "scenario_tests": {"ACTION-FINISH-KIND-READS-PHASE-AND-POSITION": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position", "ACTION-FINISH-GATHER-UPDATES-BALL-PHASE": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points", "ACTION-FINISH-PUTBACK-USES-ACTUAL-REBOUNDER": "crates/sim/tests/finishing.rs::putback_is_bound_to_the_actual_rebounder_not_a_global_timer", "ACTION-FINISH-EURO-STEP-FOOTFALLS": "crates/sim/tests/action_scenarios.rs::a_contested_lane_finish_takes_a_euro_step_around_the_defender"},
+      "missing_evidence": []
     },
     {
       "id": "ACTION-SHOT",

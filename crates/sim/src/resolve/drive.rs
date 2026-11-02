@@ -184,11 +184,47 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
     let hoop = world.hoop_for(team);
     let pos = world.players[actor].pos;
     let direction = (hoop - pos).normalize_or_zero();
-    let allowance = world.params.policy.g("gather_travel_allowance_ft");
+    let mut allowance = world.params.policy.g("gather_travel_allowance_ft");
     let gather = world.possession.gather_pos.unwrap_or(intent.from_ft);
     // 收球步的终结位置由决策意图给出：突破上篮进入篮下完成，抛投在近筐
     // 区域完成，低位保持低位位置。
-    let finish = intent.to_ft;
+    let mut finish = intent.to_ft;
+    // 欧洲步：防守人横在直线路上时，收球步要往侧面绕一步再起，
+    // 绕的那一步是第二步，仍然是合法收球步。
+    let blocker = world
+        .players
+        .iter()
+        .filter(|player| player.on_court && player.team != team)
+        .map(|player| {
+            let segment = finish - pos;
+            let length = segment.length_squared();
+            let t = if length > f32::MIN_POSITIVE {
+                ((player.pos - pos).dot(segment) / length).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let closest = pos + segment * t;
+            ((player.pos - closest).length(), t)
+        })
+        .filter(|(distance, t)| {
+            *distance <= world.params.policy.g("euro_step_defender_ft")
+                && (0.2..=0.8).contains(t)
+        })
+        .min_by(|left, right| left.0.total_cmp(&right.0))
+        .map(|(_, _)| ())
+        .is_some();
+    if blocker {
+        let lateral = Vec2::new(-direction.y, direction.x);
+        let side = world
+            .players
+            .iter()
+            .filter(|player| player.on_court && player.team != team)
+            .map(|player| lateral.dot(player.pos - pos))
+            .fold(0.0f32, |acc, value| acc + value.signum());
+        let away = if side >= 0.0 { -1.0 } else { 1.0 };
+        finish += lateral * (away * world.params.policy.g("euro_step_lateral_ft"));
+        allowance += world.params.policy.g("euro_step_allowance_ft");
+    }
     if travel_on_drive(gather, finish, allowance) {
         world.line_mut(actor).turnovers += 1;
         world.emit(Fact::Turnover {
