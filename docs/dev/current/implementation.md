@@ -78,19 +78,19 @@
 | blocks_per_game | 9.1 | 9.66 | 已在带内 |
 | shooting_fouls_per_game | 18.6 | 19.6 | 已在带内 |
 | fta_per_game | 48.1 | 43.3 | 已在带内 |
-| oreb_per_game | 26.7 | 26.5 | 已对齐 |
+| oreb_per_game | 29.4 | 26.5 | 接近 |
 | fga_per_possession | 0.95 | 0.898 | 略高 |
 | turnover_per_possession | 0.14 | 0.144 | 已对齐 |
 | zone_share 三分 | 0.446 | 0.421 | 略高 |
-| zone_share 篮下 | 0.332 | 0.316 | 已接近 |
-| zone_share 近筐 | 0.139 | 0.191 | 偏低 |
+| zone_share 篮下 | 0.349 | 0.316 | 接近 |
+| zone_share 近筐 | 0.147 | 0.191 | 偏低 |
 | zone_share 中距离 | 0.083 | 0.072 | 接近 |
 | creation_share set | 0.371 | 0.316 | 偏高（接球即投仍是最高价值出手） |
 | creation_share drive | 0.198 | 0.220 | 接近 |
 | creation_share pull_up | 0.139 | 0.190 | 偏低 |
-| creation_share cut | 0.058 | 0.045 | 接近 |
+| creation_share cut | 0.064 | 0.045 | 偏高 |
 | creation_share post | 0.062 | 0.064 | 已对齐 |
-| creation_share putback | 0.030 | 0.045 | 偏低 |
+| creation_share putback | 0.049 | 0.045 | 已对齐 |
 | creation_share transition | 0.126 | 0.121 | 已对齐 |
 
 累计调整：`shoot_tendency` 1.95 → 1.05、`shoot_mid_bonus` −0.05 → 0.35、`shoot_catch_bonus` 1.2 → 0、`shoot_off_dribble_penalty` 1.45 → 0.3；三分份额 0.543 → 0.430。接球阶段只在接到球后的 `catch_window_seconds` 内成立，超过窗口再出手记作持球跳投。突破终结距离改读 `drive_rim_*` 与 `drive_finish_*`，`drive_rim_finishing_threshold` 0.66；掩护读完后的突破加 `drive_screen_bonus` 0.9，`screen_read_over_drive` 从 0.519 回到带内。篮板伸手折减 1.22 → 1.30，必抢半径从写死的 16/50 英尺改成 `rebound_offense_late_reach_ft` / `rebound_defense_late_reach_ft`；前场篮板 35.7 → 26.9。背身候选的距离上限拆成 `post_max_distance_ft`，`post_base` 0.09 → 0.75，背身份额 0.018 → 0.067。`cut_tendency` 0.3 → 0.1，`and_one_rate` 0.23，`transition_window_seconds` 10 → 14。罚球率两分 0.21、三分 0.05。
