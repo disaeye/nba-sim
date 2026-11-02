@@ -585,3 +585,66 @@ fn a_drive_can_stop_and_pass_within_the_same_possession() {
         "真实比赛里必须有突破之后收球分球的回合，观测到 {kick_outs}"
     );
 }
+
+/// 带球撞人：站定的防守人造成进攻犯规，滑步中的防守人不会。
+#[test]
+fn a_charge_requires_a_planted_defender() {
+    let planted_charges = |planted: bool| -> u32 {
+        let mut charges = 0u32;
+        for seed in 1..=200u64 {
+            let params =
+                Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+            let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, seed);
+            let driver = world.on_court(TeamSide::Home).as_slice()[0];
+            let defender = world.on_court(TeamSide::Away).as_slice()[0];
+            for (index, player) in world.players.iter_mut().enumerate() {
+                player.on_court = index == driver || index == defender;
+                player.vel = Vec2::ZERO;
+            }
+            let hoop = world.hoop_for(TeamSide::Home);
+            let spot = hoop + Vec2::new(-10.0, 0.0);
+            world.players[driver].pos = spot;
+            world.players[driver].target = spot;
+            // 防守人站在持球人与篮筐之间，接触距离之内。
+            let toward = (hoop - spot).normalize_or_zero();
+            world.players[defender].pos = spot + toward * 2.5;
+            world.players[defender].target = world.players[defender].pos;
+            world.players[defender].vel = if planted {
+                Vec2::ZERO
+            } else {
+                toward * 9.0
+            };
+            world.possession.team = TeamSide::Home;
+            world.start_possession(TeamSide::Home, PossessionKind::Live);
+            world.set_phase(Phase::Live);
+            world.ball.set_held(driver);
+            world.ball.pos = spot;
+            world.ball.z = world.rules.ball_radius_ft;
+            world.possession.gather_pos = Some(spot);
+            let intent = ActionIntent {
+                actor: driver,
+                kind: ActionKind::Drive,
+                target: None,
+                from_ft: spot,
+                to_ft: spot + toward * 1.0,
+                start_time: world.now(),
+                duration: 0.4,
+            };
+            let before = world.events.len();
+            nba_sim_core::resolve::drive::resolve(&mut world, &intent);
+            if world.events[before..].iter().any(|event| {
+                matches!(
+                    &event.fact,
+                    Fact::Foul { kind: nba_domain::event::FoulKind::Offensive, .. }
+                )
+            }) {
+                charges += 1;
+            }
+        }
+        charges
+    };
+    let planted = planted_charges(true);
+    let sliding = planted_charges(false);
+    assert!(planted > 0, "站定的防守人必须能造进攻犯规，观测到 {planted}");
+    assert_eq!(sliding, 0, "滑步中的防守人不得造成进攻犯规，观测到 {sliding}");
+}
