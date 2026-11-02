@@ -12,9 +12,11 @@
 
 全局单动作 `World::active` 已移除：`World::advance_parallel_actions` 逐人推进每名球员自己的 `ActionRuntime`，多人配合由交互编号结算，防守动作另有 `CloseoutContest`、`StealAttempt`、`BlockJump` 三种运行时。并发性由 `crates/sim/tests/parallel_actions.rs` 4 项直接验证（多人运行时同一 tick 共存且种类不同、出手期间防守并行、每个 `ActionStarted` 恰有一个终态、死球终态不起手）。
 
-动作目录的 16 个族全部有生产路径与通过测试，`missing_evidence` 为空；传球八种技术、切入六种路线、背身步法、欧洲步、后撤步、包夹与护球、挤过与绕过、回位均已接入候选与后果消费者。规则侧已接入后场八秒、回场、出界归属与边线发球点、紧逼五秒、停表跳球准备。
+动作目录的 16 个族全部有生产路径与通过测试，`missing_evidence` 为空；传球八种技术、切入六种路线、背身步法、欧洲步、后撤步、包夹与护球、挤过与绕过、回位均已接入候选与后果消费者。规则侧已接入后场八秒与回场、出界归属与发球地点分类、紧逼五秒、停表跳球准备、罚球禁区违例、教练复核与挑战、干扰球、赛前名单检查，以及加时、换边、八秒清除与防守犯规重置八秒、最后一罚命中后的底线发球。
 
-完整工作区测试（70 个二进制）在最近一次运行中全部通过，基线指纹已按当前行为重记。未闭合项：进攻三秒与清空禁区行为、罚球禁区违例与复核、发球地点细分、裁决计划单一提交入口（清单见 `docs/dev/current/adjudication_design.md`）以及校准残差。
+裁决已收拢到 `World::adjudicate` 一个提交入口（`PenaltyPlan`、`RestartPlan`、`ResumeContext`、`InboundLocation`、`ControlState`）；时钟有 `ClockState`、`ClockDirective`、`ClockController`；内核按职责分到 `clock/`、`program/`、`officiating/`、`actions/`、`control/`、`ledger/` 六个目录，旧路径经 crate 根重导出保持可用；`LeagueProfile` 另有 `PeriodPolicy`、`ClockPolicy`、`FoulPolicy`、`TimeoutPolicy` 四个策略族。
+
+完整工作区测试（75 个二进制）在最近一次运行中全部通过，基线指纹已按当前行为重记；32 场 `validate-core` 的 38 条分布判据全部在带内，认证 `pass`。未闭合项：进攻三秒与清空禁区行为、非法触球、干扰球在篮框上方与碰板后的两种情形、动作技术细分中的收球步法与轴心脚（清单见 `docs/dev/evidence/stage_gate_map.md`）。
 
 ## 2. 历史门矩阵：2026-10-21
 
