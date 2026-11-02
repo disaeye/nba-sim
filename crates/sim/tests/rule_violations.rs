@@ -65,3 +65,58 @@ fn a_backcourt_possession_that_never_advances_is_an_eight_second_violation() {
         "违例之后旧回合必须结清"
     );
 }
+
+#[test]
+fn a_loose_ball_over_the_sideline_hands_possession_to_the_opponent() {
+    let mut world = world(317);
+    let handler = world.on_court(TeamSide::Home).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == handler;
+        player.vel = Vec2::ZERO;
+    }
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.players[handler].pos = Vec2::new(10.0, 25.0);
+    world.players[handler].target = world.players[handler].pos;
+    // 进攻人把球碰出边线：最后触球是进攻方，按违例交出球权。
+    world.last_touch = Some(handler);
+    world.ball =
+        nba_sim_core::ball::BallBody::loose(Vec2::new(2.0, 25.0), Vec2::new(-12.0, 0.0));
+
+    let mut contact = false;
+    for _ in 0..40 {
+        let before = world.events.len();
+        world.step(TICK_SECONDS);
+        for event in &world.events[before..] {
+            if matches!(
+                &event.fact,
+                Fact::BallContact {
+                    kind: "out_of_bounds",
+                    ..
+                }
+            ) {
+                contact = true;
+            }
+        }
+        if contact {
+            break;
+        }
+    }
+    assert!(contact, "球越过边线必须停表");
+    assert!(
+        world.events.iter().any(|event| matches!(
+            &event.fact,
+            Fact::Turnover {
+                kind: TurnoverKind::OutOfBounds,
+                ..
+            }
+        )),
+        "进攻方碰出界必须记违例"
+    );
+    assert_eq!(world.possession.id, 0, "出界之后旧回合必须结清");
+    match world.phase() {
+        Phase::DeadBall { team, .. } => assert_eq!(team, TeamSide::Away, "出界后由对方发球"),
+        other => panic!("出界后必须停表换边，实际 {other:?}"),
+    }
+}
