@@ -778,3 +778,59 @@ fn the_closely_guarded_timer_resets_and_spares_the_dribbler() {
     }
     assert_eq!(violations(&world), 1, "重新紧逼满限时必须吹违例");
 }
+
+/// 拒绝接球：防守人站进传球路线会实际降低这次传球的完成概率。
+#[test]
+fn a_defender_in_the_lane_denies_the_pass() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let build = |with_denier: bool| {
+        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 191);
+        let passer = world.on_court(TeamSide::Home).as_slice()[0];
+        let cutter = world.on_court(TeamSide::Home).as_slice()[2];
+        let denier = world.on_court(TeamSide::Away).as_slice()[0];
+        for (index, player) in world.players.iter_mut().enumerate() {
+            player.on_court = index == passer || index == cutter || index == denier;
+            player.vel = Vec2::ZERO;
+        }
+        let from = Vec2::new(55.0, 25.0);
+        let to = Vec2::new(74.0, 25.0);
+        world.players[passer].pos = from;
+        world.players[passer].target = from;
+        world.players[passer].facing = (to - from).normalize_or_zero();
+        world.players[cutter].pos = to;
+        world.players[cutter].target = to;
+        world.players[denier].pos = if with_denier {
+            // 正好站在传球线上。
+            (from + to) * 0.5
+        } else {
+            // 站在路线外十英尺。
+            (from + to) * 0.5 + Vec2::new(0.0, 10.0)
+        };
+        world.players[denier].target = world.players[denier].pos;
+        world.possession.team = TeamSide::Home;
+        world.start_possession(TeamSide::Home, PossessionKind::Live);
+        world.set_phase(Phase::Live);
+        world.ball.set_held(passer);
+        world.ball.pos = from;
+        world.ball.z = world.rules.ball_radius_ft;
+        (world, passer, cutter)
+    };
+    let (blocked_world, passer, cutter) = build(true);
+    let (open_world, _, _) = build(false);
+    let denied = nba_sim_core::value::pass_completion_probability(
+        &blocked_world,
+        passer,
+        cutter,
+        nba_sim_core::action::PassKind::Chest,
+    );
+    let open = nba_sim_core::value::pass_completion_probability(
+        &open_world,
+        passer,
+        cutter,
+        nba_sim_core::action::PassKind::Chest,
+    );
+    assert!(
+        denied < open,
+        "站进传球路线的防守人必须降低完成概率：{denied} vs {open}"
+    );
+}
