@@ -196,7 +196,7 @@
         },
         {
           "key": "events_per_game",
-          "value": 9646.28125,
+          "value": 9461.53125,
           "lower": 1000.0,
           "upper": 10000.0,
           "passed": true
