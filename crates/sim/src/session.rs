@@ -12,7 +12,10 @@ use crate::params::RuntimeParams;
 use crate::world::{GameReport, MatchSetup, World, TICK_SECONDS};
 
 const MAX_STEPS_PER_CALL: usize = 200_000;
+#[cfg(not(test))]
 const EVENT_HISTORY_LIMIT: usize = 20_000;
+#[cfg(test)]
+const EVENT_HISTORY_LIMIT: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionState {
@@ -43,6 +46,62 @@ pub struct MatchInfo {
     pub tick_seconds: f64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompletionSummary {
+    pub seed: u64,
+    pub home_team: String,
+    pub away_team: String,
+    pub home_score: u32,
+    pub away_score: u32,
+    pub periods: u32,
+    pub ticks: u64,
+    pub possessions: usize,
+    pub event_count: u64,
+    pub box_score: crate::boxscore::BoxScore,
+    pub finished: bool,
+}
+
+impl CompletionSummary {
+    pub fn from_report(report: &GameReport) -> Self {
+        Self {
+            seed: report.seed,
+            home_team: report.home_team.clone(),
+            away_team: report.away_team.clone(),
+            home_score: report.home_score,
+            away_score: report.away_score,
+            periods: report.periods,
+            ticks: report.ticks,
+            possessions: report.possessions.len(),
+            event_count: report.events.len() as u64,
+            box_score: report.box_score.clone(),
+            finished: report
+                .events
+                .iter()
+                .any(|event| matches!(event.fact, crate::action::Fact::GameEnd)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventBatch {
+    pub oldest_available_event_id: Option<u64>,
+    pub latest_event_id: u64,
+    pub next_after_event_id: u64,
+    pub truncated: bool,
+    pub events: Vec<FrameEvent>,
+}
+
+#[derive(Clone)]
+pub struct SessionCheckpoint {
+    version: u32,
+    world: World,
+    seed: u64,
+    state: SessionState,
+    accumulator: f64,
+    events: Vec<FrameEvent>,
+    latest_event_id: u64,
+}
+
 #[derive(Default)]
 pub struct SessionService {
     world: Option<World>,
@@ -50,6 +109,7 @@ pub struct SessionService {
     state: Option<SessionState>,
     accumulator: f64,
     events: Vec<FrameEvent>,
+    latest_event_id: u64,
 }
 
 impl SessionService {
@@ -60,6 +120,7 @@ impl SessionService {
             state: Some(SessionState::Ready),
             accumulator: 0.0,
             events: Vec::new(),
+            latest_event_id: 0,
         }
     }
 
@@ -75,7 +136,11 @@ impl SessionService {
         self.world.is_some()
     }
 
-    pub fn setup<P: Into<RuntimeParams>>(&mut self, params: P, seed: u64) -> Result<MatchInfo, String> {
+    pub fn setup<P: Into<RuntimeParams>>(
+        &mut self,
+        params: P,
+        seed: u64,
+    ) -> Result<MatchInfo, String> {
         let rules = nba_domain::GameRules::default();
         let setup = MatchSetup::builtin(rules);
         let info = MatchInfo {
@@ -91,6 +156,8 @@ impl SessionService {
         self.state = Some(SessionState::Ready);
         self.accumulator = 0.0;
         self.events.clear();
+        self.latest_event_id = 0;
+        self.collect_events();
         Ok(info)
     }
 
@@ -140,6 +207,65 @@ impl SessionService {
     pub fn events(&self, limit: usize) -> Vec<FrameEvent> {
         let start = self.events.len().saturating_sub(limit);
         self.events[start..].to_vec()
+    }
+
+    pub fn event_history_capacity(&self) -> usize {
+        EVENT_HISTORY_LIMIT
+    }
+
+    pub fn full_event_history(&self) -> Option<Vec<FrameEvent>> {
+        let world = self.world.as_ref()?;
+        if !world.finished || self.latest_event_id != world.next_event_id {
+            return None;
+        }
+        Some(
+            world
+                .events
+                .iter()
+                .map(|event| world.project_event(event))
+                .collect(),
+        )
+    }
+
+    pub fn event_history_truncated(&self) -> bool {
+        self.events.first().is_some_and(|event| event.event_id > 1)
+    }
+
+    pub fn events_since(&self, event_id: u64, limit: usize) -> Result<EventBatch, String> {
+        if event_id > self.latest_event_id {
+            return Err(format!(
+                "event cursor {event_id} is ahead of latest event {}",
+                self.latest_event_id
+            ));
+        }
+        let first_available = self.events.first().map(|event| event.event_id);
+        if let Some(first) = first_available {
+            if event_id < first - 1 {
+                return Err(format!(
+                    "event history gap: requested after {event_id}, oldest available event is {first}"
+                ));
+            }
+        } else if event_id < self.latest_event_id {
+            return Err(format!(
+                "event history gap: requested after {event_id}, latest event is {} and history is empty",
+                self.latest_event_id
+            ));
+        }
+        let events: Vec<FrameEvent> = self
+            .events
+            .iter()
+            .filter(|event| event.event_id > event_id)
+            .take(limit)
+            .cloned()
+            .collect();
+        let next_after_event_id = events.last().map_or(event_id, |event| event.event_id);
+        Ok(EventBatch {
+            oldest_available_event_id: first_available,
+            latest_event_id: self.latest_event_id,
+            next_after_event_id,
+            truncated: next_after_event_id < self.latest_event_id,
+            events,
+        })
     }
 
     pub fn tick(&mut self, dt: f64) -> Result<StreamTick, String> {
@@ -242,13 +368,140 @@ impl SessionService {
                 break;
             }
         }
-        self.state = Some(prior);
+        if self.state() != SessionState::Finished {
+            self.state = Some(prior);
+        }
         self.snapshot()
             .ok_or_else(|| "match snapshot unavailable".to_string())
     }
 
     pub fn report(&mut self) -> Option<GameReport> {
+        self.collect_events();
         self.world.as_mut().map(|world| world.report())
+    }
+
+    pub fn completion_summary(&self) -> Option<CompletionSummary> {
+        let world = self.world.as_ref()?;
+        Some(CompletionSummary {
+            seed: world.seed,
+            home_team: world.home_team_name.clone(),
+            away_team: world.away_team_name.clone(),
+            home_score: world.score[0],
+            away_score: world.score[1],
+            periods: world.clock.period(),
+            ticks: world.clock.tick(),
+            possessions: world.possession_log.len(),
+            event_count: world.next_event_id,
+            box_score: world.box_score.clone(),
+            finished: world.finished,
+        })
+    }
+
+    pub fn checkpoint(&self) -> Result<SessionCheckpoint, String> {
+        if !self.accumulator.is_finite() || !(0.0..TICK_SECONDS).contains(&self.accumulator) {
+            return Err("session accumulator is outside the fixed-step interval".to_string());
+        }
+        let world = self
+            .world
+            .as_ref()
+            .ok_or_else(|| "cannot checkpoint before match setup".to_string())?;
+        let mut events = self.events.clone();
+        if world.next_event_id > self.latest_event_id {
+            let first_uncollected = world
+                .events
+                .partition_point(|event| event.event_id <= self.latest_event_id);
+            events.extend(
+                world.events[first_uncollected..]
+                    .iter()
+                    .map(|event| world.frame_event(event)),
+            );
+        }
+        if events.len() > EVENT_HISTORY_LIMIT {
+            let excess = events.len() - EVENT_HISTORY_LIMIT;
+            events.drain(0..excess);
+        }
+        let latest_event_id = world.next_event_id;
+        Ok(SessionCheckpoint {
+            version: 1,
+            world: world.clone(),
+            seed: self.seed,
+            state: self.state(),
+            accumulator: self.accumulator,
+            events,
+            latest_event_id,
+        })
+    }
+
+    pub fn restore(&mut self, checkpoint: SessionCheckpoint) -> Result<(), String> {
+        if checkpoint.version != 1 {
+            return Err(format!(
+                "unsupported checkpoint version {}",
+                checkpoint.version
+            ));
+        }
+        if !checkpoint.accumulator.is_finite()
+            || !(0.0..TICK_SECONDS).contains(&checkpoint.accumulator)
+        {
+            return Err("checkpoint accumulator is outside the fixed-step interval".to_string());
+        }
+        if checkpoint.events.len() > EVENT_HISTORY_LIMIT {
+            return Err("checkpoint event history exceeds its retention limit".to_string());
+        }
+        if checkpoint
+            .events
+            .windows(2)
+            .any(|pair| pair[0].event_id + 1 != pair[1].event_id)
+        {
+            return Err("checkpoint event history is not contiguous".to_string());
+        }
+        if checkpoint.latest_event_id != checkpoint.world.next_event_id {
+            return Err(
+                "checkpoint event cursor does not match the world event ledger".to_string(),
+            );
+        }
+        let retained_latest_event_id = checkpoint.events.last().map_or(0, |event| event.event_id);
+        if retained_latest_event_id != checkpoint.latest_event_id {
+            return Err("checkpoint event history does not end at its latest event".to_string());
+        }
+        if let Some(first) = checkpoint.events.first() {
+            let expected_oldest = checkpoint
+                .latest_event_id
+                .saturating_sub(checkpoint.events.len() as u64)
+                + 1;
+            if first.event_id != expected_oldest {
+                return Err("checkpoint event history exceeds its retention window".to_string());
+            }
+        }
+        if (checkpoint.state == SessionState::Finished) != checkpoint.world.finished {
+            return Err("checkpoint session state disagrees with the world lifecycle".to_string());
+        }
+        self.world = Some(checkpoint.world);
+        self.seed = checkpoint.seed;
+        self.state = Some(checkpoint.state);
+        self.accumulator = checkpoint.accumulator;
+        self.events = checkpoint.events;
+        self.latest_event_id = checkpoint.latest_event_id;
+        Ok(())
+    }
+
+    fn collect_events(&mut self) {
+        let Some(world) = self.world.as_ref() else {
+            return;
+        };
+        let previous_latest_event_id = self.latest_event_id;
+        self.latest_event_id = world.next_event_id;
+        let first_uncollected = world
+            .events
+            .partition_point(|event| event.event_id <= previous_latest_event_id);
+        let collected: Vec<FrameEvent> = world.events[first_uncollected..]
+            .iter()
+            .map(|event| world.frame_event(event))
+            .collect();
+        self.events.extend(collected);
+        if self.events.len() > EVENT_HISTORY_LIMIT {
+            let excess = self.events.len() - EVENT_HISTORY_LIMIT;
+            self.events.drain(0..excess);
+        }
     }
 
     fn step_once(&mut self) {
@@ -256,13 +509,9 @@ impl SessionService {
             return;
         };
         world.step(TICK_SECONDS);
-        let tick = world.stream_tick();
-        self.events.extend(tick.frame.event_log.iter().cloned());
-        if self.events.len() > EVENT_HISTORY_LIMIT {
-            let excess = self.events.len() - EVENT_HISTORY_LIMIT;
-            self.events.drain(0..excess);
-        }
-        if world.finished {
+        let finished = world.finished;
+        self.collect_events();
+        if finished {
             self.state = Some(SessionState::Finished);
             self.accumulator = 0.0;
         }
@@ -271,4 +520,40 @@ impl SessionService {
 
 fn world_finished(world: &World) -> bool {
     world.finished
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SessionService, SessionState, EVENT_HISTORY_LIMIT};
+    use crate::params::workspace_calibration_dir;
+    use crate::params::RuntimeParams;
+
+    #[test]
+    fn real_game_event_history_stays_bounded_and_reports_evicted_cursors() {
+        let mut session = SessionService::new(43);
+        session
+            .setup(
+                RuntimeParams::load(&workspace_calibration_dir()).expect("calibration loads"),
+                43,
+            )
+            .expect("session setup");
+        session.start().expect("session start");
+
+        for _ in 0..30 {
+            session.fast_forward(120.0).expect("real match advances");
+            if session.event_history_truncated() || session.state() == SessionState::Finished {
+                break;
+            }
+        }
+
+        assert!(session.event_history_truncated());
+        let events = session.events(usize::MAX);
+        assert_eq!(events.len(), EVENT_HISTORY_LIMIT);
+        assert!(session.events_since(0, 1).is_err());
+        let first_id = events[0].event_id;
+        let boundary = session
+            .events_since(first_id - 1, 1)
+            .expect("the cursor immediately before the oldest event remains valid");
+        assert_eq!(boundary.events[0].event_id, first_id);
+    }
 }

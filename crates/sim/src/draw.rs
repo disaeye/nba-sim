@@ -107,4 +107,8 @@ pub mod purpose {
     pub const FREE_THROW_MAKE: u16 = 23;
     pub const PLAY_CALL: u16 = 24;
     pub const OPENING_TIP: u16 = 25;
+    pub const OFF_BALL_HOLD: u16 = 26;
+    pub const DRIVE_CHARGE: u16 = 27;
+    pub const GATHER_TRAVEL: u16 = 28;
+    pub const SCREEN_FOUL: u16 = 29;
 }

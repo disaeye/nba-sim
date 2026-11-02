@@ -8,6 +8,7 @@ pub mod assignment;
 pub mod ball;
 pub mod body;
 pub mod boxscore;
+pub mod clock;
 pub mod defense;
 pub mod draw;
 pub mod endgame;
@@ -37,9 +38,11 @@ pub use action::{ActionKind, Fact, ShotKind, TeamSide};
 pub use boxscore::{BoxScore, PlayerLine, TeamLine};
 pub use params::{Params, RuntimeParams, CALIBRATION_DIR};
 pub use replay::{replay_possession, PossessionFrames};
-pub use review::{build_review, write_review, ReviewReport};
 pub use report::GameReport;
-pub use session::{MatchInfo, SessionService, SessionState};
+pub use review::{build_review, write_review, ReviewReport};
+pub use session::{
+    CompletionSummary, EventBatch, MatchInfo, SessionCheckpoint, SessionService, SessionState,
+};
 pub use world::{MatchSetup, PossessionRecord, TimedFact, World};
 
 use std::path::Path;
@@ -51,7 +54,11 @@ pub fn run_game(seed: u64, calibration_dir: &Path) -> GameReport {
 }
 
 /// 用指定阵容与参数跑一场。机制实验通过它注入属性扰动。
-pub fn run_game_with_setup<P: Into<RuntimeParams>>(seed: u64, params: P, setup: MatchSetup) -> GameReport {
+pub fn run_game_with_setup<P: Into<RuntimeParams>>(
+    seed: u64,
+    params: P,
+    setup: MatchSetup,
+) -> GameReport {
     let mut world = World::new(setup, params, seed);
     world.run()
 }

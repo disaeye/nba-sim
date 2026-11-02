@@ -31,7 +31,12 @@ pub struct EpvTerms {
 
 impl EpvTerms {
     pub fn sum(&self) -> f32 {
-        self.ability + self.contest + self.lane + self.help + self.tendency + self.context
+        self.ability
+            + self.contest
+            + self.lane
+            + self.help
+            + self.tendency
+            + self.context
             + self.turnover
     }
 }

@@ -8,7 +8,8 @@
 use glam::Vec2;
 use nba_domain::projectile::ProjectileArc;
 
-use crate::action::{Fact, PassKind};
+use crate::action::{Fact, PassKind, TurnoverKind};
+use crate::draw::{purpose, Stream};
 use crate::state::BallState;
 use crate::world::World;
 
@@ -29,8 +30,7 @@ pub struct PassInFlight {
 
 #[derive(Debug, Clone)]
 pub struct BallBody {
-    pub state: BallState,
-    pub holder: Option<usize>,
+    state: BallState,
     pub pos: Vec2,
     pub z: f32,
     pub vel: Vec2,
@@ -49,6 +49,8 @@ pub struct ShotRelease<'a> {
     pub hoop: Vec2,
     pub release_z: f32,
     pub aperture_ft: f32,
+    /// 碰到筐沿之后仍能补进的概率。与模型里那一项是同一个数。
+    pub rim_in_probability: f32,
     pub origin: Vec2,
     pub plan: crate::shot_quality::ShotPlan,
     pub aim_offset: Vec2,
@@ -74,7 +76,6 @@ impl BallBody {
     pub fn loose(pos: Vec2, vel: Vec2) -> Self {
         Self {
             state: BallState::Loose { pos, vel },
-            holder: None,
             pos,
             z: 0.5,
             vel,
@@ -84,8 +85,7 @@ impl BallBody {
 
     pub fn held(handle: usize) -> Self {
         Self {
-            state: BallState::Held,
-            holder: Some(handle),
+            state: BallState::Held { holder: handle },
             pos: Vec2::ZERO,
             z: 0.0,
             vel: Vec2::ZERO,
@@ -94,18 +94,27 @@ impl BallBody {
     }
 
     pub fn set_held(&mut self, handle: usize) {
-        self.state = BallState::Held;
-        self.holder = Some(handle);
+        self.state = BallState::Held { holder: handle };
         self.vel = Vec2::ZERO;
         self.vz = 0.0;
     }
 
     pub fn release(&mut self, state: BallState) {
         self.state = state;
-        self.holder = None;
     }
 
-    pub fn release_shot(&mut self, release: ShotRelease<'_>) {
+    pub fn state(&self) -> BallState {
+        self.state
+    }
+
+    pub fn holder(&self) -> Option<usize> {
+        match self.state {
+            BallState::Held { holder } => Some(holder),
+            BallState::Pass { .. } | BallState::Shot { .. } | BallState::Loose { .. } => None,
+        }
+    }
+
+    pub(crate) fn release_shot(&mut self, release: ShotRelease<'_>) {
         // 球飞向本次抽样的落点，因此弹道、触筐位置与封盖接触逐次不同。
         // 有效筐口在出手时算好并随球体一起传下去：价值层预测的命中率与
         // 执行层的穿筐判定用的是同一个值。
@@ -124,9 +133,9 @@ impl BallBody {
             target: landing,
             start: release.now,
             aperture_ft: release.aperture_ft,
+            rim_in_probability: release.rim_in_probability,
             aim_offset: release.aim_offset,
         };
-        self.holder = None;
         self.pos = from;
         self.z = z0;
         // 水平方向飞向落点，竖直方向按同一次飞行解算：球心必须在落点
@@ -140,8 +149,9 @@ impl BallBody {
         let rules = release.rules;
         let from_player = release.from_player;
         let to_player = release.to_player;
-        let origin = from_player.pos
-            + from_player.facing.normalize_or_zero() * rules.ball_holder_offset_ft;
+        let origin =
+            from_player.pos + from_player.facing.normalize_or_zero() * rules.ball_holder_offset_ft;
+        // 接球点由调用方的 `catch_point` 算好（提前量已包含在内），这里只用它。
         let aim = release.landing.unwrap_or(to_player.pos);
         let distance = (aim - origin).length();
         let duration = release
@@ -172,7 +182,6 @@ impl BallBody {
             start: release.now,
             duration,
         };
-        self.holder = None;
         self.pos = origin;
         self.z = z0;
         self.vel = (target - origin) / duration as f32;
@@ -182,19 +191,19 @@ impl BallBody {
 
 /// 每 tick 推进球。持球时球跟随手；飞行时积分并在最早接触处停下。
 pub fn step(world: &mut World, dt: f64) {
-    if world.ball.holder.is_some() {
+    if world.ball.holder().is_some() {
         sync_held(world);
         return;
     }
-    match world.ball.state {
-        BallState::Held => sync_held(world),
+    match world.ball.state() {
+        BallState::Held { .. } => sync_held(world),
         BallState::Loose { .. } => step_loose(world, dt),
         BallState::Pass { .. } | BallState::Shot { .. } => step_flight(world, dt),
     }
 }
 
 fn sync_held(world: &mut World) {
-    let Some(handle) = world.ball.holder else {
+    let Some(handle) = world.ball.holder() else {
         return;
     };
     let player = &world.players[handle];
@@ -210,13 +219,13 @@ fn step_loose(world: &mut World, dt: f64) {
     let radius = world.rules.ball_radius_ft;
     let restitution = world.rules.loose_ball_player_restitution;
     let dt = dt as f32;
-    if world.pending_rebound.is_some() {
-        let spot = crate::resolve::rebound::rebound_spot(world);
-        for player in world.players.iter_mut().filter(|player| player.on_court) {
-            player.target = spot;
-            player.target_kind = crate::state::TargetKind::Window;
-            player.target_partner = usize::MAX;
-        }
+    if matches!(world.phase(), crate::state::Phase::JumpBall { .. }) {
+        step_jump_ball_toss(world, dt);
+        return;
+    }
+    if matches!(world.phase(), crate::state::Phase::JumpBallFlight) {
+        step_jump_ball_flight(world, dt);
+        return;
     }
     let mut ball = world.ball.clone();
     let on_floor = ball.z <= radius && ball.vz.abs() < 1.0;
@@ -230,23 +239,24 @@ fn step_loose(world: &mut World, dt: f64) {
     ball.z = (ball.z + ball.vz * dt).max(radius);
     let width = world.rules.court.width_ft;
     let height = world.rules.court.height_ft;
-    let bounded = Vec2::new(
-        ball.pos.x.clamp(radius, width - radius),
-        ball.pos.y.clamp(radius, height - radius),
-    );
-    if bounded != ball.pos {
-        ball.pos = bounded;
-        ball.vel.x = -ball.vel.x * restitution;
-        ball.vel.y = -ball.vel.y * restitution;
-        world.emit(Fact::BallContact {
-            kind: "out_of_bounds",
-            entity: None,
-            time: world.now(),
-            x: ball.pos.x,
-            y: ball.pos.y,
-            z: ball.z.max(radius),
-            sub_tick: 0,
-        });
+    // 球越过边线就死球，不弹回来：球场没有墙。最后触球的队伍交出
+    // 球权，对方在出界点发球。
+    let outside = ball.pos.x < radius
+        || ball.pos.x > width - radius
+        || ball.pos.y < radius
+        || ball.pos.y > height - radius;
+    if outside {
+        let spot = Vec2::new(
+            ball.pos.x.clamp(radius, width - radius),
+            ball.pos.y.clamp(radius, height - radius),
+        );
+        ball.pos = spot;
+        ball.vel = Vec2::ZERO;
+        ball.vz = 0.0;
+        ball.z = radius;
+        world.ball = ball;
+        out_of_bounds(world, spot);
+        return;
     }
     if ball.z <= radius && ball.vz < -1.0 {
         ball.z = radius;
@@ -266,6 +276,199 @@ fn step_loose(world: &mut World, dt: f64) {
     try_control_loose(world);
 }
 
+/// 出界：球停在边线上，球权给最后触球方的对手。投篮出手后球无人
+/// 控制地飞出界是投篮不中，不记失误；持球人或后场球员碰出界才是
+/// 违例。
+fn out_of_bounds(world: &mut World, spot: Vec2) {
+    let touched = world.last_touch;
+    let offense = world.possession.team;
+    world.emit(Fact::BallContact {
+        kind: "out_of_bounds",
+        entity: touched,
+        time: world.now(),
+        x: spot.x,
+        y: spot.y,
+        z: world.rules.ball_radius_ft,
+        sub_tick: 0,
+    });
+    let touched_team = touched.map(|handle| world.players[handle].team);
+    let recipient = match touched_team {
+        Some(team) => team.other(),
+        None => offense.other(),
+    };
+    // 最后触球的是进攻方就是进攻方违例；防守方碰出界则进攻方保留球权。
+    let violation = touched_team.is_none_or(|team| team == offense);
+    let shot_in_air = world.pending_shot.is_some();
+    if violation && !shot_in_air {
+        if let Some(handle) = touched {
+            world.line_mut(handle).turnovers += 1;
+            world.emit(Fact::Turnover {
+                player: handle,
+                kind: TurnoverKind::OutOfBounds,
+            });
+        }
+    }
+    world.end_possession(
+        nba_domain::event::PossessionEndCause::TurnoverViolation,
+        "out_of_bounds",
+        0,
+    );
+    world.cancel_actions("out_of_bounds");
+    world.set_phase(crate::state::Phase::DeadBall {
+        team: recipient,
+        ready_at: world.now() + world.rules.inbound_setup_seconds as f64,
+    });
+    // 球必须在死球期间离手：否则下一 tick 的活球争抢会在回合已关闭
+    //（possession.id == 0）的情况下接管球。发球流程稍后自己把球交给发球人。
+    let handler = world
+        .players
+        .iter()
+        .enumerate()
+        .filter(|(_, player)| player.on_court && player.team == recipient)
+        .min_by(|(left_handle, left), (right_handle, right)| {
+            (left.pos - spot)
+                .length()
+                .total_cmp(&(right.pos - spot).length())
+                .then(left_handle.cmp(right_handle))
+        })
+        .map(|(handle, _)| handle);
+    if let Some(handle) = handler {
+        world.set_ball_held(handle);
+    }
+    world.apply_dead_ball_window();
+}
+
+fn step_jump_ball_toss(world: &mut World, dt: f32) {
+    let mut ball = world.ball.clone();
+    let gravity = world.rules.ball_gravity_ftps2;
+    let previous_vz = ball.vz;
+    let previous_z = ball.z;
+    let next_z = ball.z + ball.vz * dt - 0.5 * gravity * dt * dt;
+    let next_vz = ball.vz - gravity * dt;
+    let reached_peak = previous_vz > 0.0 && next_vz <= 0.0;
+    if reached_peak {
+        let peak_time = previous_vz / gravity;
+        ball.pos += ball.vel * peak_time;
+        ball.z = previous_z + previous_vz * peak_time - 0.5 * gravity * peak_time * peak_time;
+        ball.vz = 0.0;
+        world.emit(Fact::BallContact {
+            kind: "jump_ball_peak",
+            entity: None,
+            time: world.now() - f64::from(dt) + f64::from(peak_time),
+            x: ball.pos.x,
+            y: ball.pos.y,
+            z: ball.z,
+            sub_tick: 0,
+        });
+    } else {
+        ball.pos += ball.vel * dt;
+        ball.z = next_z.max(world.rules.ball_radius_ft);
+        ball.vz = next_vz;
+    }
+    world.ball = ball;
+}
+
+fn step_jump_ball_flight(world: &mut World, dt: f32) {
+    let mut ball = world.ball.clone();
+    let gravity = world.rules.ball_gravity_ftps2;
+    let radius = world.rules.ball_radius_ft;
+    let mut remaining = dt;
+    let mut sub_tick = 0u16;
+    while remaining > f32::MIN_POSITIVE {
+        let vertical_speed = ball.vz.abs().max(1.0);
+        let step = (0.5 * radius / vertical_speed)
+            .min(1.0 / 240.0)
+            .min(remaining);
+        let previous_z = ball.z;
+        let previous_pos = ball.pos;
+        let next_z = ball.z + ball.vz * step - 0.5 * gravity * step * step;
+        let next_vz = ball.vz - gravity * step;
+        let next_pos = ball.pos + ball.vel * step;
+        let crossed_peak = ball.vz > 0.0 && next_vz <= 0.0;
+        let crossed_floor = next_z <= radius;
+        let contact_time = if crossed_peak {
+            ball.vz / gravity
+        } else if crossed_floor {
+            let a = -0.5 * gravity;
+            let b = ball.vz;
+            let c = ball.z - radius;
+            let discriminant = b * b - 4.0 * a * c;
+            let root = discriminant.max(0.0).sqrt();
+            [(-b + root) / (2.0 * a), (-b - root) / (2.0 * a)]
+                .into_iter()
+                .filter(|time| *time >= 0.0 && *time <= step)
+                .fold(f32::INFINITY, f32::min)
+        } else {
+            f32::INFINITY
+        };
+        if contact_time.is_finite() {
+            ball.pos = previous_pos + ball.vel * contact_time;
+            ball.z = if crossed_floor {
+                radius
+            } else {
+                previous_z + ball.vz * contact_time - 0.5 * gravity * contact_time * contact_time
+            };
+            ball.vz = if crossed_floor {
+                (ball.vz - gravity * contact_time).abs() * 0.45
+            } else {
+                0.0
+            };
+            let remaining_step = step - contact_time;
+            let bounded = Vec2::new(
+                ball.pos
+                    .x
+                    .clamp(radius, world.rules.court.width_ft - radius),
+                ball.pos
+                    .y
+                    .clamp(radius, world.rules.court.height_ft - radius),
+            );
+            if bounded != ball.pos {
+                ball.pos = bounded;
+                ball.vel.x = -ball.vel.x * world.rules.loose_ball_player_restitution;
+                ball.vel.y = -ball.vel.y * world.rules.loose_ball_player_restitution;
+            }
+            world.emit(Fact::BallContact {
+                kind: if crossed_floor {
+                    "jump_ball_floor_bounce"
+                } else {
+                    "jump_ball_peak"
+                },
+                entity: None,
+                time: world.now() - f64::from(remaining) + f64::from(contact_time),
+                x: ball.pos.x,
+                y: ball.pos.y,
+                z: ball.z,
+                sub_tick,
+            });
+            world.ball = ball.clone();
+            remaining -= contact_time;
+            if remaining_step <= f32::MIN_POSITIVE {
+                continue;
+            }
+            continue;
+        }
+        ball.pos = next_pos;
+        ball.z = next_z;
+        ball.vz = next_vz;
+        let bounded = Vec2::new(
+            ball.pos
+                .x
+                .clamp(radius, world.rules.court.width_ft - radius),
+            ball.pos
+                .y
+                .clamp(radius, world.rules.court.height_ft - radius),
+        );
+        if bounded != ball.pos {
+            ball.pos = bounded;
+            ball.vel.x = -ball.vel.x * world.rules.loose_ball_player_restitution;
+            ball.vel.y = -ball.vel.y * world.rules.loose_ball_player_restitution;
+        }
+        remaining -= step;
+        sub_tick = sub_tick.saturating_add(1);
+    }
+    world.ball = ball;
+}
+
 fn try_control_loose(world: &mut World) {
     let Some(state) = world.pending_rebound else {
         return;
@@ -274,12 +477,24 @@ fn try_control_loose(world: &mut World) {
         return;
     }
     let elapsed = world.now() - state.started_at;
-    // 长时间无人控制时必须结束松球状态，正常争抢仍按能力触及半径结算。
+    // 被碰歪的传球要先飞一段再进入可控阶段：碰球的人就在球边，延迟为
+    // 零的话下一个 tick 他就把球收走，除了他没人有机会反应。
+    if state.pass_by.is_some()
+        && elapsed < f64::from(world.params.policy.w("loose_ball_pickup_delay_seconds"))
+    {
+        return;
+    }
+    // 争抢能力先按可伸手高度折算到球心所在高度，再与平面距离合成。
     let force_pickup = elapsed > 2.0;
     let base = world.params.policy.w("loose_ball_catch_base_ft");
     let skill = world.params.policy.w("loose_ball_catch_skill_ft");
     let mut best: Option<(usize, f32)> = None;
-    for &handle in world.on_court_home.as_slice().iter().chain(world.on_court_away.as_slice()) {
+    for &handle in world
+        .on_court_home
+        .as_slice()
+        .iter()
+        .chain(world.on_court_away.as_slice())
+    {
         let player = &world.players[handle];
         let is_offense = player.team == state.offense;
         let attribute = if is_offense {
@@ -290,6 +505,8 @@ fn try_control_loose(world: &mut World) {
         let base_reach = base + player.attribute(attribute) * skill;
         let reach = if force_pickup {
             if is_offense { 16.0 } else { 50.0 }
+        } else if state.turnover {
+            base_reach
         } else if is_offense {
             base_reach - 1.15
         } else {
@@ -303,7 +520,23 @@ fn try_control_loose(world: &mut World) {
         }
     }
     if let Some((handle, _)) = best {
+        if std::env::var_os("NBA_TRACE_LOOSE").is_some() {
+            eprintln!(
+                "loose-control elapsed={elapsed:.2} winner={handle} team={:?} offense={:?} ball=({:.1},{:.1},\n {:.1}) holder_before={:?}",
+                world.players[handle].team,
+                state.offense,
+                world.ball.pos.x,
+                world.ball.pos.y,
+                world.ball.z,
+                world.ball.holder(),
+            );
+        }
         crate::resolve::rebound::control(world, handle);
+    } else if std::env::var_os("NBA_TRACE_LOOSE").is_some() {
+        eprintln!(
+            "loose-wait elapsed={elapsed:.2} ball=({:.1},{:.1},{:.1}) offense={:?}",
+            world.ball.pos.x, world.ball.pos.y, world.ball.z, state.offense,
+        );
     }
 }
 
@@ -318,6 +551,8 @@ fn step_flight(world: &mut World, dt: f64) {
     let g = rules.ball_gravity_ftps2;
     let radius = rules.ball_radius_ft;
     let clearance = radius.min(radius + rules.rim_radius_ft * 0.1);
+    let coefficients = crate::physical::Coefficients::from_policy(&world.params.policy);
+    let reach_share = world.params.policy.w("shot_release_vertical_share");
     while remaining > f32::MIN_POSITIVE {
         let speed = (ball.vel.length_squared() + ball.vz * ball.vz)
             .sqrt()
@@ -332,7 +567,10 @@ fn step_flight(world: &mut World, dt: f64) {
         // 有效筐口由出手时的 ShotModel 给出，与价值层预测用的是同一个值；
         // 球飞向本次抽样的落点，因此落点就是球心穿过筐平面的位置。
         if let BallState::Shot {
-            shot_id: _, shooter, aperture_ft, ..
+            shot_id: _,
+            shooter,
+            aperture_ft,
+            ..
         } = &ball.state
         {
             if prev_z > rules.rim_height_ft && next_z <= rules.rim_height_ft {
@@ -441,12 +679,15 @@ fn step_flight(world: &mut World, dt: f64) {
                 BallState::Shot { aperture_ft, .. } => *aperture_ft,
                 _ => f32::INFINITY,
             };
+            let rim_in = match &ball.state {
+                BallState::Shot { rim_in_probability, .. } => *rim_in_probability,
+                _ => 0.0,
+            };
             // 「是否穿筐口」必须按球心穿过筐平面的位置判断：球在筐口
             // 上方还有好几个子步，那里的水平距离比穿越点大，用它判定会
             // 把本该命中的球判成触筐。
             let inside_opening = if ball.vz < 0.0 && prev_z > rules.rim_height_ft {
-                let t = (prev_z - rules.rim_height_ft)
-                    / (prev_z - next_z).max(f32::MIN_POSITIVE);
+                let t = (prev_z - rules.rim_height_ft) / (prev_z - next_z).max(f32::MIN_POSITIVE);
                 let crossing = prev_pos.lerp(next_pos, t);
                 // 穿越点必须与出手时抽到的瞄准半径一致：球飞向落点，球心穿过
                 // 筐平面的位置就是落点。有效筐口用出手时定价的那一个，
@@ -461,6 +702,34 @@ fn step_flight(world: &mut World, dt: f64) {
                 && (rho - rules.rim_radius_ft).hypot(dz) <= tube
             {
                 let contact = prev_pos.lerp(next_pos, 0.5);
+                // 触筐不等于不中：球子打在筐沿内侧后仍然可能落进筐心。
+                // 这一步与模型里的 p_make_cond 是同一项，抽样命中就把球搬到
+                // 筐心正上方竖直下落，下一个子步穿筐平面时距筐心为 0，按
+                // 穿筐结算。
+                let shooter = match &ball.state {
+                    BallState::Shot { shooter, .. } => *shooter,
+                    _ => usize::MAX,
+                };
+                let bounce_in = rim_in > 0.0
+                    && shooter != usize::MAX
+                    && world.draw(Stream::Aim, shooter, purpose::SHOT_MAKE, 2) < rim_in;
+                if bounce_in {
+                    world.emit(Fact::BallContact {
+                        kind: "rim_bounce_in",
+                        entity: None,
+                        time: start_time + f64::from(elapsed + h),
+                        x: hoop.x,
+                        y: hoop.y,
+                        z: rules.rim_height_ft,
+                        sub_tick,
+                    });
+                    ball.pos = hoop;
+                    ball.z = rules.rim_height_ft + 0.4;
+                    ball.vel = Vec2::ZERO;
+                    ball.vz = -3.0;
+                    world.ball = ball;
+                    return;
+                }
                 ball.pos = contact;
                 ball.z = next_z;
                 ball.vel *= -rules.rim_contact_restitution_graze;
@@ -476,9 +745,8 @@ fn step_flight(world: &mut World, dt: f64) {
                 });
                 if let Some(pending) = world.pending_shot.as_mut() {
                     if pending.result.is_none() {
-                        pending.result = Some(crate::resolve::shot::ShotResult::Missed {
-                            rim_contact: true,
-                        });
+                        pending.result =
+                            Some(crate::resolve::shot::ShotResult::Missed { rim_contact: true });
                     }
                 }
                 ball.state = BallState::Loose {
@@ -490,8 +758,23 @@ fn step_flight(world: &mut World, dt: f64) {
             }
         }
         // 罚球不允许防守人触球；其他出手仍由手部接触决定封盖。
-        if world.pending_shot.as_ref().is_some_and(|pending| pending.free_throw.is_some()) {
-        } else if let Some((handle, kind)) = player_contact(world, next_pos, next_z, &rules) {
+        if world
+            .pending_shot
+            .as_ref()
+            .is_some_and(|pending| pending.free_throw.is_some())
+        {
+        } else if let Some((handle, kind)) = shot_swat(world, next_pos, next_z)
+            .or_else(|| {
+                player_contact(
+                    world,
+                    next_pos,
+                    next_z,
+                    &rules,
+                    &coefficients,
+                    reach_share,
+                )
+            })
+        {
             let contact = prev_pos.lerp(next_pos, 0.5);
             ball.pos = contact;
             ball.z = next_z;
@@ -532,6 +815,29 @@ fn finish_flight(world: &mut World, ball: &mut BallBody, rim_contact: bool) {
             };
         }
         BallState::Pass { .. } => {
+            if std::env::var("NBA_TRACE_MISS").is_ok() {
+                if let Some(info) = world.pass_in_flight {
+                    let spot = crate::resolve::pass::cut_target(world, info.to);
+                    let receiver = &world.players[info.to];
+                    let action = receiver.action.as_ref().map(|runtime| {
+                        (
+                            format!("{:?}", runtime.role),
+                            (runtime.intent.to_ft - spot).length(),
+                            runtime.phase,
+                        )
+                    });
+                    eprintln!(
+                        "FLIGHTEND to={} kind={:?} dist={:.2} to_spot={:.2} to_target={:.2} spot_vs_target={:.2} action={action:?} vel={:.2}",
+                        info.to,
+                        info.kind,
+                        (ball.pos - receiver.pos).length(),
+                        (receiver.pos - spot).length(),
+                        (receiver.target - receiver.pos).length(),
+                        (receiver.target - spot).length(),
+                        receiver.vel.length(),
+                    );
+                }
+            }
             world.pass_result = Some(PassResult::Incomplete);
             ball.state = BallState::Loose {
                 pos: ball.pos,
@@ -542,12 +848,22 @@ fn finish_flight(world: &mut World, ball: &mut BallBody, rim_contact: bool) {
     }
 }
 
-fn handle_player_contact(world: &mut World, ball: &mut BallBody, handle: usize, kind: &'static str) {
+fn handle_player_contact(
+    world: &mut World,
+    ball: &mut BallBody,
+    handle: usize,
+    kind: &'static str,
+) {
+    world.last_touch = Some(handle);
     match ball.state {
         BallState::Shot { .. } => {
             if let Some(pending) = world.pending_shot.as_mut() {
                 if pending.result.is_none() {
-                    pending.result = Some(crate::resolve::shot::ShotResult::Blocked { by: handle });
+                    pending.result = Some(if kind == "hand" {
+                        crate::resolve::shot::ShotResult::Blocked { by: handle }
+                    } else {
+                        crate::resolve::shot::ShotResult::Missed { rim_contact: false }
+                    });
                 }
             }
             ball.vel *= -world.rules.loose_ball_player_restitution;
@@ -559,13 +875,38 @@ fn handle_player_contact(world: &mut World, ball: &mut BallBody, handle: usize, 
         }
         BallState::Pass { to, .. } => {
             if kind == "player" && handle != to {
-                // 躯干挡到球只是改变球路，干净抢断要手碰到球。
-                ball.vel *= -world.rules.loose_ball_player_restitution;
+                // 防守球员拍到传球：手是横着扫过来的，球被抽离原来的线路，
+                // 带着一部分前进速度斜着飞出去。沿法线镜像会把球原速打回
+                // 出球人，结果是所有人挤在原点互相弹球，进攻方永远抢不到。
+                world.pass_result = Some(PassResult::Incomplete);
+                let speed = ball.vel.length();
+                if speed > 1.0e-3 {
+                    let forward = ball.vel / speed;
+                    let side = if forward.y * (ball.pos.x - world.players[handle].pos.x)
+                        - forward.x * (ball.pos.y - world.players[handle].pos.y)
+                        >= 0.0
+                    {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+                    let lateral = crate::ball::Vec2::new(-forward.y, forward.x) * side;
+                    let deflected = (forward * 0.55 + lateral * 0.85).normalize();
+                    let retained = 0.45 * speed;
+                    ball.vel = deflected * retained;
+                }
                 ball.vz = -ball.vz * world.rules.loose_ball_player_restitution;
+                ball.state = BallState::Loose {
+                    pos: ball.pos,
+                    vel: ball.vel,
+                };
                 return;
             }
-            world.pass_result = Some(if handle == to {
-                PassResult::Caught { to }
+            let teammate = world
+                .pass_in_flight
+                .is_some_and(|info| world.players[info.from].team == world.players[handle].team);
+            world.pass_result = Some(if handle == to || teammate {
+                PassResult::Caught { to: handle }
             } else {
                 PassResult::Intercepted { by: handle }
             });
@@ -578,7 +919,7 @@ fn handle_player_contact(world: &mut World, ball: &mut BallBody, handle: usize, 
             ball.vel *= -world.rules.loose_ball_player_restitution;
             ball.vz = -ball.vz * world.rules.loose_ball_player_restitution;
         }
-        BallState::Held => {}
+        BallState::Held { .. } => {}
     }
     let _ = kind;
 }
@@ -632,12 +973,27 @@ pub fn pass_catch_radius(
 }
 
 /// 传球拦截半径：价值模型与球体接触共用这一个定义。
-pub fn pass_intercept_radius(
-    rules: &nba_domain::GameRules,
-    defender: &crate::state::PlayerState,
-) -> f32 {
+pub fn pass_intercept_radius(world: &World, defender: &crate::state::PlayerState) -> f32 {
+    // 半径是防守人的手掌在身侧能够到的范围：只有手臂正好在传球
+    // 线路上的防守人才碰得到球，站得离开线路半个身位就碰不到。
     // 抄球半径随抢断属性放大：抢断能力强的防守人真的能把球断下来。
-    rules.ball_radius_ft + 0.92 + defender.attribute("steal") * 1.65
+    world.rules.ball_radius_ft
+        + world.params.policy.g("pass_intercept_base_ft")
+        + defender.attribute("steal") * world.params.policy.g("pass_intercept_steal_ft")
+}
+
+/// 出手时已经抽出「这一球被封盖」，这里只等球飞到那只手的球体里。
+/// 封盖概率与手位几何都来自投篮模型，因此模型说的那次封盖就是这一次。
+fn shot_swat(world: &World, point: Vec2, z: f32) -> Option<(usize, &'static str)> {
+    let pending = world.pending_shot.as_ref()?;
+    if pending.result.is_some() || pending.free_throw.is_some() {
+        return None;
+    }
+    let blocker = pending.block_by?;
+    let hand = crate::shot_quality::blocking_hands(world, pending.shooter)
+        .into_iter()
+        .find(|hand| hand.handle == blocker)?;
+    ((point - hand.pos).length().hypot(z - hand.z) <= hand.radius).then_some((blocker, "hand"))
 }
 
 fn player_contact(
@@ -645,7 +1001,12 @@ fn player_contact(
     next_pos: Vec2,
     next_z: f32,
     rules: &nba_domain::GameRules,
+    coefficients: &crate::physical::Coefficients,
+    reach_share: f32,
 ) -> Option<(usize, &'static str)> {
+    if matches!(world.phase(), crate::state::Phase::JumpBallFlight) {
+        return None;
+    }
     let ball_radius = rules.ball_radius_ft;
     let pass = world.pass_in_flight;
     let body_radius = rules.body_contact_radius_ft + ball_radius;
@@ -660,9 +1021,11 @@ fn player_contact(
             continue;
         }
         let hand_radius = if pass.is_some() {
-            pass_intercept_radius(rules, player)
+            pass_intercept_radius(world, player)
         } else {
-            ball_radius + 0.31 + player.attribute("block") * 0.80
+            ball_radius
+                + world.params.policy.w("block_hand_radius_base_ft")
+                + player.attribute("block") * world.params.policy.w("block_hand_radius_skill_ft")
         };
         if let Some(info) = pass {
             if handle == info.to {
@@ -683,7 +1046,7 @@ fn player_contact(
             if (next_pos - world.players[info.from].pos).length() < rules.ball_radius_ft {
                 continue;
             }
-            let intercept = pass_intercept_radius(rules, player);
+            let intercept = pass_intercept_radius(world, player);
             // 拦截用的是防守人在传球高度上伸手够到的范围：平直传球走胸口，
             // 高吊球从头顶飞过就够不到。球的高度与手的��度一起决定这次
             // 拦截是否成立。
@@ -693,17 +1056,38 @@ fn player_contact(
             let hand_height = rules.chest_height_ft + 1.0;
             let distance = (next_pos - player.pos).length().hypot(next_z - hand_height);
             if distance <= intercept {
+                if std::env::var("NBA_TRACE_CONTACT").is_ok() {
+                    let start = world.players[info.from].pos;
+                    let end = world.players[info.to].pos;
+                    let segment = end - start;
+                    let along = ((next_pos - start).dot(segment) / segment.length_squared())
+                        .clamp(0.0, 1.0);
+                    eprintln!(
+                        "CONTACT defender={handle} along={along:.3} to_end={:.2} to_start={:.2} ball_z={next_z:.2} dist={distance:.2}",
+                        (next_pos - end).length(),
+                        (next_pos - start).length()
+                    );
+                }
                 return Some((handle, "hand"));
             }
             continue;
         }
-        let hand = player.pos
-            + player.facing.normalize_or_zero()
-                * (rules.ball_holder_offset_ft + 0.4);
+        let hand =
+            player.pos + player.facing.normalize_or_zero() * (rules.ball_holder_offset_ft + 0.4);
         let hand_z = if pass.is_some() {
             rules.chest_height_ft + 1.0
         } else {
-            rules.chest_height_ft + 1.0 + player.attribute("block") * 2.5
+            // 封盖手的高度：站着防守的人手只在站立摸高，只有真正起跳的
+            // 干扰动作（防守动作处于执行阶段）才把手举到起跳摸高。
+            let jumping = world
+                .defensive_actions
+                .get(handle)
+                .and_then(Option::as_ref)
+                .is_some_and(|action| {
+                    action.phase == nba_domain::action_window::ActionPhase::Execution
+                });
+            let share = if jumping { reach_share } else { 0.0 };
+            crate::physical::Physical::with(player, coefficients).contest_reach_ft_with(share)
         };
         let hand_distance = (next_pos - hand).length().hypot(next_z - hand_z);
         if hand_distance <= hand_radius {

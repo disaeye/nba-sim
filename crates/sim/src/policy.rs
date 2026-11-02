@@ -13,29 +13,40 @@ use nba_domain::capability::{fatigue_attenuation, map_skill_to_interval};
 use crate::action::{ActionIntent, ActionKind, DefenderRoute, PassKind, ScreenKind, ShotKind};
 use crate::draw::{purpose, Stream};
 use crate::resolve::shooter_zone;
-use crate::state::{
-    DecisionRecord, DecisionSample, DecisionState, Phase, Revalidation,
-};
+use crate::state::{DecisionRecord, DecisionSample, DecisionState, Phase, Revalidation};
 use crate::utility::{softmax_pick_at, EpvTerms, Utility};
 use crate::world::World;
 
 const MAX_SPEED_FT_PER_SEC: f32 = 22.0;
+
+/// 出手评估的逐条轨迹（三分与压哨），仅在 `NBA_SIM_TRACE_SHOT` 设置时输出到 stderr。
+/// 标准输出只承载机器可读的 JSON，诊断信息一律走标准错误。
+fn shot_trace() -> bool {
+    static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *TRACE.get_or_init(|| std::env::var_os("NBA_SIM_TRACE_SHOT").is_some())
+}
+
+fn pass_trace() -> bool {
+    static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *TRACE.get_or_init(|| std::env::var_os("NBA_SIM_TRACE_PASS").is_some())
+}
 
 /// 决策调度：每 tick 调用，只在持球人的调度到期时执行一次完整决策。
 ///
 /// 决策由动作完成、球权变化、接球、掩护接触、协防承诺等事件触发；
 /// 没有事件时，`rules.redecide_interval_seconds` 是最小回退间隔。
 pub fn tick(world: &mut World) {
-    if !matches!(world.phase, Phase::Live) {
-        return;
-    }
-    if world.active.is_some() {
+    if !matches!(world.phase(), Phase::Live) {
         return;
     }
     let Some(holder) = world.holder() else {
         return;
     };
-    if world.now() < world.players[holder].schedule.next_redecide_at {
+    // 时钟见底时节奏优先于调度：球还在手上，就不能等下一次回退间隔。
+    let urgent = world.clock.shot_clock() <= 0.2;
+    if world.players[holder].action.is_some()
+        || (!urgent && world.now() < world.players[holder].schedule.next_redecide_at)
+    {
         return;
     }
     // 选板与故意犯规都在决策时刻推进：两者都会发事实，
@@ -61,7 +72,7 @@ pub fn tick(world: &mut World) {
     world.decision_samples.push(DecisionSample {
         route: crate::views::screen_read_route(world),
         family: intent.kind.family(),
-        shot_clock: world.clock.shot_clock,
+        shot_clock: world.clock.shot_clock(),
         since_screen,
         shooter_three,
         utility: decision.utility,
@@ -74,7 +85,7 @@ pub fn tick(world: &mut World) {
     world.decision_traces.push(decision.trace.clone());
     world.decision_records.push(DecisionRecord {
         decision_id: u64::from(trace_index),
-        tick: world.clock.tick,
+        tick: world.clock.tick(),
         actor,
         observation_digest: crate::views::observation_digest(world, actor),
         candidates: decision.trace.candidates.clone(),
@@ -87,6 +98,8 @@ pub fn tick(world: &mut World) {
     if world.possession.first_action_seconds.is_none() {
         world.possession.first_action_seconds = Some(world.now() - world.possession.started_at);
     }
+    // 决策选出的动作决定接下来的持球阶段。出手类型的选择读当前阶段：
+    // 阶段写在这里，出手结算读到的阶段与刚选定的动作一致。
     world.possession.ball_phase = match intent.kind {
         ActionKind::Drive => crate::state::BallPhase::Drive,
         ActionKind::Finish => crate::state::BallPhase::Gather,
@@ -122,20 +135,29 @@ pub fn tick(world: &mut World) {
     }
     let screen_defender = decision.screen_defender;
     world.screen_defender = screen_defender;
-    if let Some(screener) = intent.target.filter(|_| matches!(intent.kind, ActionKind::Screen(_))) {
-        let defender = screen_defender.expect("screen must have a defender");
-        let defender_pos = world.players[defender].pos;
-        let handler_pos = world.players[actor].pos;
-        let contact_target = defender_pos
-            + (handler_pos - defender_pos).normalize_or_zero()
-                * world.rules.min_player_separation_ft;
-        world.players[screener].target = contact_target;
-        world.players[screener].target_kind = crate::state::TargetKind::Contact;
-        world.players[screener].target_partner = defender;
+    let mut participants = vec![(actor, crate::action::ActionIntentRole::Primary)];
+    match intent.kind {
+        ActionKind::Screen(_) => {
+            let screener = intent.target.expect("screen action requires a screener");
+            participants.push((screener, crate::action::ActionIntentRole::ScreenPartner));
+            let defender = screen_defender.expect("screen must have a defender");
+            let defender_pos = world.players[defender].pos;
+            let handler_pos = world.players[actor].pos;
+            let contact_target = defender_pos
+                + (handler_pos - defender_pos).normalize_or_zero()
+                    * world.rules.min_player_separation_ft;
+            world.players[screener].target = contact_target;
+            world.players[screener].target_kind = crate::state::TargetKind::Contact;
+            world.players[screener].target_partner = defender;
+        }
+        ActionKind::Cut => {
+            let cutter = intent.target.expect("cut action requires a cutter");
+            participants.push((cutter, crate::action::ActionIntentRole::CutPartner));
+        }
+        _ => {}
     }
-    world.active = Some(intent);
+    assert!(world.start_action(intent, &participants));
 }
-
 
 /// 候选动作：动作本身、目标球员、落点与它的效用分解。
 pub type Candidate = (ActionKind, Option<usize>, Vec2, Utility);
@@ -168,7 +190,11 @@ pub fn choose_action(world: &mut World) -> Decision {
     let screen_defender = state
         .primary_defender
         .map(|defender| defender.index)
-        .filter(|_| candidates.iter().any(|candidate| matches!(candidate.0, ActionKind::Screen(_))));
+        .filter(|_| {
+            candidates
+                .iter()
+                .any(|candidate| matches!(candidate.0, ActionKind::Screen(_)))
+        });
     assert!(
         !candidates.is_empty(),
         "决策候选集不能为空：持球人 {} 在任何规则组合下都至少能传或投",
@@ -180,12 +206,63 @@ pub fn choose_action(world: &mut World) -> Decision {
         .map(|(_, _, _, utility)| utility.total(gamma))
         .collect();
     let probabilities = crate::utility::softmax_probabilities(&totals, beta);
+    if pass_trace() {
+        static SEEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let seen = SEEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let has_pass = candidates
+            .iter()
+            .any(|(kind, _, _, _)| matches!(kind, ActionKind::Pass(_)));
+        if has_pass && seen < 60 {
+            eprintln!(
+                "DECIDE t={:.2} actor={} dist={:.2} clock={:.2} beta={beta:.3} gamma={gamma:.3} open={:.3}",
+                now,
+                actor,
+                state.distance_to_hoop(),
+                state.shot_clock,
+                state.openness(),
+            );
+            for (offset, (other, target, pos, other_utility)) in candidates.iter().enumerate() {
+                eprintln!(
+                    "  {other:?} tgt={target:?} pos=({:.1},{:.1}) total={:.4} p={:.4} epv={:.4} var={:.4} clock={:.4} foul={:.4} tactic={:.4}",
+                    pos.x,
+                    pos.y,
+                    totals[offset],
+                    probabilities[offset],
+                    other_utility.epv_base(),
+                    other_utility.variance,
+                    other_utility.clock_cost,
+                    other_utility.foul_cost,
+                    other_utility.tactical_bonus,
+                );
+            }
+        }
+    }
     let index = softmax_pick_at(
         world.draw(Stream::Decision, actor, purpose::ACTION_CHOICE, 0),
         &totals,
         beta,
     );
     let (kind, target, to_ft, utility) = candidates[index];
+    if matches!(kind, ActionKind::Shoot(_)) && state.distance_to_hoop() > 30.0 && shot_trace() {
+        eprintln!(
+            "HEAVE_PICK t={:.2} dist={:.2} beta={beta:.3} gamma={gamma:.3} candidates={}",
+            now,
+            state.distance_to_hoop(),
+            candidates.len(),
+        );
+        for (offset, (other, _, _, other_utility)) in candidates.iter().enumerate() {
+            eprintln!(
+                "  cand {other:?} total={:.4} p={:.4} epv={:.4} var={:.4} clock={:.4} foul={:.4} tactic={:.4}",
+                totals[offset],
+                probabilities[offset],
+                other_utility.epv_base(),
+                other_utility.variance,
+                other_utility.clock_cost,
+                other_utility.foul_cost,
+                other_utility.tactical_bonus,
+            );
+        }
+    }
     let candidate_count = candidates.len();
     let traced: Vec<crate::state::CandidateTrace> = candidates
         .iter()
@@ -220,20 +297,63 @@ pub fn choose_action(world: &mut World) -> Decision {
         candidates: traced,
         chosen,
     };
-    let duration_screen_defender = screen_defender.filter(|_| matches!(kind, ActionKind::Screen(_)));
-    let duration = match kind {
+    let duration = action_duration(world, &state, kind, target, to_ft);
+
+    Decision {
+        intent: ActionIntent {
+            actor,
+            kind,
+            target,
+            from_ft: state.actor_pos,
+            to_ft,
+            start_time: now,
+            duration,
+        },
+        utility,
+        beta,
+        gamma,
+        candidate_count,
+        screen_defender,
+        trace,
+    }
+}
+
+/// 一个候选动作从决定到产生结果的时长。它也是「这个动作在剩下的进攻
+/// 时间里做不做得完」的判据：进攻时钟不会等一个做不完的动作。
+fn action_duration(
+    world: &World,
+    state: &DecisionState,
+    kind: ActionKind,
+    target: Option<usize>,
+    to_ft: Vec2,
+) -> f64 {
+    match kind {
         ActionKind::Pass(_) => {
             let distance = (to_ft - state.actor_pos).length();
             (distance / 28.0).clamp(0.35, 1.4) as f64
         }
         ActionKind::Drive => {
-            let distance = (state.hoop - state.actor_pos).length();
-            (distance / MAX_SPEED_FT_PER_SEC * 1.15).clamp(0.8, 3.5) as f64
+            // 突破时长按「跑到落点」估算，而不是按到筐距离。落点在篮下
+            // 四尺左右，从外线起步时到筐距离有二十多英尺；用到筐距离
+            // 估时间会把动作压缩到跑不完，突破在半路就结束，收球步
+            // 只能在中距离出手，近筐区域的出手分布整体塌到 near 区。
+            let travel = (to_ft - state.actor_pos).length();
+            let speed = world.players[state.actor]
+                .effective_speed(&world.params.policy)
+                .max(1.0);
+            let accel = world.players[state.actor]
+                .effective_acceleration(&world.params.policy)
+                .max(1.0);
+            let ramp = world.params.policy.g("advance_ramp_distance_ft").max(f32::EPSILON);
+            let startup = (speed / accel) * (-travel / ramp).exp();
+            ((travel / speed + startup) * 1.3).clamp(0.8, 4.0) as f64
         }
         ActionKind::Screen(_) => {
             let screener = target.expect("screen requires a screener");
-            let defender = duration_screen_defender
-                .expect("screen requires its primary defender");
+            let defender = state
+                .primary_defender
+                .expect("screen requires its primary defender")
+                .index;
             let handler_pos = world.players[state.actor].pos;
             let defender_pos = world.players[defender].pos;
             let contact_point = defender_pos
@@ -254,24 +374,6 @@ pub fn choose_action(world: &mut World) -> Decision {
         ActionKind::PostUp => 1.6,
         ActionKind::Shoot(_) => 0.55,
         ActionKind::Dribble | ActionKind::Relocate => 1.4,
-    };
-
-    Decision {
-        intent: ActionIntent {
-            actor,
-            kind,
-            target,
-            from_ft: state.actor_pos,
-            to_ft,
-            start_time: now,
-            duration,
-        },
-        utility,
-        beta,
-        gamma,
-        candidate_count,
-        screen_defender,
-        trace,
     }
 }
 
@@ -342,11 +444,92 @@ pub fn candidate_utilities(world: &World, state: &DecisionState) -> Vec<Candidat
         }
     }
 
+    // 进攻时钟不会等一个做不完的动作：剩余时间装不下的候选不成立。若
+    // 全部装不下，只留最短的那个——那一次违例已经是必然结果。
+    let clock = state.shot_clock;
+    let durations: Vec<f64> = candidates
+        .iter()
+        .map(|(kind, target, to_ft, _)| action_duration(world, state, *kind, *target, *to_ft))
+        .collect();
+    if durations.iter().any(|duration| *duration > clock) {
+        let shortest = durations.iter().copied().fold(f64::INFINITY, f64::min);
+        let mut kept = Vec::new();
+        for (candidate, duration) in candidates.drain(..).zip(durations) {
+            if matches!(candidate.0, ActionKind::Shoot(_)) || duration <= clock || duration == shortest
+            {
+                kept.push(candidate);
+            }
+        }
+        candidates = kept;
+    }
+
     // 选板窗口内的持球人偏好与候选抑制。
     crate::tactics::apply_play_effects(world, &mut candidates);
+    if std::env::var_os("NBA_TRACE_EPV").is_some() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEEN: AtomicU32 = AtomicU32::new(0);
+        let seen = SEEN.fetch_add(1, Ordering::Relaxed);
+        if seen < 60 {
+            let listing: Vec<String> = candidates
+                .iter()
+                .map(|(kind, _, _, utility)| {
+                    format!(
+                        "{}={:.2}[e{:.2} v{:.2} c{:.2} f{:.2} t{:.2}]",
+                        kind.family(),
+                        utility.total(gamma),
+                        utility.epv_base(),
+                        gamma * utility.variance,
+                        -utility.clock_cost,
+                        -utility.foul_cost,
+                        utility.tactical_bonus
+                    )
+                })
+                .collect();
+            eprintln!(
+                "EPV dist={:.1} clock={:.1} gamma={:.3} {:?}",
+                state.distance_to_hoop(),
+                state.shot_clock,
+                gamma,
+                listing
+            );
+            if seen < 6 {
+                for (kind, _, _, utility) in &candidates {
+                    eprintln!("  {} {:?}", kind.family(), utility.epv);
+                }
+            }
+        }
+    }
+    if std::env::var_os("NBA_TRACE_CAND").is_some() {
+        eprintln!(
+            "CANDCALL last_screen={:?} window={} now={:.3}",
+            world.possession.last_screen.map(|read| (read.route, read.at)),
+            world.params.policy.g("screen_read_window_seconds"),
+            world.now()
+        );
+    }
+    if std::env::var_os("NBA_TRACE_CAND").is_some()
+        && world
+            .possession
+            .last_screen
+            .map(|read| world.now() - read.at <= 2.2)
+            .unwrap_or(false)
+    {
+        let listing: Vec<String> = candidates
+            .iter()
+            .map(|(kind, _, _, utility)| format!("{}={:.3}", kind.family(), utility.total(gamma)))
+            .collect();
+        eprintln!(
+            "CAND route={:?} three={:.2} dist={:.1} clock={:.1} beta={:.2} {:?}",
+            route,
+            world.players[state.actor].data.attributes.shooting_three,
+            state.distance_to_hoop(),
+            state.shot_clock,
+            decision_temperature(world, state.actor),
+            listing
+        );
+    }
     candidates
 }
-
 /// 逆温度 β：球商决定基准确定性，体能决定衰减。
 ///
 /// 高球商的球员高度确定地选最优解；体能透支时同一个人的选择噪声变大，
@@ -477,7 +660,6 @@ fn catch_value(world: &World, pos: Vec2, shooter: usize, contest: f32) -> f32 {
     crate::value::catch_value(world, pos, shooter, contest)
 }
 
-
 fn shot_origin_legal(world: &World, actor: usize) -> bool {
     let team = world.players[actor].team;
     let pos = world.players[actor].pos;
@@ -507,36 +689,6 @@ fn shot_origin_legal(world: &World, actor: usize) -> bool {
 ///
 /// 满足这些条件时，任何距离的三分都获得加成，越远加成越小但不为零；
 /// 这让超远抛投成为处境驱动的选择，而不是被硬性距离上限删掉。
-fn endgame_three_pressure(world: &World, state: &DecisionState, is_three: bool) -> f32 {
-    if !is_three {
-        return 0.0;
-    }
-    let weights = &world.params.policy;
-    let remaining = crate::endgame::remaining_seconds(world);
-    let window = weights.w("endgame_three_required_seconds") as f64;
-    if remaining > window {
-        return 0.0;
-    }
-    // 领先方不需要投三分；平局也不需要抢投。
-    if state.margin >= 0 {
-        return 0.0;
-    }
-    // 分差太大，三分追不上时也不必抢投。
-    let deficit = -state.margin as f32;
-    let reach = weights.w("endgame_hold_margin_max").max(0.1);
-    if deficit > reach {
-        return 0.0;
-    }
-    // 没有暂停可用时紧迫度最高；有暂停时仍然需要尽快出手，但保留布置空间。
-    let offense = world.possession.team;
-    let timeouts = world.timeouts[World::team_index(offense)].remaining;
-    let timeout_factor = if timeouts == 0 { 1.0 } else { 0.7 };
-    // 越接近终场越紧迫；分差越小，一次三分越接近追平，加成越大。
-    let urgency = (1.0 - (remaining / window).clamp(0.0, 1.0)).sqrt() as f32;
-    let closeness = (1.0 - (deficit - 2.0).max(0.0) / reach).clamp(0.4, 1.0);
-    weights.w("endgame_three_pressure") * urgency * closeness * timeout_factor
-}
-
 /// 当前状态下最好的非出手后续价值：传球、突破、保留球权里的最高值。
 ///
 /// 这条值用来给「早出手的机会成本」一个参照：出手比最好的替代动作好
@@ -567,25 +719,66 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
     let params = &world.params;
     let weights = &params.policy;
     let actor = state.actor;
+    let trace = std::env::var_os("NBA_TRACE_SHOT").is_some()
+        && world
+            .possession
+            .last_screen
+            .map(|read| world.now() - read.at <= 2.2)
+            .unwrap_or(false)
+        && state.primary_defender.and_then(|d| d.route) == Some(crate::action::DefenderRoute::Under)
+        && world.players[actor].data.attributes.shooting_three >= 0.7;
     if !shot_origin_legal(world, actor) {
+        if trace {
+            eprintln!("SHOTDROP origin_illegal pos={:?}", world.players[actor].pos);
+        }
         return None;
     }
     // 出手必须发生在一个能出手的位置上：突破或收球被挡在远离篮筐的地方
     // 时，那个位置不是出手点——球手要么继续走，要么把球交出去。
-    let (shoot_kind, shot_zone) = shot_choice(world, state)?;
+    let (shoot_kind, shot_zone) = match shot_choice(world, state) {
+        Some(choice) => choice,
+        None => {
+            if trace {
+                eprintln!("SHOTDROP no_zone dist={:.2}", state.distance_to_hoop());
+            }
+            return None;
+        }
+    };
     let phase = world.possession.ball_phase;
     let remaining = crate::endgame::remaining_seconds(world);
+    let required_margin = if remaining <= 8.0 { 3.0 } else { 9.0 };
+    let no_timeouts = world.timeouts[World::team_index(world.players[actor].team)].remaining == 0;
+    let three_needed = remaining <= 120.0
+        && state.margin < 0
+        && (-(state.margin as f32) <= required_margin || no_timeouts);
     let hold_window = weights.w("endgame_hold_seconds") as f64;
     let hold_clock = weights.w("endgame_hold_shot_clock") as f64;
     let just_received = world
         .possession
         .last_pass_at
-        .map(|time| world.now() - time < 1.2)
+        .map(|time| world.now() - time < 2.5)
         .unwrap_or(false);
     if state.margin > 0 && remaining <= hold_window && state.shot_clock > hold_clock {
         return None;
     }
     let quality = shot_quality(world, state.actor_pos, actor, shoot_kind, phase);
+
+    if (quality.is_three || state.distance_to_hoop() > 30.0) && shot_trace() {
+        let model = crate::shot_quality::evaluate(world, actor, shoot_kind, phase, state.actor_pos);
+        eprintln!(
+            "SHOT dist={:.2} three={} kind={:?} phase={:?} p={:.4} sigma={:.4} aper={:.5} speed={:.2} contest={:.3} block={:.3}",
+            state.distance_to_hoop(),
+            quality.is_three,
+            shoot_kind,
+            phase,
+            model.p_make,
+            model.sigma_ft,
+            model.effective_aperture_ft,
+            world.players[actor].vel.length(),
+            model.contest,
+            model.block_risk,
+        );
+    }
     let points = quality.points;
     let p_make = quality.p_make;
     let net = crate::value::shot_value_for(world, actor, state.actor_pos, p_make, points);
@@ -598,7 +791,7 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
         .map(|(_, separation, _)| (separation / 4.0).clamp(0.0, 1.5))
         .unwrap_or(0.0);
     let mut epv = EpvTerms {
-        ability: weights.b("shoot_base") + weights.w("shoot_expected_points") * net,
+        ability: weights.w("shoot_expected_points") * net,
         ..Default::default()
     };
     let mid_bonus = if shot_zone == "mid" {
@@ -607,9 +800,13 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
         0.0
     };
     let buzzer_urgency = if quality.is_three {
-        (6.0 - state.shot_clock as f32).max(0.0) * 1.0
+        if three_needed {
+            (6.0 - state.shot_clock as f32).max(0.0) * 8.0
+        } else {
+            -(6.0 - state.shot_clock as f32).max(0.0) * 3.0
+        }
     } else {
-        (6.0 - state.shot_clock as f32).max(0.0) * 12.0
+        (6.0 - state.shot_clock as f32).max(0.0) * 14.0
     };
     let preference = world.players[actor].data.tendencies.three_point_preference;
     let three_tendency = if quality.is_three {
@@ -621,7 +818,11 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
     } else {
         0.0
     };
-    let endgame_three = endgame_three_pressure(world, state, quality.is_three);
+    let endgame_three = if three_needed && quality.is_three {
+        weights.b("endgame_three_pressure")
+    } else {
+        0.0
+    };
     let three_context = if quality.is_three {
         if endgame_three > 0.0 {
             0.0
@@ -631,17 +832,19 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
     } else {
         0.0
     };
+    let is_putback = putback_available(world, actor);
     epv.context = weights.b("shoot_catch_bonus") * state.openness() * f32::from(just_received)
-        + weights.b("shoot_putback_bonus") * f32::from(putback_available(world, actor))
+        + weights.b("shoot_putback_bonus") * f32::from(is_putback)
         + weights.b("shoot_separation_bonus") * separation_bonus
         + weights.b("momentum_shot_bonus") * state.momentum
         + endgame_three
         + mid_bonus
         + buzzer_urgency
         + three_context
-        - weights.b("shoot_off_dribble_penalty") * f32::from(!just_received);
+        - weights.b("shoot_off_dribble_penalty") * f32::from(!just_received && !is_putback);
     epv.tendency = weights.b("shoot_tendency")
-        * (world.players[actor].data.tendencies.shoot_frequency - 0.5) * 5.0
+        * (world.players[actor].data.tendencies.shoot_frequency - 0.5)
+        * weights.w("shoot_tendency_gain")
         + three_tendency;
 
     let utility = Utility {
@@ -674,9 +877,7 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
 fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     let weights = &world.params.policy;
     let distance = state.distance_to_hoop();
-    let screen_over = state
-        .primary_defender
-        .and_then(|defender| defender.route)
+    let screen_over = state.primary_defender.and_then(|defender| defender.route)
         == Some(crate::action::DefenderRoute::Over)
         && world
             .possession
@@ -725,17 +926,17 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
         * possession_value
         * (f32::from(1u8) - p_beat)
         * weights.w("drive_turnover_rate");
-    // 突破的落点按终结能力决定：终结能力强的球员直接杀到篮下上篮，
-    // 其余球员突到抛投区域完成近筐抛投。
+    // 突破的落点按终结能力决定：终结能力强的球员在篮下合球完成上篮，
+    // 其余球员突到抛投区域完成近筐抛投。落点必须留在近筐区（4 ft 以外），
+    // 否则每一条突破都变成篮下出手，出手的区域分布整段压在篮下。
     let finishing = world.players[state.actor].data.attributes.finishing;
     let drive_target_distance = if finishing > 0.40 {
-        weights.g("finish_min_distance_ft")
+        weights.g("finish_min_distance_ft") + 0.5
     } else {
-        weights.g("finish_min_distance_ft") + 2.5
+        weights.g("finish_min_distance_ft") + 1.2
     };
-    let to_ft = state.hoop
-        + (state.actor_pos - state.hoop).normalize_or_zero()
-            * drive_target_distance;
+    let to_ft =
+        state.hoop + (state.actor_pos - state.hoop).normalize_or_zero() * drive_target_distance;
     Some((
         ActionKind::Drive,
         None,
@@ -744,8 +945,7 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
             epv,
             variance: variance_of(p_beat, net.max(0.1)) * weights.w("variance_choice_weight"),
             clock_cost: clock_cost(world, state.shot_clock) * weights.w("drive_clock_weight"),
-            foul_cost: weights.w("offensive_foul_rate_drive")
-                * crate::value::retained_value(world),
+            foul_cost: weights.w("offensive_foul_rate_drive") * crate::value::retained_value(world),
             tactical_bonus: f32::default(),
         },
     ))
@@ -754,7 +954,9 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
 /// 收球步：把运球收成上篮步。到了终结距离之后不用再突，这两步就是出手。
 fn finish_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Candidate> {
     let weights = &world.params.policy;
-    let finish_limit = weights.g("finish_zone_ft").min(weights.g("gather_travel_allowance_ft") - 1.0);
+    let finish_limit = weights
+        .g("finish_zone_ft")
+        .min(weights.g("gather_travel_allowance_ft") - 1.0);
     if state.distance_to_hoop() > finish_limit {
         return None;
     }
@@ -795,7 +997,7 @@ fn finish_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<
         crate::state::BallPhase::Post => crate::action::ShotKind::Hook,
         crate::state::BallPhase::Cut => crate::action::ShotKind::CuttingLayup,
         _ => {
-            if state.distance_to_hoop() <= 4.5 {
+            if state.distance_to_hoop() <= 7.8 {
                 crate::action::ShotKind::DrivingLayup
             } else {
                 crate::action::ShotKind::Floater
@@ -872,8 +1074,11 @@ fn pass_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
         // 传球价值直接读取几何完成概率与接球后的完整后果；失败按失误
         // 成本进入同一个净值，不再由另一个独立线性权重估算概率。
         let net = crate::value::pass_value(world, state.actor, teammate.index);
+        // 刚接到的球立刻原路回传属于无意义的乒乓传球，在效用中扣减，
+        // 促使持球人转向防守弱侧或寻找空位队友。
+        let ping_pong = world.possession.last_pass_from == Some(teammate.index);
         let epv = EpvTerms {
-            ability: weights.b("pass_base") + net,
+            ability: weights.b("pass_base") + net - if ping_pong { 1.2 } else { 0.0 },
             lane: weights.b("pass_advancement") * (advancement / 20.0).clamp(-1.0, 1.0)
                 - weights.b("pass_risk") * risk * (1.0 - risk_tolerance),
             context: weights.b("pass_perimeter") * f32::from(teammate_three)
@@ -909,6 +1114,14 @@ fn pass_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
 
 fn screen_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     let weights = &world.params.policy;
+    // 有球掩护是阵地进攻的起手，发生在三分线一带。后场推进途中也能做
+    // 掩护，但那种掩护不为任何人制造机会，读球也就无从谈起。
+    let screen_distance = state.distance_to_hoop();
+    if screen_distance < weights.g("screen_min_distance_ft")
+        || screen_distance > weights.g("screen_max_distance_ft")
+    {
+        return None;
+    }
     let screener = state
         .teammates
         .iter()
@@ -936,15 +1149,28 @@ fn screen_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
         crate::state::BallPhase::Drive,
     );
     // 掩护成功的机会：错位越大越容易形成空位。
-    let p_success = (weights.w("screen_base")
+    let p_success = (weights.w("screen_success_base")
         + weights.w("screen_mismatch") * state.mismatch.abs())
-        .clamp(0.0, 0.9);
+    .clamp(0.0, 0.9);
+    // 掩护之后球还在自己手里，现在能做的选择一个都没丢，所以它的下限是
+    // 「现在就出手」的价值，而不是零。成功的那部分只买一样东西：把这次
+    // 出手换成一个更干净的版本。换给谁不固定——持球人可以自己终结，也
+    // 可以把球交给顺下的大个子在篮下接球。
+    let now_value = crate::value::shot_value(
+        world,
+        actor,
+        state.actor_pos,
+        crate::action::ShotKind::CatchShoot,
+        crate::state::BallPhase::Catch,
+    );
+    let roll_spot = hoop
+        + (world.players[screener].pos - hoop).normalize_or_zero()
+            * world.params.policy.g("finish_min_distance_ft");
+    let roll_value = crate::value::catch_value(world, roll_spot, screener, 0.0);
+    let open_value = finish_value.max(roll_value);
+    let premium = (open_value - now_value).max(0.0);
     let mut epv = EpvTerms {
-        // 掩护创造的是一条通往篮下的通道：成功时持球人可以挤过去在篮下
-        // 终结，而不是在原地投一个被干扰的球。掩护的价值因此是「这条通道
-        // 带来的那次篮下终结」乘上成功的概率。
-        ability: p_success * finish_value * weights.w("screen_open_value_share"),
-        context: weights.b("screen_base") * 2.0,
+        ability: now_value + p_success * premium * weights.w("screen_open_value_share"),
         ..Default::default()
     };
     // 掩护与空切创造机会的价值要和「一次出手」可比：出手值是净得分，
@@ -1047,25 +1273,22 @@ fn cut_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
             p_clean = p_clean.min(slack.clamp(0.0, 1.0));
         }
     }
-    let finish = crate::value::shot_value(
-        world,
-        cutter,
-        cut_spot,
-        crate::action::ShotKind::DrivingLayup,
-        crate::state::BallPhase::Drive,
-    );
-    let blocked = crate::value::retained_value(world);
+    // 接球那一瞬间就是一次出手机会，接球价值按接球点的实际出手质量算。
+    // 这里与传球候选调用同一个函数：两种选择都通向「某个人在某处接到球
+    // 并且继续这次进攻」，用同一个口径才能互相比较。
+    let finish = crate::value::catch_value(world, cut_spot, cutter, contest);
+    // 接球不干净不等于丢掉球权：球还在切入人手里（或者被挡出来的球被
+    // 同队捡回），进攻继续。继续持有球权的价值才是这一分支的下界。
+    let blocked = crate::value::dribble_value(world, state.shot_clock);
     let continuation = p_clean * finish + (1.0 - p_clean) * blocked;
     let turnover = weights.w("epv_turnover_cost") * weights.w("possession_value");
-    // 空切创造的机会只占这份球权的一部分：同样的球也可以直接出手或者
-    // 继续转移，因此空切的价值按一个份额计。
-    let net = (p_complete * continuation - (1.0 - p_complete) * turnover)
-        * weights.w("cut_open_value_share");
+    let net = p_complete * continuation - (1.0 - p_complete) * turnover;
     let epv = EpvTerms {
         ability: net,
         // 通道越开阔，空切越容易做出来。
-        context: weights.w("cut_base") * lane_norm,
-        ..Default::default()    };
+        context: weights.w("cut_lane_scale") * lane_norm,
+        ..Default::default()
+    };
     Some((
         ActionKind::Cut,
         Some(cutter),
@@ -1093,8 +1316,7 @@ fn post_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     if distance > weights.g("finish_zone_ft") {
         return None;
     }
-    let post_pos = state.hoop
-        + (state.actor_pos - state.hoop).normalize_or_zero() * 7.0;
+    let post_pos = state.hoop + (state.actor_pos - state.hoop).normalize_or_zero() * 7.0;
     // 低位候选用自己的出手类型与阶段估值，不借用通用两分估值。
     let net = crate::value::shot_value(
         world,
@@ -1115,8 +1337,7 @@ fn post_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
             epv,
             variance: variance_of(0.5, net.max(0.1)) * weights.w("variance_choice_weight"),
             clock_cost: clock_cost(world, state.shot_clock) * weights.w("post_clock_weight"),
-            foul_cost: weights.w("offensive_foul_rate_post")
-                * crate::value::retained_value(world),
+            foul_cost: weights.w("offensive_foul_rate_post") * crate::value::retained_value(world),
             tactical_bonus: f32::default(),
         },
     ))
@@ -1184,7 +1405,7 @@ mod tests {
         }
         world.players[1].on_court = true;
         world.possession.team = TeamSide::Home;
-        world.phase = Phase::Live;
+        world.set_phase(Phase::Live);
         let pos = world.players[1].pos;
         let quality = shot_quality(
             &world,

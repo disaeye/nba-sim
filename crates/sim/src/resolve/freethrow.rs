@@ -8,6 +8,22 @@ use crate::resolve::shot::{PendingShot, ShotResult};
 use crate::state::{BallState, Phase};
 use crate::world::World;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FreeThrowFollowUp {
+    Attempts {
+        shooter: usize,
+        total: u8,
+        remaining: u8,
+        made: u8,
+        and_one: bool,
+        retain_possession: bool,
+        foul_id: u64,
+    },
+    DeadBall {
+        team: crate::action::TeamSide,
+    },
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct FreeThrowMeta {
     pub total: u8,
@@ -15,6 +31,9 @@ pub struct FreeThrowMeta {
     pub made: u8,
     pub and_one: bool,
     pub retain_possession: bool,
+    pub foul_id: u64,
+    pub technical_retained_team: Option<crate::action::TeamSide>,
+    pub after_technical: Option<FreeThrowFollowUp>,
 }
 
 pub fn shoot(
@@ -25,6 +44,65 @@ pub fn shoot(
     made_so_far: u8,
     and_one: bool,
     retain_possession: bool,
+    foul_id: u64,
+) {
+    shoot_with_retained_team(
+        world,
+        shooter,
+        total,
+        remaining,
+        made_so_far,
+        and_one,
+        retain_possession,
+        foul_id,
+        None,
+        None,
+    );
+}
+
+pub fn shoot_team_technical(
+    world: &mut World,
+    shooting_team: crate::action::TeamSide,
+    retained_team: crate::action::TeamSide,
+    foul_id: u64,
+    after_technical: FreeThrowFollowUp,
+) {
+    let shooter = world
+        .on_court(shooting_team)
+        .as_slice()
+        .iter()
+        .copied()
+        .max_by(|left, right| {
+            world.players[*left]
+                .attribute("free_throw")
+                .total_cmp(&world.players[*right].attribute("free_throw"))
+        })
+        .expect("each team must have a player to shoot a technical free throw");
+    shoot_with_retained_team(
+        world,
+        shooter,
+        1,
+        1,
+        0,
+        false,
+        true,
+        foul_id,
+        Some(retained_team),
+        Some(after_technical),
+    );
+}
+
+fn shoot_with_retained_team(
+    world: &mut World,
+    shooter: usize,
+    total: u8,
+    remaining: u8,
+    made_so_far: u8,
+    and_one: bool,
+    retain_possession: bool,
+    foul_id: u64,
+    technical_retained_team: Option<crate::action::TeamSide>,
+    after_technical: Option<FreeThrowFollowUp>,
 ) {
     let hoop = world.hoop_for(world.players[shooter].team);
     let pos = world.players[shooter].pos;
@@ -44,6 +122,9 @@ pub fn shoot(
         made: made_so_far,
         and_one,
         retain_possession,
+        foul_id,
+        technical_retained_team,
+        after_technical,
     };
     world.pending_shot = Some(PendingShot {
         shooter,
@@ -59,6 +140,7 @@ pub fn shoot(
         assisted_by: None,
         shot_id,
         free_throw: Some(meta),
+        block_by: None,
         result: None,
     });
     let rules = world.rules.clone();
@@ -70,13 +152,14 @@ pub fn shoot(
         hoop,
         release_z: model.release_z_ft,
         aperture_ft: model.effective_aperture_ft,
+        rim_in_probability: model.rim_in_probability,
         origin: model.origin,
         plan: model.plan,
         aim_offset,
     });
-    world.phase = Phase::ShotFlight {
+    world.set_phase(Phase::FreeThrowFlight {
         resolve_at: world.now() + f64::from(rules.max_shot_duration_seconds) + 2.0,
-    };
+    });
 }
 
 pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
@@ -98,34 +181,94 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
         made,
         index,
         total: meta.total,
+        foul_id: meta.foul_id,
     });
     let made_count = meta.made + u8::from(made);
     if meta.remaining == 1 {
-        let team = world.players[pending.shooter].team;
-        world.possession.shot_clock_start = world.clock.shot_clock;
-        world.end_possession(
+        if let Some(after_technical) = meta.after_technical {
+            match after_technical {
+                FreeThrowFollowUp::Attempts {
+                    shooter,
+                    total,
+                    remaining,
+                    made,
+                    and_one,
+                    retain_possession,
+                    foul_id,
+                } => shoot(
+                    world,
+                    shooter,
+                    total,
+                    remaining,
+                    made,
+                    and_one,
+                    retain_possession,
+                    foul_id,
+                ),
+                FreeThrowFollowUp::DeadBall { team } => {
+                    world.set_phase(Phase::DeadBall {
+                        team,
+                        ready_at: world.now() + 1.2,
+                    });
+                    world.ball.release(BallState::Loose {
+                        pos: world.hoop_for(team),
+                        vel: Vec2::ZERO,
+                    });
+                }
+            }
+            return;
+        }
+        let team = meta
+            .technical_retained_team
+            .unwrap_or_else(|| world.players[pending.shooter].team);
+        let result = pending
+            .result
+            .expect("free throw flight must resolve before settlement");
+        let eligible_rebound =
+            !meta.retain_possession && matches!(result, ShotResult::Missed { rim_contact: true });
+        if eligible_rebound {
+            let rim_contact = matches!(result, ShotResult::Missed { rim_contact: true });
+            world.possession.shot_clock_start = world.clock.shot_clock();
+            world.release_ball(BallState::Loose {
+                pos: world.ball.pos,
+                vel: world.ball.vel,
+            });
+            crate::resolve::rebound::resolve(world, "free_throw", 15.0, rim_contact);
+            return;
+        }
+        world.possession.shot_clock_start = world.clock.shot_clock();
+        if meta.technical_retained_team.is_none() && !meta.retain_possession {
             if made_count > 0 {
-                "free_throw"
+                world.end_possession(
+                    nba_domain::event::PossessionEndCause::Score,
+                    "free_throw",
+                    made_count as u32,
+                );
             } else {
-                "free_throw_miss"
-            },
-            made_count as u32,
-        );
-        world.phase = Phase::DeadBall {
-            team: if meta.retain_possession {
+                world.end_possession(
+                    nba_domain::event::PossessionEndCause::TurnoverViolation,
+                    "free_throw_miss_without_rim_rebound",
+                    0,
+                );
+            }
+        }
+        world.set_phase(Phase::DeadBall {
+            team: if meta.technical_retained_team.is_some() {
+                team
+            } else if meta.retain_possession {
                 team
             } else {
                 team.other()
             },
             ready_at: world.now() + 1.2,
-        };
+        });
         world.ball.release(BallState::Loose {
             pos: world.hoop_for(team),
             vel: Vec2::ZERO,
         });
         return;
     }
-    world.phase = Phase::FreeThrows {
+    world.set_phase(Phase::FreeThrows {
         shooter: pending.shooter,
         total: meta.total,
         remaining: meta.remaining - 1,
@@ -133,6 +276,9 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
         next_at: world.now() + world.rules.free_throw_interval_seconds as f64,
         and_one: meta.and_one,
         retain_possession: meta.retain_possession,
-    };
-    world.ball.set_held(pending.shooter);
+        foul_id: meta.foul_id,
+        technical_retained_team: meta.technical_retained_team,
+        after_technical: meta.after_technical,
+    });
+    world.set_ball_held(pending.shooter);
 }

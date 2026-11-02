@@ -6,6 +6,7 @@
 
 use glam::Vec2;
 
+use crate::state::PossessionKind;
 pub use nba_domain::event::FoulKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -87,10 +88,7 @@ impl ShotKind {
             Self::CatchShoot | Self::Dunk | Self::Layup => "set",
             Self::PullUp | Self::StepBack => "pull_up",
             Self::Turnaround | Self::Hook => "post",
-            Self::DrivingLayup
-            | Self::DrivingDunk
-            | Self::ReverseLayup
-            | Self::Floater => "drive",
+            Self::DrivingLayup | Self::DrivingDunk | Self::ReverseLayup | Self::Floater => "drive",
             Self::CuttingLayup | Self::CuttingDunk => "cut",
             Self::RunningLayup | Self::RunningDunk | Self::RunningJump | Self::AlleyOop => {
                 "transition"
@@ -123,6 +121,13 @@ pub enum PassKind {
     Bounce,
     Lob,
     Outlet,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum JumpBallKind {
+    Opening,
+    Overtime,
+    HeldBall,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -209,6 +214,143 @@ impl ActionIntent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionIntentRole {
+    Primary,
+    ScreenPartner,
+    CutPartner,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionTurn {
+    Begin,
+    Advance,
+    Resolve,
+}
+
+#[derive(Debug, Clone)]
+/// 一次多人交互：同一份意图由若干球员的运行时共同执行。
+///
+/// 交互是结算的调度单位。主参与者的运行时到期时，交互整体结算一次；
+/// 同一时刻可以存在多个交互，每个交互只依赖自己的运行时推进。
+pub struct Interaction {
+    pub id: u64,
+    pub action_id: u64,
+    pub intent: ActionIntent,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionRuntime {
+    pub action_id: u64,
+    pub interaction_id: u64,
+    pub player: usize,
+    pub role: ActionIntentRole,
+    pub intent: ActionIntent,
+    pub phase: nba_domain::action_window::ActionPhase,
+    pub preparation_ends_at: f64,
+    pub execution_ends_at: f64,
+    pub ends_at: f64,
+}
+
+impl ActionRuntime {
+    pub fn new(
+        action_id: u64,
+        interaction_id: u64,
+        intent: ActionIntent,
+        player: usize,
+        role: ActionIntentRole,
+        phase: nba_domain::action_window::ActionPhase,
+        preparation_seconds: f64,
+        execution_seconds: f64,
+        follow_through_seconds: f64,
+    ) -> Self {
+        assert!(intent.duration.is_finite() && intent.duration > 0.0);
+        assert!(preparation_seconds.is_finite() && preparation_seconds >= 0.0);
+        assert!(execution_seconds.is_finite() && execution_seconds >= 0.0);
+        assert!(follow_through_seconds.is_finite() && follow_through_seconds >= 0.0);
+        let window_total = preparation_seconds + execution_seconds + follow_through_seconds;
+        assert!(window_total > 0.0, "action window must have positive duration");
+        let scale = intent.duration / window_total;
+        let preparation_ends_at = intent.start_time + preparation_seconds * scale;
+        let execution_ends_at =
+            preparation_ends_at + execution_seconds * scale;
+        let ends_at = intent.end_time();
+        Self {
+            action_id,
+            interaction_id,
+            player,
+            role,
+            intent,
+            phase,
+            preparation_ends_at,
+            execution_ends_at,
+            ends_at,
+        }
+    }
+
+    pub fn phase_at(&self, now: f64) -> Option<nba_domain::action_window::ActionPhase> {
+        let phase = if now < self.preparation_ends_at {
+            nba_domain::action_window::ActionPhase::Preparation
+        } else if self.preparation_ends_at == self.execution_ends_at && now < self.ends_at {
+            nba_domain::action_window::ActionPhase::FollowThrough
+        } else if now < self.execution_ends_at {
+            nba_domain::action_window::ActionPhase::Execution
+        } else if now < self.ends_at {
+            nba_domain::action_window::ActionPhase::FollowThrough
+        } else {
+            return None;
+        };
+        if phase == self.phase {
+            None
+        } else {
+            Some(phase)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefensiveActionKind {
+    CloseoutContest,
+}
+
+impl DefensiveActionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CloseoutContest => "closeout_contest",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DefensiveActionRuntime {
+    pub action_id: u64,
+    pub interaction_id: u64,
+    pub defender: usize,
+    pub shooter: usize,
+    pub phase: nba_domain::action_window::ActionPhase,
+    pub preparation_ends_at: f64,
+    pub execution_ends_at: f64,
+    pub ends_at: f64,
+    pub start_position: Vec2,
+    pub target_position: Vec2,
+    pub completed: bool,
+}
+
+impl DefensiveActionRuntime {
+    pub fn phase_at(&self, now: f64) -> Option<nba_domain::action_window::ActionPhase> {
+        let phase = if now < self.preparation_ends_at {
+            nba_domain::action_window::ActionPhase::Preparation
+        } else if now < self.execution_ends_at {
+            nba_domain::action_window::ActionPhase::Execution
+        } else if now < self.ends_at {
+            nba_domain::action_window::ActionPhase::FollowThrough
+        } else {
+            return None;
+        };
+        (phase != self.phase).then_some(phase)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Completion {
     Completed,
     Failed,
@@ -272,9 +414,91 @@ pub struct ActionOutcome {
 
 #[derive(Debug, Clone)]
 pub enum Fact {
+    ActionStarted {
+        action_id: u64,
+        interaction_id: u64,
+        player: usize,
+        kind: &'static str,
+        target: Option<usize>,
+    },
+    ActionIntentRejected {
+        player: usize,
+        kind: &'static str,
+        reason: &'static str,
+    },
+    ActionPhaseChanged {
+        action_id: u64,
+        player: usize,
+        from: nba_domain::action_window::ActionPhase,
+        to: nba_domain::action_window::ActionPhase,
+    },
+    ActionCompleted {
+        action_id: u64,
+        player: usize,
+        kind: &'static str,
+    },
+    ActionFailed {
+        action_id: u64,
+        player: usize,
+        kind: &'static str,
+    },
+    ActionCancelled {
+        action_id: u64,
+        player: usize,
+        kind: &'static str,
+        reason: &'static str,
+    },
+    DefensiveActionStarted {
+        action_id: u64,
+        interaction_id: u64,
+        defender: usize,
+        shooter: usize,
+        kind: &'static str,
+        start_position: Vec2,
+    },
+    DefensiveActionPhaseChanged {
+        action_id: u64,
+        defender: usize,
+        from: nba_domain::action_window::ActionPhase,
+        to: nba_domain::action_window::ActionPhase,
+    },
+    DefensiveActionCompleted {
+        action_id: u64,
+        defender: usize,
+        shooter: usize,
+        kind: &'static str,
+        displacement_ft: f32,
+    },
+    DefensiveActionCancelled {
+        action_id: u64,
+        defender: usize,
+        shooter: usize,
+        kind: &'static str,
+        reason: &'static str,
+    },
     PossessionStarted {
         team: TeamSide,
         live: bool,
+        possession_id: u64,
+    },
+    PossessionEnded {
+        team: TeamSide,
+        possession_id: u64,
+        points: u32,
+        end_reason: nba_domain::event::PossessionEndCause,
+        termination_detail: &'static str,
+        start_game_clock: f64,
+        end_game_clock: f64,
+        start_shot_clock: f64,
+        end_shot_clock: f64,
+        duration: f64,
+        passes: u32,
+        screens: u32,
+        drives: u32,
+        possession_kind: PossessionKind,
+        had_shot: bool,
+        had_offensive_rebound: bool,
+        first_action_seconds: Option<f64>,
     },
     Pass {
         pass_id: u64,
@@ -313,6 +537,8 @@ pub enum Fact {
         zone: &'static str,
         distance_ft: f32,
         contest: f32,
+        is_three: bool,
+        blocked_by: Option<usize>,
         made: bool,
         points: u8,
         assisted_by: Option<usize>,
@@ -323,12 +549,14 @@ pub enum Fact {
         kind: FoulKind,
         free_throws: u8,
         and_one: bool,
+        foul_id: u64,
     },
     FreeThrow {
         shooter: usize,
         made: bool,
         index: u8,
         total: u8,
+        foul_id: u64,
     },
     Rebound {
         player: usize,
@@ -339,6 +567,11 @@ pub enum Fact {
     ReboundOpportunity {
         players: u8,
         contestable: u8,
+    },
+    /// 活球被球员拾起（失误松球），不算篮板。
+    LooseBallRecovered {
+        player: usize,
+        kind: &'static str,
     },
     /// 二次进攻回合的边界：前场篮板被控制后开启。
     SecondChanceStarted {
@@ -372,22 +605,44 @@ pub enum Fact {
         incoming: usize,
         outgoing: usize,
     },
+    BenchDepleted {
+        team: TeamSide,
+        player: usize,
+    },
+    FoulOutRetention {
+        team: TeamSide,
+        player: usize,
+        foul_id: u64,
+    },
+    TeamTechnicalFoul {
+        team: TeamSide,
+        reason: &'static str,
+        foul_id: u64,
+    },
     /// 暂停被批准：比分与两个边界的暂停余额。
     Timeout {
         team: TeamSide,
         remaining: [u32; 2],
+    },
+    /// 跳球中，一方触球后实际确定控制球权的结果。
+    JumpBall {
+        kind: JumpBallKind,
+        home_jumper: usize,
+        away_jumper: usize,
+        tapper: usize,
+        tapped_team: TeamSide,
     },
     PeriodEnd {
         period: u32,
     },
     /// 选板激活：阵地回合进入某份剧本的行为窗口。
     PlayActivated {
-        play: String,
+        play: usize,
         possession: u64,
     },
     /// 选板窗口结束。
     PlayWindowEnded {
-        play: String,
+        play: usize,
         possession: u64,
     },
     /// 球与地板、篮筐、篮板、球员或手部的接触。
@@ -410,7 +665,18 @@ pub enum Fact {
 impl Fact {
     pub fn name(&self) -> &'static str {
         match self {
+            Self::ActionStarted { .. } => "ActionStarted",
+            Self::ActionIntentRejected { .. } => "ActionIntentRejected",
+            Self::ActionPhaseChanged { .. } => "ActionPhaseChanged",
+            Self::ActionCompleted { .. } => "ActionCompleted",
+            Self::ActionFailed { .. } => "ActionFailed",
+            Self::ActionCancelled { .. } => "ActionCancelled",
+            Self::DefensiveActionStarted { .. } => "DefensiveActionStarted",
+            Self::DefensiveActionPhaseChanged { .. } => "DefensiveActionPhaseChanged",
+            Self::DefensiveActionCompleted { .. } => "DefensiveActionCompleted",
+            Self::DefensiveActionCancelled { .. } => "DefensiveActionCancelled",
             Self::PossessionStarted { .. } => "PossessionStarted",
+            Self::PossessionEnded { .. } => "PossessionEnded",
             Self::Pass { .. } => "Pass",
             Self::Screen { .. } => "Screen",
             Self::Drive { .. } => "Drive",
@@ -420,6 +686,7 @@ impl Fact {
             Self::FreeThrow { .. } => "FreeThrow",
             Self::Rebound { .. } => "Rebound",
             Self::ReboundOpportunity { .. } => "ReboundOpportunity",
+            Self::LooseBallRecovered { .. } => "LooseBallRecovered",
             Self::SecondChanceStarted { .. } => "SecondChanceStarted",
             Self::Cut { .. } => "Cut",
             Self::BoxOut { .. } => "BoxOut",
@@ -427,7 +694,11 @@ impl Fact {
             Self::Turnover { .. } => "Turnover",
             Self::Steal { .. } => "Steal",
             Self::Substitution { .. } => "Substitution",
+            Self::BenchDepleted { .. } => "BenchDepleted",
+            Self::FoulOutRetention { .. } => "FoulOutRetention",
+            Self::TeamTechnicalFoul { .. } => "TeamTechnicalFoul",
             Self::Timeout { .. } => "Timeout",
+            Self::JumpBall { .. } => "JumpBall",
             Self::PeriodEnd { .. } => "PeriodEnd",
             Self::PlayActivated { .. } => "PlayActivated",
             Self::PlayWindowEnded { .. } => "PlayWindowEnded",

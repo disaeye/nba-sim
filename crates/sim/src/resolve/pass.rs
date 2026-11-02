@@ -2,9 +2,7 @@
 
 use glam::Vec2;
 
-use crate::action::{
-    ActionIntent, ActionKind, Completion, Fact, PassKind, StateDelta,
-};
+use crate::action::{ActionIntent, ActionKind, Completion, Fact, PassKind, StateDelta};
 use crate::world::World;
 
 pub fn resolve(
@@ -34,10 +32,9 @@ pub fn resolve(
         let (spot, flight) = crate::resolve::pass::cut_plan(world, to);
         (Some(spot), Some(flight))
     } else {
-        // 普通传球瞄向接球人将要到达的位置（他的站位），而不是他此刻站的
-        // 地方。瞄向他此刻的位置会让接球人往回跑，球落在他原来的位置上，
-        // 进攻于是离筐越来越远。
-        let point = crate::value::catch_point(world, to);
+        // 普通传球瞄向接球人按当前速度在飞行时间内跑到的位置：提前量
+        // 与飞行时间互相决定，落点由 `catch_point` 迭代求解。
+        let point = crate::value::catch_point(world, from, to);
         to_player.pos = point;
         (None, None)
     };
@@ -61,7 +58,7 @@ pub fn resolve(
         to,
         kind,
     });
-    if let crate::state::BallState::Pass { to_pos, .. } = world.ball.state {
+    if let crate::state::BallState::Pass { to_pos, .. } = world.ball.state() {
         world.players[to].target = to_pos;
         world.players[to].target_kind = crate::state::TargetKind::Window;
         world.players[to].target_partner = to;
@@ -76,13 +73,22 @@ pub fn resolve(
         .map(|p| p.data.tendencies.gamble_steal)
         .fold(0.0f32, f32::max);
     let gamble_effect = 1.0 + (defense_gamble - 0.5) * 0.1;
-    let rate = (base * (1.0 + (skill_base - passing) * 1.0) * gamble_effect).clamp(0.005, 0.018);
-    if world.draw(crate::draw::Stream::Pass, from, crate::draw::purpose::BAD_PASS, 0) < rate {
+    let rate = (base * (1.0 + (skill_base - passing) * 1.0) * gamble_effect).clamp(0.005, 0.045);
+    let drawn = world.draw(
+        crate::draw::Stream::Pass,
+        from,
+        crate::draw::purpose::BAD_PASS,
+        0,
+    );
+    if std::env::var("NBA_TRACE_MISS").is_ok() {
+        eprintln!("BADPASS from={from} drawn={drawn:.4} rate={rate:.4} passing={passing:.2}");
+    }
+    if drawn < rate {
         world.pass_result = Some(crate::ball::PassResult::Incomplete);
     }
-    world.phase = crate::world::Phase::PassFlight {
+    world.set_phase(crate::world::Phase::PassFlight {
         resolve_at: now + duration + 0.5,
-    };
+    });
     world.emit(Fact::Pass {
         pass_id,
         from,
@@ -141,20 +147,13 @@ pub fn cut_plan(world: &World, cutter: usize) -> (Vec2, f64) {
     let mut covered = 0.5 * accel * flight * flight;
     while covered < distance && flight < 2.0 {
         flight += 0.05;
-        covered = 0.5 * accel * startup * startup
-            + speed * (flight - startup).max(0.0);
+        covered = 0.5 * accel * startup * startup + speed * (flight - startup).max(0.0);
     }
-    let flight = f64::from(flight.clamp(0.6, 1.8));
-    // 接球点就是切入人在这段时间里能跑到的位置：球飞到他手里，而不是
-    // 飞到一个他还没到的点上。跑动会绕开防守人，实际能跑到的距离比直线
-    // 短，因此按九成估计。
-    // 实际能跑到的距离比直线短：切入人从静止起步，跑动还要绕开防守人。
-    // 系数按引擎里实测的切入速度与自由跑速度之比取值。
-    // 切入人实际能跑到的距离要按引擎里真实的跑动估计：跑动会被防守人挡住
-    // 绕行，因此比自由跑慢。按四成估计，接球点才是他真的能到的地方。
-    let reachable = (covered * 0.4).min(distance);
-    let landing = world.players[cutter].pos + to_basket.normalize_or_zero() * reachable;
-    (landing, flight)
+    // 空切的接球点就是篮下那个点：切入人先跑到那里站住，球再落到他手里。
+    // 按跑动距离把落点往前缩会让球落在切入人还没到的地方，而切入人的
+    // 实际跑动受防守人阻挡，与自由奔跑的估算对不上，球就落地判成不完整。
+    let flight = f64::from((flight * 1.45).clamp(0.6, 2.6));
+    (basket, flight)
 }
 
 /// 高吊球的飞行时间：等切入人跑到接球点。
@@ -167,7 +166,11 @@ pub fn cut_target(world: &World, cutter: usize) -> Vec2 {
     let team = world.players[cutter].team;
     world.hoop_for(team)
         + Vec2::new(
-            -if world.attacking_right(team) { 1.0 } else { -1.0 },
+            -if world.attacking_right(team) {
+                1.0
+            } else {
+                -1.0
+            },
             0.0,
         ) * 2.5
 }
@@ -187,4 +190,3 @@ pub fn resolve_cut(world: &mut World, intent: &ActionIntent) -> crate::action::A
     world.players[cutter].target_partner = cutter;
     outcome
 }
-

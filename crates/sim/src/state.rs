@@ -7,7 +7,7 @@
 use glam::Vec2;
 use nba_domain::PlayerData;
 
-use crate::action::DefenderRoute;
+use crate::action::{ActionRuntime, DefenderRoute};
 pub use crate::action::TeamSide;
 use crate::params::PolicyTable;
 
@@ -152,8 +152,10 @@ pub struct PlayerState {
     pub on_court: bool,
     pub stamina: f32,
     pub fouls: u8,
-    /// 犯满离场：置位后不再上场。
+    /// 犯满离场：置位后不再上场，除非 NBA 名单耗尽规则要求留在场上。
     pub disqualified: bool,
+    /// NBA 替补全部犯满后，规则要求该球员留在场上。
+    pub retained_after_foul_limit: bool,
     pub slot: Slot,
     pub offense_job: OffenseJob,
     pub defense_responsibility: DefenseResponsibility,
@@ -193,6 +195,8 @@ pub struct PlayerState {
     pub resting_until: f64,
     /// 重决策调度：事件触发加最小间隔。
     pub schedule: DecisionSchedule,
+    /// 本球员当前执行的身体动作；多人配合使用相同的 interaction_id。
+    pub action: Option<ActionRuntime>,
 }
 
 impl PlayerState {
@@ -210,6 +214,7 @@ impl PlayerState {
             stamina: 1.0,
             fouls: 0,
             disqualified: false,
+            retained_after_foul_limit: false,
             slot,
             offense_job: OffenseJob::Handler,
             defense_responsibility: DefenseResponsibility::OnBall,
@@ -234,6 +239,7 @@ impl PlayerState {
             entered_at: f64::default(),
             resting_until: f64::default(),
             schedule: DecisionSchedule::default(),
+            action: None,
         }
     }
 
@@ -287,14 +293,47 @@ impl PlayerState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClockAdvance {
+    pub game_clock: bool,
+    pub shot_clock: bool,
+    pub elapsed: bool,
+    pub player_time: bool,
+}
+
+impl ClockAdvance {
+    pub fn validate(self) {
+        assert!(
+            !self.player_time || self.game_clock,
+            "player time requires a running game clock"
+        );
+        assert!(
+            !self.shot_clock || self.game_clock,
+            "shot clock cannot run while game clock is stopped"
+        );
+        assert!(
+            !self.elapsed || self.game_clock,
+            "match elapsed time requires a running game clock"
+        );
+    }
+
+    const STOPPED: Self = Self {
+        game_clock: false,
+        shot_clock: false,
+        elapsed: false,
+        player_time: false,
+    };
+}
+
 #[derive(Debug, Clone)]
 pub struct Clock {
-    pub period: u32,
-    pub game_clock: f64,
-    pub shot_clock: f64,
-    pub elapsed: f64,
-    pub tick: u64,
-    pub period_seconds: f64,
+    period: u32,
+    game_clock: f64,
+    shot_clock: f64,
+    elapsed: f64,
+    simulation_time: f64,
+    tick: u64,
+    period_seconds: f64,
 }
 
 impl Clock {
@@ -304,15 +343,139 @@ impl Clock {
             game_clock: period_seconds,
             shot_clock,
             elapsed: 0.0,
+            simulation_time: 0.0,
             tick: 0,
             period_seconds,
         }
     }
+
+    pub(crate) fn advance(&mut self, seconds: f64, clocks: ClockAdvance) {
+        assert!(
+            seconds.is_finite() && seconds >= 0.0,
+            "clock interval must be finite and non-negative"
+        );
+        clocks.validate();
+        self.advance_simulation_time(seconds);
+        if clocks.game_clock {
+            self.game_clock = (self.game_clock - seconds).max(0.0);
+        }
+        if clocks.shot_clock {
+            self.shot_clock = (self.shot_clock - seconds).max(0.0);
+        }
+        if clocks.elapsed {
+            self.elapsed += seconds;
+        }
+    }
+
+    pub fn shot_clock(&self) -> f64 {
+        self.shot_clock
+    }
+
+    pub fn set_shot_clock(&mut self, seconds: f64) {
+        assert!(
+            seconds.is_finite() && seconds >= 0.0,
+            "shot clock must be finite and non-negative"
+        );
+        self.shot_clock = seconds;
+    }
+
+    pub fn game_clock(&self) -> f64 {
+        self.game_clock
+    }
+
+    pub fn set_game_clock(&mut self, seconds: f64) {
+        assert!(
+            seconds.is_finite() && seconds >= 0.0,
+            "game clock must be finite and non-negative"
+        );
+        self.game_clock = seconds;
+    }
+
+    pub fn period(&self) -> u32 {
+        self.period
+    }
+
+    pub fn set_regulation_clock(&mut self, period: u32, seconds: f64, shot_clock_seconds: f64) {
+        assert!(period > 0, "period number must be positive");
+        assert!(
+            seconds.is_finite() && seconds >= 0.0,
+            "game clock must be finite and non-negative"
+        );
+        assert!(
+            shot_clock_seconds.is_finite() && shot_clock_seconds >= 0.0,
+            "shot clock must be finite and non-negative"
+        );
+        self.period = period;
+        self.period_seconds = seconds;
+        self.game_clock = seconds;
+        self.shot_clock = shot_clock_seconds;
+    }
+
+    pub fn period_seconds(&self) -> f64 {
+        self.period_seconds
+    }
+
+    pub fn elapsed(&self) -> f64 {
+        self.elapsed
+    }
+
+    pub fn simulation_time(&self) -> f64 {
+        self.simulation_time
+    }
+
+    pub fn advance_simulation_time(&mut self, seconds: f64) {
+        assert!(
+            seconds.is_finite() && seconds >= 0.0,
+            "simulation interval must be finite and non-negative"
+        );
+        self.simulation_time += seconds;
+    }
+
+    pub fn tick(&self) -> u64 {
+        self.tick
+    }
+
+    pub fn advance_tick(&mut self) {
+        self.tick += 1;
+    }
+
+    pub(crate) fn set_shot_clock_at_least(&mut self, seconds: f64) {
+        assert!(
+            seconds.is_finite() && seconds >= 0.0,
+            "shot-clock reset must be finite and non-negative"
+        );
+        self.shot_clock = self.shot_clock.max(seconds);
+    }
+
+    pub(crate) fn set_period_duration(&mut self, seconds: f64) {
+        assert!(
+            seconds.is_finite() && seconds > 0.0,
+            "period duration must be finite and positive"
+        );
+        self.period_seconds = seconds;
+    }
+
+    pub(crate) fn start_next_period(&mut self, seconds: f64, shot_clock_seconds: f64) {
+        assert!(
+            seconds.is_finite() && seconds > 0.0,
+            "period duration must be finite and positive"
+        );
+        assert!(
+            shot_clock_seconds.is_finite() && shot_clock_seconds >= 0.0,
+            "shot clock must be finite and non-negative"
+        );
+        self.period += 1;
+        self.period_seconds = seconds;
+        self.game_clock = seconds;
+        self.shot_clock = shot_clock_seconds;
+    }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BallState {
-    Held,
+    Held {
+        holder: usize,
+    },
     Pass {
         pass_id: u64,
         from: usize,
@@ -331,6 +494,8 @@ pub enum BallState {
         start: f64,
         /// 出手时算出的有效筐口：价值层与执行层共用同一个值。
         aperture_ft: f32,
+        /// 碰到筐沿之后仍能补进的概率。
+        rim_in_probability: f32,
         /// 球心在筐平面上的落点偏移（瞄准误差）。
         aim_offset: Vec2,
     },
@@ -340,17 +505,27 @@ pub enum BallState {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Phase {
     Inbound {
         team: TeamSide,
         ready_at: f64,
     },
+    JumpBall {
+        home_jumper: usize,
+        away_jumper: usize,
+        resolve_at: f64,
+        kind: crate::action::JumpBallKind,
+    },
+    JumpBallFlight,
     Live,
     PassFlight {
         resolve_at: f64,
     },
     ShotFlight {
+        resolve_at: f64,
+    },
+    FreeThrowFlight {
         resolve_at: f64,
     },
     FreeThrows {
@@ -360,8 +535,10 @@ pub enum Phase {
         made: u8,
         next_at: f64,
         and_one: bool,
-        /// 最后一次罚球后球权是否仍属罚球方（最后时段的无球犯规是一罚一掷）。
         retain_possession: bool,
+        foul_id: u64,
+        technical_retained_team: Option<TeamSide>,
+        after_technical: Option<crate::resolve::freethrow::FreeThrowFollowUp>,
     },
     DeadBall {
         team: TeamSide,
@@ -370,18 +547,378 @@ pub enum Phase {
     /// 暂停：比赛钟与进攻钟都停，暂停结束时叫暂停方继续持有球权。
     Timeout {
         team: TeamSide,
+        started_at: f64,
         resume_at: f64,
+        resume_phase: ResumePhase,
     },
     PeriodBreak {
         resume_at: f64,
+        next_stage: MatchStage,
     },
+    Pregame,
     Finished,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ResumePhase {
+    Inbound {
+        team: TeamSide,
+        ready_at: f64,
+    },
+    JumpBall {
+        home_jumper: usize,
+        away_jumper: usize,
+        resolve_at: f64,
+        kind: crate::action::JumpBallKind,
+    },
+    JumpBallFlight,
+    Live,
+    PassFlight {
+        resolve_at: f64,
+    },
+    ShotFlight {
+        resolve_at: f64,
+    },
+    FreeThrowFlight {
+        resolve_at: f64,
+    },
+    FreeThrows {
+        shooter: usize,
+        total: u8,
+        remaining: u8,
+        made: u8,
+        next_at: f64,
+        and_one: bool,
+        retain_possession: bool,
+        foul_id: u64,
+        technical_retained_team: Option<TeamSide>,
+        after_technical: Option<crate::resolve::freethrow::FreeThrowFollowUp>,
+    },
+    DeadBall {
+        team: TeamSide,
+        ready_at: f64,
+    },
+    PeriodBreak {
+        resume_at: f64,
+        next_stage: MatchStage,
+    },
+    Pregame,
+    Finished,
+}
+
+impl ResumePhase {
+    pub fn capture(phase: Phase) -> Self {
+        match phase {
+            Phase::Inbound { team, ready_at } => Self::Inbound { team, ready_at },
+            Phase::JumpBall {
+                home_jumper,
+                away_jumper,
+                resolve_at,
+                kind,
+            } => Self::JumpBall {
+                home_jumper,
+                away_jumper,
+                resolve_at,
+                kind,
+            },
+            Phase::JumpBallFlight => Self::JumpBallFlight,
+            Phase::Live => Self::Live,
+            Phase::PassFlight { resolve_at } => Self::PassFlight { resolve_at },
+            Phase::ShotFlight { resolve_at } => Self::ShotFlight { resolve_at },
+            Phase::FreeThrowFlight { resolve_at } => Self::FreeThrowFlight { resolve_at },
+            Phase::FreeThrows {
+                shooter,
+                total,
+                remaining,
+                made,
+                next_at,
+                and_one,
+                retain_possession,
+                foul_id,
+                technical_retained_team,
+                after_technical,
+            } => Self::FreeThrows {
+                shooter,
+                total,
+                remaining,
+                made,
+                next_at,
+                and_one,
+                retain_possession,
+                foul_id,
+                technical_retained_team,
+                after_technical,
+            },
+            Phase::DeadBall { team, ready_at } => Self::DeadBall { team, ready_at },
+            Phase::PeriodBreak {
+                resume_at,
+                next_stage,
+            } => Self::PeriodBreak {
+                resume_at,
+                next_stage,
+            },
+            Phase::Pregame => Self::Pregame,
+            Phase::Finished => Self::Finished,
+            Phase::Timeout { .. } => unreachable!("timeout phase must be unwrapped before capture"),
+        }
+    }
+
+    pub const fn phase(self) -> Phase {
+        match self {
+            Self::Inbound { team, ready_at } => Phase::Inbound { team, ready_at },
+            Self::JumpBall {
+                home_jumper,
+                away_jumper,
+                resolve_at,
+                kind,
+            } => Phase::JumpBall {
+                home_jumper,
+                away_jumper,
+                resolve_at,
+                kind,
+            },
+            Self::JumpBallFlight => Phase::JumpBallFlight,
+            Self::Live => Phase::Live,
+            Self::PassFlight { resolve_at } => Phase::PassFlight { resolve_at },
+            Self::ShotFlight { resolve_at } => Phase::ShotFlight { resolve_at },
+            Self::FreeThrowFlight { resolve_at } => Phase::FreeThrowFlight { resolve_at },
+            Self::FreeThrows {
+                shooter,
+                total,
+                remaining,
+                made,
+                next_at,
+                and_one,
+                retain_possession,
+                foul_id,
+                technical_retained_team,
+                after_technical,
+            } => Phase::FreeThrows {
+                shooter,
+                total,
+                remaining,
+                made,
+                next_at,
+                and_one,
+                retain_possession,
+                foul_id,
+                technical_retained_team,
+                after_technical,
+            },
+            Self::DeadBall { team, ready_at } => Phase::DeadBall { team, ready_at },
+            Self::PeriodBreak {
+                resume_at,
+                next_stage,
+            } => Phase::PeriodBreak {
+                resume_at,
+                next_stage,
+            },
+            Self::Pregame => Phase::Pregame,
+            Self::Finished => Phase::Finished,
+        }
+    }
+
+    pub const fn is_live_gameplay(self) -> bool {
+        matches!(
+            self,
+            Self::Live | Self::PassFlight { .. } | Self::ShotFlight { .. }
+        )
+    }
+}
+
+impl Phase {
+    pub fn shift_deadlines(self, seconds: f64) -> Self {
+        assert!(
+            seconds.is_finite() && seconds >= 0.0,
+            "phase shift must be finite and non-negative"
+        );
+        match self {
+            Self::Inbound { team, ready_at } => Self::Inbound {
+                team,
+                ready_at: ready_at + seconds,
+            },
+            Self::JumpBall {
+                home_jumper,
+                away_jumper,
+                resolve_at,
+                kind,
+            } => Self::JumpBall {
+                home_jumper,
+                away_jumper,
+                resolve_at: resolve_at + seconds,
+                kind,
+            },
+            Self::JumpBallFlight => Self::JumpBallFlight,
+            Self::Live => Self::Live,
+            Self::PassFlight { resolve_at } => Self::PassFlight {
+                resolve_at: resolve_at + seconds,
+            },
+            Self::ShotFlight { resolve_at } => Self::ShotFlight {
+                resolve_at: resolve_at + seconds,
+            },
+            Self::FreeThrowFlight { resolve_at } => Self::FreeThrowFlight {
+                resolve_at: resolve_at + seconds,
+            },
+            Self::FreeThrows {
+                shooter,
+                total,
+                remaining,
+                made,
+                next_at,
+                and_one,
+                retain_possession,
+                foul_id,
+                technical_retained_team,
+                after_technical,
+            } => Self::FreeThrows {
+                shooter,
+                total,
+                remaining,
+                made,
+                next_at: next_at + seconds,
+                and_one,
+                retain_possession,
+                foul_id,
+                technical_retained_team,
+                after_technical,
+            },
+            Self::DeadBall { team, ready_at } => Self::DeadBall {
+                team,
+                ready_at: ready_at + seconds,
+            },
+            Self::Timeout { .. } => panic!("cannot shift an active timeout"),
+            Self::PeriodBreak {
+                resume_at,
+                next_stage,
+            } => Self::PeriodBreak {
+                resume_at: resume_at + seconds,
+                next_stage,
+            },
+            Self::Pregame => Self::Pregame,
+            Self::Finished => Self::Finished,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchStage {
+    Pregame,
+    Regulation,
+    Intermission,
+    Overtime,
+    Finalizing,
+    Finished,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchProgram {
+    OpenPlay,
+    JumpBall,
+    Inbound,
+    FreeThrows,
+    Timeout,
+    Review,
+    PeriodSettlement,
+    PenaltyAdministration,
+    Intermission,
+    Pregame,
+    Complete,
+}
+
+impl Phase {
+    pub const fn clock_advance(self) -> ClockAdvance {
+        match self {
+            Self::Live | Self::PassFlight { .. } => ClockAdvance {
+                game_clock: true,
+                shot_clock: true,
+                elapsed: true,
+                player_time: true,
+            },
+            Self::JumpBallFlight => ClockAdvance {
+                game_clock: true,
+                shot_clock: false,
+                elapsed: true,
+                player_time: true,
+            },
+            Self::ShotFlight { .. } => ClockAdvance {
+                game_clock: true,
+                shot_clock: false,
+                elapsed: true,
+                player_time: true,
+            },
+            Self::Pregame
+            | Self::FreeThrows { .. }
+            | Self::FreeThrowFlight { .. }
+            | Self::Inbound { .. }
+            | Self::JumpBall { .. }
+            | Self::DeadBall { .. }
+            | Self::Timeout { .. }
+            | Self::PeriodBreak { .. }
+            | Self::Finished => ClockAdvance::STOPPED,
+        }
+    }
+
+    pub const fn is_live_gameplay(self) -> bool {
+        matches!(
+            self,
+            Self::Live | Self::PassFlight { .. } | Self::ShotFlight { .. } | Self::JumpBallFlight
+        )
+    }
+
+    pub const fn is_shot_flight(self) -> bool {
+        matches!(self, Self::ShotFlight { .. } | Self::FreeThrowFlight { .. })
+    }
+
+    pub const fn stage(self, period: u32, regulation_periods: u32) -> MatchStage {
+        if matches!(self, Self::Finished) {
+            MatchStage::Finished
+        } else if matches!(self, Self::Pregame) {
+            MatchStage::Pregame
+        } else if let Self::PeriodBreak { next_stage, .. } = self {
+            next_stage
+        } else if let Self::Timeout { resume_phase, .. } = self {
+            resume_phase.phase().stage(period, regulation_periods)
+        } else if period > regulation_periods {
+            MatchStage::Overtime
+        } else {
+            MatchStage::Regulation
+        }
+    }
+
+    pub const fn clocks(self) -> ClockAdvance {
+        self.clock_advance()
+    }
+
+    pub const fn program(self) -> MatchProgram {
+        match self {
+            Self::Live | Self::PassFlight { .. } | Self::ShotFlight { .. } => {
+                MatchProgram::OpenPlay
+            }
+            Self::Inbound { .. } => MatchProgram::Inbound,
+            Self::JumpBall { .. } | Self::JumpBallFlight => MatchProgram::JumpBall,
+            Self::FreeThrows { .. } | Self::FreeThrowFlight { .. } => MatchProgram::FreeThrows,
+            Self::Timeout { .. } => MatchProgram::Timeout,
+            Self::DeadBall { .. } => MatchProgram::PenaltyAdministration,
+            Self::PeriodBreak { .. } => MatchProgram::PeriodSettlement,
+            Self::Pregame => MatchProgram::Pregame,
+            Self::Finished => MatchProgram::Complete,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PossessionKind {
     Dead,
     Live,
+}
+
+impl PossessionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Dead => "dead",
+            Self::Live => "live",
+        }
+    }
 }
 
 /// 持球状态：运球中或已收球。收球后只允许终结（投篮/传球）或两步
@@ -462,6 +999,8 @@ pub struct PossessionState {
     pub play: Option<crate::tactics::PlayWindow>,
     /// 本回合是否已经叫过战术：每个回合只叫一次，之后进自由进攻。
     pub play_called: bool,
+    /// 快攻跑位改过的球员及其原站位：窗口结束时按这里还回去。
+    pub break_return: Vec<(usize, Vec2)>,
 }
 
 impl PossessionState {
@@ -505,6 +1044,7 @@ impl PossessionState {
             matchup: [usize::MAX; MAX_ON_COURT],
             play: None,
             play_called: false,
+            break_return: Vec::new(),
         }
     }
 }
@@ -529,6 +1069,10 @@ pub struct ShotSample {
     pub game_clock: f64,
     pub period: u32,
     pub contest: f32,
+    /// 出手瞬间的移动程度：球员速度除以最大速度。
+    pub movement: f32,
+    /// 出手人的区域投篮属性。
+    pub skill: f32,
     /// 出手瞬间最近防守人的距离（英尺）。
     pub defender_ft: f32,
     pub zone: u8,
@@ -719,13 +1263,13 @@ impl DecisionState {
 
     pub fn openness(&self) -> f32 {
         match self.primary_defender {
-            Some(defender) => {
-                (1.0 - contest_from_defender(
+            Some(defender) => (1.0
+                - contest_from_defender(
                     defender.distance_ft,
                     defender.between_ball_and_hoop,
                     defender.reach_excess_ft,
-                )).clamp(0.0, 1.0)
-            }
+                ))
+            .clamp(0.0, 1.0),
             None => 1.0,
         }
     }
@@ -809,7 +1353,12 @@ pub fn lane_clearance(players: &[PlayerState], from: Vec2, to: Vec2, offense: Te
 ///
 /// 站在传球人身后或接球人身后的防守人不在走廊里，拦不到球；
 /// 按纵向投影区间筛掉它们，而不是把它们按两端点投影后当成堵住走廊。
-pub fn pass_lane_clearance(players: &[PlayerState], from: Vec2, to: Vec2, offense: TeamSide) -> f32 {
+pub fn pass_lane_clearance(
+    players: &[PlayerState],
+    from: Vec2,
+    to: Vec2,
+    offense: TeamSide,
+) -> f32 {
     let segment = to - from;
     let length = segment.length();
     if length < MIN_LANE_LENGTH_FT {

@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use nba_domain::play::{DecisionActionFamily, PlayCourtSide, PlayInhibitionMode, PlayPredicate, PlaySpec};
+use nba_domain::play::{
+    DecisionActionFamily, PlayCourtSide, PlayInhibitionMode, PlayPredicate, PlaySpec,
+};
 use nba_domain::tactics::TacticalSetSpec;
 
 use crate::action::Fact;
@@ -116,9 +118,10 @@ impl TacticsTable {
             let path = plays_dir.join(format!("{name}.json"));
             let text = std::fs::read_to_string(&path)
                 .map_err(|error| format!("play spec {} unreadable: {error}", path.display()))?;
-            plays.push(PlaySpec::from_json(&text).map_err(|error| {
-                format!("play spec {} invalid: {error:?}", path.display())
-            })?);
+            plays.push(
+                PlaySpec::from_json(&text)
+                    .map_err(|error| format!("play spec {} invalid: {error:?}", path.display()))?,
+            );
         }
         let tactics_dir = data_dir.join("tactics");
         let mut systems = BTreeMap::new();
@@ -147,10 +150,7 @@ impl TacticsTable {
         for system in self.systems.values() {
             for id in &system.play_ids {
                 if !seen.contains_key(id) {
-                    return Err(format!(
-                        "system {} references unknown play {id}",
-                        system.id
-                    ));
+                    return Err(format!("system {} references unknown play {id}", system.id));
                 }
             }
         }
@@ -204,19 +204,20 @@ pub fn trigger_matches(world: &World, predicates: &[PlayPredicate]) -> bool {
                     < world.params.policy.g("transition_window_seconds") as f64
         }
         PlayPredicate::ShotClockUrgent { threshold_s } => {
-            world.clock.shot_clock <= *threshold_s as f64
+            world.clock.shot_clock() <= *threshold_s as f64
         }
         PlayPredicate::BeyondCircleFt { r } => world
             .holder()
             .map(|handle| {
-                (world.players[handle].pos - world.hoop_for(world.possession.team)).length()
-                    > *r
+                (world.players[handle].pos - world.hoop_for(world.possession.team)).length() > *r
             })
             .unwrap_or(false),
         PlayPredicate::ScreenEstablished => world
             .possession
             .last_screen
-            .map(|read| world.now() - read.at < world.params.policy.g("screen_read_window_seconds") as f64)
+            .map(|read| {
+                world.now() - read.at < world.params.policy.g("screen_read_window_seconds") as f64
+            })
             .unwrap_or(false),
         PlayPredicate::CornerOccupied { side } => {
             let hoop = world.hoop_for(world.possession.team);
@@ -236,7 +237,12 @@ pub fn trigger_matches(world: &World, predicates: &[PlayPredicate]) -> bool {
         }
         PlayPredicate::HelpShadingOff | PlayPredicate::WeakSideVacated => {
             let hoop = world.hoop_for(world.possession.team);
-            let radius = world.rules.tactics.defense.potential_field.rim_help_radius_ft;
+            let radius = world
+                .rules
+                .tactics
+                .defense
+                .potential_field
+                .rim_help_radius_ft;
             world
                 .on_court(world.possession.team.other())
                 .as_slice()
@@ -251,10 +257,9 @@ pub fn trigger_matches(world: &World, predicates: &[PlayPredicate]) -> bool {
 pub fn update_play_window(world: &mut World) {
     if let Some(window) = world.possession.play {
         if world.now() >= window.ends_at {
-            let id = world.params.tactics.plays[window.play].id.clone();
             world.possession.play = None;
             world.emit(Fact::PlayWindowEnded {
-                play: id,
+                play: window.play,
                 possession: world.possession.id,
             });
         }
@@ -263,8 +268,8 @@ pub fn update_play_window(world: &mut World) {
     if world.possession.kind != PossessionKind::Live {
         return;
     }
-    let transition_window = f64::from(world.params.policy.g("transition_window_seconds"));
-    if world.now() - world.possession.started_at < transition_window {
+    let activation_after = f64::from(world.params.policy.g("play_activation_after_seconds"));
+    if world.now() - world.possession.started_at < activation_after {
         return;
     }
     if world.possession.play_called {
@@ -304,9 +309,8 @@ pub fn update_play_window(world: &mut World) {
             world
                 .play_cooldowns
                 .insert(index, ends_at + trigger.cooldown_seconds as f64);
-            let id = play.id.clone();
             world.emit(Fact::PlayActivated {
-                play: id,
+                play: index,
                 possession: world.possession.id,
             });
             return;
@@ -316,11 +320,9 @@ pub fn update_play_window(world: &mut World) {
 
 /// 回合结束时关闭未到期的窗口，保证激活与结束一一对应。
 pub fn close_play_window(world: &mut World) {
-    if let Some(window) = world.possession.play {
-        let id = world.params.tactics.plays[window.play].id.clone();
-        world.possession.play = None;
+    if let Some(window) = world.possession.play.take() {
         world.emit(Fact::PlayWindowEnded {
-            play: id,
+            play: window.play,
             possession: world.possession.id,
         });
     }

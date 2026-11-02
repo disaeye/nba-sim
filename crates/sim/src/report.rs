@@ -11,6 +11,10 @@ pub struct GameReport {
     pub home_score: u32,
     pub away_score: u32,
     pub periods: u32,
+    pub regulation_periods: u32,
+    pub period_duration_seconds: f32,
+    pub overtime_duration_seconds: f32,
+    pub tick_seconds: f32,
     pub ticks: u64,
     /// 决策调度器的回退间隔，供判据计算「掩护后首步」窗口。
     pub redecide_interval_seconds: f64,
@@ -43,6 +47,10 @@ impl GameReport {
             home_score: 0,
             away_score: 0,
             periods: 0,
+            regulation_periods: 0,
+            period_duration_seconds: 0.0,
+            overtime_duration_seconds: 0.0,
+            tick_seconds: 0.0,
             ticks: 0,
             redecide_interval_seconds: 0.0,
             open_business_instances: 0,
@@ -71,6 +79,17 @@ impl GameReport {
     /// 回合与聚合计数，过程判据读的是 `events` 与 `decision_samples`。
     /// 判定批次在合并后会把这两类流放掉，中间过程不留副本。
     pub fn merge(&mut self, other: &GameReport) {
+        if other.games > 0 && self.games == 0 {
+            self.regulation_periods = other.regulation_periods;
+            self.period_duration_seconds = other.period_duration_seconds;
+            self.overtime_duration_seconds = other.overtime_duration_seconds;
+            self.tick_seconds = other.tick_seconds;
+        } else if other.games > 0 {
+            assert_eq!(self.regulation_periods, other.regulation_periods);
+            assert_eq!(self.period_duration_seconds, other.period_duration_seconds);
+            assert_eq!(self.overtime_duration_seconds, other.overtime_duration_seconds);
+            assert_eq!(self.tick_seconds, other.tick_seconds);
+        }
         self.games += other.games;
         self.ticks += other.ticks;
         self.redecide_interval_seconds = other.redecide_interval_seconds;

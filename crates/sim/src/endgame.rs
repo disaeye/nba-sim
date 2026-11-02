@@ -11,8 +11,8 @@ use crate::world::World;
 /// 剩余比赛时间（秒）：本节剩余加上后续各节整节时长。
 pub fn remaining_seconds(world: &World) -> f64 {
     let periods = world.rules.league.regulation_periods;
-    let left = periods.saturating_sub(world.clock.period);
-    world.clock.game_clock + left as f64 * world.clock.period_seconds
+    let left = periods.saturating_sub(world.clock.period());
+    world.clock.game_clock() + left as f64 * world.clock.period_seconds()
 }
 
 /// 一次决策时的比赛处境。
@@ -96,14 +96,14 @@ pub struct FoulPlan {
 /// 最后时段的无球犯规给一罚且球权仍属对手，因此几乎总是不划算。
 fn free_throw_award(world: &World, defense: TeamSide, off_ball: bool) -> (f64, bool) {
     let league = &world.rules.league;
-    let final_window = league.in_final_window(world.clock.period, world.clock.game_clock);
+    let final_window = league.in_final_window(world.clock.period(), world.clock.game_clock());
     if off_ball && final_window {
         // 一罚一掷：罚球次数是 1，且球权不转。
         return (league.away_from_play_free_throws as f64, false);
     }
     let index = World::team_index(defense);
     let after = world.fouls[index].period as u32 + 1;
-    let award = league.bonus_free_throws_for(after, world.clock.period, world.clock.game_clock);
+    let award = league.bonus_free_throws_for(after, world.clock.period(), world.clock.game_clock());
     let retains = award == 0;
     (award as f64, retains)
 }
@@ -122,7 +122,7 @@ fn free_throw_award(world: &World, defense: TeamSide, off_ball: bool) -> (f64, b
 pub fn intentional_foul(world: &World) -> Option<FoulPlan> {
     // 只有活球回合才能犯规。`possession.kind` 记录的是回合如何开始
     // （死球发球还是活球抢断），不能用来判断当前是否在打球。
-    if !matches!(world.phase, crate::state::Phase::Live) {
+    if !matches!(world.phase(), crate::state::Phase::Live) {
         return None;
     }
     let offense = world.possession.team;
@@ -133,11 +133,11 @@ pub fn intentional_foul(world: &World) -> Option<FoulPlan> {
     let procedure = weights.g("foul_procedure_seconds") as f64;
     let retain = weights.w("foul_retain_possession") as f64;
     let ev_offense = weights.w("possession_value") as f64;
-    let shot_clock = world.clock.shot_clock;
+    let shot_clock = world.clock.shot_clock();
     let final_window = world
         .rules
         .league
-        .in_final_window(world.clock.period, world.clock.game_clock);
+        .in_final_window(world.clock.period(), world.clock.game_clock());
     let defenders = world.on_court(defense);
 
     let mut best: Option<(FoulPlan, f64)> = None;
@@ -158,19 +158,21 @@ pub fn intentional_foul(world: &World) -> Option<FoulPlan> {
             remaining - procedure,
             !retains,
         ) * retain;
-        // 不犯规：对手把这次进攻打完，随后球权转到自己手上。对手能消耗的
-        // 时间不会超过比赛剩余时间：时钟走完就没有球权可拿了。
+        // 不犯规：对手把这次进攻打完。这次进攻可能得分，也可能被防下来，
+        // 两种结果都要计入；只按「必然拿到平均得分」估计，会把故意犯规
+        // 算成稳赚，于是大把时间都会去犯规。
         let consumed = shot_clock.min(remaining);
         let left = remaining - consumed;
         let played_out = if left <= f64::default() {
             f64::default()
         } else {
-            win_probability_at(world, defense, -ev_offense, left, true)
+            let scored = weights.w("possession_score_probability") as f64;
+            let points = ev_offense / scored;
+            win_probability_at(world, defense, -points, left, true) * scored
+                + win_probability_at(world, defense, f64::default(), left, true)
+                    * (f64::from(1u8) - scored)
         };
         let gain = fouled - played_out;
-        // 故意犯规是一次显式承诺：犯规累计、轮换与判罚差异这些模型之外的
-        // 代价会陪到比赛结束。因此门槛随时钟稀缺度升高而降低：终场前
-        // 一个千分点的胜率增量就值得犯规，开局阶段同样的增量不值得。
         let defense_margin = world.score[World::team_index(defense)] as i32
             - world.score[World::team_index(offense)] as i32;
         let urgency = leverage(world, defense_margin, remaining).urgency as f64;

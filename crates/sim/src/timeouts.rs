@@ -7,7 +7,7 @@
 use nba_domain::rules::GameRules;
 
 use crate::action::Fact;
-use crate::state::{Phase, TeamSide};
+use crate::state::{Phase, ResumePhase, TeamSide};
 use crate::world::World;
 
 /// 一支球队的暂停账本。
@@ -57,7 +57,7 @@ pub fn can_request(world: &World, team: TeamSide) -> Result<(), TimeoutRejection
     if world.finished {
         return Err(TimeoutRejection::GameOver);
     }
-    let dead = !matches!(world.phase, Phase::Live | Phase::PassFlight { .. } | Phase::ShotFlight { .. });
+    let dead = !world.phase().is_live_gameplay() || world.holder().is_none();
     let holder_team = world.holder().map(|handle| world.players[handle].team);
     if !dead && holder_team != Some(team) {
         return Err(TimeoutRejection::NoPossession);
@@ -67,13 +67,13 @@ pub fn can_request(world: &World, team: TeamSide) -> Result<(), TimeoutRejection
     if ledger.remaining == 0 {
         return Err(TimeoutRejection::NoRemaining);
     }
-    if world.clock.period == rules.league.regulation_periods
+    if world.clock.period() == rules.league.regulation_periods
         && ledger.used_in_fourth >= rules.league.timeouts_fourth_quarter_max
     {
         return Err(TimeoutRejection::FourthQuarterExhausted);
     }
-    if world.clock.period >= rules.league.bonus_final_period
-        && world.clock.game_clock <= rules.league.timeouts_final_seconds as f64
+    if world.clock.period() >= rules.league.bonus_final_period
+        && world.clock.game_clock() <= rules.league.timeouts_final_seconds as f64
         && ledger.used_in_final_window >= rules.league.timeouts_final_max
     {
         return Err(TimeoutRejection::FinalWindowExhausted);
@@ -88,7 +88,12 @@ pub fn request(world: &mut World, team: TeamSide) -> bool {
     }
     let duration = world.rules.tactics.timeout_duration_seconds as f64;
     let index = World::team_index(team);
-    let period = world.clock.period;
+    let period = world.clock.period();
+    let previous_phase = world.phase();
+    assert!(
+        !matches!(previous_phase, Phase::Timeout { .. }),
+        "timeout cannot be requested during an active timeout"
+    );
     let ledger = &mut world.timeouts[index];
     if ledger.period != period {
         ledger.period = period;
@@ -99,14 +104,14 @@ pub fn request(world: &mut World, team: TeamSide) -> bool {
         ledger.used_in_fourth += 1;
     }
     if period >= world.rules.league.bonus_final_period
-        && world.clock.game_clock <= world.rules.league.timeouts_final_seconds as f64
+        && world.clock.game_clock() <= world.rules.league.timeouts_final_seconds as f64
     {
         ledger.used_in_final_window += 1;
     }
-    world.phase = Phase::Timeout {
-        team,
-        resume_at: world.now() + duration,
-    };
+    let now = world.now();
+    let resume_phase = ResumePhase::capture(previous_phase);
+    let resume_at = now + duration;
+    world.set_timeout_phase(team, resume_at, resume_phase, now, previous_phase);
     world.emit(Fact::Timeout {
         team,
         remaining: [world.timeouts[0].remaining, world.timeouts[1].remaining],
@@ -131,7 +136,6 @@ pub fn coach_stop_run(world: &mut World) -> bool {
     if !request(world, team) {
         return false;
     }
-    // 暂停已经回答了这一波得分，同一波不该在下一个回合再触发一次。
     world.scoring_run = 0;
     true
 }

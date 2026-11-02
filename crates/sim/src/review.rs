@@ -1,6 +1,6 @@
 //! 人工回放工件：选出覆盖过程清单的回合，输出帧流与自包含 HTML。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use nba_protocol::StreamTick;
@@ -63,17 +63,11 @@ impl ReviewReport {
     }
 }
 
-fn label_for(record: &PossessionRecord, frames: &[StreamTick]) -> &'static str {
-    let has_free_throw = frames
-        .iter()
-        .any(|tick| tick.frame.event_log.iter().any(|event| event.kind == "FREE_THROW"));
-    if has_free_throw || record.ended_by.contains("free_throw") || record.ended_by.contains("foul") {
+fn label_for(record: &PossessionRecord, bits: &[bool; 12]) -> &'static str {
+    if bits[9] || record.ended_by.contains("free_throw") || record.ended_by.contains("foul") {
         return "free_throw";
     }
-    if frames
-        .iter()
-        .any(|tick| tick.frame.phase.contains("Inbound"))
-    {
+    if bits[8] || record.kind == crate::state::PossessionKind::Dead {
         return "inbound";
     }
     if record.kind == crate::state::PossessionKind::Live && record.duration <= 8.0 {
@@ -82,28 +76,30 @@ fn label_for(record: &PossessionRecord, frames: &[StreamTick]) -> &'static str {
     "half_court"
 }
 
-fn event_count(frames: &[StreamTick], kind: &str) -> usize {
-    frames
-        .iter()
-        .flat_map(|tick| tick.frame.event_log.iter())
-        .filter(|event| event.kind == kind)
-        .count()
-}
-
-fn contact_count(frames: &[StreamTick], kinds: &[&str]) -> usize {
-    frames
-        .iter()
-        .flat_map(|tick| tick.frame.event_log.iter())
-        .filter(|event| event.kind == "BALL_CONTACT")
-        .filter(|event| {
-            event
-                .data
-                .as_ref()
-                .and_then(|data| data.get("contact_kind"))
-                .and_then(|value| value.as_str())
-                .is_some_and(|kind| kinds.contains(&kind))
-        })
-        .count()
+fn observe_tick(bits: &mut [bool; 13], tick: &StreamTick) {
+    let events = &tick.frame.event_log;
+    let has_event = |kind: &str| events.iter().any(|event| event.kind == kind);
+    bits[0] |= holder_ok(std::slice::from_ref(tick));
+    bits[1] |= has_event("PASS");
+    bits[2] |= has_event("SCREEN");
+    bits[3] |= has_event("CUT");
+    bits[4] |= has_event("DRIVE");
+    bits[5] |= has_event("SHOT")
+        && events.iter().any(|event| {
+            event.kind == "BALL_CONTACT"
+                && event
+                    .data
+                    .as_ref()
+                    .and_then(|data| data.get("contact_kind"))
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|kind| matches!(kind, "rim" | "rim_swish"))
+        });
+    bits[6] |= has_event("REBOUND");
+    bits[7] |= has_event("DEFENSE_RESPONSIBILITY_CHANGED");
+    bits[9] |= has_event("FREE_THROW");
+    bits[10] |= has_event("SUBSTITUTION");
+    bits[11] |= has_event("PERIOD_END");
+    bits[12] |= has_event("BOX_OUT");
 }
 
 fn holder_ok(frames: &[StreamTick]) -> bool {
@@ -124,32 +120,19 @@ fn holder_ok(frames: &[StreamTick]) -> bool {
     true
 }
 
-fn bits_for(frames: &[StreamTick]) -> [bool; 12] {
-    let mut bits = [false; 12];
-    bits[0] = holder_ok(frames);
-    bits[1] = event_count(frames, "PASS") > 0;
-    bits[2] = event_count(frames, "SCREEN") > 0;
-    bits[3] = event_count(frames, "CUT") > 0;
-    bits[4] = event_count(frames, "DRIVE") > 0;
-    bits[5] = event_count(frames, "SHOT") > 0
-        && contact_count(frames, &["rim", "rim_swish"]) > 0;
-    bits[6] = event_count(frames, "REBOUND") > 0 && event_count(frames, "BOX_OUT") > 0;
-    bits[7] = event_count(frames, "DEFENSE_RESPONSIBILITY_CHANGED") > 0;
-    bits[8] = frames
-        .iter()
-        .any(|tick| tick.frame.phase.contains("Inbound"));
-    bits[9] = event_count(frames, "FREE_THROW") > 0;
-    bits[10] = event_count(frames, "SUBSTITUTION") > 0;
-    bits[11] = event_count(frames, "PERIOD_END") > 0;
-    bits
-}
-
-fn checklist_for(selected: &[ReviewPossession]) -> Vec<ReviewCheck> {
+fn checklist_for(
+    selected: &[ReviewPossession],
+    selected_bits: &BTreeMap<u64, [bool; 12]>,
+) -> Vec<ReviewCheck> {
     let mut checks = Vec::new();
     for (index, item) in CHECKLIST.iter().enumerate() {
         let evidence = selected
             .iter()
-            .filter(|possession| bits_for(&possession.frames)[index])
+            .filter(|possession| {
+                selected_bits
+                    .get(&possession.id)
+                    .is_some_and(|bits| bits[index])
+            })
             .map(|possession| possession.id.to_string())
             .collect::<Vec<_>>();
         checks.push(ReviewCheck {
@@ -165,36 +148,39 @@ fn checklist_for(selected: &[ReviewPossession]) -> Vec<ReviewCheck> {
     checks
 }
 
-pub fn build_review(seed: u64, calibration_dir: &Path, count: usize) -> Result<ReviewReport, String> {
+pub fn build_review(
+    seed: u64,
+    calibration_dir: &Path,
+    count: usize,
+) -> Result<ReviewReport, String> {
     if count == 0 {
         return Err("review requires at least one possession".to_string());
     }
     let params = RuntimeParams::load(calibration_dir)?;
-    let mut world = World::new(
-        MatchSetup::builtin(nba_domain::GameRules::default()),
-        params,
-        seed,
-    );
-    let mut by_possession: BTreeMap<u64, Vec<StreamTick>> = BTreeMap::new();
-    let mut pending_inbound: Vec<StreamTick> = Vec::new();
+    let setup = MatchSetup::builtin(nba_domain::GameRules::default());
+    let mut world = World::new(setup.clone(), params, seed);
+    let mut possession_evidence = BTreeMap::new();
+    let mut inbound_pending = false;
     while !world.finished {
         world.step(TICK_SECONDS);
         let id = world.possession.id;
-        let tick = world.stream_tick();
-        if matches!(world.phase, crate::state::Phase::Inbound { .. }) {
-            pending_inbound.push(tick);
-        } else {
-            if !pending_inbound.is_empty() {
-                by_possession
-                    .entry(id)
-                    .or_default()
-                    .append(&mut pending_inbound);
+        if id != 0 {
+            let tick = world.stream_tick();
+            let bits = possession_evidence.entry(id).or_insert([false; 13]);
+            observe_tick(bits, &tick);
+            if matches!(world.phase(), crate::state::Phase::Inbound { .. }) {
+                inbound_pending = true;
+            } else if inbound_pending {
+                bits[8] = true;
+                inbound_pending = false;
             }
-            if id != 0 {
-                by_possession.entry(id).or_default().push(tick);
-            }
+            bits[11] |= tick
+                .frame
+                .event_log
+                .iter()
+                .any(|event| event.kind == "PERIOD_END");
         }
-        if world.clock.tick > 2_000_000 {
+        if world.clock.tick() > 2_000_000 {
             return Err(format!("seed {seed} did not finish"));
         }
     }
@@ -209,8 +195,12 @@ pub fn build_review(seed: u64, calibration_dir: &Path, count: usize) -> Result<R
         .possessions
         .iter()
         .filter_map(|record| {
-            let frames = by_possession.get(&record.id)?.clone();
-            Some((record.clone(), label_for(record, &frames), bits_for(&frames)))
+            let evidence = *possession_evidence.get(&record.id)?;
+            let mut bits = [false; 12];
+            bits.copy_from_slice(&evidence[..12]);
+            bits[6] = evidence[6] && evidence[12];
+            bits[8] |= record.kind == crate::state::PossessionKind::Dead;
+            Some((record.clone(), label_for(record, &bits), bits))
         })
         .collect();
     candidates.retain(|(_, _, bits)| bits.iter().any(|value| *value));
@@ -275,6 +265,53 @@ pub fn build_review(seed: u64, calibration_dir: &Path, count: usize) -> Result<R
     }
     selected.truncate(count);
     selected.sort_unstable();
+    let selected_ids = selected
+        .iter()
+        .map(|index| candidates[*index].0.id)
+        .collect::<BTreeSet<_>>();
+    let mut selected_bits = selected
+        .iter()
+        .map(|index| (candidates[*index].0.id, candidates[*index].2))
+        .collect::<BTreeMap<_, _>>();
+    let mut frame_world = World::new(
+        setup,
+        RuntimeParams::load(calibration_dir)?,
+        seed,
+    );
+    let mut selected_frames: BTreeMap<u64, Vec<StreamTick>> = BTreeMap::new();
+    let mut pending_inbound: Vec<StreamTick> = Vec::new();
+    let mut inbounded_possessions = BTreeSet::new();
+    while !frame_world.finished {
+        frame_world.step(TICK_SECONDS);
+        let id = frame_world.possession.id;
+        if matches!(frame_world.phase(), crate::state::Phase::Inbound { .. }) {
+            pending_inbound.push(frame_world.stream_tick());
+        } else {
+            if selected_ids.contains(&id) {
+                if !pending_inbound.is_empty() {
+                    inbounded_possessions.insert(id);
+                }
+                selected_frames
+                    .entry(id)
+                    .or_default()
+                    .append(&mut pending_inbound);
+                selected_frames
+                    .entry(id)
+                    .or_default()
+                    .push(frame_world.stream_tick());
+            } else {
+                pending_inbound.clear();
+            }
+        }
+        if frame_world.clock.tick() > 2_000_000 {
+            return Err(format!("seed {seed} did not finish while collecting review frames"));
+        }
+    }
+    for id in inbounded_possessions {
+        if let Some(bits) = selected_bits.get_mut(&id) {
+            bits[8] = true;
+        }
+    }
     let possessions = selected
         .iter()
         .map(|index| {
@@ -289,11 +326,11 @@ pub fn build_review(seed: u64, calibration_dir: &Path, count: usize) -> Result<R
                 duration: record.duration,
                 points: record.points,
                 ended_by: record.ended_by.to_string(),
-                frames: by_possession.get(&record.id).cloned().unwrap_or_default(),
+                frames: selected_frames.remove(&record.id).unwrap_or_default(),
             }
         })
         .collect::<Vec<_>>();
-    let mut checklist = checklist_for(&possessions);
+    let mut checklist = checklist_for(&possessions, &selected_bits);
     if report
         .events
         .iter()

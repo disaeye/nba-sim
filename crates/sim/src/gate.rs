@@ -360,9 +360,7 @@ fn push_process_layers(gate: &mut GateReport, report: &GameReport, params: &Para
         target: under_bound,
         relative_error: (under_rate - under_bound) / under_bound.max(f64::MIN_POSITIVE),
         passed: under_rate >= under_bound,
-        detail: format!(
-            "{under_shoot:.0}/{under_total:.0} 掩护后首步且三分能力达标"
-        ),
+        detail: format!("{under_shoot:.0}/{under_total:.0} 掩护后首步且三分能力达标"),
     });
 
     let over_total = report
@@ -540,13 +538,16 @@ fn push_process_layers(gate: &mut GateReport, report: &GameReport, params: &Para
     }
     // 每个阵地回合最多叫一次战术，所以激活数除以阵地回合数就是覆盖率。
     // 回合 id 逐场重置，批次合并后不能拿 id 做匹配。
-    let transition_window = f64::from(params.policy.g("transition_window_seconds"));
+    // 分母口径必须与战术系统的激活条件一致：只有「由篮板或抢断开始、且
+    // 活到激活时刻」的回合才可能叫出战术，所以用激活延迟而不是转换窗口
+    // 作为存活门槛，并且只统计这类回合。
+    let activation_after = f64::from(params.policy.g("play_activation_after_seconds"));
     let halfcourt = report
         .possessions
         .iter()
         .filter(|record| {
             record.kind == crate::state::PossessionKind::Live
-                && record.duration >= transition_window
+                && record.duration >= activation_after
         })
         .count();
     push_process_range(

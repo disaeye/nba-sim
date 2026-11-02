@@ -11,6 +11,8 @@ OUT = "data/calibration"
 SHOTS = os.path.join(RAW, "shotdetail_2024.csv")
 POSS = os.path.join(RAW, "pbpstats_2024.csv")
 SEASON = "2024-25"
+# 事件文本没有 and-1 标记，这一项是联盟场均参考值。
+AND_ONE_PER_GAME = 2.5
 
 # 封盖与抢断的事件文本写法：`X BLOCK (2 BLK): ...` 或 `...: X BLOCK (2 BLK)`。
 BLOCK_EVENT_RE = re.compile(r"(\S+) BLOCK \((\d+) BLK\)")
@@ -193,8 +195,16 @@ def player_zone_skill(shots):
 
 DISTANCE_EDGES = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-    20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32, 35, 40, 60,
+    20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38,
+    40, 45, 60,
 ]
+
+SHRINK_PRIOR = 40.0
+
+# 档内整体出手太少时，档命中率本身就是噪声（22 英尺三分整季只有两次出手），
+# 用它做收缩目标会把该档拉到 1.0。这类档不进入曲线，引擎在首档之下按首档取
+# 值，距离曲线仍然连续。
+MIN_BAND_ATTEMPTS = 30
 
 
 def distance_bin(distance):
@@ -204,33 +214,67 @@ def distance_bin(distance):
     return DISTANCE_EDGES[-1]
 
 
+def isotonic_decreasing(rows):
+    """加权保序回归：命中率随距离单调不增，抹平小样本分档的倒挂。"""
+    blocks = []
+    for row in rows:
+        blocks.append([row["rate"], max(row["samples"], 1), [row]])
+        while len(blocks) > 1 and blocks[-2][0] < blocks[-1][0]:
+            right_rate, right_weight, right_rows = blocks.pop()
+            left_rate, left_weight, left_rows = blocks.pop()
+            weight = left_weight + right_weight
+            merged = (left_rate * left_weight + right_rate * right_weight) / weight
+            blocks.append([merged, weight, left_rows + right_rows])
+    merged_rows = []
+    for rate, _, block_rows in blocks:
+        for row in block_rows:
+            merged_rows.append(
+                {
+                    "upper_ft": row["upper_ft"],
+                    "rate": round(rate, 6),
+                    "samples": row["samples"],
+                }
+            )
+    merged_rows.sort(key=lambda row: row["upper_ft"])
+    return merged_rows
+
+
 def build_shot_make(shots, league_p, skills, totals):
     kinds = sorted({s["kind"] for s in shots})
     zones = ["rim", "near", "mid", "three"]
 
     cells = defaultdict(lambda: [0, 0])
-    kind_totals = defaultdict(lambda: [0, 0])
+    band_totals = defaultdict(lambda: [0, 0])
     for shot in shots:
-        key = (shot["kind"], distance_bin(shot["distance"]), shot["is_three"])
-        cells[key][0] += shot["made"]
-        cells[key][1] += 1
-        kind_totals[(shot["kind"], shot["is_three"])][0] += shot["made"]
-        kind_totals[(shot["kind"], shot["is_three"])][1] += 1
+        upper = distance_bin(shot["distance"])
+        side = "three" if shot["is_three"] else "two"
+        cells[(shot["kind"], upper, side)][0] += shot["made"]
+        cells[(shot["kind"], upper, side)][1] += 1
+        band_totals[(upper, side)][0] += shot["made"]
+        band_totals[(upper, side)][1] += 1
+
+    # 收缩的目标是同一距离档上所有出手类型的整体命中率。用该出手类型的
+    # 整体命中率会把四十英尺的接球投拉回到三分的平均水平，距离衰减就
+    # 消失了，远处出手于是显得和弧顶一样好。
+    band_rate = {
+        band: made / attempts
+        for band, (made, attempts) in band_totals.items()
+        if attempts >= MIN_BAND_ATTEMPTS
+    }
 
     table_cells = defaultdict(lambda: defaultdict(list))
-    for (kind, upper, is_three), (made, attempts) in cells.items():
-        if attempts < 20:
+    for (kind, upper, side), (made, attempts) in cells.items():
+        if (upper, side) not in band_rate:
             continue
-        prior = 40.0
-        kind_made, kind_attempts = kind_totals[(kind, is_three)]
-        kind_p = kind_made / kind_attempts
-        rate = (made + prior * kind_p) / (attempts + prior)
-        table_cells[kind]["three" if is_three else "two"].append(
+        target = band_rate[(upper, side)]
+        rate = (made + SHRINK_PRIOR * target) / (attempts + SHRINK_PRIOR)
+        table_cells[kind][side].append(
             {"upper_ft": upper, "rate": round(rate, 6), "samples": attempts}
         )
     for kind in table_cells:
         for side in table_cells[kind]:
-            table_cells[kind][side].sort(key=lambda row: row["upper_ft"])
+            rows = sorted(table_cells[kind][side], key=lambda row: row["upper_ft"])
+            table_cells[kind][side] = isotonic_decreasing(rows)
 
     # 个人技巧斜率：用未收缩的球员命中率做方差分解。
     # 观测方差 = 真实方差 + 二项抽样方差；属性按 sd=0.15 归一。
@@ -263,7 +307,7 @@ def build_shot_make(shots, league_p, skills, totals):
             "season": SEASON,
             "sample": len(shots),
             "script": "scripts/calibrate/fit_tables.py",
-            "method": "empirical make rate per (shot kind, distance bin, two/three), sparse cells smoothed toward the kind mean",
+            "method": "empirical make rate per (shot kind, distance bin, two/three), sparse cells smoothed toward the same-distance-band rate and forced monotone decreasing in distance",
             "contest": "modeled: centred at 0.5 so the fitted mean is preserved; sensitivity documented in table",
         },
         "distance_edges": DISTANCE_EDGES,
@@ -424,7 +468,7 @@ def build_possession(rows):
             "season": SEASON,
             "sample": len(rows),
             "script": "scripts/calibrate/fit_tables.py",
-            "method": "按回合起始语境分组统计结局速率与时长分位",
+            "method": "按回合起始语境分组统计结局速率与时长分位；封盖与抢断按事件文本上的（比赛、球员、计数）去重后逐场计数；封盖写作 `X BLOCK (n BLK)`，抢断写作 `X STEAL (n STL)`，两种词序都计入；and-1 取联盟场均参考值，事件文本里没有 and-1 标记",
             "context": "live = 上一次回合以活球方式终结（抢断/封盖/投失）；dead = 停表方式终结",
         },
         "context": {},
@@ -492,6 +536,8 @@ def build_possession(rows):
     table["league"]["shooting_fouls_per_game"] = round(totals["sf"] / games, 4)
     table["league"]["blocks_per_game"] = round(len(block_events) / games, 4)
     table["league"]["steals_per_game"] = round(len(steal_events) / games, 4)
+    # 事件文本没有 and-1 标记，这一项直接取联盟场均参考值。
+    table["league"]["and_one_per_game"] = AND_ONE_PER_GAME
     points = 2 * totals["fg2m"] + 3 * totals["fg3m"] + free_throw_makes
     table["league"]["points_per_game"] = round(points / games, 4)
     return table
@@ -596,8 +642,30 @@ def main():
     rebound = build_rebound(rows, possession["league"]["oreb_per_miss"])
     freethrow = build_freethrow(rows)
 
+    shot_distance = {
+        "table": "shot_distance",
+        "provenance": {
+            "source": "shufinskiy/nba_data shotdetail (stats.nba.com ShotChartDetail)",
+            "season": SEASON,
+            "sample": len(shots),
+            "script": "scripts/calibrate/fit_tables.py",
+            "method": "每个出手类型在每个距离档上的实测命中率；取同一距离档的整体命中率做收缩目标并对距离保序，命中率随距离单调不增",
+        },
+        "profiles": {},
+    }
+    for kind, sides in shot_make["cells"].items():
+        for side, cells in sides.items():
+            shot_distance["profiles"][f"{kind}_{side}"] = {
+                "cells": [
+                    {"upper_ft": cell["upper_ft"], "rate": cell["rate"]}
+                    for cell in cells
+                ]
+            }
+    shot_distance["profiles"] = dict(sorted(shot_distance["profiles"].items()))
+
     for name, table in [
         ("shot_make", shot_make),
+        ("shot_distance", shot_distance),
         ("shot_profile", profile),
         ("possession", possession),
         ("rebound", rebound),

@@ -9,20 +9,39 @@ use crate::action::{Fact, FoulKind};
 use crate::state::{Phase, TeamSide};
 use crate::world::World;
 
-/// 犯规的公共计账：个人累计、球队单节犯规、bonus 判定、事实发布，
-/// 返回实际判给的罚球次数。
+/// 犯规的公共计账：个人累计、球队单节犯规、bonus 判定与犯规事实。
 ///
 /// 个人累计与球队单节犯规是两套账：进攻犯规计入个人累计（满 6 犯仍离场），
 /// 但不计入球队单节犯规，因此不会把对手送进 bonus。`award` 是该犯规类型
 /// 自带的罚球数（投篮犯规 2/3 罚），为 0 时按球队单节犯规判定 bonus。
-fn book(
+#[derive(Debug, Clone, Copy)]
+pub struct FoulBooking {
+    pub free_throws: u8,
+    pub foul_id: u64,
+    pub team_technical_id: Option<u64>,
+    pub retained_team: TeamSide,
+}
+
+pub fn book(
     world: &mut World,
     fouler: usize,
     fouled: usize,
     kind: FoulKind,
     award: u8,
     and_one: bool,
-) -> u8 {
+) -> FoulBooking {
+    let team = world.players[fouler].team;
+    assert!(world.players[fouler].on_court, "only an on-court player can foul");
+    let was_disqualified = world.players[fouler].disqualified;
+    let foul_limit = world.rules.league.max_personal_fouls;
+    let exhausted_bench = world.rules.league.id == nba_domain::league::LeagueId::Nba
+        && !(0..world.players.len()).any(|handle| {
+            let player = &world.players[handle];
+            player.team == team
+                && !player.on_court
+                && !player.disqualified
+                && player.fouls < foul_limit
+        });
     world.line_mut(fouler).fouls += 1;
     let disqualified = crate::rotation::record_foul(world, fouler);
     let index = World::team_index(world.players[fouler].team);
@@ -41,14 +60,73 @@ fn book(
     } else {
         0
     };
+    let foul_id = world.new_foul_id();
+    let retained_team = if kind == FoulKind::Offensive {
+        team.other()
+    } else {
+        world.possession.team
+    };
+    let team_technical_id = if disqualified && exhausted_bench {
+        world.rotation.pending[index] = false;
+        world.players[fouler].retained_after_foul_limit = true;
+        world.fouls[index].technical += 1;
+        Some(world.new_foul_id())
+    } else {
+        if disqualified {
+            world.rotation.pending[index] = true;
+        }
+        None
+    };
     world.emit(Fact::Foul {
         fouler,
         fouled,
         kind,
         free_throws,
         and_one,
+        foul_id,
     });
-    free_throws
+    if let Some(technical_id) = team_technical_id {
+        if !was_disqualified {
+            world.emit(Fact::BenchDepleted {
+                team,
+                player: fouler,
+            });
+        }
+        world.emit(Fact::FoulOutRetention {
+            team,
+            player: fouler,
+            foul_id,
+        });
+        world.emit(Fact::TeamTechnicalFoul {
+            team,
+            reason: "foul_out_with_depleted_bench",
+            foul_id: technical_id,
+        });
+    }
+    FoulBooking {
+        free_throws,
+        foul_id,
+        team_technical_id,
+        retained_team,
+    }
+}
+
+pub fn start_roster_technical(
+    world: &mut World,
+    booking: FoulBooking,
+    beneficiary: TeamSide,
+    follow_up: crate::resolve::freethrow::FreeThrowFollowUp,
+) {
+    let Some(technical_id) = booking.team_technical_id else {
+        return;
+    };
+    crate::resolve::freethrow::shoot_team_technical(
+        world,
+        beneficiary,
+        booking.retained_team,
+        technical_id,
+        follow_up,
+    );
 }
 
 /// 球队是否已经进入 bonus。
@@ -58,8 +136,8 @@ pub fn bonus_free_throws(world: &World, fouling_team: TeamSide) -> u8 {
     let index = World::team_index(fouling_team);
     world.rules.league.bonus_free_throws_for(
         world.fouls[index].period as u32,
-        world.clock.period,
-        world.clock.game_clock,
+        world.clock.period(),
+        world.clock.game_clock(),
     )
 }
 
@@ -71,7 +149,7 @@ fn is_away_from_play(world: &World, fouled: usize) -> bool {
     world
         .rules
         .league
-        .in_final_window(world.clock.period, world.clock.game_clock)
+        .in_final_window(world.clock.period(), world.clock.game_clock())
         && world.holder() != Some(fouled)
 }
 
@@ -86,7 +164,7 @@ pub fn apply_shooting_foul(
     if made {
         world.line_mut(shooter).and_one += 1;
     }
-    book(
+    let booking = book(
         world,
         fouler,
         shooter,
@@ -94,16 +172,37 @@ pub fn apply_shooting_foul(
         free_throws,
         made,
     );
-    world.phase = Phase::FreeThrows {
+    world.pending_rebound = None;
+    world.set_ball_held(shooter);
+    world.set_phase(Phase::FreeThrows {
         shooter,
-        total: free_throws,
-        remaining: free_throws,
+        total: booking.free_throws,
+        remaining: booking.free_throws,
         made: 0,
         next_at: world.now() + world.rules.free_throw_interval_seconds as f64,
         and_one: made,
         retain_possession: false,
-    };
+        foul_id: booking.foul_id,
+        technical_retained_team: None,
+        after_technical: None,
+    });
     world.apply_dead_ball_window();
+    if booking.team_technical_id.is_some() {
+        start_roster_technical(
+            world,
+            booking,
+            world.players[shooter].team,
+            crate::resolve::freethrow::FreeThrowFollowUp::Attempts {
+                shooter,
+                total: booking.free_throws,
+                remaining: booking.free_throws,
+                made: 0,
+                and_one: made,
+                retain_possession: false,
+                foul_id: booking.foul_id,
+            },
+        );
+    }
 }
 
 /// 非投篮普通犯规：bonus 之内两罚，最后时段对无球人犯规，
@@ -115,36 +214,76 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
     } else {
         0
     };
-    let free_throws = book(world, fouler, fouled, FoulKind::Personal, award, false);
-    if free_throws > 0 {
-        world.phase = Phase::FreeThrows {
+    let booking = book(world, fouler, fouled, FoulKind::Personal, award, false);
+    // 哨响就停表：场上正在进行的掩护、切入、突破都作废，否则那些动作的
+    // 结算会用上一个状态的防守人或站位去判一个已经不存在的回合。
+    world.cancel_actions("foul");
+    if booking.free_throws > 0 {
+        world.pending_rebound = None;
+        world.set_ball_held(fouled);
+        world.set_phase(Phase::FreeThrows {
             shooter: fouled,
-            total: free_throws,
-            remaining: free_throws,
+            total: booking.free_throws,
+            remaining: booking.free_throws,
             made: 0,
             next_at: world.now() + world.rules.free_throw_interval_seconds as f64,
             and_one: false,
             retain_possession: away_from_play,
-        };
+            foul_id: booking.foul_id,
+            technical_retained_team: None,
+            after_technical: None,
+        });
     } else {
-        world.end_possession("foul", 0);
-        world.phase = Phase::DeadBall {
+        world.set_phase(Phase::DeadBall {
             team: world.players[fouled].team,
             ready_at: world.now() + world.rules.inbound_setup_seconds as f64,
-        };
+        });
     }
     world.apply_dead_ball_window();
+    let follow_up = if booking.free_throws > 0 {
+        crate::resolve::freethrow::FreeThrowFollowUp::Attempts {
+            shooter: fouled,
+            total: booking.free_throws,
+            remaining: booking.free_throws,
+            made: 0,
+            and_one: false,
+            retain_possession: away_from_play,
+            foul_id: booking.foul_id,
+        }
+    } else {
+        crate::resolve::freethrow::FreeThrowFollowUp::DeadBall {
+            team: world.players[fouled].team,
+        }
+    };
+    if booking.team_technical_id.is_some() {
+        start_roster_technical(world, booking, world.players[fouler].team.other(), follow_up);
+    }
 }
 
 /// 进攻犯规：计入个人累计与球队全场犯规，不计入球队单节犯规，
 /// 不判给对手罚球，只把球权交给对方。
 pub fn apply_offensive_foul(world: &mut World, fouler: usize, fouled: usize) {
     let team = world.players[fouler].team;
-    book(world, fouler, fouled, FoulKind::Offensive, 0, false);
-    world.end_possession("offensive_foul", 0);
-    world.phase = Phase::DeadBall {
+    let booking = book(world, fouler, fouled, FoulKind::Offensive, 0, false);
+    world.cancel_actions("offensive_foul");
+    world.end_possession(
+        nba_domain::event::PossessionEndCause::TurnoverOffensiveFoul,
+        "offensive_foul",
+        0,
+    );
+    world.set_phase(Phase::DeadBall {
         team: team.other(),
         ready_at: world.now() + world.rules.inbound_setup_seconds as f64,
-    };
+    });
     world.apply_dead_ball_window();
+    let retained_team = team.other();
+    start_roster_technical(
+        world,
+        FoulBooking {
+            retained_team,
+            ..booking
+        },
+        retained_team,
+        crate::resolve::freethrow::FreeThrowFollowUp::DeadBall { team: retained_team },
+    );
 }

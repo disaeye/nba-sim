@@ -22,8 +22,8 @@ pub fn decision_state(world: &World) -> DecisionState {
     defenders.sort_by(|a, b| a.1.partial_cmp(&b.1).expect("finite distances"));
     let primary = defenders.first().map(|(index, distance)| {
         let defender = &world.players[*index];
-        let closing = (defender.vel - world.players[actor].vel)
-            .dot((pos - defender.pos).normalize_or_zero());
+        let closing =
+            (defender.vel - world.players[actor].vel).dot((pos - defender.pos).normalize_or_zero());
         DefenderView {
             index: *index,
             distance_ft: *distance,
@@ -88,16 +88,17 @@ pub fn decision_state(world: &World) -> DecisionState {
     let mismatch = skill_edge.clamp(-1.0, 1.0) * 0.5;
     let margin = world.score[World::team_index(team)] as i32
         - world.score[World::team_index(team.other())] as i32;
-    let leverage = crate::endgame::leverage(world, margin, crate::endgame::remaining_seconds(world));
+    let leverage =
+        crate::endgame::leverage(world, margin, crate::endgame::remaining_seconds(world));
     DecisionState {
         actor,
         actor_pos: pos,
         hoop,
         attacking_right: world.attacking_right(team),
-        clock: world.clock.game_clock,
-        shot_clock: world.clock.shot_clock,
+        clock: world.clock.game_clock(),
+        shot_clock: world.clock.shot_clock(),
         margin,
-        period: world.clock.period,
+        period: world.clock.period(),
         primary_defender: primary,
         help,
         teammates,
@@ -204,13 +205,17 @@ pub fn observe(world: &World, actor: usize) -> Observation {
             continue;
         }
         let dist_sq = distance * distance;
-        let occluded = world.players.iter().enumerate().any(|(blocker, candidate)| {
-            blocker != actor
-                && blocker != index
-                && candidate.on_court
-                && (candidate.pos - player.pos).length_squared() < dist_sq
-                && segment_distance_sq(candidate.pos, player.pos, other.pos) < 20.25
-        });
+        let occluded = world
+            .players
+            .iter()
+            .enumerate()
+            .any(|(blocker, candidate)| {
+                blocker != actor
+                    && blocker != index
+                    && candidate.on_court
+                    && (candidate.pos - player.pos).length_squared() < dist_sq
+                    && segment_distance_sq(candidate.pos, player.pos, other.pos) < 20.25
+            });
         if occluded {
             continue;
         }
@@ -233,7 +238,9 @@ pub fn observe(world: &World, actor: usize) -> Observation {
     let ball_angle = if ball_distance <= f32::EPSILON {
         0.0
     } else {
-        (forward.dot(ball_offset / ball_distance)).clamp(-1.0, 1.0).acos()
+        (forward.dot(ball_offset / ball_distance))
+            .clamp(-1.0, 1.0)
+            .acos()
     };
     let ball_visible = ball_distance <= 55.0 && ball_angle <= 100_f32.to_radians();
     Observation {
@@ -242,8 +249,8 @@ pub fn observe(world: &World, actor: usize) -> Observation {
         players,
         ball_pos: world.ball.pos,
         ball_visible,
-        shot_clock: world.clock.shot_clock,
-        game_clock: world.clock.game_clock,
+        shot_clock: world.clock.shot_clock(),
+        game_clock: world.clock.game_clock(),
         score: world.score,
         possession: world.possession.id,
     }

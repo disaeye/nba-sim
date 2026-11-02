@@ -32,13 +32,20 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     if let Some(defender) = nearest {
         let physicality = world.players[defender].data.tendencies.physicality;
         let help = world.players[defender].data.tendencies.help_aggressiveness;
+        let fouling_team = world.players[defender].team;
+        let free_throws = crate::resolve::foul::bonus_free_throws(world, fouling_team);
         let policy = &world.params.policy;
+        // 到 bonus 之后防守人收手：同样的对位，伸手犯规明显变少。
+        let discipline = if free_throws > 0 {
+            policy.w("reach_in_penalty_scale")
+        } else {
+            1.0
+        };
         let rate = policy.w("reach_in_foul_rate")
             * (policy.w("reach_in_physicality_base") + physicality)
-            * (policy.w("reach_in_help_base") + help);
+            * (policy.w("reach_in_help_base") + help)
+            * discipline;
         if world.draw(Stream::Foul, defender, purpose::REACH_IN_FOUL, 0) < rate {
-            let fouling_team = world.players[defender].team;
-            let free_throws = crate::resolve::foul::bonus_free_throws(world, fouling_team);
             crate::resolve::foul::apply_non_shooting_foul(world, defender, driver);
             if free_throws == 0 {
                 // 非 bonus：死球后进攻方继续本次回合，只是把下一次决策
@@ -72,19 +79,53 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     let distance_ft = (pos - hoop).length();
     let reached = distance_ft <= world.params.policy.g("finish_zone_ft");
     let defender_beaten = separation_ft > world.rules.min_player_separation_ft + 1.0;
-    if !defender_beaten && separation_ft <= world.rules.min_player_separation_ft + 0.5 {
+    // 带球撞人：防守人在接触前已经站定（双脚落地、不再滑步），碰撞
+    // 由进攻方发起。裁判看的就是防守人有没有先占住位置，所以判定挂在
+    // 防守人的速度上，而不是进攻人的速度。
+    if separation_ft <= world.rules.min_player_separation_ft + 0.7 {
+        if let Some(defender) = nearest {
+            let planted = world.players[defender].vel.length() < 3.0;
+            let strength = world.players[driver].data.attributes.strength;
+            let rate = world.params.policy.w("charge_rate_drive") * (0.6 + strength);
+            if planted && world.draw(Stream::Foul, driver, purpose::DRIVE_CHARGE, 0) < rate {
+                crate::resolve::foul::apply_offensive_foul(world, driver, defender);
+                return ActionOutcome {
+                    actor: driver,
+                    kind: ActionKind::Drive,
+                    completion: Completion::Failed,
+                    delta: StateDelta {
+                        turnover: Some(TurnoverKind::OffensiveFoul),
+                        ..Default::default()
+                    },
+                    facts: Vec::new(),
+                };
+            }
+        }
+    }
+    if separation_ft <= world.rules.min_player_separation_ft + 2.0 {
         let handle_skill = world.players[driver].data.attributes.ball_handling;
         let steal_skill = nearest
             .map(|d| world.players[d].data.attributes.defense_perimeter)
             .unwrap_or(0.5);
-        let lost_rate = (0.12 + 0.25 * (steal_skill - handle_skill)).clamp(0.03, 0.20);
+        let lost_rate = (0.035 + 0.12 * (steal_skill - handle_skill)).clamp(0.01, 0.07);
         if world.draw(Stream::Decision, driver, purpose::DRIVE_BEAT, 0) < lost_rate {
             world.line_mut(driver).turnovers += 1;
+            if let Some(thief) = nearest {
+                world.line_mut(thief).steals += 1;
+                world.emit(Fact::Steal {
+                    player: thief,
+                    victim: driver,
+                });
+            }
             world.emit(Fact::Turnover {
                 player: driver,
                 kind: TurnoverKind::LostBall,
             });
-            world.end_possession("turnover", 0);
+            world.end_possession(
+                nba_domain::event::PossessionEndCause::TurnoverSteal,
+                "lost_ball",
+                0,
+            );
             world.start_possession(team.other(), PossessionKind::Live);
             return ActionOutcome {
                 actor: driver,
@@ -98,6 +139,12 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
             };
         }
     }
+    // 突破成功后球员留在落点。动作结束到下一次决策之间有半秒空档，
+    // 如果 target 还是弧顶，球员会从篮下走回弧顶，下一次决策时已经在
+    // 中距离，突破的出手全部落进近筐区，近筐比例整体偏高。
+    world.players[driver].target = intent.to_ft;
+    world.players[driver].target_kind = crate::state::TargetKind::Window;
+    world.players[driver].target_partner = driver;
     world.possession.gather_pos = Some(pos);
     world.possession.dribble_state = crate::state::DribbleState::Dribbling;
     world.possession.ball_phase = crate::state::BallPhase::Drive;
@@ -139,22 +186,47 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
     let direction = (hoop - pos).normalize_or_zero();
     let allowance = world.params.policy.g("gather_travel_allowance_ft");
     let gather = world.possession.gather_pos.unwrap_or(intent.from_ft);
-    // 收球步的终结位置：突破上篮进入篮下完成，抛投在近筐区域完成。
-    let min_distance = world.params.policy.g("finish_min_distance_ft");
-    let is_floater = world.draw(Stream::Aim, actor, purpose::FINISH_STEP, 1) < 0.56;
-    let finish_dist = if is_floater {
-        5.2 + world.draw(Stream::Aim, actor, purpose::FINISH_STEP, 0) * 5.2
-    } else {
-        min_distance + world.draw(Stream::Aim, actor, purpose::FINISH_STEP, 0) * 0.8
-    };
-    let finish = hoop - direction * finish_dist;
+    // 收球步的终结位置由决策意图给出：突破上篮进入篮下完成，抛投在近筐
+    // 区域完成，低位保持低位位置。
+    let finish = intent.to_ft;
     if travel_on_drive(gather, finish, allowance) {
         world.line_mut(actor).turnovers += 1;
         world.emit(Fact::Turnover {
             player: actor,
             kind: TurnoverKind::Travel,
         });
-        world.end_possession("turnover", 0);
+        world.end_possession(
+            nba_domain::event::PossessionEndCause::TurnoverTravel,
+            "travel",
+            0,
+        );
+        world.start_possession(team.other(), PossessionKind::Live);
+        return ActionOutcome {
+            actor,
+            kind: ActionKind::Finish,
+            completion: Completion::Failed,
+            delta: StateDelta {
+                turnover: Some(TurnoverKind::Travel),
+                ..Default::default()
+            },
+            facts: Vec::new(),
+        };
+    }
+    // 走步是步数违规，与收球位移是同一件事的两种尺度：容限检查抓到
+    // 迈得太远的那几次，剩下的由判罚频率补上。
+    if world.draw(Stream::Decision, actor, purpose::GATHER_TRAVEL, 0)
+        < world.params.policy.w("gather_travel_rate")
+    {
+        world.line_mut(actor).turnovers += 1;
+        world.emit(Fact::Turnover {
+            player: actor,
+            kind: TurnoverKind::Travel,
+        });
+        world.end_possession(
+            nba_domain::event::PossessionEndCause::TurnoverTravel,
+            "travel",
+            0,
+        );
         world.start_possession(team.other(), PossessionKind::Live);
         return ActionOutcome {
             actor,
@@ -170,7 +242,12 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
     world.players[actor].target = finish;
     world.players[actor].target_kind = crate::state::TargetKind::Window;
     world.players[actor].target_partner = actor;
-    if let Some(slot) = world.possession.matchup.iter().position(|man| *man == actor) {
+    if let Some(slot) = world
+        .possession
+        .matchup
+        .iter()
+        .position(|man| *man == actor)
+    {
         let defense = world.possession.team.other();
         let defenders = world.on_court(defense);
         if let Some(defender) = defenders.as_slice().get(slot) {
@@ -180,10 +257,22 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
     }
     world.possession.dribble_state = crate::state::DribbleState::Gathered;
     world.possession.gather_pos = Some(pos);
-    world.possession.ball_phase = crate::state::BallPhase::Gather;
-    // 收球步仍属于这次突破，出手语境按突破计算。
-    world.possession.last_drive_at = Some(world.now());
-    world.possession.last_drive_actor = Some(actor);
+    let was_post = world.possession.ball_phase == crate::state::BallPhase::Post
+        || (world.possession.last_post_actor == Some(actor)
+            && world
+                .possession
+                .last_post_at
+                .map(|t| world.now() - t < 4.0)
+                .unwrap_or(false));
+    if was_post {
+        world.possession.ball_phase = crate::state::BallPhase::Post;
+        world.possession.last_post_at = Some(world.now());
+        world.possession.last_post_actor = Some(actor);
+    } else {
+        world.possession.ball_phase = crate::state::BallPhase::Gather;
+        world.possession.last_drive_at = Some(world.now());
+        world.possession.last_drive_actor = Some(actor);
+    }
     ActionOutcome {
         actor,
         kind: ActionKind::Finish,
@@ -213,16 +302,16 @@ pub fn resolve_post(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     let target_distance = defender.map_or(0.0, |handle| {
         let offense_strength = world.players[actor].data.attributes.strength;
         let defense = &world.players[handle].data.attributes;
-        let defense_resistance = nba_domain::capability::effective_post_defense_physicality(
-            &world.rules,
-            defense,
-        );
-        let offense_pressure = offense_strength * world.rules.capability.post_defense_secondary_gain;
+        let defense_resistance =
+            nba_domain::capability::effective_post_defense_physicality(&world.rules, defense);
+        let offense_pressure =
+            offense_strength * world.rules.capability.post_defense_secondary_gain;
         (offense_pressure - defense_resistance).clamp(-1.5, 1.5)
     });
     let target = hoop
         - direction
-            * (5.5 + world.draw(Stream::Aim, actor, purpose::POST_TARGET, 0) * 4.0 - target_distance);
+            * (5.5 + world.draw(Stream::Aim, actor, purpose::POST_TARGET, 0) * 4.0
+                - target_distance);
     world.players[actor].target = target;
     world.players[actor].target_kind = crate::state::TargetKind::Window;
     world.players[actor].target_partner = actor;

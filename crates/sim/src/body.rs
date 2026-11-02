@@ -7,7 +7,6 @@
 use glam::Vec2;
 use nba_domain::rules::GameRules;
 
-use crate::action::{ActionKind, PassKind};
 use crate::state::PlayerState;
 use crate::world::World;
 
@@ -36,33 +35,27 @@ pub fn integrate(world: &mut World, dt: f64) {
     let min_separation = rules.min_player_separation_ft;
     let policy = &world.params.policy;
     let now = world.now();
-    let active = world
-        .active
-        .as_ref()
-        .map(|intent| (intent.actor, intent.to_ft));
     let holder = world.holder();
-    let live = matches!(world.phase, crate::state::Phase::Live);
-    let inbound_passer = if matches!(world.phase, crate::state::Phase::Inbound { .. }) {
+    let live = matches!(world.phase(), crate::state::Phase::Live);
+    let inbound_passer = if matches!(world.phase(), crate::state::Phase::Inbound { .. }) {
         world.inbound_passer
     } else {
         None
     };
-    let screen_screener = world
-        .active
-        .as_ref()
-        .filter(|intent| matches!(intent.kind, ActionKind::Screen(_)))
-        .and_then(|intent| intent.target);
-    // 空切的人：动作本身是空切，或者是高吊球的接球人。高吊球在空中飞
-    // 的那段时间里，切入人必须往接球点跑，否则球到时他还在半路。
-    let cut_cutter = world
-        .active
-        .as_ref()
-        .filter(|intent| matches!(intent.kind, ActionKind::Cut))
-        .and_then(|intent| intent.target);
-    let lob_receiver = world
-        .pass_in_flight
-        .filter(|info| info.kind == PassKind::Lob)
-        .map(|info| info.to);
+    let screen_screener = world.players.iter().enumerate().find_map(|(handle, player)| {
+        player.action.as_ref().and_then(|runtime| {
+            (runtime.role == crate::action::ActionIntentRole::ScreenPartner).then_some(handle)
+        })
+    });
+    // 空切的人：高吊球的接球人必须往切点跑，且不参与绕行判定。
+    // 传球在空中的接球人同样适用：球正飞向他，他停下等人传球就落地了。
+    let cut_cutter = world.pass_in_flight.map(|info| info.to).or_else(|| {
+        world.players.iter().enumerate().find_map(|(handle, player)| {
+            player.action.as_ref().and_then(|runtime| {
+                (runtime.role == crate::action::ActionIntentRole::CutPartner).then_some(handle)
+            })
+        })
+    });
     for (i, p) in world.players.iter().enumerate() {
         world.body_before[i] = p.pos;
     }
@@ -80,37 +73,53 @@ pub fn integrate(world: &mut World, dt: f64) {
         min_separation,
         pressure,
     };
-    for &handle in on_court_home.as_slice().iter().chain(on_court_away.as_slice()) {
+    for &handle in on_court_home
+        .as_slice()
+        .iter()
+        .chain(on_court_away.as_slice())
+    {
         // 发球队员要走到发球点：发球点在他自己的底线，所以他走的是短距离，
         // 但他必须走——瞬移与原地不动都会让进攻在远离篮筐的地方开始。
         let is_inbound_passer = inbound_passer == Some(handle);
-        let mut target = if screen_screener == Some(handle) {
-            let screen = world.active.as_ref().expect("screen action must exist");
-            let defender = world.screen_defender.expect("screen defender must exist");
-            let defender_pos = world.players[defender].pos;
-            let handler_pos = world.players[screen.actor].pos;
-            defender_pos
-                + (handler_pos - defender_pos).normalize_or_zero()
-                    * world.rules.min_player_separation_ft
-        } else {
-            match active {
-                Some((actor, to_ft)) if actor == handle => to_ft,
-                _ => world.players[handle].target,
+        let runtime = world.players[handle].action.as_ref();
+        let has_action = runtime.is_some();
+        let has_defensive_action = world
+            .defensive_actions
+            .get(handle)
+            .and_then(Option::as_ref)
+            .is_some_and(|runtime| {
+                runtime.phase == nba_domain::action_window::ActionPhase::Execution
+                    && !runtime.completed
+            });
+        let mut target = runtime.map_or(world.players[handle].target, |runtime| {
+            match runtime.role {
+                crate::action::ActionIntentRole::Primary => runtime.intent.to_ft,
+                crate::action::ActionIntentRole::CutPartner
+                | crate::action::ActionIntentRole::ScreenPartner => world.players[handle].target,
             }
-        };
+        });
+        if let Some(closeout_target) = world
+            .defensive_actions
+            .get(handle)
+            .and_then(Option::as_ref)
+            .filter(|runtime| {
+                runtime.phase == nba_domain::action_window::ActionPhase::Execution
+                    && !runtime.completed
+            })
+            .map(|runtime| runtime.target_position)
+        {
+            target = closeout_target;
+        }
         if is_inbound_passer {
             target = world.players[handle].target;
         }
         let before = world.players[handle].pos;
         let player_side = world.players[handle].avoidance_side;
-        let allow_forward = matches!(active, Some((actor, _)) if actor == handle)
-            || cut_cutter == Some(handle)
-            || lob_receiver == Some(handle);
-        // 持球人和正在执行动作的人不绕行：他们直接朝目标走。绕行逻辑
-        // 只服务于无球球员；给持球人绕行会让突破停在防守人身边，也会让
-        // 回避方向在两次决策之间反复翻转。
-        let holder_or_actor = matches!(active, Some((actor, _)) if actor == handle)
-            || holder == Some(handle);
+        // 在飞传球的接球人也不绕行：球正飞向他，绕路就接不到。
+        let holder_or_actor =
+            has_action || has_defensive_action || holder == Some(handle) || cut_cutter == Some(handle);
+        let allow_forward =
+            has_action || has_defensive_action || holder == Some(handle) || cut_cutter == Some(handle);
         let (steered, blocker, side, blocked) = if holder_or_actor {
             (target, usize::MAX, player_side, false)
         } else {
@@ -118,10 +127,16 @@ pub fn integrate(world: &mut World, dt: f64) {
         };
         {
             let player = &mut world.players[handle];
-            player.avoidance_side = side;
             player.avoidance_blocker = blocker;
+            player.avoidance_side = side;
             let distance = (target - player.pos).length();
-            if distance + 0.1 < player.progress_best_ft {
+            if distance <= rules.arrival_epsilon_ft {
+                // 已经站在目标点上：这不是「没有进展」，不该累积停滞时间。
+                // 否则开场跳球这种全员静止的阶段会让每个人带着停滞计时进入回合，
+                // 一拿到新目标就立即进入让路状态并原地停住。
+                player.progress_best_ft = distance;
+                player.nonprogress_seconds = 0.0;
+            } else if distance + 0.1 < player.progress_best_ft {
                 player.progress_best_ft = distance;
                 player.nonprogress_seconds = 0.0;
             } else {
@@ -133,9 +148,15 @@ pub fn integrate(world: &mut World, dt: f64) {
             if !blocked && player.nonprogress_seconds == 0.0 {
                 player.yielding_since = 0.0;
             }
-            let active_actor = matches!(active, Some((actor, _)) if actor == handle);
+            let active_actor = has_action;
             let is_holder = holder == Some(handle);
-            if active_actor || is_holder || screen_screener == Some(handle) || cut_cutter == Some(handle) || !live {
+            if active_actor
+                || has_defensive_action
+                || is_holder
+                || screen_screener == Some(handle)
+                || cut_cutter == Some(handle)
+                || !live
+            {
                 player.yielding_since = 0.0;
                 target = steered;
             } else if player.yielding_since > 0.0 {
@@ -155,7 +176,6 @@ pub fn integrate(world: &mut World, dt: f64) {
             effective_accel,
             motion,
             rules,
-            now,
         );
         {
             let player = &mut world.players[handle];
@@ -170,14 +190,16 @@ pub fn integrate(world: &mut World, dt: f64) {
         let player = &mut world.players[handle];
         player.last_motion_ft = (after - before).length();
         player.last_separation_ft = 0.0;
-        if player.recovery_since > 0.0
-            || (player.target - player.pos).length() > min_separation
-        {
+        if player.recovery_since > 0.0 || (player.target - player.pos).length() > min_separation {
             player.recovery_path_ft += player.last_motion_ft;
         }
     }
     separate(world, dt, max_speed, min_separation);
-    for &handle in on_court_home.as_slice().iter().chain(on_court_away.as_slice()) {
+    for &handle in on_court_home
+        .as_slice()
+        .iter()
+        .chain(on_court_away.as_slice())
+    {
         let player = &mut world.players[handle];
         player.pos.x = player.pos.x.clamp(radius, width - radius);
         player.pos.y = player.pos.y.clamp(radius, height - radius);
@@ -209,16 +231,11 @@ fn step(
     accel: f32,
     motion: Motion,
     rules: &GameRules,
-    now: f64,
 ) {
     let delta = target - player.pos;
     let distance = delta.length();
     if distance <= rules.arrival_epsilon_ft {
         player.vel = Vec2::ZERO;
-        player.target = player.pos;
-        player.target_kind = crate::state::TargetKind::Station;
-        player.target_partner = usize::MAX;
-        player.target_changed_at = now;
         player.progress_best_ft = 0.0;
         player.nonprogress_seconds = 0.0;
         player.recovery_since = 0.0;
@@ -226,9 +243,7 @@ fn step(
         player.recovery_path_ft = 0.0;
         return;
     }
-    let braking = rules
-        .max_player_braking_accel_ftps2
-        .max(f32::MIN_POSITIVE);
+    let braking = rules.max_player_braking_accel_ftps2.max(f32::MIN_POSITIVE);
     let brake_limit = (2.0 * braking * distance).sqrt();
     let scale = (distance / (motion.max_speed * rules.arrival_speed_scale + 1.0))
         .clamp(rules.arrival_speed_floor, 1.0);
@@ -265,11 +280,7 @@ fn rotate_toward(from: Vec2, to: Vec2, max_angle: f32) -> Vec2 {
     }
     let limited = angle.clamp(-max_angle, max_angle);
     let (sin, cos) = limited.sin_cos();
-    Vec2::new(
-        from.x * cos - from.y * sin,
-        from.x * sin + from.y * cos,
-    )
-    .normalize_or_zero()
+    Vec2::new(from.x * cos - from.y * sin, from.x * sin + from.y * cos).normalize_or_zero()
 }
 
 fn steer_target(
@@ -288,7 +299,12 @@ fn steer_target(
     let direction = delta / distance;
     let mut blocker = usize::MAX;
     let mut blocker_distance = f32::MAX;
-    for &other in world.on_court_home.as_slice().iter().chain(world.on_court_away.as_slice()) {
+    for &other in world
+        .on_court_home
+        .as_slice()
+        .iter()
+        .chain(world.on_court_away.as_slice())
+    {
         if other == handle {
             continue;
         }
@@ -360,7 +376,12 @@ fn steer_target(
         }
         let mut clear_of_others = true;
         let clear_sq = clear * clear;
-        for &other in world.on_court_home.as_slice().iter().chain(world.on_court_away.as_slice()) {
+        for &other in world
+            .on_court_home
+            .as_slice()
+            .iter()
+            .chain(world.on_court_away.as_slice())
+        {
             if other == handle {
                 continue;
             }

@@ -28,9 +28,11 @@ pub fn update_stamina(world: &mut World, dt: f64) {
 /// 「主力身背 4 犯却因为两分钟没有死球而下不了场」这类真实博弈的前提。
 pub fn is_substitution_window(world: &World) -> bool {
     matches!(
-        world.phase,
+        world.phase(),
         Phase::DeadBall { .. }
             | Phase::Inbound { .. }
+            | Phase::JumpBall { .. }
+            | Phase::JumpBallFlight
             | Phase::FreeThrows { .. }
             | Phase::PeriodBreak { .. }
             | Phase::Timeout { .. }
@@ -52,13 +54,13 @@ fn rest_priority(world: &World, handle: usize) -> Option<f32> {
     // 「需要休息」再换下来，窗口配额在来回拉锯中耗尽。开场就在场上的人
     // 不受这条限制，`entered_at` 为零就是「从开场就没下过」。
     let settle = policy.w("rotation_settle_seconds") as f64;
-    if player.entered_at > f64::default() && world.now() - player.entered_at < settle {
+    if player.entered_at > f64::default() && world.clock.elapsed() - player.entered_at < settle {
         return None;
     }
     let base_threshold = policy.w("stamina_rest_threshold");
     let in_foul_trouble = if player.data.starter {
         let foul_limit = rules.league.max_personal_fouls;
-        let threshold = match world.clock.period {
+        let threshold = match world.clock.period() {
             1 => policy.w("foul_trouble_first") as u8,
             2 => policy.w("foul_trouble_second") as u8,
             3 => policy.w("foul_trouble_third") as u8,
@@ -75,8 +77,7 @@ fn rest_priority(world: &World, handle: usize) -> Option<f32> {
     let wp = crate::endgame::win_probability(world, player.team, has_ball) as f32;
     let one = f32::from(1u8);
     let closeness = (wp * (one - wp) * policy.w("closeness_scale")).clamp(f32::default(), one);
-    let threshold = base_threshold
-        * (one - policy.w("clutch_stamina_retention") * closeness);
+    let threshold = base_threshold * (one - policy.w("clutch_stamina_retention") * closeness);
     let mut priority = f32::default();
     if player.stamina < threshold {
         priority = priority.max(policy.w("rest_priority_stamina") + (threshold - player.stamina));
@@ -182,7 +183,12 @@ fn player_quality(world: &World, handle: usize) -> f32 {
         + attributes.agility
 }
 
-fn best_bench(world: &World, team: TeamSide, handle: usize) -> Option<usize> {
+fn best_bench(
+    world: &World,
+    team: TeamSide,
+    handle: usize,
+    respect_min_rest: bool,
+) -> Option<usize> {
     let foul_limit = world.rules.league.max_personal_fouls;
     let eligible: Vec<usize> = (0..world.players.len())
         .filter(|candidate| {
@@ -191,7 +197,7 @@ fn best_bench(world: &World, team: TeamSide, handle: usize) -> Option<usize> {
                 && !player.on_court
                 && player.fouls < foul_limit
                 && !player.disqualified
-                && player.resting_until <= world.now()
+                && (!respect_min_rest || player.resting_until <= world.clock.elapsed())
         })
         .collect();
     if eligible.is_empty() {
@@ -239,17 +245,19 @@ fn swap(world: &mut World, team: TeamSide, outgoing: usize, incoming: usize) {
     let target = world.players[outgoing].target;
     let slot = world.players[outgoing].slot;
     world.players[incoming].on_court = true;
-    world.players[incoming].entered_at = world.now();
+    world.players[incoming].retained_after_foul_limit = false;
+    world.players[incoming].entered_at = world.clock.elapsed();
     // 下场的人要坐够最短休息时间才能回来：没有这条，垃圾时间会在
     // 「主力下去、替补上来、替补又被当成该休息、主力回来」里无限拉锯。
     world.players[outgoing].resting_until =
-        world.now() + world.rules.rotation.min_rest_seconds as f64;
+        world.clock.elapsed() + world.rules.rotation.min_rest_seconds as f64;
     world.players[incoming].target = target;
     world.players[incoming].target_kind = crate::state::TargetKind::Station;
     world.players[incoming].target_partner = usize::MAX;
     world.players[incoming].target_changed_at = world.now();
     world.players[incoming].slot = slot;
     world.players[outgoing].on_court = false;
+    world.players[outgoing].retained_after_foul_limit = false;
     let on_court = match team {
         TeamSide::Home => &mut world.on_court_home,
         TeamSide::Away => &mut world.on_court_away,
@@ -258,7 +266,7 @@ fn swap(world: &mut World, team: TeamSide, outgoing: usize, incoming: usize) {
         on_court.as_mut_slice()[pos] = incoming;
     }
     if world.holder() == Some(outgoing) {
-        world.ball.set_held(incoming);
+        world.set_ball_held(incoming);
     }
     world.emit(crate::action::Fact::Substitution {
         team,
@@ -272,21 +280,47 @@ fn swap(world: &mut World, team: TeamSide, outgoing: usize, incoming: usize) {
 /// 停表后由 [`apply_dead_ball_window`] 把人换下；球权不变，所以这不是
 /// 球权转换，只是把比赛停下来一次。
 fn enforce_disqualification(world: &mut World) {
-    let live = matches!(
-        world.phase,
-        Phase::Live | Phase::PassFlight { .. } | Phase::ShotFlight { .. }
-    );
+    let live = world.phase().is_live_gameplay();
     if !live {
         return;
     }
-    if !world.players.iter().any(|p| p.on_court && p.disqualified) {
+    let disqualified_team = [TeamSide::Home, TeamSide::Away]
+        .into_iter()
+        .find(|team| {
+            world.on_court(*team)
+                .as_slice()
+                .iter()
+                .any(|handle| {
+                    world.players[*handle].disqualified
+                        && !world.players[*handle].retained_after_foul_limit
+                })
+        });
+    let Some(team) = disqualified_team else {
         return;
+    };
+    if world.rules.league.id == nba_domain::league::LeagueId::Nba {
+        let has_legal_replacement = world
+            .on_court(team)
+            .as_slice()
+            .iter()
+            .copied()
+                .filter(|handle| {
+                    world.players[*handle].disqualified
+                        && !world.players[*handle].retained_after_foul_limit
+                })
+            .any(|handle| best_bench(world, team, handle, false).is_some());
+        if !has_legal_replacement {
+            return;
+        }
     }
-    let team = world.possession.team;
-    world.phase = Phase::DeadBall {
+    let team = match world.rules.league.id {
+        nba_domain::league::LeagueId::Nba => team,
+        nba_domain::league::LeagueId::Fiba => world.possession.team,
+    };
+    world.set_phase(Phase::DeadBall {
         team,
         ready_at: world.now() + world.rules.inbound_setup_seconds as f64,
-    };
+    });
 }
 
 pub fn note_intents(world: &mut World) {
@@ -327,11 +361,19 @@ pub fn apply_dead_ball_window(world: &mut World) {
                 .as_slice()
                 .iter()
                 .copied()
-                .find(|handle| world.players[*handle].disqualified)
+                .find(|handle| {
+                    world.players[*handle].disqualified
+                        && !world.players[*handle].retained_after_foul_limit
+                })
             else {
                 break;
             };
-            let Some(incoming) = best_bench(world, team, outgoing) else {
+            let Some(incoming) = best_bench(world, team, outgoing, false) else {
+                // 替补席已经用完：球队继续比赛，场上留着这个犯满球员。
+                // NBA 的团队技术犯规在犯规判定里记（`resolve::foul::book`），
+                // FIBA 只按人数不足继续。
+                world.players[outgoing].retained_after_foul_limit = true;
+                world.rotation.pending[index] = false;
                 break;
             };
             swap(world, team, outgoing, incoming);
@@ -362,7 +404,7 @@ pub fn apply_dead_ball_window(world: &mut World) {
             let Some(outgoing) = resting else {
                 break;
             };
-            let Some(incoming) = best_bench(world, team, outgoing) else {
+            let Some(incoming) = best_bench(world, team, outgoing, true) else {
                 break;
             };
             swap(world, team, outgoing, incoming);
@@ -383,6 +425,7 @@ pub fn record_foul(world: &mut World, handle: usize) -> bool {
     player.fouls = player.fouls.saturating_add(1);
     if player.fouls >= limit {
         player.disqualified = true;
+        player.retained_after_foul_limit = false;
         return true;
     }
     false

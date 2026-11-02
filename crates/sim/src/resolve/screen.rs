@@ -23,12 +23,17 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
 
     let strength = world.players[screener].data.attributes.strength;
     let defender_skill = world.players[defender].data.attributes.defense_perimeter;
-    let contact_threshold = world.params.policy.g("pressure_separation_ft")
-        + world.rules.contact_margin_ft;
+    let contact_threshold =
+        world.params.policy.g("pressure_separation_ft") + world.rules.contact_margin_ft;
     let contact = (world.players[screener].pos - defender_pos).length() <= contact_threshold;
 
     let shooter_three = world.players[intent.actor].data.attributes.shooting_three;
-    let roll = world.draw(crate::draw::Stream::Decision, defender, crate::draw::purpose::ACTION_CHOICE, 0);
+    let roll = world.draw(
+        crate::draw::Stream::Decision,
+        defender,
+        crate::draw::purpose::ACTION_CHOICE,
+        0,
+    );
     // 力量连续调制防守路线与推开距离；防守抵抗力经 capability 映射计算。
     let defender_attributes = &world.players[defender].data.attributes;
     let resistance = nba_domain::capability::effective_post_defense_physicality(
@@ -64,11 +69,25 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
         .length()
         .max(0.2);
 
-    // 移动掩护只在真实接触且掩护人仍以明显速度移动时成立。
+    // 移动掩护：掩护人还没落位就撞上防守人。接触本身是掩护的常态，
+    // 裁判只在其中吹罚一部分；physicality 越高越不容易被吹。
     let screener_physicality = world.players[screener].data.tendencies.physicality;
     let screener_speed = world.players[screener].vel.length();
-    let moving = contact && screener_speed > 2.0 - 0.8 * screener_physicality;
-    if moving {
+    let illegal_speed = 1.2 - 0.5 * screener_physicality;
+    // 还在走向掩护点的人没有落下脚步：站住的掩护允许接触，走着撞上去
+    // 的不行。
+    let unsettled = (world.players[screener].target - world.players[screener].pos).length() > 0.6;
+    let moving = contact && (screener_speed > illegal_speed || unsettled);
+    let call_rate = world.params.policy.w("moving_screen_foul_rate")
+        * (world.params.policy.w("moving_screen_physicality_base") + 1.0 - screener_physicality);
+    let called = moving
+        && world.draw(
+            crate::draw::Stream::Foul,
+            screener,
+            crate::draw::purpose::MOVING_SCREEN,
+            0,
+        ) < call_rate;
+    if called {
         world.line_mut(screener).turnovers += 1;
         world.emit(Fact::Turnover {
             player: screener,

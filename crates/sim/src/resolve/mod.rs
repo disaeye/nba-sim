@@ -6,7 +6,9 @@
 pub mod drive;
 pub mod foul;
 pub mod freethrow;
+pub mod offball;
 pub mod pass;
+pub mod poke;
 pub mod rebound;
 pub mod screen;
 pub mod shot;
@@ -20,11 +22,7 @@ use crate::action::{
 use crate::state::{DribbleState, PossessionKind, TeamSide};
 use crate::world::World;
 
-pub fn resolve(world: &mut World) -> ActionOutcome {
-    let intent = world
-        .active
-        .take()
-        .expect("resolve requires an active action");
+pub fn resolve(world: &mut World, intent: ActionIntent) -> ActionOutcome {
     let outcome = match intent.kind {
         ActionKind::Pass(kind) => pass::resolve(world, &intent, kind),
         ActionKind::Screen(kind) => screen::resolve(world, &intent, kind),
@@ -56,7 +54,11 @@ fn resolve_dribble(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
             kind: TurnoverKind::DoubleDribble,
         });
         let team = world.players[actor].team;
-        world.end_possession("turnover", 0);
+        world.end_possession(
+            nba_domain::event::PossessionEndCause::TurnoverViolation,
+            "double_dribble",
+            0,
+        );
         world.start_possession(team.other(), PossessionKind::Live);
         return ActionOutcome {
             actor,
@@ -77,8 +79,7 @@ fn resolve_dribble(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     let stationary =
         (player.target - player.pos).length() < world.params.policy.g("gather_stationary_ft");
     let hoop = world.hoop_for(world.players[actor].team);
-    let in_shooting_range =
-        (player.pos - hoop).length() <= world.params.policy.g("finish_zone_ft");
+    let in_shooting_range = (player.pos - hoop).length() <= world.params.policy.g("finish_zone_ft");
     if stationary && in_shooting_range {
         world.possession.dribble_state = DribbleState::Gathered;
         world.possession.gather_pos = Some(player.pos);
@@ -106,7 +107,7 @@ pub fn clamp01(value: f32) -> f32 {
 }
 
 pub fn shooter_zone(world: &World, pos: Vec2, team: TeamSide) -> &'static str {
-    let attacking_right = team == TeamSide::Home;
+    let attacking_right = world.attacking_right(team);
     match world.rules.court.shot_zone(
         pos,
         attacking_right,
@@ -184,4 +185,3 @@ pub fn weighted_pick_at(unit: f32, weights: &[f32]) -> usize {
     }
     weights.len() - 1
 }
-

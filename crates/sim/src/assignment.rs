@@ -7,7 +7,7 @@
 use glam::Vec2;
 
 use crate::action::ActionKind;
-use crate::state::{DefenseResponsibility, OffenseJob, Phase, Slot, TargetKind};
+use crate::state::{DefenseResponsibility, OffenseJob, Slot, TargetKind};
 use crate::world::World;
 
 pub fn commit_target(world: &mut World, handle: usize, desired: Vec2) -> bool {
@@ -21,9 +21,7 @@ pub fn commit_target_as(
     kind: TargetKind,
     partner: usize,
 ) -> bool {
-    if kind == TargetKind::Pressure
-        && (partner == usize::MAX || !world.players[partner].on_court)
-    {
+    if kind == TargetKind::Pressure && (partner == usize::MAX || !world.players[partner].on_court) {
         return false;
     }
     let deadband = if kind == TargetKind::Pressure {
@@ -163,13 +161,12 @@ fn validate_target(
             if partner == usize::MAX || !world.players[partner].on_court {
                 return false;
             }
-            let separation = if world.players[handle].defense_responsibility
-                == DefenseResponsibility::Deny
-            {
-                pressure_separation(world)
-            } else {
-                world.rules.min_player_separation_ft
-            };
+            let separation =
+                if world.players[handle].defense_responsibility == DefenseResponsibility::Deny {
+                    pressure_separation(world)
+                } else {
+                    world.rules.min_player_separation_ft
+                };
             let distance = (target - world.players[partner].pos).length();
             distance >= separation - 0.25 && distance <= separation + 2.5
         }
@@ -185,6 +182,10 @@ fn validate_target(
         }
         TargetKind::Window => true,
     }
+}
+
+pub fn pressure_target_valid(world: &World, handle: usize, partner: usize, target: Vec2) -> bool {
+    validate_target(world, handle, target, TargetKind::Pressure, partner)
 }
 
 fn alternative_target(
@@ -204,16 +205,14 @@ fn alternative_target(
         (0.707, -0.707),
         (-0.707, -0.707),
     ];
-    let offset = world.rules.min_player_separation_ft
-        + world.rules.separation_safety_margin_ft;
+    let offset = world.rules.min_player_separation_ft + world.rules.separation_safety_margin_ft;
     if kind == TargetKind::Pressure && partner != usize::MAX && world.players[partner].on_court {
-        let separation = if world.players[handle].defense_responsibility
-            == DefenseResponsibility::Deny
-        {
-            pressure_separation(world)
-        } else {
-            world.rules.min_player_separation_ft
-        };
+        let separation =
+            if world.players[handle].defense_responsibility == DefenseResponsibility::Deny {
+                pressure_separation(world)
+            } else {
+                world.rules.min_player_separation_ft
+            };
         let center = world.players[partner].pos;
         for radius in [separation, separation + 0.5, separation + 1.0] {
             for (x, y) in DIRECTIONS {
@@ -260,8 +259,7 @@ pub fn reselect_yielding(world: &mut World, handle: usize, desired: Vec2) -> boo
     let width = world.rules.court.width_ft;
     let height = world.rules.court.height_ft;
     let radius = world.rules.player_radius_ft;
-    let offset = world.rules.min_player_separation_ft
-        + world.rules.separation_safety_margin_ft;
+    let offset = world.rules.min_player_separation_ft + world.rules.separation_safety_margin_ft;
     let mut target = desired + lateral * offset;
     if !validate_target(world, handle, target, kind, partner) {
         const DIRECTIONS: [(f32, f32); 8] = [
@@ -318,13 +316,14 @@ pub fn assign_offense_jobs(world: &mut World) {
     for &handle in world.on_court(offense).as_slice() {
         let job = if Some(handle) == holder {
             OffenseJob::Handler
-        } else if world.active.as_ref().is_some_and(|active| {
+        } else if world.any_interaction(|active| {
             matches!(active.kind, ActionKind::Screen(_)) && active.target == Some(handle)
         }) {
             OffenseJob::Screen
-        } else if world.active.as_ref().is_some_and(|active| {
+        } else if world.any_interaction(|active| {
             matches!(active.kind, ActionKind::Cut) && active.target == Some(handle)
-        }) || world.possession.last_cut_actor == Some(handle) {
+        }) || world.possession.last_cut_actor == Some(handle)
+        {
             OffenseJob::Cut
         } else if world
             .possession
@@ -333,7 +332,7 @@ pub fn assign_offense_jobs(world: &mut World) {
             .is_some_and(|screen| screen.screener == handle)
         {
             OffenseJob::Roll
-        } else if matches!(world.phase, Phase::ShotFlight { .. })
+        } else if world.phase().is_shot_flight()
             && (world.players[handle].pos - world.hoop_for(offense)).length() < 12.0
         {
             OffenseJob::Rebound
@@ -357,7 +356,9 @@ pub fn assign_offense_jobs(world: &mut World) {
 pub fn assign_defense_responsibilities(world: &mut World, targets: &[Vec2]) {
     let defense = world.possession.team.other();
     let defenders = world.on_court(defense);
-    let carrier = world.holder().or_else(|| world.pass_in_flight.map(|info| info.to));
+    let carrier = world
+        .holder()
+        .or_else(|| world.pass_in_flight.map(|info| info.to));
     let hoop = world.hoop_for(world.possession.team);
     let now = world.now();
     let dwell = f64::from(world.params.policy.g("assignment_dwell_seconds"));
@@ -365,8 +366,16 @@ pub fn assign_defense_responsibilities(world: &mut World, targets: &[Vec2]) {
     for (slot, handle) in defenders.as_slice().iter().enumerate() {
         let man = world.possession.matchup[slot];
         let current = world.players[*handle].defense_responsibility;
-        let help_threshold = if current == DefenseResponsibility::Help { 9.0 } else { 7.5 };
-        let sink_threshold = if current == DefenseResponsibility::Sink { 11.0 } else { 9.5 };
+        let help_threshold = if current == DefenseResponsibility::Help {
+            9.0
+        } else {
+            7.5
+        };
+        let sink_threshold = if current == DefenseResponsibility::Sink {
+            11.0
+        } else {
+            9.5
+        };
         let responsibility = if Some(man) == carrier {
             DefenseResponsibility::OnBall
         } else if world
@@ -379,7 +388,9 @@ pub fn assign_defense_responsibilities(world: &mut World, targets: &[Vec2]) {
             DefenseResponsibility::BoxOut
         } else if (targets[slot] - hoop).length_squared() < help_threshold * help_threshold {
             DefenseResponsibility::Help
-        } else if man != usize::MAX && (world.players[man].pos - hoop).length_squared() < sink_threshold * sink_threshold {
+        } else if man != usize::MAX
+            && (world.players[man].pos - hoop).length_squared() < sink_threshold * sink_threshold
+        {
             DefenseResponsibility::Sink
         } else {
             DefenseResponsibility::Deny

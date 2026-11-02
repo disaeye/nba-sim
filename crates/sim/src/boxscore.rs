@@ -5,7 +5,7 @@
 
 use crate::action::TeamSide;
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlayerLine {
     pub id: String,
     pub name: String,
@@ -37,7 +37,13 @@ pub struct PlayerLine {
 }
 
 impl PlayerLine {
-    pub fn new(id: &str, name: &str, jersey: &str, team: TeamSide, three_point_preference: f32) -> Self {
+    pub fn new(
+        id: &str,
+        name: &str,
+        jersey: &str,
+        team: TeamSide,
+        three_point_preference: f32,
+    ) -> Self {
         Self {
             id: id.to_string(),
             name: name.to_string(),
@@ -90,7 +96,7 @@ impl PlayerLine {
     }
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TeamLine {
     pub points: u32,
     pub fgm: u32,
@@ -133,7 +139,7 @@ impl TeamLine {
     }
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BoxScore {
     pub home: Vec<PlayerLine>,
     pub away: Vec<PlayerLine>,

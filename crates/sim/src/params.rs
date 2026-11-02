@@ -234,19 +234,65 @@ pub struct ShotDistanceProfile {
     pub cells: Vec<ShotDistanceCell>,
 }
 
+/// 命中率换成对数几率，插值在两端附近保持单调。
+fn logit_rate(rate: f32) -> f32 {
+    let clamped = rate.clamp(0.0005, 0.995);
+    (clamped / (1.0 - clamped)).ln()
+}
+
+fn expit_rate(value: f32) -> f32 {
+    1.0 / (1.0 + (-value).exp())
+}
+
+fn interpolate_rate(earlier: f32, later: f32, fraction: f32) -> f32 {
+    let start = logit_rate(earlier);
+    expit_rate(start + (logit_rate(later) - start) * fraction)
+}
+
 impl ShotDistanceProfile {
-    /// 距离对应的实测命中率：落在哪个档就取那个档的值；超出最后一档时
-    /// 取最后一档（远距离的命中率趋近于零）。
+    /// 距离对应的实测命中率。
+    ///
+    /// 每个分档存的是一个区间上的实测值，远处分档宽达数英尺；把分档值当作
+    /// 点值会让相隔八英尺的两个距离取到同一个命中率。这里在相邻分档之间按
+    /// 对数几率插值，超出最后一个分档时沿用最后一段的斜率。
     pub fn rate_at(&self, distance_ft: f32) -> f32 {
-        for cell in &self.cells {
-            if distance_ft < cell.upper_ft {
-                return cell.rate;
-            }
+        let first = match self.cells.first() {
+            Some(cell) => cell,
+            None => return 0.0,
+        };
+        if distance_ft < first.upper_ft {
+            return first.rate;
         }
-        self.cells
-            .last()
-            .map(|cell| cell.rate)
-            .unwrap_or_default()
+        let mut previous = first;
+        for cell in self.cells.iter().skip(1) {
+            if distance_ft < cell.upper_ft {
+                let span = cell.upper_ft - previous.upper_ft;
+                let fraction = if span > 0.0 {
+                    (distance_ft - previous.upper_ft) / span
+                } else {
+                    1.0
+                };
+                return interpolate_rate(previous.rate, cell.rate, fraction);
+            }
+            previous = cell;
+        }
+        let last = *previous;
+        if self.cells.len() < 2 {
+            return last.rate;
+        }
+        let anchor = self.cells[self.cells.len() - 2];
+        let span = last.upper_ft - anchor.upper_ft;
+        if span <= 0.0 {
+            return last.rate;
+        }
+        let slope = (logit_rate(last.rate) - logit_rate(anchor.rate)) / span;
+        expit_rate(logit_rate(last.rate) + slope * (distance_ft - last.upper_ft))
+    }
+
+    /// 最后一个实测档的距离上限。超出这个距离之后没有实测数据，需要
+    /// 另加衰减。
+    pub fn last_upper_ft(&self) -> f32 {
+        self.cells.last().map(|cell| cell.upper_ft).unwrap_or_default()
     }
 }
 
@@ -262,6 +308,14 @@ pub struct ShotDistanceTable {
 }
 
 impl ShotDistanceTable {
+    /// 该出手类型实测数据覆盖到的最远距离。
+    pub fn last_upper_ft(&self, kind: &str, is_three: bool) -> Option<f32> {
+        let side = if is_three { "three" } else { "two" };
+        self.profiles
+            .get(&format!("{kind}_{side}"))
+            .map(ShotDistanceProfile::last_upper_ft)
+    }
+
     pub fn rate_at(&self, kind: &str, is_three: bool, distance_ft: f32) -> Option<f32> {
         let side = if is_three { "three" } else { "two" };
         self.profiles
@@ -280,7 +334,8 @@ impl ShotDistanceTable {
         let path = dir.join("shot_distance.json");
         let text = std::fs::read_to_string(&path)
             .map_err(|error| format!("shot_distance table must be readable: {error}"))?;
-        serde_json::from_str(&text).map_err(|error| format!("shot_distance table must parse: {error}"))
+        serde_json::from_str(&text)
+            .map_err(|error| format!("shot_distance table must parse: {error}"))
     }
 }
 
@@ -737,8 +792,8 @@ mod manifest_tests {
 
     #[test]
     fn runtime_params_load_from_runtime_tables_only() {
-        let params = RuntimeParams::load(&workspace_calibration_dir())
-            .expect("runtime tables must load");
+        let params =
+            RuntimeParams::load(&workspace_calibration_dir()).expect("runtime tables must load");
         assert!(params.policy.w("shot_quality_base_rim") > 0.0);
     }
 

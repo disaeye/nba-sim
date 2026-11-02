@@ -90,6 +90,69 @@ pub fn place_opening_positions(world: &mut World, offense: TeamSide) {
     }
 }
 
+/// 快攻跑位：活球回合开始时，速度明显快于自己防守人的进攻球员直接跑向篮下。
+///
+/// 阵型的每一个目标点都定义在「已经进入前场」的假设上：防守篮板和抢断之后，
+/// 五名进攻球员都在本方半场，全部走回阵型位置，于是快攻传球没有接球对象，
+/// 只要回合在进攻时钟里推进得久一点，就全都变成落位进攻。这里给速度占优的
+/// 球员一个篮下目标，窗口结束时由 `World::expire_break_targets` 把原来的站位还回去。
+pub fn assign_break_targets(world: &mut World, offense: TeamSide, handler: usize) {
+    let edge_needed = world.params.policy.g("break_speed_edge_ftps");
+    let max_runners = world.params.policy.g("break_max_runners") as usize;
+    if max_runners == 0 {
+        return;
+    }
+    let mut runners: Vec<(usize, f32)> = Vec::new();
+    for handle in 0..world.players.len() {
+        let player = &world.players[handle];
+        if !player.on_court || player.team != offense || handle == handler {
+            continue;
+        }
+        let speed = player.effective_speed(&world.params.policy);
+        let mut nearest_distance = f32::INFINITY;
+        let mut nearest_speed = 0.0;
+        for opponent in world.players.iter() {
+            if !opponent.on_court || opponent.team == offense {
+                continue;
+            }
+            let distance = (opponent.pos - player.pos).length();
+            if distance < nearest_distance {
+                nearest_distance = distance;
+                nearest_speed = opponent.effective_speed(&world.params.policy);
+            }
+        }
+        let edge = speed - nearest_speed;
+        if edge >= edge_needed {
+            runners.push((handle, edge));
+        }
+    }
+    if runners.is_empty() {
+        return;
+    }
+    runners.sort_by(|left, right| {
+        right
+            .1
+            .partial_cmp(&left.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(left.0.cmp(&right.0))
+    });
+    let hoop = world.hoop_for(offense);
+    let back = if world.attacking_right(offense) {
+        -1.0
+    } else {
+        1.0
+    };
+    for (slot, (handle, _)) in runners.into_iter().take(max_runners).enumerate() {
+        // 两名跑向前场的球员分列篮框两侧，站得太近会互相挡住接球路线。
+        let lateral = if slot.is_multiple_of(2) { 4.0 } else { -4.0 };
+        let target = hoop + Vec2::new(back * 3.0, lateral);
+        let previous = world.players[handle].home_spot;
+        crate::assignment::force_target(world, handle, target);
+        world.players[handle].home_spot = target;
+        world.possession.break_return.push((handle, previous));
+    }
+}
+
 /// 给双方重新分配阵型目标点。不写位置；球员从当前位置走向新目标。
 pub fn set_targets(world: &mut World, offense: TeamSide) {
     let spots = offense_spots(
@@ -225,19 +288,21 @@ pub fn spot_target_for(world: &World, player: usize, spots: &[Vec2; 5]) -> Vec2 
     let center = world.params.policy.g("spacing_preference_center");
     let span = world.params.policy.g("spacing_preference_span");
     let arc = world.rules.league.three_point_distance_ft;
-    let is_perimeter = index == 2;
-    let shift = if is_perimeter && preference > center {
-        (arc + 1.2 - distance).max(0.0) * (preference - center) * span
+    // 外线点按站位本身判断：原始站点已经在三分线外的槽位才按外线处理。
+    // 按槽位编号判断会把弧顶与两翼压回三分线内，接球投篮就都变成中距离。
+    let is_perimeter = distance > arc;
+    let shift = if is_perimeter {
+        // 外线站位保留手写几何，只做小幅调整：三分偏好高的球员往外推一点，
+        // 偏好低的最多退到弧线外侧 0.5 ft，不再退到弧内。
+        let outward = (arc + 1.2 - distance).max(0.0) * (preference - center) * span;
+        let inward = -((distance - arc - 0.5).max(0.0)) * (center - preference) * span;
+        (outward + inward).max(-1.0)
     } else if preference < center {
         -(distance - rim).max(0.0) * (center - preference) * span
     } else {
         (arc - 0.5 - distance).max(0.0) * (preference - center) * span
     };
-    let max_distance = if is_perimeter && preference > center {
-        arc + 1.5
-    } else {
-        arc - 0.5
-    };
+    let max_distance = if is_perimeter { arc + 3.0 } else { arc - 0.5 };
     let spaced = (distance + shift).clamp(rim, max_distance);
     hoop + offset.normalize_or_zero() * spaced
 }
@@ -257,24 +322,17 @@ pub fn move_toward_targets(world: &mut World) {
         if Some(handle) == holder {
             continue;
         }
-        if world
-            .pass_in_flight
-            .is_some_and(|info| info.to == handle)
-        {
+        if world.pass_in_flight.is_some_and(|info| info.to == handle) {
             continue;
         }
-        if world
-            .active
-            .as_ref()
-            .is_some_and(|screen| matches!(screen.kind, ActionKind::Screen(_)) && screen.target == Some(handle))
-        {
+        if world.any_interaction(|screen| {
+            matches!(screen.kind, ActionKind::Screen(_)) && screen.target == Some(handle)
+        }) {
             continue;
         }
-        if world
-            .active
-            .as_ref()
-            .is_some_and(|active| matches!(active.kind, ActionKind::Cut) && active.target == Some(handle))
-        {
+        if world.any_interaction(|active| {
+            matches!(active.kind, ActionKind::Cut) && active.target == Some(handle)
+        }) {
             continue;
         }
         let desired = spot_target_for(world, handle, &spots);
@@ -283,10 +341,37 @@ pub fn move_toward_targets(world: &mut World) {
             crate::assignment::reselect_yielding(world, handle, desired);
         }
     }
+    if world.pending_rebound.is_some() {
+        let spot = crate::resolve::rebound::rebound_spot(world);
+        let on_court_home = world.on_court_home;
+        let on_court_away = world.on_court_away;
+        for handle in on_court_home
+            .as_slice()
+            .iter()
+            .chain(on_court_away.as_slice())
+        {
+            crate::assignment::force_target_as(
+                world,
+                *handle,
+                spot,
+                crate::state::TargetKind::Window,
+                usize::MAX,
+            );
+        }
+    }
     let min_separation = world.rules.min_player_separation_ft;
     let on_court_home = world.on_court_home;
     let on_court_away = world.on_court_away;
-    for &handle in on_court_home.as_slice().iter().chain(on_court_away.as_slice()) {
+    for &handle in on_court_home
+        .as_slice()
+        .iter()
+        .chain(on_court_away.as_slice())
+    {
+        // 正在等接球的人不能被绕行路径的里程上限打断：他的目标是球飞
+        // 过去的那个落点，跑到一半被改成原地小步挪动就会把球漏掉。
+        if world.pass_in_flight.is_some_and(|info| info.to == handle) {
+            continue;
+        }
         let player = &world.players[handle];
         let target_distance = (player.target - player.pos).length();
         let cap = target_distance + 2.0 * std::f32::consts::PI * min_separation;

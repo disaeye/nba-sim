@@ -5,9 +5,14 @@
 //! 任何结果。
 
 use glam::Vec2;
+use nba_domain::event::PossessionEndCause;
 use nba_domain::{GameRules, TeamData};
+use std::collections::BTreeMap;
 
-use crate::action::{ActionIntent, Fact, TeamSide};
+use crate::action::{
+    ActionIntent, ActionKind, ActionRuntime, DefensiveActionKind, DefensiveActionRuntime, Fact,
+    Interaction, TeamSide,
+};
 use crate::ball::BallBody;
 use crate::boxscore::{BoxScore, PlayerLine};
 use crate::draw::{purpose, DrawKey, DrawSource, Stream};
@@ -50,6 +55,9 @@ impl MatchSetup {
 pub struct TimedFact {
     pub time: f64,
     pub period: u32,
+    pub tick_index: u64,
+    pub sequence: u64,
+    pub event_id: u64,
     pub fact: Fact,
     /// 直接产生这条事实的那次决策（指向 `World::decision_traces`）。
     pub trace: Option<u32>,
@@ -61,6 +69,8 @@ pub struct TeamFouls {
     pub period: u8,
     /// 全场球队犯规累计（含进攻犯规）。
     pub total: u8,
+    /// 全场技术犯规累计。
+    pub technical: u8,
 }
 
 /// 轮换状态：换人意图与停表窗口内的换人配额。
@@ -100,18 +110,26 @@ pub struct World {
     pub params: RuntimeParams,
     pub rules: GameRules,
     pub clock: Clock,
-    pub phase: Phase,
+    phase: Phase,
     pub ball: BallBody,
     pub pass_result: Option<crate::ball::PassResult>,
     pub pass_in_flight: Option<crate::ball::PassInFlight>,
+    /// 最后触球的球员。出界判定按最后触球方决定球权，所以每次持球与
+    /// 碰球都要更新它。
+    pub last_touch: Option<usize>,
     pub players: Vec<PlayerState>,
     pub possession: PossessionState,
     pub score: [u32; 2],
     pub box_score: BoxScore,
     /// 球员句柄到所属队伍箱体行下标的映射。构建期算一次，换人不重排行序。
     pub line_slot: Vec<u8>,
-    pub active: Option<ActionIntent>,
+    /// 尚未结算的多人交互，按交互编号升序结算。
+    pub interactions: BTreeMap<u64, Interaction>,
     pub screen_defender: Option<usize>,
+    pub defensive_actions: Vec<Option<DefensiveActionRuntime>>,
+    pub next_action_id: u64,
+    pub next_interaction_id: u64,
+    pub action_turn: Option<(u64, crate::action::ActionTurn)>,
     pub events: Vec<TimedFact>,
     pub draws: DrawSource,
     pub seed: u64,
@@ -123,6 +141,15 @@ pub struct World {
     pub scoring_run: u32,
     pub possession_count: u64,
     pub period_started_with: TeamSide,
+    pub alternate_possession_next: TeamSide,
+    pub(crate) period_start_inbound_pending: bool,
+    pub(crate) jump_ball_tapper: Option<usize>,
+    pub(crate) jump_ball_receiver: Option<usize>,
+    /// 跳球开始时实际站位的接应人，按球队索引记录。点球方向由被点球队
+    /// 决定，接球人必须是该队已经站到落点上的那个人。
+    pub(crate) jump_ball_receivers: [Option<usize>; 2],
+    pub(crate) jump_ball_kind: Option<crate::action::JumpBallKind>,
+    pub first_possession: Option<TeamSide>,
     pub finished: bool,
     pub home_team_name: String,
     pub away_team_name: String,
@@ -130,8 +157,9 @@ pub struct World {
     pub possession_log: Vec<PossessionRecord>,
     pub pending_shot: Option<PendingShot>,
     pub pending_rebound: Option<crate::resolve::rebound::PendingRebound>,
+    /// 刚被切掉球的持球人，以及恢复之前不可再次被切的截止时间。
+    pub poke_cooldown: Option<(usize, f64)>,
     pub possession_points: u32,
-    pub wall: f64,
     pub inbound_passer: Option<usize>,
     pub violations: Vec<String>,
     pub last_separation: Option<(usize, f32, f64)>,
@@ -150,11 +178,15 @@ pub struct World {
     pub decision_records: Vec<DecisionRecord>,
     /// 当前生效的决策快照下标：本次决策产生的事实都带着它。
     pub active_trace: Option<u32>,
+    pub next_event_id: u64,
+    pub last_event_tick: u64,
+    pub next_event_sequence: u64,
     pub shot_zone_counts: [[u32; 4]; 2],
     pub shot_zone_makes: [[u32; 4]; 2],
     pub creation_counts: [u32; 7],
     pub next_shot_id: u64,
     pub next_pass_id: u64,
+    pub next_foul_id: u64,
     /// 走到篮板结算的投失次数。犯规导致的投失不进入篮板，
     /// 前场篮板率的分子分母必须用这个数对账。
     pub rebound_attempts: u64,
@@ -169,13 +201,457 @@ pub struct World {
 }
 
 impl World {
+    fn set_program_phase(
+        &mut self,
+        stage: crate::state::MatchStage,
+        program: crate::state::MatchProgram,
+        phase: Phase,
+    ) {
+        assert!(
+            !matches!(phase, Phase::PeriodBreak { .. }),
+            "period breaks use set_period_phase"
+        );
+        assert!(
+            !matches!(phase, Phase::Timeout { .. }),
+            "timeout phases use set_timeout_phase"
+        );
+        assert_eq!(program, phase.program(), "phase and program disagree");
+        assert_eq!(
+            matches!(stage, crate::state::MatchStage::Pregame),
+            matches!(phase, Phase::Pregame),
+            "pregame stage requires pregame phase"
+        );
+        assert_eq!(
+            matches!(stage, crate::state::MatchStage::Finished),
+            matches!(phase, Phase::Finished),
+            "finished stage requires finished phase"
+        );
+        assert_eq!(
+            phase.stage(self.clock.period(), self.rules.league.regulation_periods),
+            stage,
+            "phase and match stage disagree"
+        );
+        let current_stage = self.match_stage();
+        let stage_transition_is_allowed = stage == current_stage
+            || (current_stage == crate::state::MatchStage::Pregame
+                && stage == crate::state::MatchStage::Regulation)
+            || (current_stage == crate::state::MatchStage::Intermission
+                && matches!(
+                    stage,
+                    crate::state::MatchStage::Intermission
+                        | crate::state::MatchStage::Regulation
+                        | crate::state::MatchStage::Overtime
+                ))
+            || (current_stage == crate::state::MatchStage::Regulation
+                && matches!(
+                    stage,
+                    crate::state::MatchStage::Intermission
+                        | crate::state::MatchStage::Overtime
+                        | crate::state::MatchStage::Finished
+                ))
+            || (current_stage == crate::state::MatchStage::Overtime
+                && matches!(
+                    stage,
+                    crate::state::MatchStage::Intermission
+                        | crate::state::MatchStage::Regulation
+                        | crate::state::MatchStage::Finished
+                ));
+        assert!(
+            stage_transition_is_allowed,
+            "match stage transition {current_stage:?} -> {stage:?} through {phase:?} is not permitted"
+        );
+        self.phase = phase;
+    }
+
+    pub(crate) fn set_period_phase(&mut self, phase: Phase) {
+        let Phase::PeriodBreak { next_stage, .. } = phase else {
+            panic!("period phase requires a period break");
+        };
+        let next_period = self.clock.period() + 1;
+        let expected_stage = if next_period > self.rules.league.regulation_periods {
+            crate::state::MatchStage::Overtime
+        } else {
+            crate::state::MatchStage::Intermission
+        };
+        assert_eq!(
+            next_stage, expected_stage,
+            "period break destination must match the next period"
+        );
+        let current_stage = self.match_stage();
+        assert!(
+            matches!(
+                current_stage,
+                crate::state::MatchStage::Regulation | crate::state::MatchStage::Overtime
+            ),
+            "period break cannot begin from {current_stage:?}"
+        );
+        let stage = phase.stage(self.clock.period(), self.rules.league.regulation_periods);
+        assert!(
+            matches!(
+                stage,
+                crate::state::MatchStage::Intermission | crate::state::MatchStage::Overtime
+            ),
+            "period break phase must report intermission or overtime stage"
+        );
+        assert_eq!(
+            phase.program(),
+            crate::state::MatchProgram::PeriodSettlement
+        );
+        self.phase = phase;
+    }
+
+    fn opening_tip_setup(
+        players: &[PlayerState],
+        policy: &crate::params::PolicyTable,
+    ) -> (usize, usize) {
+        let select_jumper = |team| {
+            players
+                .iter()
+                .enumerate()
+                .filter(|(_, player)| player.on_court && player.team == team)
+                .max_by(|(_, left), (_, right)| {
+                    let left_physical = crate::physical::Physical::of(left, policy);
+                    let right_physical = crate::physical::Physical::of(right, policy);
+                    left_physical
+                        .standing_reach_ft
+                        .total_cmp(&right_physical.standing_reach_ft)
+                        .then_with(|| {
+                            left_physical
+                                .vertical_ft
+                                .total_cmp(&right_physical.vertical_ft)
+                        })
+                        .then_with(|| right.id.cmp(&left.id))
+                })
+                .map(|(handle, _)| handle)
+                .expect("each team must field a jump-ball participant")
+        };
+        (select_jumper(TeamSide::Home), select_jumper(TeamSide::Away))
+    }
+
+    fn period_jumpers(&self) -> (usize, usize) {
+        let select_jumper = |team| {
+            self.on_court(team)
+                .into_iter()
+                .max_by(|left, right| {
+                    let left_physical =
+                        crate::physical::Physical::of(&self.players[*left], &self.params.policy);
+                    let right_physical =
+                        crate::physical::Physical::of(&self.players[*right], &self.params.policy);
+                    left_physical
+                        .standing_reach_ft
+                        .total_cmp(&right_physical.standing_reach_ft)
+                        .then_with(|| {
+                            left_physical
+                                .vertical_ft
+                                .total_cmp(&right_physical.vertical_ft)
+                        })
+                        .then_with(|| self.players[*right].id.cmp(&self.players[*left].id))
+                })
+                .expect("each team must field a jump-ball participant")
+        };
+        (select_jumper(TeamSide::Home), select_jumper(TeamSide::Away))
+    }
+
+    fn begin_opening_jump_ball(&mut self, home_jumper: usize, away_jumper: usize) {
+        self.begin_period_jump_ball(
+            home_jumper,
+            away_jumper,
+            crate::action::JumpBallKind::Opening,
+        );
+    }
+
+    fn begin_period_jump_ball(
+        &mut self,
+        home_jumper: usize,
+        away_jumper: usize,
+        kind: crate::action::JumpBallKind,
+    ) {
+        self.jump_ball_kind = Some(kind);
+        self.jump_ball_tapper = None;
+        self.jump_ball_receiver = None;
+        self.jump_ball_receivers = [None; 2];
+        let center = self.rules.court.center();
+        let radius = self.rules.league.center_circle_radius_ft * 0.5;
+        let home_spot = center - Vec2::new(radius, 0.0);
+        let away_spot = center + Vec2::new(radius, 0.0);
+        crate::body::place(self, home_jumper, home_spot);
+        crate::body::place(self, away_jumper, away_spot);
+        self.players[home_jumper].facing = Vec2::X;
+        self.players[away_jumper].facing = Vec2::NEG_X;
+        for team in [TeamSide::Home, TeamSide::Away] {
+            let jumper = if team == TeamSide::Home {
+                home_jumper
+            } else {
+                away_jumper
+            };
+            let receiver = self
+                .on_court(team)
+                .into_iter()
+                .filter(|handle| *handle != jumper)
+                .min_by(|left, right| {
+                    (self.players[*left].pos - center)
+                        .length_squared()
+                        .total_cmp(&(self.players[*right].pos - center).length_squared())
+                        .then_with(|| self.players[*left].id.cmp(&self.players[*right].id))
+                })
+                .expect("each team needs a jump-ball receiver");
+            let direction = if team == TeamSide::Home {
+                -Vec2::X
+            } else {
+                Vec2::X
+            };
+            // 接应人站到点球落点上：落点距离必须同时满足中圈外的站位要求
+            // 与点球档位，否则接应人够不到球。
+            let distance = self.rules.tip_off_tap_distance_ft;
+            assert!(
+                distance >= self.rules.league.jump_ball_receiver_distance_ft,
+                "jump-ball tap distance must place the receiver outside the center circle"
+            );
+            assert!(
+                distance >= self.rules.league.center_circle_radius_ft,
+                "jump-ball receiver must stand outside the center circle"
+            );
+            let target = center + direction * distance;
+            let radius = self.rules.player_radius_ft;
+            assert!(
+                target.x >= radius
+                    && target.x <= self.rules.court.width_ft - radius
+                    && target.y >= radius
+                    && target.y <= self.rules.court.height_ft - radius,
+                "jump-ball receiver spot must be inside playable court geometry"
+            );
+            crate::body::place(self, receiver, target);
+            self.players[receiver].target_kind = crate::state::TargetKind::Station;
+            self.players[receiver].target_partner = jumper;
+            self.jump_ball_receivers[World::team_index(team)] = Some(receiver);
+            self.emit(Fact::PlacementApplied {
+                player: receiver,
+                reason: "jump_ball_receiver",
+            });
+        }
+        self.ball = BallBody::loose(center, Vec2::ZERO);
+        let coefficients = crate::physical::Coefficients::from_policy(&self.params.policy);
+        let home = crate::physical::Physical::with(&self.players[home_jumper], &coefficients);
+        let away = crate::physical::Physical::with(&self.players[away_jumper], &coefficients);
+        let peak_height = (home.standing_reach_ft + home.vertical_ft)
+            .max(away.standing_reach_ft + away.vertical_ft);
+        let rise = (peak_height - self.rules.chest_height_ft).max(f32::MIN_POSITIVE);
+        self.ball.z = self.rules.chest_height_ft;
+        self.ball.vz = (2.0 * self.rules.ball_gravity_ftps2 * rise).sqrt();
+        let resolve_after = f64::from(self.ball.vz / self.rules.ball_gravity_ftps2);
+        self.set_phase(Phase::JumpBall {
+            home_jumper,
+            away_jumper,
+            resolve_at: self.now() + resolve_after,
+            kind,
+        });
+    }
+
+    fn resolve_opening_jump_ball(
+        &mut self,
+        home_jumper: usize,
+        away_jumper: usize,
+        kind: crate::action::JumpBallKind,
+    ) {
+        let coefficients = crate::physical::Coefficients::from_policy(&self.params.policy);
+        let home = crate::physical::Physical::with(&self.players[home_jumper], &coefficients);
+        let away = crate::physical::Physical::with(&self.players[away_jumper], &coefficients);
+        let home_reach = home.standing_reach_ft + home.vertical_ft;
+        let away_reach = away.standing_reach_ft + away.vertical_ft;
+        let home_roll = self.draw(Stream::Reaction, home_jumper, purpose::OPENING_TIP, 0);
+        let away_roll = self.draw(Stream::Reaction, away_jumper, purpose::OPENING_TIP, 1);
+        let (tapper, tapped_team) =
+            if home_reach > away_reach || (home_reach == away_reach && home_roll >= away_roll) {
+                (home_jumper, TeamSide::Home)
+            } else {
+                (away_jumper, TeamSide::Away)
+            };
+        let direction = if tapped_team == TeamSide::Home {
+            -Vec2::X
+        } else {
+            Vec2::X
+        };
+        let receiver = self.jump_ball_receivers[World::team_index(tapped_team)]
+            .expect("the tapped team must have a placed jump-ball receiver");
+        self.jump_ball_tapper = Some(tapper);
+        self.jump_ball_receiver = Some(receiver);
+        let center = self.rules.court.center();
+        let target = self.rules.court.clamp_playable(
+            center + direction * self.rules.tip_off_tap_distance_ft,
+            self.rules.ball_radius_ft,
+        );
+        let control_reach = self.params.policy.w("loose_ball_catch_base_ft")
+            + self.players[receiver].attribute("ball_handling")
+                * self.params.policy.w("loose_ball_catch_skill_ft");
+        assert!(
+            (target - self.players[receiver].pos).length() <= control_reach,
+            "jump-ball receiver placement must be within control reach"
+        );
+        self.ball.pos = center;
+        self.ball.z = self.rules.tip_off_tap_height_ft;
+        let target_distance = (target - center).length();
+        let vertical_rise = target_distance
+            * (self.rules.tip_off_tap_vel_z_ftps / self.rules.tip_off_tap_speed_ftps);
+        self.ball.vel = direction * self.rules.tip_off_tap_speed_ftps;
+        self.ball.vz = (2.0 * self.rules.ball_gravity_ftps2 * vertical_rise).sqrt();
+        self.ball.release(crate::state::BallState::Loose {
+            pos: self.ball.pos,
+            vel: self.ball.vel,
+        });
+        self.players[receiver].target = target;
+        self.players[receiver].target_kind = crate::state::TargetKind::Window;
+        self.players[receiver].target_partner = tapper;
+        self.possession.team = tapped_team;
+        self.period_started_with = tapped_team;
+        self.emit(Fact::BallContact {
+            kind: "jump_ball_tap",
+            entity: Some(tapper),
+            time: self.now(),
+            x: center.x,
+            y: center.y,
+            z: self.ball.z,
+            sub_tick: 0,
+        });
+        self.emit(Fact::JumpBall {
+            kind,
+            home_jumper,
+            away_jumper,
+            tapper,
+            tapped_team,
+        });
+        self.set_phase(Phase::JumpBallFlight);
+    }
+
+    fn award_opening_tip_control(&mut self, tapped_team: TeamSide, receiver: usize) {
+        let kind = self
+            .jump_ball_kind
+            .take()
+            .expect("jump-ball kind must remain available until control is awarded");
+        assert_eq!(
+            self.players[receiver].team, tapped_team,
+            "jump-ball controller must belong to the entitled team"
+        );
+        self.set_ball_held(receiver);
+        self.start_possession(tapped_team, PossessionKind::Live);
+        self.set_ball_held(receiver);
+        self.players[receiver].facing = if self.attacking_right(tapped_team) {
+            Vec2::X
+        } else {
+            Vec2::NEG_X
+        };
+        self.players[receiver].target = self.top_of_key(tapped_team);
+        let advance_seconds = self.advance_seconds_to_front(receiver, tapped_team);
+        let setup_seconds = f64::from(self.params.policy.g("possession_setup_seconds"));
+        self.players[receiver].schedule.next_redecide_at =
+            self.now() + advance_seconds + setup_seconds;
+        self.players[receiver].schedule.pending =
+            Some(crate::state::DecisionTrigger::PossessionStart);
+        // 球交给接应人：球落到他手上，球员本身不位移。把球员瞬移到球的
+        // 位置会让一个 tick 内的位移超过速度上限。
+        self.ball.pos = self.players[receiver].pos
+            + self.players[receiver].facing.normalize_or_zero() * self.rules.ball_holder_offset_ft;
+        self.ball.z = self.rules.ball_holder_height_ft;
+        self.ball.vel = self.players[receiver].vel;
+        self.ball.vz = 0.0;
+        self.emit(Fact::PlacementApplied {
+            player: receiver,
+            reason: "jump_ball_control",
+        });
+        if matches!(kind, crate::action::JumpBallKind::Opening) {
+            self.first_possession = Some(tapped_team);
+            if self.rules.league.use_alternate_possession_arrow {
+                self.alternate_possession_next = tapped_team.other();
+            }
+        }
+        self.set_phase(Phase::Live);
+        crate::formation::set_targets(self, tapped_team);
+    }
+
+    pub fn phase(&self) -> Phase {
+        self.phase
+    }
+
+    pub(crate) fn set_ball_held(&mut self, holder: usize) {
+        self.ball.set_held(holder);
+        self.last_touch = Some(holder);
+    }
+
+    pub(crate) fn release_ball(&mut self, state: crate::state::BallState) {
+        self.ball.release(state);
+    }
+
+    pub(crate) fn set_timeout_phase(
+        &mut self,
+        team: TeamSide,
+        resume_at: f64,
+        resume_phase: crate::state::ResumePhase,
+        started_at: f64,
+        previous_phase: Phase,
+    ) {
+        assert_ne!(
+            previous_phase.program(),
+            crate::state::MatchProgram::Timeout,
+            "timeout cannot interrupt another timeout"
+        );
+        assert_eq!(
+            self.phase, previous_phase,
+            "timeout source phase changed before commit"
+        );
+        assert!(
+            resume_at >= started_at,
+            "timeout end cannot precede its start"
+        );
+        assert_eq!(
+            resume_phase.phase().program(),
+            previous_phase.program(),
+            "timeout must preserve the interrupted program"
+        );
+        let phase = Phase::Timeout {
+            team,
+            started_at,
+            resume_at,
+            resume_phase,
+        };
+        assert_eq!(phase.program(), crate::state::MatchProgram::Timeout);
+        let stage = phase.stage(self.clock.period(), self.rules.league.regulation_periods);
+        assert_eq!(
+            stage,
+            self.match_stage(),
+            "timeout must preserve the current match stage"
+        );
+        self.cancel_actions("timeout");
+        self.phase = phase;
+    }
+
+    pub fn set_phase(&mut self, phase: Phase) {
+        let phase = match phase {
+            Phase::Timeout { .. } => panic!("timeout phases must be created by timeouts::request"),
+            phase => phase,
+        };
+        if matches!(phase, Phase::PeriodBreak { .. }) {
+            self.set_period_phase(phase);
+            return;
+        }
+        let stage = phase.stage(self.clock.period(), self.rules.league.regulation_periods);
+        let program = phase.program();
+        self.set_program_phase(stage, program, phase);
+    }
+
+    pub fn match_stage(&self) -> crate::state::MatchStage {
+        self.phase()
+            .stage(self.clock.period(), self.rules.league.regulation_periods)
+    }
+
+    pub fn match_program(&self) -> crate::state::MatchProgram {
+        self.phase().program()
+    }
+
     pub fn new<P: Into<RuntimeParams>>(setup: MatchSetup, params: P, seed: u64) -> Self {
         let params = params.into();
         let rules = setup.rules.clone();
         // 读球历史按秒数上限预分配：稳态每帧只做写入与裁剪，不再扩容。
-        let history_capacity = ((params.policy.g("ball_history_seconds") as f64 / TICK_SECONDS)
-            .ceil() as usize)
-            + 64;
+        let history_capacity =
+            ((params.policy.g("ball_history_seconds") as f64 / TICK_SECONDS).ceil() as usize) + 64;
         let mut players = Vec::new();
         for (index, data) in setup.home.players.iter().enumerate() {
             let on_court = setup.home_lineup.contains(&index);
@@ -240,37 +716,24 @@ impl World {
         let shot_clock = rules.league.shot_clock_seconds as f64;
         let rules_capture = rules.clone();
         let draws = DrawSource::new(seed);
-        let first = if draws.f32(DrawKey {
-            stream: Stream::Decision,
-            possession: 0,
-            tick: 0,
-            entity: 0,
-            purpose: purpose::OPENING_TIP,
-            ordinal: 0,
-        }) < 0.5
-        {
-            TeamSide::Home
-        } else {
-            TeamSide::Away
-        };
+        let (home_jumper, away_jumper) = Self::opening_tip_setup(&players, &params.policy);
         let mut play_cooldowns = std::collections::BTreeMap::new();
         for index in 0..params.tactics.plays.len() {
             play_cooldowns.insert(index, 0.0);
         }
+        let center = rules.court.center();
         let mut world = Self {
             params,
             rules,
             clock: Clock::new(period_seconds, shot_clock),
-            phase: Phase::DeadBall {
-                team: first,
-                ready_at: 0.6,
-            },
-            ball: BallBody::loose(Vec2::new(47.0, 25.0), Vec2::ZERO),
+            phase: Phase::Pregame,
+            ball: BallBody::loose(center, Vec2::ZERO),
             pass_result: None,
             pass_in_flight: None,
+            last_touch: None,
             players,
             possession: PossessionState::new(
-                first,
+                TeamSide::Home,
                 0,
                 PossessionKind::Dead,
                 0.0,
@@ -283,8 +746,12 @@ impl World {
                 away: away_lines,
             },
             line_slot,
-            active: None,
+            interactions: BTreeMap::new(),
             screen_defender: None,
+            defensive_actions: vec![None; player_count],
+            next_action_id: 0,
+            next_interaction_id: 0,
+            action_turn: None,
             events: Vec::with_capacity(4096),
             draws,
             seed,
@@ -297,7 +764,14 @@ impl World {
             last_scoring: None,
             scoring_run: 0,
             possession_count: 0,
-            period_started_with: first,
+            period_started_with: TeamSide::Home,
+            alternate_possession_next: TeamSide::Away,
+            period_start_inbound_pending: false,
+            jump_ball_tapper: None,
+            jump_ball_receiver: None,
+            jump_ball_receivers: [None; 2],
+            jump_ball_kind: None,
+            first_possession: None,
             finished: false,
             home_team_name: setup.home.name.clone(),
             away_team_name: setup.away.name.clone(),
@@ -306,8 +780,8 @@ impl World {
             possession_log: Vec::with_capacity(256),
             pending_shot: None,
             pending_rebound: None,
+            poke_cooldown: None,
             possession_points: 0,
-            wall: 0.0,
             inbound_passer: None,
             violations: Vec::new(),
             last_separation: None,
@@ -321,11 +795,15 @@ impl World {
             decision_traces: Vec::new(),
             decision_records: Vec::new(),
             active_trace: None,
+            next_event_id: 0,
+            last_event_tick: 0,
+            next_event_sequence: 0,
             shot_zone_counts: [[0; 4]; 2],
             shot_zone_makes: [[0; 4]; 2],
             creation_counts: [0; 7],
             next_shot_id: 0,
             next_pass_id: 0,
+            next_foul_id: 0,
             rebound_attempts: 0,
             momentum: [f32::default(); 2],
             ball_history: Vec::with_capacity(history_capacity),
@@ -349,12 +827,13 @@ impl World {
         for (handle, spot) in bench_placements {
             crate::body::place(&mut world, handle, spot);
         }
-        world.reset_positions(first);
+        world.reset_positions(TeamSide::Home);
+        world.begin_opening_jump_ball(home_jumper, away_jumper);
         world
     }
 
     pub fn run(&mut self) -> GameReport {
-        while !self.finished && self.clock.tick < MAX_TICKS {
+        while !self.finished && self.clock.tick() < MAX_TICKS {
             self.step(TICK_SECONDS);
         }
         self.report()
@@ -362,7 +841,7 @@ impl World {
 
     /// 逐步推演并逐帧交给调用方，供流式导出与实时观察使用。
     pub fn run_with<F: FnMut(&World)>(&mut self, mut sink: F) -> GameReport {
-        while !self.finished && self.clock.tick < MAX_TICKS {
+        while !self.finished && self.clock.tick() < MAX_TICKS {
             self.step(TICK_SECONDS);
             sink(self);
         }
@@ -377,6 +856,216 @@ impl World {
     pub fn new_pass_id(&mut self) -> u64 {
         self.next_pass_id += 1;
         self.next_pass_id
+    }
+
+    pub fn new_foul_id(&mut self) -> u64 {
+        self.next_foul_id += 1;
+        self.next_foul_id
+    }
+
+    pub fn start_action(
+        &mut self,
+        intent: ActionIntent,
+        participants: &[(usize, crate::action::ActionIntentRole)],
+    ) -> bool {
+        assert!(participants.iter().any(|(player, role)| {
+            *player == intent.actor && *role == crate::action::ActionIntentRole::Primary
+        }));
+        assert!(participants
+            .iter()
+            .all(|(player, _)| *player < self.players.len()));
+        assert!(participants
+            .iter()
+            .all(|(player, _)| self.players[*player].on_court));
+        assert!(
+            intent.target.is_none_or(|target| target < self.players.len()),
+            "action target must reference a player"
+        );
+        let conflict = participants
+            .iter()
+            .any(|(player, _)| self.players[*player].action.is_some());
+        if conflict {
+            self.emit(Fact::ActionIntentRejected {
+                player: intent.actor,
+                kind: intent.kind.as_str(),
+                reason: "participant_busy",
+            });
+            return false;
+        }
+        self.next_interaction_id += 1;
+        let interaction_id = self.next_interaction_id;
+        let (preparation, execution, follow_through) = self.action_windows(&intent);
+        let configured_total = preparation + execution + follow_through;
+        assert!(configured_total.is_finite() && configured_total > 0.0);
+        assert!(intent.start_time.is_finite() && (intent.start_time - self.now()).abs() <= f64::EPSILON);
+        assert!(intent.duration.is_finite() && intent.duration > 0.0);
+        let scale = intent.duration / configured_total;
+        let preparation = preparation * scale;
+        let execution = execution * scale;
+        let follow_through = follow_through * scale;
+        let phase = if preparation > 0.0 {
+            nba_domain::action_window::ActionPhase::Preparation
+        } else if execution > 0.0 {
+            nba_domain::action_window::ActionPhase::Execution
+        } else {
+            nba_domain::action_window::ActionPhase::FollowThrough
+        };
+        let mut ordered = participants.to_vec();
+        ordered.sort_unstable_by_key(|(player, _)| *player);
+        assert!(ordered.windows(2).all(|pair| pair[0].0 != pair[1].0));
+        let action_id = self.activate_action_participants(
+            intent.clone(),
+            &ordered,
+            interaction_id,
+            preparation,
+            execution,
+            follow_through,
+            phase,
+        );
+        self.interactions.insert(
+            interaction_id,
+            Interaction {
+                id: interaction_id,
+                action_id,
+                intent,
+            },
+        );
+        self.action_turn = None;
+        true
+    }
+
+    fn action_windows(&self, intent: &ActionIntent) -> (f64, f64, f64) {
+        use crate::action::{ActionKind, ShotKind};
+        let rules = &self.rules;
+        let (preparation, execution, follow_through) = match intent.kind {
+            ActionKind::Shoot(ShotKind::Dunk | ShotKind::DrivingDunk | ShotKind::CuttingDunk | ShotKind::RunningDunk) => (
+                rules.dunk_prep_seconds,
+                rules.dunk_exec_seconds,
+                rules.dunk_follow_seconds,
+            ),
+            ActionKind::Shoot(ShotKind::Layup | ShotKind::DrivingLayup | ShotKind::CuttingLayup | ShotKind::RunningLayup | ShotKind::ReverseLayup | ShotKind::Floater | ShotKind::AlleyOop | ShotKind::Putback) | ActionKind::Finish => (
+                rules.layup_prep_seconds,
+                rules.layup_exec_seconds,
+                rules.layup_follow_seconds,
+            ),
+            ActionKind::Shoot(_) => (
+                rules.jump_shot_prep_seconds,
+                rules.jump_shot_exec_seconds,
+                rules.jump_shot_follow_seconds,
+            ),
+            ActionKind::Pass(_) => (
+                rules.pass_prep_seconds,
+                rules.pass_exec_seconds,
+                rules.pass_follow_seconds,
+            ),
+            ActionKind::Screen(_) => (
+                rules.screen_prep_seconds,
+                rules.screen_exec_seconds,
+                rules.screen_follow_seconds,
+            ),
+            ActionKind::Drive | ActionKind::Dribble | ActionKind::Cut | ActionKind::PostUp | ActionKind::Relocate => (
+                rules.tactics.drive_min_duration_seconds,
+                rules.tactics.drive_max_duration_seconds,
+                rules.tactical_initiation_seconds,
+            ),
+        };
+        (
+            f64::from(preparation),
+            f64::from(execution),
+            f64::from(follow_through),
+        )
+    }
+
+    fn activate_action_participants(
+        &mut self,
+        intent: ActionIntent,
+        participants: &[(usize, crate::action::ActionIntentRole)],
+        interaction_id: u64,
+        preparation: f64,
+        execution: f64,
+        follow_through: f64,
+        phase: nba_domain::action_window::ActionPhase,
+    ) -> u64 {
+        self.next_action_id += 1;
+        let action_id = self.next_action_id;
+        let kind = intent.kind.as_str();
+        for &(player, role) in participants {
+            let participant_intent = intent.clone();
+            let runtime = ActionRuntime::new(
+                action_id,
+                interaction_id,
+                participant_intent,
+                player,
+                role,
+                phase,
+                preparation,
+                execution,
+                follow_through,
+            );
+            self.players[player].action = Some(runtime);
+            self.emit(Fact::ActionStarted {
+                action_id,
+                interaction_id,
+                player,
+                kind,
+                target: intent.target,
+            });
+        }
+        action_id
+    }
+
+    pub(crate) fn cancel_actions(&mut self, reason: &'static str) {
+        let resolving_action = self
+            .action_turn
+            .filter(|(_, turn)| *turn == crate::action::ActionTurn::Resolve)
+            .map(|(action_id, _)| action_id);
+        for player in 0..self.players.len() {
+            let Some(runtime) = self.players[player].action.as_ref() else {
+                continue;
+            };
+            if Some(runtime.action_id) == resolving_action {
+                continue;
+            }
+            let runtime = self.players[player].action.take().unwrap();
+            if self.players[player].target_kind == crate::state::TargetKind::Contact {
+                self.players[player].target_kind = crate::state::TargetKind::Station;
+                self.players[player].target_partner = usize::MAX;
+            }
+            self.emit(Fact::ActionCancelled {
+                action_id: runtime.action_id,
+                player,
+                kind: runtime.intent.kind.as_str(),
+                reason,
+            });
+        }
+        self.cancel_defensive_actions(reason);
+        let alive: Vec<u64> = self
+            .players
+            .iter()
+            .filter_map(|player| player.action.as_ref().map(|runtime| runtime.action_id))
+            .collect();
+        self.interactions
+            .retain(|_, interaction| alive.contains(&interaction.action_id));
+        self.screen_defender = None;
+    }
+
+    fn cancel_defensive_actions(&mut self, reason: &'static str) {
+        for defender in 0..self.defensive_actions.len() {
+            self.cancel_defensive_action(defender, reason);
+        }
+    }
+
+    fn cancel_defensive_action(&mut self, defender: usize, reason: &'static str) {
+        let Some(runtime) = self.defensive_actions[defender].take() else {
+            return;
+        };
+        self.emit(Fact::DefensiveActionCancelled {
+            action_id: runtime.action_id,
+            defender: runtime.defender,
+            shooter: runtime.shooter,
+            kind: DefensiveActionKind::CloseoutContest.as_str(),
+            reason,
+        });
     }
 
     /// 流尾部尚未结算的业务实例：飞行中的出手、飞行中的传球、未执行完的罚球。
@@ -397,8 +1086,12 @@ impl World {
             away_team: self.away_team_name.clone(),
             home_score: self.score[0],
             away_score: self.score[1],
-            periods: self.clock.period,
-            ticks: self.clock.tick,
+            periods: self.clock.period(),
+            regulation_periods: self.rules.league.regulation_periods,
+            period_duration_seconds: self.rules.league.period_duration_seconds,
+            overtime_duration_seconds: self.rules.league.overtime_duration_seconds,
+            tick_seconds: self.rules.tick_seconds,
+            ticks: self.clock.tick(),
             redecide_interval_seconds: self.rules.redecide_interval_seconds as f64,
             open_business_instances: self.open_business_instances(),
             rebound_attempts: self.rebound_attempts,
@@ -428,19 +1121,48 @@ impl World {
     }
 
     pub fn hoop_for(&self, team: TeamSide) -> Vec2 {
-        self.rules.court.hoop_pos(team == TeamSide::Home)
+        self.rules.court.hoop_pos(self.attacking_right(team))
     }
 
     pub fn attacking_right(&self, team: TeamSide) -> bool {
-        team == TeamSide::Home
+        self.attacking_right_in_period(team, self.clock.period())
+    }
+
+    fn attacking_right_in_period(&self, team: TeamSide, period: u32) -> bool {
+        let home_attacks_right = !period.is_multiple_of(2);
+        (team == TeamSide::Home) == home_attacks_right
+    }
+
+    pub fn apply_defensive_closeout_target(&mut self, defender: usize) -> bool {
+        let Some(runtime) = self.defensive_actions[defender].as_ref() else {
+            return false;
+        };
+        if runtime.phase != nba_domain::action_window::ActionPhase::Execution {
+            return false;
+        }
+        let shooter = runtime.shooter;
+        if !self.players[defender].on_court || !self.players[shooter].on_court {
+            return false;
+        }
+        let runtime = self.defensive_actions[defender]
+            .as_ref()
+            .expect("active defensive action");
+        let target = runtime.target_position;
+        crate::assignment::force_target_as(
+            self,
+            defender,
+            target,
+            crate::state::TargetKind::Window,
+            usize::MAX,
+        )
     }
 
     pub fn holder(&self) -> Option<usize> {
-        self.ball.holder
+        self.ball.holder()
     }
 
     pub fn now(&self) -> f64 {
-        self.wall
+        self.clock.simulation_time()
     }
 
     /// 按地址抽样。`entity` 是球员句柄或球队下标；`ordinal` 是语义序号。
@@ -448,7 +1170,7 @@ impl World {
         self.draws.f32(DrawKey {
             stream,
             possession: self.possession.id,
-            tick: self.clock.tick,
+            tick: self.clock.tick(),
             entity: entity as u32,
             purpose,
             ordinal,
@@ -461,6 +1183,9 @@ impl World {
         let mut fork = self.clone();
         fork.draws = DrawSource::new(base_seed);
         fork.events.clear();
+        fork.next_event_id = 0;
+        fork.last_event_tick = fork.clock.tick();
+        fork.next_event_sequence = 0;
         fork.shot_samples.clear();
         fork.pass_samples.clear();
         fork.decision_samples.clear();
@@ -477,9 +1202,20 @@ impl World {
     }
 
     pub fn emit(&mut self, fact: Fact) {
+        let tick_index = self.clock.tick();
+        if tick_index != self.last_event_tick {
+            self.last_event_tick = tick_index;
+            self.next_event_sequence = 0;
+        }
+        self.next_event_id += 1;
+        let sequence = self.next_event_sequence;
+        self.next_event_sequence += 1;
         self.events.push(TimedFact {
             time: self.now(),
-            period: self.clock.period,
+            period: self.clock.period(),
+            tick_index,
+            sequence,
+            event_id: self.next_event_id,
             fact,
             trace: self.active_trace,
         });
@@ -506,15 +1242,15 @@ impl World {
     }
 
     pub fn add_points(&mut self, team: TeamSide, points: u32) {
+        self.scoring_run = if self.last_scoring == Some(Self::team_index(team)) {
+            self.scoring_run.saturating_add(points)
+        } else {
+            points
+        };
+        self.last_scoring = Some(Self::team_index(team));
         let index = Self::team_index(team);
         self.score[index] += points;
         self.possession_points += points;
-        if self.last_scoring == Some(index) {
-            self.scoring_run += points;
-        } else {
-            self.last_scoring = Some(index);
-            self.scoring_run = points;
-        }
         // 势头：得分方累积，被得分方清零。它按秒衰减，不是一次性标记。
         let gain = self.params.policy.w("momentum_gain_per_point");
         let cap = self.params.policy.w("momentum_cap");
@@ -606,16 +1342,13 @@ impl World {
             .on_court(team)
             .into_iter()
             .min_by(|a, b| {
-                let distance = |handle: usize| {
-                    (self.players[handle].pos - inbound_spot).length()
-                };
+                let distance = |handle: usize| (self.players[handle].pos - inbound_spot).length();
                 distance(*a).total_cmp(&distance(*b))
             })
             .expect("every team must have an on-court player");
         self.inbound_passer = Some(handler);
-        self.active = None;
-        self.screen_defender = None;
-        self.ball.set_held(handler);
+        self.cancel_actions("inbound");
+        self.set_ball_held(handler);
         crate::formation::set_targets(self, team);
         // 发球队员必须自己走到发球点，不能被瞬移过去：瞬移会让球员在
         // 回合之间跳几十英尺，看起来像系统重排而不是真实移动。
@@ -631,38 +1364,75 @@ impl World {
         // 发球时间要足够发球队员走到发球点，但不能把进攻时钟耗在走位上。
         let walk = (self.players[handler].pos - inbound_spot).length()
             / self.rules.max_player_speed_ftps.max(f32::MIN_POSITIVE);
-        self.phase = Phase::Inbound {
+        self.set_phase(Phase::Inbound {
             team,
             ready_at: self.now() + 0.5 + f64::from(walk.clamp(0.0, 1.5)),
-        };
+        });
     }
 
     pub fn start_possession(&mut self, team: TeamSide, kind: PossessionKind) {
         let inbound_passer = self.inbound_passer;
         self.inbound_passer = None;
+        let continuing_possession = kind == PossessionKind::Dead && self.possession.id != 0;
+        if self.period_start_inbound_pending {
+            assert_eq!(
+                team, self.period_started_with,
+                "period-start throw-in must preserve awarded team"
+            );
+            self.alternate_possession_next = team.other();
+            self.period_start_inbound_pending = false;
+        }
         crate::tactics::close_play_window(self);
         self.active_trace = None;
-        self.screen_defender = None;
-        // 新回合的读球历史从头开始：上一个回合的球位不是这次协防的依据。
+        self.cancel_actions("possession_start");
+        if continuing_possession {
+            assert_eq!(self.possession.team, team, "dead-ball restart must preserve possession team");
+        }
         crate::motion::reset_ball_history(self);
-        self.possession_count += 1;
-        self.alternate_spacing = self.possession_count.is_multiple_of(2);
-        let shot_clock = self.rules.league.shot_clock_seconds as f64;
-        self.clock.shot_clock = shot_clock;
-        self.possession = PossessionState::new(
-            team,
-            self.possession_count,
-            kind,
-            self.now(),
-            shot_clock,
-            self.clock.game_clock,
-        );
+        let next_possession_id = if continuing_possession {
+            self.possession.id
+        } else {
+            assert_eq!(
+                self.possession.id, 0,
+                "a new possession must close the previous possession with its typed cause"
+            );
+            self.possession_count + 1
+        };
+        self.alternate_spacing = next_possession_id.is_multiple_of(2);
+        let full_shot_clock = self.rules.league.shot_clock_seconds as f64;
+        let shot_clock = if continuing_possession {
+            self.clock.shot_clock()
+        } else {
+            full_shot_clock
+        };
+        if continuing_possession {
+            self.clock.set_shot_clock(shot_clock);
+        }
+        if !continuing_possession {
+            self.clock.set_shot_clock(shot_clock);
+            self.possession_count = next_possession_id;
+            assert_eq!(
+                self.possession.id, 0,
+                "a new possession must close the previous possession with its typed cause"
+            );
+            self.possession = PossessionState::new(
+                team,
+                self.possession_count,
+                kind,
+                self.now(),
+                shot_clock,
+                self.clock.game_clock(),
+            );
+            self.possession_points = 0;
+        }
         // 发球也是一次传球：接球人接到发球后直接出手是合法的进攻选择，
-        // 不应该被判成「没有接球就投」。
+        // 不应该被判成「没有接球就投」。传球链统计也按官方口径把发球
+        // 计入链条。回合开始或重启时持球人处于运球推进状态。
+        self.possession.passes += 1;
+        self.possession.ball_phase = crate::state::BallPhase::Dribble;
         self.possession.last_pass_at = Some(self.now());
         self.possession.last_pass_from = inbound_passer;
         self.possession.assist_candidate = inbound_passer.map(|handler| (handler, self.now()));
-        self.possession_points = 0;
         self.pending_shot = None;
         self.pending_rebound = None;
         self.pass_result = None;
@@ -674,67 +1444,101 @@ impl World {
             self.apply_dead_ball_window();
         }
         let handler = self.primary_handler(team);
-        self.players[handler].target = self.top_of_key(team);
-        self.players[handler].target_kind = crate::state::TargetKind::Station;
-        self.players[handler].target_partner = usize::MAX;
-        self.ball.set_held(handler);
-        self.phase = Phase::Live;
-        self.active = None;
-        // 推进到前场的时长由移动速度决定：速度快则更快进入首个决策，
-        // 在固定比赛时钟内产生更多回合。
-        //
-        // 推进距离以当前持球人的位置为起点；速度与加速度只影响实际需要的推进段。
+        self.set_ball_held(handler);
+        self.set_phase(Phase::Live);
+        if kind == PossessionKind::Live {
+            self.begin_live_push(handler);
+        } else {
+            self.players[handler].target = self.top_of_key(team);
+            self.players[handler].target_kind = crate::state::TargetKind::Station;
+            self.players[handler].target_partner = usize::MAX;
+            let advance_seconds = self.advance_seconds_to_front(handler, team);
+            let setup_seconds = f64::from(self.params.policy.g("possession_setup_seconds"));
+            self.players[handler].schedule = crate::state::DecisionSchedule {
+                next_redecide_at: self.now() + advance_seconds + setup_seconds,
+                pending: Some(crate::state::DecisionTrigger::PossessionStart),
+            };
+        }
+        if !continuing_possession {
+            self.emit(Fact::PossessionStarted {
+                team,
+                live: kind == PossessionKind::Live,
+                possession_id: self.possession.id,
+            });
+        }
+    }
+
+    /// 持球人从当前位置推进到本方前场弧顶所需的秒数。
+    ///
+    /// 时长由移动速度决定：速度快则更快进入首个决策，在固定比赛时钟内产生
+    /// 更多回合。总时长 = 匀速段 + 起步加速段，起步段随距离衰减。
+    fn advance_seconds_to_front(&self, handler: usize, team: TeamSide) -> f64 {
         let advance_distance = (self.top_of_key(team) - self.players[handler].pos).length();
         let speed = self.players[handler]
             .effective_speed(&self.params.policy)
             .max(1.0);
-        // 推进时长 = 匀速段 + 起步加速段：加速度决定多快到达目标速度。
         let accel = self.players[handler]
             .effective_acceleration(&self.params.policy)
             .max(1.0);
-        // 起步段随推进距离衰减：接球时多半已在移动，长推进接近匀速。
         let ramp_scale = self
             .params
             .policy
             .g("advance_ramp_distance_ft")
             .max(f32::EPSILON);
         let startup = (speed / accel) * (-advance_distance / ramp_scale).exp();
-        let advance_seconds = (advance_distance / speed + startup).max(0.8) as f64;
+        (advance_distance / speed + startup).max(0.8) as f64
+    }
+
+    /// 活球回合的第一段：持球人自己把球推进到前场，快攻球员直奔篮下。
+    ///
+    /// 抢到防守篮板或抢断之后立刻决策，持球人还在本方半场，传球目标都落在
+    /// 身后，结果只能是横向倒球，快攻和空切都做不出来。先推进到前场再读场面，
+    /// 首个决策落在 `transition_window_seconds` 的一半处，剩下的时间留给终结。
+    pub fn begin_live_push(&mut self, handler: usize) {
+        let team = self.players[handler].team;
+        if let Some(index) = self
+            .possession
+            .break_return
+            .iter()
+            .position(|(runner, _)| *runner == handler)
+        {
+            let (_, spot) = self.possession.break_return.remove(index);
+            self.players[handler].home_spot = spot;
+        }
+        if self.possession.break_return.is_empty() {
+            crate::formation::assign_break_targets(self, team, handler);
+        }
+        self.players[handler].target = self.top_of_key(team);
+        self.players[handler].target_kind = crate::state::TargetKind::Station;
+        self.players[handler].target_partner = usize::MAX;
+        let advance_seconds = self.advance_seconds_to_front(handler, team);
         self.players[handler].schedule = crate::state::DecisionSchedule {
-            next_redecide_at: self.now()
-                + advance_seconds
-                + f64::from(self.params.policy.g("possession_setup_seconds")),
-            pending: Some(crate::state::DecisionTrigger::PossessionStart),
+            next_redecide_at: self.now() + advance_seconds,
+            pending: None,
         };
-        self.emit(Fact::PossessionStarted {
-            team,
-            live: kind == PossessionKind::Live,
-        });
     }
 
     pub fn start_second_chance(&mut self, team: TeamSide, rebounder: usize, rim_contact: bool) {
+        assert_eq!(self.possession.team, team, "an offensive rebound must keep the offense");
+        assert_ne!(
+            self.possession.id,
+            0,
+            "an offensive rebound requires an active possession (last ended by {:?})",
+            self.possession_log.last().map(|record| record.ended_by)
+        );
         crate::tactics::close_play_window(self);
         self.active_trace = None;
-        self.possession_count += 1;
         // 前场篮板只有球触筐才重置进攻时钟，且只补不足、不削减剩余时间。
         let shot_clock = self
             .rules
             .league
-            .shot_clock_after_offensive_rebound(self.clock.shot_clock, rim_contact);
-        self.clock.shot_clock = shot_clock;
-        self.possession = PossessionState::new(
-            team,
-            self.possession_count,
-            PossessionKind::Live,
-            self.now(),
-            shot_clock,
-            self.clock.game_clock,
-        );
+            .shot_clock_after_offensive_rebound(self.clock.shot_clock(), rim_contact);
+        self.clock.set_shot_clock(shot_clock);
+        self.possession.kind = PossessionKind::Live;
         self.possession.last_offensive_rebound_at = Some(self.now());
         self.possession.last_offensive_rebound_actor = Some(rebounder);
         self.possession.had_offensive_rebound = true;
         self.possession.ball_phase = crate::state::BallPhase::Putback;
-        self.possession_points = 0;
         self.pending_shot = None;
         self.pending_rebound = None;
         self.pass_result = None;
@@ -743,22 +1547,25 @@ impl World {
         self.players[rebounder].target = self.players[rebounder].pos;
         self.players[rebounder].target_kind = crate::state::TargetKind::Station;
         self.players[rebounder].target_partner = usize::MAX;
-        self.ball.set_held(rebounder);
-        self.phase = Phase::Live;
-        self.active = None;
-        self.screen_defender = None;
+        self.set_ball_held(rebounder);
+        self.set_phase(Phase::Live);
+        self.cancel_actions("second_chance_start");
         self.players[rebounder].schedule = crate::state::DecisionSchedule {
             next_redecide_at: self.now() + 0.3,
             pending: Some(crate::state::DecisionTrigger::PossessionStart),
         };
-        self.emit(Fact::PossessionStarted { team, live: true });
         self.emit(Fact::SecondChanceStarted {
             rebounder,
             possession: self.possession.id,
         });
     }
 
-    pub fn end_possession(&mut self, cause: &'static str, points: u32) {
+    pub fn end_possession(
+        &mut self,
+        end_reason: PossessionEndCause,
+        termination_detail: &'static str,
+        points: u32,
+    ) {
         if self.possession.id == 0 {
             return;
         }
@@ -768,17 +1575,36 @@ impl World {
             id: self.possession.id,
             kind: self.possession.kind,
             start_clock: self.possession.shot_clock_start,
-            end_clock: self.clock.shot_clock,
+            end_clock: self.clock.shot_clock(),
             duration: self.now() - self.possession.started_at,
             start_game_clock: self.possession.start_game_clock,
-            end_game_clock: self.clock.game_clock,
+            end_game_clock: self.clock.game_clock(),
             passes: self.possession.passes,
             screens: self.possession.screens,
             drives: self.possession.drives,
             points,
-            ended_by: cause,
+            ended_by: termination_detail,
             first_action_seconds: self.possession.first_action_seconds,
         };
+        self.emit(Fact::PossessionEnded {
+            team: record.team,
+            possession_id: record.id,
+            points,
+            end_reason,
+            termination_detail,
+            start_game_clock: record.start_game_clock,
+            end_game_clock: record.end_game_clock,
+            start_shot_clock: record.start_clock,
+            end_shot_clock: record.end_clock,
+            duration: record.duration,
+            passes: record.passes,
+            screens: record.screens,
+            drives: record.drives,
+            possession_kind: record.kind,
+            had_shot: self.possession.had_shot,
+            had_offensive_rebound: self.possession.had_offensive_rebound,
+            first_action_seconds: record.first_action_seconds,
+        });
         self.possession_log.push(record);
         self.possession.id = 0;
     }
@@ -791,42 +1617,76 @@ impl World {
         if self.finished {
             return;
         }
-        self.clock.tick += 1;
-        self.wall += dt;
-        let live = matches!(
-            self.phase,
-            Phase::Live | Phase::PassFlight { .. } | Phase::ShotFlight { .. }
-        );
-        let clock_running = live;
-        if clock_running {
-            self.clock.game_clock = (self.clock.game_clock - dt).max(0.0);
-        }
-        if live {
-            self.clock.elapsed += dt;
-            if matches!(self.phase, Phase::Live) {
-                self.clock.shot_clock = (self.clock.shot_clock - dt).max(0.0);
+        self.clock.advance_tick();
+        let phase_before_step = self.phase;
+        let momentum_phase = if matches!(phase_before_step, Phase::Timeout { .. }) {
+            match phase_before_step {
+                Phase::Timeout { resume_phase, .. } => resume_phase.phase(),
+                _ => unreachable!(),
             }
+        } else {
+            phase_before_step
+        };
+        let game_clock_before_advance = self.clock.game_clock();
+        let clock_advance = crate::clock::advance(phase_before_step, &mut self.clock, dt);
+        let player_time_seconds = if clock_advance.player_time {
+            dt.min(game_clock_before_advance)
+        } else {
+            0.0
+        };
+        if !matches!(momentum_phase, Phase::Live | Phase::PassFlight { .. } | Phase::ShotFlight { .. }) {
+            crate::motion::decay_momentum(self, dt);
+        }
+        if player_time_seconds > 0.0 {
             for &handle in self.on_court_home.as_slice() {
                 let slot = self.line_slot[handle] as usize;
-                self.box_score.home[slot].seconds += dt;
+                self.box_score.home[slot].seconds += player_time_seconds;
             }
             for &handle in self.on_court_away.as_slice() {
                 let slot = self.line_slot[handle] as usize;
-                self.box_score.away[slot].seconds += dt;
+                self.box_score.away[slot].seconds += player_time_seconds;
             }
-            self.update_stamina(dt);
+        }
+        if player_time_seconds > 0.0 {
+            self.update_stamina(player_time_seconds);
         }
         crate::rotation::note_intents(self);
-        self.advance_movement(dt);
-        crate::ball::step(self, dt);
-        if self.active.is_some() {
-            self.advance_active();
+        self.advance_action_phases();
+        self.advance_defensive_actions();
+        if matches!(phase_before_step, Phase::JumpBallFlight) {
+            self.move_jump_ball_receiver(dt);
+        } else if !matches!(phase_before_step, Phase::JumpBall { .. }) {
+            self.advance_movement(dt);
         }
+        crate::resolve::poke::step(self, dt);
+        crate::resolve::offball::step(self, dt);
+        crate::ball::step(self, dt);
+        self.resolve_due_interactions();
         self.advance_phase();
-        if matches!(self.phase, Phase::Live) && self.active.is_none() {
+        self.expire_break_targets();
+        if matches!(self.phase, Phase::Live) && self.holder().is_some() {
             self.maybe_decide();
         }
         self.check_period_end();
+    }
+
+    /// 快攻窗口关闭：跑向前场的球员回到各自的阵型站位。
+    ///
+    /// 只有被快攻跑位改过目标的球员会被改回去，持球人和其他球员的当前
+    /// 目标不受影响。
+    fn expire_break_targets(&mut self) {
+        if self.possession.break_return.is_empty() {
+            return;
+        }
+        let window = f64::from(self.params.policy.g("transition_window_seconds"));
+        if self.now() < self.possession.started_at + window {
+            return;
+        }
+        let returns = std::mem::take(&mut self.possession.break_return);
+        for (handle, spot) in returns {
+            crate::assignment::force_target(self, handle, spot);
+            self.players[handle].home_spot = spot;
+        }
     }
 
     fn update_stamina(&mut self, dt: f64) {
@@ -837,21 +1697,246 @@ impl World {
         crate::motion::advance_movement(self, dt);
     }
 
-    fn advance_active(&mut self) {
-        let Some(active) = &self.active else {
+    fn move_jump_ball_receiver(&mut self, dt: f64) {
+        let Some(receiver) = self.jump_ball_receiver else {
             return;
         };
-        if self.now() < active.end_time() {
+        for player in self.players.iter_mut().filter(|player| player.on_court) {
+            player.target = player.pos;
+            player.target_kind = crate::state::TargetKind::Station;
+            player.target_partner = usize::MAX;
+        }
+        self.players[receiver].target_kind = crate::state::TargetKind::Window;
+        self.players[receiver].target_partner = receiver;
+        crate::body::integrate(self, dt);
+    }
+
+    fn advance_action_phases(&mut self) {
+        for player in 0..self.players.len() {
+            let Some(mut runtime) = self.players[player].action.take() else {
+                continue;
+            };
+            if let Some(to) = runtime.phase_at(self.now()) {
+                let from = runtime.phase;
+                runtime.phase = to;
+                self.players[player].action = Some(runtime.clone());
+                self.emit(Fact::ActionPhaseChanged {
+                    action_id: runtime.action_id,
+                    player,
+                    from,
+                    to,
+                });
+            } else {
+                self.players[player].action = Some(runtime);
+            }
+        }
+    }
+
+    fn advance_defensive_actions(&mut self) {
+        if !matches!(
+            self.phase(),
+            Phase::Live | Phase::ShotFlight { .. }
+        ) {
+            self.cancel_defensive_actions("shot_action_ended");
             return;
         }
-        let screen_screener = active.target;
-        let outcome = resolve::resolve(self);
+        let shooting_player = self.players.iter().position(|player| {
+            player.on_court
+                && player.action.as_ref().is_some_and(|action| {
+                    matches!(action.intent.kind, crate::action::ActionKind::Shoot(_))
+                })
+        });
+        // 出手的那一刻投篮动作结束、球还在飞。封盖动作要继续举着手飞完
+        // 整段轨迹：在出手的同一个 tick 把动作取消，等于防守人从未起跳，
+        // 封盖只剩球擦过站立摸高的零星几次。
+        let (defender, shooter) = if let Some(shooter) = shooting_player {
+            let defense = self.players[shooter].team.other();
+            let defenders = self.on_court(defense);
+            let Some(defender) = defenders.as_slice().iter().copied().find(|handle| {
+                self.players[*handle].defense_responsibility
+                    == crate::state::DefenseResponsibility::OnBall
+            }) else {
+                self.cancel_defensive_actions("on_ball_defender_unavailable");
+                return;
+            };
+            (defender, shooter)
+        } else {
+            self.cancel_defensive_actions("shot_action_ended");
+            return;
+        };
+        for player in 0..self.defensive_actions.len() {
+            if self.defensive_actions[player]
+                .as_ref()
+                .is_some_and(|action| action.shooter != shooter || action.defender != defender)
+            {
+                self.cancel_defensive_action(player, "matchup_changed");
+            }
+        }
+        if self.defensive_actions[defender].is_none() {
+            self.start_defensive_closeout(defender, shooter);
+        }
+        let now = self.now();
+        let Some(mut runtime) = self.defensive_actions[defender].take() else {
+            return;
+        };
+        if runtime.completed {
+            self.defensive_actions[defender] = Some(runtime);
+            return;
+        }
+        if !self.players[defender].on_court || !self.players[shooter].on_court {
+            self.emit(Fact::DefensiveActionCancelled {
+                action_id: runtime.action_id,
+                defender,
+                shooter,
+                kind: DefensiveActionKind::CloseoutContest.as_str(),
+                reason: "participant_left_court",
+            });
+            return;
+        }
+        if let Some(to) = runtime.phase_at(now) {
+            let from = runtime.phase;
+            runtime.phase = to;
+            self.emit(Fact::DefensiveActionPhaseChanged {
+                action_id: runtime.action_id,
+                defender,
+                from,
+                to,
+            });
+        }
+        if now >= runtime.ends_at {
+            runtime.completed = true;
+            self.emit(Fact::DefensiveActionCompleted {
+                action_id: runtime.action_id,
+                defender,
+                shooter,
+                kind: DefensiveActionKind::CloseoutContest.as_str(),
+                displacement_ft: (self.players[defender].pos - runtime.start_position).length(),
+            });
+        }
+        self.defensive_actions[defender] = Some(runtime);
+    }
+
+    fn start_defensive_closeout(&mut self, defender: usize, shooter: usize) {
+        let rules = &self.rules;
+        let window = nba_domain::action_window::ActionTimeWindow::new_closeout_contest(
+            &self.players[defender].id,
+            self.now() as f32,
+            rules,
+        );
+        let start_time = self.now();
+        let preparation_ends_at = start_time + f64::from(window.prep_duration);
+        let execution_ends_at = preparation_ends_at + f64::from(window.exec_duration);
+        let ends_at = execution_ends_at + f64::from(window.follow_duration);
+        self.next_action_id += 1;
+        self.next_interaction_id += 1;
+        let action_id = self.next_action_id;
+        let interaction_id = self.next_interaction_id;
+        let phase = window.phase;
+        let defender_position = self.players[defender].pos;
+        let hoop = self.hoop_for(self.players[shooter].team);
+        let approach = (hoop - self.players[shooter].pos).normalize_or_zero();
+        let closeout_distance = self.rules.min_player_separation_ft + 0.1;
+        let desired = self.players[shooter].pos + approach * closeout_distance;
+        let radius = self.rules.player_radius_ft;
+        let target_position = desired.clamp(
+            Vec2::new(radius, radius),
+            Vec2::new(
+                self.rules.court.width_ft - radius,
+                self.rules.court.height_ft - radius,
+            ),
+        );
+        self.defensive_actions[defender] = Some(DefensiveActionRuntime {
+            action_id,
+            interaction_id,
+            defender,
+            shooter,
+            phase,
+            preparation_ends_at,
+            execution_ends_at,
+            ends_at,
+            start_position: defender_position,
+            target_position,
+            completed: false,
+        });
+        self.emit(Fact::DefensiveActionStarted {
+            action_id,
+            interaction_id,
+            defender,
+            shooter,
+            kind: DefensiveActionKind::CloseoutContest.as_str(),
+            start_position: defender_position,
+        });
+    }
+
+    fn advance_parallel_actions(&mut self) {
+        for player in 0..self.players.len() {
+            let Some(runtime) = self.players[player].action.as_ref() else {
+                continue;
+            };
+            if self.interactions.contains_key(&runtime.interaction_id)
+                || self.now() < runtime.ends_at
+            {
+                continue;
+            }
+            let runtime = self.players[player].action.take().unwrap();
+            self.emit(Fact::ActionCompleted {
+                action_id: runtime.action_id,
+                player,
+                kind: runtime.intent.kind.as_str(),
+            });
+        }
+    }
+
+    /// 结算所有到期的交互，然后清掉没有交互承载的残余运行时。
+    ///
+    /// 每个交互只读自己的意图与参与者运行时；同一 tick 内多个交互按编号
+    /// 升序结算，回放因此确定。
+    fn resolve_due_interactions(&mut self) {
+        let now = self.now();
+        let due: Vec<u64> = self
+            .interactions
+            .iter()
+            .filter(|(_, interaction)| now >= interaction.intent.end_time())
+            .map(|(id, _)| *id)
+            .collect();
+        for interaction_id in due {
+            let interaction = self
+                .interactions
+                .remove(&interaction_id)
+                .expect("due interaction must still be present");
+            let actor_running = self.players[interaction.intent.actor]
+                .action
+                .as_ref()
+                .is_some_and(|runtime| runtime.action_id == interaction.action_id);
+            if !actor_running {
+                continue;
+            }
+            self.resolve_interaction(interaction);
+        }
+        self.advance_parallel_actions();
+    }
+
+    fn resolve_interaction(&mut self, interaction: Interaction) {
+        let action_id = interaction.action_id;
+        let screen_screener = interaction.intent.target;
+        self.action_turn = Some((action_id, crate::action::ActionTurn::Resolve));
+        let outcome = resolve::resolve(self, interaction.intent);
+        self.apply_outcome(outcome, screen_screener, action_id);
+        self.action_turn = None;
+    }
+
+    fn apply_outcome(
+        &mut self,
+        outcome: crate::action::ActionOutcome,
+        screen_screener: Option<usize>,
+        action_id: u64,
+    ) {
         let facts = outcome.facts.clone();
         for fact in facts {
             self.emit(fact);
         }
         if let Some(control) = outcome.delta.control {
-            self.ball.set_held(control);
+            self.set_ball_held(control);
             self.players[control].schedule.next_redecide_at =
                 self.now() + f64::from(self.rules.redecide_interval_seconds);
             self.players[control].schedule.pending =
@@ -874,11 +1959,49 @@ impl World {
                 crate::defense::switch_matchup(self, outcome.actor, carrier);
             }
         }
-        self.active = None;
+        for player in 0..self.players.len() {
+            let Some(runtime) = self.players[player].action.take() else {
+                continue;
+            };
+            if runtime.action_id != action_id {
+                self.players[player].action = Some(runtime);
+                continue;
+            }
+            if self.players[player].target_kind == crate::state::TargetKind::Contact {
+                self.players[player].target_kind = crate::state::TargetKind::Station;
+                self.players[player].target_partner = usize::MAX;
+            }
+            let fact = match outcome.completion {
+                crate::action::Completion::Completed => Fact::ActionCompleted {
+                    action_id: runtime.action_id,
+                    player,
+                    kind: runtime.intent.kind.as_str(),
+                },
+                crate::action::Completion::Failed => Fact::ActionFailed {
+                    action_id: runtime.action_id,
+                    player,
+                    kind: runtime.intent.kind.as_str(),
+                },
+                crate::action::Completion::Interrupted => Fact::ActionCancelled {
+                    action_id: runtime.action_id,
+                    player,
+                    kind: runtime.intent.kind.as_str(),
+                    reason: "interrupted",
+                },
+            };
+            self.emit(fact);
+        }
         self.players[outcome.actor].schedule.next_redecide_at =
             self.now() + f64::from(self.rules.redecide_interval_seconds);
         self.players[outcome.actor].schedule.pending =
             Some(crate::state::DecisionTrigger::ActionComplete);
+    }
+
+    /// 当前是否存在满足条件的交互，供职责分配与计时判定读派生状态。
+    pub fn any_interaction(&self, predicate: impl Fn(&ActionIntent) -> bool) -> bool {
+        self.interactions
+            .values()
+            .any(|interaction| predicate(&interaction.intent))
     }
 
     fn advance_phase(&mut self) {
@@ -889,9 +2012,16 @@ impl World {
                     self.begin_inbound(team);
                 }
             }
-            Phase::Timeout { team, resume_at } => {
+            Phase::Timeout {
+                team: _,
+                started_at,
+                resume_at,
+                resume_phase,
+            } => {
                 if now >= resume_at {
-                    self.start_possession(team, PossessionKind::Dead);
+                    let paused = now - started_at;
+                    let resumed = resume_phase.phase().shift_deadlines(paused);
+                    self.set_phase(resumed);
                 }
             }
             Phase::Inbound { team, ready_at } => {
@@ -899,12 +2029,45 @@ impl World {
                     self.start_possession(team, PossessionKind::Dead);
                 }
             }
+            Phase::JumpBall {
+                home_jumper,
+                away_jumper,
+                resolve_at,
+                kind,
+            } => {
+                if now >= resolve_at {
+                    self.resolve_opening_jump_ball(home_jumper, away_jumper, kind);
+                }
+            }
+            Phase::JumpBallFlight => {
+                if let Some(tapper) = self.jump_ball_tapper {
+                    let tapped_team = self.players[tapper].team;
+                    let controller = self
+                        .jump_ball_receiver
+                        .expect("jump-ball tap must select a receiver");
+                    let reach = self.params.policy.w("loose_ball_catch_base_ft")
+                        + self.players[controller].attribute("ball_handling")
+                            * self.params.policy.w("loose_ball_catch_skill_ft");
+                    let physical = crate::physical::Physical::of(
+                        &self.players[controller],
+                        &self.params.policy,
+                    );
+                    let hand_height = physical.standing_reach_ft + physical.vertical_ft;
+                    if self.ball.z <= hand_height + reach
+                        && (self.players[controller].pos - self.ball.pos).length() <= reach
+                    {
+                        self.jump_ball_tapper = None;
+                        self.jump_ball_receiver = None;
+                        self.award_opening_tip_control(tapped_team, controller);
+                    }
+                }
+            }
             Phase::PassFlight { resolve_at } => {
                 if self.pass_result.is_some() || now >= resolve_at {
                     self.finish_pass();
                 }
             }
-            Phase::ShotFlight { resolve_at } => {
+            Phase::ShotFlight { resolve_at } | Phase::FreeThrowFlight { resolve_at } => {
                 if self
                     .pending_shot
                     .as_ref()
@@ -922,6 +2085,9 @@ impl World {
                 next_at,
                 and_one,
                 retain_possession,
+                foul_id,
+                technical_retained_team: _,
+                after_technical: _,
             } => {
                 if now >= next_at {
                     crate::resolve::freethrow::shoot(
@@ -932,31 +2098,86 @@ impl World {
                         made,
                         and_one,
                         retain_possession,
+                        foul_id,
                     );
                 }
             }
-            Phase::PeriodBreak { resume_at } => {
+            Phase::PeriodBreak {
+                resume_at,
+                next_stage,
+            } => {
                 if now >= resume_at {
-                    self.clock.period += 1;
-                    self.clock.game_clock = self.clock.period_seconds;
-                    self.clock.shot_clock = self.rules.league.shot_clock_seconds as f64;
+                    let stage_after_break =
+                        if self.clock.period() >= self.rules.league.regulation_periods {
+                            crate::state::MatchStage::Overtime
+                        } else {
+                            crate::state::MatchStage::Intermission
+                        };
+                    assert_eq!(
+                        next_stage, stage_after_break,
+                        "period break destination must match the next period"
+                    );
+                    let next_period_duration =
+                        if self.clock.period() >= self.rules.league.regulation_periods {
+                            f64::from(self.rules.league.overtime_duration_seconds)
+                        } else {
+                            f64::from(self.rules.league.period_duration_seconds)
+                        };
+                    self.clock.start_next_period(
+                        next_period_duration,
+                        self.rules.league.shot_clock_seconds as f64,
+                    );
                     self.fouls[0].period = 0;
                     self.fouls[1].period = 0;
                     // 换节后最后时段的暂停配额重新计算。
                     for ledger in self.timeouts.iter_mut() {
-                        ledger.period = self.clock.period;
+                        ledger.period = self.clock.period();
                         ledger.used_in_final_window = 0;
                     }
-                    let team = self.period_started_with.other();
-                    self.period_started_with = team;
-                    self.phase = Phase::DeadBall {
-                        team,
-                        ready_at: self.now() + 0.5,
-                    };
+                    let next_period = self.clock.period();
+                    if self.rules.league.period_starts_with_jump_ball(next_period) {
+                        let (home_jumper, away_jumper) = self.period_jumpers();
+                        self.begin_period_jump_ball(
+                            home_jumper,
+                            away_jumper,
+                            crate::action::JumpBallKind::Overtime,
+                        );
+                    } else {
+                        self.alternate_possession_next = self.period_started_with.other();
+                        let team = self.alternate_possession_next;
+                        self.period_started_with = team;
+                        self.period_start_inbound_pending = true;
+                        self.begin_inbound(team);
+                    }
                 }
             }
             Phase::Live => {
-                if self.clock.shot_clock <= 0.0 && self.pending_rebound.is_none() {
+                // 球在空中时时钟走完不是违例：那一球会自己解出进与不进，
+                // 违例只在计时归零时球还在某个球员手里成立。
+                let shooting = self
+                    .any_interaction(|intent| matches!(&intent.kind, ActionKind::Shoot(_)));
+                if self.clock.shot_clock() <= 0.0
+                    && self.pending_rebound.is_none()
+                    && !shooting
+                {
+                    if std::env::var("NBA_TRACE_CLOCK").is_ok() {
+                        eprintln!(
+                            "CLOCK VIOLATION now={:.2} started={:.2} elapsed={:.2} phase={:?} holder={:?} next_decide={:.2} pending={:?} active={:?} play={:?}",
+                            self.now(),
+                            self.possession.started_at,
+                            self.now() - self.possession.started_at,
+                            self.possession.ball_phase,
+                            self.holder(),
+                            self.holder()
+                                .map(|handle| self.players[handle].schedule.next_redecide_at)
+                                .unwrap_or(f64::NAN),
+                            self.holder()
+                                .map(|handle| self.players[handle].schedule.pending)
+                                .unwrap_or(None),
+                            self.interactions.keys().copied().collect::<Vec<_>>(),
+                            self.possession.play,
+                        );
+                    }
                     let team = self.possession.team;
                     let actor = self.holder().unwrap_or_else(|| self.primary_handler(team));
                     self.line_mut(actor).turnovers += 1;
@@ -964,12 +2185,45 @@ impl World {
                         player: actor,
                         kind: crate::action::TurnoverKind::ShotClock,
                     });
-                    self.end_possession("shot_clock", 0);
+                    self.end_possession(
+                        PossessionEndCause::TurnoverViolation,
+                        "shot_clock",
+                        0,
+                    );
                     self.start_possession(team.other(), PossessionKind::Live);
                 }
             }
-            Phase::Finished => {}
+            Phase::Pregame | Phase::Finished => {}
         }
+    }
+
+    /// 高吊球到点时防守人能不能把球打掉：距离越近越容易。
+    fn contest_lob_catch(&mut self, receiver: usize) -> Option<usize> {
+        let radius = self.params.policy.w("lob_contest_radius_ft");
+        let target = self.players[receiver].pos;
+        let team = self.players[receiver].team;
+        let mut nearest: Option<(usize, f32)> = None;
+        for (handle, player) in self.players.iter().enumerate() {
+            if !player.on_court || player.team == team {
+                continue;
+            }
+            let distance = (player.pos - target).length();
+            if distance <= radius && nearest.is_none_or(|(_, best)| distance < best) {
+                nearest = Some((handle, distance));
+            }
+        }
+        let (by, distance) = nearest?;
+        let closeness = 1.0 - distance / radius;
+        let chance = self.params.policy.w("lob_contest_base")
+            + self.params.policy.w("lob_contest_steal") * self.players[by].attribute("steal")
+            + self.params.policy.w("lob_contest_close") * closeness;
+        let roll = self.draw(
+            crate::draw::Stream::Pass,
+            by,
+            crate::draw::purpose::CUT_COMPLETION,
+            0,
+        );
+        (roll < chance.clamp(0.0, 0.9)).then_some(by)
     }
 
     fn finish_pass(&mut self) {
@@ -979,12 +2233,22 @@ impl World {
         let pass_id = info.pass_id;
         let from = info.from;
         let kind = info.kind;
-        match self.pass_result.take() {
+        // 高吊球到篮下时是贴身争抢：防守人就在接球人身边，手够到球就能把它
+        // 打掉。空接本身不是稳的两分。
+        let result = match self.pass_result.take() {
+            Some(crate::ball::PassResult::Caught { to }) if kind == crate::action::PassKind::Lob => {
+                match self.contest_lob_catch(to) {
+                    Some(by) => Some(crate::ball::PassResult::Intercepted { by }),
+                    None => Some(crate::ball::PassResult::Caught { to }),
+                }
+            }
+            other => other,
+        };
+        match result {
             Some(crate::ball::PassResult::Caught { to: caught }) => {
-                self.ball.set_held(caught);
-                self.phase = Phase::Live;
-                self.active = None;
-                self.screen_defender = None;
+                self.set_ball_held(caught);
+                self.set_phase(Phase::Live);
+                self.cancel_actions("pass_caught");
                 self.possession.last_pass_at = Some(self.now());
                 self.possession.ball_phase = crate::state::BallPhase::Catch;
                 self.emit(Fact::Pass {
@@ -999,7 +2263,9 @@ impl World {
                     let defender_distance = self
                         .players
                         .iter()
-                        .filter(|player| player.on_court && player.team != self.players[cutter].team)
+                        .filter(|player| {
+                            player.on_court && player.team != self.players[cutter].team
+                        })
                         .map(|player| (player.pos - self.players[cutter].pos).length())
                         .fold(f32::INFINITY, f32::min);
                     self.possession.last_cut_at = Some(self.now());
@@ -1017,6 +2283,54 @@ impl World {
                     Some(crate::state::DecisionTrigger::PassReceived);
             }
             Some(crate::ball::PassResult::Intercepted { by }) => {
+                let recovery_pos = self.ball.pos;
+                // 手碰到球和把球拿住是两件事：碰到只说明站位对了，能不能
+                // 抓住看他的抢断与球感。拿不住就是打掉的活球，谁抢到算谁的。
+                let catch = self.params.policy.w("pass_catch_base")
+                    + self.players[by].attribute("steal") * self.params.policy.w("pass_catch_steal")
+                    + self.players[by].attribute("ball_handling")
+                        * self.params.policy.w("pass_catch_handling");
+                if self.draw(
+                    crate::draw::Stream::Pass,
+                    by,
+                    crate::draw::purpose::PASS_INTERCEPT,
+                    1,
+                ) >= catch
+                {
+                    // 手只碰得到球、拿不住：球变活球，谁先抢到谁算抢断。
+                    self.emit(Fact::BallContact {
+                        kind: "deflection",
+                        entity: Some(by),
+                        time: self.now(),
+                        x: recovery_pos.x,
+                        y: recovery_pos.y,
+                        z: self.rules.ball_radius_ft,
+                        sub_tick: 0,
+                    });
+                    self.ball.pos = recovery_pos;
+                    self.ball.z = self.rules.ball_radius_ft;
+                    self.ball.vel = Vec2::ZERO;
+                    self.ball.vz = 0.0;
+                    self.release_ball(crate::state::BallState::Loose {
+                        pos: recovery_pos,
+                        vel: Vec2::ZERO,
+                    });
+                    crate::resolve::rebound::resolve_turnover(self);
+                    if let Some(pending) = self.pending_rebound.as_mut() {
+                        pending.poke_by = Some((by, from));
+                    }
+                    self.cancel_actions("turnover");
+                    return;
+                }
+                self.emit(Fact::BallContact {
+                    kind: "interception",
+                    entity: Some(by),
+                    time: self.now(),
+                    x: recovery_pos.x,
+                    y: recovery_pos.y,
+                    z: self.rules.ball_radius_ft,
+                    sub_tick: 0,
+                });
                 self.line_mut(from).turnovers += 1;
                 self.line_mut(by).steals += 1;
                 self.emit(Fact::Steal {
@@ -1028,19 +2342,56 @@ impl World {
                     kind: crate::action::TurnoverKind::BadPass,
                 });
                 let team = self.players[from].team;
-                self.end_possession("turnover", 0);
+                self.end_possession(
+                    PossessionEndCause::TurnoverSteal,
+                    "pass_intercepted",
+                    0,
+                );
                 self.start_possession(team.other(), PossessionKind::Live);
+                self.set_ball_held(by);
+                self.players[by].target = self.top_of_key(team.other());
+                self.players[by].target_kind = crate::state::TargetKind::Window;
+                self.players[by].target_partner = by;
+                self.players[by].schedule.next_redecide_at =
+                    self.now() + f64::from(self.rules.redecide_interval_seconds);
+                self.players[by].schedule.pending =
+                    Some(crate::state::DecisionTrigger::PossessionStart);
             }
-            Some(crate::ball::PassResult::Incomplete) | None => {
-                self.line_mut(from).turnovers += 1;
-                self.emit(Fact::Turnover {
-                    player: from,
-                    kind: crate::action::TurnoverKind::BadPass,
-                });
-                let team = self.players[from].team;
-                self.end_possession("turnover", 0);
-                self.start_possession(team.other(), PossessionKind::Live);
+            Some(crate::ball::PassResult::Incomplete) => {
+                if std::env::var("NBA_TRACE_MISS").is_ok() {
+                    let d = (self.ball.pos - self.players[info.to].pos).length();
+                    eprintln!(
+                        "MISS dice to={} dist={d:.1} z={:.2}",
+                        info.to,
+                        self.ball.z
+                    );
+                }
+                self.finish_bad_pass(from);
             }
+            None => {
+                if std::env::var("NBA_TRACE_MISS").is_ok() {
+                    let d = (self.ball.pos - self.players[info.to].pos).length();
+                    let z = self.ball.z;
+                    let reach = crate::ball::pass_catch_radius(&self.rules, &self.players[info.to]);
+                    let kept = self.players[info.to].target;
+                    eprintln!(
+                        "MISS geom to={} dist={d:.1} z={z:.2} catch={reach:.1} gap_target={:.1}",
+                        info.to,
+                        (self.players[info.to].pos - kept).length()
+                    );
+                }
+                self.finish_bad_pass(from);
+            }
+        }
+    }
+
+    fn finish_bad_pass(&mut self, passer: usize) {
+        // 没接住的传球和被打掉的传球一样只是活球：双方都要抢，谁控制谁
+        // 决定这次进攻的结局。球回到自己人手里，进攻继续，不记失误；
+        // 落到对方手里才记失误与抢断。
+        crate::resolve::rebound::resolve_turnover(self);
+        if let Some(pending) = self.pending_rebound.as_mut() {
+            pending.pass_by = Some(passer);
         }
     }
 
@@ -1049,39 +2400,61 @@ impl World {
     }
 
     fn check_period_end(&mut self) {
-        if self.clock.game_clock > 0.0 || self.finished {
+        if self.clock.game_clock() > 0.0 || self.finished {
+            return;
+        }
+        if matches!(self.phase(), Phase::FreeThrows { .. } | Phase::FreeThrowFlight { .. }) {
+            return;
+        }
+        if self.pending_shot.as_ref().is_some_and(|shot| {
+            shot.result.is_none() && shot.free_throw.is_none()
+        }) {
             return;
         }
         crate::tactics::close_play_window(self);
-        if matches!(self.phase, Phase::Finished | Phase::PeriodBreak { .. }) {
+        if matches!(self.phase(), Phase::Finished | Phase::PeriodBreak { .. }) {
             return;
         }
         let tied = self.score[0] == self.score[1];
-        let regulation_over = self.clock.period >= 4;
+        let regulation_over = self.clock.period() >= 4;
+        self.pending_rebound = None;
         if regulation_over && tied {
             self.emit(Fact::PeriodEnd {
-                period: self.clock.period,
+                period: self.clock.period(),
             });
-            self.end_possession("period_end", 0);
-            self.clock.period_seconds = 300.0;
-            self.phase = Phase::PeriodBreak {
+            self.end_possession(PossessionEndCause::PeriodEnd, "period_end", 0);
+            self.cancel_actions("period_end");
+            self.clock.set_period_duration(300.0);
+            self.set_period_phase(Phase::PeriodBreak {
                 resume_at: self.now() + 1.0,
-            };
+                next_stage: crate::state::MatchStage::Overtime,
+            });
             return;
         }
         if !regulation_over {
             self.emit(Fact::PeriodEnd {
-                period: self.clock.period,
+                period: self.clock.period(),
             });
-            self.end_possession("period_end", 0);
-            self.phase = Phase::PeriodBreak {
+            self.end_possession(PossessionEndCause::PeriodEnd, "period_end", 0);
+            self.cancel_actions("period_end");
+            self.set_period_phase(Phase::PeriodBreak {
                 resume_at: self.now() + 1.0,
-            };
+                next_stage: if self.clock.period() >= 4 {
+                    crate::state::MatchStage::Overtime
+                } else {
+                    crate::state::MatchStage::Intermission
+                },
+            });
             return;
         }
-        self.end_possession("period_end", 0);
+        self.end_possession(PossessionEndCause::PeriodEnd, "period_end", 0);
+        self.cancel_actions("game_end");
         self.finished = true;
-        self.phase = Phase::Finished;
+        self.set_program_phase(
+            crate::state::MatchStage::Finished,
+            crate::state::MatchProgram::Complete,
+            Phase::Finished,
+        );
         self.emit(Fact::GameEnd);
     }
 }

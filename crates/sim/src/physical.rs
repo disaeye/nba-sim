@@ -69,10 +69,8 @@ impl Physical {
     /// 用已解析的系数计算物理量。
     pub fn with(player: &PlayerState, coefficients: &Coefficients) -> Self {
         let attributes = &player.data.attributes;
-        let base = coefficients.speed_base_ftps
-            + coefficients.speed_gain_ftps * attributes.speed;
-        let stamina =
-            coefficients.stamina_floor + coefficients.stamina_span * player.stamina;
+        let base = coefficients.speed_base_ftps + coefficients.speed_gain_ftps * attributes.speed;
+        let stamina = coefficients.stamina_floor + coefficients.stamina_span * player.stamina;
         let speed_ftps = (base * stamina).min(coefficients.speed_cap_ftps);
         let accel_ftps2 = (coefficients.accel_base_ftps2
             + coefficients.accel_gain_ftps2 * attributes.acceleration)

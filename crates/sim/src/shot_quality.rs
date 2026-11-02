@@ -32,15 +32,53 @@ const MIN_LOG_ARGUMENT: f32 = 1.0e-6;
 /// 有效筐口小于这个值时不存在干净穿筐的可能。
 const MIN_APERTURE_FT: f32 = 1.0e-4;
 
+/// 瞄准误差乘子的下界：任何加成都不能把偏度压到零，否则一次出手就变成必进。
+const MIN_SIGMA_FACTOR: f32 = 0.25;
+
+/// 条件命中率的上界。净目标除以存活概率后可能略高于 1，飞行的瞄准
+/// 误差不能因此变成零。
+const MAX_ARC_PROBABILITY: f32 = 0.995;
+
+/// 存活概率的下界，只在封盖风险与犯规风险同时逼近 1 时起作用。
+const MIN_SURVIVE: f32 = 1.0e-3;
+
+/// 干净穿筐概率的下界：触筐补进已经解释掉目标里的大部分，剩下的干净
+/// 穿筐部分不能反向落到零，否则瞄准误差会发散。
+const MIN_ARC_PROBABILITY: f32 = 1.0e-4;
+
+/// 给定有效筐口与穿筐概率，反解落点分散程度：球心的落点偏移服从
+/// Rayleigh 分布，半径小于筐口的概率就是 1 - exp(-r²/(2σ²))。
+fn solve_sigma(aperture: f32, swish: f32) -> f32 {
+    let log_argument = (-2.0 * (1.0 - swish.clamp(MIN_ARC_PROBABILITY, 1.0 - MIN_ARC_PROBABILITY)).ln())
+        .max(MIN_LOG_ARGUMENT);
+    (aperture / log_argument.sqrt()).max(MIN_LOG_ARGUMENT)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ShotModel {
+    /// 净命中率：扣掉封盖与「犯规不中」两种分支之后的命中率，价值层与
+    /// 决策层都用它。
     pub p_make: f32,
+    /// 条件命中率：球已出手、没有封盖也没有被吹掉时的穿筐概率，也就是
+    /// 瞄准误差的积分结果。执行层用它抽样瞄准点。
+    pub p_make_cond: f32,
     pub sigma_ft: f32,
     pub effective_aperture_ft: f32,
+    /// 筐口外一个球径带：落点落在这个环带里才算碰到筐沿。
+    pub contact_radius_ft: f32,
+    /// 碰到筐沿之后仍能补进的概率。
+    pub rim_in_probability: f32,
     pub release_z_ft: f32,
     pub release_delay_seconds: f32,
     pub contest: f32,
+    /// 出手瞬间的移动程度：球员速度除以最大速度，0 表示站定、1 表示全速。
+    pub movement: f32,
+    /// 出手人的区域投篮属性，原样带出来供标定统计使用。
+    pub skill: f32,
     pub block_risk: f32,
+    /// 这次出手最可能被谁封盖。概率由 `block_risk` 给出，出手时抽一次，
+    /// 执行层只负责把这次封盖演成手碰到球。
+    pub block_hand: Option<usize>,
     /// 出手点到篮筐的平面距离（ft）。
     pub distance_ft: f32,
     /// 球心轨迹穿过筐平面时的入射角：1 表示垂直下落，0 表示平飞。
@@ -49,6 +87,23 @@ pub struct ShotModel {
     pub plan: ShotPlan,
     /// 出手释放点。
     pub origin: Vec2,
+}
+
+/// 实测曲线对应的射手水平：该区域出手权的平均属性。
+///
+/// 实测曲线给的是联盟平均射手在这个区域能投进多少，因此「这名射手比
+/// 平均水平好多少」必须以这份名册在该区域的平均属性为原点。属性的量纲
+/// 上 0.5 并不是联盟平均（这份名册的三分均值约 0.65），把 0.5 当原点会
+/// 让每一投都带上一个固定的加成。
+fn skill_reference(world: &World, zone: &str) -> f32 {
+    let policy = &world.params.policy;
+    policy.w(match zone {
+        "rim" => "shot_skill_reference_rim",
+        "near" => "shot_skill_reference_near",
+        "mid" => "shot_skill_reference_mid",
+        "three" => "shot_skill_reference_three",
+        other => panic!("unknown shot zone `{other}`"),
+    })
 }
 
 /// 一次出手的平面几何：飞行时长、竖直初速与穿过筐平面的入射角。
@@ -76,12 +131,16 @@ pub fn plan_shot(
     let distance = (landing - from).length();
     let peak = (rules.shot_peak_base_ft + distance * rules.shot_peak_distance_factor)
         .max(rules.rim_height_ft + 0.5);
-    let mut duration =
-        ProjectileArc::time_for_peak(release_z, rules.rim_height_ft, peak, rules.ball_gravity_ftps2)
-            .clamp(
-                rules.min_shot_duration_seconds,
-                rules.max_shot_duration_seconds,
-            );
+    let mut duration = ProjectileArc::time_for_peak(
+        release_z,
+        rules.rim_height_ft,
+        peak,
+        rules.ball_gravity_ftps2,
+    )
+    .clamp(
+        rules.min_shot_duration_seconds,
+        rules.max_shot_duration_seconds,
+    );
     if distance / duration > rules.ball_max_speed_ftps {
         duration = distance / (rules.ball_max_speed_ftps * 0.9);
     }
@@ -138,13 +197,11 @@ pub fn release_origin(world: &World, pos: Vec2, hoop: Vec2) -> Vec2 {
     pos + facing * offset
 }
 
-/// 某一类出手的基准干扰强度。
+/// 出手类型所属的参考分区。
 ///
-/// 实测曲线按出手类型给出，篮下出手的曲线里已经含有贴身的防守人，外线
-/// 出手的基准干扰则低得多。干扰修正必须相对这个基准，否则同一份实测数据
-/// 会被扣两次干扰。
-fn contest_reference(world: &World, kind: ShotKind) -> f32 {
-    let policy = &world.params.policy;
+/// 实测曲线按出手类型给出，同一分区里的出手在干扰和移动上的统计特征
+/// 接近，因此基准值按分区配置，而不是按每一种出手类型各配一份。
+fn reference_zone(kind: ShotKind) -> &'static str {
     match kind {
         ShotKind::Dunk
         | ShotKind::DrivingDunk
@@ -156,11 +213,37 @@ fn contest_reference(world: &World, kind: ShotKind) -> f32 {
         | ShotKind::RunningLayup
         | ShotKind::ReverseLayup
         | ShotKind::Putback
-        | ShotKind::AlleyOop => policy.w("shot_contest_reference_rim"),
-        ShotKind::Hook | ShotKind::Turnaround | ShotKind::Floater => {
-            policy.w("shot_contest_reference_near")
-        }
+        | ShotKind::AlleyOop => "rim",
+        ShotKind::Hook | ShotKind::Turnaround | ShotKind::Floater => "near",
+        _ => "perimeter",
+    }
+}
+
+/// 某一类出手的基准干扰强度。
+///
+/// 实测曲线按出手类型给出，篮下出手的曲线里已经含有贴身的防守人，外线
+/// 出手的基准干扰则低得多。干扰修正必须相对这个基准，否则同一份实测数据
+/// 会被扣两次干扰。
+fn contest_reference(world: &World, kind: ShotKind) -> f32 {
+    let policy = &world.params.policy;
+    match reference_zone(kind) {
+        "rim" => policy.w("shot_contest_reference_rim"),
+        "near" => policy.w("shot_contest_reference_near"),
         _ => policy.w("shot_contest_reference_perimeter"),
+    }
+}
+
+/// 某一类出手的基准移动速度（占最快速度的比例）。
+///
+/// 实测曲线里同一类出手的移动是混合的：有原地接球出手，也有全速突破中
+/// 的出手。曲线给出的是这些情况加起来的命中率，所以修正必须以该类出手
+/// 的移动均值为中心，均值处不改变命中率。
+fn movement_reference(world: &World, kind: ShotKind) -> f32 {
+    let policy = &world.params.policy;
+    match reference_zone(kind) {
+        "rim" => policy.w("shot_movement_reference_rim"),
+        "near" => policy.w("shot_movement_reference_near"),
+        _ => policy.w("shot_movement_reference_perimeter"),
     }
 }
 
@@ -190,23 +273,30 @@ fn phase_factor(world: &World, phase: BallPhase) -> f32 {
     }
 }
 
-fn release_height(world: &World, kind: ShotKind) -> f32 {
-    let base = world.rules.chest_height_ft + 0.5;
-    let bonus = match kind {
-        ShotKind::Dunk
-        | ShotKind::DrivingDunk
-        | ShotKind::CuttingDunk
-        | ShotKind::RunningDunk => 1.0,
+fn release_height(world: &World, shooter: usize, kind: ShotKind) -> f32 {
+    let policy = &world.params.policy;
+    let rules = &world.rules;
+    let physical = crate::physical::Physical::of(&world.players[shooter], policy);
+    // 出手高度就是持球手的摸高：站立摸高加上起跳带来的那一段。跳投把这段
+    // 摸高全部用上，上篮与抛投在球离手的瞬间还没完全伸展，篮下终结则贴着
+    // 篮筐。球员身高与弹跳因此直接进入出手高度，也直接进入封盖判定。
+    let extended =
+        physical.standing_reach_ft + physical.vertical_ft * policy.w("shot_release_vertical_share");
+    let height = match kind {
+        ShotKind::Dunk | ShotKind::DrivingDunk | ShotKind::CuttingDunk | ShotKind::RunningDunk => {
+            rules.rim_height_ft + 0.5
+        }
+        ShotKind::AlleyOop => rules.rim_height_ft + 0.3,
         ShotKind::Layup
         | ShotKind::DrivingLayup
         | ShotKind::CuttingLayup
         | ShotKind::RunningLayup
         | ShotKind::ReverseLayup
-        | ShotKind::Putback => 0.45,
-        ShotKind::Floater | ShotKind::Hook => 0.3,
-        _ => 0.0,
+        | ShotKind::Putback => extended - 0.55,
+        ShotKind::Floater | ShotKind::Hook | ShotKind::Turnaround => extended - 0.25,
+        _ => extended,
     };
-    (base + bonus).min(world.rules.rim_height_ft + 1.0)
+    height.clamp(rules.chest_height_ft + 1.0, rules.rim_height_ft + 1.5)
 }
 
 fn release_delay(kind: ShotKind, phase: BallPhase) -> f32 {
@@ -227,7 +317,12 @@ fn release_delay(kind: ShotKind, phase: BallPhase) -> f32 {
         ShotKind::AlleyOop => 0.15,
         ShotKind::RunningJump => 0.26,
     };
-    kind_delay + if phase == BallPhase::Gather { 0.08 } else { 0.0 }
+    kind_delay
+        + if phase == BallPhase::Gather {
+            0.08
+        } else {
+            0.0
+        }
 }
 
 /// 手心到球心中心轨迹的最近距离，以及该最近点的横向方向。
@@ -303,7 +398,6 @@ fn release_contest(
     let team = world.players[shooter].team;
     let hoop = world.hoop_for(team);
     let policy = &world.params.policy;
-    let rules = &world.rules;
     let mut best_contest = 0.0_f32;
     let mut best_distance = f32::INFINITY;
     for defender in world.players.iter().filter(|player| player.on_court) {
@@ -312,7 +406,7 @@ fn release_contest(
         }
         let predicted = defender.pos + defender.vel * delay;
         let physical = crate::physical::Physical::of(defender, policy);
-        let hand_z = rules.chest_height_ft + 1.0 + defender.attribute("block") * 2.5;
+        let hand_z = world.rules.chest_height_ft + 1.0 + defender.attribute("block") * 2.5;
         let horizontal = (predicted - pos).length();
         let distance = horizontal.hypot(hand_z - release_z);
         let between = crate::state::is_between(predicted, pos, hoop);
@@ -335,10 +429,54 @@ fn release_contest(
 /// 针对这一次出手的真实轨迹来算：球的落点由瞄准误差抽样决定，轨迹就是
 /// 释放点到落点的那条线。
 ///
-/// 物理上「手在轨迹上」是确定事件，但防守人��手也在动，接触是持续的
-/// 过程而不是一次瞬时判定。因此模型用「手到轨迹的最近距离与拦截半径
-/// 的比值」给出连续的风险：轨迹穿过手的拦截体积时风险为 1，完全在
-/// 拦截体积外时为 0，中间线性过渡。
+/// 执行层的判据是硬判据：球心到手的距离进入拦截半径就是封盖，否则不是。
+/// 模型要预测的是这一条判据在瞄准误差下的概率，因此不能自己另立一套
+/// 软带宽。落点横向偏移 s 会让整条轨迹跟着偏移 s，手到轨迹的最近距离
+/// 就是 |h0 - s|，于是封盖等价于 s 落在 [h0 - r, h0 + r] 之内。瞄准误差
+/// 的横向分量服从 N(0, sigma)，两个端点之差就是一个正态区间概率。
+/// 执行层用的正是同一个 sigma 抽样、同一个拦截半径，因此模型给出的概率
+/// 就是执行层在大量同几何出手上的封盖比例。
+/// 防守人伸手后的手球。模型估封盖概率与执行层判封盖接触都从这里取
+/// 几何，两处的手位、高度与半径因此不会漂移。
+pub struct BlockingHand {
+    pub handle: usize,
+    pub pos: Vec2,
+    pub z: f32,
+    pub radius: f32,
+}
+
+pub fn blocking_hands(world: &World, shooter: usize) -> Vec<BlockingHand> {
+    let team = world.players[shooter].team;
+    let policy = &world.params.policy;
+    let rules = &world.rules;
+    world
+        .players
+        .iter()
+        .enumerate()
+        .filter(|(_, player)| player.on_court && player.team != team)
+        .map(|(handle, defender)| BlockingHand {
+            handle,
+            pos: defender.pos
+                + defender.facing.normalize_or_zero() * (rules.ball_holder_offset_ft + 0.4),
+            // 手的高度就是防守人的摸高：站立摸高加上起跳。身材与弹跳因此
+            // 决定了他能不能把手伸到球飞的轨迹上。
+            z: crate::physical::Physical::of(defender, policy).contest_reach_ft(policy),
+            radius: rules.ball_radius_ft
+                + policy.w("block_hand_radius_base_ft")
+                + defender.attribute("block") * policy.w("block_hand_radius_skill_ft"),
+        })
+        .collect()
+}
+
+/// 球心落在哪个防守人的手球里。按三维距离判定，与
+/// `block_risk_for_path` 里「轨迹离手的最近距离」是同一套口径。
+pub fn blocking_hand(world: &World, shooter: usize, point: Vec2, z: f32) -> Option<usize> {
+    blocking_hands(world, shooter)
+        .into_iter()
+        .find(|hand| (point - hand.pos).length().hypot(z - hand.z) <= hand.radius)
+        .map(|hand| hand.handle)
+}
+
 pub fn block_risk_for_path(
     world: &World,
     shooter: usize,
@@ -346,29 +484,42 @@ pub fn block_risk_for_path(
     landing: Vec2,
     plan: &ShotPlan,
     release_z: f32,
-) -> f32 {
-    let team = world.players[shooter].team;
+    sigma: f32,
+) -> (f32, Option<usize>) {
     let rules = &world.rules;
-    let mut best = 0.0_f32;
-    for defender in world.players.iter().filter(|player| player.on_court) {
-        if defender.team == team {
-            continue;
-        }
-        let hand = defender.pos
-            + defender.facing.normalize_or_zero() * (rules.ball_holder_offset_ft + 0.4);
-        let hand_z = rules.chest_height_ft + 1.0 + defender.attribute("block") * 2.5;
-        let hand_radius = rules.ball_radius_ft + 0.25 + defender.attribute("block") * 0.70;
+    let mut best = (0.0_f32, None);
+    for hand in blocking_hands(world, shooter) {
         let (distance, _point, _lateral, _z) = trajectory_closest(
-            plan, origin, landing, release_z, hand, hand_z, rules.ball_gravity_ftps2,
+            plan,
+            origin,
+            landing,
+            release_z,
+            hand.pos,
+            hand.z,
+            rules.ball_gravity_ftps2,
         );
-        // 手到轨迹的最近距离落在拦截半径内就是确定封盖；在外就是确定
-        // 不封盖；中间按距离线性过渡。
-        let risk = (1.0 - (distance - hand_radius) / hand_radius.max(0.1)).clamp(0.0, 1.0);
-        if risk > best {
-            best = risk;
+        let sigma = sigma.max(MIN_LOG_ARGUMENT);
+        let near = standard_normal_cdf((distance - hand.radius) / sigma);
+        let far = standard_normal_cdf((distance + hand.radius) / sigma);
+        let risk = (far - near).clamp(0.0, 1.0);
+        if risk > best.0 {
+            best = (risk, Some(hand.handle));
         }
     }
     best
+}
+
+/// 标准正态分布的累积分布函数，用 erf 的 Abramowitz-Stegun 近似。
+fn standard_normal_cdf(x: f32) -> f32 {
+    let z = x / std::f32::consts::SQRT_2;
+    let sign = if z < 0.0 { -1.0 } else { 1.0 };
+    let z = z.abs();
+    let t = 1.0 / (1.0 + 0.3275911 * z);
+    let poly = t
+        * (0.254_829_6
+            + t * (-0.284_496_72 + t * (1.421_413_8 + t * (-1.453_152_1 + t * 1.061_405_4))));
+    let erf = 1.0 - poly * (-z * z).exp();
+    0.5 * (1.0 + sign * erf)
 }
 
 /// 三分距离衰减：三分线外连续衰减，远处趋近于零。
@@ -404,7 +555,7 @@ pub fn evaluate(
     let distance = (pos - hoop).length();
     let policy = &world.params.policy;
     let rules = &world.rules;
-    let release_z = release_height(world, kind);
+    let release_z = release_height(world, shooter, kind);
     let delay = release_delay(kind, phase);
     let origin = release_origin(world, pos, hoop);
     let plan = plan_shot(rules, origin, hoop, release_z);
@@ -430,43 +581,75 @@ pub fn evaluate(
     // 实测曲线的距离是出手点到篮筐的距离，也就是释放点的距离；因此查表
     // 用释放点而不是球员站位点，两者相差一个持球偏移。
     let release_distance = (origin - hoop).length();
-    let measured = world
-        .params
-        .shot_distance
-        .rate_at(kind.as_str(), zone == "three", release_distance);
+    let measured =
+        world
+            .params
+            .shot_distance
+            .rate_at(kind.as_str(), zone == "three", release_distance);
     let mut target = match measured {
-        Some(rate) => rate + (skill - 0.5) * spread,
+        Some(rate) => rate + (skill - skill_reference(world, zone)) * spread,
         None => reference,
     };
     // 三分线外的衰减：实测曲线在最后一个距离档之后不再有数据，超远距离的
-    // 命中率必须连续趋近于零，因此这里从最后一个实测档继续衰减。
+    // 命中率必须连续趋近于零，因此这里从最后一个实测档继续衰减。实测曲线
+    // 已经包含距离带来的命中率下降，在曲线覆盖的范围内不能再衰减一次，
+    // 否则同一段距离衰减会被计入两遍。衰减在实测档边界归一，保证曲线在
+    // 边界处连续。
     if zone == "three" {
         let arc = world.rules.league.three_point_distance_ft;
-        if distance > arc {
-            let decay = three_distance_decay(world, distance);
-            let edge = three_distance_decay(world, arc);
+        let last_upper = world
+            .params
+            .shot_distance
+            .last_upper_ft(kind.as_str(), true)
+            .unwrap_or(arc);
+        if release_distance > last_upper {
+            let decay = three_distance_decay(world, release_distance);
+            let edge = three_distance_decay(world, last_upper);
             target *= decay / edge.max(MIN_LOG_ARGUMENT);
         }
     }
     let target = target.clamp(0.0, 1.0);
-    // 参考条件下的瞄准误差：把目标命中率换算成「落点离筐多远」。
-    let denominator = (-2.0 * (1.0 - target).ln()).max(MIN_LOG_ARGUMENT);
-    let sigma_reference = aperture / denominator.sqrt();
+    if std::env::var_os("NBA_TRACE_QUAL").is_some() {
+        eprintln!(
+            "QUAL kind={} zone={} dist={:.1} measured={} target={:.4} skill={:.3} spread={:.3}",
+            kind.as_str(),
+            zone,
+            release_distance,
+            measured.map(|rate| format!("{rate:.4}")).unwrap_or_else(|| "none".to_string()),
+            target,
+            skill,
+            spread
+        );
+    }
+    // 封盖与「投篮犯规不中」是球出手之后才发生的分支，实测曲线给的是
+    // 扣掉这两种分支之后的净命中率。瞄准误差决定的是球自己能不能穿过
+    // 筐口，所以先把净目标反解成条件命中率：飞行层的封盖与犯规判定再把
+    // 条件概率折回净命中率，两次口径不会重复扣减。
+    let (contest, _block_distance) = release_contest(world, shooter, pos, release_z, delay);
+    let rim_in = policy.w("shot_rim_in_probability").clamp(0.0, 0.9);
+    let contact_band = policy.w("shot_rim_contact_band").max(0.0);
+    let contact_radius = aperture + contact_band;
     let movement = world.players[shooter].vel.length() / rules.max_player_speed_ftps;
-    // 干扰对瞄准误差的作用：实测曲线本身已经包含联盟平均干扰，因此只有
-    // 比平均更强的干扰才扩大瞄准误差。干扰比平均弱时不能缩小误差——否则
-    // 模型的命中率会高于实测曲线，三分球会显得比真实更划算。
-    // 每类出手的基准干扰不同：篮下出手本来就有防守人贴身，实测曲线里已经
-    // 包含这份干扰；外线出手的基准干扰低得多。干扰修正按「相对本类出手的
-    // 基准干扰」计算，否则篮下出手会被重复扣一次干扰，突破终结反而比
-    // 原地跳投更不值钱。
+    // 实测曲线本身就是本类出手在本距离上的总体命中率，已经包含联盟平均的
+    // 干扰与移动。两个乘子都以本类出手的总体均值为中心：比均值更紧的防守
+    // 扩大瞄准误差，比均值更干净的出手缩小瞄准误差，两侧对称、均值不变。
+    // 基准值由多种子运行的 world.shot_samples 统计得出，写在 policy 表里，
+    // 每一类出手单独一份。移动基准也是以全速的比例计量，间隔基准是该类
+    // 出手在 release_contest 口径下的均值，两者都取自同一次多种子运行。
+    // 乘子有下界 MIN_SIGMA_FACTOR，任何加成都不会让偏差变成零。
+    // 干扰越强，命中率越低：乘子在命中目标上，所以因子必须随干扰下降。
+    // 基准值是该类出手在 release_contest 口径下的平均干扰，基准处因子为 1；
+    // 比基准更干净的出手不额外加成，因为实测曲线已经含有联盟平均干扰。
     let contest_reference = contest_reference(world, kind);
     let contest_factor_of = |contest: f32| {
-        1.0 + (contest - contest_reference).max(0.0)
-            * policy.w("shot_quality_contest_sensitivity")
+        (1.0 - (contest - contest_reference).max(0.0) * policy.w("shot_quality_contest_sensitivity"))
+            .max(MIN_SIGMA_FACTOR)
     };
-    let movement_factor =
-        1.0 + movement * policy.w("shot_aim_movement_sensitivity");
+    // 出手时的移动同样压低命中率：移动基准是全速的比例，基准处因子为 1。
+    let movement_factor = (1.0
+        - (movement - movement_reference(world, kind)).max(0.0)
+            * policy.w("shot_aim_movement_sensitivity"))
+        .max(MIN_SIGMA_FACTOR);
     let gather_factor = if phase == BallPhase::Gather {
         policy.w("shot_gather_sigma_scale")
     } else {
@@ -475,39 +658,91 @@ pub fn evaluate(
     // 出手类型与动作阶段的倍率是「相对实测曲线的修正」：实测曲线已经是
     // 这个出手类型在这个距离上的真实命中率，倍率只表达「同样的距离下，
     // 这种出手方式与这个动作阶段的额外折扣或加成」。
-    let (contest, _block_distance) = release_contest(world, shooter, pos, release_z, delay);
-    let sigma = (sigma_reference
-        * kind_factor(kind)
+    // 乘子作用在命中目标上：目标对乘子是线性的，以本类出手的总体均值为
+    // 中心时两侧对称、均值不变。作用在瞄准误差上则会系统性放大命中率，
+    // 因为命中率对瞄准偏差是凸函数，乘子的方差会抬高均值。
+    let adjust = kind_factor(kind)
         * phase_factor(world, phase)
         * movement_factor
         * contest_factor_of(contest)
         * gather_factor
-        * policy.w("shot_aim_sigma_scale"))
-        .max(MIN_LOG_ARGUMENT);
-    let block_risk = block_risk_for_path(
-        world,
-        shooter,
-        origin,
-        hoop,
-        &plan,
-        release_z,
-    )
-    .clamp(0.0, 0.95);
+        * policy.w("shot_aim_sigma_scale");
+    let target = (target * adjust).clamp(0.0, 1.0);
+    // 参考条件下的瞄准误差：把条件命中率换算成「落点离筐多远」。
+    let sigma_for = |survive: f32| {
+        let conditional = (target / survive).clamp(0.0, MAX_ARC_PROBABILITY);
+        // 目标命中率包含「球打到筐沿之后仍然补进」的部分，瞄准误差只决定
+        // 干净穿筐的概率。触筐补进这一项自己依赖瞄准误差的宽度（偏离越大
+        // 越碰不到筐沿），因此用不动点迭代反解：先按只算穿筐解一次，再把
+        // 触筐项扣掉重解，几次之后两边一致。
+        let mut sigma_reference = solve_sigma(aperture, conditional);
+        for _ in 0..4 {
+            let contact = 1.0
+                - (-(contact_radius * contact_radius) /
+                    (2.0 * sigma_reference * sigma_reference))
+                    .exp();
+            let arc_target = ((conditional - rim_in * contact) / (1.0 - rim_in).max(MIN_SURVIVE))
+                .clamp(MIN_ARC_PROBABILITY, MAX_ARC_PROBABILITY);
+            sigma_reference = solve_sigma(aperture, arc_target);
+        }
+        sigma_reference.max(MIN_LOG_ARGUMENT)
+    };
+    let sigma_prior = sigma_for(1.0);
+    let (block_risk, block_hand) =
+        block_risk_for_path(world, shooter, origin, hoop, &plan, release_z, sigma_prior);
+    let block_risk = block_risk.clamp(0.0, 0.95);
+    let survive = 1.0 - block_risk;
+    let sigma = sigma_prior;
     // 命中概率就是瞄准误差落进有效筐口的概率；执行层用同一个 sigma 抽样、
-    // 同一个有效筐口判定，两者不会漂移。
-    let p_make = if aperture <= MIN_APERTURE_FT {
+    // 同一个有效筐口判定，两者不会漂移。这一概率是条件命中率，乘以存活
+    // 概率才是实测口径的净命中率。
+    let p_make_cond = if aperture <= MIN_APERTURE_FT {
         0.0
     } else {
-        (1.0 - (-(aperture * aperture) / (2.0 * sigma * sigma)).exp()).clamp(0.0, 1.0)
+        // 干净穿筐，加上「碰到筐沿之后补进」：只有落点落在筐口外一个
+        // 球径带以内的出手才碰得到筐沿，偏离更远的球直接飞出。执行层
+        // 用同一个筐口、同一个接触带、同一个补进概率抽样，两边同账。
+        let swish = 1.0 - (-(aperture * aperture) / (2.0 * sigma * sigma)).exp();
+        let contact = 1.0
+            - (-(contact_radius * contact_radius) / (2.0 * sigma * sigma)).exp();
+        (swish + (contact - swish) * rim_in).clamp(0.0, 1.0)
     };
+    let p_make = (p_make_cond * survive).clamp(0.0, 1.0);
+    if std::env::var_os("NBA_TRACE_RATE").is_some() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEEN: AtomicU32 = AtomicU32::new(0);
+        if SEEN.fetch_add(1, Ordering::Relaxed) < 80 {
+            eprintln!(
+                "RATE kind={} three={} dist={:.1} measured={:?} target={:.3} contest={:.2} move={:.2} sigma={:.3} aper={:.3} cond={:.3} p={:.3} survive={:.3}",
+                kind.as_str(),
+                zone == "three",
+                release_distance,
+                measured,
+                target,
+                contest,
+                movement,
+                sigma,
+                aperture,
+                p_make_cond,
+                p_make,
+                survive
+            );
+        }
+    }
     ShotModel {
         p_make,
+        p_make_cond,
         sigma_ft: sigma,
         effective_aperture_ft: aperture,
+        contact_radius_ft: contact_radius,
+        rim_in_probability: rim_in,
         release_z_ft: release_z,
         release_delay_seconds: delay,
         contest,
+        movement,
+        skill,
         block_risk,
+        block_hand,
         distance_ft: distance,
         incidence: plan.incidence,
         plan,
@@ -524,7 +759,8 @@ pub fn free_throw_model(world: &World, shooter: usize) -> ShotModel {
     let policy = &world.params.policy;
     let hoop = world.hoop_for(team);
     let distance = (pos - hoop).length();
-    let release_z = rules.chest_height_ft + 0.5;
+    let release_z =
+        crate::physical::Physical::of(&world.players[shooter], policy).contest_reach_ft(policy);
     let origin = release_origin(world, pos, hoop);
     let plan = plan_shot(rules, origin, hoop, release_z);
     let aperture = effective_aperture(rules, plan.incidence);
@@ -536,12 +772,18 @@ pub fn free_throw_model(world: &World, shooter: usize) -> ShotModel {
     let sigma = (aperture / denominator.sqrt()).max(MIN_LOG_ARGUMENT);
     ShotModel {
         p_make: target,
+        p_make_cond: target,
         sigma_ft: sigma,
         effective_aperture_ft: aperture,
+        contact_radius_ft: aperture,
+        rim_in_probability: 0.0,
         release_z_ft: release_z,
         release_delay_seconds: 0.0,
         contest: 0.0,
+        movement: 0.0,
+        skill,
         block_risk: 0.0,
+        block_hand: None,
         distance_ft: distance,
         incidence: plan.incidence,
         plan,
@@ -565,6 +807,14 @@ pub fn shot_choice(world: &World, state: &DecisionState) -> Option<(ShotKind, &'
     let finishing = world.players[state.actor].data.attributes.finishing;
     let putback = putback_available(world, state.actor);
     let distance = state.distance_to_hoop();
+    let just_received = world
+        .possession
+        .last_pass_at
+        .map(|t| world.now() - t < 2.5)
+        .unwrap_or(false);
+    let is_catch_shoot = phase == BallPhase::Cut
+        || phase == BallPhase::Catch
+        || (phase == BallPhase::Dribble && just_received);
 
     // 投篮类型只读当前持球阶段与实际位置，不读「最近 2.5 秒做过什么」
     // 这类宽泛标签。阶段由动作结算写入，位置由球员当前坐标给出。
@@ -592,7 +842,17 @@ pub fn shot_choice(world: &World, state: &DecisionState) -> Option<(ShotKind, &'
                     },
                     zone,
                 ))
-            } else if phase == BallPhase::Drive {
+            } else if phase == BallPhase::Drive
+                || (phase == BallPhase::Gather
+                    && world.possession.last_drive_actor == Some(state.actor)
+                    && world
+                        .possession
+                        .last_drive_at
+                        .map(|t| world.now() - t < 2.0)
+                        .unwrap_or(false))
+            {
+                // 突破收球步之后的篮下完成属于突破进攻：收球步把阶段写成
+                // Gather，出手时读到的阶段是 Gather 而不是 Drive。
                 Some((
                     if finishing > 0.6 {
                         ShotKind::DrivingDunk
@@ -617,19 +877,22 @@ pub fn shot_choice(world: &World, state: &DecisionState) -> Option<(ShotKind, &'
                 Some((ShotKind::Putback, zone))
             } else if phase == BallPhase::Post {
                 // 低位出手的类型按实际距离定：贴身是勾手，稍远是转身跳投。
-                Some((if distance > 8.0 {
-                    ShotKind::Turnaround
-                } else {
-                    ShotKind::Hook
-                }, zone))
+                Some((
+                    if distance > 8.0 {
+                        ShotKind::Turnaround
+                    } else {
+                        ShotKind::Hook
+                    },
+                    zone,
+                ))
             } else if transition {
                 Some((ShotKind::RunningLayup, zone))
             } else if matches!(phase, BallPhase::Drive | BallPhase::Gather) {
                 Some((ShotKind::Floater, zone))
-            } else if phase == BallPhase::Catch {
+            } else if is_catch_shoot {
                 Some((
                     if distance > 10.0 {
-                        ShotKind::PullUp
+                        ShotKind::CatchShoot
                     } else {
                         ShotKind::Floater
                     },
@@ -653,21 +916,9 @@ pub fn shot_choice(world: &World, state: &DecisionState) -> Option<(ShotKind, &'
                 Some((ShotKind::Turnaround, zone))
             } else if transition && phase == BallPhase::Dribble {
                 Some((ShotKind::RunningJump, zone))
-            } else if phase == BallPhase::Catch {
-                let curling_or_contested = state
-                    .primary_defender
-                    .map(|d| d.distance_ft < 10.5)
-                    .unwrap_or(false)
-                    || world
-                        .possession
-                        .last_screen
-                        .map(|read| world.now() - read.at < 5.0)
-                        .unwrap_or(false);
-                if curling_or_contested {
-                    Some((ShotKind::PullUp, zone))
-                } else {
-                    Some((ShotKind::CatchShoot, zone))
-                }
+            } else if is_catch_shoot {
+                // 零运球出手：接球或切出后直接起跳，无论防守贴得多紧都算接球投篮。
+                Some((ShotKind::CatchShoot, zone))
             } else {
                 Some((ShotKind::PullUp, zone))
             }
@@ -675,21 +926,8 @@ pub fn shot_choice(world: &World, state: &DecisionState) -> Option<(ShotKind, &'
         "three" => {
             if transition && phase == BallPhase::Dribble {
                 Some((ShotKind::RunningJump, zone))
-            } else if phase == BallPhase::Catch {
-                let curling_or_contested = state
-                    .primary_defender
-                    .map(|d| d.distance_ft < 10.5)
-                    .unwrap_or(false)
-                    || world
-                        .possession
-                        .last_screen
-                        .map(|read| world.now() - read.at < 5.0)
-                        .unwrap_or(false);
-                if curling_or_contested {
-                    Some((ShotKind::PullUp, zone))
-                } else {
-                    Some((ShotKind::CatchShoot, zone))
-                }
+            } else if is_catch_shoot {
+                Some((ShotKind::CatchShoot, zone))
             } else {
                 Some((ShotKind::PullUp, zone))
             }
