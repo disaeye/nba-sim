@@ -1213,3 +1213,31 @@ fn post_footwork_follows_the_defenders_stance() {
     let (baseline_kind, _) = run(9.0, 7.0, 0.9, 0.1);
     assert_eq!(baseline_kind, "drop_step", "靠底线必须走撤步转身");
 }
+
+/// 传球被防守人点到：球变活球，控制权由随后的争抢决定。
+#[test]
+fn a_deflected_pass_becomes_a_loose_ball_decided_by_control() {
+    let mut deflections = 0u32;
+    for seed in 1..=4u64 {
+        let report = world(seed).run();
+        for (index, event) in report.events.iter().enumerate() {
+            let Fact::BallContact {
+                kind: "deflection",
+                entity: Some(defender),
+                ..
+            } = &event.fact
+            else {
+                continue;
+            };
+            deflections += 1;
+            let recovered = report.events[index..].iter().any(|other| {
+                matches!(&other.fact, Fact::LooseBallRecovered { .. })
+            });
+            assert!(
+                recovered,
+                "被点到的传球必须进入松球争夺（seed {seed}, defender {defender}）"
+            );
+        }
+    }
+    assert!(deflections > 0, "真实比赛里必须有被点到的传球");
+}
