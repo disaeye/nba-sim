@@ -332,8 +332,8 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
     let mut candidates = [relocate; 2];
     let mut count = 1usize;
     if cut_available {
-        candidates[1] = cut;
-        count = 2;
+        candidates[count] = cut;
+        count += 1;
     }
     let gamma = f32::default();
     // 固定数组，逐 tick 的热路径上不分配。
@@ -406,7 +406,7 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
         intent: ActionIntent {
             actor,
             kind,
-            target: None,
+            target: candidate.1,
             from_ft: pos,
             to_ft,
             start_time: now,
@@ -415,7 +415,7 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
         utility: candidate.3,
         beta,
         gamma,
-        candidate_count: candidates.len(),
+        candidate_count: count,
         screen_defender: None,
         trace,
     })
@@ -665,9 +665,9 @@ pub fn candidate_utilities(world: &World, state: &DecisionState) -> Vec<Candidat
         drive_candidate(world, state),
         finish_candidate(world, state, gamma),
         pass_candidate(world, state, gamma),
-        screen_candidate(world, state),
         cut_candidate(world, state),
         post_candidate(world, state),
+        screen_candidate(world, state),
         fake_candidate(world, state),
         protect_candidate(world, state),
         hold_candidate(world, state),
