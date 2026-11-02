@@ -357,7 +357,7 @@
     "drive_rim_finish_ft": 0.5,
     "drive_rim_finishing_threshold": 0.66,
     "drive_rim_spread_ft": 4.0,
-    "transition_window_seconds": 10.0,
+    "transition_window_seconds": 14.0,
     "play_activation_after_seconds": 8.0,
     "transition_unset_relief": 0.35,
     "spacing_rim_ft": 5.0,
