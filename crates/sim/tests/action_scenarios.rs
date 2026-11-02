@@ -1336,8 +1336,10 @@ fn a_tie_for_the_ball_enters_a_held_ball_jump_ball() {
     let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 233);
     let offense = world.on_court(TeamSide::Home).as_slice()[0];
     let defense = world.on_court(TeamSide::Away).as_slice()[0];
+    let home_mate = world.on_court(TeamSide::Home).as_slice()[1];
+    let away_mate = world.on_court(TeamSide::Away).as_slice()[1];
     for (index, player) in world.players.iter_mut().enumerate() {
-        player.on_court = index == offense || index == defense;
+        player.on_court = index == offense || index == defense || index == home_mate || index == away_mate;
         player.vel = Vec2::ZERO;
     }
     let ball_spot = Vec2::new(62.0, 25.0);
@@ -1368,13 +1370,10 @@ fn a_tie_for_the_ball_enters_a_held_ball_jump_ball() {
         matches!(&event.fact, Fact::BallContact { kind: "held_ball", .. })
     });
     assert!(held_ball, "同时够到球必须发出停表事实");
-    match world.phase() {
-        Phase::JumpBall {
-            kind: nba_sim_core::action::JumpBallKind::HeldBall,
-            ..
-        } => {}
-        other => panic!("双方同时控球必须进入跳球，实际 {other:?}"),
-    }
+    assert!(
+        world.pending_jump_ball.is_some(),
+        "停表后必须先进入跳球准备，而不是直接掷球"
+    );
     assert_eq!(
         world.possession.id, 0,
         "跳球前原来那个回合必须按双方控球结清"
@@ -1383,6 +1382,41 @@ fn a_tie_for_the_ball_enters_a_held_ball_jump_ball() {
         world.pending_rebound.is_none(),
         "跳球时不得留下未结算的篮板"
     );
+    // 参跳四人必须走到圈边：整个过程没有瞬移。
+    let mut guard = 0;
+    loop {
+        let prior: Vec<Vec2> = world
+            .players
+            .iter()
+            .map(|player| player.pos)
+            .collect();
+        world.step(TICK_SECONDS);
+        guard += 1;
+        for (index, player) in world.players.iter().enumerate() {
+            if !player.on_court {
+                continue;
+            }
+            let moved = (player.pos - prior[index]).length();
+            assert!(
+                moved <= 1.2,
+                "跳球准备不得瞬移：球员 {index} 单 tick 移动 {moved:.2} 英尺"
+            );
+        }
+        if matches!(
+            world.phase(),
+            Phase::JumpBall {
+                kind: nba_sim_core::action::JumpBallKind::HeldBall,
+                ..
+            }
+        ) {
+            break;
+        }
+        assert!(
+            guard < 400,
+            "跳球准备必须在限时内掷球，实际阶段 {:?}",
+            world.phase()
+        );
+    }
 }
 
 /// 包夹与护球出球：两张手让伸手更容易、出球更难，护球把它补回来。

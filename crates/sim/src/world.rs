@@ -105,6 +105,18 @@ pub struct PossessionRecord {
     pub first_action_seconds: Option<f64>,
 }
 
+/// 停表跳球的准备：参跳双方、到位时刻与四个站位。
+#[derive(Debug, Clone)]
+pub struct PendingJumpBall {
+    pub home: usize,
+    pub away: usize,
+    pub ready_at: f64,
+    /// 参跳人与接应人的目标点：到位后才掷球。
+    pub spots: Vec<(usize, Vec2)>,
+    /// 已经等待的秒数：迟迟有人到不了位时不能无限停表。
+    pub waited: f32,
+}
+
 #[derive(Debug, Clone)]
 pub struct World {
     pub params: RuntimeParams,
@@ -157,6 +169,8 @@ pub struct World {
     pub possession_log: Vec<PossessionRecord>,
     pub pending_shot: Option<PendingShot>,
     pub pending_rebound: Option<crate::resolve::rebound::PendingRebound>,
+    /// 停表跳球的准备：双方参跳人与到位时刻。到位后才掷球。
+    pub pending_jump_ball: Option<PendingJumpBall>,
     /// 刚被切掉球的持球人，以及恢复之前不可再次被切的截止时间。
     pub poke_cooldown: Option<(usize, f64)>,
     /// 当前生效的护球姿态。开始其他动作或窗口到期即失效。
@@ -359,6 +373,7 @@ impl World {
             home_jumper,
             away_jumper,
             crate::action::JumpBallKind::Opening,
+            true,
         );
     }
 
@@ -367,6 +382,9 @@ impl World {
         home_jumper: usize,
         away_jumper: usize,
         kind: crate::action::JumpBallKind,
+        // 节次开局直接把站位写到位；比赛内停表跳球时球员已经走到圈边，
+        // 不再写位置，只确认目标。
+        place: bool,
     ) {
         self.jump_ball_kind = Some(kind);
         self.jump_ball_tapper = None;
@@ -376,8 +394,25 @@ impl World {
         let radius = self.rules.league.center_circle_radius_ft * 0.5;
         let home_spot = center - Vec2::new(radius, 0.0);
         let away_spot = center + Vec2::new(radius, 0.0);
-        crate::body::place(self, home_jumper, home_spot);
-        crate::body::place(self, away_jumper, away_spot);
+        if place {
+            crate::body::place(self, home_jumper, home_spot);
+            crate::body::place(self, away_jumper, away_spot);
+        } else {
+            crate::assignment::force_target_as(
+                self,
+                home_jumper,
+                home_spot,
+                crate::state::TargetKind::Station,
+                away_jumper,
+            );
+            crate::assignment::force_target_as(
+                self,
+                away_jumper,
+                away_spot,
+                crate::state::TargetKind::Station,
+                home_jumper,
+            );
+        }
         self.players[home_jumper].facing = Vec2::X;
         self.players[away_jumper].facing = Vec2::NEG_X;
         for team in [TeamSide::Home, TeamSide::Away] {
@@ -422,7 +457,17 @@ impl World {
                     && target.y <= self.rules.court.height_ft - radius,
                 "jump-ball receiver spot must be inside playable court geometry"
             );
-            crate::body::place(self, receiver, target);
+            if place {
+                crate::body::place(self, receiver, target);
+            } else {
+                crate::assignment::force_target_as(
+                    self,
+                    receiver,
+                    target,
+                    crate::state::TargetKind::Station,
+                    jumper,
+                );
+            }
             self.players[receiver].target_kind = crate::state::TargetKind::Station;
             self.players[receiver].target_partner = jumper;
             self.jump_ball_receivers[World::team_index(team)] = Some(receiver);
@@ -449,13 +494,69 @@ impl World {
         });
     }
 
-    /// 双方同时控住球：停表并在中圈跳球，双方各出一名当事人。
-    pub(crate) fn begin_held_ball_jump_ball(&mut self, home_jumper: usize, away_jumper: usize) {
-        self.begin_period_jump_ball(
-            home_jumper,
-            away_jumper,
-            crate::action::JumpBallKind::HeldBall,
-        );
+    /// 双方同时控住球：停表，参跳的四人走到中圈，到位后再掷球。
+    pub(crate) fn stage_held_ball(&mut self, home_jumper: usize, away_jumper: usize) {
+        let center = self.rules.court.center();
+        let radius = self.rules.league.center_circle_radius_ft * 0.5;
+        let distance = self.rules.tip_off_tap_distance_ft;
+        let mut spots: Vec<(usize, Vec2)> = Vec::with_capacity(4);
+        for jumper in [home_jumper, away_jumper] {
+            let team = self.players[jumper].team;
+            let opponent = if jumper == home_jumper {
+                away_jumper
+            } else {
+                home_jumper
+            };
+            let spot = if team == TeamSide::Home {
+                center - Vec2::new(radius, 0.0)
+            } else {
+                center + Vec2::new(radius, 0.0)
+            };
+            crate::assignment::force_target_as(
+                self,
+                jumper,
+                spot,
+                crate::state::TargetKind::Station,
+                opponent,
+            );
+            spots.push((jumper, spot));
+            let receiver = self
+                .on_court(team)
+                .into_iter()
+                .filter(|handle| *handle != jumper)
+                .min_by(|left, right| {
+                    (self.players[*left].pos - center)
+                        .length_squared()
+                        .total_cmp(&(self.players[*right].pos - center).length_squared())
+                        .then_with(|| self.players[*left].id.cmp(&self.players[*right].id))
+                });
+            if let Some(receiver) = receiver {
+                let direction = if team == TeamSide::Home {
+                    -Vec2::X
+                } else {
+                    Vec2::X
+                };
+                let target = center + direction * distance;
+                crate::assignment::force_target_as(
+                    self,
+                    receiver,
+                    target,
+                    crate::state::TargetKind::Station,
+                    jumper,
+                );
+                spots.push((receiver, target));
+            }
+        }
+        let team = self.possession.team;
+        let ready_at = self.now() + f64::from(self.params.policy.g("jump_ball_staging_seconds"));
+        self.pending_jump_ball = Some(PendingJumpBall {
+            home: home_jumper,
+            away: away_jumper,
+            ready_at,
+            spots,
+            waited: 0.0,
+        });
+        self.set_phase(Phase::DeadBall { team, ready_at });
     }
 
     fn resolve_opening_jump_ball(
@@ -494,10 +595,21 @@ impl World {
         let control_reach = self.params.policy.w("loose_ball_catch_base_ft")
             + self.players[receiver].attribute("ball_handling")
                 * self.params.policy.w("loose_ball_catch_skill_ft");
-        assert!(
-            (target - self.players[receiver].pos).length() <= control_reach,
-            "jump-ball receiver placement must be within control reach"
-        );
+        // 停表跳球的接应人可能还在跑位：到位了就直接接，没到位就让球成为
+        // 松球，由地板球争抢决定，而不是把他瞬移过去。
+        let receiver_in_reach = (target - self.players[receiver].pos).length() <= control_reach;
+        if !receiver_in_reach {
+            // 接应人还没跑到接球点：这次战球不判归属，改由发球重新开始。
+            self.jump_ball_kind = None;
+            self.jump_ball_tapper = None;
+            self.jump_ball_receiver = None;
+            self.jump_ball_receivers = [None; 2];
+            self.set_phase(Phase::DeadBall {
+                team: tapped_team,
+                ready_at: self.now() + 1.0,
+            });
+            return;
+        }
         self.ball.pos = center;
         self.ball.z = self.rules.tip_off_tap_height_ft;
         let target_distance = (target - center).length();
@@ -791,6 +903,7 @@ impl World {
             possession_log: Vec::with_capacity(256),
             pending_shot: None,
             pending_rebound: None,
+            pending_jump_ball: None,
             poke_cooldown: None,
             protection: None,
             possession_points: 0,
@@ -2477,7 +2590,33 @@ impl World {
         match self.phase {
             Phase::DeadBall { team, ready_at } => {
                 if now >= ready_at {
-                    self.begin_inbound(team);
+                    if let Some(pending) = self.pending_jump_ball.clone() {
+                        // 参跳四人到位才掷球：停表期间不等同于瞬移。
+                        let arrived = pending.spots.iter().all(|(handle, spot)| {
+                            (self.players[*handle].pos - *spot).length() <= 1.5
+                        });
+                        if arrived || pending.waited >= 5.0 {
+                            self.pending_jump_ball = None;
+                            self.begin_period_jump_ball(
+                                pending.home,
+                                pending.away,
+                                crate::action::JumpBallKind::HeldBall,
+                                false,
+                            );
+                        } else {
+                            let next = now + 0.5;
+                            if let Some(entry) = self.pending_jump_ball.as_mut() {
+                                entry.ready_at = next;
+                                entry.waited += 0.5;
+                            }
+                            self.set_phase(Phase::DeadBall {
+                                team,
+                                ready_at: next,
+                            });
+                        }
+                    } else {
+                        self.begin_inbound(team);
+                    }
                 }
             }
             Phase::Timeout {
@@ -2609,6 +2748,7 @@ impl World {
                             home_jumper,
                             away_jumper,
                             crate::action::JumpBallKind::Overtime,
+                            true,
                         );
                     } else {
                         self.alternate_possession_next = self.period_started_with.other();

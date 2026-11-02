@@ -819,14 +819,7 @@ pub fn shot_choice(world: &World, state: &DecisionState) -> Option<(ShotKind, &'
     let finishing = world.players[state.actor].data.attributes.finishing;
     let putback = putback_available(world, state.actor);
     let distance = state.distance_to_hoop();
-    let just_received = world
-        .possession
-        .last_pass_at
-        .map(|t| world.now() - t < 2.5)
-        .unwrap_or(false);
-    let is_catch_shoot = phase == BallPhase::Cut
-        || phase == BallPhase::Catch
-        || (phase == BallPhase::Dribble && just_received);
+    let is_catch_shoot = phase == BallPhase::Cut || phase == BallPhase::Catch;
 
     // 投篮类型只读当前持球阶段与实际位置，不读「最近 2.5 秒做过什么」
     // 这类宽泛标签。阶段由动作结算写入，位置由球员当前坐标给出。

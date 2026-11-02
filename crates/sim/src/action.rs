@@ -121,6 +121,14 @@ pub enum PassKind {
     Bounce,
     Lob,
     Outlet,
+    /// 头顶传球：出手点高，从防守人的手上方过去。
+    Overhead,
+    /// 单手推传：长距离推进，速度快但路线直。
+    OneHand,
+    /// 背后传球：出手隐蔽但路线难以控制。
+    BehindBack,
+    /// 手递手：两人贴近交接，几乎没有飞行距离。
+    Handoff,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

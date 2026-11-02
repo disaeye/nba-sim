@@ -566,7 +566,7 @@ fn try_control_loose(world: &mut World) {
                 "held_ball",
                 0,
             );
-            world.begin_held_ball_jump_ball(home, away);
+            world.stage_held_ball(home, away);
             return;
         }
     }

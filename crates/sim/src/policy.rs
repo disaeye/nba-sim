@@ -1394,12 +1394,42 @@ fn pass_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
         }
     }
     best.map(|(target, pos, utility, _)| {
-        (
-            ActionKind::Pass(PassKind::Chest),
-            Some(target),
-            pos,
-            utility,
-        )
+        // 传球技术跟着几何走：贴着手递手，抢断线路被占就改高吊或击地，
+        // 长距离推进用单手推传，贴身且向前推进则从头顶过。
+        let view = state.teammates.iter().find(|view| view.index == target);
+        let gap = view
+            .map(|view| (view.pos - state.actor_pos).length())
+            .unwrap_or(f32::INFINITY);
+        let lane = view.map(|view| view.lane_clearance).unwrap_or(f32::INFINITY);
+        let advancement = view
+            .map(|view| {
+                if state.attacking_right {
+                    view.pos.x - state.actor_pos.x
+                } else {
+                    state.actor_pos.x - view.pos.x
+                }
+            })
+            .unwrap_or(f32::default());
+        let defender_gap = world
+            .players
+            .iter()
+            .filter(|player| player.on_court && player.team != world.players[state.actor].team)
+            .map(|player| (player.pos - state.actor_pos).length())
+            .fold(f32::INFINITY, f32::min);
+        let kind = if gap <= 5.5 && defender_gap <= 3.0 {
+            PassKind::Handoff
+        } else if lane < 2.0 {
+            PassKind::Bounce
+        } else if defender_gap <= 3.0 && advancement > 8.0 {
+            PassKind::Overhead
+        } else if advancement > 20.0 {
+            PassKind::OneHand
+        } else if defender_gap <= 1.8 && advancement.abs() < 3.0 {
+            PassKind::BehindBack
+        } else {
+            PassKind::Chest
+        };
+        (ActionKind::Pass(kind), Some(target), pos, utility)
     })
 }
 

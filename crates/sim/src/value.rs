@@ -210,10 +210,19 @@ pub fn pass_completion_probability(
         // 按更小的有效半径算。球的飞行时间越久，防守人越有时间跑到球
         // 的落点旁边，所以这个折扣随飞行时间减弱。
         let lob = kind == crate::action::PassKind::Lob;
+        // 传球技术决定防守人有多容易碰到球：手递手几乎没有飞行段，
+        // 头顶传球从手上方过，背后传球路线最难控制。
+        let kind_scale = match kind {
+            crate::action::PassKind::Handoff => 0.35,
+            crate::action::PassKind::Overhead => 0.75,
+            crate::action::PassKind::BehindBack => 1.2,
+            crate::action::PassKind::OneHand => 1.05,
+            _ => 1.0,
+        };
         let effective_radius = if lob {
-            intercept_radius * (0.35 + 0.3 * (flight as f32).min(1.5))
+            intercept_radius * (0.35 + 0.3 * (flight as f32).min(1.5)) * kind_scale
         } else {
-            intercept_radius
+            intercept_radius * kind_scale
         };
         clearance = clearance.min(separation - effective_radius);
     }

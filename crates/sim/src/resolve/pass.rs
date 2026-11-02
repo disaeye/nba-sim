@@ -39,7 +39,16 @@ pub fn resolve(
         (None, None)
     };
     let distance = (to_player.pos - from_player.pos).length();
-    let duration = flight.unwrap_or_else(|| f64::from(rules.pass_duration(distance, false)));
+    // 传球技术改变飞行时长：手递手几乎没有飞行段，头顶传球弧线更高更慢，
+    // 背后传球出手快但轨迹难控。
+    let kind_flight = match kind {
+        crate::action::PassKind::Handoff => 0.5,
+        crate::action::PassKind::Overhead => 1.25,
+        crate::action::PassKind::BehindBack => 0.9,
+        _ => 1.0,
+    };
+    let duration = flight
+        .unwrap_or_else(|| f64::from(rules.pass_duration(distance, false)) * kind_flight);
     world.ball.release_pass(crate::ball::PassRelease {
         rules: &rules,
         from_player: &from_player,
