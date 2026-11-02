@@ -73,23 +73,24 @@
 
 | 指标 | 观测 | 目标 | 处理 |
 | --- | --- | --- | --- |
-| possessions_per_game | 192.0 | ≈200 | 略低 |
-| points_per_game | 233.5 | 227.6 | 已在带内 |
-| blocks_per_game | 9.1 | 9.66 | 已在带内 |
-| shooting_fouls_per_game | 18.6 | 19.6 | 已在带内 |
-| fta_per_game | 48.1 | 43.3 | 已在带内 |
-| oreb_per_game | 29.4 | 26.5 | 接近 |
+| possessions_per_game | 194.0 | ≈200 | 已接近 |
+| points_per_game | 232.1 | 227.6 | 已在带内 |
+| blocks_per_game | 9.31 | 9.66 | 已在带内 |
+| shooting_fouls_per_game | 18.2 | 19.6 | 已在带内 |
+| fta_per_game | 48.6 | 43.3 | 已在带内 |
+| oreb_per_game | 28.1 | 26.5 | 已在带内 |
 | fga_per_possession | 0.95 | 0.898 | 略高 |
-| turnover_per_possession | 0.14 | 0.144 | 已对齐 |
-| zone_share 三分 | 0.446 | 0.421 | 略高 |
-| zone_share 篮下 | 0.349 | 0.316 | 接近 |
-| zone_share 近筐 | 0.147 | 0.191 | 偏低 |
-| zone_share 中距离 | 0.083 | 0.072 | 接近 |
-| creation_share set | 0.371 | 0.316 | 偏高（接球即投仍是最高价值出手） |
-| creation_share drive | 0.198 | 0.220 | 接近 |
-| creation_share pull_up | 0.139 | 0.190 | 偏低 |
-| creation_share cut | 0.064 | 0.045 | 偏高 |
-| creation_share post | 0.062 | 0.064 | 已对齐 |
+| turnover_per_possession | 0.15 | 0.144 | 已对齐 |
+| steals_per_game | 15.8 | 16.1 | 已对齐 |
+| zone_share 三分 | 0.443 | 0.421 | 略高 |
+| zone_share 篮下 | 0.345 | 0.316 | 接近 |
+| zone_share 近筐 | 0.136 | 0.191 | 偏低 |
+| zone_share 中距离 | 0.077 | 0.072 | 已对齐 |
+| creation_share set | 0.381 | 0.316 | 偏高（接球即投仍是最高价值出手） |
+| creation_share drive | 0.200 | 0.220 | 接近 |
+| creation_share pull_up | 0.133 | 0.190 | 偏低 |
+| creation_share cut | 0.060 | 0.045 | 偏高 |
+| creation_share post | 0.052 | 0.064 | 接近 |
 | creation_share putback | 0.049 | 0.045 | 已对齐 |
 | creation_share transition | 0.126 | 0.121 | 已对齐 |
 
