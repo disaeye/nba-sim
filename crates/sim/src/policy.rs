@@ -1291,11 +1291,15 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     // 其余球员突到抛投区域完成近筐抛投。落点必须留在近筐区（4 ft 以外），
     // 否则每一条突破都变成篮下出手，出手的区域分布整段压在篮下。
     let finishing = world.players[state.actor].data.attributes.finishing;
+    // 终结能力决定突破停在哪里：强的到篮下收球，弱的在抛投区提前收球。
+    // `drive_rim_*` 与 `drive_finish_*` 四个几何参数都在这里生效。
+    let shortfall = (1.0 - finishing).clamp(0.0, 1.0);
     let drive_target_distance = if finishing > 0.40 {
-        weights.g("finish_min_distance_ft") + 0.5
+        weights.g("drive_rim_finish_ft") + weights.g("drive_rim_spread_ft") * shortfall
     } else {
-        weights.g("finish_min_distance_ft") + 1.2
-    };
+        weights.g("drive_finish_distance_ft") + weights.g("drive_finish_spread_ft") * shortfall
+    }
+    .max(weights.g("finish_min_distance_ft"));
     let to_ft =
         state.hoop + (state.actor_pos - state.hoop).normalize_or_zero() * drive_target_distance;
     Some((

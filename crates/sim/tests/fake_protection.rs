@@ -268,7 +268,8 @@ fn both_families_appear_in_real_games() {
     let mut protections = 0u32;
     let mut completed_fakes = 0u32;
     let mut completed_protections = 0u32;
-    for seed in 1..=6u64 {
+    // 护球是低频率选择：样本取十二场，否则会被单场节奏波动掩盖。
+    for seed in 1..=12u64 {
         let report = common::short_world(seed).run();
         for event in &report.events {
             match &event.fact {

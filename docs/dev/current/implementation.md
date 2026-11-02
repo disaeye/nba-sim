@@ -58,6 +58,38 @@
 
 校准阶段已启动：`scripts/calibrate/fit_policy.py` 按职责分组调 `policy.json` 的权重，目标是 `shot_profile.json` 的区域与创造方式份额，以及 `possession.json` 的回合数、每回合出手、失误率、罚球与得分。引擎侧原先写死的系数已陆续搬进参数表，可被标定：封盖手部半径 `block_hand_radius_base_ft`、投篮犯规率 `shooting_foul_rate_two_point/three_point`、篮板伸手折减与加成 `rebound_offense_reach_penalty_ft`/`rebound_defense_reach_bonus_ft`、包夹半径与权重、回场判定带宽 `backcourt_advance_ft`/`backcourt_margin_ft`。每次拟合后用 `sim2 --seeds 1..33` 与 `validate-core` 记录残差；历史批次（2026-10-21）的数字仅作参考。
 
+### 已应用的拟合
+
+拟合排除 `aim_error`、`contest`、`shot_phase` 三组：它们直接缩放出手误差与干扰，被 `shot_geometry_benchmark` 的实测参考值钉住。把 `shot_phase` 纳入拟合后，18 英尺中距离的模型命中率从 0.406 掉到 0.351，因此这三组改为固定。
+
+| 组 | 拟合前损失 | 拟合后损失 | 是否采纳 |
+| --- | --- | --- | --- |
+| `distance_decay` | 0.4290 | 0.4290 | 否（无改进） |
+| `decision_temperature` | 0.4290 | 0.4008 | 是（`temperature_max` 9.0 → 7.875） |
+| `pace` | 0.4008 | 0.4008 | 否 |
+| `behavior` | 0.4008 | 0.4008 | 否 |
+
+### 当前残差（32 场，种子 1..33）
+
+| 指标 | 观测 | 目标 | 处理 |
+| --- | --- | --- | --- |
+| possessions_per_game | 205.6 | ≈200 | 已接近 |
+| points_per_game | 243.2 | 227.6 | 偏高，主因是三分占比与二次进攻出手 |
+| blocks_per_game | 8.9 | 9.65 | 已接近 |
+| shooting_fouls_per_game | 20.9 | 19.6 | 已接近 |
+| fta_per_game | 53.7 | 43.3 | 偏高，罚球判给多于目标 |
+| oreb_per_game | 36.0 | 27.4 | 偏高；伸手折减从 1.22 再上调会让前场篮板崩到 6.6，需要改成按距离分档的争抢模型 |
+| fga_per_possession | 1.014 | 0.898 | 偏高，二次进攻出手直接计入同一回合 |
+| turnover_per_possession | 0.245 | 0.144 | 偏高，传球被点与出界占多数 |
+| zone_share 三分 | 0.543 | 0.421 | 偏高；三分偏好权重不在拟合分组内 |
+| zone_share 近筐 | 0.106 | 0.191 | 偏低，与三分偏高成对 |
+| creation_share set | 0.541 | 0.316 | 偏高，接球出手被记作 set |
+| creation_share drive | 0.119 | 0.220 | 偏低 |
+| creation_share post | 0.010 | 0.064 | 偏低，低位候选只在 16 英尺内生成 |
+| creation_share pull_up | 0.097 | 0.190 | 偏低 |
+
+残差的三个结构性原因：三分与近筐份额由 `shot_choice` 的候选与价值决定，拟合分组未拥有这些权重；前场篮板对伸手折减极度敏感；失误率由传球被点与出界的松球回收路径贡献大半。下一步要改的是这三处机制，而不是继续调现有权重。
+
 ## 已确认的待修复项
 
 1. `JumpBall` 当前由参赛球员身高、起跳能力和确定性抽样决定拍球归属，随后由几何条件让接应人收球；跳球员实际伸手触球、对手点拍与触球合法性尚未接入身体接触证据。
