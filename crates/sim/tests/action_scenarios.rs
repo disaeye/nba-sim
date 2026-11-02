@@ -328,3 +328,65 @@ fn help_coverage_is_assigned_and_recovers() {
     assert!(help_seen, "真实比赛里必须有防守人承担协防");
     assert!(recovered, "协防责任必须会收回，而不是一直挂着");
 }
+
+/// 合法掩护：站定的掩护人撞上防守人只是接触，不是犯规。
+#[test]
+fn a_set_screen_contacts_without_a_foul() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 149);
+    let offense = world.on_court(TeamSide::Home).as_slice()[0];
+    let screener = world.on_court(TeamSide::Home).as_slice()[1];
+    let defender = world.on_court(TeamSide::Away).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == offense || index == screener || index == defender;
+        player.vel = Vec2::ZERO;
+    }
+    let spot = Vec2::new(60.0, 25.0);
+    world.players[offense].pos = spot;
+    world.players[offense].target = spot;
+    // 掩护人已经站定：目标点就是脚下，速度为零。
+    world.players[screener].pos = spot + Vec2::new(0.8, 0.6);
+    world.players[screener].target = world.players[screener].pos;
+    world.players[defender].pos = spot + Vec2::new(1.0, 0.9);
+    world.players[defender].target = world.players[defender].pos;
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+
+    let mut contacts = 0u32;
+    let mut fouls = 0u32;
+    for _ in 0..500u32 {
+        world.set_phase(Phase::Live);
+        world.screen_defender = Some(defender);
+        world.clock.advance_tick();
+        world.players[screener].vel = Vec2::ZERO;
+        world.players[screener].target = world.players[screener].pos;
+        let intent = ActionIntent {
+            actor: offense,
+            kind: ActionKind::Screen(ScreenKind::OnBall),
+            target: Some(screener),
+            from_ft: spot,
+            to_ft: spot,
+            start_time: world.now(),
+            duration: 1.0,
+        };
+        let before = world.events.len();
+        nba_sim_core::resolve::screen::resolve(&mut world, &intent, ScreenKind::OnBall);
+        for event in &world.events[before..] {
+            match &event.fact {
+                Fact::Screen { contact, .. } => {
+                    if *contact {
+                        contacts += 1;
+                    }
+                }
+                Fact::Foul {
+                    kind: nba_domain::event::FoulKind::Offensive,
+                    ..
+                } => fouls += 1,
+                _ => {}
+            }
+        }
+    }
+    assert!(contacts > 0, "站定的掩护人必须有真实的接触");
+    assert_eq!(fouls, 0, "站定的掩护不得被判进攻犯规");
+}
