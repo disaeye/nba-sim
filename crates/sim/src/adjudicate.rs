@@ -71,6 +71,11 @@ pub enum RestartPlan {
     Live { team: TeamSide },
     /// 停表但不结束回合，到点后按当前状态恢复（换人、延迟发球）。
     Stoppage { team: TeamSide, ready_after: f64 },
+    /// 节次间歇：到点后按下个阶段继续。
+    PeriodBreak {
+        resume_at: f64,
+        next_stage: crate::state::MatchStage,
+    },
     /// 比赛结束。
     GameOver,
 }
@@ -167,7 +172,18 @@ impl World {
                     ready_at: self.now() + ready_after,
                 });
             }
+            RestartPlan::PeriodBreak {
+                resume_at,
+                next_stage,
+            } => {
+                self.cancel_actions("period_end");
+                self.set_period_phase(Phase::PeriodBreak {
+                    resume_at,
+                    next_stage,
+                });
+            }
             RestartPlan::GameOver => {
+                self.cancel_actions("game_end");
                 self.set_phase(Phase::Finished);
             }
         }

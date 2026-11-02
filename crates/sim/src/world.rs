@@ -3202,33 +3202,47 @@ impl World {
             self.emit(Fact::PeriodEnd {
                 period: self.clock.period(),
             });
-            self.end_possession(PossessionEndCause::PeriodEnd, "period_end", 0);
-            self.cancel_actions("period_end");
             self.clock.set_period_duration(300.0);
-            self.set_period_phase(Phase::PeriodBreak {
-                resume_at: self.now() + 1.0,
-                next_stage: crate::state::MatchStage::Overtime,
-            });
+            self.adjudicate(
+                crate::adjudicate::Adjudication::new(
+                    crate::adjudicate::StoppageCause::PeriodEnd,
+                    crate::adjudicate::RestartPlan::PeriodBreak {
+                        resume_at: self.now() + 1.0,
+                        next_stage: crate::state::MatchStage::Overtime,
+                    },
+                )
+                .ending(PossessionEndCause::PeriodEnd, "period_end"),
+            );
             return;
         }
         if !regulation_over {
             self.emit(Fact::PeriodEnd {
                 period: self.clock.period(),
             });
-            self.end_possession(PossessionEndCause::PeriodEnd, "period_end", 0);
-            self.cancel_actions("period_end");
-            self.set_period_phase(Phase::PeriodBreak {
-                resume_at: self.now() + 1.0,
-                next_stage: if self.clock.period() >= 4 {
-                    crate::state::MatchStage::Overtime
-                } else {
-                    crate::state::MatchStage::Intermission
-                },
-            });
+            let next_stage = if self.clock.period() >= 4 {
+                crate::state::MatchStage::Overtime
+            } else {
+                crate::state::MatchStage::Intermission
+            };
+            self.adjudicate(
+                crate::adjudicate::Adjudication::new(
+                    crate::adjudicate::StoppageCause::PeriodEnd,
+                    crate::adjudicate::RestartPlan::PeriodBreak {
+                        resume_at: self.now() + 1.0,
+                        next_stage,
+                    },
+                )
+                .ending(PossessionEndCause::PeriodEnd, "period_end"),
+            );
             return;
         }
-        self.end_possession(PossessionEndCause::PeriodEnd, "period_end", 0);
-        self.cancel_actions("game_end");
+        self.adjudicate(
+            crate::adjudicate::Adjudication::new(
+                crate::adjudicate::StoppageCause::PeriodEnd,
+                crate::adjudicate::RestartPlan::GameOver,
+            )
+            .ending(PossessionEndCause::PeriodEnd, "period_end"),
+        );
         self.finished = true;
         self.set_program_phase(
             crate::state::MatchStage::Finished,
