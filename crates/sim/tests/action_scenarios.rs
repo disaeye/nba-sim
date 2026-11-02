@@ -1095,3 +1095,62 @@ fn a_step_back_shot_creates_space_before_the_release() {
         "后撤步必须真的拉开空间：{catch_shoot:.2} → {step_back:.2}"
     );
 }
+
+/// 背身挤打：力量优势真的把背身要位推到更靠近篮筐的位置。
+#[test]
+fn a_stronger_backdown_gets_closer_to_the_rim() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let target_distance = |strength: f32| -> f32 {
+        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 211);
+        let offense = world.on_court(TeamSide::Home).as_slice()[0];
+        let defender = world.on_court(TeamSide::Away).as_slice()[0];
+        for (index, player) in world.players.iter_mut().enumerate() {
+            player.on_court = index == offense || index == defender;
+            player.vel = Vec2::ZERO;
+        }
+        world.players[offense].data.attributes.strength = strength;
+        world.players[defender].data.attributes.strength = 0.5;
+        let hoop = world.hoop_for(TeamSide::Home);
+        let spot = hoop + Vec2::new(-9.0, 2.0);
+        world.players[offense].pos = spot;
+        world.players[offense].target = spot;
+        world.players[offense].facing = (hoop - spot).normalize_or_zero();
+        world.players[defender].pos = spot + Vec2::new(-2.0, 0.0);
+        world.players[defender].target = world.players[defender].pos;
+        world.possession.team = TeamSide::Home;
+        world.start_possession(TeamSide::Home, PossessionKind::Live);
+        world.set_phase(Phase::Live);
+        world.ball.set_held(offense);
+        world.ball.pos = spot;
+        world.ball.z = world.rules.ball_radius_ft;
+        let intent = ActionIntent {
+            actor: offense,
+            kind: ActionKind::PostUp,
+            target: None,
+            from_ft: spot,
+            to_ft: spot,
+            start_time: world.now(),
+            duration: 0.8,
+        };
+        let before = world.events.len();
+        let outcome = nba_sim_core::resolve::drive::resolve_post(&mut world, &intent);
+        let fouled = world.events[before..].iter().any(|event| {
+            matches!(
+                &event.fact,
+                Fact::Foul { kind: nba_domain::event::FoulKind::Offensive, .. }
+            )
+        });
+        assert!(
+            !fouled,
+            "合法的背身挤打不得判进攻犯规：{:?}",
+            outcome.completion
+        );
+        (world.players[offense].target - hoop).length()
+    };
+    let weak = target_distance(0.1);
+    let strong = target_distance(0.95);
+    assert!(
+        strong < weak - 0.3,
+        "力量更強的背身必须更靠近篮筐：weak={weak:.2} strong={strong:.2}"
+    );
+}
