@@ -150,10 +150,11 @@
       "existing_types": ["nba_sim_core::action::ActionKind::Relocate"],
       "production_paths": ["crates/sim/src/policy.rs::off_ball_tick", "crates/sim/src/policy.rs::off_ball_decision", "crates/sim/src/formation.rs::move_toward_targets", "crates/sim/src/resolve/mod.rs::resolve (empty delta)"],
       "consumer_status": "Off-ball players now choose Relocate on their own schedule and the formation layer keeps their chosen spot instead of overwriting it, so the position really changes. The resolver itself returns an empty delta; the receive window is opened by the formation target, not by a dedicated fact.",
-      "evidence": [],
-      "missing_evidence": ["ACTION-RELOCATE-POSITION-CHANGES", "ACTION-RELOCATE-RECEIVE-WINDOW-OPENS"],
+      "evidence": ["crates/sim/tests/action_scenarios.rs::relocate_changes_the_position_and_keeps_the_receive_window"],
+      "missing_evidence": [],
       "rule_refs": ["NBA Rule 4 §IX; Rule 12B §III", "FIBA Articles 17, 32-33"],
-      "scenarios": ["ACTION-RELOCATE-POSITION-CHANGES", "ACTION-RELOCATE-RECEIVE-WINDOW-OPENS"]
+      "scenarios": ["ACTION-RELOCATE-POSITION-CHANGES", "ACTION-RELOCATE-RECEIVE-WINDOW-OPENS"],
+      "scenario_tests": {"ACTION-RELOCATE-POSITION-CHANGES": "crates/sim/tests/action_scenarios.rs::relocate_changes_the_position_and_keeps_the_receive_window", "ACTION-RELOCATE-RECEIVE-WINDOW-OPENS": "crates/sim/tests/action_scenarios.rs::relocate_changes_the_position_and_keeps_the_receive_window"}
     },
     {
       "id": "ACTION-DEFENSE-ON-BALL",

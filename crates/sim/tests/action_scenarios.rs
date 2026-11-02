@@ -234,3 +234,61 @@ fn shot_after_a_bitten_fake_is_less_contested() {
     );
     assert!(quality.p_make_cond > 0.0);
 }
+
+/// 无球位置调整：球员自己发起的跑位真的改变位置，编队不会把落点改回去。
+#[test]
+fn relocate_changes_the_position_and_keeps_the_receive_window() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 151);
+    let holder = world.on_court(TeamSide::Home).as_slice()[0];
+    let mover = world.on_court(TeamSide::Home).as_slice()[1];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == holder || index == mover;
+        player.vel = Vec2::ZERO;
+    }
+    let hoop = world.hoop_for(TeamSide::Home);
+    world.players[holder].pos = hoop + Vec2::new(-26.0, 0.0);
+    world.players[holder].target = world.players[holder].pos;
+    let start = hoop + Vec2::new(-18.0, -12.0);
+    world.players[mover].pos = start;
+    world.players[mover].target = start;
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(holder);
+    world.ball.pos = world.players[holder].pos;
+    world.ball.z = world.rules.ball_radius_ft;
+
+    let spot = hoop + Vec2::new(-6.0, 8.0);
+    let intent = ActionIntent {
+        actor: mover,
+        kind: ActionKind::Relocate,
+        target: None,
+        from_ft: start,
+        to_ft: spot,
+        start_time: world.now(),
+        duration: 2.0,
+    };
+    let participants = [(mover, nba_sim_core::action::ActionIntentRole::Primary)];
+    assert!(world.start_action(intent, &participants));
+    for _ in 0..60 {
+        nba_sim_core::formation::move_toward_targets(&mut world);
+        nba_sim_core::motion::advance_movement(&mut world, TICK_SECONDS);
+        world.clock.advance_simulation_time(TICK_SECONDS);
+        world.clock.advance_tick();
+    }
+    let travelled = (world.players[mover].pos - start).length();
+    assert!(
+        travelled > 3.0,
+        "跑位必须真的把人送出去：仅移动了 {travelled:.2} 英尺"
+    );
+    assert_eq!(
+        world.players[mover].target_kind,
+        nba_sim_core::state::TargetKind::Window,
+        "跑位期间的目标点必须是接球窗口"
+    );
+    assert!(
+        (world.players[mover].target - spot).length() < 0.5,
+        "编队不得把跑位的落点改回去"
+    );
+}
