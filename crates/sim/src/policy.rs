@@ -107,7 +107,7 @@ pub fn tick(world: &mut World) {
         ActionKind::PostUp => crate::state::BallPhase::Post,
         ActionKind::Dribble(_)
         | ActionKind::Pass(_)
-        | ActionKind::Cut
+        | ActionKind::Cut(_)
         | ActionKind::Screen(_)
         | ActionKind::Fake(_)
         | ActionKind::Protect(_)
@@ -124,7 +124,7 @@ pub fn tick(world: &mut World) {
             world.players[actor].target_kind = crate::state::TargetKind::Window;
             world.players[actor].target_partner = actor;
         }
-        ActionKind::Cut => {
+        ActionKind::Cut(_) => {
             if let Some(cutter) = intent.target {
                 world.players[cutter].target = crate::resolve::pass::cut_target(world, cutter);
                 world.players[cutter].target_kind = crate::state::TargetKind::Window;
@@ -153,7 +153,7 @@ pub fn tick(world: &mut World) {
             world.players[screener].target_kind = crate::state::TargetKind::Contact;
             world.players[screener].target_partner = defender;
         }
-        ActionKind::Cut => {
+        ActionKind::Cut(_) => {
             let cutter = intent.target.expect("cut action requires a cutter");
             participants.push((cutter, crate::action::ActionIntentRole::CutPartner));
         }
@@ -292,8 +292,9 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
         },
     );
 
-    // 切入：篮下接球点的价值，减掉被对位跟住的折损。
-    let cut_spot = hoop + (pos - hoop).normalize_or_zero() * weights.g("finish_min_distance_ft");
+    // 切入：先按几何选路线类型，再按类型取落点。
+    let to_rim = (hoop - pos).normalize_or_zero();
+    let lateral = Vec2::new(-to_rim.y, to_rim.x);
     let marker = world
         .players
         .iter()
@@ -301,16 +302,85 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
         .map(|player| (player.pos - pos).length())
         .fold(f32::INFINITY, f32::min);
     let openness = (marker / weights.g("cut_open_distance_ft").max(f32::EPSILON)).clamp(0.0, 1.0);
+    let holder_pos = world.holder().map(|handle| world.players[handle].pos);
+    // 防守人卡在持球人与自己之间：转身从背后切。
+    let denied = holder_pos.is_some_and(|ball| {
+        let segment = ball - pos;
+        let length_squared = segment.length_squared();
+        world
+            .players
+            .iter()
+            .filter(|player| player.on_court && player.team != team)
+            .any(|player| {
+                let t = if length_squared > f32::MIN_POSITIVE {
+                    ((player.pos - pos).dot(segment) / length_squared).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                (player.pos - (pos + segment * t)).length() < 1.5 && (0.15..=0.85).contains(&t)
+            })
+    });
+    let near_screen = world
+        .possession
+        .last_screen
+        .map(|read| (world.players[read.screener].pos - pos).length())
+        .unwrap_or(f32::INFINITY)
+        < 8.0;
+    let kind = if denied {
+        crate::action::CutKind::Backdoor
+    } else if world.possession.last_pass_from == Some(actor) {
+        crate::action::CutKind::GiveAndGo
+    } else if near_screen {
+        crate::action::CutKind::Curl
+    } else if marker < 3.0 {
+        crate::action::CutKind::VCut
+    } else if (pos - hoop).length() > 22.0 {
+        crate::action::CutKind::PopUp
+    } else {
+        crate::action::CutKind::Basket
+    };
+    let cut_spot = match kind {
+        crate::action::CutKind::Basket | crate::action::CutKind::GiveAndGo => {
+            hoop - to_rim * weights.g("finish_min_distance_ft")
+        }
+        crate::action::CutKind::Backdoor => hoop - to_rim * 3.0 + lateral * 4.0,
+        crate::action::CutKind::VCut => pos - to_rim * 2.0,
+        crate::action::CutKind::Curl => world
+            .possession
+            .last_screen
+            .map(|read| {
+                let spot = world.players[read.screener].pos;
+                spot + (hoop - spot).normalize_or_zero() * 4.0
+            })
+            .unwrap_or(hoop - to_rim * weights.g("finish_min_distance_ft")),
+        crate::action::CutKind::PopUp => holder_pos
+            .map(|ball| pos + (ball - pos).normalize_or_zero() * 6.0)
+            .unwrap_or(pos - to_rim * 3.0),
+    };
+    let rim_attack = matches!(
+        kind,
+        crate::action::CutKind::Basket
+            | crate::action::CutKind::Backdoor
+            | crate::action::CutKind::GiveAndGo
+    );
     // 空切是机会动作，不是常规站位：只有对位人确实跟丢、且篮下接球
-    // 比留在自己的位置更值时才是候选；否则一律靠跑位解决。
+    // 比留在自己的位置更值时才是候选；V 字与上提是拿球动作，不要求篮下机会。
     let cut_value = crate::value::catch_value(world, cut_spot, actor, 0.0);
     let spot_value = crate::value::catch_value(world, spot, actor, 0.0);
     let cut_open = marker >= weights.g("cut_open_distance_ft") * 0.6;
-    let cut_pays = cut_value > spot_value * 1.2;
-    let mut cut_available = cut_open && cut_pays && travel > 3.0;
+    let cut_pays = if rim_attack {
+        cut_value > spot_value * 1.2
+    } else {
+        cut_value > spot_value
+    };
+    let mut cut_available = if rim_attack {
+        cut_open && cut_pays && travel > 3.0
+    } else {
+        cut_pays && travel > 2.0
+    };
     let mut relocate = relocate;
     let mut cut: Candidate = (
-        ActionKind::Cut,
+        ActionKind::Cut(kind),
         None,
         cut_spot,
         Utility {
@@ -387,11 +457,11 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
         .max(1.0);
     let cut_travel = (cut_spot - pos).length();
     // 空切必须跑得到：超过一个动作窗口能跑的距离就不成立。
-    if matches!(kind, ActionKind::Cut) && cut_travel > speed * 2.6 * 0.85 {
+    if matches!(kind, ActionKind::Cut(_)) && cut_travel > speed * 2.6 * 0.85 {
         return None;
     }
     let duration = match kind {
-        ActionKind::Cut => (cut_travel / speed * 1.35).clamp(1.2, 2.6) as f64,
+        ActionKind::Cut(_) => (cut_travel / speed * 1.35).clamp(1.2, 2.6) as f64,
         _ => ((to_ft - pos).length() / speed * 1.2).clamp(0.8, 2.6) as f64,
     };
     let trace = crate::state::DecisionTraceSample {
@@ -645,7 +715,7 @@ fn action_duration(
             (distance / speed * 1.25).max(0.6) as f64
         }
         ActionKind::Finish => 0.9,
-        ActionKind::Cut => {
+        ActionKind::Cut(_) => {
             let cutter = target.expect("cut requires a cutter");
             let distance = (state.hoop - world.players[cutter].pos).length();
             (distance / MAX_SPEED_FT_PER_SEC * 1.8).clamp(1.5, 3.2) as f64
@@ -1615,7 +1685,11 @@ fn cut_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
         ..Default::default()
     };
     Some((
-        ActionKind::Cut,
+        ActionKind::Cut(if lane_norm < 0.4 {
+            crate::action::CutKind::Backdoor
+        } else {
+            crate::action::CutKind::Basket
+        }),
         Some(cutter),
         state.hoop,
         Utility {

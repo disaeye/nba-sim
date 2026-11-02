@@ -33,8 +33,8 @@ pub fn resolve(world: &mut World, intent: ActionIntent) -> ActionOutcome {
         ActionKind::Shoot(kind) => shot::resolve(world, &intent, kind),
         ActionKind::PostUp => drive::resolve_post(world, &intent),
         // 切入人自己发起的空切只跑路线；持球人发起的空切同时送出高吊球。
-        ActionKind::Cut if intent.target.is_some() => pass::resolve_cut(world, &intent),
-        ActionKind::Cut => offball::cut_route(world, &intent),
+        ActionKind::Cut(_) if intent.target.is_some() => pass::resolve_cut(world, &intent),
+        ActionKind::Cut(kind) => offball::cut_route(world, &intent, kind),
         ActionKind::Dribble(kind) => resolve_dribble(world, &intent, kind),
         ActionKind::Fake(kind) => fake::resolve(world, &intent, kind),
         ActionKind::Protect(kind) => protect::resolve(world, &intent, kind),

@@ -321,7 +321,7 @@ pub fn assign_offense_jobs(world: &mut World) {
         }) {
             OffenseJob::Screen
         } else if world.any_interaction(|active| {
-            matches!(active.kind, ActionKind::Cut) && active.target == Some(handle)
+            matches!(active.kind, ActionKind::Cut(_)) && active.target == Some(handle)
         }) || world.possession.last_cut_actor == Some(handle)
         {
             OffenseJob::Cut

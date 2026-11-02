@@ -116,6 +116,34 @@ impl ShotKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// 无球切入的路线类型。
+///
+/// 每一种路线都有自己的起点、终点的取法：背切从防守人背后绕，
+/// 反跑先向球再折回篮下，V 字跑位先下沉再上提，绕掩护从掩护人身侧绕出，
+/// 上提接球向持球人靠，空切直接跑向篮下。
+pub enum CutKind {
+    Basket,
+    Backdoor,
+    GiveAndGo,
+    VCut,
+    Curl,
+    PopUp,
+}
+
+impl CutKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Basket => "basket",
+            Self::Backdoor => "backdoor",
+            Self::GiveAndGo => "give_and_go",
+            Self::VCut => "v_cut",
+            Self::Curl => "curl",
+            Self::PopUp => "pop_up",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PassKind {
     Chest,
     Bounce,
@@ -195,7 +223,7 @@ pub enum ActionKind {
     Finish,
     Pass(PassKind),
     Screen(ScreenKind),
-    Cut,
+    Cut(CutKind),
     PostUp,
     Shoot(ShotKind),
     Relocate,
@@ -211,7 +239,7 @@ impl ActionKind {
             Self::Finish => "Finish",
             Self::Pass(_) => "Pass",
             Self::Screen(_) => "Screen",
-            Self::Cut => "Cut",
+            Self::Cut(_) => "Cut",
             Self::PostUp => "PostUp",
             Self::Shoot(_) => "Shoot",
             Self::Relocate => "Relocate",
@@ -227,7 +255,7 @@ impl ActionKind {
             Self::Drive => "drive",
             Self::Pass(_) => "pass",
             Self::Screen(_) => "screen",
-            Self::Cut => "cut",
+            Self::Cut(_) => "cut",
             Self::PostUp => "post_up",
             Self::Dribble(_) => "hold",
             Self::Finish => "finish",
@@ -244,7 +272,7 @@ impl ActionKind {
             Self::Drive => 1,
             Self::Pass(_) => 2,
             Self::Screen(_) => 3,
-            Self::Cut => 4,
+            Self::Cut(_) => 4,
             Self::PostUp => 5,
             Self::Dribble(_) => 6,
             Self::Finish => 7,
@@ -659,6 +687,8 @@ pub enum Fact {
         cutter: usize,
         arrived: bool,
         defender_distance_ft: f32,
+        /// 本次切入的路线类型。
+        kind: &'static str,
     },
     /// 运球技术细分：动作本身就是一次球与身体的移动，效果按技术区分。
     DribbleMove {

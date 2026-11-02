@@ -69,7 +69,7 @@ pub fn step(world: &mut World, dt: f64) {
 ///
 /// 与持球人发起的空切（高吊球送到切入点）不同，这条路线的产出是位置与
 /// 接球窗口：切入人真的跑到篮下，后续的传球候选按他的新位置估值。
-pub fn cut_route(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
+pub fn cut_route(world: &mut World, intent: &ActionIntent, kind: crate::action::CutKind) -> ActionOutcome {
     let cutter = intent.actor;
     // 到位容差按接球半径量级取：停在接球点一个身位以内就算切到了。
     let tolerance = world
@@ -92,10 +92,11 @@ pub fn cut_route(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
         cutter,
         arrived,
         defender_distance_ft: defender_distance,
+        kind: kind.as_str(),
     });
     ActionOutcome {
         actor: cutter,
-        kind: ActionKind::Cut,
+        kind: ActionKind::Cut(kind),
         completion: if arrived {
             Completion::Completed
         } else {

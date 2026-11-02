@@ -390,10 +390,12 @@ impl World {
                 cutter,
                 arrived,
                 defender_distance_ft,
+                kind,
             } => json!({
                 "cutter_id": self.player_id(*cutter),
                 "arrived": arrived,
                 "defender_distance_ft": defender_distance_ft,
+                "kind": kind,
             }),
             Fact::DribbleMove {
                 player,

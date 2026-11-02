@@ -88,7 +88,7 @@ fn cut_pass_aims_at_the_cutters_planned_catch_point() {
     let plan = nba_sim_core::resolve::pass::cut_plan(&world, cutter).0;
     let intent = ActionIntent {
         actor: passer,
-        kind: ActionKind::Cut,
+        kind: ActionKind::Cut(nba_sim_core::action::CutKind::Basket),
         target: Some(cutter),
         from_ft: world.players[passer].pos,
         to_ft: plan,
@@ -444,11 +444,14 @@ fn the_screener_rolls_or_pops_after_setting_a_screen() {
             .as_ref()
             .map(|action| action.intent.kind);
         assert!(
-            matches!(kind, Some(ActionKind::Cut) | Some(ActionKind::Relocate)),
+            matches!(kind, Some(ActionKind::Cut(_)) | Some(ActionKind::Relocate)),
             "掩护人必须顺下或外弹，实际 {kind:?}（sagging={sagging}）"
         );
         if sagging {
-            assert_eq!(kind, Some(ActionKind::Cut), "对位人收缩时必须顺下");
+            assert!(
+                matches!(kind, Some(ActionKind::Cut(_))),
+                "对位人收缩时必须顺下"
+            );
         }
         assert_eq!(
             world.players[screener].screened_at, 0.0,
@@ -1560,5 +1563,29 @@ fn a_contested_lane_finish_takes_a_euro_step_around_the_defender() {
     assert!(
         around.abs() > 1.0,
         "有人堵路时必须绕着走：{around:.2}"
+    );
+}
+
+/// 无球切入路线：真实比赛里必须用到不止一种路线，且每种路线都被记录。
+#[test]
+fn real_games_use_several_cut_routes() {
+    let mut counts: std::collections::BTreeMap<&'static str, u32> = std::collections::BTreeMap::new();
+    for seed in 1..=4u64 {
+        let report = world(seed).run();
+        for event in &report.events {
+            if let Fact::Cut { kind, arrived, .. } = &event.fact {
+                if *arrived {
+                    *counts.entry(kind).or_default() += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        counts.len() >= 2,
+        "切入路线必须不止一种，实际 {counts:?}"
+    );
+    assert!(
+        counts.get("basket").copied().unwrap_or(0) > 0,
+        "直切篮下仍是主要路线：{counts:?}"
     );
 }

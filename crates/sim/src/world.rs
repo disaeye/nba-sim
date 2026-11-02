@@ -1114,7 +1114,7 @@ impl World {
             ),
             ActionKind::Drive
             | ActionKind::Dribble(_)
-            | ActionKind::Cut
+            | ActionKind::Cut(_)
             | ActionKind::PostUp
             | ActionKind::Relocate => (
                 rules.tactics.drive_min_duration_seconds,
@@ -1379,8 +1379,7 @@ impl World {
     }
 
     /// 持球人是否被包夹：两名以上对手挤在包夹半径内。
-    pub fn trapped(&self, holder: usize) -> bool {
-        let radius = self.params.policy.g("trap_radius_ft");
+    pub fn trapped(&self, holder: usize) -> bool {        let radius = self.params.policy.g("trap_radius_ft");
         let team = self.players[holder].team;
         let pos = self.players[holder].pos;
         let mut count = 0u8;
@@ -1399,6 +1398,14 @@ impl World {
     pub fn protected(&self, holder: usize, now: f64) -> bool {
         self.protection
             .is_some_and(|protection| protection.holder == holder && protection.until > now)
+    }
+
+    /// 该球员正在执行的切入路线类型；没有切入动作时按直切处理。
+    pub fn cut_kind_name(&self, cutter: usize) -> &'static str {
+        match self.players[cutter].action.as_ref().map(|action| action.intent.kind) {
+            Some(ActionKind::Cut(kind)) => kind.as_str(),
+            _ => crate::action::CutKind::Basket.as_str(),
+        }
     }
 
     pub fn now(&self) -> f64 {
@@ -2878,6 +2885,7 @@ impl World {
                         cutter,
                         arrived: true,
                         defender_distance_ft: defender_distance,
+                        kind: self.cut_kind_name(cutter),
                     });
                 }
                 self.players[caught].schedule.next_redecide_at =

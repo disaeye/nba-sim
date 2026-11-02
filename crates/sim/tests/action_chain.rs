@@ -335,7 +335,7 @@ fn cut_uses_lob_flight_and_received_fact_before_control() {
     let mut world = two_player_world();
     let intent = ActionIntent {
         actor: 0,
-        kind: ActionKind::Cut,
+        kind: ActionKind::Cut(nba_sim_core::action::CutKind::Basket),
         target: Some(1),
         from_ft: world.players[0].pos,
         to_ft: world.hoop_for(TeamSide::Home),
