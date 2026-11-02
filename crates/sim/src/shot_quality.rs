@@ -454,16 +454,28 @@ pub fn blocking_hands(world: &World, shooter: usize) -> Vec<BlockingHand> {
         .iter()
         .enumerate()
         .filter(|(_, player)| player.on_court && player.team != team)
-        .map(|(handle, defender)| BlockingHand {
+        .map(|(handle, defender)| {
+            // 垂直起跳封盖在执行窗口内真的把手举得更高：摸高按策略增加。
+            let jumping = world.defensive_actions[handle].as_ref().is_some_and(|action| {
+                action.kind == crate::action::DefensiveActionKind::BlockJump
+                    && action.phase == nba_domain::action_window::ActionPhase::Execution
+            });
+            let jump_bonus = if jumping {
+                rules.resolve.technique.block_jump_extra_reach_ft
+            } else {
+                f32::default()
+            };
+            BlockingHand {
             handle,
             pos: defender.pos
                 + defender.facing.normalize_or_zero() * (rules.ball_holder_offset_ft + 0.4),
             // 手的高度就是防守人的摸高：站立摸高加上起跳。身材与弹跳因此
             // 决定了他能不能把手伸到球飞的轨迹上。
-            z: crate::physical::Physical::of(defender, policy).contest_reach_ft(policy),
+            z: crate::physical::Physical::of(defender, policy).contest_reach_ft(policy) + jump_bonus,
             radius: rules.ball_radius_ft
                 + policy.w("block_hand_radius_base_ft")
                 + defender.attribute("block") * policy.w("block_hand_radius_skill_ft"),
+            }
         })
         .collect()
 }

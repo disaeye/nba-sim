@@ -77,6 +77,16 @@ pub struct TechniquePolicy {
     pub steal_attempt_exec_bonus: f32,
     /// 收势窗口内该防守人干扰的折减比例（0 = 无损失，1 = 完全失去干扰）。
     pub steal_attempt_follow_penalty: f32,
+    /// 垂直起跳封盖的准备窗口（秒）。
+    pub block_jump_prep_seconds: f32,
+    /// 垂直起跳封盖的执行窗口（秒）。
+    pub block_jump_exec_seconds: f32,
+    /// 垂直起跳封盖的收势窗口（秒）。
+    pub block_jump_follow_seconds: f32,
+    /// 起跳封盖时摸高增加的高度（英尺）。
+    pub block_jump_extra_reach_ft: f32,
+    /// 起跳封盖的触发半径（英尺）：防守人离出手点太远就不跳。
+    pub block_jump_radius_ft: f32,
 }
 
 impl Default for TechniquePolicy {
@@ -98,6 +108,11 @@ impl Default for TechniquePolicy {
             steal_attempt_follow_seconds: 0.35,
             steal_attempt_exec_bonus: 0.9,
             steal_attempt_follow_penalty: 0.5,
+            block_jump_prep_seconds: 0.08,
+            block_jump_exec_seconds: 0.16,
+            block_jump_follow_seconds: 0.24,
+            block_jump_extra_reach_ft: 1.1,
+            block_jump_radius_ft: 4.0,
         }
     }
 }
@@ -131,6 +146,8 @@ impl TechniquePolicy {
             self.fake_shot_displacement_ft,
             self.fake_pass_lane_ft,
             self.jab_step_ft,
+            self.block_jump_extra_reach_ft,
+            self.block_jump_radius_ft,
         ];
         if lengths
             .iter()
@@ -144,6 +161,9 @@ impl TechniquePolicy {
             self.steal_attempt_prep_seconds,
             self.steal_attempt_exec_seconds,
             self.steal_attempt_follow_seconds,
+            self.block_jump_prep_seconds,
+            self.block_jump_exec_seconds,
+            self.block_jump_follow_seconds,
         ];
         if durations
             .iter()

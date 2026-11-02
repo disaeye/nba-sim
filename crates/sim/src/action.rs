@@ -364,6 +364,8 @@ pub enum DefensiveActionKind {
     CloseoutContest,
     /// 伸手切球：主动赌一次抄截，执行窗口内成功率提高，收势窗口内失去干扰。
     StealAttempt,
+    /// 垂直起跳封盖：执行窗口内摸高增加，跳起的人无法卡位抢篮板。
+    BlockJump,
 }
 
 impl DefensiveActionKind {
@@ -371,6 +373,7 @@ impl DefensiveActionKind {
         match self {
             Self::CloseoutContest => "closeout_contest",
             Self::StealAttempt => "steal_attempt",
+            Self::BlockJump => "block_jump",
         }
     }
 }

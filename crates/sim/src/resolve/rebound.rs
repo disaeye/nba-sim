@@ -42,7 +42,11 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
         world.players[handle].target = ball_pos;
         world.players[handle].target_kind = TargetKind::Window;
         world.players[handle].target_partner = handle;
-        if world.players[handle].team != offense && distance < 12.0 {
+        // 跳起封盖的人还在空中：他没有落脚点去卡位，这一球他不参与 box-out。
+        let airborne = world.defensive_actions[handle].as_ref().is_some_and(|action| {
+            action.kind == crate::action::DefensiveActionKind::BlockJump
+        });
+        if world.players[handle].team != offense && distance < 12.0 && !airborne {
             world.emit(Fact::BoxOut {
                 player: handle,
                 distance_ft: distance,

@@ -1732,6 +1732,7 @@ impl World {
         self.advance_action_phases();
         self.advance_defensive_actions();
         self.advance_steal_attempts();
+        self.advance_block_jumps();
         if matches!(phase_before_step, Phase::JumpBallFlight) {
             self.move_jump_ball_receiver(dt);
         } else if !matches!(phase_before_step, Phase::JumpBall { .. }) {
@@ -2004,6 +2005,124 @@ impl World {
             }
             self.start_defensive_steal(defender, holder, &policy);
         }
+    }
+
+    /// 垂直起跳封盖：协防人跳起伸手，执行窗口内摸高增加。
+    ///
+    /// 跳起的人无法卡位抢篮板：起跳期间他不参与 box-out，这是这次冒险的代价。
+    fn advance_block_jumps(&mut self) {
+        if !matches!(self.phase(), Phase::Live | Phase::ShotFlight { .. }) {
+            self.cancel_defensive_actions_of(DefensiveActionKind::BlockJump, "shot_ended");
+            return;
+        }
+        let now = self.now();
+        let policy = self.rules.resolve.technique.clone();
+        for defender in 0..self.defensive_actions.len() {
+            let Some(mut runtime) = self.defensive_actions[defender].take() else {
+                continue;
+            };
+            if runtime.kind != DefensiveActionKind::BlockJump {
+                self.defensive_actions[defender] = Some(runtime);
+                continue;
+            }
+            if !self.players[defender].on_court {
+                self.emit(Fact::DefensiveActionCancelled {
+                    action_id: runtime.action_id,
+                    defender,
+                    shooter: runtime.shooter,
+                    kind: runtime.kind.as_str(),
+                    reason: "participant_left_court",
+                });
+                continue;
+            }
+            if let Some(to) = runtime.phase_at(now) {
+                let from = runtime.phase;
+                runtime.phase = to;
+                self.emit(Fact::DefensiveActionPhaseChanged {
+                    action_id: runtime.action_id,
+                    defender,
+                    from,
+                    to,
+                });
+            }
+            if now >= runtime.ends_at {
+                self.emit(Fact::DefensiveActionCompleted {
+                    action_id: runtime.action_id,
+                    defender,
+                    shooter: runtime.shooter,
+                    kind: runtime.kind.as_str(),
+                    displacement_ft: (self.players[defender].pos - runtime.start_position).length(),
+                });
+                continue;
+            }
+            self.defensive_actions[defender] = Some(runtime);
+        }
+        let Some(shooter) = self.players.iter().position(|player| {
+            player.on_court
+                && player.action.as_ref().is_some_and(|action| {
+                    matches!(action.intent.kind, crate::action::ActionKind::Shoot(_))
+                })
+        }) else {
+            return;
+        };
+        let defense = self.players[shooter].team.other();
+        let spot = self.players[shooter].pos;
+        let mut closest: Option<(usize, f32)> = None;
+        for defender in self.on_court(defense).as_slice().iter().copied() {
+            if self.defensive_actions[defender].is_some() {
+                continue;
+            }
+            let gap = (self.players[defender].pos - spot).length();
+            if gap > policy.block_jump_radius_ft {
+                continue;
+            }
+            if closest.is_none_or(|(_, best)| gap < best) {
+                closest = Some((defender, gap));
+            }
+        }
+        let Some((defender, _)) = closest else {
+            return;
+        };
+        self.start_defensive_block_jump(defender, shooter, &policy);
+    }
+
+    fn start_defensive_block_jump(
+        &mut self,
+        defender: usize,
+        shooter: usize,
+        policy: &nba_domain::resolve::TechniquePolicy,
+    ) {
+        let start_time = self.now();
+        let preparation_ends_at = start_time + f64::from(policy.block_jump_prep_seconds);
+        let execution_ends_at = preparation_ends_at + f64::from(policy.block_jump_exec_seconds);
+        let ends_at = execution_ends_at + f64::from(policy.block_jump_follow_seconds);
+        self.next_action_id += 1;
+        self.next_interaction_id += 1;
+        let action_id = self.next_action_id;
+        let interaction_id = self.next_interaction_id;
+        let start_position = self.players[defender].pos;
+        self.defensive_actions[defender] = Some(DefensiveActionRuntime {
+            action_id,
+            interaction_id,
+            kind: DefensiveActionKind::BlockJump,
+            defender,
+            shooter,
+            phase: nba_domain::action_window::ActionPhase::Preparation,
+            preparation_ends_at,
+            execution_ends_at,
+            ends_at,
+            start_position,
+            target_position: start_position,
+            completed: false,
+        });
+        self.emit(Fact::DefensiveActionStarted {
+            action_id,
+            interaction_id,
+            defender,
+            shooter,
+            kind: DefensiveActionKind::BlockJump.as_str(),
+            start_position,
+        });
     }
 
     fn start_defensive_steal(
