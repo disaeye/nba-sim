@@ -49,6 +49,7 @@
     "shoot_pull_up_bonus": 0.2,
     "shot_fatigue_penalty": 0.55,
     "pass_iq_penalty": 0.22,
+    "bad_pass_iq_weight": 0.8,
     "rebound_boxout_weight": 1.0,
     "screen_base_displacement_ft": 0.25,
     "shoot_tendency": 1.05,

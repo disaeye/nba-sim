@@ -83,7 +83,11 @@ pub fn resolve(
         .map(|p| p.data.tendencies.gamble_steal)
         .fold(0.0f32, f32::max);
     let gamble_effect = 1.0 + (defense_gamble - 0.5) * 0.1;
-    let rate = (base * (1.0 + (skill_base - passing) * 1.0) * gamble_effect).clamp(0.005, 0.045);
+    // 传球判断决定出球的冒险程度：读不出协防的人更容易把球送到防守人手里。
+    let iq = world.players[from].data.attributes.decision_iq.clamp(0.0, 1.0);
+    let iq_effect = 1.0 + (0.5 - iq) * world.params.policy.w("bad_pass_iq_weight");
+    let rate = (base * (1.0 + (skill_base - passing) * 1.0) * gamble_effect * iq_effect)
+        .clamp(0.005, 0.08);
     let drawn = world.draw(
         crate::draw::Stream::Pass,
         from,
