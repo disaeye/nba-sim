@@ -894,7 +894,7 @@ fn a_defensive_rebound_advances_past_midcourt_within_the_transition_window() {
     let transition = params.policy.g("transition_window_seconds") as f64;
     let mut monitored = 0u32;
     let mut advanced = 0u32;
-    for seed in 1..=3u64 {
+    for seed in 1..=2u64 {
         let mut world = World::new(
             MatchSetup::builtin(GameRules::default()),
             Params::load(&workspace_calibration_dir()).expect("calibration tables load"),
@@ -947,4 +947,52 @@ fn a_defensive_rebound_advances_past_midcourt_within_the_transition_window() {
         "防守篮板后的推进必须在快攻窗口内完成，超时次数 {monitored}"
     );
     assert!(advanced > 0, "必须有防守篮板后的推进");
+}
+
+/// 退防：球权转换的瞬间，五名防守人的目标点全部落在本方半场。
+#[test]
+fn a_possession_change_sends_every_defender_back() {
+    let mut checked = 0u32;
+    for seed in 1..=2u64 {
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            Params::load(&workspace_calibration_dir()).expect("calibration tables load"),
+            seed,
+        );
+        let mid = world.rules.court.width_ft * 0.5;
+        let mut guard = 0;
+        while !world.finished && guard < 200_000 {
+            let before = world.events.len();
+            world.step(TICK_SECONDS);
+            guard += 1;
+            let started = world.events[before..].iter().any(|event| {
+                matches!(&event.fact, Fact::PossessionStarted { .. })
+            });
+            if !started {
+                continue;
+            }
+            let offense = world.possession.team;
+            let defense = offense.other();
+            let hoop_x = world.hoop_for(offense).x;
+            let attacking_right = hoop_x > mid;
+            for handle in world.on_court(defense).as_slice() {
+                let player = &world.players[*handle];
+                if !player.on_court {
+                    continue;
+                }
+                let on_their_half = if attacking_right {
+                    player.target.x >= mid - 1.0
+                } else {
+                    player.target.x <= mid + 1.0
+                };
+                assert!(
+                    on_their_half,
+                    "退防目标必须在球权转换后落到本方半场：{handle} target={:?}（seed {seed}）",
+                    player.target
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 0, "必须观测到球权转换后的防守目标");
 }

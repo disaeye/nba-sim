@@ -221,11 +221,11 @@
       "existing_types": ["nba_sim_core::state::PossessionKind", "nba_sim_core::action::Fact::PossessionStarted"],
       "production_paths": ["crates/sim/src/world.rs::start_possession", "crates/sim/src/formation.rs::set_targets", "crates/sim/src/defense.rs::apply_defense_targets", "crates/sim/src/shot_quality.rs::shot_choice"],
       "consumer_status": "Every Live possession uses the configured transition window for shot selection and quality. After a defensive rebound the ball is advanced past midcourt inside the window, and after a steal possession transfers to the stealing team and the new possession starts its first action quickly; sprint-back targets are assignment-driven rather than separately selected intents.",
-      "evidence": ["crates/sim/tests/action_scenarios.rs::a_steal_hands_possession_over_and_starts_a_quick_transition", "crates/sim/tests/action_scenarios.rs::a_defensive_rebound_advances_past_midcourt_within_the_transition_window"],
+      "evidence": ["crates/sim/tests/action_scenarios.rs::a_steal_hands_possession_over_and_starts_a_quick_transition", "crates/sim/tests/action_scenarios.rs::a_defensive_rebound_advances_past_midcourt_within_the_transition_window", "crates/sim/tests/action_scenarios.rs::a_possession_change_sends_every_defender_back"],
       "rule_refs": ["NBA Rule 7-10, Rule 12B", "FIBA Articles 14, 17, 28-30, 32, 37-38"],
       "scenarios": ["ACTION-TRANSITION-STEAL-FASTBREAK", "ACTION-TRANSITION-DEFENSIVE-REBOUND-ADVANCE", "ACTION-TRANSITION-ALL-DEFENDERS-RECOVER"],
-      "scenario_tests": {"ACTION-TRANSITION-STEAL-FASTBREAK": "crates/sim/tests/action_scenarios.rs::a_steal_hands_possession_over_and_starts_a_quick_transition", "ACTION-TRANSITION-DEFENSIVE-REBOUND-ADVANCE": "crates/sim/tests/action_scenarios.rs::a_defensive_rebound_advances_past_midcourt_within_the_transition_window"},
-      "missing_evidence": ["ACTION-TRANSITION-ALL-DEFENDERS-RECOVER"]
+      "scenario_tests": {"ACTION-TRANSITION-STEAL-FASTBREAK": "crates/sim/tests/action_scenarios.rs::a_steal_hands_possession_over_and_starts_a_quick_transition", "ACTION-TRANSITION-DEFENSIVE-REBOUND-ADVANCE": "crates/sim/tests/action_scenarios.rs::a_defensive_rebound_advances_past_midcourt_within_the_transition_window", "ACTION-TRANSITION-ALL-DEFENDERS-RECOVER": "crates/sim/tests/action_scenarios.rs::a_possession_change_sends_every_defender_back"},
+      "missing_evidence": []
     }
   ]
 }
