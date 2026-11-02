@@ -4,7 +4,10 @@
 
 use glam::Vec2;
 use nba_domain::rules::GameRules;
-use nba_sim_core::action::{ActionIntent, ActionKind, Fact, ScreenKind, ShotKind, TeamSide, TurnoverKind};
+use nba_sim_core::action::{
+    ActionIntent, ActionKind, Fact, FakeKind, ProtectKind, ScreenKind, ShotKind, TeamSide,
+    TurnoverKind,
+};
 use nba_sim_core::params::{workspace_calibration_dir, Params};
 use nba_sim_core::state::{Phase, PossessionKind};
 use nba_sim_core::world::TICK_SECONDS;
@@ -1240,4 +1243,88 @@ fn a_deflected_pass_becomes_a_loose_ball_decided_by_control() {
         }
     }
     assert!(deflections > 0, "真实比赛里必须有被点到的传球");
+}
+
+/// 假动作与护球都不移动支撑脚：身体位置在动作前后必须一致。
+#[test]
+fn fakes_and_protection_keep_the_pivot_foot_planted() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    for fake in [FakeKind::Shot, FakeKind::Pass, FakeKind::JabStep, FakeKind::Hesitation] {
+        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 227);
+        let actor = world.on_court(TeamSide::Home).as_slice()[0];
+        let defender = world.on_court(TeamSide::Away).as_slice()[0];
+        for (index, player) in world.players.iter_mut().enumerate() {
+            player.on_court = index == actor || index == defender;
+            player.vel = Vec2::ZERO;
+        }
+        let spot = Vec2::new(60.0, 25.0);
+        world.players[actor].pos = spot;
+        world.players[actor].target = spot;
+        world.players[defender].pos = spot + Vec2::new(2.0, 0.0);
+        world.players[defender].target = world.players[defender].pos;
+        world.possession.team = TeamSide::Home;
+        world.start_possession(TeamSide::Home, PossessionKind::Live);
+        world.set_phase(Phase::Live);
+        world.ball.set_held(actor);
+        world.ball.pos = spot;
+        world.ball.z = world.rules.ball_radius_ft;
+        let intent = ActionIntent {
+            actor,
+            kind: ActionKind::Fake(fake),
+            target: Some(defender),
+            from_ft: spot,
+            to_ft: spot,
+            start_time: world.now(),
+            duration: 0.4,
+        };
+        nba_sim_core::resolve::fake::resolve(&mut world, &intent, fake);
+        let moved = (world.players[actor].pos - spot).length();
+        assert!(
+            moved < 1.0e-4,
+            "假动作不得移动支撑脚：{fake:?} 移动了 {moved:.3} 英尺"
+        );
+        assert!(
+            world.players[defender].bait.is_some(),
+            "假动作必须给防守人留下失衡窗口：{fake:?}"
+        );
+    }
+    for protect in [ProtectKind::FaceUp, ProtectKind::Post, ProtectKind::Spin] {
+        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 229);
+        let actor = world.on_court(TeamSide::Home).as_slice()[0];
+        let defender = world.on_court(TeamSide::Away).as_slice()[0];
+        for (index, player) in world.players.iter_mut().enumerate() {
+            player.on_court = index == actor || index == defender;
+            player.vel = Vec2::ZERO;
+        }
+        let spot = Vec2::new(60.0, 25.0);
+        world.players[actor].pos = spot;
+        world.players[actor].target = spot;
+        world.players[defender].pos = spot + Vec2::new(1.8, 0.0);
+        world.players[defender].target = world.players[defender].pos;
+        world.possession.team = TeamSide::Home;
+        world.start_possession(TeamSide::Home, PossessionKind::Live);
+        world.set_phase(Phase::Live);
+        world.ball.set_held(actor);
+        world.ball.pos = spot;
+        world.ball.z = world.rules.ball_radius_ft;
+        let intent = ActionIntent {
+            actor,
+            kind: ActionKind::Protect(protect),
+            target: Some(defender),
+            from_ft: spot,
+            to_ft: spot,
+            start_time: world.now(),
+            duration: 0.4,
+        };
+        nba_sim_core::resolve::protect::resolve(&mut world, &intent, protect);
+        let moved = (world.players[actor].pos - spot).length();
+        assert!(
+            moved < 1.0e-4,
+            "护球不得移动支撑脚：{protect:?} 移动了 {moved:.3} 英尺"
+        );
+        assert!(
+            world.protection.is_some(),
+            "护球必须开出保护窗口：{protect:?}"
+        );
+    }
 }
