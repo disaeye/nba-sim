@@ -308,6 +308,17 @@ pub fn resolve_post(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
             offense_strength * world.rules.capability.post_defense_secondary_gain;
         (offense_pressure - defense_resistance).clamp(-1.5, 1.5)
     });
+    // 背身步法由防守人的站位决定：站定的防守人用上下步，靠底线的用撤步转身，
+    // 其余情况用背身挤打。步法写入事实，落点仍由力量对抗与抽样决定。
+    let planted = defender.is_some_and(|handle| world.players[handle].vel.length() < 3.0);
+    let baseline_side = (pos.y - hoop.y).abs() > 6.0;
+    let kind_name = if planted {
+        "up_and_under"
+    } else if baseline_side {
+        "drop_step"
+    } else {
+        "backdown"
+    };
     let target = hoop
         - direction
             * (5.5 + world.draw(Stream::Aim, actor, purpose::POST_TARGET, 0) * 4.0
@@ -319,7 +330,10 @@ pub fn resolve_post(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     world.possession.last_post_at = Some(world.now());
     world.possession.last_post_actor = Some(actor);
     world.possession.ball_phase = crate::state::BallPhase::Post;
-    world.emit(Fact::PostUp { player: actor });
+    world.emit(Fact::PostUp {
+        player: actor,
+        kind: kind_name,
+    });
     ActionOutcome {
         actor,
         kind: ActionKind::PostUp,

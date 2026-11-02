@@ -596,6 +596,8 @@ pub enum Fact {
     /// 背身单打：持球人进入低位开始背打（本身不产出结果，结果由后续出手给出）。
     PostUp {
         player: usize,
+        /// 本次背身选用的步法名称：撤步转身、上下步、匀手、后仰、挤打。
+        kind: &'static str,
     },
     Shot {
         shot_id: u64,

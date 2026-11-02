@@ -301,8 +301,9 @@ impl World {
                 "distance_ft": distance_ft,
                 "separation_ft": separation_ft,
             }),
-            Fact::PostUp { player } => json!({
+            Fact::PostUp { player, kind } => json!({
                 "player_id": self.player_id(*player),
+                "kind": kind,
             }),
             Fact::Shot {
                 shot_id,
