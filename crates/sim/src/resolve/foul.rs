@@ -237,10 +237,16 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
             after_technical: None,
         });
     } else {
-        world.set_phase(Phase::DeadBall {
-            team: world.players[fouled].team,
-            ready_at: world.now() + world.rules.inbound_setup_seconds as f64,
-        });
+        // 无罚球的犯规同样停表换边（保留球权方为被犯规方）：
+        // 阶段写入走同一个提交入口。
+        world.adjudicate(crate::adjudicate::Adjudication::new(
+            crate::adjudicate::StoppageCause::Foul,
+            crate::adjudicate::RestartPlan::Inbound {
+                team: world.players[fouled].team,
+                spot: None,
+                ready_after: None,
+            },
+        ));
     }
     world.apply_dead_ball_window();
     let follow_up = if booking.free_throws > 0 {

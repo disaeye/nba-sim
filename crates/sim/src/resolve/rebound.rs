@@ -3,7 +3,7 @@
 use glam::Vec2;
 
 use crate::action::{Fact, TeamSide, TurnoverKind};
-use crate::state::{PossessionKind, TargetKind};
+use crate::state::TargetKind;
 use crate::world::{Phase, World};
 
 #[derive(Debug, Clone, Copy)]

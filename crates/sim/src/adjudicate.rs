@@ -69,6 +69,8 @@ pub enum RestartPlan {
     },
     /// 直接开始活球回合。
     Live { team: TeamSide },
+    /// 停表但不结束回合，到点后按当前状态恢复（换人、延迟发球）。
+    Stoppage { team: TeamSide, ready_after: f64 },
     /// 比赛结束。
     GameOver,
 }
@@ -158,6 +160,12 @@ impl World {
             }
             RestartPlan::Live { team } => {
                 self.start_possession(team, PossessionKind::Live);
+            }
+            RestartPlan::Stoppage { team, ready_after } => {
+                self.set_phase(Phase::DeadBall {
+                    team,
+                    ready_at: self.now() + ready_after,
+                });
             }
             RestartPlan::GameOver => {
                 self.set_phase(Phase::Finished);

@@ -305,8 +305,12 @@ def adjust_group(group, weights, metrics, goal):
         w["post_base"] = group.clamp(
             "post_base", damp(w["post_base"], ratio(goal["creation"]["post"], creation["post"]))
         )
-        w["cut_base"] = group.clamp(
-            "cut_base", damp(w["cut_base"], ratio(goal["creation"]["cut"], creation["cut"]))
+        w["cut_tendency"] = group.clamp(
+            "cut_tendency",
+            damp(
+                w["cut_tendency"],
+                ratio(goal["creation"]["cut"], creation["cut"]),
+            ),
         )
     for key in group.keys:
         w[key] = group.clamp(key, w[key])

@@ -6,7 +6,6 @@ use crate::action::{
     ActionIntent, ActionKind, ActionOutcome, Completion, Fact, StateDelta, TurnoverKind,
 };
 use crate::draw::{purpose, Stream};
-use crate::state::PossessionKind;
 use crate::world::World;
 
 pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {

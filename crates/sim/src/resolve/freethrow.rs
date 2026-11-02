@@ -206,10 +206,13 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
                     foul_id,
                 ),
                 FreeThrowFollowUp::DeadBall { team } => {
-                    world.set_phase(Phase::DeadBall {
-                        team,
-                        ready_at: world.now() + 1.2,
-                    });
+                    world.adjudicate(crate::adjudicate::Adjudication::new(
+                        crate::adjudicate::StoppageCause::FreeThrow,
+                        crate::adjudicate::RestartPlan::Stoppage {
+                            team,
+                            ready_after: 1.2,
+                        },
+                    ));
                     world.ball.release(BallState::Loose {
                         pos: world.hoop_for(team),
                         vel: Vec2::ZERO,

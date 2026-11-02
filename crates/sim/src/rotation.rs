@@ -317,10 +317,13 @@ fn enforce_disqualification(world: &mut World) {
         nba_domain::league::LeagueId::Nba => team,
         nba_domain::league::LeagueId::Fiba => world.possession.team,
     };
-    world.set_phase(Phase::DeadBall {
-        team,
-        ready_at: world.now() + world.rules.inbound_setup_seconds as f64,
-    });
+    world.adjudicate(crate::adjudicate::Adjudication::new(
+        crate::adjudicate::StoppageCause::Foul,
+        crate::adjudicate::RestartPlan::Stoppage {
+            team,
+            ready_after: f64::from(world.rules.inbound_setup_seconds),
+        },
+    ));
 }
 
 pub fn note_intents(world: &mut World) {
