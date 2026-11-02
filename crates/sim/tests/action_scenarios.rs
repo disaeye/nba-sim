@@ -996,3 +996,53 @@ fn a_possession_change_sends_every_defender_back() {
     }
     assert!(checked > 0, "必须观测到球权转换后的防守目标");
 }
+
+/// 防守滑步：对位防守人必须真的缩小与持球人的距离。
+#[test]
+fn the_on_ball_defender_closes_the_gap() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 197);
+    let carrier = world.on_court(TeamSide::Home).as_slice()[0];
+    let guard = world.on_court(TeamSide::Away).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == carrier || index == guard;
+        player.vel = Vec2::ZERO;
+    }
+    let hoop = world.hoop_for(TeamSide::Home);
+    let spot = hoop + Vec2::new(-16.0, 6.0);
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(carrier);
+    world.players[carrier].pos = spot;
+    world.players[carrier].target = spot;
+    world.ball.pos = spot;
+    world.ball.z = world.rules.ball_radius_ft;
+    // 防守人离持球人十二英尺：他必须滑步贴上来。
+    world.players[guard].pos = spot + Vec2::new(-12.0, 0.0);
+    world.players[guard].target = world.players[guard].pos;
+    world.players[guard].vel = Vec2::ZERO;
+    nba_sim_core::defense::apply_defense_targets(&mut world);
+    let before = (world.players[guard].pos - world.players[carrier].pos).length();
+    for _ in 0..40 {
+        world.players[carrier].pos = spot;
+        world.players[carrier].target = spot;
+        world.players[carrier].vel = Vec2::ZERO;
+        world.ball.pos = spot;
+        world.ball.z = world.rules.ball_radius_ft;
+        nba_sim_core::defense::apply_defense_targets(&mut world);
+        nba_sim_core::formation::move_toward_targets(&mut world);
+        nba_sim_core::motion::advance_movement(&mut world, TICK_SECONDS);
+        world.clock.advance_simulation_time(TICK_SECONDS);
+        world.clock.advance_tick();
+    }
+    let after = (world.players[guard].pos - world.players[carrier].pos).length();
+    assert!(
+        after < before - 2.0,
+        "对位防守人必须滑步缩小距离：{before:.2} → {after:.2}"
+    );
+    assert!(
+        after >= nba_sim_core::assignment::pressure_separation(&world) - 0.5,
+        "滑步不得贴到身位以内：{after:.2}"
+    );
+}
