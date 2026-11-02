@@ -76,6 +76,18 @@ pub enum RestartPlan {
         resume_at: f64,
         next_stage: crate::state::MatchStage,
     },
+    /// 进入罚球程序：球交给主罚人，阶段切到 FreeThrows。
+    FreeThrows {
+        shooter: usize,
+        total: u8,
+        remaining: u8,
+        made: u8,
+        and_one: bool,
+        retain_possession: bool,
+        foul_id: u64,
+        technical_retained_team: Option<TeamSide>,
+        after_technical: Option<crate::resolve::freethrow::FreeThrowFollowUp>,
+    },
     /// 比赛结束。
     GameOver,
 }
@@ -181,6 +193,31 @@ impl World {
                     resume_at,
                     next_stage,
                 });
+            }
+            RestartPlan::FreeThrows {
+                shooter,
+                total,
+                remaining,
+                made,
+                and_one,
+                retain_possession,
+                foul_id,
+                technical_retained_team,
+                after_technical,
+            } => {
+                self.set_phase(Phase::FreeThrows {
+                    shooter,
+                    total,
+                    remaining,
+                    made,
+                    next_at: self.now() + f64::from(self.rules.free_throw_interval_seconds),
+                    and_one,
+                    retain_possession,
+                    foul_id,
+                    technical_retained_team,
+                    after_technical,
+                });
+                self.set_ball_held(shooter);
             }
             RestartPlan::GameOver => {
                 self.cancel_actions("game_end");

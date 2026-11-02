@@ -176,21 +176,22 @@ pub fn apply_shooting_foul(
         made,
     );
     world.pending_rebound = None;
-    world.set_ball_held(shooter);
     // 新罚球程序：清空上一轮的禁区记录。
     world.free_throw_lane = Some(crate::world::FreeThrowLane::default());
-    world.set_phase(Phase::FreeThrows {
-        shooter,
-        total: booking.free_throws,
-        remaining: booking.free_throws,
-        made: 0,
-        next_at: world.now() + world.rules.free_throw_interval_seconds as f64,
-        and_one: made,
-        retain_possession: false,
-        foul_id: booking.foul_id,
-        technical_retained_team: None,
-        after_technical: None,
-    });
+    world.adjudicate(crate::adjudicate::Adjudication::new(
+        crate::adjudicate::StoppageCause::Foul,
+        crate::adjudicate::RestartPlan::FreeThrows {
+            shooter,
+            total: booking.free_throws,
+            remaining: booking.free_throws,
+            made: 0,
+            and_one: made,
+            retain_possession: false,
+            foul_id: booking.foul_id,
+            technical_retained_team: None,
+            after_technical: None,
+        },
+    ));
     world.apply_dead_ball_window();
     if booking.team_technical_id.is_some() {
         start_roster_technical(
@@ -225,19 +226,20 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
     world.cancel_actions("foul");
     if booking.free_throws > 0 {
         world.pending_rebound = None;
-        world.set_ball_held(fouled);
-        world.set_phase(Phase::FreeThrows {
-            shooter: fouled,
-            total: booking.free_throws,
-            remaining: booking.free_throws,
-            made: 0,
-            next_at: world.now() + world.rules.free_throw_interval_seconds as f64,
-            and_one: false,
-            retain_possession: away_from_play,
-            foul_id: booking.foul_id,
-            technical_retained_team: None,
-            after_technical: None,
-        });
+        world.adjudicate(crate::adjudicate::Adjudication::new(
+            crate::adjudicate::StoppageCause::Foul,
+            crate::adjudicate::RestartPlan::FreeThrows {
+                shooter: fouled,
+                total: booking.free_throws,
+                remaining: booking.free_throws,
+                made: 0,
+                and_one: false,
+                retain_possession: away_from_play,
+                foul_id: booking.foul_id,
+                technical_retained_team: None,
+                after_technical: None,
+            },
+        ));
     } else {
         // 无罚球的犯规同样停表换边（保留球权方为被犯规方）：
         // 阶段写入走同一个提交入口，发球位置取中断点的就近边线。

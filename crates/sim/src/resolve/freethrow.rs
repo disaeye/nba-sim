@@ -259,19 +259,20 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
                 // 防守方提前进区：重罚一次。
                 world.emit(Fact::FreeThrowLaneViolation { side: "defense" });
                 world.free_throw_lane = Some(crate::world::FreeThrowLane::default());
-                world.set_phase(Phase::FreeThrows {
-                    shooter: pending.shooter,
-                    total: meta.total,
-                    remaining: 1,
-                    made: made_count,
-                    next_at: world.now() + world.rules.free_throw_interval_seconds as f64,
-                    and_one: meta.and_one,
-                    retain_possession: meta.retain_possession,
-                    foul_id: meta.foul_id,
-                    technical_retained_team: meta.technical_retained_team,
-                    after_technical: None,
-                });
-                world.set_ball_held(pending.shooter);
+                world.adjudicate(crate::adjudicate::Adjudication::new(
+                    crate::adjudicate::StoppageCause::FreeThrow,
+                    crate::adjudicate::RestartPlan::FreeThrows {
+                        shooter: pending.shooter,
+                        total: meta.total,
+                        remaining: 1,
+                        made: made_count,
+                        and_one: meta.and_one,
+                        retain_possession: meta.retain_possession,
+                        foul_id: meta.foul_id,
+                        technical_retained_team: meta.technical_retained_team,
+                        after_technical: None,
+                    },
+                ));
                 return;
             }
             let rim_contact = matches!(result, ShotResult::Missed { rim_contact: true });
@@ -317,17 +318,18 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
         });
         return;
     }
-    world.set_phase(Phase::FreeThrows {
-        shooter: pending.shooter,
-        total: meta.total,
-        remaining: meta.remaining - 1,
-        made: made_count,
-        next_at: world.now() + world.rules.free_throw_interval_seconds as f64,
-        and_one: meta.and_one,
-        retain_possession: meta.retain_possession,
-        foul_id: meta.foul_id,
-        technical_retained_team: meta.technical_retained_team,
-        after_technical: meta.after_technical,
-    });
-    world.set_ball_held(pending.shooter);
+    world.adjudicate(crate::adjudicate::Adjudication::new(
+        crate::adjudicate::StoppageCause::FreeThrow,
+        crate::adjudicate::RestartPlan::FreeThrows {
+            shooter: pending.shooter,
+            total: meta.total,
+            remaining: meta.remaining - 1,
+            made: made_count,
+            and_one: meta.and_one,
+            retain_possession: meta.retain_possession,
+            foul_id: meta.foul_id,
+            technical_retained_team: meta.technical_retained_team,
+            after_technical: meta.after_technical,
+        },
+    ));
 }
