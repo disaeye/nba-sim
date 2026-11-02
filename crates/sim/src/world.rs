@@ -198,6 +198,10 @@ pub struct World {
     pub fouls: [TeamFouls; 2],
     pub rotation: RotationState,
     pub timeouts: [crate::timeouts::TimeoutBudget; 2],
+    /// 最近一条可复核的裁决：发球类裁定写入它。
+    pub last_ruling: Option<crate::challenge::Ruling>,
+    /// 两队各自剩余的教练挑战额度。
+    pub challenges_left: [u8; 2],
     /// 最近一次得分方（队下标，0 主 1 客）与这一方的连续得分。
     pub last_scoring: Option<usize>,
     pub scoring_run: u32,
@@ -939,6 +943,11 @@ impl World {
             timeouts: [
                 crate::timeouts::TimeoutBudget::new(&rules_capture),
                 crate::timeouts::TimeoutBudget::new(&rules_capture),
+            ],
+            last_ruling: None,
+            challenges_left: [
+                rules_capture.league.challenges_per_game.min(u8::MAX as u32) as u8,
+                rules_capture.league.challenges_per_game.min(u8::MAX as u32) as u8,
             ],
             last_scoring: None,
             scoring_run: 0,

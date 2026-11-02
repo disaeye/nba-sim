@@ -342,6 +342,8 @@ fn out_of_bounds(world: &mut World, spot: Vec2) {
         }
     }
     // 停表后果统一走裁决提交入口：结束回合、记录发球地点与恢复方式。
+    // 这条裁定可复核：丢球一方在复核窗口内可以申请教练挑战。
+    world.record_ruling(recipient, "out_of_bounds");
     world.adjudicate(crate::adjudicate::Adjudication::violation(
         crate::adjudicate::ViolationKind::OutOfBounds,
         crate::adjudicate::RestartPlan::Inbound {
@@ -550,7 +552,15 @@ fn try_control_loose(world: &mut World) {
         } else if is_offense {
             base_reach - penalty
         } else {
-            base_reach + bonus
+            // 防守卡位加成来自 defensive_rebound 与 strength：这条能力曲线
+            // 之前没有任何消费者，防守篮板因此对属性不敏感。
+            let boxout = nba_domain::capability::effective_defensive_boxout_bonus(
+                &world.rules,
+                &player.data.attributes,
+            );
+            base_reach
+                + bonus
+                + boxout * world.params.policy.w("rebound_boxout_weight")
         };
         let vertical = (world.ball.z - 4.0).max(0.0);
         let distance = (player.pos - world.ball.pos).length().hypot(vertical);

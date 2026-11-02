@@ -244,6 +244,9 @@ pub fn pass_completion_probability(
     let distance_fail = (distance / 45.0).powi(2) * 0.10;
     let catch_factor = (1.0 - distance_fail - 0.03 * (1.0 - touch)).clamp(0.60, 0.985);
     let mut probability = lane_factor * catch_factor;
+    // 传球判断直接压低被断概率：读出协防、选对出球点的人传球更安全。
+    let iq = passer.data.attributes.decision_iq.clamp(0.0, 1.0);
+    probability *= 1.0 - world.params.policy.b("pass_iq_penalty") * (1.0 - iq);
     // 被包夹时出球更难：两张手就在球前面，传球线路被堵住。
     // 护球姿态能把一部分劣势补回来：球护在身体一侧，出手点仍然存在。
     if world.trapped(from) {

@@ -62,7 +62,10 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
         DefenderRoute::Over
     };
     let strength_edge = strength - resistance;
-    let displacement_ft = strength_edge.max(0.0)
+    // 掩护的身体接触本身就会把防守人顶开一点，力量差在它上面叠加：
+    // 弱掩护人也会把人撞歪，强掩护人把差距拉开。
+    let displacement_ft = (world.params.policy.w("screen_base_displacement_ft")
+        + strength_edge.max(0.0))
         * world.params.policy.w("screen_push_displacement_gain_ft")
         * contact_window;
     let separation = (world.players[screener].pos - world.players[defender].pos)

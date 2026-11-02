@@ -810,6 +810,14 @@ pub enum Fact {
         shot_id: u64,
         time: f64,
     },
+    /// 复核结论：教练挑战的结果与原判是否保留。
+    Review {
+        team: TeamSide,
+        call: &'static str,
+        overturned: bool,
+        cost_timeout: bool,
+        time: f64,
+    },
     PlacementApplied {
         player: usize,
         reason: &'static str,
@@ -863,6 +871,7 @@ impl Fact {
             Self::PlayWindowEnded { .. } => "PlayWindowEnded",
             Self::BallContact { kind, .. } => kind,
             Self::Goaltending { .. } => "Goaltending",
+            Self::Review { .. } => "Review",
             Self::PlacementApplied { .. } => "PlacementApplied",
             Self::GameEnd => "GameEnd",
         }

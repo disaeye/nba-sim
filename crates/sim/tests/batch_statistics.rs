@@ -233,22 +233,22 @@ fn defensive_skill_changes_blocks_and_steals() {
     let rules = common::nba_short();
     let mut weak = MatchSetup::builtin(rules.clone());
     for player in weak.home.players.iter_mut() {
-        player.attributes.block = 0.1;
-        player.attributes.steal = 0.1;
+        player.attributes.block = 0.05;
+        player.attributes.steal = 0.05;
     }
     let mut strong = MatchSetup::builtin(rules.clone());
     for player in strong.home.players.iter_mut() {
-        player.attributes.block = 0.95;
-        player.attributes.steal = 0.95;
+        player.attributes.block = 0.99;
+        player.attributes.steal = 0.99;
     }
     let mut weak_blocks = 0u32;
     let mut strong_blocks = 0u32;
     let mut weak_steals = 0u32;
     let mut strong_steals = 0u32;
-    // 十八个种子两种防守强度，四个线程分摊：封盖是低频率事件，样本小了
-    // 分不出能力差异。
-    let weak_lines = run_skill_lines(&weak, &base, 31u64..49);
-    let strong_lines = run_skill_lines(&strong, &base, 31u64..49);
+    // 四十个种子两种防守强度，四个线程分摊：封盖与抢断都是低频率事件，
+    // 样本小了分不出能力差异。
+    let weak_lines = run_skill_lines(&weak, &base, 31u64..71);
+    let strong_lines = run_skill_lines(&strong, &base, 31u64..71);
     for line in weak_lines {
         weak_blocks += line.blocks;
         weak_steals += line.steals;

@@ -68,6 +68,7 @@ impl Fact {
             Self::PlayWindowEnded { .. } => "PLAY_WINDOW_ENDED",
             Self::BallContact { .. } => "BALL_CONTACT",
             Self::Goaltending { .. } => "GOALTENDING",
+            Self::Review { .. } => "REVIEW",
             Self::PlacementApplied { .. } => "PLACEMENT_APPLIED",
             Self::GameEnd => "GAME_END",
         }
@@ -551,6 +552,19 @@ impl World {
                 "defender_id": self.player_id(*defender),
                 "shooter_id": self.player_id(*shooter),
                 "shot_id": shot_id,
+                "time": time,
+            }),
+            Fact::Review {
+                team,
+                call,
+                overturned,
+                cost_timeout,
+                time,
+            } => json!({
+                "team": team,
+                "call": call,
+                "overturned": overturned,
+                "cost_timeout": cost_timeout,
                 "time": time,
             }),
         }

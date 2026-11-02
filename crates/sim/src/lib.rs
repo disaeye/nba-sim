@@ -9,6 +9,7 @@ pub mod assignment;
 pub mod ball;
 pub mod body;
 pub mod boxscore;
+pub mod challenge;
 pub mod clock;
 pub mod defense;
 pub mod draw;

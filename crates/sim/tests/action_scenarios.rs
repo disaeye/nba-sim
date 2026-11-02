@@ -139,6 +139,10 @@ fn moving_screen_is_called_as_an_offensive_foul() {
         world.players[screener].target = spot + Vec2::new(6.0, 1.0);
         world.players[screener].vel = Vec2::new(6.0, 0.0);
         world.players[offense].pos = spot;
+        // 每次掩护都把防守人放回起始位置：掩护接触会把人顶开，
+        // 不复位的现场第二拍就已经脱离了接触。
+        world.players[defender].pos = spot + Vec2::new(0.8, 0.6);
+        world.players[defender].target = world.players[defender].pos;
         world.set_phase(Phase::Live);
         world.screen_defender = Some(defender);
         world.clock.advance_tick();

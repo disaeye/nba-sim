@@ -62,6 +62,12 @@ pub struct LeagueProfile {
     /// 赛前名单上限（NBA 15，FIBA 12）。
     #[serde(default = "default_roster_limit")]
     pub roster_limit: u32,
+    /// 每队每场的教练挑战额度（NBA 1，无挑战的档案为 0）。
+    #[serde(default = "default_challenges_per_game")]
+    pub challenges_per_game: u32,
+    /// 复核窗口：本节剩余时间不超过该值时才能申请复核。
+    #[serde(default = "default_challenge_final_seconds")]
+    pub challenge_final_seconds: f32,
     /// 投篮犯规基础罚球数。
     pub shooting_foul_free_throws: u8,
     /// 球队犯规进入罚则后的罚球数。
@@ -115,6 +121,14 @@ fn default_closely_guarded_seconds() -> f32 {
 
 fn default_roster_limit() -> u32 {
     15
+}
+
+fn default_challenges_per_game() -> u32 {
+    1
+}
+
+fn default_challenge_final_seconds() -> f32 {
+    120.0
 }
 
 fn default_closely_guarded_distance_ft() -> f32 {
