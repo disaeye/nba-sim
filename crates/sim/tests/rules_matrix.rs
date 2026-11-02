@@ -289,3 +289,4 @@ fn a_pass_nobody_controls_becomes_loose() {
     }
     assert!(loose, "无人接住的传球必须成为松球");
 }
+
