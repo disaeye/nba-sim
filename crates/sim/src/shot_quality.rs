@@ -730,7 +730,9 @@ pub fn evaluate(
         .attributes
         .stamina
         .clamp(0.0, 1.0);
-    let fatigue_scale = 1.5 - endurance;
+    // 均值保持不变、区间拉开：平均耐力下系数仍为 1，低耐力的人明显放大、
+    // 高耐力的人明显缩小，否则轮换把在场能量拉平之后就看不出差别。
+    let fatigue_scale = 1.0 + 1.2 * (0.5 - endurance);
     let p_make = (p_make
         * (1.0 - policy.w("shot_fatigue_penalty") * (1.0 - fatigue) * fatigue_scale))
         .clamp(0.0, 1.0);

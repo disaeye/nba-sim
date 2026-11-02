@@ -103,7 +103,7 @@
     "moving_screen_physicality_base": 0.5,
     "shooting_foul_rate_two_point": 0.205,
     "shooting_foul_rate_three_point": 0.045,
-    "and_one_rate": 0.24,
+    "and_one_rate": 0.225,
     "block_base": 0.25,
     "block_range_factor_three": 0.15,
     "block_foul_rate": 0.02,
