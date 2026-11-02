@@ -112,6 +112,26 @@ pub fn request(world: &mut World, team: TeamSide) -> bool {
     let resume_phase = ResumePhase::capture(previous_phase);
     let resume_at = now + duration;
     world.set_timeout_phase(team, resume_at, resume_phase, now, previous_phase);
+    // 末段暂停可以选择前场发球：把发球点移到前场边线的标记处。
+    if world
+        .rules
+        .league
+        .in_final_window(period, world.clock.game_clock())
+    {
+        let mid = world.rules.court.width_ft * 0.5;
+        let attacking_right = world.attacking_right(team);
+        let offset = world.params.policy.g("frontcourt_inbound_offset_ft");
+        let radius = world.rules.player_radius_ft;
+        let x = if attacking_right {
+            mid + offset
+        } else {
+            mid - offset
+        };
+        world.inbound_spot = Some(glam::Vec2::new(
+            x.clamp(radius, world.rules.court.width_ft - radius),
+            radius,
+        ));
+    }
     world.emit(Fact::Timeout {
         team,
         remaining: [world.timeouts[0].remaining, world.timeouts[1].remaining],

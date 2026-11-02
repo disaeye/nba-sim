@@ -421,3 +421,44 @@ fn a_made_basket_inbounds_from_the_conceding_baseline() {
         "底线发球点在中点附近：{target:?}"
     );
 }
+
+#[test]
+fn a_late_timeout_may_inbound_in_the_frontcourt() {
+    // 短节次：三步之内就能打到第四节。
+    let mut rules = GameRules::default();
+    rules.league.period_duration_seconds = 8.0;
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(rules), params, 353);
+    let mut guard = 0;
+    while guard < 200_000 {
+        world.step(TICK_SECONDS);
+        guard += 1;
+        if world.clock.period() >= 4
+            && matches!(world.phase(), Phase::Live)
+            && world.holder().is_some()
+        {
+            break;
+        }
+    }
+    assert!(
+        world.clock.period() >= 4,
+        "必须能推进到第四节，实际第 {} 节",
+        world.clock.period()
+    );
+    // 进入末段窗口。
+    world.clock.set_game_clock(60.0);
+    let team = world.possession.team;
+    assert!(
+        nba_sim_core::timeouts::request(&mut world, team),
+        "末段持球方必须可以请求暂停"
+    );
+    let spot = world.inbound_spot.expect("末段暂停必须记录前场发球点");
+    let mid = world.rules.court.width_ft * 0.5;
+    let attacking_right = world.attacking_right(team);
+    let in_frontcourt = if attacking_right {
+        spot.x > mid
+    } else {
+        spot.x < mid
+    };
+    assert!(in_frontcourt, "末段暂停的发球点必须在前场：{spot:?}");
+}
