@@ -67,7 +67,7 @@ fn hard_inhibition_removes_the_family_from_the_candidate_set() {
     let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 13);
     for _ in 0..40_000 {
         world.step(TICK_SECONDS);
-        if matches!(world.phase, Phase::Live) && world.holder().is_some() {
+        if matches!(world.phase(), Phase::Live) && world.holder().is_some() {
             break;
         }
     }
@@ -171,7 +171,7 @@ fn decisions_inside_a_hard_inhibition_window_avoid_the_blocked_family() {
                 "family {family} was selected while hard-inhibited by {blocked:?}"
             );
         }
-        if matches!(world.phase, Phase::Finished) {
+        if matches!(world.phase(), Phase::Finished) {
             break;
         }
     }
@@ -188,7 +188,7 @@ fn play_prior_only_touches_the_tactical_term() {
     let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 21);
     for _ in 0..40_000 {
         world.step(TICK_SECONDS);
-        if matches!(world.phase, Phase::Live) && world.holder().is_some() {
+        if matches!(world.phase(), Phase::Live) && world.holder().is_some() {
             break;
         }
     }

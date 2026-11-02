@@ -29,11 +29,11 @@ fn first_decisions_show_where_actions_start() {
                 (pos - hoop).length(),
                 chosen.kind,
                 chosen.to_ft,
-                world.phase
+                world.phase()
             );
             seen += 1;
         }
-        if matches!(world.phase, Phase::Live) && world.holder().is_none() {
+        if matches!(world.phase(), Phase::Live) && world.holder().is_none() {
             // no-op
         }
     }

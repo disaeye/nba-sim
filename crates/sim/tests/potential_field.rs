@@ -21,7 +21,7 @@ fn world(seed: u64) -> World {
 fn live_holder(world: &mut World) -> usize {
     for _ in 0..40_000 {
         world.step(TICK_SECONDS);
-        if matches!(world.phase, Phase::Live) && world.holder().is_some() {
+        if matches!(world.phase(), Phase::Live) && world.holder().is_some() {
             let possession = world.possession.id;
             for _ in 0..24 {
                 world.step(TICK_SECONDS);
@@ -212,7 +212,7 @@ fn matchup_holds_while_no_screen_or_beat_happens() {
     let baseline = world.possession.matchup;
     let possession = world.possession.id;
     let mut checked = 0;
-    for _ in 0..200 {
+    for tick in 0..200 {
         world.step(TICK_SECONDS);
         if world.possession.id != possession {
             break;
@@ -232,7 +232,14 @@ fn matchup_holds_while_no_screen_or_beat_happens() {
         }
         assert_eq!(
             world.possession.matchup, baseline,
-            "matchup changed without a screen or a beat"
+            "matchup changed without a screen or a beat at tick {tick}; carrier={carrier} holder={:?} now={} baseline={baseline:?} matchup={:?} last_drive={:?} last_screen={:?} pairing_changed={} defender_distances={:?}",
+            world.holder(),
+            world.now(),
+            world.possession.matchup,
+            world.possession.last_drive_at,
+            world.possession.last_screen,
+            world.possession.pairing_changed_at,
+            world.on_court(world.possession.team.other()).as_slice().iter().map(|defender| (defender, world.possession.matchup.iter().position(|man| man == defender), world.players[*defender].pos, world.holder().map(|holder| (world.players[*defender].pos - world.players[holder].pos).length()))).collect::<Vec<_>>()
         );
         checked += 1;
     }

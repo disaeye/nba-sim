@@ -1,12 +1,20 @@
 //! 按回合回放：帧流确定，且只包含目标回合。
 
+use std::sync::OnceLock;
+
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::{replay_possession, run_game};
+use nba_sim_core::{replay_possession, run_game, GameReport};
+
+/// 三个测试都用种子 7：完整比赛报告只算一次；每次回放仍然
+/// 是从头逐 tick 重算的真实路径，不做任何缓存。
+fn seed_seven() -> &'static GameReport {
+    static REPORT: OnceLock<GameReport> = OnceLock::new();
+    REPORT.get_or_init(|| run_game(7, &workspace_calibration_dir()))
+}
 
 #[test]
 fn replaying_a_possession_twice_yields_identical_frames() {
-    let calibration = workspace_calibration_dir();
-    let report = run_game(7, &calibration);
+    let report = seed_seven();
     let target = report
         .possessions
         .iter()
@@ -14,8 +22,17 @@ fn replaying_a_possession_twice_yields_identical_frames() {
         .expect("a game must contain a scoring possession")
         .id;
 
-    let first = replay_possession(7, &calibration, target).expect("first replay");
-    let second = replay_possession(7, &calibration, target).expect("second replay");
+    // 两次回放并发执行，各自从头重放目标回合。
+    let (first, second) = std::thread::scope(|scope| {
+        let left = scope
+            .spawn(|| replay_possession(7, &workspace_calibration_dir(), target).expect("replay"));
+        let right = scope
+            .spawn(|| replay_possession(7, &workspace_calibration_dir(), target).expect("replay"));
+        (
+            left.join().expect("replay thread must not panic"),
+            right.join().expect("replay thread must not panic"),
+        )
+    });
 
     assert!(!first.frames.is_empty(), "回放必须产出帧");
     assert_eq!(
@@ -33,25 +50,30 @@ fn replaying_a_possession_twice_yields_identical_frames() {
 
 #[test]
 fn different_possessions_produce_different_frame_streams() {
-    let calibration = workspace_calibration_dir();
-    let report = run_game(7, &calibration);
+    let report = seed_seven();
     let mut scoring = report.possessions.iter().filter(|record| record.points > 0);
-    let first = scoring.next().expect("first scoring possession").id;
-    let second = scoring.next().expect("second scoring possession").id;
+    let first_id = scoring.next().expect("first scoring possession").id;
+    let second_id = scoring.next().expect("second scoring possession").id;
 
-    let first_frames = replay_possession(7, &calibration, first).expect("first replay");
-    let second_frames = replay_possession(7, &calibration, second).expect("second replay");
-    assert_ne!(
-        first_frames.ndjson(),
-        second_frames.ndjson(),
-        "不同回合的帧流不应相同"
-    );
+    let (first, second) = std::thread::scope(|scope| {
+        let left = scope.spawn(|| {
+            replay_possession(7, &workspace_calibration_dir(), first_id).expect("replay")
+        });
+        let right = scope.spawn(|| {
+            replay_possession(7, &workspace_calibration_dir(), second_id).expect("replay")
+        });
+        (
+            left.join().expect("replay thread must not panic"),
+            right.join().expect("replay thread must not panic"),
+        )
+    });
+    assert_ne!(first.ndjson(), second.ndjson(), "不同回合的帧流不应相同");
 }
 
 #[test]
 fn replay_rejects_an_unknown_possession() {
-    let calibration = workspace_calibration_dir();
-    let error = replay_possession(7, &calibration, u64::MAX).expect_err("未知回合必须报错");
+    let error =
+        replay_possession(7, &workspace_calibration_dir(), u64::MAX).expect_err("未知回合必须报错");
     assert!(
         error.contains("no possession"),
         "错误信息应指出缺失的回合：{error}"

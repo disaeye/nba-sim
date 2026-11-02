@@ -18,20 +18,27 @@ fn world(seed: u64) -> World {
     World::new(MatchSetup::builtin(GameRules::default()), params, seed)
 }
 
-/// 推进到末节的一次活球进攻。
+/// 推进到首个活球回合后直接把两钟设定到末节：末段策略只依赖注入的时钟与比分。
 fn fourth_quarter_live(world: &mut World) -> usize {
-    for _ in 0..400_000 {
+    for _ in 0..40_000 {
         world.step(TICK_SECONDS);
-        if world.clock.period >= 4
-            && matches!(world.phase, Phase::Live)
+        if matches!(world.phase(), Phase::Live)
             && world.possession.kind == PossessionKind::Live
+            && world.holder().is_some()
         {
-            if let Some(handle) = world.holder() {
-                return handle;
-            }
+            break;
         }
     }
-    panic!("no fourth-quarter live possession");
+    let carrier = world
+        .holder()
+        .expect("no fourth-quarter live possession");
+    let rules = nba_domain::GameRules::default();
+    world.clock.set_regulation_clock(
+        4,
+        f64::from(rules.league.period_duration_seconds),
+        world.clock.shot_clock(),
+    );
+    carrier
 }
 
 fn set_score(world: &mut World, team: TeamSide, diff: i32) {
@@ -68,12 +75,14 @@ fn leverage_is_continuous_across_the_period_boundary() {
     let carrier = fourth_quarter_live(&mut world);
     let team = world.players[carrier].team;
     set_score(&mut world, team, -6);
-    // 第三节末与第四节初的同一种处境：τ 与 γ 必须给出同一个量级。
-    world.clock.period = 3;
-    world.clock.game_clock = 1.0;
+    // 第三节末与第四节初都固定为剩余 720 秒的处境。
+    world
+        .clock
+        .set_regulation_clock(3, 360.0, world.clock.shot_clock());
     let third = leverage(&world, -6, remaining_seconds(&world));
-    world.clock.period = 4;
-    world.clock.game_clock = 720.0;
+    world
+        .clock
+        .set_regulation_clock(4, 720.0, world.clock.shot_clock());
     let fourth = leverage(&world, -6, remaining_seconds(&world));
     assert!(
         (third.variance_appetite - fourth.variance_appetite).abs() < 0.2,
@@ -128,14 +137,14 @@ fn a_trailing_team_late_prefers_three_point_attempts() {
     let carrier = fourth_quarter_live(&mut world);
     let team = world.players[carrier].team;
     set_score(&mut world, team, -3);
-    world.clock.game_clock = 7.0;
-    world.clock.shot_clock = 6.0;
+    world.clock.set_game_clock(7.0);
+    world.clock.set_shot_clock(6.0);
     place_at_arc(&mut world, carrier, team);
     clear_screen_read(&mut world);
     let mut threes = 0;
     let mut twos = 0;
     for _ in 0..400 {
-        world.clock.tick += 1;
+        world.clock.advance_tick();
         let decision = nba_sim_core::policy::choose_action(&mut world);
         let intent = decision.intent;
         if let ActionKind::Shoot(_) = intent.kind {
@@ -147,7 +156,8 @@ fn a_trailing_team_late_prefers_three_point_attempts() {
             }
         }
     }
-    assert!(threes > 0, "the trailing team never attempted a three");    assert!(
+    assert!(threes > 0, "the trailing team never attempted a three");
+    assert!(
         threes > twos,
         "down three late the shot mix did not lean to threes: {threes} threes vs {twos} twos"
     );
@@ -160,13 +170,13 @@ fn a_leading_team_late_shoots_less_than_a_trailing_one() {
         let carrier = fourth_quarter_live(&mut world);
         let team = world.players[carrier].team;
         set_score(&mut world, team, diff);
-        world.clock.game_clock = 26.0;
-        world.clock.shot_clock = 20.0;
+        world.clock.set_game_clock(26.0);
+        world.clock.set_shot_clock(20.0);
         place_at_arc(&mut world, carrier, team);
         clear_screen_read(&mut world);
         let mut shots = 0;
         for _ in 0..400 {
-            world.clock.tick += 1;
+            world.clock.advance_tick();
             let decision = nba_sim_core::policy::choose_action(&mut world);
             if matches!(decision.intent.kind, ActionKind::Shoot(_)) {
                 shots += 1;
@@ -188,7 +198,9 @@ fn trailing_team_commits_an_intentional_foul_when_down_four_late() {
     let carrier = fourth_quarter_live(&mut world);
     let team = world.players[carrier].team;
     set_score(&mut world, team, 4);
-    world.clock.game_clock = 26.0;
+    world.clock.set_game_clock(26.0);
+    // 对手握有完整投篮计时，停下表是防守方唯一能抢回球权的办法。
+    world.clock.set_shot_clock(20.0);
     let plan = intentional_foul(&world);
     assert!(
         plan.is_some(),
@@ -196,7 +208,10 @@ fn trailing_team_commits_an_intentional_foul_when_down_four_late() {
     );
     let plan = plan.expect("foul plan");
     assert_eq!(world.players[plan.fouler].team, team.other());
-    assert_eq!(plan.target, carrier, "the holder is the only eligible target here");
+    assert_eq!(
+        plan.target, carrier,
+        "the holder is the only eligible target here"
+    );
 }
 
 #[test]
@@ -205,8 +220,9 @@ fn a_normal_possession_never_triggers_an_intentional_foul() {
     let carrier = fourth_quarter_live(&mut world);
     let team = world.players[carrier].team;
     set_score(&mut world, team, 0);
-    world.clock.period = 2;
-    world.clock.game_clock = 400.0;
+    world
+        .clock
+        .set_regulation_clock(2, 400.0, world.clock.shot_clock());
     assert!(
         intentional_foul(&world).is_none(),
         "a mid-game possession was intentionally fouled"
@@ -223,7 +239,7 @@ fn a_trailing_defense_helps_harder_than_a_leading_one() {
     let rim = hoop + (world.players[carrier].pos - hoop).normalize_or_zero() * 3.0;
     world.players[carrier].pos = rim;
     world.players[carrier].target = rim;
-    world.clock.game_clock = 120.0;
+    world.clock.set_game_clock(120.0);
 
     // 最靠内的协防目标点：越靠近篮筐，说明协防缩得越很。
     let nearest_help = |world: &World| {
@@ -253,7 +269,7 @@ fn a_poor_free_throw_shooter_is_fouled_more_often_than_a_good_one() {
         let team = world.players[carrier].team;
         // 进攻方领先两分、剩一分钟：防守方正在考虑要不要赌一把。
         set_score(&mut world, team, 2);
-        world.clock.game_clock = 60.0;
+        world.clock.set_game_clock(60.0);
         world.players[carrier].data.attributes.free_throw = free_throw;
         // 砍人只能在 bonus 内：没进 bonus 的犯规不给罚球，砍了也换不回球权。
         let defense = World::team_index(team.other());

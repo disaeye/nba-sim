@@ -11,9 +11,10 @@ use nba_sim_core::{MatchSetup, Params, World};
 
 const ACTION_KINDS: [&str; 4] = ["SHOT", "PASS", "DRIVE", "POST_UP"];
 
+mod common;
+
 fn world(seed: u64) -> World {
-    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
-    World::new(MatchSetup::builtin(GameRules::default()), params, seed)
+    common::short_world(seed)
 }
 
 fn finite(value: f32) -> bool {

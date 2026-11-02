@@ -30,7 +30,7 @@ fn shooter(world: &mut World) -> usize {
     world.players[handle].on_court = true;
     world.players[handle].stamina = 1.0;
     world.possession.team = TeamSide::Home;
-    world.phase = Phase::Live;
+    world.set_phase(Phase::Live);
     world.ball.set_held(handle);
     handle
 }
@@ -60,10 +60,7 @@ fn three_distance_decay_is_continuous_and_reaches_zero() {
     }
     // 超远距离趋近于零。
     let far = nba_sim_core::shot_quality::three_distance_decay(&world, 90.0);
-    assert!(
-        far < 1.0e-6,
-        "a 90 ft heave must decay to zero, got {far}"
-    );
+    assert!(far < 1.0e-6, "a 90 ft heave must decay to zero, got {far}");
     let _ = handle;
     let _ = hoop;
 }
@@ -105,13 +102,8 @@ fn shot_value_follows_the_candidate_kind_and_phase() {
         ShotKind::CatchShoot,
         BallPhase::Catch,
     );
-    let pull_up = nba_sim_core::value::shot_value(
-        &world,
-        handle,
-        spot,
-        ShotKind::PullUp,
-        BallPhase::Dribble,
-    );
+    let pull_up =
+        nba_sim_core::value::shot_value(&world, handle, spot, ShotKind::PullUp, BallPhase::Dribble);
     assert!(
         (catch_shoot - pull_up).abs() > 1.0e-4,
         "the value must follow the candidate kind and phase, got {catch_shoot} and {pull_up}"
@@ -141,15 +133,17 @@ fn the_endgame_three_decision_follows_score_time_and_timeouts() {
     });
     world.ball.set_held(handle);
     // 时间充足、领先、还有暂停时不抢投。
-    world.clock.period = 4;
-    world.clock.game_clock = 300.0;
+    world
+        .clock
+        .set_regulation_clock(4, 300.0, world.clock.shot_clock());
     world.score = [9, 3];
     world.timeouts[World::team_index(TeamSide::Home)].remaining = 2;
     let calm = shot_candidate_context(&world, handle);
     // 时间将尽、落后、没有暂停时，同一个远距离三分必须更值钱。
-    world.clock.game_clock = 4.0;
+    world.clock.set_game_clock(4.0);
     world.score = [3, 8];
     world.timeouts[World::team_index(TeamSide::Home)].remaining = 0;
+    world.players[handle].data.tendencies.three_point_preference = 0.5;
     let desperate = shot_candidate_context(&world, handle);
     assert!(
         desperate > calm,

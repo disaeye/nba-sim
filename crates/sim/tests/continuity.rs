@@ -1,6 +1,6 @@
 use nba_domain::rules::GameRules;
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::state::{BallState, Phase};
+use nba_sim_core::state::BallState;
 use nba_sim_core::world::TICK_SECONDS;
 use nba_sim_core::{MatchSetup, Params, World};
 
@@ -17,25 +17,24 @@ fn every_tick_respects_displacement_and_acceleration_bounds() {
     let max_accel = world.rules.max_player_accel_ftps2;
     let tolerance = 0.01;
     for _ in 0..20_000 {
-        let phase_before = world.phase;
         let before: Vec<_> = world
             .players
             .iter()
             .map(|player| (player.on_court, player.pos, player.vel))
             .collect();
         world.step(TICK_SECONDS);
-        let inbound = matches!(phase_before, Phase::Inbound { .. })
-            || matches!(world.phase, Phase::Inbound { .. });
         for (handle, (was_on, pos, vel)) in before.into_iter().enumerate() {
             let player = &world.players[handle];
-            if !was_on || !player.on_court || inbound {
+            if !was_on || !player.on_court {
                 continue;
             }
             let displacement = (player.pos - pos).length();
             assert!(
                 displacement <= max_speed * dt + tolerance,
-                "player {handle} moved {displacement:.3} ft in one tick (limit {:.3})",
-                max_speed * dt
+                "player {handle} moved {displacement:.3} ft in one tick (limit {:.3}), period={} clock={:.2}",
+                max_speed * dt,
+                world.clock.period(),
+                world.clock.game_clock()
             );
             let change = (player.vel - vel).length();
             assert!(
@@ -47,7 +46,7 @@ fn every_tick_respects_displacement_and_acceleration_bounds() {
         match world.holder() {
             Some(handle) => {
                 assert!(
-                    matches!(world.ball.state, BallState::Held),
+                    matches!(world.ball.state(), BallState::Held { .. }),
                     "holder is set but ball is not held"
                 );
                 assert!(
@@ -56,7 +55,7 @@ fn every_tick_respects_displacement_and_acceleration_bounds() {
                 );
             }
             None => assert!(
-                !matches!(world.ball.state, BallState::Held),
+                !matches!(world.ball.state(), BallState::Held { .. }),
                 "ball is held but no holder is set"
             ),
         }

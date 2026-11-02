@@ -44,27 +44,28 @@ fn setup(world: &mut World, _condition: &Condition) -> usize {
     world.players[shooter].data.attributes.shooting_three = 0.5;
     world.players[shooter].data.attributes.free_throw = 0.5;
     world.possession.team = TeamSide::Home;
-    world.phase = Phase::Live;
+    world.set_phase(Phase::Live);
     world.pending_shot = None;
     shooter
 }
 
 fn shoot_once(world: &mut World, condition: &Condition, shooter: usize) -> (bool, f32) {
     let hoop = world.hoop_for(TeamSide::Home);
-    let spot = hoop + Vec2::new(-condition.distance, 0.0);
+    // 参考值的距离轴是出手点到篮筐的距离，也就是释放点的距离；站位点
+    // 需要再退一个持球偏移，释放点才会落在参考的距离上。
+    let spot = hoop
+        + Vec2::new(
+            -(condition.distance + world.rules.ball_holder_offset_ft),
+            0.0,
+        );
     world.players[shooter].pos = spot;
     world.players[shooter].facing = (hoop - spot).normalize_or_zero();
     world.possession.ball_phase = condition.phase;
     world.possession.dribble_state = DribbleState::Dribbling;
     world.possession.gather_pos = None;
     world.ball.set_held(shooter);
-    let model = nba_sim_core::shot_quality::evaluate(
-        world,
-        shooter,
-        condition.kind,
-        condition.phase,
-        spot,
-    );
+    let model =
+        nba_sim_core::shot_quality::evaluate(world, shooter, condition.kind, condition.phase, spot);
     let intent = ActionIntent {
         actor: shooter,
         kind: ActionKind::Shoot(condition.kind),
@@ -76,8 +77,8 @@ fn shoot_once(world: &mut World, condition: &Condition, shooter: usize) -> (bool
     };
     nba_sim_core::resolve::shot::resolve(world, &intent, condition.kind);
     for _ in 0..1200 {
+        world.clock.advance_simulation_time(TICK_SECONDS);
         nba_sim_core::ball::step(world, TICK_SECONDS);
-        world.wall += TICK_SECONDS;
         if let Some(pending) = world.pending_shot.as_ref() {
             if let Some(result) = pending.result {
                 return (
@@ -101,7 +102,7 @@ fn measure(condition: &Condition, attempts: u32, seed: u64) {
             vel: Vec2::ZERO,
         });
         world.pending_shot = None;
-        world.clock.tick += 1;
+        world.clock.advance_tick();
         let (hit, p) = shoot_once(&mut world, condition, shooter);
         made += u32::from(hit);
         predicted += f64::from(p);
@@ -186,19 +187,17 @@ fn free_throw_matches_the_measured_reference() {
     let mut made = 0u32;
     let attempts = 3000u32;
     for _ in 0..attempts {
-        world.clock.tick += 1;
+        world.clock.advance_tick();
         world.pending_shot = None;
         world.possession.ball_phase = BallPhase::Catch;
         world.ball.set_held(shooter);
-        nba_sim_core::resolve::freethrow::shoot(&mut world, shooter, 1, 1, 0, false, false);
+        nba_sim_core::resolve::freethrow::shoot(&mut world, shooter, 1, 1, 0, false, false, 1);
         for _ in 0..1200 {
+            world.clock.advance_simulation_time(TICK_SECONDS);
             nba_sim_core::ball::step(&mut world, TICK_SECONDS);
-            world.wall += TICK_SECONDS;
             if let Some(pending) = world.pending_shot.as_ref() {
                 if let Some(result) = pending.result {
-                    made += u32::from(
-                        result == nba_sim_core::resolve::shot::ShotResult::Made,
-                    );
+                    made += u32::from(result == nba_sim_core::resolve::shot::ShotResult::Made);
                     break;
                 }
             }

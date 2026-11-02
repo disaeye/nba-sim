@@ -13,7 +13,7 @@ fn world(seed: u64) -> World {
 fn live_holder(world: &mut World) -> usize {
     for _ in 0..40_000 {
         world.step(TICK_SECONDS);
-        if matches!(world.phase, Phase::Live) && world.holder().is_some() {
+        if matches!(world.phase(), Phase::Live) && world.holder().is_some() {
             let possession = world.possession.id;
             for _ in 0..24 {
                 world.step(TICK_SECONDS);
@@ -39,9 +39,10 @@ fn mapping_parameters_come_from_the_calibration_table() {
     let before = Physical::of(player, &policy);
 
     let mut taller = policy.clone();
-    taller
-        .geometry
-        .insert("reach_per_cm_ft".to_string(), policy.g("reach_per_cm_ft") * 2.0);
+    taller.geometry.insert(
+        "reach_per_cm_ft".to_string(),
+        policy.g("reach_per_cm_ft") * 2.0,
+    );
     let reach = Physical::of(player, &taller).standing_reach_ft;
     assert!(
         reach > before.standing_reach_ft,
@@ -50,9 +51,10 @@ fn mapping_parameters_come_from_the_calibration_table() {
     );
 
     let mut jumpier = policy.clone();
-    jumpier
-        .geometry
-        .insert("vertical_gain_ft".to_string(), policy.g("vertical_gain_ft") * 2.0);
+    jumpier.geometry.insert(
+        "vertical_gain_ft".to_string(),
+        policy.g("vertical_gain_ft") * 2.0,
+    );
     assert!(
         Physical::of(player, &jumpier).vertical_ft > before.vertical_ft,
         "起跳高度没有随弹跳系数变化"

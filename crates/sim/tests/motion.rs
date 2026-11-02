@@ -16,7 +16,7 @@ fn world(seed: u64) -> World {
 fn live_holder(world: &mut World) -> usize {
     for _ in 0..40_000 {
         world.step(TICK_SECONDS);
-        if matches!(world.phase, Phase::Live) && world.holder().is_some() {
+        if matches!(world.phase(), Phase::Live) && world.holder().is_some() {
             let possession = world.possession.id;
             for _ in 0..24 {
                 world.step(TICK_SECONDS);
@@ -45,7 +45,7 @@ fn acceleration_limits_direction_change() {
     let before = world.players[handle].vel;
     // 目标放在正后方：允许瞬间转向的实现会让速度立刻变成 -x。
     world.players[handle].target = world.players[handle].pos + Vec2::new(-10.0, 0.0);
-    world.active = None;
+    world.interactions.clear();
     integrate(&mut world, TICK_SECONDS);
     let after = world.players[handle].vel;
     let change = (after - before).length();

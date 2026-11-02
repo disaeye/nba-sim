@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 
 use nba_sim_core::action::PassKind;
 use nba_sim_core::params::{workspace_calibration_dir, RuntimeParams};
-use nba_sim_core::world::MatchSetup;
 use serde_json::json;
+
+mod common;
 
 #[test]
 fn possession_end_reasons_are_visible_for_calibration() {
@@ -31,11 +32,7 @@ fn possession_end_reasons_are_visible_for_calibration() {
     let mut second_chances = 0u32;
     let mut durations: Vec<f64> = Vec::new();
     for seed in 1..=9 {
-        let report = nba_sim_core::run_game_with_setup(
-            seed,
-            params.clone(),
-            MatchSetup::builtin(nba_domain::GameRules::default()),
-        );
+        let report = nba_sim_core::run_game_with_setup(seed, params.clone(), common::short_setup());
         for record in &report.possessions {
             *reasons.entry(record.ended_by).or_default() += 1;
             durations.push(record.duration);

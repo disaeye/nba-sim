@@ -37,7 +37,7 @@ fn solve_defense_targets_allocates_nothing() {
     let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 13);
     for _ in 0..40_000 {
         world.step(TICK_SECONDS);
-        if matches!(world.phase, Phase::Live) && world.holder().is_some() {
+        if matches!(world.phase(), Phase::Live) && world.holder().is_some() {
             break;
         }
     }

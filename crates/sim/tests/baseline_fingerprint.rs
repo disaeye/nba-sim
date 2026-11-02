@@ -13,8 +13,14 @@ use std::path::PathBuf;
 
 use nba_sim_core::action::Fact;
 use nba_sim_core::params::{workspace_calibration_dir, workspace_root};
-use nba_sim_core::{run_game, GameReport};
+use nba_sim_core::GameReport;
 use serde_json::{json, Map, Value};
+
+mod common;
+
+fn play(seed: u64) -> GameReport {
+    common::short_world(seed).run()
+}
 
 const BASELINE_SEEDS: u64 = 16;
 const BASELINE_PATH: &str = "crates/sim/tests/baseline/fingerprint.json";
@@ -25,7 +31,18 @@ fn baseline_path() -> PathBuf {
 
 fn fact_kind(fact: &Fact) -> &'static str {
     match fact {
+        Fact::ActionStarted { .. } => "action_started",
+        Fact::ActionIntentRejected { .. } => "action_intent_rejected",
+        Fact::ActionPhaseChanged { .. } => "action_phase_changed",
+        Fact::ActionCompleted { .. } => "action_completed",
+        Fact::ActionFailed { .. } => "action_failed",
+        Fact::ActionCancelled { .. } => "action_cancelled",
+        Fact::DefensiveActionStarted { .. } => "defensive_action_started",
+        Fact::DefensiveActionPhaseChanged { .. } => "defensive_action_phase_changed",
+        Fact::DefensiveActionCompleted { .. } => "defensive_action_completed",
+        Fact::DefensiveActionCancelled { .. } => "defensive_action_cancelled",
         Fact::PossessionStarted { .. } => "possession_started",
+        Fact::PossessionEnded { .. } => "possession_ended",
         Fact::Pass { .. } => "pass",
         Fact::Screen { .. } => "screen",
         Fact::Drive { .. } => "drive",
@@ -35,6 +52,7 @@ fn fact_kind(fact: &Fact) -> &'static str {
         Fact::FreeThrow { .. } => "free_throw",
         Fact::Rebound { .. } => "rebound",
         Fact::ReboundOpportunity { .. } => "rebound_opportunity",
+        Fact::LooseBallRecovered { .. } => "loose_ball_recovered",
         Fact::SecondChanceStarted { .. } => "second_chance_started",
         Fact::Cut { .. } => "cut",
         Fact::BoxOut { .. } => "box_out",
@@ -42,7 +60,11 @@ fn fact_kind(fact: &Fact) -> &'static str {
         Fact::Turnover { .. } => "turnover",
         Fact::Steal { .. } => "steal",
         Fact::Substitution { .. } => "substitution",
+        Fact::BenchDepleted { .. } => "bench_depleted",
+        Fact::FoulOutRetention { .. } => "foul_out_retention",
+        Fact::TeamTechnicalFoul { .. } => "team_technical_foul",
         Fact::Timeout { .. } => "timeout",
+        Fact::JumpBall { .. } => "jump_ball",
         Fact::PeriodEnd { .. } => "period_end",
         Fact::BallContact { .. } => "ball_contact",
         Fact::PlacementApplied { .. } => "placement_applied",
@@ -112,17 +134,43 @@ fn digest(value: &Value) -> String {
 }
 
 fn collect() -> Map<String, Value> {
-    let calibration = workspace_calibration_dir();
-    let mut entries = Map::new();
-    for seed in 1..=BASELINE_SEEDS {
-        let report = run_game(seed, &calibration);
-        let fields = fingerprint(&report);
-        entries.insert(
-            seed.to_string(),
-            json!({ "digest": digest(&fields), "fields": fields }),
-        );
+    // 十六个种子各自独立，四个线程分摊后按种子顺序插入，结果与串行一致。
+    let seeds: Vec<u64> = (1..=BASELINE_SEEDS).collect();
+    let chunk_size = seeds.len().div_ceil(4);
+    let entries: Vec<(u64, Value)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .filter_map(|chunk| {
+                let start = chunk * chunk_size;
+                let end = (start + chunk_size).min(seeds.len());
+                (start < end).then(|| &seeds[start..end])
+            })
+            .map(|chunk| {
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .map(|seed| {
+                            let report = play(*seed);
+                            let fields = fingerprint(&report);
+                            (
+                                *seed,
+                                json!({ "digest": digest(&fields), "fields": fields }),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("fingerprint thread must not panic"))
+            .flatten()
+            .collect::<Vec<_>>()
+    });
+    let mut map = Map::new();
+    for (seed, value) in entries {
+        map.insert(seed.to_string(), value);
     }
-    entries
+    map
 }
 
 /// 按字段路径报告第一处差异；两侧结构不同时报告形状差异。
@@ -172,10 +220,23 @@ fn first_difference(expected: &Value, actual: &Value, path: &str) -> Option<Stri
 
 #[test]
 fn same_seed_produces_identical_fingerprint() {
-    let calibration = workspace_calibration_dir();
-    for seed in [1u64, 7] {
-        let first = digest(&fingerprint(&run_game(seed, &calibration)));
-        let second = digest(&fingerprint(&run_game(seed, &calibration)));
+    // 两个种子各跑两次，四场比赛并发执行后逐对比较。
+    let pairs: Vec<(u64, String, String)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = [1u64, 7]
+            .iter()
+            .flat_map(|seed| [*seed, *seed])
+            .map(|seed| scope.spawn(move || digest(&fingerprint(&play(seed)))))
+            .collect();
+        let digests: Vec<String> = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("fingerprint thread must not panic"))
+            .collect();
+        vec![
+            (1, digests[0].clone(), digests[1].clone()),
+            (7, digests[2].clone(), digests[3].clone()),
+        ]
+    });
+    for (seed, first, second) in pairs {
         assert_eq!(first, second, "seed {seed} 两次运行的指纹不一致");
     }
 }
@@ -203,9 +264,7 @@ fn baseline_fingerprint_matches_recorded_artifact() {
             failures.push(format!("seed {seed}: 基线工件没有这个种子"));
             continue;
         };
-        let expected_fields = baseline_entry
-            .get("fields")
-            .expect("基线条目必须含 fields");
+        let expected_fields = baseline_entry.get("fields").expect("基线条目必须含 fields");
         let actual_fields = entry.get("fields").expect("当前条目必须含 fields");
         if let Some(difference) = first_difference(expected_fields, actual_fields, "fields") {
             failures.push(format!("seed {seed}: {difference}"));
@@ -218,7 +277,11 @@ fn baseline_fingerprint_matches_recorded_artifact() {
             .get("digest")
             .and_then(Value::as_str)
             .expect("当前条目必须含 digest");
-        if expected_digest != actual_digest && !failures.iter().any(|line| line.contains(&format!("seed {seed}:"))) {
+        if expected_digest != actual_digest
+            && !failures
+                .iter()
+                .any(|line| line.contains(&format!("seed {seed}:")))
+        {
             failures.push(format!(
                 "seed {seed}: 摘要不同，基线 {expected_digest}，当前 {actual_digest}"
             ));

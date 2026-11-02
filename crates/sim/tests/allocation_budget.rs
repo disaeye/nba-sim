@@ -39,12 +39,12 @@ const TICK: f64 = 0.05;
 /// 稳态 tick：活球、没有进行中的动作、下一步决策尚未到期、进攻时钟不临近
 /// 到期。这类 tick 只做运动与计时，占全场绝大多数。
 fn steady_tick(world: &World) -> bool {
-    matches!(world.phase, Phase::Live)
-        && world.active.is_none()
+    matches!(world.phase(), Phase::Live)
+        && world.interactions.is_empty()
         && world.holder().is_some_and(|handle| {
             world.now() + TICK < world.players[handle].schedule.next_redecide_at
         })
-        && world.clock.shot_clock > 0.2
+        && world.clock.shot_clock() > 0.2 + TICK
 }
 
 fn measure(world: &mut World) -> usize {
@@ -54,7 +54,7 @@ fn measure(world: &mut World) -> usize {
     if delta > 0 {
         eprintln!(
             "allocation {delta} phase={:?} events {}/{} shots {}/{} traces {}/{} records {}/{}",
-            world.phase,
+            world.phase(),
             world.events.len(),
             world.events.capacity(),
             world.shot_samples.len(),
@@ -89,7 +89,7 @@ fn steady_state_ticks_allocate_nothing() {
 
     let mut steady = 1usize;
     let mut allocated = 0usize;
-    while world.clock.period == 1 && !world.finished {
+    while world.clock.period() == 1 && !world.finished {
         if steady_tick(&world) {
             allocated += measure(&mut world);
             steady += 1;

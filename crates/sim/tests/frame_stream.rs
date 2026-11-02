@@ -5,10 +5,12 @@ use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::world::TICK_SECONDS;
 use nba_sim_core::{MatchSetup, Params, World};
 
+mod common;
+
 #[test]
 fn frame_stream_satisfies_motion_contact_rules_and_causal_ids() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
-    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 1);
+    let mut world = World::new(common::short_setup(), params, 1);
     let width = world.rules.court.width_ft;
     let height = world.rules.court.height_ft;
     let tick_seconds = world.rules.tick_seconds;

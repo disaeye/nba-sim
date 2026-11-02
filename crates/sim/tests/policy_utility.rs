@@ -4,27 +4,26 @@
 //! 是否只在对应那一项上生效」。它们不检查数值是否好看——那是校准表的事。
 
 use nba_domain::rules::GameRules;
-use rand::SeedableRng;
 use nba_sim_core::action::ActionKind;
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::policy::{
-    candidate_utilities, decision_temperature, variance_appetite,
-};
+use nba_sim_core::policy::{candidate_utilities, decision_temperature, variance_appetite};
 use nba_sim_core::state::Phase;
 use nba_sim_core::utility::{softmax_pick, EpvTerms, Utility};
 use nba_sim_core::world::TICK_SECONDS;
 use nba_sim_core::{MatchSetup, Params, TeamSide, World};
+use rand::SeedableRng;
+
+mod common;
 
 fn world(seed: u64) -> World {
-    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
-    World::new(MatchSetup::builtin(GameRules::default()), params, seed)
+    common::short_world(seed)
 }
 
 fn live_world(seed: u64) -> World {
     let mut world = world(seed);
     for _ in 0..40_000 {
         world.step(TICK_SECONDS);
-        if matches!(world.phase, Phase::Live) && world.holder().is_some() {
+        if matches!(world.phase(), Phase::Live) && world.holder().is_some() {
             return world;
         }
     }
@@ -74,7 +73,7 @@ fn the_utility_total_is_the_documented_formula() {
 #[test]
 fn every_decision_records_a_finite_decomposition() {
     let mut world = world(7);
-    while !world.finished && world.clock.tick < 1_000_000 {
+    while !world.finished && world.clock.tick() < 1_000_000 {
         world.step(TICK_SECONDS);
     }
     assert!(world.finished, "the game did not finish");
@@ -98,15 +97,24 @@ fn every_decision_records_a_finite_decomposition() {
             utility.foul_cost,
             utility.tactical_bonus,
         ] {
-            assert!(term.is_finite(), "a utility term is not finite: {utility:?}");
+            assert!(
+                term.is_finite(),
+                "a utility term is not finite: {utility:?}"
+            );
         }
         assert!(
             (utility.epv.sum() - utility.epv_base()).abs() < 1e-5,
             "the epv decomposition does not sum to its own total"
         );
-        assert!(sample.beta > 0.0, "the inverse temperature must be positive");
+        assert!(
+            sample.beta > 0.0,
+            "the inverse temperature must be positive"
+        );
         assert!(sample.candidates > 0, "a decision had no candidates");
-        assert!(sample.gamma.is_finite(), "the variance appetite is not finite");
+        assert!(
+            sample.gamma.is_finite(),
+            "the variance appetite is not finite"
+        );
     }
 }
 
@@ -223,8 +231,9 @@ fn decision_temperature_rises_with_basketball_iq_and_falls_with_fatigue() {
 #[test]
 fn the_variance_appetite_flips_sign_between_leading_and_trailing() {
     let mut world = live_world(13);
-    world.clock.period = 4;
-    world.clock.game_clock = 180.0;
+    world
+        .clock
+        .set_regulation_clock(4, 180.0, world.clock.shot_clock());
     let state = world.decision_state();
     let actor = state.actor;
     let team = world.players[actor].team;
@@ -247,7 +256,10 @@ fn the_variance_appetite_flips_sign_between_leading_and_trailing() {
     world.score[index] = 100;
     world.score[World::team_index(team.other())] = 100;
     let tied = variance_appetite(&world.decision_state());
-    assert!(tied.abs() < 1e-6, "a tie must be variance neutral, got {tied:.3}");
+    assert!(
+        tied.abs() < 1e-6,
+        "a tie must be variance neutral, got {tied:.3}"
+    );
     let _ = TeamSide::Home;
 }
 
@@ -278,7 +290,7 @@ fn a_stationary_arc_holder_has_a_shot_candidate() {
     world.players[actor].pos = spot;
     world.players[actor].target = spot;
     world.possession.last_screen = None;
-    world.clock.shot_clock = 6.0;
+    world.clock.set_shot_clock(6.0);
     let state = world.decision_state();
     let kinds: Vec<String> = candidate_utilities(&world, &state)
         .into_iter()

@@ -13,7 +13,10 @@ fn world(seed: u64) -> World {
 fn live_holder(world: &mut World) {
     for _ in 0..40_000 {
         world.step(TICK_SECONDS);
-        if matches!(world.phase, Phase::Live) && world.holder().is_some() && world.active.is_none() {
+        if matches!(world.phase(), Phase::Live)
+            && world.holder().is_some()
+            && world.interactions.is_empty()
+        {
             return;
         }
     }
@@ -31,10 +34,10 @@ fn snapshot(world: &World) -> Snapshot {
         .collect();
     (
         players,
-        world.clock.shot_clock,
+        world.clock.shot_clock(),
         world.score,
-        world.clock.tick as u32,
-        format!("{:?}", world.phase),
+        world.clock.tick() as u32,
+        format!("{:?}", world.phase()),
     )
 }
 

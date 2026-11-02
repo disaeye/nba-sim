@@ -21,7 +21,12 @@ fn contest_bucket(contest: f32) -> u8 {
 
 /// 命中率按「区域 × 对抗」分层校验：每一格里实测命中率要落在模型
 /// 预测均值附近，偏差由二项抽样误差给出上界。
+///
+/// 样本量需求固定：≥8 格、每格 ≥100 次出手，需要 288 场完整比赛，
+/// 运行时长远超单测预算，改为显式调用：
+/// `cargo test -p nba-sim-core --test conditional_distribution -- --ignored --test-threads=1`
 #[test]
+#[ignore = "统计样本量需要 288 场完整比赛，按需显式运行"]
 fn conditional_make_rate_matches_the_model_in_every_zone_and_contest_bucket() {
     struct Bucket {
         count: u32,

@@ -76,17 +76,13 @@ fn setup(world: &mut World, condition: &Condition) -> (usize, usize) {
     world.players[defender].target = defender_spot;
     world.players[defender].facing = (spot - defender_spot).normalize_or_zero();
     world.possession.team = TeamSide::Home;
-    world.phase = Phase::Live;
+    world.set_phase(Phase::Live);
     world.pending_shot = None;
     (shooter, defender)
 }
 
 /// 出手一次，返回（是否命中，模型预测的命中率，封盖是否发生，模型预测的封盖率）。
-fn shoot_once(
-    world: &mut World,
-    condition: &Condition,
-    shooter: usize,
-) -> (bool, f32, bool, f32) {
+fn shoot_once(world: &mut World, condition: &Condition, shooter: usize) -> (bool, f32, bool, f32) {
     let hoop = world.hoop_for(TeamSide::Home);
     // 移动中的出手：球手有速度，瞄准误差因此变大。
     let direction = (hoop - world.players[shooter].pos).normalize_or_zero();
@@ -103,7 +99,7 @@ fn shoot_once(
         condition.phase,
         world.players[shooter].pos,
     );
-    let predicted = model.p_make;
+    let predicted = model.p_make_cond;
     let predicted_block = model.block_risk;
     let intent = ActionIntent {
         actor: shooter,
@@ -116,8 +112,8 @@ fn shoot_once(
     };
     nba_sim_core::resolve::shot::resolve(world, &intent, condition.kind);
     for _ in 0..1200 {
+        world.clock.advance_simulation_time(TICK_SECONDS);
         nba_sim_core::ball::step(world, TICK_SECONDS);
-        world.wall += TICK_SECONDS;
         if let Some(pending) = world.pending_shot.as_ref() {
             if let Some(result) = pending.result {
                 let made = result == nba_sim_core::resolve::shot::ShotResult::Made;
@@ -146,7 +142,7 @@ fn measure(condition: &Condition, attempts: u32, seed: u64) {
             vel: Vec2::ZERO,
         });
         world.pending_shot = None;
-        world.clock.tick += 1;
+        world.clock.advance_tick();
         let (hit, p, was_blocked, p_block) = shoot_once(&mut world, condition, shooter);
         made += u32::from(hit);
         blocked += u32::from(was_blocked);
@@ -250,7 +246,27 @@ fn game_condition_shots_match_the_model() {
             contest_level: 2,
         },
     ];
-    for (index, condition) in conditions.iter().enumerate() {
-        measure(condition, 3000, 900 + index as u64);
-    }
+    // 九个条件各自独立采样，四个线程分摊；每个条件的种子与串行版本一致。
+    let chunk_size = conditions.len().div_ceil(4);
+    let shared = &conditions;
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .filter_map(|chunk| {
+                let start = chunk * chunk_size;
+                let end = (start + chunk_size).min(shared.len());
+                (start < end).then(|| start..end)
+            })
+            .map(|range| {
+                scope.spawn(move || {
+                    let base = range.start;
+                    for (index, condition) in shared[range].iter().enumerate() {
+                        measure(condition, 3000, 900 + (base + index) as u64);
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().expect("condition thread must not panic");
+        }
+    });
 }

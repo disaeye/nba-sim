@@ -35,7 +35,7 @@ fn screen_route_reaches_the_next_decision() {
         let Some(route) = resolved else {
             continue;
         };
-        if !matches!(world.phase, Phase::Live) || world.holder().is_none() {
+        if !matches!(world.phase(), Phase::Live) || world.holder().is_none() {
             continue;
         }
         let state = world.decision_state();

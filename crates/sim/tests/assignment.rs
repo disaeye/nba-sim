@@ -11,9 +11,10 @@ use nba_sim_core::{MatchSetup, Params, World};
 /// 恢复段允许的额外路径（ft）：与验收表 `recovery_path_extra_ft` 一致。
 const RECOVERY_PATH_EXTRA_FT: f64 = 22.62;
 
+mod common;
+
 fn world(seed: u64) -> World {
-    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
-    World::new(MatchSetup::builtin(GameRules::default()), params, seed)
+    common::short_world(seed)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,12 +84,10 @@ impl Segment {
                 || (role.is_on_ball()
                     && (world.players[handle].target - world.players[handle].pos).length()
                         > world.rules.min_player_separation_ft),
-            recovery_d0: (world.players[handle].target - world.players[handle].pos).length()
-                as f64,
+            recovery_d0: (world.players[handle].target - world.players[handle].pos).length() as f64,
             recovery_marker: world.players[handle].recovery_since,
             start_pos: world.players[handle].pos,
-            initial_target_distance: (world.players[handle].target
-                - world.players[handle].pos)
+            initial_target_distance: (world.players[handle].target - world.players[handle].pos)
                 .length() as f64,
             path: 0.0,
             path_motion: 0.0,
@@ -114,8 +113,8 @@ impl Segment {
 
     fn finish(mut self, world: &World) -> Self {
         self.net = (world.players[self.handle].pos - self.start_pos).length() as f64;
-        let remaining = (world.players[self.handle].target - world.players[self.handle].pos)
-            .length() as f64;
+        let remaining =
+            (world.players[self.handle].target - world.players[self.handle].pos).length() as f64;
         self.progress = self.initial_target_distance - remaining;
         self
     }
@@ -143,12 +142,7 @@ fn matchup_man(world: &World, handle: usize) -> Option<usize> {
     Some(man)
 }
 
-fn start_segment(
-    seed: u64,
-    handle: usize,
-    world: &World,
-    active: &mut [Option<Segment>],
-) {
+fn start_segment(seed: u64, handle: usize, world: &World, active: &mut [Option<Segment>]) {
     let role = role_for(world, handle);
     let man = if role.is_on_ball() {
         matchup_man(world, handle)
@@ -179,6 +173,7 @@ fn collect_segments(seed: u64) -> Vec<Segment> {
         }
     }
     let mut possession = world.possession.id;
+    let mut period = world.clock.period();
     let mut tick = 0u32;
     while !world.finished && tick < 100_000 {
         let before: Vec<Vec2> = world.players.iter().map(|player| player.pos).collect();
@@ -190,6 +185,14 @@ fn collect_segments(seed: u64) -> Vec<Segment> {
             .collect();
         world.step(TICK_SECONDS);
         tick += 1;
+        if world.clock.period() != period {
+            for handle in 0..world.players.len() {
+                finish_segment(handle, &world, &mut active, &mut segments);
+            }
+            period = world.clock.period();
+            possession = world.possession.id;
+            continue;
+        }
         for handle in 0..world.players.len() {
             if !world.players[handle].on_court {
                 finish_segment(handle, &world, &mut active, &mut segments);
@@ -218,8 +221,9 @@ fn collect_segments(seed: u64) -> Vec<Segment> {
             if world.players[handle].yielding_since > 0.0 {
                 segment.yielding_seconds += TICK_SECONDS;
                 segment.yielding_current += TICK_SECONDS;
-                segment.yielding_continuous_max =
-                    segment.yielding_continuous_max.max(segment.yielding_current);
+                segment.yielding_continuous_max = segment
+                    .yielding_continuous_max
+                    .max(segment.yielding_current);
             } else {
                 segment.yielding_current = 0.0;
             }
@@ -238,9 +242,7 @@ fn collect_segments(seed: u64) -> Vec<Segment> {
             }
             if segment.role.is_on_ball() {
                 match segment.man {
-                    Some(man)
-                        if world.players[man].on_court && segment.paired_valid =>
-                    {
+                    Some(man) if world.players[man].on_court && segment.paired_valid => {
                         segment.paired_path +=
                             (world.players[man].pos - before[man]).length() as f64;
                     }
@@ -258,8 +260,7 @@ fn collect_segments(seed: u64) -> Vec<Segment> {
                 || (role.is_on_ball()
                     && (world.players[handle].target - world.players[handle].pos).length()
                         > world.rules.min_player_separation_ft);
-            let recovery_changed =
-                segment.recovery_marker != world.players[handle].recovery_since;
+            let recovery_changed = segment.recovery_marker != world.players[handle].recovery_since;
             let kind_changed = segment.kind != world.players[handle].target_kind
                 || segment.partner != world.players[handle].target_partner;
             if segment.role != role
@@ -273,17 +274,21 @@ fn collect_segments(seed: u64) -> Vec<Segment> {
                 start_segment(seed, handle, &world, &mut active);
             }
         }
-        if world.possession.id != possession {
+        if world.possession.id != possession || world.clock.period() != period {
             for handle in 0..world.players.len() {
                 finish_segment(handle, &world, &mut active, &mut segments);
             }
             possession = world.possession.id;
+            period = world.clock.period();
         }
     }
     for handle in 0..world.players.len() {
         finish_segment(handle, &world, &mut active, &mut segments);
     }
-    assert!(world.finished, "seed {seed} did not finish within {tick} ticks");
+    assert!(
+        world.finished,
+        "seed {seed} did not finish within {tick} ticks"
+    );
     segments
 }
 
@@ -305,7 +310,10 @@ fn print_distribution(segments: &[Segment]) {
             .or_default()
             .push(segment);
     }
-    println!("S3 segment distribution over 32 seeds: {} segments", segments.len());
+    println!(
+        "S3 segment distribution over 32 seeds: {} segments",
+        segments.len()
+    );
     for (role, list) in &by_role {
         let mut ratios: Vec<f64> = list
             .iter()
@@ -378,9 +386,7 @@ fn print_distribution(segments: &[Segment]) {
         let over = recovery
             .iter()
             .filter(|segment| {
-                segment.path
-                    > segment.recovery_d0
-                        + 2.0 * std::f64::consts::PI * min_separation
+                segment.path > segment.recovery_d0 + 2.0 * std::f64::consts::PI * min_separation
             })
             .count();
         let yield_cont = recovery
@@ -506,7 +512,8 @@ fn assert_envelope(segments: &[Segment], acceptance: &AcceptanceTable) {
     let s3 = &acceptance.s3;
     for segment in segments {
         assert_eq!(
-            segment.side_switches, 0,
+            segment.side_switches,
+            0,
             "seed {} handle {} role {} switched avoidance side",
             segment.seed,
             segment.handle,
@@ -564,7 +571,8 @@ fn assert_envelope(segments: &[Segment], acceptance: &AcceptanceTable) {
             );
         }
         assert_eq!(
-            segment.invalid_by_kind, [0; 4],
+            segment.invalid_by_kind,
+            [0; 4],
             "seed {} handle {} role {} had invalid commits {:?}",
             segment.seed,
             segment.handle,
@@ -576,13 +584,34 @@ fn assert_envelope(segments: &[Segment], acceptance: &AcceptanceTable) {
 
 #[test]
 fn role_segments_are_measured_by_responsibility() {
-    let mut all = Vec::new();
-    for seed in 1..=32 {
-        all.extend(collect_segments(seed));
-    }
+    // 三十二个种子各自独立采段，四个线程分摊后按种子顺序汇合。
+    let seeds: Vec<u64> = (1..=32u64).collect();
+    let chunk_size = seeds.len().div_ceil(4);
+    let all: Vec<Segment> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .filter_map(|chunk| {
+                let start = chunk * chunk_size;
+                let end = (start + chunk_size).min(seeds.len());
+                (start < end).then(|| &seeds[start..end])
+            })
+            .map(|chunk| {
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .flat_map(|seed| collect_segments(*seed))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("segment thread must not panic"))
+            .flatten()
+            .collect::<Vec<_>>()
+    });
     print_distribution(&all);
-    let validation = ValidationParams::load(&workspace_calibration_dir())
-        .expect("validation tables load");
+    let validation =
+        ValidationParams::load(&workspace_calibration_dir()).expect("validation tables load");
     assert_envelope(&all, &validation.acceptance);
     assert!(!all.is_empty(), "no responsibility segment was measured");
 }
