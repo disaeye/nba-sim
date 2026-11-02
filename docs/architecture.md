@@ -62,6 +62,19 @@ flowchart TD
 - `validation` 依赖 `sim` 与 `domain`，只读公共事件做独立重建；
 - `cli`、`debug-server`、`bball-wasm` 依赖 `sim` / `validation` / `protocol`，只读取快照与工件。
 
+**`crates/sim/src` 的职责模块**（方案 §11）：内核按写入职责分目录，旧路径由 crate 根重导出保持可用。
+
+| 目录 | 职责 | 具体模块 |
+| --- | --- | --- |
+| `clock/` | 独立计时器、运行条件与时间指令 | `ClockState`、`ClockDirective`、`ClockController` |
+| `program/` | 暂停、换人与轮换 | `timeouts`、`rotation` |
+| `officiating/` | 违例、犯规、罚则与恢复计划 | `StoppageCause`、`PenaltyPlan`、`RestartPlan`、`ResumeContext`、`InboundLocation`、`ControlState` |
+| `actions/` | 动作生命周期、并行调度与技术细分 | `ActionKind`、`Fact`、`DefensiveActionKind` |
+| `control/` | 球员控制、最后触球与回合边界 | `BallBody`、`BallState`、球权争抢 |
+| `ledger/` | 比分、时间与统计投影 | `boxscore`、`report` |
+
+跳球、发球、罚球与节末程序的结算在 `world` 与 `resolve` 中，教练复核在 `challenge`。
+
 ### 1.3 红线宪章（`charter` §4 镜像，不可触碰）
 
 以下条款源自 `docs/charter.md` §4，是本文档与一切实现的**不可修订红线**：违反任一条的改动 = 打回，无论动机多好。完整论证见 `charter`；本节只列工程执行细则与机械守卫——红线没有守卫只是愿望。
