@@ -2000,8 +2000,33 @@ impl World {
         } else {
             pos.x > mid
         };
+        // 防守人碰过球后球回到后场是合法的：那段控制不算进攻方建立的前场控制。
+        if self
+            .last_touch
+            .is_some_and(|touched| self.players[touched].team != team)
+        {
+            self.possession.frontcourt_established = false;
+        }
         if !in_backcourt {
             self.possession.backcourt_deadline = None;
+            self.possession.frontcourt_established = true;
+            return;
+        }
+        // 已经在前场建立控制又把球带回后场：回场违例。
+        if self.possession.frontcourt_established {
+            self.possession.frontcourt_established = false;
+            self.possession.backcourt_deadline = None;
+            self.line_mut(holder).turnovers += 1;
+            self.emit(Fact::Turnover {
+                player: holder,
+                kind: TurnoverKind::Backcourt,
+            });
+            self.end_possession(PossessionEndCause::TurnoverViolation, "backcourt", 0);
+            self.cancel_actions("backcourt");
+            self.set_phase(Phase::DeadBall {
+                team: team.other(),
+                ready_at: self.now() + f64::from(self.rules.inbound_setup_seconds),
+            });
             return;
         }
         let now = self.now();

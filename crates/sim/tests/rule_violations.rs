@@ -137,3 +137,54 @@ fn a_loose_ball_over_the_sideline_hands_possession_to_the_opponent() {
         "发球点必须留在出界处的纵向位置：{target:?}"
     );
 }
+
+#[test]
+fn carrying_the_ball_back_over_half_court_is_a_backcourt_violation() {
+    let mut world = world(319);
+    let holder = world.on_court(TeamSide::Home).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == holder;
+        player.vel = Vec2::ZERO;
+    }
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(holder);
+    world.players[holder].schedule.next_redecide_at = world.now() + 1_000.0;
+    let mid = world.rules.court.width_ft * 0.5;
+    // 先在前场建立控制。
+    world.players[holder].pos = Vec2::new(mid + 8.0, 25.0);
+    world.players[holder].target = world.players[holder].pos;
+    world.ball.pos = world.players[holder].pos;
+    world.ball.z = world.rules.ball_radius_ft;
+    for _ in 0..10 {
+        world.players[holder].pos = Vec2::new(mid + 8.0, 25.0);
+        world.players[holder].vel = Vec2::ZERO;
+        world.step(TICK_SECONDS);
+    }
+    assert!(
+        world.possession.frontcourt_established,
+        "过中线之后必须记下前场控制"
+    );
+    // 再把球带回后场。
+    let before = world.events.len();
+    world.players[holder].pos = Vec2::new(mid - 5.0, 25.0);
+    world.players[holder].target = world.players[holder].pos;
+    world.ball.pos = world.players[holder].pos;
+    world.step(TICK_SECONDS);
+    let violation = world.events[before..].iter().any(|event| {
+        matches!(
+            &event.fact,
+            Fact::Turnover {
+                kind: TurnoverKind::Backcourt,
+                ..
+            }
+        )
+    });
+    assert!(violation, "把球带回后场必须判回场违例");
+    assert_eq!(world.possession.id, 0, "回场之后旧回合必须结清");
+    match world.phase() {
+        Phase::DeadBall { team, .. } => assert_eq!(team, TeamSide::Away, "回场后由对方发球"),
+        other => panic!("回场后必须停表换边，实际 {other:?}"),
+    }
+}

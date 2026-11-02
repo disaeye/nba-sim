@@ -448,7 +448,7 @@ fn home_and_away_produce_comparable_offences() {
     let mut threes = [0u32; 2];
     let mut shots = [0u32; 2];
     let mut distance = [0.0f64; 2];
-    for (seed_shots, seed_threes, seed_distance) in seeds_in_parallel(1..=12u64, per_seed) {
+    for (seed_shots, seed_threes, seed_distance) in seeds_in_parallel(1..=20u64, per_seed) {
         for team in 0..2 {
             shots[team] += seed_shots[team];
             threes[team] += seed_threes[team];

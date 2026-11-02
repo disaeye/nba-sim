@@ -478,6 +478,8 @@ pub enum TurnoverKind {
     CloselyGuarded,
     /// 后场八秒未过中线。
     EightSecond,
+    /// 已过中线又把球带回后场。
+    Backcourt,
 }
 
 impl TurnoverKind {
@@ -492,6 +494,7 @@ impl TurnoverKind {
             Self::OutOfBounds => "out_of_bounds",
             Self::CloselyGuarded => "closely_guarded",
             Self::EightSecond => "eight_second",
+            Self::Backcourt => "backcourt",
         }
     }
 }

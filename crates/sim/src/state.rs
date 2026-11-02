@@ -1048,6 +1048,8 @@ pub struct PossessionState {
     pub closely_guarded_seconds: f32,
     /// 后场八秒的到期时刻：球过中线即清空。
     pub backcourt_deadline: Option<f64>,
+    /// 本回合是否已经在前场建立控制：已建立后不能再把球带回后场。
+    pub frontcourt_established: bool,
 }
 
 impl PossessionState {
@@ -1097,6 +1099,7 @@ impl PossessionState {
             break_return: Vec::new(),
             closely_guarded_seconds: 0.0,
             backcourt_deadline: None,
+            frontcourt_established: false,
         }
     }
 }
