@@ -183,10 +183,36 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
     // 基准按「真正走到篮板的投失」计算：犯规导致的投失不产生篮板，
     // 用 FGA−FGM 做分母会把犯规率的变化误算成篮板能力的变化。
     let reboundable_misses = report.rebound_attempts as f64 / games;
+    // 前场篮板基准取冻结的 `rebound` 表：按本批次的出手分区加权，
+    // 而不是只用一个联盟标量。三分占比高时预期的前场篮板率会不同。
+    let zone_names = ["rim", "near", "mid", "three"];
+    let zone_shots: Vec<f64> = (0..4)
+        .map(|index| {
+            (report.shot_zone_counts[0][index] + report.shot_zone_counts[1][index]) as f64
+        })
+        .collect();
+    let zone_total: f64 = zone_shots.iter().sum();
+    let zone_rate = if zone_total > f64::default() {
+        zone_names
+            .iter()
+            .zip(&zone_shots)
+            .map(|(name, shots)| {
+                let rate = params
+                    .rebound
+                    .oreb_rate_by_zone
+                    .get(*name)
+                    .copied()
+                    .unwrap_or(params.rebound.league_oreb_per_miss);
+                f64::from(rate) * shots / zone_total
+            })
+            .sum::<f64>()
+    } else {
+        f64::from(params.rebound.league_oreb_per_miss)
+    };
     push(
         "oreb_per_game",
         oreb as f64 / games,
-        league.oreb_per_miss as f64 * reboundable_misses,
+        zone_rate * reboundable_misses,
     );
     push(
         "possessions_per_game",
