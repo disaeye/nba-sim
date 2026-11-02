@@ -541,9 +541,9 @@ fn try_control_loose(world: &mut World) {
         let bonus = world.params.policy.g("rebound_defense_reach_bonus_ft");
         let reach = if force_pickup {
             if is_offense {
-                16.0
+                world.params.policy.g("rebound_offense_late_reach_ft")
             } else {
-                50.0
+                world.params.policy.g("rebound_defense_late_reach_ft")
             }
         } else if state.turnover {
             base_reach
