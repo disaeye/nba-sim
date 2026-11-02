@@ -91,6 +91,19 @@ pub struct EventBatch {
     pub events: Vec<FrameEvent>,
 }
 
+/// 磁盘检查点描述符。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionDescriptor {
+    pub version: u32,
+    pub seed: u64,
+    pub tick: u64,
+    pub latest_event_id: u64,
+    pub state: SessionState,
+    pub home_score: u32,
+    pub away_score: u32,
+    pub possessions: u64,
+}
+
 #[derive(Clone)]
 pub struct SessionCheckpoint {
     version: u32,
@@ -395,6 +408,93 @@ impl SessionService {
             box_score: world.box_score.clone(),
             finished: world.finished,
         })
+    }
+
+    /// 磁盘检查点：记录重建一次会话所需的全部信息。
+    ///
+    /// 世界本身不序列化（它持有随机流与逐 tick 缓存）；检查点用
+    /// 「种子 + tick + 计数指纹」描述状态，恢复时按同一条路径重放，
+    /// 指纹对不上就就地失败，而不是继续跑一场已经分叉的比赛。
+    pub fn descriptor(&self) -> Result<SessionDescriptor, String> {
+        let world = self
+            .world
+            .as_ref()
+            .ok_or_else(|| "cannot checkpoint before match setup".to_string())?;
+        Ok(SessionDescriptor {
+            version: 1,
+            seed: self.seed,
+            tick: world.clock.tick(),
+            latest_event_id: world.next_event_id,
+            state: self.state(),
+            home_score: world.score[0],
+            away_score: world.score[1],
+            possessions: world.possession_count,
+        })
+    }
+
+    /// 把检查点写到磁盘；写入成功返回实际写下的描述符。
+    pub fn save_descriptor(&self, path: &Path) -> Result<SessionDescriptor, String> {
+        let descriptor = self.descriptor()?;
+        let text = serde_json::to_string_pretty(&descriptor)
+            .map_err(|error| format!("serialize checkpoint: {error}"))?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("create checkpoint dir {}: {error}", parent.display()))?;
+        }
+        std::fs::write(path, format!("{text}\n"))
+            .map_err(|error| format!("write checkpoint {}: {error}", path.display()))?;
+        Ok(descriptor)
+    }
+
+    /// 从磁盘检查点恢复：按同一份设置重放到检查点所在的 tick，再校验指纹。
+    pub fn restore_from_descriptor(
+        &mut self,
+        path: &Path,
+        _setup: MatchSetup,
+        params: RuntimeParams,
+    ) -> Result<SessionDescriptor, String> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|error| format!("read checkpoint {}: {error}", path.display()))?;
+        let descriptor: SessionDescriptor = serde_json::from_str(&text)
+            .map_err(|error| format!("parse checkpoint {}: {error}", path.display()))?;
+        if descriptor.version != 1 {
+            return Err(format!(
+                "unsupported checkpoint version {}",
+                descriptor.version
+            ));
+        }
+        self.setup(params, descriptor.seed)?;
+        self.start()?;
+        for _ in 0..descriptor.tick {
+            if self.state() != SessionState::Running {
+                break;
+            }
+            self.step_once();
+        }
+        let world = self
+            .world
+            .as_ref()
+            .ok_or_else(|| "restore replay produced no world".to_string())?;
+        if world.next_event_id != descriptor.latest_event_id
+            || world.score[0] != descriptor.home_score
+            || world.score[1] != descriptor.away_score
+            || world.possession_count != descriptor.possessions
+        {
+            return Err(format!(
+                "checkpoint replay diverged at tick {}: events {} vs {}, score {}:{} vs {}:{}, possessions {} vs {}",
+                descriptor.tick,
+                world.next_event_id,
+                descriptor.latest_event_id,
+                world.score[0],
+                world.score[1],
+                descriptor.home_score,
+                descriptor.away_score,
+                world.possession_count,
+                descriptor.possessions
+            ));
+        }
+        self.state = Some(descriptor.state);
+        Ok(descriptor)
     }
 
     pub fn checkpoint(&self) -> Result<SessionCheckpoint, String> {
