@@ -3,23 +3,24 @@
 > 状态类型：当前快照，不是执行日志。
 > 动作链内核（`crates/sim`）的设计与缺口清单见 `docs/dev/action_chain_engine.md`。
 > 证据原则：本文件只写当前工作区可以由代码、测试或守卫复核的结论。旧引擎的记录保留在 `docs/dev/cycles/`、`docs/dev/evidence/` 与 `docs/decisions.md`，本文件不再复述。
-> 复核日期：2026-10-21。
+> 复核日期：2026-10-30。
+> 校准批次数据仍来自 2026-10-21 的内核快照；本轮内核改动后尚未重新运行完整校准，不能作为当前验收结论。
 
-## 1. 结论
+## 1. 当前工作区状态
 
-当前工作区有七个 crate：`domain`（规格与数据档案）、`sim`（动作链内核）、`protocol`（帧与流类型）、`validation`（判定与机制实验）、`cli`（`sim-core` 与 `validate-core`）、`bball-wasm`（浏览器适配）、`debug-server`（观测页面）。
+当前实施阶段按 `docs/dev/current/full_simulation_plan.md` 执行；完整进度与逐项缺口见 `docs/dev/current/implementation.md`。`crates/sim` 是唯一比赛模拟实现，同一完成比赛的 CLI 与 WASM 入口已通过 seed 211 的摘要和投影事件对比。独立事件账本、会话检查点恢复、事件游标、规则场景和若干 NBA/FIBA 程序已有对应测试。
 
-`crates/sim` 是唯一的模拟实现。固定种子可重放；`World::step` 的每 tick 顺序固定为时钟 → 运动 → 动作到期结算 → 阶段推进 → 决策。结算产出状态变化与事实，事实进入 `GameReport.events`。
+全方案尚未完成：进攻 `ActionRuntime` 记录球员动作阶段和交互身份；另有独立 `DefensiveActionRuntime::CloseoutContest` 在投篮准备期间并行执行，改变防守者移动位置并影响真实投篮干扰几何。主要动作解析仍依赖 `World::active`，十名球员独立候选及完整攻防响应链未完成。完整动作候选到结果的因果链、完整 NBA/FIBA 程序裁决和规则场景矩阵、规则档案全部行为字段验证，以及当前内核上的全量校准仍有缺口。工作区全量测试状态记录于实施文档；最近一次完整工作区运行早于 CloseoutContest 修改，仅 `baseline_fingerprint_matches_recorded_artifact` 失败，过期基线工件未更新。Closeout 定向验证中，`action_chain` 5/5、`assignment` 2/2、`continuity` 2/2、`shot_model_invariants` 4/4、`allocation_budget` 1/1、`engine` 17/17、`rules_flow` 10/10 通过；不能据此认定完整工作区测试或全部并行动作通过。
 
-内核的结构性能力已经就位，逐项见 §2 与 `action_chain_engine.md` §9：战术层由 `params.tactics` 加载并由 `tactics::update_play_window` 驱动，防守几何由 `defense::solve_defense_targets` 求解，过程级判定有十八条判据进 `gate::evaluate`。剩余缺口是聚合层的校准，见 §3。
+## 2. 历史门矩阵：2026-10-21
 
-## 2. 门矩阵
+以下矩阵是 2026-10-21 的历史记录，不描述当前工作区能力。各项 `verified` 只适用于当时记录的范围与测试。
 
 状态含义：`verified` 只表示所列代码和测试范围存在；`partial` 表示实现或证据只覆盖规格的一部分；`未接线` 表示规格与数据已存在但没有任何消费点。
 
-| 门 | 状态 | 当前代码事实 | 未闭合边界 |
+| 门 | 状态 | 历史代码事实 | 当时未闭合边界 |
 | --- | --- | --- | --- |
-| 确定性 | verified | `crates/sim/tests/baseline_fingerprint.rs` 覆盖 16 个种子的箱体、出手分区计数、回合结束原因分布与事实构成摘要，逐字段比对并报告差异路径 | 指纹只证明同输入稳定，不证明比赛真实 |
+| 确定性 | verified | `crates/sim/tests/baseline_fingerprint.rs` 覆盖 16 个种子的箱体、出手分区计数、回合结束原因分布与事实构成摘要，逐字段比对并报告差异路径 | 历史基线在 2026-10-30 工作区失配；完整工作区测试中，同种子重放通过，基线对比不通过 |
 | 几何与语境合法性 | verified | 结算期逐动作记录；16 种子批次几何违规 0、语境违规 0 | 不覆盖未建模的动作 |
 | 回合终结 | verified | `PossessionRecord.ended_by` 记录结束原因，`World::end_possession` 是唯一写入口 | 走步率判据未登记 |
 | 账本 | verified | `crates/sim/tests/engine.rs` 断言球员得分合计等于队伍合计、得分与出手账本对平、罚球命中数与事实流一致 | 加时犯规累计未按档案区分 |
@@ -38,13 +39,13 @@
 | 联赛档案 | verified | `GameRules::league` 参数化节时长、进攻时钟、个人犯满、bonus 与三分几何 | 干扰球与技术犯规没有程序 |
 | 动作模型 | verified | `ActionIntent` 加 `resolve` 分支覆盖 9 类动作 | — |
 | 文档守卫 | verified | `scripts/check_docs.py` 扫 30 份文档 204 处引用；常数、阈值、身份与行数守卫接入 CI | 工作面豁免路径实在性检查，本文件引用已删路径不会变红 |
-| 验证基础设施 | partial | `crates/validation` 提供判定批次、机制实验与四态裁决；最新当前工作区报告为 `defects_found` | 32 场训练组的 `shooting_fouls_per_game` 未达验收带；40 种子机制实验中 speed、acceleration、strength、defensive_rebound、decision_iq 仍为 `insufficient` |
+| 验证基础设施 | partial | `crates/validation` 提供判定批次、机制实验与四态裁决；当时的报告为 `defects_found` | 32 场训练组的 `shooting_fouls_per_game` 未达验收带；40 种子机制实验中 speed、acceleration、strength、defensive_rebound、decision_iq 仍为 `insufficient` |
 | 性能预算 | verified | 实测单场 0.03 s、58,936 tick；稳态每 tick 堆分配 0，由 `crates/sim/tests/allocation_budget.rs` 在一千个以上稳态 tick 上逐 tick 计数 | `--stream` 仍逐帧序列化，单场 1.46 s；按回合回放是替代路径 |
 | 观测视图 | verified | 2.5D 正交斜视视图 `crates/debug-server/static/court3d.js` 与二维战术板共用协议帧；`node scripts/test_court3d.mjs` 覆盖十名球员可见、位置与插值坐标误差 0、小人偏航与 facing 误差 0、资产前向对齐误差 0、背向镜头的球员全部显示背面、落地最低点 0.04 英尺与头高 6.12 英尺、卡通渐层材质 60 个、全场四角在镜头内、正交投影下同一高度尺寸一致（比值 1.0000）、平移限制在球场内；二维动效 `scripts/test_court_visuals.py` 以 `?court=2d` 运行通过 | 引擎不下发腾空高度与动作标签，一次性动作由 `eventType` 与 `events` 推导；小人朝向直接取 facing，固定镜头下背面会被遮挡 |
 
-## 3. 当前未完成工作
+## 3. 历史快照中的未完成工作
 
-`crates/sim` 当前实现与观测视图已提交至本地分支；发布门禁尚未通过。最新当前工作区验证在 32 场训练组中有一项分布判定失败，机制实验有五项响应不足。需要按第一性原理继续检查速度、加速度、力量、防守篮板、决策球商和投篮犯规的因果链，并刷新证据后再评估发布状态。
+此处的历史矩阵和旧未完成工作清单只用于追溯 2026-10-21 快照。最近一次完整工作区运行的失败及其原因记录于 `docs/dev/current/implementation.md`：过时的 `baseline_fingerprint_matches_recorded_artifact`；该运行早于 CloseoutContest 修改。当前 `events_per_game` 上限已按 32 场生产运行的实测范围调整，五维诊断测试 3/3 通过；指纹工件先于目前的内核行为，需要重新审查后才能继续作为基线。当前未完成项和最新校准状态以 `docs/dev/current/implementation.md` 及唯一权威实施方案 `docs/dev/current/full_simulation_plan.md` 为准。进攻 `ActionRuntime` 有部分实现；独立防守 CloseoutContest 已有真实执行路径与定向测试，完整并行动作调度仍未完成。当前完整校准未运行，历史校准数据仅适用于其注明的 2026-10-21 快照。
 
 ## 4. 证据入口
 
@@ -55,9 +56,9 @@
 - 基线指纹工件：`crates/sim/tests/baseline/fingerprint.json`（16 种子，随仓库提交，新 checkout 不依赖本地残留文件；记录方式见测试文件头部注释）
 - 判定批次工件：`validate-core --out <目录>`
 
-## 5. 判定批次
+## 5. 历史判定批次：2026-10-21
 
-当前工作区最新命令为 `cargo run --release -p nba-sim-cli -- validate-core --seed 1 --games 32 --mechanism`。32 场训练组有 1 项分布判定失败：`shooting_fouls_per_game` 为 16.531，目标为 19.597；其余 36 项分布与过程判定通过，几何违规、语境违规及账本失败均为 0。五维诊断通过。40 种子机制实验有 5 项 `insufficient`，认证为 `defects_found`。
+下表中的命令与数据来自 2026-10-21 内核快照的历史验证批次，并非当前工作区最新运行。该批次有 1 项分布判定失败：`shooting_fouls_per_game` 为 16.531，目标为 19.597；其余 36 项分布与过程判定通过，几何违规、语境违规及账本失败均为 0。五维诊断通过。40 种子机制实验有 5 项 `insufficient`，认证为 `defects_found`。当前改动后的完整校准仍待重新运行。
 
 | 指标 | 观测 | 基准 |
 | --- | --- | --- |

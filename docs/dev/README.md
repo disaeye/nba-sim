@@ -1,139 +1,103 @@
 # NBA-Sim 开发文档
 
-> `docs/dev/` 是代码绑定的工作面。这里的内容会过期，但每条当前结论都应该能回到代码、测试或可复现实验证据。
+> `docs/dev/` 记录当前实现、执行进度、可复核证据与历史周期。所有当前结论都应能对应代码、测试或可重现的验证。
 
 ## 0. 当前入口
 
-- **当前状态**：[`status.md`](status.md)
+- **当前状态**：[`status.md`](status.md)（简要当前结论；历史验证矩阵另有日期标记）
+- **当前实施入口**：[`current/plan.md`](current/plan.md)
+- **唯一权威实施方案**：[`current/full_simulation_plan.md`](current/full_simulation_plan.md)
+- **当前执行进度**：[`current/implementation.md`](current/implementation.md)
 - **观测视图**：[`visualization.md`](visualization.md)
-- **当前计划**：[`current/plan.md`](current/plan.md)
-- **跨周期差距程序**：[`gap.md`](gap.md)
+- **跨周期差距**：[`gap.md`](gap.md)
 - **里程碑路线**：[`roadmap.md`](roadmap.md)
-- **原始证据**：[`evidence/problem.md`](evidence/problem.md)、[`evidence/impact_assessment.md`](evidence/impact_assessment.md)
+- **原始问题与影响证据**：[`evidence/problem.md`](evidence/problem.md)、[`evidence/impact_assessment.md`](evidence/impact_assessment.md)
+- **规则目录核验记录**：[`evidence/rule_catalog_sources.md`](evidence/rule_catalog_sources.md)
 - **历史周期**：[`cycles/`](cycles/)
 
-如果只想知道今天该做什么，按 `status.md` → `current/plan.md` 阅读。不要从 `cycles/` 的最后一页推断当前状态。
+当前执行依据的阅读顺序：`status.md` → `current/plan.md` → `current/full_simulation_plan.md` → `current/implementation.md`。历史周期只用于查阅归档内容。
 
-## 1. 当前工作区的真值规则
+## 1. 文档职责
 
-### 1.1 状态不是愿望
+| 文件 | 唯一职责 |
+| --- | --- |
+| `status.md` | 当前代码状态、验证范围、失败与未完成事项 |
+| `current/plan.md` | 当前方案入口，不复制完整设计与任务正文 |
+| `current/full_simulation_plan.md` | 唯一权威实施方案：目标范围、结构、依赖、实施次序与最终验收要求 |
+| `current/implementation.md` | 执行阶段、已完成证据、未完成事项与下一步 |
+| `gap.md` | 跨周期差距与依赖关系 |
+| `roadmap.md` | 项目里程碑及其顺序 |
+| `evidence/` | 可重现的命令、输入、原始输出与分析 |
+| `cycles/` | 已结束周期的完整历史记录 |
 
-`status.md` 只登记当前工作区可核验的状态：
+任何完整方案只在 `full_simulation_plan.md` 保存一份。`plan.md` 只提供入口；`implementation.md` 只记录进度，不另设目标或另写一套方案。
 
-- **implemented**：代码路径和相应测试/守卫都存在；
-- **verified**：在明确范围、输入和命令下通过；
-- **partial**：部分路径通过，剩余范围必须列出；
-- **blocked**：有明确依赖或失败证据；
-- **unknown**：尚未运行或证据不足。
+## 2. 当前状态与证据
 
-“有实现”不等于“已验证”，“某个 seed 通过”不等于“全矩阵通过”，“历史周期通过”不等于“当前工作区通过”。状态表必须把范围写出来。2026-09-27 的当前复核见 [`status.md`](status.md) 与 [`current/implementation.md`](current/implementation.md)：弹框松球篮板修复、投篮来源结构化事实与接球决策时序已验证，seed 1 来源与构成审计 `rim_attempt_composition` 与全量 16 种子 `stats_baseline` 全场矩阵已全部通过，R2 篮下出手分布闭合。
+`status.md` 记录当前工作区能够核验的状态；其中标注日期的历史矩阵仅用于追溯，不代表当前验证：
 
-### 1.2 计划不是历史
+- **implemented**：存在相应代码路径和测试或守卫；
+- **verified**：指定范围、输入与命令均已通过；
+- **partial**：部分路径已实现或核验，剩余范围有明确记录；
+- **blocked**：存在已确认的失败或外部依赖；
+- **unknown**：没有足够证据作出判断。
 
-`current/plan.md` 只包含未完成的任务和下一步验收条件。已完成工作移入周期归档，并在 `status.md` 保留一行当前结论与证据链接。不得在当前计划中继续追加 Round 流水账。
+实现存在不代表已经验证；单个种子通过不代表完整场景通过；历史周期的结果不代表当前工作区的结果。每条状态应记录范围与证据。
 
-### 1.3 证据不是状态
+`evidence/` 保存原始结果，允许记录命令、随机种子、输出和失败信息。证据支持状态判定，不能替代当前状态，也不能覆盖较新的验证结果。
 
-`evidence/` 保存原始实验和影响分析，允许包含命令、seed、输出和失败。它是状态的证据来源，不是状态本身；历史证据不能覆盖新的验证结果。
+## 3. 当前实施进度
 
-## 2. 目录和生命周期
+`implementation.md` 按 `full_simulation_plan.md` 的依赖阶段更新。每项进度记录：
 
-```text
-docs/dev/
-├── README.md
-├── status.md
-├── gap.md
-├── roadmap.md
-├── current/
-│   ├── plan.md
-│   └── implementation.md
-├── evidence/
-│   ├── problem.md
-│   └── impact_assessment.md
-└── cycles/
-    ├── 20260901_historical/
-    ├── 20260911_first-principles/
-    ├── 20260916_convergence/
-    │   ├── plan.md
-    │   └── spec_gap.md
-    ├── 20260916_systematization/
-    └── 20260917_first_principles_next/
-        └── plan_play.md
-```
+1. 阶段状态；
+2. 修改过的代码与数据路径；
+3. 测试身份、输入范围和结果；
+4. 尚未覆盖的条件；
+5. 下一项工作或关闭条件。
 
-| 层级 | 唯一职责 | 完成后的动作 |
+用户确认目标范围或核心结构变化时，更新 `full_simulation_plan.md`，并检查目录入口、验收任务和实现进度。日常实现进度不复制完整方案。
+
+## 4. 编号范围
+
+跨文件使用的编号应在此处登记后再使用；编号不得与其他规格、周期或测试清单混淆。
+
+| 编号范围 | 所属文档 | 用途 |
 | --- | --- | --- |
-| `status.md` | 当前快照和开放门 | 持续更新，不复制历史正文 |
-| `current/` | 尚未完成的执行任务：`plan.md` 是队列，`implementation.md` 是步骤 | 任务结束即归档到当前周期目录 |
-| `gap.md` | 跨周期差距地图 | 程序整体闭合后归档快照 |
-| `roadmap.md` | 里程碑顺序 | 下一轮路线取代旧路线 |
-| `evidence/` | 原始事实和口径 | 只追加，不用新状态覆盖旧事实 |
-| `cycles/` | 已结束周期的完整记录 | 只读历史，不作为当前入口 |
+| G0–G9 | `gap.md` | 跨周期差距标识 |
+| M1–M10 | `roadmap.md`、`protocol.md` | 里程碑标识 |
+| D0–D6 | `cycles/20260911_first-principles/plan.md` | 已归档周期任务 |
+| D7–D13 | `cycles/20260916_convergence/plan.md` | 已归档周期任务 |
+| D14 及后续 | 当前周期方案或执行记录 | 当前周期任务；须先登记到唯一实施方案 |
+| R1–R12 | 历史周期记录 | 已完成轮次与证据索引 |
+| F1–F7 | 历史周期记录 | 遗留事项的历史标识 |
 
-## 3. 当前状态快照的格式
+历史编号只用于追溯。新增任务编号前先确认既有编号范围的用途。
 
-`status.md` 应保持短而可扫描，推荐固定为：
+## 5. 更新与归档
 
-1. 快照元数据：代码基线、更新时间、证据范围；
-2. 结论摘要：当前可以宣称什么，不能宣称什么；
-3. 门矩阵：门、状态、验证范围、证据；
-4. 实现映射：规格条款对应的代码/测试/脚本；
-5. 开放问题：每项有 owner/依赖/下一验证动作；
-6. 最近变更：只列影响当前判断的几条，不重放整个周期。
+每次实现变更至少更新一处相关记录：
 
-禁止在 `status.md` 重新粘贴 `problem.md` 的完整输出或周期计划。需要细节时链接到证据或归档。
+- 当前已验证状态变化时更新 `status.md`；
+- 阶段、证据或下一步变化时更新 `current/implementation.md`；
+- 用户确认方案范围或结构变化时更新 `current/full_simulation_plan.md`；
+- 新增原始验证时保存至 `evidence/`。
 
-## 4. 阶段编号
+一个周期满足以下条件后才能归档：
 
-项目保留历史编号，但不把它们混成一个完成度百分比：
+- 当前阶段已验证完成，或未完成部分已明确交给后续阶段；
+- `status.md` 已记录周期结果与尚未关闭的事项；
+- 原始证据与执行记录已归入 `evidence/` 或对应周期目录；
+- 当前入口及新的实施进度已更新。
 
-| 编号 | 所在文档 | 语义 | 当前用途 |
-| --- | --- | --- | --- |
-| G0–G9 | `gap.md` | 跨周期差距程序 | 依赖地图 |
-| M1–M10 | `roadmap.md` / `protocol.md` | 迭代里程碑 | 路线与验收定义 |
-| D0–D6 | `cycles/20260911_first-principles/plan.md` | 已结束周期的任务分解 | 追溯旧证据，不新增 |
-| D7–D13 | `cycles/20260916_convergence/plan.md` | 已结束周期的任务分解（从可运行收敛到可证明） | 追溯旧证据，不新增 |
-| D14– | `current/plan.md` | 当前周期任务分解（体系化实施） | 当前周期未完成工作 |
-| R1–R12 | `current/plan.md` / `current/implementation.md` | 当前周期轮次（R1–R11 引擎能力轮次，R12 验证基础设施） | 当前周期未完成工作 |
-| F1–F7 | 历史周期 | 遗留项编号 | 追溯旧证据，不新增 |
-| Round-N | 周期归档 | 执行顺序 | 历史检索，不代表当前状态 |
+归档目录使用 `YYYYMMDD_theme`。归档文件注明历史周期属性和当前状态入口。
 
-新增编号前必须证明现有编号无法表达；当前计划只使用本周期已经登记的编号。
+## 6. 设计、决策与实现记录
 
-## 5. 写作和更新协议
-
-每次实现变更至少更新以下之一：
-
-- `status.md`：当前状态发生变化；
-- `current/plan.md`：待办、依赖或验收条件发生变化；
-- `evidence/`：新增可复现实验或失败证据。
-
-更新状态时必须同时给出：
-
-- 代码或测试路径；
-- 验证范围（seed、scope、profile 或测试目标）；
-- 通过/失败/未运行的明确结论；
-- 下一步或关闭条件。
-
-“完成”“稳定”“已支持”“真实度达标”等词不能单独出现，必须绑定机械门和范围。
-
-## 6. 设计与实现的边界
-
-- 稳定设计结论进入 `docs/*.md`；
+- 稳定的篮球规则与系统设计进入 `docs/` 对应规格；
 - 跨模块取舍进入 `docs/decisions.md`；
-- 目标设计、迁移依赖和未完成差距进入 `gap.md` 或当前计划；
-- 当前代码映射和测试事实进入 `status.md`；
-- 命令输出、seed 矩阵和原始失败进入 `evidence/` 或周期归档。
+- 本目标的完整实施方案与验收要求进入 `current/full_simulation_plan.md`；
+- 当前代码路径与测试事实进入 `status.md` 或 `current/implementation.md`；
+- 命令输出、输入数据与失败原文进入 `evidence/` 或周期归档。
 
-如果工作文档提出的设计被批准，执行“吸收而非复制”：把结论写入对应规格，保留 ADR/计划中的理由和迁移记录，并删除当前工作文档中重复的完整设计。
-
-## 7. 归档规则
-
-一个周期只有在以下条件同时满足时才归档：
-
-- `current/plan.md` 的未完成项已关闭、拆分或明确转交；
-- `status.md` 已记录周期出口和未闭合项；
-- 原始证据与执行记录都位于 `evidence/` 或 `cycles/<cycle>/`；
-- 新周期有新的 `current/plan.md`，且入口链接已更新。
-
-归档目录名使用 `YYYYMMDD_theme`。归档文件头部必须声明周期、历史属性和当前状态入口。
+方案获用户确认后，稳定设计结论应进入对应规格。当前方案保留执行依赖和验收范围；状态页与进度页只记录代码、测试和证据，不复制设计全文。

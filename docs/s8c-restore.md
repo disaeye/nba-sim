@@ -113,7 +113,7 @@
 `shot_quality_base_free_throw` / `shot_quality_skill_free_throw`（罚球基准）、
 `shot_contest_reference_rim` / `_near` / `_perimeter`（各出手类型的基准干扰）、
 `shot_phase_sigma_*`（各阶段倍率）、`hold_continuation_scale`（持球时钟期权）、
-`cut_open_value_share` / `screen_open_value_share`（掩护与空切创造的机会份额）、
+`break_speed_edge_ftps` / `break_max_runners`（快攻跑位的速度优势门槛与人数）、
 `cut_open_defender_ft`（空位要求的最小防守距离）。
 
 ## 出手类型与进攻分类的对应
