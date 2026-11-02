@@ -2972,9 +2972,30 @@ impl World {
                 and_one,
                 retain_possession,
                 foul_id,
-                technical_retained_team: _,
-                after_technical: _,
+                technical_retained_team,
+                after_technical,
             } => {
+                // 罚球人离场（换人或被逐）：由在场队友替他罚完剩下的球。
+                if !self.players[shooter].on_court {
+                    let team = self.players[shooter].team;
+                    let Some(stand_in) = self.on_court(team).as_slice().first().copied() else {
+                        return;
+                    };
+                    self.set_phase(Phase::FreeThrows {
+                        shooter: stand_in,
+                        total,
+                        remaining,
+                        made,
+                        next_at,
+                        and_one,
+                        retain_possession,
+                        foul_id,
+                        technical_retained_team,
+                        after_technical,
+                    });
+                    self.set_ball_held(stand_in);
+                    return;
+                }
                 // 罚球人有出手时限：超时判违例，球权交给对方。
                 if let Some(started) = self.free_throw_started {
                     let limit = f64::from(self.rules.league.free_throw_time_limit_seconds);
