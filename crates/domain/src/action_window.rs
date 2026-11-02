@@ -53,11 +53,16 @@ impl Foot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DribbleMoveKind {
+    /// 原地或推进运球：不改变球与防守人的相对位置。
     DirectDrive,
     Crossover,
     BetweenTheLegs,
     BehindTheBack,
     SpinMove,
+    /// 迟疑步：顿一下再起，冻结防守人的伸手时机。
+    Hesitation,
+    /// 后撤步运球：把球拉回远离防守人的一侧。
+    Retreat,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JumperKind {

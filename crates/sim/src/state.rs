@@ -1008,6 +1008,10 @@ pub struct PossessionState {
     pub first_action_seconds: Option<f64>,
     /// 本回合已经发生的无球自主动作数：无球球员每个回合只另起一次动作。
     pub off_ball_actions: u8,
+    /// 当前运球技术带给球的暴露程度（0 = 护住，1 = 完全暴露）。
+    pub dribble_exposure: f32,
+    /// 暴露程度的到期时刻。
+    pub dribble_exposure_until: f64,
     /// 对位表最后一次被重算的时刻：职责层据此立刻换人。
     pub pairing_changed_at: f64,
     /// 持球状态与收球位置。
@@ -1062,6 +1066,8 @@ impl PossessionState {
             last_cut_actor: None,
             first_action_seconds: None,
             off_ball_actions: 0,
+            dribble_exposure: 1.0,
+            dribble_exposure_until: 0.0,
             pairing_changed_at: 0.0,
             dribble_state: DribbleState::Dribbling,
             gather_pos: None,

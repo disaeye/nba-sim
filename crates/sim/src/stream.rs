@@ -48,6 +48,7 @@ impl Fact {
             Self::LooseBallRecovered { .. } => "LOOSE_BALL_RECOVERED",
             Self::SecondChanceStarted { .. } => "SECOND_CHANCE_STARTED",
             Self::Cut { .. } => "CUT",
+            Self::DribbleMove { .. } => "DRIBBLE_MOVE",
             Self::FakeAction { .. } => "FAKE_ACTION",
             Self::BallProtection { .. } => "BALL_PROTECTION",
             Self::PokePrevented { .. } => "POKE_PREVENTED",
@@ -359,6 +360,17 @@ impl World {
                 "cutter_id": self.player_id(*cutter),
                 "arrived": arrived,
                 "defender_distance_ft": defender_distance_ft,
+            }),
+            Fact::DribbleMove {
+                player,
+                kind,
+                separation_ft,
+                exposure,
+            } => json!({
+                "player_id": self.player_id(*player),
+                "dribble": format!("{kind:?}"),
+                "separation_ft": separation_ft,
+                "exposure": exposure,
             }),
             Fact::FakeAction {
                 player,

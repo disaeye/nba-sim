@@ -971,7 +971,7 @@ impl World {
                 rules.screen_exec_seconds,
                 rules.screen_follow_seconds,
             ),
-            ActionKind::Drive | ActionKind::Dribble | ActionKind::Cut | ActionKind::PostUp | ActionKind::Relocate => (
+            ActionKind::Drive | ActionKind::Dribble(_) | ActionKind::Cut | ActionKind::PostUp | ActionKind::Relocate => (
                 rules.tactics.drive_min_duration_seconds,
                 rules.tactics.drive_max_duration_seconds,
                 rules.tactical_initiation_seconds,

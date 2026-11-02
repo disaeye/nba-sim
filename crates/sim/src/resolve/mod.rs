@@ -35,7 +35,7 @@ pub fn resolve(world: &mut World, intent: ActionIntent) -> ActionOutcome {
         // 切入人自己发起的空切只跑路线；持球人发起的空切同时送出高吊球。
         ActionKind::Cut if intent.target.is_some() => pass::resolve_cut(world, &intent),
         ActionKind::Cut => offball::cut_route(world, &intent),
-        ActionKind::Dribble => resolve_dribble(world, &intent),
+        ActionKind::Dribble(kind) => resolve_dribble(world, &intent, kind),
         ActionKind::Fake(kind) => fake::resolve(world, &intent, kind),
         ActionKind::Protect(kind) => protect::resolve(world, &intent, kind),
         ActionKind::Relocate => ActionOutcome {
@@ -51,8 +51,25 @@ pub fn resolve(world: &mut World, intent: ActionIntent) -> ActionOutcome {
 }
 
 /// 运球：正常运球结束即收球并记下位置；已收球再运球是二次运球。
-fn resolve_dribble(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
+///
+/// 技术细分决定这次运球的分离距离与球的暴露程度：变向类换到横向空间，
+/// 后撤步拉开距离，迟疑步冻结伸手时机，原地运球不改变位置。
+fn resolve_dribble(
+    world: &mut World,
+    intent: &ActionIntent,
+    kind: nba_domain::action_window::DribbleMoveKind,
+) -> ActionOutcome {
+    use nba_domain::action_window::DribbleMoveKind;
     let actor = intent.actor;
+    let (separation, exposure) = match kind {
+        DribbleMoveKind::DirectDrive => (0.0, 1.0),
+        DribbleMoveKind::Crossover => (0.9, 0.45),
+        DribbleMoveKind::BetweenTheLegs => (0.6, 0.40),
+        DribbleMoveKind::BehindTheBack => (0.8, 0.35),
+        DribbleMoveKind::SpinMove => (1.2, 0.60),
+        DribbleMoveKind::Hesitation => (0.3, 0.30),
+        DribbleMoveKind::Retreat => (1.0, 0.40),
+    };
     if world.possession.dribble_state == DribbleState::Gathered {
         world.line_mut(actor).turnovers += 1;
         world.emit(Fact::Turnover {
@@ -68,7 +85,7 @@ fn resolve_dribble(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
         world.start_possession(team.other(), PossessionKind::Live);
         return ActionOutcome {
             actor,
-            kind: ActionKind::Dribble,
+            kind: ActionKind::Dribble(kind),
             completion: Completion::Failed,
             delta: StateDelta {
                 turnover: Some(TurnoverKind::DoubleDribble),
@@ -95,9 +112,63 @@ fn resolve_dribble(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
         world.possession.gather_pos = None;
         world.possession.ball_phase = crate::state::BallPhase::Dribble;
     }
+    // 球的暴露程度按技术设定，窗口覆盖这一次运球的持续时间。
+    world.possession.dribble_exposure = exposure;
+    world.possession.dribble_exposure_until = intent.end_time().max(world.now());
+    // 变向与后撤步是被动的身体移动：把落点设到防守人的另一侧，
+    // 由移动层按速度走完；迟疑步改为冻结对手的伸手时机。
+    let defender = world
+        .players
+        .iter()
+        .enumerate()
+        .filter(|(handle, player)| *handle != actor && player.on_court && player.team != world.players[actor].team)
+        .map(|(handle, player)| (handle, (player.pos - world.players[actor].pos).length()))
+        .min_by(|left, right| left.1.partial_cmp(&right.1).expect("finite distance"));
+    if let Some((defender, _)) = defender {
+        match kind {
+            DribbleMoveKind::Crossover
+            | DribbleMoveKind::BetweenTheLegs
+            | DribbleMoveKind::BehindTheBack
+            | DribbleMoveKind::SpinMove
+            | DribbleMoveKind::Retreat => {
+                let away = (world.players[actor].pos - world.players[defender].pos).normalize_or_zero();
+                let lateral = Vec2::new(-away.y, away.x);
+                let step = match kind {
+                    DribbleMoveKind::Crossover | DribbleMoveKind::BetweenTheLegs => lateral,
+                    DribbleMoveKind::BehindTheBack | DribbleMoveKind::SpinMove => -lateral,
+                    _ => away,
+                };
+                let target = world.players[actor].pos + step * separation;
+                crate::assignment::force_target_as(
+                    world,
+                    actor,
+                    target,
+                    crate::state::TargetKind::Window,
+                    actor,
+                );
+            }
+            DribbleMoveKind::Hesitation => {
+                // 迟疑步冻结防守人的伸手时机：留下一个短失衡窗口。
+                let until = world.now()
+                    + f64::from(world.rules.resolve.technique.fake_bait_seconds) * 0.5;
+                world.players[defender].bait = Some(crate::state::Bait {
+                    kind: crate::action::FakeKind::Hesitation,
+                    until,
+                    displacement_ft: 0.0,
+                });
+            }
+            DribbleMoveKind::DirectDrive => {}
+        }
+    }
+    world.emit(Fact::DribbleMove {
+        player: actor,
+        kind,
+        separation_ft: separation,
+        exposure,
+    });
     ActionOutcome {
         actor,
-        kind: ActionKind::Dribble,
+        kind: ActionKind::Dribble(kind),
         completion: Completion::Completed,
         delta: StateDelta::default(),
         facts: Vec::new(),

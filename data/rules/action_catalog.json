@@ -7,13 +7,14 @@
       "name": "运球与持球控制",
       "actions": ["原地运球", "推进运球", "体前变向", "胯下运球", "背后运球", "转身运球", "迟疑步", "后撤步运球"],
       "current_status": "partial",
-      "existing_types": ["nba_sim_core::action::ActionKind::Dribble", "nba_domain::action_window::DribbleMoveKind"],
-      "production_paths": ["crates/sim/src/policy.rs::hold_candidate", "crates/sim/src/resolve/mod.rs::resolve_dribble"],
-      "consumer_status": "ActionKind::Dribble is selected by hold_candidate and resolved. DribbleMoveKind remains domain vocabulary and sim does not read it; no per-move technique is chosen. The regression covers a second-dribble turnover, not an ordinary dribble route or gather footwork.",
-      "evidence": ["crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover"],
+      "existing_types": ["nba_sim_core::action::ActionKind::Dribble(DribbleMoveKind)", "nba_domain::action_window::DribbleMoveKind", "nba_sim_core::action::Fact::DribbleMove"],
+      "production_paths": ["crates/sim/src/policy.rs::hold_candidate", "crates/sim/src/resolve/mod.rs::resolve_dribble", "crates/sim/src/resolve/poke.rs::poke_success", "crates/sim/src/assignment.rs::force_target_as"],
+      "consumer_status": "hold_candidate picks the technique from the defender gap, lane clearance and shot clock; resolve_dribble applies that technique's separation and ball exposure, and hesitation writes a bait window on the nearest defender. The poke resolver reads the technique exposure for the duration of the move, so the choice changes real turnover risk. Gather footwork and pivot legality are not modelled; the double-dribble rule still guards re-gathering.",
+      "evidence": ["crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover", "crates/sim/tests/dribble_technique.rs::crossover_moves_the_holder_and_reduces_the_poke_exposure", "crates/sim/tests/dribble_technique.rs::hesitation_freezes_the_defender_and_lowers_the_poke_success", "crates/sim/tests/dribble_technique.rs::direct_drive_keeps_the_geometric_exposure", "crates/sim/tests/dribble_technique.rs::real_games_select_several_dribble_techniques"],
       "rule_refs": ["NBA Rule 4 §II, §VII-IX; Rule 10 §II, §XIII", "FIBA Articles 24-25"],
-      "scenarios": ["ACTION-DRIBBLE-SECOND-DRIBBLE-TURNOVER"],
-      "scenario_tests": {"ACTION-DRIBBLE-SECOND-DRIBBLE-TURNOVER": "crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover"}
+      "scenarios": ["ACTION-DRIBBLE-SECOND-DRIBBLE-TURNOVER", "ACTION-DRIBBLE-CROSSOVER-CREATES-SPACE", "ACTION-DRIBBLE-HESITATION-FREEZES-DEFENDER", "ACTION-DRIBBLE-DIRECT-DRIVE-KEEPS-EXPOSURE", "ACTION-DRIBBLE-TECHNIQUES-USED-IN-GAMES", "ACTION-DRIBBLE-GATHER-FOOTWORK-LEGAL"],
+      "scenario_tests": {"ACTION-DRIBBLE-SECOND-DRIBBLE-TURNOVER": "crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover", "ACTION-DRIBBLE-CROSSOVER-CREATES-SPACE": "crates/sim/tests/dribble_technique.rs::crossover_moves_the_holder_and_reduces_the_poke_exposure", "ACTION-DRIBBLE-HESITATION-FREEZES-DEFENDER": "crates/sim/tests/dribble_technique.rs::hesitation_freezes_the_defender_and_lowers_the_poke_success", "ACTION-DRIBBLE-DIRECT-DRIVE-KEEPS-EXPOSURE": "crates/sim/tests/dribble_technique.rs::direct_drive_keeps_the_geometric_exposure", "ACTION-DRIBBLE-TECHNIQUES-USED-IN-GAMES": "crates/sim/tests/dribble_technique.rs::real_games_select_several_dribble_techniques"},
+      "missing_evidence": ["ACTION-DRIBBLE-GATHER-FOOTWORK-LEGAL"]
     },
     {
       "id": "ACTION-DRIVE",

@@ -231,7 +231,7 @@ fn double_dribble_after_gather_is_a_turnover() {
     world.interactions.clear();
     let intent = ActionIntent {
         actor,
-        kind: ActionKind::Dribble,
+        kind: ActionKind::Dribble(nba_domain::action_window::DribbleMoveKind::Crossover),
         target: None,
         from_ft: world.players[actor].pos,
         to_ft: world.players[actor].pos,

@@ -105,7 +105,7 @@ pub fn tick(world: &mut World) {
         ActionKind::Drive => crate::state::BallPhase::Drive,
         ActionKind::Finish => crate::state::BallPhase::Gather,
         ActionKind::PostUp => crate::state::BallPhase::Post,
-        ActionKind::Dribble
+        ActionKind::Dribble(_)
         | ActionKind::Pass(_)
         | ActionKind::Cut
         | ActionKind::Screen(_)
@@ -117,7 +117,7 @@ pub fn tick(world: &mut World) {
     match intent.kind {
         ActionKind::Drive
         | ActionKind::Finish
-        | ActionKind::Dribble
+        | ActionKind::Dribble(_)
         | ActionKind::PostUp
         | ActionKind::Relocate => {
             world.players[actor].target = intent.to_ft;
@@ -635,7 +635,8 @@ fn action_duration(
         }
         ActionKind::PostUp => 1.6,
         ActionKind::Shoot(_) => 0.55,
-        ActionKind::Dribble | ActionKind::Relocate => 1.4,
+        ActionKind::Dribble(_) => 1.4,
+        ActionKind::Relocate => 1.4,
         // 假动作与护球都是短技术动作，时长由规则档案的战术下限决定。
         ActionKind::Fake(_) => 0.45,
         ActionKind::Protect(_) => 0.35,
@@ -683,7 +684,7 @@ pub fn candidate_utilities(world: &World, state: &DecisionState) -> Vec<Candidat
             candidates.retain(|(kind, _, _, _)| match read {
                 DefenderRoute::Under => matches!(
                     kind,
-                    ActionKind::Shoot(_) | ActionKind::Pass(_) | ActionKind::Dribble
+                    ActionKind::Shoot(_) | ActionKind::Pass(_) | ActionKind::Dribble(_)
                 ),
                 DefenderRoute::Over => matches!(
                     kind,
@@ -1757,8 +1758,30 @@ fn hold_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
                 ),
         ..Default::default()
     };
+    // 技术细分由处境决定：贴得越紧越用短促的变向，空间大就用转身或推进。
+    let gap = state
+        .primary_defender
+        .map(|defender| defender.distance_ft)
+        .unwrap_or(f32::INFINITY);
+    let move_kind = if gap <= 2.0 {
+        nba_domain::action_window::DribbleMoveKind::Crossover
+    } else if gap <= 3.2 {
+        nba_domain::action_window::DribbleMoveKind::BetweenTheLegs
+    } else if gap <= 4.5 {
+        if state.shot_clock < 10.0 {
+            nba_domain::action_window::DribbleMoveKind::Hesitation
+        } else if state.lane_clearance < 3.0 {
+            nba_domain::action_window::DribbleMoveKind::BehindTheBack
+        } else {
+            nba_domain::action_window::DribbleMoveKind::Retreat
+        }
+    } else if state.lane_clearance >= 3.0 {
+        nba_domain::action_window::DribbleMoveKind::SpinMove
+    } else {
+        nba_domain::action_window::DribbleMoveKind::DirectDrive
+    };
     Some((
-        ActionKind::Dribble,
+        ActionKind::Dribble(move_kind),
         None,
         // 持球移动的落点是弧顶的持球位，不是篮筐：把「拿着球」指向篮筐会让
         // 每次运球都变成一次无意识的冲筐；停在原地又会让持球人停在还没

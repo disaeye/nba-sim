@@ -72,6 +72,9 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: FakeKind) -> Acti
                     let aim = world.players[fake].pos - world.players[defender].pos;
                     world.players[defender].facing = aim.normalize_or_zero();
                 }
+                FakeKind::Hesitation => {
+                    // 迟疑步是运球技术，不走这条假动作路径。
+                }
                 FakeKind::JabStep => {
                     // 试探步向篮筐方向跨出：持球人与防守人都走真实脚步，
                     // 位移由移动层按速度完成。

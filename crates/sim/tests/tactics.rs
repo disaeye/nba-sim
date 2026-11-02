@@ -112,7 +112,7 @@ fn hard_inhibition_removes_the_family_from_the_candidate_set() {
             nba_sim_core::utility::Utility::default(),
         ),
         (
-            ActionKind::Dribble,
+            ActionKind::Dribble(nba_domain::action_window::DribbleMoveKind::Crossover),
             None,
             glam::Vec2::ZERO,
             nba_sim_core::utility::Utility::default(),

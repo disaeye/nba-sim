@@ -248,7 +248,7 @@ fn starting_another_action_ends_the_protection_window() {
     assert!(world.protection.is_some());
     let dribble = ActionIntent {
         actor: holder,
-        kind: ActionKind::Dribble,
+        kind: ActionKind::Dribble(nba_domain::action_window::DribbleMoveKind::Crossover),
         target: None,
         from_ft: world.players[holder].pos,
         to_ft: world.players[holder].pos,

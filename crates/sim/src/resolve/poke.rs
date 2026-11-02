@@ -13,10 +13,18 @@ use crate::world::{Phase, World};
 /// 「模型说的成功率」与「执行时用的成功率」分家。
 pub fn poke_success(world: &World, thief: usize, holder: usize, nearest: f32, now: f64) -> f32 {
     let ball = world.ball.pos;
-    let exposure = nba_domain::capability::poke_ball_exposure(
+    let geometric_exposure = nba_domain::capability::poke_ball_exposure(
         &world.rules,
         ball.distance(world.players[holder].pos),
     );
+    // 运球技术决定这一段动作里球有多暴露：贴身变向与后撤步把球收在身体一侧，
+    // 原地推进则保持几何暴露。窗口到期后回到几何值。
+    // 技术只能把球收得更紧，不能比几何暴露更松。
+    let exposure = if world.possession.dribble_exposure_until > now {
+        geometric_exposure.min(world.possession.dribble_exposure)
+    } else {
+        geometric_exposure
+    };
     let towards_ball = (ball - world.players[thief].pos).normalize_or_zero();
     let closing = world.players[thief].vel.dot(towards_ball);
     let facing = nba_domain::capability::poke_pressure_factor(&world.rules, nearest);

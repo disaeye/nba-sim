@@ -55,6 +55,7 @@ fn fact_kind(fact: &Fact) -> &'static str {
         Fact::LooseBallRecovered { .. } => "loose_ball_recovered",
         Fact::SecondChanceStarted { .. } => "second_chance_started",
         Fact::Cut { .. } => "cut",
+        Fact::DribbleMove { .. } => "dribble_move",
         Fact::FakeAction { .. } => "fake_action",
         Fact::BallProtection { .. } => "ball_protection",
         Fact::PokePrevented { .. } => "poke_prevented",

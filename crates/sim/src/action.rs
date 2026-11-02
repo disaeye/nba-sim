@@ -145,6 +145,8 @@ pub enum FakeKind {
     Pass,
     /// 试探步：向篮筐方向的脚步试探，换回半步空间。
     JabStep,
+    /// 迟疑步：顿一下再起，冻结防守人的伸手时机。
+    Hesitation,
 }
 
 impl FakeKind {
@@ -153,6 +155,7 @@ impl FakeKind {
             Self::Shot => "shot_fake",
             Self::Pass => "pass_fake",
             Self::JabStep => "jab_step",
+            Self::Hesitation => "hesitation",
         }
     }
 }
@@ -179,7 +182,7 @@ impl ProtectKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ActionKind {
-    Dribble,    Drive,
+    Dribble(nba_domain::action_window::DribbleMoveKind),    Drive,
     Finish,
     Pass(PassKind),
     Screen(ScreenKind),
@@ -194,7 +197,7 @@ pub enum ActionKind {
 impl ActionKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Dribble => "Dribble",
+            Self::Dribble(_) => "Dribble",
             Self::Drive => "Drive",
             Self::Finish => "Finish",
             Self::Pass(_) => "Pass",
@@ -217,7 +220,7 @@ impl ActionKind {
             Self::Screen(_) => "screen",
             Self::Cut => "cut",
             Self::PostUp => "post_up",
-            Self::Dribble => "hold",
+            Self::Dribble(_) => "hold",
             Self::Finish => "finish",
             Self::Relocate => "relocate",
             Self::Fake(_) => "fake",
@@ -234,7 +237,7 @@ impl ActionKind {
             Self::Screen(_) => 3,
             Self::Cut => 4,
             Self::PostUp => 5,
-            Self::Dribble => 6,
+            Self::Dribble(_) => 6,
             Self::Finish => 7,
             Self::Relocate => 8,
             Self::Fake(_) => 9,
@@ -642,6 +645,15 @@ pub enum Fact {
         arrived: bool,
         defender_distance_ft: f32,
     },
+    /// 运球技术细分：动作本身就是一次球与身体的移动，效果按技术区分。
+    DribbleMove {
+        player: usize,
+        kind: nba_domain::action_window::DribbleMoveKind,
+        /// 这次技术动作换到的分离距离（英尺）。
+        separation_ft: f32,
+        /// 这次技术动作期间球暴露给防守人的程度（0 = 贴身护住，1 = 完全暴露）。
+        exposure: f32,
+    },
     /// 假动作：持球人做出投篮、传球或试探步的假动作，防守人的反应可观察。
     FakeAction {
         player: usize,
@@ -770,6 +782,7 @@ impl Fact {
             Self::LooseBallRecovered { .. } => "LooseBallRecovered",
             Self::SecondChanceStarted { .. } => "SecondChanceStarted",
             Self::Cut { .. } => "Cut",
+            Self::DribbleMove { .. } => "DribbleMove",
             Self::FakeAction { .. } => "FakeAction",
             Self::BallProtection { .. } => "BallProtection",
             Self::PokePrevented { .. } => "PokePrevented",
