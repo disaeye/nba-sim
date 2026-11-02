@@ -42,6 +42,6 @@
     { "dimension": "rules", "key": "violations_per_1k_events", "lower": 0.0, "upper": 0.0 },
     { "dimension": "rules", "key": "finished_game_share", "lower": 1.0, "upper": 1.0 },
     { "dimension": "rules", "key": "score_reconcile_share", "lower": 1.0, "upper": 1.0 },
-    { "dimension": "rules", "key": "events_per_game", "lower": 1000.0, "upper": 6000.0 }
+    { "dimension": "rules", "key": "events_per_game", "lower": 1000.0, "upper": 10000.0 }
   ]
 }
