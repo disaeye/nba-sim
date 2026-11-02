@@ -71,6 +71,12 @@ pub enum DefenseResponsibility {
     Sink,
     Help,
     BoxOut,
+    /// 从掩护上方挤过去，继续贴着持球人。
+    GoOver,
+    /// 从掩护下方绕过，先沉到掩护人与篮筐之间。
+    GoUnder,
+    /// 被掩护后直接换防。
+    Switch,
 }
 
 impl DefenseResponsibility {
@@ -81,6 +87,9 @@ impl DefenseResponsibility {
             Self::Sink => "sink",
             Self::Help => "help",
             Self::BoxOut => "box_out",
+            Self::GoOver => "go_over",
+            Self::GoUnder => "go_under",
+            Self::Switch => "switch",
         }
     }
 }

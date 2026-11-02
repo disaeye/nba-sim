@@ -1224,7 +1224,7 @@ fn post_footwork_follows_the_defenders_stance() {
 #[test]
 fn a_deflected_pass_becomes_a_loose_ball_decided_by_control() {
     let mut deflections = 0u32;
-    for seed in 1..=4u64 {
+    for seed in 1..=8u64 {
         let report = world(seed).run();
         for (index, event) in report.events.iter().enumerate() {
             let Fact::BallContact {
@@ -1587,5 +1587,89 @@ fn real_games_use_several_cut_routes() {
     assert!(
         counts.get("basket").copied().unwrap_or(0) > 0,
         "直切篮下仍是主要路线：{counts:?}"
+    );
+}
+
+/// 过掩护的两条路线：挤过继续贴人，绕过先沉到掩护人与篮筐之间。
+#[test]
+fn screen_navigation_route_decides_the_defender_target() {
+    use nba_sim_core::action::DefenderRoute;
+    use nba_sim_core::state::{DefenseResponsibility, ScreenRead};
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let run = |route: DefenderRoute| {
+        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 251);
+        let carrier = world.on_court(TeamSide::Home).as_slice()[0];
+        let screener = world.on_court(TeamSide::Home).as_slice()[1];
+        let guard = world.on_court(TeamSide::Away).as_slice()[0];
+        let helper = world.on_court(TeamSide::Away).as_slice()[1];
+        for (index, player) in world.players.iter_mut().enumerate() {
+            player.on_court = index == carrier || index == screener || index == guard || index == helper;
+            player.vel = Vec2::ZERO;
+        }
+        let hoop = world.hoop_for(TeamSide::Home);
+        let carrier_spot = hoop + Vec2::new(-20.0, 0.0);
+        world.players[carrier].pos = carrier_spot;
+        world.players[carrier].target = carrier_spot;
+        // 掩护人站在持球人与篮筐之间。
+        world.players[screener].pos = hoop + Vec2::new(-16.0, 0.0);
+        world.players[screener].target = world.players[screener].pos;
+        world.players[guard].pos = hoop + Vec2::new(-18.5, 1.2);
+        world.players[guard].target = world.players[guard].pos;
+        world.possession.team = TeamSide::Home;
+        world.start_possession(TeamSide::Home, PossessionKind::Live);
+        world.set_phase(Phase::Live);
+        world.ball.set_held(carrier);
+        world.ball.pos = carrier_spot;
+        world.ball.z = world.rules.ball_radius_ft;
+        world.possession.last_screen = Some(ScreenRead {
+            route,
+            at: world.now(),
+            screener,
+            separation_ft: 1.2,
+        });
+        // 职责只有在换对位或驻留时间到点时才变：这里直接标记对位刚变更。
+        nba_sim_core::defense::refresh_matchup(&mut world);
+        world.possession.pairing_changed_at = world.now() + 1.0;
+        // 压力目标的提交有最小驻留时间：先推进时钟越过驻留窗口。
+        world.clock.advance_simulation_time(1.0);
+        nba_sim_core::defense::apply_defense_targets(&mut world);
+        let responsibility = world.players[guard].defense_responsibility;
+        let target = world.players[guard].target;
+        (
+            responsibility,
+            target,
+            world.players[guard].target_kind,
+            world.players[guard].target_partner,
+        )
+    };
+    let (over, over_target, over_kind, over_partner) = run(DefenderRoute::Over);
+    let (under, under_target, under_kind, under_partner) = run(DefenderRoute::Under);
+    assert_eq!(
+        over,
+        DefenseResponsibility::GoOver,
+        "挤过的职责必须被记录为 go_over"
+    );
+    assert_eq!(
+        under,
+        DefenseResponsibility::GoUnder,
+        "绕过的职责必须被记录为 go_under"
+    );
+    assert_eq!(
+        over_kind,
+        nba_sim_core::state::TargetKind::Pressure,
+        "挤过仍然要贴着持球人"
+    );
+    assert_eq!(
+        under_kind,
+        nba_sim_core::state::TargetKind::Pressure,
+        "绕过也要占据一个压迫位置"
+    );
+    assert_ne!(
+        over_partner, under_partner,
+        "两条路线盯的不是同一个人：挤过贴持球人，绕过盯掩护人"
+    );
+    assert!(
+        (over_target - under_target).length() > 1.0,
+        "两条路线的落点必须不同：{over_target:?} vs {under_target:?}"
     );
 }

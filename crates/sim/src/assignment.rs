@@ -161,12 +161,9 @@ fn validate_target(
             if partner == usize::MAX || !world.players[partner].on_court {
                 return false;
             }
-            let separation =
-                if world.players[handle].defense_responsibility == DefenseResponsibility::Deny {
-                    pressure_separation(world)
-                } else {
-                    world.rules.min_player_separation_ft
-                };
+            // 所有压力目标都由同一个间隔参数生成：对位、拒绝接球、卡位、
+            // 过掩护与换防的站位都是「贴着对手一个身位」。
+            let separation = pressure_separation(world);
             let distance = (target - world.players[partner].pos).length();
             distance >= separation - 0.25 && distance <= separation + 2.5
         }
@@ -377,7 +374,17 @@ pub fn assign_defense_responsibilities(world: &mut World, targets: &[Vec2]) {
             9.5
         };
         let responsibility = if Some(man) == carrier {
-            DefenseResponsibility::OnBall
+            // 掩护刚结算完：按那次结算的路线决定怎么过掩护。
+            let nav_window = world.params.policy.g("screen_nav_seconds") as f64;
+            match world.possession.last_screen {
+                Some(read) if now - read.at < nav_window => match read.route {
+                    crate::action::DefenderRoute::Over => DefenseResponsibility::GoOver,
+                    crate::action::DefenderRoute::Under => DefenseResponsibility::GoUnder,
+                    crate::action::DefenderRoute::Switch => DefenseResponsibility::Switch,
+                    crate::action::DefenderRoute::Trapped => DefenseResponsibility::OnBall,
+                },
+                _ => DefenseResponsibility::OnBall,
+            }
         } else if world
             .possession
             .last_offensive_rebound_at

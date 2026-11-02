@@ -26,14 +26,12 @@ pub fn refresh_matchup(world: &mut World) {
         .any(|handle| *handle == UNASSIGNED || !world.players[*handle].on_court);
     let pairing_changed_at = world.possession.pairing_changed_at;
     let new_possession = pairing_changed_at < world.possession.started_at;
+    // 传球本身不换对位：只有突破得手（防守人被过）才重算最近匹配；
+    // 传球后重新配对会让对位在无人要求的情况下自己变。
     let possession_reassigned = world
         .possession
-        .last_pass_at
-        .is_some_and(|at| at > pairing_changed_at)
-        || world
-            .possession
-            .last_drive_at
-            .is_some_and(|at| at > pairing_changed_at);
+        .last_drive_at
+        .is_some_and(|at| at > pairing_changed_at);
     if !stale && !new_possession && !possession_reassigned {
         return;
     }
@@ -329,6 +327,50 @@ pub fn apply_defense_targets(world: &mut World) {
             crate::state::DefenseResponsibility::Help
             | crate::state::DefenseResponsibility::Sink => {
                 (crate::state::TargetKind::Station, usize::MAX, targets[slot])
+            }
+            // 从掩护上方挤过：继续站在持球人与篮筐之间，贴着人不放。
+            crate::state::DefenseResponsibility::GoOver => {
+                let target = carrier
+                    .map(|carrier| {
+                        let direction = (hoop - world.players[carrier].pos).normalize_or_zero();
+                        world.players[carrier].pos + direction * pressure
+                    })
+                    .unwrap_or(targets[slot]);
+                (
+                    crate::state::TargetKind::Pressure,
+                    carrier.unwrap_or(usize::MAX),
+                    target,
+                )
+            }
+            // 从掩护下方绕过：先沉到掩护人与篮筐之间，让持球人只能往外投。
+            crate::state::DefenseResponsibility::GoUnder => {
+                let screener = world.possession.last_screen.map(|read| read.screener);
+                let target = screener
+                    .filter(|screener| world.players[*screener].on_court)
+                    .map(|screener| {
+                        let spot = world.players[screener].pos;
+                        let direction = (hoop - spot).normalize_or_zero();
+                        spot + direction * (pressure + 1.5)
+                    })
+                    .unwrap_or(targets[slot]);
+                (
+                    crate::state::TargetKind::Pressure,
+                    screener.unwrap_or(usize::MAX),
+                    target,
+                )
+            }
+            // 换防：接管新的对位人，站位按他的切入路线取。
+            crate::state::DefenseResponsibility::Switch => {
+                let target = if man != usize::MAX && world.players[man].on_court {
+                    let ball = carrier
+                        .map(|carrier| world.players[carrier].pos)
+                        .unwrap_or(world.players[*handle].pos);
+                    let direction = (ball - world.players[man].pos).normalize_or_zero();
+                    world.players[man].pos + direction * pressure
+                } else {
+                    targets[slot]
+                };
+                (crate::state::TargetKind::Pressure, man, target)
             }
         };
         let used_closeout = responsibility == crate::state::DefenseResponsibility::OnBall

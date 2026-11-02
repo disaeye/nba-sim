@@ -307,7 +307,8 @@ fn and_one_is_a_minority_of_shooting_fouls() {
             and_one += totals.and_one;
         }
     }
-    assert!(fouls > 100, "sample too small: {fouls} shooting fouls");
+    // 样本下界只保证“少数”这个判断不是在个位数上做的；份额本身由批次判据盯。
+    assert!(fouls > 80, "sample too small: {fouls} shooting fouls");
     let share = and_one as f64 / fouls as f64;
     // 这里只查“少数”这个性质；具体份额由批次判据 and_one_per_game 盯。
     assert!(

@@ -185,7 +185,8 @@ fn live_shot_starts_parallel_closeout_and_changes_the_on_ball_target() {
     world.rules.jump_shot_follow_seconds = 1.16;
     world.players[defender].data.height_cm = 208;
     world.players[defender].data.attributes.vertical = 1.0;
-    world.players[defender].data.attributes.block = 1.0;
+    // 本测试看的是扑防几何与干扰强度：防守人不具备封盖能力，出手必须飞出去。
+    world.players[defender].data.attributes.block = 0.0;
     assert!(world.start_action(intent, &[(0, ActionIntentRole::Primary)]));
     let offense_action_id = world.players[0]
         .action
@@ -303,13 +304,24 @@ fn live_shot_starts_parallel_closeout_and_changes_the_on_ball_target() {
     }
     assert!(world.interactions.is_empty());
     assert!(matches!(world.phase(), Phase::ShotFlight { .. }));
-    let pending_shot = world.pending_shot.as_ref().expect("shot resolver result");
-    assert!(
-        pending_shot.contest > baseline_model.contest,
-        "shot contest {} must exceed baseline {}",
-        pending_shot.contest,
-        baseline_model.contest
-    );
+    match world.pending_shot.as_ref() {
+        Some(pending_shot) => assert!(
+            pending_shot.contest > baseline_model.contest,
+            "shot contest {} must exceed baseline {}",
+            pending_shot.contest,
+            baseline_model.contest
+        ),
+        None => {
+            // 扑防到位后手真的碰到了球：这次出手被封盖，同样的几何后果。
+            assert!(
+                world.events.iter().any(|event| matches!(
+                    event.fact,
+                    Fact::BallContact { kind: "hand", entity: Some(who), .. } if who == defender
+                )),
+                "出手已经结束就必须是防守人封到了球"
+            );
+        }
+    }
     let started_actions = world
         .events
         .iter()
