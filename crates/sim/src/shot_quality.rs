@@ -723,7 +723,16 @@ pub fn evaluate(
     // 体能直接压低出手概率：累了的人脚步与手腕都跟不上，落点误差更大。
     // 系数在参数表里，不在代码里写死。
     let fatigue = world.players[shooter].stamina.clamp(0.0, 1.0);
-    let p_make = (p_make * (1.0 - policy.w("shot_fatigue_penalty") * (1.0 - fatigue)))
+    // 同样的疲劳对耐力差的人更致命：体能属性放大这一次的命中损失，
+    // 不再只靠掉能量快慢差一点——轮换会把在场能量拉平，只看掉能量分不出差距。
+    let endurance = world.players[shooter]
+        .data
+        .attributes
+        .stamina
+        .clamp(0.0, 1.0);
+    let fatigue_scale = 1.5 - endurance;
+    let p_make = (p_make
+        * (1.0 - policy.w("shot_fatigue_penalty") * (1.0 - fatigue) * fatigue_scale))
         .clamp(0.0, 1.0);
     if std::env::var_os("NBA_TRACE_RATE").is_some() {
         use std::sync::atomic::{AtomicU32, Ordering};
