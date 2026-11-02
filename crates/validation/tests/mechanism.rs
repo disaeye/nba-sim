@@ -45,13 +45,19 @@ fn known_insufficient_entries_require_a_valid_resolution() {
 /// 力量的观测量必须对应属性规格中的「掩护推开距离」。
 #[test]
 fn strength_mechanism_uses_screen_displacement_observable() {
-    assert_eq!(MechanismAttribute::Strength.metric(), Metric::ScreenDisplacement);
+    assert_eq!(
+        MechanismAttribute::Strength.metric(),
+        Metric::ScreenDisplacement
+    );
 }
 
 /// 决策智商的观测量使用每次传球的失误比，避免回合长度改变分母。
 #[test]
 fn decision_iq_mechanism_uses_turnovers_per_pass() {
-    assert_eq!(MechanismAttribute::DecisionIq.metric(), Metric::TurnoversPerPass);
+    assert_eq!(
+        MechanismAttribute::DecisionIq.metric(),
+        Metric::TurnoversPerPass
+    );
 }
 
 /// 机制实验的契约：每个属性都产出已知裁决、数值有限、样本缺失时给出明确原因。
@@ -66,30 +72,55 @@ fn every_attribute_reports_a_known_verdict_or_an_explicit_gap() {
         low_value: 0.10,
         high_value: 0.95,
     };
-    for attribute in MechanismAttribute::all() {
-        match run_mechanism_experiment(attribute, config) {
-            Ok(result) => {
-                assert!(
-                    ["pass", "insufficient", "defect", "not_applicable"]
-                        .contains(&result.verdict.as_str()),
-                    "attribute {} returned unknown verdict {}",
-                    attribute.key(),
-                    result.verdict
-                );
-                assert!(
-                    result.baseline.is_finite() && result.perturbed.is_finite(),
-                    "attribute {} produced a non-finite metric",
-                    attribute.key()
-                );
-                assert_eq!(result.seeds, 1);
-            }
-            Err(error) => {
-                assert!(
-                    error.contains("produced no"),
-                    "attribute {} failed for an unexpected reason: {error}",
-                    attribute.key()
-                );
-            }
+    // 各属性的实验互不依赖，四个线程分摊。
+    let attributes: Vec<MechanismAttribute> = MechanismAttribute::all().to_vec();
+    let chunk_size = attributes.len().div_ceil(4);
+    let shared = (&attributes, &config);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .filter_map(|chunk| {
+                let start = chunk * chunk_size;
+                let end = (start + chunk_size).min(shared.0.len());
+                (start < end).then(|| &shared.0[start..end])
+            })
+            .map(|chunk| {
+                scope.spawn(move || {
+                    for attribute in chunk {
+                        check_mechanism_experiment(*attribute, shared.1);
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().expect("mechanism thread must not panic");
+        }
+    });
+}
+
+/// 单属性的实验契约检查：裁决已知、数值有限、失败原因明确。
+fn check_mechanism_experiment(attribute: MechanismAttribute, config: &MechanismConfig) {
+    match run_mechanism_experiment(attribute, config.clone()) {
+        Ok(result) => {
+            assert!(
+                ["pass", "insufficient", "defect", "not_applicable"]
+                    .contains(&result.verdict.as_str()),
+                "attribute {} returned unknown verdict {}",
+                attribute.key(),
+                result.verdict
+            );
+            assert!(
+                result.baseline.is_finite() && result.perturbed.is_finite(),
+                "attribute {} produced a non-finite metric",
+                attribute.key()
+            );
+            assert_eq!(result.seeds, 1);
+        }
+        Err(error) => {
+            assert!(
+                error.contains("produced no"),
+                "attribute {} failed for an unexpected reason: {error}",
+                attribute.key()
+            );
         }
     }
 }

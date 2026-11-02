@@ -33,33 +33,68 @@ pub struct G4Report {
 
 pub fn g4a_report(games: u64) -> Result<G4aReport, String> {
     let params = Params::load(&workspace_calibration_dir())?;
+    // 各种子比赛独立，四个线程分摊；逐种子汇总后按种子顺序折叠，
+    // 浮点累加顺序与串行版本一致。
+    let seeds: Vec<u64> = (1..=games).collect();
+    let chunk_size = seeds.len().div_ceil(4);
+    let shared_params = &params;
+    let per_seed: Vec<Result<(usize, f32, f32), String>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .filter_map(|chunk| {
+                let start = chunk * chunk_size;
+                let end = (start + chunk_size).min(seeds.len());
+                (start < end).then(|| &seeds[start..end])
+            })
+            .map(|chunk| {
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .map(|seed| {
+                            let mut world = World::new(
+                                MatchSetup::builtin(nba_domain::GameRules::default()),
+                                shared_params.clone(),
+                                *seed,
+                            );
+                            let report = world.run();
+                            let mut decisions = 0usize;
+                            let mut sum = 0.0f32;
+                            let mut max = 0.0f32;
+                            for record in &report.decision_records {
+                                let Some(chosen) = record.candidates.get(record.chosen) else {
+                                    continue;
+                                };
+                                let best = record
+                                    .candidates
+                                    .iter()
+                                    .map(|candidate| candidate.total)
+                                    .fold(f32::MIN, f32::max);
+                                let regret = (best - chosen.total).max(0.0);
+                                if !regret.is_finite() {
+                                    return Err(format!("seed {seed} produced non-finite regret"));
+                                }
+                                decisions += 1;
+                                sum += regret;
+                                max = max.max(regret);
+                            }
+                            Ok((decisions, sum, max))
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().expect("g4 game thread must not panic"))
+            .collect::<Vec<_>>()
+    });
     let mut decisions = 0usize;
     let mut sum = 0.0f32;
     let mut max = 0.0f32;
-    for seed in 1..=games {
-        let mut world = World::new(
-            MatchSetup::builtin(nba_domain::GameRules::default()),
-            params.clone(),
-            seed,
-        );
-        let report = world.run();
-        for record in &report.decision_records {
-            let Some(chosen) = record.candidates.get(record.chosen) else {
-                continue;
-            };
-            let best = record
-                .candidates
-                .iter()
-                .map(|candidate| candidate.total)
-                .fold(f32::MIN, f32::max);
-            let regret = (best - chosen.total).max(0.0);
-            if !regret.is_finite() {
-                return Err(format!("seed {seed} produced non-finite regret"));
-            }
-            decisions += 1;
-            sum += regret;
-            max = max.max(regret);
-        }
+    for result in per_seed {
+        let (seed_decisions, seed_sum, seed_max) = result?;
+        decisions += seed_decisions;
+        sum += seed_sum;
+        max = max.max(seed_max);
     }
     let mean = sum / decisions.max(1) as f32;
     let passed = decisions > 100 && mean <= 0.25 && max <= 2.0;

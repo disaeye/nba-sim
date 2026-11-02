@@ -1,6 +1,11 @@
 use nba_sim_core::params::workspace_root;
 use nba_validation::five_dimension::{run_five_dimension, FiveDimensionReport};
 
+fn short_rules() -> nba_domain::rules::GameRules {
+    // 轨迹覆盖门槛按完整比赛的决策分支校准，短场覆盖不到 0.99。
+    nba_domain::rules::GameRules::default()
+}
+
 const DIMENSIONS: [(&str, [&str; 4]); 5] = [
     (
         "decision",
@@ -81,7 +86,8 @@ fn assert_schema(report: &FiveDimensionReport) {
 
 #[test]
 fn report_covers_every_dimension_with_stable_fields() {
-    let report = run_five_dimension(1, 2).expect("五维报告生成失败");
+    // 诊断量是逐刻采集的物理/行为统计。
+    let report = run_five_dimension(1, 2, short_rules()).expect("五维报告生成失败");
     assert_schema(&report);
     assert_eq!(report.seeds, vec![1, 2]);
     assert!(
@@ -93,8 +99,8 @@ fn report_covers_every_dimension_with_stable_fields() {
 
 #[test]
 fn report_is_deterministic_for_the_same_seeds() {
-    let first = run_five_dimension(21, 2).expect("五维报告生成失败");
-    let second = run_five_dimension(21, 2).expect("五维报告生成失败");
+    let first = run_five_dimension(21, 2, short_rules()).expect("五维报告生成失败");
+    let second = run_five_dimension(21, 2, short_rules()).expect("五维报告生成失败");
     let left = serde_json::to_string(&first).expect("序列化失败");
     let right = serde_json::to_string(&second).expect("序列化失败");
     assert_eq!(left, right, "同一批种子的报告不稳定，无法当回归基线");

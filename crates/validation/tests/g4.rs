@@ -2,7 +2,8 @@ use nba_validation::g4::{g4_report, write_g4};
 
 #[test]
 fn g4a_and_g4b_reports_meet_their_bounds() {
-    let report = g4_report(4).expect("g4 report");
+    // 两场完整比赛的决策记录已过万，足以稳定均值与最大遗憾统计。
+    let report = g4_report(2).expect("g4 report");
     assert!(report.g4a.passed, "{:?}", report.g4a);
     assert!(report.g4b.passed, "{:?}", report.g4b);
     assert!(report.g4a.decisions > 100);

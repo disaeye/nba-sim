@@ -298,7 +298,104 @@ fn mean(sum: f64, count: u64) -> f64 {
     sum / count as f64
 }
 
-pub fn run_five_dimension(seed_start: u64, games: u64) -> Result<FiveDimensionReport, String> {
+/// 把一场比赛的局部统计合并进总表；调用方按种子顺序折叠，
+/// 浮点累加顺序与串行版本一致，结果完全相同。
+fn merge_tally(target: &mut Tally, part: Tally) {
+    target.decisions += part.decisions;
+    target.well_formed += part.well_formed;
+    target.candidate_sum += part.candidate_sum;
+    target.beta_sum += part.beta_sum;
+    target.candidates += part.candidates;
+    target.finite_candidates += part.finite_candidates;
+    if part.families.len() > target.families.len() {
+        target.families.resize(part.families.len(), u32::default());
+    }
+    for (slot, count) in part.families.iter().enumerate() {
+        target.families[slot] += count;
+    }
+    target.traces_with_bonus += part.traces_with_bonus;
+    target.passes += part.passes;
+    target.shots += part.shots;
+    target.drives += part.drives;
+    target.post_ups += part.post_ups;
+    target.plays += part.plays;
+    target.possessions += part.possessions;
+    target.endgame_shots += part.endgame_shots;
+    target.endgame_threes += part.endgame_threes;
+    target.player_ticks += part.player_ticks;
+    target.speed_violations += part.speed_violations;
+    target.accel_violations += part.accel_violations;
+    target.momentum_violations += part.momentum_violations;
+    target.events += part.events;
+    target.violations += part.violations;
+    target.games += part.games;
+    target.finished += part.finished;
+    target.reconciled += part.reconciled;
+}
+
+/// 跑完一个种子的整场并返回该场的局部统计（含逐 tick 物理判定）。
+fn game_tally(seed: u64, rules: &GameRules, params: &Params, config: &DiagnosticConfig) -> Tally {
+    let mut tally = Tally::default();
+    let mut world = World::new(MatchSetup::builtin(rules.clone()), params.clone(), seed);
+    let mut previous_velocity: Vec<_> = world.players.iter().map(|player| player.vel).collect();
+    let mut previous_position: Vec<_> = world.players.iter().map(|player| player.pos).collect();
+    let mut previous_distance: Vec<_> = world
+        .players
+        .iter()
+        .map(|player| (player.target - player.pos).length())
+        .collect();
+    let mut previous_target: Vec<_> = world.players.iter().map(|player| player.target).collect();
+    let arrival = world.params.policy.g("motion_arrival_epsilon_ft");
+    let momentum_cap = world.params.policy.w("momentum_cap");
+    // 物理映射系数在整场开始前解析一次：逐 tick 克隆整张策略表会把
+    // 判定批次变成内存大户，也会让诊断本身变成最慢的一段。
+    let coefficients = Coefficients::from_policy(&world.params.policy);
+    let dt = TICK_SECONDS as f32;
+    while !world.finished {
+        world.step(TICK_SECONDS);
+        for (index, player) in world.players.iter().enumerate() {
+            if !player.on_court {
+                continue;
+            }
+            let physical = Physical::with(player, &coefficients);
+            tally.player_ticks += 1;
+            if player.vel.length() > physical.speed_ftps + config.tolerance.velocity {
+                tally.speed_violations += 1;
+            }
+            // 只判定「真的由移动积分产生位移、且不是到位停步」的帧：
+            // 摆位重置与换人是瞬移，目标点当帧变化时也可能伴随重新摆位。
+            let travelled = player.pos - previous_position[index];
+            if (travelled - player.vel * dt).length() <= config.tolerance.teleport
+                && previous_distance[index] > arrival
+                && (player.target - previous_target[index]).length() <= config.tolerance.teleport
+            {
+                let change = (player.vel - previous_velocity[index]).length();
+                if change > physical.accel_ftps2 * dt + config.tolerance.acceleration {
+                    tally.accel_violations += 1;
+                }
+            }
+            previous_velocity[index] = player.vel;
+            previous_position[index] = player.pos;
+            previous_distance[index] = (player.target - player.pos).length();
+            previous_target[index] = player.target;
+        }
+        if world
+            .momentum
+            .iter()
+            .any(|value| *value > momentum_cap + config.tolerance.momentum)
+        {
+            tally.momentum_violations += 1;
+        }
+    }
+    accumulate(&mut tally, &world, config);
+    tally
+}
+
+pub fn run_five_dimension(
+    seed_start: u64,
+    games: u64,
+    rules: GameRules,
+) -> Result<FiveDimensionReport, String> {
     if games == 0 {
         return Err("five-dimension report requires at least one game".to_string());
     }
@@ -306,66 +403,40 @@ pub fn run_five_dimension(seed_start: u64, games: u64) -> Result<FiveDimensionRe
     let params = Params::load(&workspace_calibration_dir())?;
     let tolerance = &config.tolerance;
     let mut tally = Tally::default();
-    let mut seeds = Vec::new();
-    let dt = TICK_SECONDS as f32;
-    for offset in 0..games {
-        let seed = seed_start + offset;
-        seeds.push(seed);
-        let mut world = World::new(
-            MatchSetup::builtin(GameRules::default()),
-            params.clone(),
-            seed,
-        );
-        let mut previous_velocity: Vec<_> = world.players.iter().map(|player| player.vel).collect();
-        let mut previous_position: Vec<_> = world.players.iter().map(|player| player.pos).collect();
-        let mut previous_distance: Vec<_> = world
-            .players
-            .iter()
-            .map(|player| (player.target - player.pos).length())
+    let seeds: Vec<u64> = (0..games).map(|offset| seed_start + offset).collect();
+    // 各场比赛互不依赖，按连续切片分给四个线程；局部统计按种子顺序
+    // 合并，浮点累加顺序与串行执行完全一致。
+    let chunk_size = seeds.len().div_ceil(4);
+    let shared_rules = &rules;
+    let shared_params = &params;
+    let shared_config = &config;
+    let partials: Vec<Tally> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .filter_map(|chunk| {
+                let start = chunk * chunk_size;
+                let end = (start + chunk_size).min(seeds.len());
+                (start < end).then(|| &seeds[start..end])
+            })
+            .map(|chunk| {
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .map(|seed| game_tally(*seed, shared_rules, shared_params, shared_config))
+                        .collect::<Vec<_>>()
+                })
+            })
             .collect();
-        let mut previous_target: Vec<_> = world.players.iter().map(|player| player.target).collect();
-        let arrival = world.params.policy.g("motion_arrival_epsilon_ft");
-        let momentum_cap = world.params.policy.w("momentum_cap");
-        // 物理映射系数在整场开始前解析一次：逐 tick 克隆整张策略表会把
-        // 判定批次变成内存大户，也会让诊断本身变成最慢的一段。
-        let coefficients = Coefficients::from_policy(&world.params.policy);
-        while !world.finished {
-            world.step(TICK_SECONDS);
-            for (index, player) in world.players.iter().enumerate() {
-                if !player.on_court {
-                    continue;
-                }
-                let physical = Physical::with(player, &coefficients);
-                tally.player_ticks += 1;
-                if player.vel.length() > physical.speed_ftps + tolerance.velocity {
-                    tally.speed_violations += 1;
-                }
-                // 只判定「真的由移动积分产生位移、且不是到位停步」的帧：
-                // 摆位重置与换人是瞬移，目标点当帧变化时也可能伴随重新摆位。
-                let travelled = player.pos - previous_position[index];
-                if (travelled - player.vel * dt).length() <= tolerance.teleport
-                    && previous_distance[index] > arrival
-                    && (player.target - previous_target[index]).length() <= tolerance.teleport
-                {
-                    let change = (player.vel - previous_velocity[index]).length();
-                    if change > physical.accel_ftps2 * dt + tolerance.acceleration {
-                        tally.accel_violations += 1;
-                    }
-                }
-                previous_velocity[index] = player.vel;
-                previous_position[index] = player.pos;
-                previous_distance[index] = (player.target - player.pos).length();
-                previous_target[index] = player.target;
-            }
-            if world
-                .momentum
-                .iter()
-                .any(|value| *value > momentum_cap + tolerance.momentum)
-            {
-                tally.momentum_violations += 1;
-            }
-        }
-        accumulate(&mut tally, &world, &config);
+        handles
+            .into_iter()
+            .flat_map(|handle| {
+                handle
+                    .join()
+                    .expect("five-dimension game thread must not panic")
+            })
+            .collect::<Vec<_>>()
+    });
+    for part in partials {
+        merge_tally(&mut tally, part);
     }
 
     // 情境敏感性用同一份参数做合成扫描：时间步长越小，两点的 γ 越接近；
