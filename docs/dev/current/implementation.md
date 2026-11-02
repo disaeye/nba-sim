@@ -73,24 +73,26 @@
 
 | 指标 | 观测 | 目标 | 处理 |
 | --- | --- | --- | --- |
-| possessions_per_game | 200.7 | ≈200 | 已对齐 |
-| points_per_game | 240.8 | 227.6 | 偏高，主因是三分占比与二次进攻出手 |
-| blocks_per_game | 8.8 | 9.65 | 已在判据带内 |
-| shooting_fouls_per_game | 18.3 | 19.6 | 已在判据带内 |
-| fta_per_game | 47.5 | 43.3 | 接近；再降会牺牲犯规数 |
-| oreb_per_game | 33.1 | 27.4 | 偏高；伸手折减从 1.22 再上调会让前场篮板崩到 6.6 |
-| fga_per_possession | 0.98 | 0.898 | 偏高，二次进攻出手直接计入同一回合 |
-| turnover_per_possession | 0.23 | 0.144 | 偏高，传球被点与出界占多数 |
-| zone_share 三分 | 0.481 | 0.421 | 偏低三分已从 0.543 拉回，仍偏高 |
-| zone_share 近筐 | 0.108 | 0.191 | 偏低，与三分偏高成对 |
-| zone_share 中距离 | 0.107 | 0.072 | 略高，`shoot_mid_bonus` 上调的直接结果 |
-| zone_share 篮下 | 0.303 | 0.316 | 已接近 |
-| creation_share set | 0.553 | 0.316 | 偏高，接球出手被记作 set |
-| creation_share drive | 0.152 | 0.220 | 偏低 |
-| creation_share post | 0.009 | 0.064 | 偏低，低位候选只在 16 英尺内生成 |
-| creation_share pull_up | 0.071 | 0.190 | 偏低；接球后直接出手的比例过高 |
+| possessions_per_game | 193.3 | ≈200 | 略低 |
+| points_per_game | 230.2 | 227.6 | 已接近 |
+| blocks_per_game | 10.5 | 9.65 | 略高（手部半径 0.615 英尺） |
+| shooting_fouls_per_game | 17.9 | 19.6 | 接近 |
+| fta_per_game | 47.4 | 43.3 | 接近 |
+| oreb_per_game | 35.7 | 27.4 | 偏高；伸手折减对取值极敏感 |
+| fga_per_possession | 0.98 | 0.898 | 偏高，二次进攻出手计入同一回合 |
+| turnover_per_possession | 0.160 | 0.144 | 已接近 |
+| zone_share 三分 | 0.443 | 0.421 | 接近 |
+| zone_share 篮下 | 0.343 | 0.316 | 接近 |
+| zone_share 近筐 | 0.122 | 0.191 | 偏低 |
+| zone_share 中距离 | 0.093 | 0.072 | 略高 |
+| creation_share set | 0.455 | 0.316 | 偏高 |
+| creation_share drive | 0.199 | 0.220 | 接近 |
+| creation_share pull_up | 0.111 | 0.190 | 偏低 |
+| creation_share putback | 0.045 | 0.045 | 已对齐 |
 
-本轮已做的调整：`shoot_tendency` 1.95 → 0.95、`shoot_mid_bonus` −0.05 → 0.35（三分份额从 0.543 降到 0.481，同时保住末段三分份额的五维下限），罚球率改为两分 0.21、三分 0.05（罚球数从 52.8 降到 47.5，三分犯规每次给三次罚球是剩余差额的主因）。
+本轮已做的调整：`shoot_tendency` 1.95 → 1.05、`shoot_mid_bonus` −0.05 → 0.35、`shoot_catch_bonus` 1.2 → 0.2、`shoot_off_dribble_penalty` 1.45 → 0.6（三分份额 0.543 → 0.443，接球即投份额 0.553 → 0.455，得分 240.8 → 230.2）；罚球率改为两分 0.21、三分 0.05；驱动终结距离改为读 `drive_rim_*` 与 `drive_finish_*` 四个几何参数，并以 `drive_rim_finishing_threshold` 决定哪些突破在抛投区收球。
+
+两处机制修正：慢速松球不再直接出界（`loose_ball_boundary_speed_ftps`），出界从每回合约 0.08 降到接近零，失误率从 0.23 降到 0.16；八秒计时改看球的位置并按比赛时钟计，同时在八秒过半后给“把球送过中线”的动作加上 `advance_pressure_bonus`。
 
 残差的结构性原因：三分份额与接球即投的份额由 `shot_choice` 的候选生成与 `ball_phase` 标签决定，不是权重能改的；前场篮板对伸手折减极度敏感；失误率由传球被点与出界的松球回收路径贡献大半。下一步要改的是这三处机制。
 
