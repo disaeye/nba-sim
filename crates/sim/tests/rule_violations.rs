@@ -699,3 +699,45 @@ fn an_ascending_ball_may_be_blocked_without_goaltending() {
     );
     assert_eq!(world.score[home], before, "上升中的球不得直接记中");
 }
+
+#[test]
+fn the_last_made_free_throw_sends_the_other_team_to_its_own_baseline() {
+    let mut world = world(421);
+    let shooter = world.on_court(TeamSide::Home).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == shooter;
+        player.vel = Vec2::ZERO;
+    }
+    let hoop = world.hoop_for(TeamSide::Home);
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.ball.set_held(shooter);
+    world.players[shooter].pos = hoop + Vec2::new(-18.0, 0.0);
+    world.set_phase(Phase::FreeThrows {
+        shooter,
+        total: 1,
+        remaining: 1,
+        made: 0,
+        next_at: world.now(),
+        and_one: false,
+        retain_possession: false,
+        foul_id: 3,
+        technical_retained_team: None,
+        after_technical: None,
+    });
+    world.step(TICK_SECONDS);
+    if let Some(pending) = world.pending_shot.as_mut() {
+        pending.result = Some(nba_sim_core::resolve::shot::ShotResult::Made);
+    }
+    world.step(TICK_SECONDS);
+    let team = match world.phase() {
+        Phase::DeadBall { team, .. } | Phase::Inbound { team, .. } => team,
+        other => panic!("最后一罚命中之后必须发球，实际 {other:?}"),
+    };
+    assert_eq!(team, TeamSide::Away, "最后一罚命中由对方从本方底线发球");
+    assert!(
+        world.inbound_spot.is_none(),
+        "底线发球不设本场地点，实际 {:?}",
+        world.inbound_spot
+    );
+}
