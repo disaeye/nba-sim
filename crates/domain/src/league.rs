@@ -143,7 +143,90 @@ fn default_jump_ball_receiver_distance_ft() -> f32 {
     8.0
 }
 
+/// 节次策略族：常规节数、节时长与加时时长。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PeriodPolicy {
+    pub regulation_periods: u32,
+    pub period_duration_seconds: f32,
+    pub overtime_duration_seconds: f32,
+}
+
+/// 时钟策略族：进攻钟、进攻篮板重置与紧逼盯防判定。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClockPolicy {
+    pub shot_clock_seconds: f32,
+    pub offensive_rebound_shot_clock_seconds: f32,
+    pub closely_guarded_seconds: f32,
+    pub closely_guarded_distance_ft: f32,
+}
+
+/// 犯规策略族：犯满离场、罚球数与罚则门槛。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FoulPolicy {
+    pub max_personal_fouls: u8,
+    pub shooting_foul_free_throws: u8,
+    pub bonus_free_throws: u8,
+    pub bonus_fouls_per_period: u32,
+    pub bonus_final_period: u32,
+    pub bonus_final_seconds: f32,
+    pub bonus_fouls_final: u32,
+    pub away_from_play_free_throws: u8,
+}
+
+/// 暂停策略族：额度、末段限制与加时额度。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TimeoutPolicy {
+    pub timeouts_per_game: u32,
+    pub timeouts_fourth_quarter_max: u32,
+    pub timeouts_final_seconds: f32,
+    pub timeouts_final_max: u32,
+    pub overtime_timeouts: u32,
+}
+
 impl LeagueProfile {
+    /// 节次策略族。引擎读节数与时长时走这里，不直接摸扁平字段。
+    pub fn periods(&self) -> PeriodPolicy {
+        PeriodPolicy {
+            regulation_periods: self.regulation_periods,
+            period_duration_seconds: self.period_duration_seconds,
+            overtime_duration_seconds: self.overtime_duration_seconds,
+        }
+    }
+
+    /// 时钟策略族。
+    pub fn clocks(&self) -> ClockPolicy {
+        ClockPolicy {
+            shot_clock_seconds: self.shot_clock_seconds,
+            offensive_rebound_shot_clock_seconds: self.offensive_rebound_shot_clock_seconds,
+            closely_guarded_seconds: self.closely_guarded_seconds,
+            closely_guarded_distance_ft: self.closely_guarded_distance_ft,
+        }
+    }
+
+    /// 犯规策略族。
+    pub fn fouls(&self) -> FoulPolicy {
+        FoulPolicy {
+            max_personal_fouls: self.max_personal_fouls,
+            shooting_foul_free_throws: self.shooting_foul_free_throws,
+            bonus_free_throws: self.bonus_free_throws,
+            bonus_fouls_per_period: self.bonus_fouls_per_period,
+            bonus_final_period: self.bonus_final_period,
+            bonus_final_seconds: self.bonus_final_seconds,
+            bonus_fouls_final: self.bonus_fouls_final,
+            away_from_play_free_throws: self.away_from_play_free_throws,
+        }
+    }
+
+    /// 暂停策略族。
+    pub fn timeouts(&self) -> TimeoutPolicy {
+        TimeoutPolicy {
+            timeouts_per_game: self.timeouts_per_game,
+            timeouts_fourth_quarter_max: self.timeouts_fourth_quarter_max,
+            timeouts_final_seconds: self.timeouts_final_seconds,
+            timeouts_final_max: self.timeouts_final_max,
+            overtime_timeouts: self.overtime_timeouts,
+        }
+    }
     pub fn validate(&self) -> Result<(), String> {
         if !self.center_circle_radius_ft.is_finite()
             || self.center_circle_radius_ft <= 0.0
@@ -239,5 +322,46 @@ impl LeagueProfile {
 impl Default for LeagueProfile {
     fn default() -> Self {
         Self::nba()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn policy_families_mirror_the_profile() {
+        for league in [LeagueProfile::nba(), LeagueProfile::fiba()] {
+            let periods = league.periods();
+            assert_eq!(periods.regulation_periods, league.regulation_periods);
+            assert_eq!(
+                periods.period_duration_seconds,
+                league.period_duration_seconds
+            );
+            assert_eq!(
+                periods.overtime_duration_seconds,
+                league.overtime_duration_seconds
+            );
+            let clocks = league.clocks();
+            assert_eq!(clocks.shot_clock_seconds, league.shot_clock_seconds);
+            assert_eq!(
+                clocks.offensive_rebound_shot_clock_seconds,
+                league.offensive_rebound_shot_clock_seconds
+            );
+            assert_eq!(
+                clocks.closely_guarded_seconds,
+                league.closely_guarded_seconds
+            );
+            let fouls = league.fouls();
+            assert_eq!(fouls.max_personal_fouls, league.max_personal_fouls);
+            assert_eq!(
+                fouls.bonus_fouls_per_period,
+                league.bonus_fouls_per_period
+            );
+            assert_eq!(fouls.bonus_free_throws, league.bonus_free_throws);
+            let timeouts = league.timeouts();
+            assert_eq!(timeouts.timeouts_per_game, league.timeouts_per_game);
+            assert_eq!(timeouts.overtime_timeouts, league.overtime_timeouts);
+        }
     }
 }
