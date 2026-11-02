@@ -10,7 +10,7 @@
   },
   "weights": {
     "temperature_min": 4.0,
-    "temperature_max": 9.0,
+    "temperature_max": 7.8751661450508275,
     "temperature_fatigue_discount": 0.45,
     "variance_appetite_scale": 0.45,
     "variance_shot_weight": 0.35,

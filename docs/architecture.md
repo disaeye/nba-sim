@@ -36,44 +36,31 @@
 
 ### 1.2 分层视图
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  应用层 (Application)                                        │
-│  cli / debug-server / bball-wasm / 回放、统计与评判工具      │
-│  - 只读快照 + 生命周期命令，不拥有比赛真相                    │
-├─────────────────────────────────────────────────────────────┤
-│  编排层 (Orchestration)        crates/engine                │
-│  MatchEngine / MatchService                                 │
-│  - 唯一认识所有子系统的层                                    │
-│  - 只负责：阶段管线调度、事实归集、不变量触发、快照输出        │
-│  - 不含任何物理公式、决策权重、犯规规则                       │
-├──────────┬──────────┬──────────┬──────────┬─────────────────┤
-│ 决策     │ 裁决     │ 语义     │ 物理     │ 不变量           │
-│ decision │officiating│semantics│ physics │ invariants       │
-│ 候选→约束 │接触→犯规 │物理→篮球 │刚体/弹道 │tick 底线校验     │
-│ →效用→采样│违例→罚则 │意义解释  │空间查询  │                 │
-├──────────┴──────────┴──────────┴──────────┴─────────────────┤
-│  领域层 (Domain)               crates/domain                │
-│  场地 / 时钟 / 阶段 / 事件 / 动作窗口 / 规则参数              │
-│  - 只描述"比赛是什么"，不描述"比赛怎么打"                     │
-│  - 依赖图最内层，零业务依赖                                   │
-├─────────────────────────────────────────────────────────────┤
-│  协议层 (Protocol)             crates/protocol              │
-│  StreamTick / RenderFrame / FrameEvent / DecisionDebug      │
-│  - 引擎对外的唯一数据接口，UI/回放/审计共用                   │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    APP["应用层<br/>crates/cli · crates/debug-server · crates/bball-wasm"]
+    SIM["模拟层<br/>crates/sim（World、阶段管线、动作运行时、结算与报告）"]
+    PROTO["协议层<br/>crates/protocol（StreamTick、RenderFrame、FrameEvent）"]
+    VAL["验证层<br/>crates/validation（独立账本、规则场景矩阵、机制实验）"]
+    DOMAIN["领域层<br/>crates/domain（场地、时钟、阶段、事件、动作窗口、规则档案）"]
+
+    APP --> SIM
+    APP --> PROTO
+    APP --> VAL
+    SIM --> DOMAIN
+    SIM --> PROTO
+    VAL --> SIM
+    PROTO --> DOMAIN
 ```
 
 **依赖规则（编译期强制）**：
 
 - 上层可依赖下层，下层**禁止**反向依赖；
 - `domain` 不依赖任何其他内部 crate；
-- `physics` 只依赖 `domain`；
-- `decision` / `semantics` 可依赖 `domain` + `physics`（读快照）；
-- `officiating` 另依赖 `semantics`（语义事实的消费方，与 §6.1 单向数据流一致）；
-- `engine` 可依赖全部（含 `invariants`：`step()` 包装器每 tick 调用 `check_tick`，见 quality.md §1.1）；
-- `invariants` 只依赖 `protocol`（校验输出帧，不接触引擎内部）；
-- `protocol` 只依赖 `serde`。
+- `protocol` 只依赖 `domain` 与 `serde`；
+- `sim` 依赖 `domain` 与 `protocol`，承载比赛真相（`World`）；
+- `validation` 依赖 `sim` 与 `domain`，只读公共事件做独立重建；
+- `cli`、`debug-server`、`bball-wasm` 依赖 `sim` / `validation` / `protocol`，只读取快照与工件。
 
 ### 1.3 红线宪章（`charter` §4 镜像，不可触碰）
 
@@ -92,63 +79,21 @@
 
 ## 2. 核心数据流（单 tick）
 
-```
-         ┌──────────────────────────────────────────────┐
-         │  MatchEngine::step()                         │
-         └──────────────────────────────────────────────┘
-                          │
-   ┌──────────────────────┼──────────────────────┐
-   ▼                      ▼                      ▼
-[1] 时钟与生命周期     [2] 运行时约束求值     [3] 动作窗口推进
-   current_time/shot      (24秒/出界/死球)      ActionTimeWindow
-   _clock 推进             只读快照              锁/解锁运动学
-   │                      │                      │
-   └──────────────────────┼──────────────────────┘
-                          ▼
-                [4] 决策（活球，或死球发球就绪；到达决策间隔）
-                   候选生成 → 硬约束过滤 → 软约束 → 效用 → 采样
-                   输出 CandidateAction + DecisionTrace
-                          │
-                          ▼
-                [5] 执行重校验（关键 · P4）
-                   动作实施前再次过约束管线
-                   若世界已变 → 降级/取消，不强行执行
-                          │
-                          ▼
-                [6] 物理步进 physics.step(FixedDt)
-                   刚体运动 + 碰撞 + 球弹道采样
-                   产出 PhysicsFact / RawContact
-                          │
-                          ▼
-                [7] 弹道裁决 ballistics resolve
-                   传球到达、封盖、触筐、篮板落点
-                   球权状态转移（经唯一写通道 · P1）
-                   结果在对应事实出现时产生（basketball.md §3）
-                          │
-                          ▼
-                [8] 语义解释 semantics
-                   RawContact → ContactKind/Severity
-                   空间 → SpacingEvaluation
-                          │
-                          ▼
-                [9] 裁决 officiating
-                   语义接触 → Foul/NoCall
-                   违例 → Turnover/FreeThrow
-                          │
-                          ▼
-                [10] 阶段转换 phase transition
-                    SubPhase / GameFlowState 迁移
-                          │
-                          ▼
-                [11] 不变量校验 invariants.check_tick（关键 · P2）
-                    物理底线 + 球权唯一 + 比分/时钟单调
-                    违反 → 记录 + 导出报告（debug 可 panic）
-                          │
-                          ▼
-                [12] 快照输出 build_tick() → StreamTick
+```mermaid
+flowchart TD
+    A["World::step(dt)"] --> B["[1] 时钟推进<br/>clock::advance（按 Phase 的时钟表）"]
+    B --> C["[2] 动量衰减与轮转意图<br/>note_intents"]
+    C --> D["[3] 动作运行时推进<br/>advance_action_phases · advance_defensive_actions · advance_steal_attempts · advance_block_jumps"]
+    D --> E["[4] 移动与身体积分<br/>advance_movement（跳球飞行走专用路径）"]
+    E --> F["[5] 球的飞行与地面接触<br/>ball::step"]
+    F --> G["[6] 交互结算<br/>resolve_due_interactions"]
+    G --> H["[7] 阶段推进与结算<br/>advance_phase · resolve::{shot,pass,rebound,foul,freethrow}"]
+    H --> I["[8] 停表裁决提交<br/>World::adjudicate（违例、得分、犯规、罚球）"]
+    I --> J["[9] 决策<br/>policy::tick 与 policy::off_ball_tick（仅 Live 且有持球人）"]
+    J --> K["[10] 规则计时器与节末<br/>check_closely_guarded · check_backcourt · check_period_end"]
 ```
 
-> **时序不变式**：任何阶段不得修改它之前阶段已产出的事实（"事实" = `PhysicsFact` / `RawContact` / 已发布进事件流的 `GameEvent`）；球权状态可在多个阶段转移（执行、弹道裁决、罚球、发球等），但**只能经唯一通道 `transition_ball_state` 写入**（§3.3）；不变量校验 [11] 是最后的**校验**环节、不可绕过——其后仅允许无副作用的快照输出 [12]（EmitPhase）。
+> **写入路径**：事件一律经 `World::emit` 进入事实流；停表的比分、球权、时钟与阶段后果一律经 `World::adjudicate(Adjudication)` 提交（见 `adjudication_design.md`）；动作生命周期由运行时推进发布 `ActionStarted` / `ActionPhaseChanged` / 终态事实。回放与验证只读事实流，不读引擎内部累加值。
 
 ---
 
