@@ -322,3 +322,42 @@ fn an_early_offensive_entry_gives_the_ball_to_the_defence() {
         other => panic!("进攻方提前进区后必须停表换边，实际 {other:?}"),
     }
 }
+
+#[test]
+fn a_frontcourt_foul_inbounds_from_the_nearest_sideline() {
+    let mut world = world(347);
+    let carrier = world.on_court(TeamSide::Home).as_slice()[0];
+    let defender = world.on_court(TeamSide::Away).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == carrier || index == defender;
+        player.vel = Vec2::ZERO;
+    }
+    let hoop = world.hoop_for(TeamSide::Home);
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(carrier);
+    // 前场上方：中断点在中线以上、靠近上边线。
+    let spot = hoop + Vec2::new(-14.0, 9.0);
+    world.players[carrier].pos = spot;
+    world.players[carrier].target = spot;
+    world.ball.pos = spot;
+    world.ball.z = world.rules.ball_radius_ft;
+    world.players[defender].pos = spot + Vec2::new(1.5, 0.0);
+    world.players[defender].target = world.players[defender].pos;
+    // 未进入罚则的普通犯规：停表、保留球权、在中断点就近边线发球。
+    world.fouls[1].period = 0;
+    let ball_before = world.ball.pos;
+    let radius = world.rules.player_radius_ft;
+    let height = world.rules.court.height_ft;
+    nba_sim_core::resolve::foul::apply_non_shooting_foul(&mut world, defender, carrier);
+    let inbound = world.inbound_spot.expect("犯规后必须记录发球位置");
+    assert!(
+        (inbound.y - radius).abs() <= 0.5 || (inbound.y - (height - radius)).abs() <= 0.5,
+        "犯规后的发球点必须落在边线上：{inbound:?}"
+    );
+    assert!(
+        (inbound.x - ball_before.x).abs() <= 0.5,
+        "发球点必须保留中断处的纵向位置：{inbound:?} 对 {ball_before:?}"
+    );
+}

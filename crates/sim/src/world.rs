@@ -1586,6 +1586,25 @@ impl World {
         crate::formation::place_opening_positions(self, offense);
     }
 
+    /// 中断点的发球位置：把球的位置投影到就近边线。
+    ///
+    /// 犯规与违例都在停表处发球，而不是一律回到底线。命中、节次开局与
+    /// 无记录的停表仍用本方底线（`begin_inbound` 的默认值）。
+    pub fn inbound_point_of_interruption(&self) -> Vec2 {
+        let court = self.rules.court;
+        let radius = self.rules.player_radius_ft;
+        let ball = self.ball.pos;
+        let y = if ball.y < court.height_ft * 0.5 {
+            radius
+        } else {
+            court.height_ft - radius
+        };
+        Vec2::new(
+            ball.x.clamp(radius, court.width_ft - radius),
+            y,
+        )
+    }
+
     fn begin_inbound(&mut self, team: TeamSide) {
         let width = self.rules.court.width_ft;
         let height = self.rules.court.height_ft;
@@ -2082,11 +2101,12 @@ impl World {
                 player: holder,
                 kind: TurnoverKind::Backcourt,
             });
+            let spot = self.inbound_point_of_interruption();
             self.adjudicate(crate::adjudicate::Adjudication::violation(
                 crate::adjudicate::ViolationKind::Backcourt,
                 crate::adjudicate::RestartPlan::Inbound {
                     team: team.other(),
-                    spot: None,
+                    spot: Some(spot),
                     ready_after: None,
                 },
             ));
@@ -2104,11 +2124,12 @@ impl World {
                     player: holder,
                     kind: TurnoverKind::EightSecond,
                 });
+                let spot = self.inbound_point_of_interruption();
                 self.adjudicate(crate::adjudicate::Adjudication::violation(
                     crate::adjudicate::ViolationKind::EightSecond,
                     crate::adjudicate::RestartPlan::Inbound {
                         team: team.other(),
-                        spot: None,
+                        spot: Some(spot),
                         ready_after: None,
                     },
                 ));

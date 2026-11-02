@@ -240,12 +240,13 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
         });
     } else {
         // 无罚球的犯规同样停表换边（保留球权方为被犯规方）：
-        // 阶段写入走同一个提交入口。
+        // 阶段写入走同一个提交入口，发球位置取中断点的就近边线。
+        let spot = world.inbound_point_of_interruption();
         world.adjudicate(crate::adjudicate::Adjudication::new(
             crate::adjudicate::StoppageCause::Foul,
             crate::adjudicate::RestartPlan::Inbound {
                 team: world.players[fouled].team,
-                spot: None,
+                spot: Some(spot),
                 ready_after: None,
             },
         ));
@@ -281,13 +282,15 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
 pub fn apply_offensive_foul(world: &mut World, fouler: usize, fouled: usize) {
     let team = world.players[fouler].team;
     let booking = book(world, fouler, fouled, FoulKind::Offensive, 0, false);
-    // 进攻犯规停表换边：取消动作、结束回合与恢复方式都经同一个提交入口。
+    // 进攻犯规停表换边：取消动作、结束回合与恢复方式都经同一个提交入口，
+    // 发球位置取中断点的就近边线。
+    let spot = world.inbound_point_of_interruption();
     world.adjudicate(
         crate::adjudicate::Adjudication::new(
             crate::adjudicate::StoppageCause::Foul,
             crate::adjudicate::RestartPlan::Inbound {
                 team: team.other(),
-                spot: None,
+                spot: Some(spot),
                 ready_after: None,
             },
         )
