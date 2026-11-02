@@ -368,8 +368,17 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
     let cut_value = crate::value::catch_value(world, cut_spot, actor, 0.0);
     let spot_value = crate::value::catch_value(world, spot, actor, 0.0);
     let cut_open = marker >= weights.g("cut_open_distance_ft") * 0.6;
+    // 拆完掩护的顺下是掩护本身的后续，不是凭空发起的空切：它的收益要求
+    // 只面对防守人是否跟丢，不适用普通空切的机会比率。
+    let just_screened = world.players[actor].screened_at > 0.0
+        && now - world.players[actor].screened_at < 2.0;
+    let payoff_ratio = if just_screened {
+        weights.g("screen_roll_payoff_ratio")
+    } else {
+        weights.g("cut_payoff_ratio")
+    };
     let cut_pays = if rim_attack {
-        cut_value > spot_value * weights.g("cut_payoff_ratio")
+        cut_value > spot_value * payoff_ratio
     } else {
         cut_value > spot_value
     };
