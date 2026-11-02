@@ -270,3 +270,77 @@ fn real_games_run_block_jumps_through_their_phases() {
     assert!(started > 0, "真实比赛里必须有协防人起跳封盖");
     assert!(completed > 0, "起跳封盖必须走完生命周期");
 }
+
+/// 封盖是球体接触：手碰到球，投篮被判为被盖，球成为松球。
+#[test]
+fn a_blocked_shot_is_hand_contact_and_leaves_the_ball_loose() {
+    let mut blocked = 0u32;
+    for seed in 1..=6u64 {
+        let report = common::short_world(seed).run();
+        for (index, event) in report.events.iter().enumerate() {
+            let Fact::Shot {
+                shooter,
+                blocked_by: Some(blocker),
+                made,
+                ..
+            } = &event.fact
+            else {
+                continue;
+            };
+            blocked += 1;
+            assert_ne!(shooter, blocker, "封盖人不能是投篮人自己");
+            assert!(!made, "被盖的球不能算命中");
+            // 封盖必须在同一段时间内伴随防守人手的球体接触。
+            let from = index.saturating_sub(4);
+            let hand = report.events[from..=index].iter().any(|other| {
+                matches!(
+                    &other.fact,
+                    Fact::BallContact { kind: "hand", entity: Some(who), .. } if who == blocker
+                )
+            });
+            assert!(hand, "封盖必须由手碰球产生：blocker={blocker}");
+            // 被盖之后球必须是松球，而不是直接落到某个人手里。
+            let loose = report.events[index..].iter().any(|other| {
+                matches!(&other.fact, Fact::ReboundOpportunity { .. } | Fact::LooseBallRecovered { .. })
+            }) || report.possessions.iter().any(|record| {
+                record.ended_by.contains("block") || record.ended_by.contains("loose")
+            });
+            assert!(loose, "被盖之后必须进入松球争夺：blocker={blocker}");
+        }
+    }
+    assert!(blocked > 0, "真实比赛里必须出现封盖");
+}
+
+/// 干扰改变命中率：同一投篮在贴防下被判为更受干扰。
+#[test]
+fn contest_pressure_reduces_the_shot_quality() {
+    let (tight, holder, _) = setup(19, 1.2);
+    let (open, _, _) = setup(19, 9.0);
+    let phase = nba_sim_core::state::BallPhase::Catch;
+    let tight_model = nba_sim_core::shot_quality::evaluate(
+        &tight,
+        holder,
+        ShotKind::CatchShoot,
+        phase,
+        tight.players[holder].pos,
+    );
+    let open_model = nba_sim_core::shot_quality::evaluate(
+        &open,
+        holder,
+        ShotKind::CatchShoot,
+        phase,
+        open.players[holder].pos,
+    );
+    assert!(
+        tight_model.contest > open_model.contest,
+        "贴防的干扰强度必须更高：{} vs {}",
+        tight_model.contest,
+        open_model.contest
+    );
+    assert!(
+        tight_model.p_make < open_model.p_make,
+        "贴防的命中率必须更低：{} vs {}",
+        tight_model.p_make,
+        open_model.p_make
+    );
+}
