@@ -156,7 +156,7 @@
     "shot_skill_reference_mid": 0.6773,
     "shot_skill_reference_three": 0.7657,
     "shot_release_vertical_share": 1.0,
-    "block_hand_radius_base_ft": 0.585,
+    "block_hand_radius_base_ft": 0.60,
     "block_hand_radius_skill_ft": 0.8,
     "shot_aim_sigma_scale": 0.9980641733344193,
     "shot_rim_in_probability": 0.0,
