@@ -19,6 +19,8 @@ pub enum StoppageCause {
     Timeout,
     PeriodEnd,
     GameEnd,
+    /// 球权在活球中直接转移（篮板、抢断、松球回收），没有停表。
+    PossessionChange,
 }
 
 /// 违例细分。
@@ -113,6 +115,7 @@ impl World {
                     StoppageCause::Timeout => "timeout",
                     StoppageCause::PeriodEnd => "period_end",
                     StoppageCause::GameEnd => "game_end",
+                    StoppageCause::PossessionChange => "possession_change",
                 };
                 self.cancel_actions(reason);
                 self.set_phase(Phase::DeadBall {

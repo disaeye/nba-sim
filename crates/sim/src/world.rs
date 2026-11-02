@@ -2895,8 +2895,10 @@ impl World {
                         player: actor,
                         kind: crate::action::TurnoverKind::ShotClock,
                     });
-                    self.end_possession(PossessionEndCause::TurnoverViolation, "shot_clock", 0);
-                    self.start_possession(team.other(), PossessionKind::Live);
+                    self.adjudicate(crate::adjudicate::Adjudication::violation(
+                        crate::adjudicate::ViolationKind::ShotClock,
+                        crate::adjudicate::RestartPlan::Live { team: team.other() },
+                    ));
                 }
             }
             Phase::Pregame | Phase::Finished => {}
@@ -3052,8 +3054,15 @@ impl World {
                     kind: crate::action::TurnoverKind::BadPass,
                 });
                 let team = self.players[from].team;
-                self.end_possession(PossessionEndCause::TurnoverSteal, "pass_intercepted", 0);
-                self.start_possession(team.other(), PossessionKind::Live);
+                self.adjudicate(crate::adjudicate::Adjudication {
+                    cause: crate::adjudicate::StoppageCause::PossessionChange,
+                    possession_end: Some((
+                        PossessionEndCause::TurnoverSteal,
+                        "pass_intercepted",
+                    )),
+                    clock: crate::adjudicate::ClockAdjustment::default(),
+                    restart: crate::adjudicate::RestartPlan::Live { team: team.other() },
+                });
                 self.set_ball_held(by);
                 self.players[by].target = self.top_of_key(team.other());
                 self.players[by].target_kind = crate::state::TargetKind::Window;

@@ -169,20 +169,23 @@ pub fn control(world: &mut World, handle: usize) {
                     kind,
                 });
             }
-            if state.pass_by.is_some() {
-                world.end_possession(
+            let end = if state.pass_by.is_some() {
+                (
                     nba_domain::event::PossessionEndCause::TurnoverPassDropped,
                     "pass_incomplete",
-                    0,
-                );
+                )
             } else {
-                world.end_possession(
+                (
                     nba_domain::event::PossessionEndCause::TurnoverLooseBall,
                     "loose_ball_recovered",
-                    0,
-                );
-            }
-            world.start_possession(team, PossessionKind::Live);
+                )
+            };
+            world.adjudicate(crate::adjudicate::Adjudication {
+                cause: crate::adjudicate::StoppageCause::PossessionChange,
+                possession_end: Some(end),
+                clock: crate::adjudicate::ClockAdjustment::default(),
+                restart: crate::adjudicate::RestartPlan::Live { team },
+            });
         }
         take_live_ball(world, handle);
         return;
@@ -201,12 +204,15 @@ pub fn control(world: &mut World, handle: usize) {
         world.start_second_chance(state.offense, handle, state.rim_contact);
     } else {
         world.line_mut(handle).dreb += 1;
-        world.end_possession(
-            nba_domain::event::PossessionEndCause::DefensiveRebound,
-            "defensive_rebound",
-            0,
-        );
-        world.start_possession(defense, PossessionKind::Live);
+        world.adjudicate(crate::adjudicate::Adjudication {
+            cause: crate::adjudicate::StoppageCause::PossessionChange,
+            possession_end: Some((
+                nba_domain::event::PossessionEndCause::DefensiveRebound,
+                "defensive_rebound",
+            )),
+            clock: crate::adjudicate::ClockAdjustment::default(),
+            restart: crate::adjudicate::RestartPlan::Live { team: defense },
+        });
         take_live_ball(world, handle);
     }
 }

@@ -121,12 +121,15 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
                 player: driver,
                 kind: TurnoverKind::LostBall,
             });
-            world.end_possession(
-                nba_domain::event::PossessionEndCause::TurnoverSteal,
-                "lost_ball",
-                0,
-            );
-            world.start_possession(team.other(), PossessionKind::Live);
+            world.adjudicate(crate::adjudicate::Adjudication {
+                cause: crate::adjudicate::StoppageCause::PossessionChange,
+                possession_end: Some((
+                    nba_domain::event::PossessionEndCause::TurnoverSteal,
+                    "lost_ball",
+                )),
+                clock: crate::adjudicate::ClockAdjustment::default(),
+                restart: crate::adjudicate::RestartPlan::Live { team: team.other() },
+            });
             return ActionOutcome {
                 actor: driver,
                 kind: ActionKind::Drive,
@@ -231,12 +234,17 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
             player: actor,
             kind: TurnoverKind::Travel,
         });
-        world.end_possession(
-            nba_domain::event::PossessionEndCause::TurnoverTravel,
-            "travel",
-            0,
-        );
-        world.start_possession(team.other(), PossessionKind::Live);
+        world.adjudicate(crate::adjudicate::Adjudication {
+            cause: crate::adjudicate::StoppageCause::Violation(
+                crate::adjudicate::ViolationKind::Travel,
+            ),
+            possession_end: Some((
+                nba_domain::event::PossessionEndCause::TurnoverTravel,
+                "travel",
+            )),
+            clock: crate::adjudicate::ClockAdjustment::default(),
+            restart: crate::adjudicate::RestartPlan::Live { team: team.other() },
+        });
         return ActionOutcome {
             actor,
             kind: ActionKind::Finish,
@@ -258,12 +266,17 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
             player: actor,
             kind: TurnoverKind::Travel,
         });
-        world.end_possession(
-            nba_domain::event::PossessionEndCause::TurnoverTravel,
-            "travel",
-            0,
-        );
-        world.start_possession(team.other(), PossessionKind::Live);
+        world.adjudicate(crate::adjudicate::Adjudication {
+            cause: crate::adjudicate::StoppageCause::Violation(
+                crate::adjudicate::ViolationKind::Travel,
+            ),
+            possession_end: Some((
+                nba_domain::event::PossessionEndCause::TurnoverTravel,
+                "travel",
+            )),
+            clock: crate::adjudicate::ClockAdjustment::default(),
+            restart: crate::adjudicate::RestartPlan::Live { team: team.other() },
+        });
         return ActionOutcome {
             actor,
             kind: ActionKind::Finish,
