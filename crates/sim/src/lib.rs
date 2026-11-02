@@ -4,6 +4,7 @@
 //! 出手位置与命中率都是动作链的后果，参数表来自真实赛季数据。
 
 pub mod action;
+pub mod adjudicate;
 pub mod assignment;
 pub mod ball;
 pub mod body;

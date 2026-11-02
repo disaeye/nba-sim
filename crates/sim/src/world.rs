@@ -1978,8 +1978,10 @@ impl World {
             player: holder,
             kind: TurnoverKind::CloselyGuarded,
         });
-        self.end_possession(PossessionEndCause::TurnoverViolation, "closely_guarded", 0);
-        self.start_possession(team.other(), PossessionKind::Live);
+        self.adjudicate(crate::adjudicate::Adjudication::violation(
+            crate::adjudicate::ViolationKind::CloselyGuarded,
+            crate::adjudicate::RestartPlan::Live { team: team.other() },
+        ));
     }
 
     /// 后场八秒：控球方在后场停留超过规则秒数即违例。
@@ -2040,12 +2042,13 @@ impl World {
                 player: holder,
                 kind: TurnoverKind::Backcourt,
             });
-            self.end_possession(PossessionEndCause::TurnoverViolation, "backcourt", 0);
-            self.cancel_actions("backcourt");
-            self.set_phase(Phase::DeadBall {
-                team: team.other(),
-                ready_at: self.now() + f64::from(self.rules.inbound_setup_seconds),
-            });
+            self.adjudicate(crate::adjudicate::Adjudication::violation(
+                crate::adjudicate::ViolationKind::Backcourt,
+                crate::adjudicate::RestartPlan::Inbound {
+                    team: team.other(),
+                    spot: None,
+                },
+            ));
             return;
         }
         let now = self.now();
@@ -2059,12 +2062,13 @@ impl World {
                     player: holder,
                     kind: TurnoverKind::EightSecond,
                 });
-                self.end_possession(PossessionEndCause::TurnoverViolation, "eight_second", 0);
-                self.cancel_actions("eight_second");
-                self.set_phase(Phase::DeadBall {
-                    team: team.other(),
-                    ready_at: self.now() + f64::from(self.rules.inbound_setup_seconds),
-                });
+                self.adjudicate(crate::adjudicate::Adjudication::violation(
+                    crate::adjudicate::ViolationKind::EightSecond,
+                    crate::adjudicate::RestartPlan::Inbound {
+                        team: team.other(),
+                        spot: None,
+                    },
+                ));
             }
             Some(_) => {}
         }

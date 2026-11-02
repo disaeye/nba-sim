@@ -153,12 +153,12 @@ fn carrying_the_ball_back_over_half_court_is_a_backcourt_violation() {
     world.players[holder].schedule.next_redecide_at = world.now() + 1_000.0;
     let mid = world.rules.court.width_ft * 0.5;
     // 先在前场建立控制。
-    world.players[holder].pos = Vec2::new(mid + 8.0, 25.0);
+    world.players[holder].pos = Vec2::new(mid + 12.0, 25.0);
     world.players[holder].target = world.players[holder].pos;
     world.ball.pos = world.players[holder].pos;
     world.ball.z = world.rules.ball_radius_ft;
     for _ in 0..10 {
-        world.players[holder].pos = Vec2::new(mid + 8.0, 25.0);
+        world.players[holder].pos = Vec2::new(mid + 12.0, 25.0);
         world.players[holder].vel = Vec2::ZERO;
         world.step(TICK_SECONDS);
     }

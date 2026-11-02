@@ -135,7 +135,7 @@ GROUPS = [
             "shoot_off_dribble_penalty": (0.0, 12.0),
             "drive_base": (0.0, 12.0),
             "post_base": (0.0, 12.0),
-            "cut_base": (0.0, 12.0),
+            "cut_tendency": (0.0, 12.0),
             "pass_base": (0.0, 12.0),
             "pass_open": (0.0, 12.0),
             "epv_bonus_scale": (0.01, 1.0),
@@ -341,6 +341,8 @@ def fit_group(group, policy, goal, iterations):
         with open(POLICY, "w") as handle:
             json.dump(policy, handle, indent=2, ensure_ascii=False)
             handle.write("\n")
+    if best is None:
+        raise RuntimeError(f"[{group.name}] 没有任何一次评估，无法给出参数")
     policy["weights"] = best[1]
     write_policy(policy, best[1])
     print(f"[{group.name}] best loss {best[0]:.4f}")
