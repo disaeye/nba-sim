@@ -70,7 +70,7 @@
     "cut_lane_scale": 0.55,
     "cut_lane": 0.3,
     "cut_tendency": 0.1,
-    "post_base": 0.75,
+    "post_base": 0.85,
     "post_size": 0.25,
     "dribble_setup": 1.2,
     "pass_turnover_rate": 0.0005,
