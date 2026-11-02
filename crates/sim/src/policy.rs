@@ -576,6 +576,22 @@ pub fn choose_action(world: &mut World) -> Decision {
                 .iter()
                 .any(|candidate| matches!(candidate.0, ActionKind::Screen(_)))
         });
+    // 候选集为空意味着持球人没有任何合法动作。真实比赛里球总得被处理掉，
+    // 时钟见底时就是一次勉强出手：给出兜底的干拔，保证每次决策都有解。
+    if candidates.is_empty() {
+        candidates.push((
+            ActionKind::Shoot(ShotKind::PullUp),
+            None,
+            state.actor_pos,
+            Utility {
+                epv: EpvTerms {
+                    ability: world.params.policy.b("desperation_shot_value"),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        ));
+    }
     assert!(
         !candidates.is_empty(),
         "决策候选集不能为空：持球人 {} 在任何规则组合下都至少能传或投",

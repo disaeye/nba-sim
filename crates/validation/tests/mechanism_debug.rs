@@ -5,12 +5,18 @@ use nba_validation::mechanism_core::{
 };
 
 #[test]
-fn a_free_throw_experiment_finishes_with_a_bounded_log() {
+fn perturbed_attributes_always_keep_a_decision() {
     let config = MechanismConfig {
-        seeds: 6,
+        seeds: 8,
         ..MechanismConfig::default()
     };
-    let result = run_mechanism_experiment(MechanismAttribute::FreeThrow, config)
-        .expect("free-throw experiment must terminate");
-    assert!(result.seeds >= 5, "样本不足：{}", result.seeds);
+    for attribute in [
+        MechanismAttribute::FreeThrow,
+        MechanismAttribute::Acceleration,
+        MechanismAttribute::DecisionIq,
+    ] {
+        let result = run_mechanism_experiment(attribute, config)
+            .unwrap_or_else(|error| panic!("{attribute:?} experiment failed: {error}"));
+        assert!(result.seeds >= 6, "{attribute:?} 样本不足：{}", result.seeds);
+    }
 }
