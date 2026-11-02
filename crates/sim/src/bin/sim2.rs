@@ -127,6 +127,9 @@ struct Metrics {
     oreb: u32,
     fta: u32,
     points: u32,
+    blocks: u32,
+    shooting_fouls: u32,
+    steals: u32,
 }
 
 impl Metrics {
@@ -151,6 +154,12 @@ impl Metrics {
         self.oreb += summary.oreb;
         self.fta += summary.fta;
         self.points += summary.home_score + summary.away_score;
+        for team in [nba_sim_core::TeamSide::Home, nba_sim_core::TeamSide::Away] {
+            let totals = report.box_score.team_totals(team);
+            self.blocks += totals.blocks;
+            self.shooting_fouls += totals.shooting_fouls;
+            self.steals += totals.steals;
+        }
     }
 }
 
@@ -190,6 +199,9 @@ fn print_metrics(metrics: &Metrics) {
         "fga_per_possession": metrics.fga as f64 / metrics.possessions.max(1) as f64,
         "turnover_per_possession": metrics.turnovers as f64 / metrics.possessions.max(1) as f64,
         "oreb_per_game": metrics.oreb as f64 / games,
+        "blocks_per_game": metrics.blocks as f64 / games,
+        "shooting_fouls_per_game": metrics.shooting_fouls as f64 / games,
+        "steals_per_game": metrics.steals as f64 / games,
         "fta_per_game": metrics.fta as f64 / games,
         "zone_share": {"rim": zone[0], "near": zone[1], "mid": zone[2], "three": zone[3]},
         "creation_share": {"drive": creation[0], "cut": creation[1], "post": creation[2], "pull_up": creation[3], "putback": creation[4], "transition": creation[5], "set": creation[6]},

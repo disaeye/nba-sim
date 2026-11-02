@@ -513,6 +513,8 @@ fn try_control_loose(world: &mut World) {
             "defensive_rebound"
         };
         let base_reach = base + player.attribute(attribute) * skill;
+        let penalty = world.params.policy.g("rebound_offense_reach_penalty_ft");
+        let bonus = world.params.policy.g("rebound_defense_reach_bonus_ft");
         let reach = if force_pickup {
             if is_offense {
                 16.0
@@ -522,9 +524,9 @@ fn try_control_loose(world: &mut World) {
         } else if state.turnover {
             base_reach
         } else if is_offense {
-            base_reach - 1.15
+            base_reach - penalty
         } else {
-            base_reach + 1.75
+            base_reach + bonus
         };
         let vertical = (world.ball.z - 4.0).max(0.0);
         let distance = (player.pos - world.ball.pos).length().hypot(vertical);

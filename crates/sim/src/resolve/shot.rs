@@ -2,7 +2,7 @@
 
 use glam::Vec2;
 
-use crate::action::{ActionIntent, ActionKind, ActionOutcome, Completion, ShotKind, StateDelta};
+use crate::action::{ActionIntent, ActionKind, ActionOutcome, Completion, Fact, ShotKind, StateDelta};
 use crate::draw::{purpose, Stream};
 use crate::resolve::{clamp01, shooter_zone};
 use crate::world::{Phase, World};
@@ -258,24 +258,45 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         shot_id,
         free_throw: None,
         block_by,
-        result: None,
+        // 模型判定的封盖必须算作封盖：球在出手点就被拍掉，而不是先飞出去再赌接触。
+        result: block_by.map(|by| ShotResult::Blocked { by }),
     });
     let now = world.now();
     world.players[shooter].facing = (hoop - pos).normalize_or_zero();
     let rules = world.rules.clone();
-    world.ball.release_shot(crate::ball::ShotRelease {
-        rules: &rules,
-        now,
-        shot_id,
-        shooter,
-        hoop,
-        release_z: model.release_z_ft,
-        aperture_ft: model.effective_aperture_ft,
-        rim_in_probability: model.rim_in_probability,
-        origin: model.origin,
-        plan: model.plan,
-        aim_offset,
-    });
+    if let Some(by) = block_by {
+        // 手在出手点碰到球：球从投篮人手上直接脱落。
+        let hand = model.origin;
+        world.emit(Fact::BallContact {
+            kind: "hand",
+            entity: Some(by),
+            time: now,
+            x: hand.x,
+            y: hand.y,
+            z: model.release_z_ft,
+            sub_tick: 0,
+        });
+        world.ball.pos = hand;
+        world.ball.z = model.release_z_ft;
+        world.release_ball(crate::state::BallState::Loose {
+            pos: hand,
+            vel: Vec2::ZERO,
+        });
+    } else {
+        world.ball.release_shot(crate::ball::ShotRelease {
+            rules: &rules,
+            now,
+            shot_id,
+            shooter,
+            hoop,
+            release_z: model.release_z_ft,
+            aperture_ft: model.effective_aperture_ft,
+            rim_in_probability: model.rim_in_probability,
+            origin: model.origin,
+            plan: model.plan,
+            aim_offset,
+        });
+    }
     world.set_phase(Phase::ShotFlight {
         resolve_at: now + f64::from(rules.max_shot_duration_seconds) + 2.0,
     });
