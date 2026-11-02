@@ -1958,6 +1958,7 @@ impl World {
         self.resolve_due_interactions();
         self.advance_phase();
         self.expire_break_targets();
+        self.expire_catch_phase();
         if matches!(self.phase, Phase::Live) && self.holder().is_some() {
             self.maybe_decide();
         }
@@ -1965,6 +1966,21 @@ impl World {
         self.check_backcourt();
         self.check_free_throw_lane();
         self.check_period_end();
+    }
+
+    /// 接球阶段只在接到球后的短暂窗口内成立。
+    ///
+    /// “接球就投”描述的是接球后立刻出手；接到球后站了两三秒再出手是
+    /// 持球跳投，不应继续计为接球投篮。窗口用 `catch_window_seconds` 控制。
+    fn expire_catch_phase(&mut self) {
+        if self.possession.ball_phase != crate::state::BallPhase::Catch {
+            return;
+        }
+        let window = f64::from(self.params.policy.g("catch_window_seconds"));
+        let since = self.possession.last_pass_at.unwrap_or(f64::NEG_INFINITY);
+        if self.now() - since > window {
+            self.possession.ball_phase = crate::state::BallPhase::Dribble;
+        }
     }
 
     /// 罚球禁区：球离手之前，任何球员不得进入禁区内侧。
