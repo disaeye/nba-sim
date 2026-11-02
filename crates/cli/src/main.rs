@@ -33,8 +33,8 @@ fn print_usage() {
          用法：nba-sim <子命令> [选项]\n\
          \n\
          子命令：\n\
-           sim-core --seed N [--games M] [--gate] [--stream PATH]\n\
-                    跑一场或多场比赛；--gate 打印四层判定，--stream 写事件流\n\
+           sim-core --seed N [--games M] [--gate] [--json] [--stream PATH]\n\
+                    跑一场或多场比赛；--gate 打印四层判定，--json 输出摘要\n\
            validate-core --seed N --games M [--mechanism] [--out DIR]\n\
                     跑判定批次并写工件；退出码 0 通过、1 缺陷、2 执行错误、3 已知不足\n\
            review --seed N [--possessions M] [--out DIR]\n\
@@ -149,6 +149,7 @@ fn main() -> std::io::Result<()> {
         let mut seed = 42u64;
         let mut games = 1u64;
         let mut gate = false;
+        let mut json = false;
         let mut stream: Option<String> = None;
         let mut i = 2;
         while i < args.len() {
@@ -169,6 +170,10 @@ fn main() -> std::io::Result<()> {
                     gate = true;
                     i += 1;
                 }
+                "--json" => {
+                    json = true;
+                    i += 1;
+                }
                 "--stream" => {
                     stream = Some(parse_option_value(&args, i + 1, "--stream <path>")?.to_string());
                     i += 2;
@@ -181,7 +186,7 @@ fn main() -> std::io::Result<()> {
                 }
             }
         }
-        return run_sim_core(seed, games, gate, stream.as_deref());
+        return run_sim_core(seed, games, gate, json, stream.as_deref());
     }
 
     print_usage();

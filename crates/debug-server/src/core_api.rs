@@ -50,6 +50,10 @@ pub(crate) fn api_core_snapshot(core: &SharedCore) -> Response {
 }
 
 pub(crate) fn api_core_events(req: &Request, core: &SharedCore) -> Response {
+    let after = match query_u64(&req.query, "after") {
+        Ok(after) => after,
+        Err(error) => return bad_request(error),
+    };
     let limit = match query_u64(&req.query, "limit") {
         Ok(limit) => {
             if limit == 0 {
@@ -64,7 +68,11 @@ pub(crate) fn api_core_events(req: &Request, core: &SharedCore) -> Response {
         Ok(service) => service,
         Err(response) => return response,
     };
-    json_response(&service.events(limit))
+    match service.events_since(after, limit) {
+        Ok(batch) => json_response(&batch),
+        Err(error) if error.starts_with("event cursor ") => bad_request(error),
+        Err(error) => conflict(error),
+    }
 }
 
 pub(crate) fn api_core_setup(req: &Request, core: &SharedCore) -> Response {
@@ -226,7 +234,7 @@ pub(crate) fn run_core_simulation(seed: u64, scope: &str) -> Result<(Vec<u8>, us
             .map(|target| world.possession_log.len() as u32 >= target)
             .unwrap_or(false);
         let reached_quarter = quarter_target
-            .map(|target| world.clock.period >= target)
+            .map(|target| world.clock.period() >= target)
             .unwrap_or(false);
         if reached_possessions || reached_quarter {
             break;

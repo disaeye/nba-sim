@@ -161,6 +161,7 @@ dependencies = [
  "nba-domain",
  "nba-sim-core",
  "nba-validation",
+ "nba-wasm",
  "serde",
  "serde_json",
 ]

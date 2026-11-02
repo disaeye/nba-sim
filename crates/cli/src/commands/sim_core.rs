@@ -4,7 +4,7 @@
 //! `--gate` 输出四层判定结果。
 
 use nba_sim_core::{
-    gate, run_game, summarize, MatchSetup, Params, RuntimeParams, TeamSide, World, CALIBRATION_DIR,
+    gate, run_game, summarize, CompletionSummary, MatchSetup, Params, RuntimeParams, TeamSide, World,
 };
 use std::io::Write;
 use std::path::Path;
@@ -13,22 +13,60 @@ pub(crate) fn run_sim_core(
     seed: u64,
     games: u64,
     gate: bool,
+    json: bool,
     stream: Option<&str>,
 ) -> std::io::Result<()> {
-    let calibration = Path::new(CALIBRATION_DIR);
-    let params = RuntimeParams::load(calibration)
+    let calibration = nba_sim_core::params::workspace_calibration_dir();
+    let params = RuntimeParams::load(&calibration)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
 
     let mut reports = Vec::new();
+    let mut event_logs = Vec::new();
     for offset in 0..games.max(1) {
         let report = match stream {
             Some(path) if offset == 0 => {
-                export_stream(seed, calibration, params.clone(), path)?
+                export_stream(seed, &calibration, params.clone(), path)?
             }
-            _ => run_game(seed + offset, calibration),
+            _ => run_game(seed + offset, &calibration),
         };
-        print_game(&report);
+        if !json {
+            print_game(&report);
+        } else {
+            let mut projection_world = World::new(
+                MatchSetup::builtin(nba_domain::GameRules::default()),
+                params.clone(),
+                seed + offset,
+            );
+            projection_world.decision_traces = report.decision_traces.clone();
+            event_logs.push(
+                report
+                    .events
+                    .iter()
+                    .map(|event| projection_world.project_frame_event(event))
+                    .collect::<Vec<_>>(),
+            );
+        }
         reports.push(report);
+    }
+
+    if json {
+        if gate {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "--json and --gate cannot be used together",
+            ));
+        }
+        let summaries: Vec<CompletionSummary> = reports
+            .iter()
+            .map(CompletionSummary::from_report)
+            .collect();
+        let output = serde_json::json!({ "games": summaries, "events": event_logs });
+        println!(
+            "{}",
+            serde_json::to_string(&output)
+                .map_err(|error| std::io::Error::other(error.to_string()))?
+        );
+        return Ok(());
     }
 
     if reports.len() > 1 {
@@ -64,11 +102,11 @@ pub(crate) fn run_sim_core(
     }
 
     if gate {
-        let validation = Params::load(calibration)
+        let validation = Params::load(&calibration)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
         let mut batch = Vec::new();
         for batch_seed in 1..=16u64 {
-            batch.push(run_game(batch_seed, calibration));
+            batch.push(run_game(batch_seed, &calibration));
         }
         let report = gate::evaluate_batch(&batch, &validation);
         println!();
@@ -96,7 +134,7 @@ pub(crate) fn run_sim_core(
 
 fn export_stream(
     seed: u64,
-    calibration: &Path,
+    _calibration: &Path,
     params: RuntimeParams,
     path: &str,
 ) -> std::io::Result<nba_sim_core::GameReport> {
@@ -129,7 +167,6 @@ fn export_stream(
     report.shot_zone_makes = world.shot_zone_makes;
     report.creation_counts = world.creation_counts;
     report.violations = world.violations.clone();
-    let _ = calibration;
     Ok(report)
 }
 

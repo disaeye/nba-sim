@@ -99,9 +99,12 @@ impl WasmMatchService {
         }
     }
 
-    pub fn events_since_json(&self, _sequence: u64) -> Result<String, JsError> {
-        let events = self.inner.events(5_000);
-        serde_json::to_string(&events).map_err(|error| JsError::new(&error.to_string()))
+    pub fn events_since_json(&self, sequence: u64) -> Result<String, JsError> {
+        let batch = self
+            .inner
+            .events_since(sequence, 5_000)
+            .map_err(|error| JsError::new(&error))?;
+        serde_json::to_string(&batch).map_err(|error| JsError::new(&error.to_string()))
     }
 
     pub fn next_possession_json(&mut self) -> Result<String, JsError> {
@@ -115,6 +118,24 @@ impl WasmMatchService {
     #[wasm_bindgen(js_name = "sessionState")]
     pub fn session_state(&self) -> String {
         self.inner.state().as_str().to_string()
+    }
+
+    #[wasm_bindgen(js_name = "completionSummaryJson")]
+    pub fn completion_summary_json(&self) -> Result<String, JsError> {
+        let summary = self
+            .inner
+            .completion_summary()
+            .ok_or_else(|| JsError::new("completion summary unavailable before match setup"))?;
+        serde_json::to_string(&summary).map_err(|error| JsError::new(&error.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = "fullEventHistoryJson")]
+    pub fn full_event_history_json(&self) -> Result<String, JsError> {
+        let events = self
+            .inner
+            .full_event_history()
+            .ok_or_else(|| JsError::new("full event history requires a completed match"))?;
+        serde_json::to_string(&events).map_err(|error| JsError::new(&error.to_string()))
     }
 }
 
@@ -201,6 +222,8 @@ pub fn simulate_to_ndjson(
 #[cfg(test)]
 mod tests {
     use super::WasmMatchService;
+    use nba_sim_core::params::workspace_calibration_dir;
+    use nba_sim_core::{Params, SessionService};
 
     #[test]
     fn bridge_keeps_json_service_boundary() {
@@ -214,7 +237,84 @@ mod tests {
         let snapshot: serde_json::Value =
             serde_json::from_str(&snapshot).expect("tick should be JSON");
         assert!(snapshot["t"].as_f64().is_some());
+        let events = service.events_since_json(0).expect("initial event query");
+        let events: serde_json::Value =
+            serde_json::from_str(&events).expect("event batch should be JSON");
+        let event_rows = events["events"].as_array().expect("event batch list");
+        assert!(!event_rows.is_empty());
+        let latest_event_id = event_rows.last().unwrap()["event_id"]
+            .as_u64()
+            .expect("event id");
+        assert_eq!(
+            events["next_after_event_id"].as_u64(),
+            Some(latest_event_id)
+        );
         assert_eq!(service.session_state(), "Running");
+    }
+
+    #[test]
+    fn wasm_bridge_matches_session_service_frames_and_events() {
+        let seed = 211;
+        let mut wasm = WasmMatchService::with_seed(seed);
+        let mut session = SessionService::new(seed);
+        wasm.setup_match_json("").expect("WASM setup");
+        session
+            .setup(
+                Params::load(&workspace_calibration_dir()).expect("calibration tables load"),
+                seed,
+            )
+            .expect("session setup");
+        wasm.start().expect("WASM session starts");
+        session.start().expect("session starts");
+
+        for _ in 0..40 {
+            let wasm_frame = wasm
+                .tick_ms(nba_sim_core::world::TICK_SECONDS * 1000.0)
+                .expect("WASM tick");
+            let session_frame = serde_json::to_string(
+                &session
+                    .tick(nba_sim_core::world::TICK_SECONDS)
+                    .expect("session tick"),
+            )
+            .expect("session frame serialization");
+            assert_eq!(wasm_frame, session_frame);
+        }
+
+        let wasm_events = wasm.events_since_json(0).expect("WASM event query");
+        let session_events =
+            serde_json::to_string(&session.events_since(0, 5_000).expect("session event query"))
+                .expect("session event batch JSON");
+        assert_eq!(wasm_events, session_events);
+
+        let wasm_frame: serde_json::Value = serde_json::from_str(
+            &wasm
+                .tick_ms(nba_sim_core::world::TICK_SECONDS * 1000.0)
+                .expect("next WASM tick"),
+        )
+        .expect("next WASM frame JSON");
+        let wasm_cursor = wasm_frame["frame"]["event_log"][0]["event_id"]
+            .as_u64()
+            .unwrap_or(0);
+        let wasm_events_after_cursor = wasm
+            .events_since_json(wasm_cursor)
+            .expect("incremental WASM event query");
+        let session_frame: serde_json::Value = serde_json::from_str(
+            &serde_json::to_string(
+                &session
+                    .tick(nba_sim_core::world::TICK_SECONDS)
+                    .expect("next session tick"),
+            )
+            .expect("next session frame serialization"),
+        )
+        .expect("next session frame JSON");
+        assert_eq!(wasm_frame, session_frame);
+        let session_events_after_cursor = serde_json::to_string(
+            &session
+                .events_since(wasm_cursor, 5_000)
+                .expect("incremental session event query"),
+        )
+        .expect("incremental session event batch JSON");
+        assert_eq!(wasm_events_after_cursor, session_events_after_cursor);
     }
 
     #[cfg(target_arch = "wasm32")]
