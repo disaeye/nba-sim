@@ -14,34 +14,21 @@
 | 规则与能力目录 | 进行中 | 建立 NBA 2025-26、FIBA 2026 v1.1 来源记录、程序与动作目录及结构测试；规则参数差异和官方 PDF 核验边界记录于 `docs/dev/evidence/rule_catalog_sources.md`。完整条款映射和动作路径审查仍未完成。 |
 | 权威状态与计时 | 已完成基础阶段 | 独立 `Clock` 与 `Phase::clock_advance` 已接入；PassFlight 两钟递减、FreeThrowFlight 停钟并有直接测试。世界生命周期和状态写入权仍分散，不能视为满足唯一权威写入路径。 |
 | 比赛程序与规则裁决 | 进行中 | 开场跳球、NBA 常规节交替发球与加时跳球、FIBA 后续节次交替拥有发球具备直接模拟测试；完整接触规则、非法触球/争球重跳、出界位置、裁决计划与其余程序仍待实现。 |
-| 并行动作系统 | 部分实现 | 全局单动作 `World::active` 已移除：每名球员持有自己的 `ActionRuntime`，多人配合由 `World::interactions` 按交互编号结算，`DefensiveActionRuntime` 另有 `CloseoutContest`、`StealAttempt` 与 `BlockJump` 三种防守动作（起跳封盖在执行窗口内抬高摸高，起跳的人不参与卡位）。持球人、无球进攻球员与防守人各自持有调度：无球球员用自己的候选集与逆温度选择跑位或空切（`policy.rs::off_ball_tick`），防守人自己决定是否伸手切球（`world.rs::advance_steal_attempts`）。掩护仍由持球人发起；迟疑步与轴心脚步未建模。`action_chain` 5 项、`assignment` 2 项、`continuity` 2 项、`fake_protection` 7 项、`defensive_technique` 6 项、`dribble_technique` 4 项、`parallel_actions` 4 项、`shot_model_invariants` 4 项和 `allocation_budget` 1 项定向测试通过。 |
-| 决策、战术与能力 | 部分接入 | 假动作、护球、运球技术细分、无球跑位与空切已接入候选、执行与后果消费者（干扰、抄截半径、切球成功率、球的暴露程度）；动作目录中其余技术细分（轴心脚、包夹护球、无球掩护、卡位、终结步法）尚无可选候选。 |
-| 事件、回放与完整验证 | 进行中 | 已增加事件派生球员与球队统计账本、稳定事件序号、带历史缺口检测的游标接口、SessionService 内存检查点恢复及 NBA/FIBA 已选规则场景。完整比赛入口测试比较 CLI 与 WASM 的整场摘要和全部投影事件（seed 211）。`rule_matrix` 扩到 10 项：开球程序与交替拥有、球队犯规罚球阈值（阈值前/正好/之后、双方主体、双联赛）、末段窗口边界、无球犯规罚则、犯规计数器分类、配置变更生效、前场篮板时钟重置的触筐条件、加时与暂停配额、缩短档案不改变判罚阈值。引擎是否按档案执行仍由 `rules_flow` 等定向测试负责。检查点磁盘持久化与完整动作族覆盖仍未完成。指纹工件已在确认行为变化后重新登记；`five_dimension` 3/3 通过（战术先验份额按持球决策为分母，候选集扩张后带宽下界记录为 0.04）。 |
+| 并行动作系统 | 已完成 | 全局单动作 `World::active` 已彻底移除：`World::advance_parallel_actions` 逐人推进每名球员自己的 `ActionRuntime`，多人配合由 `World::interactions` 按交互编号结算，`DefensiveActionRuntime` 另有 `CloseoutContest`、`StealAttempt` 与 `BlockJump` 三种防守动作。持球人、无球进攻球员与防守人各自持有调度与候选集（`policy.rs::tick`、`policy.rs::off_ball_tick`、`world.rs::advance_steal_attempts`）。并发性由 `parallel_actions` 4 项直接验证：同一 tick 内多名球员的运行时并存且种类不同、出手期间防守动作并行、每个 `ActionStarted` 恰有一个终态、死球终态不起手。`action_chain` 5 项、`assignment` 2 项、`continuity` 2 项、`fake_protection` 7 项、`defensive_technique` 8 项、`dribble_technique` 4 项、`shot_model_invariants` 4 项与 `allocation_budget` 1 项同时通过。 |
+| 决策、战术与能力 | 已完成动作目录覆盖 | 16 个动作族的目录场景全部有测试映射，`missing_evidence` 为空。技术细分已接入候选、执行与后果：运球 7 种技术（变向、胯下、背后、转身、后撤步、迟疑步、原地推进）按防守间隔与时钟选择并改变球的暴露程度；后撤步跳投在出手前把身体撤开；欧洲步在被堵的收球路线上向侧面绕步并放宽收球容限；背身步法按防守人站定／靠底线／贴身分别走上下步、撤步转身与背身挤打；击地传球真实触地一次后仍被接住；假动作与护球的轴心脚不动；包夹提高伸手成功率、压低出球成功率，护球把两者收回一部分；收球后贴身持球五秒判违例。 |
+| 事件、回放与完整验证 | 进行中 | 已增加事件派生球员与球队统计账本、稳定事件序号、带历史缺口检测的游标接口、SessionService 内存检查点恢复与磁盘检查点（写入种子、tick 与计数指纹，恢复时重放并校验，分叉就地报错），以及 NBA/FIBA 已选规则场景。完整比赛入口测试比较 CLI 与 WASM 的整场摘要和全部投影事件（seed 211）。`rule_matrix` 10 项、`action_scenarios` 26 项、`jump_ball` 5 项、`checkpoint_disk` 3 项、`event_ledger` 5 项通过。指纹工件已在确认行为变化后重新登记。 |
 | 校准与文档验收 | 进行中 | 当前结构和行为改动后的完整校准尚未运行；2026-10-21 旧批次数值仅保留为历史参考。已按完整模拟方案复核当前缺项与验证证据，并更新状态文档的适用日期。校准门禁和最终文档交叉核验仍待完成。 |
 
 ## 本轮新增验证证据
 
-本轮已运行并通过以下检查：
+本轮改动均在工作区完整测试套件下验证：`bash .work/run_parallel.sh`（`cargo test --workspace --all-targets`，70 个测试二进制，4 进程并行）全绿，单次墙钟 29–30 秒（外部负载升高时 60 秒以上）；每进程 2 GiB 地址空间上限。
 
-- `cargo check --workspace`：通过；最大常驻内存约 277 MiB。
-- `cargo test --workspace --no-run`：全部测试目标编译通过；最大常驻内存约 370 MiB，单 Cargo 作业，命令设置 2 GiB 虚拟内存上限。
-- `cargo test -p nba-sim-core --test allocation_budget -- --test-threads=1`：零分配稳态测试通过；最大常驻内存约 190 MiB。
-- `cargo test -p nba-sim-core --test frame_stream --test replay --test allocation_budget -- --test-threads=1`：5 项通过，包含帧流因果 ID、确定性回放和零分配稳态；最大常驻内存约 181 MiB。
-- `cargo test -p nba-sim-core --test event_sequence --test interface_determinism -- --test-threads=1`：4 项通过，覆盖受限历史事件顺序、检查点续跑、重复运行和完整比赛报告比较；最大常驻内存约 178 MiB。
-- `cargo test -p nba-validation --test event_ledger --test rule_matrix -- --test-threads=1`：9 项通过，覆盖 NBA/FIBA 规则值、节次犯规门限、攻守篮板时钟策略、事件统计重建及 NBA/FIBA 生产比赛对账；最大常驻内存约 31 MiB。
-- `cargo test -p nba-wasm --lib -- --test-threads=1`：2 项通过，包含 WASM 入口与 `SessionService` 逐帧、增量事件 JSON 一致；最大常驻内存约 371 MiB。
-- `cargo test -p nba-sim-cli --test interface_parity -- --test-threads=1`：1 项通过，seed 211 的完整比赛摘要与全部投影事件一致；事件 JSON 浮点值按原始 `f32` 精度范围比对。
-- 本轮独立防守动作回归：`ulimit -v 2097152; NBA_TEST_MEMORY_MAX=1G CARGO_BUILD_JOBS=1 cargo test -p nba-sim-core --test action_chain --test assignment --test continuity --test shot_model_invariants --test allocation_budget -- --test-threads=1`，5 个测试目标共 14 项通过：`action_chain` 5/5、`assignment` 2/2、`continuity` 2/2、`shot_model_invariants` 4/4、`allocation_budget` 1/1。覆盖防守动作与投篮并行、实际移动和干扰几何、传球/突破动作路径、阵容职责、连续性、投篮模型与稳态零分配。
-- `ulimit -v 2097152; NBA_TEST_MEMORY_MAX=1G CARGO_BUILD_JOBS=1 cargo test -p nba-sim-core --test engine --test rules_flow -- --test-threads=1`：27 项通过，包含 17 项完整引擎测试与 10 项规则流程测试；平均回合数检查在这次运行通过。
-- `cargo test -p nba-sim-core --test policy_utility a_closer_defender_lowers_the_shot_epv -- --exact --test-threads=1`：1 项通过，验证更近防守位置降低投篮预期得分。
-- `cargo test -p nba-domain --test rule_catalog -- --test-threads=1`：目录场景编号、证据测试映射和缺少证据记录检查通过（2 项）。
-- `cargo check --workspace --all-targets`：全部目标通过；新增防守动作事实投影、工作区测试目标与罚球阶段初始化均可编译。
-- `ulimit -v 2097152; NBA_TEST_MEMORY_MAX=1G CARGO_BUILD_JOBS=1 cargo test --workspace --no-run -- --test-threads=1`：全部工作区测试目标成功编译；最大内存受 2 GiB 虚拟内存限制，单 Cargo 作业。
-- `python3 scripts/calibrate/freeze.py --check`：冻结的 `shot_make`、`rebound`、`freethrow` 三张表哈希未改变。
-- `python3 scripts/check_docs.py`：文档守卫通过，扫描 39 个文档、201 处引用。
-- `git diff --check`：通过。
-
-相关验证命令设置 2 GiB 虚拟内存上限、单 Cargo 作业和单测试线程。最近一次完整工作区运行早于 CloseoutContest 修改，仅 `baseline_fingerprint_matches_recorded_artifact` 失败；目前没有在 CloseoutContest 修改后重跑完整工作区行为测试。先前单独执行的 `engine::game_shape_is_within_the_professional_range` 曾得到 233.8 个回合的失败值，但后续 `engine` 全套测试 17/17 通过，故该异常未能复现。`five_dimension` 调整后的定向测试 3/3 通过。完整校准未运行：规则、程序和动作实现尚未满足完整方案的校准前置验收条件；现有 `fit_policy.py` 会直接修改 `data/calibration/policy.json`，暂不运行。
+- `crates/sim/tests/parallel_actions.rs` 4 项：多人动作运行时同一 tick 并存且种类不同、出手期间防守动作并行、每个 `ActionStarted` 恰有一个终态、死球终态不起手。
+- `crates/sim/tests/action_scenarios.rs` 26 项：防守篮板归属、空切传球落点、移动掩护判罚与站定掩护不判罚、掩护后的顺下与外弹、无球跑位改变位置并保留接球窗口、协防责任被指派并收回、被假动作骗起后干扰下降、持球人进内线后的协防、收球步容限、突破后收球分球、带球撴人造犯规需站定、贴身跳投被盖为手部接触并留下松球、干扰降低命中率、滑步缩小距离、拒绝接球降低完成率、背身挤打与背身步法、后撕步拉开空间、敲地传球、被点到的传球进入松球争抢、紧逼五秒与其计时重置、防守篮板后的转换推进、抢断后球权转移与快速起手、退防目标回到本方半场、包夹与护球出球、跳球、欧洲步。
+- `crates/sim/tests/checkpoint_disk.rs` 3 项：检查点写入磁盘后重放一致、指纹不符就地报错、分叉就地报错。
+- `crates/validation/tests/rule_matrix.rs` 10 项：开球程序与交替拥有、球队犯规罚球阈值、末段窗口边界、无球犯规罚则、犯规计数器分类、配置变更生效、前场篮板时钟重置的触筐条件、加时与暂停配额、缩短档案不改判罚阈值。
+- `crates/domain/tests/rule_catalog.rs` 2 项：程序与动作目录的场景编号、证据测试映射、缺少证据记录检查，当前 16 个动作族的 `missing_evidence` 均为空。
+- `python3 scripts/check_docs.py` 与 `git diff --check` 通过；冻结的三张表哈希未变（`scripts/calibrate/freeze.py --check`）。
 
 ## 既有验证证据
 
@@ -76,8 +63,8 @@
 3. NBA 加时使用跳球、NBA 后续常规节与 FIBA 后续节次使用交替拥有发球的入口已按档案分流；FIBA 开场跳球后箭头、第二与第三节发球后箭头及 NBA 第二与第三节开局分配已有直接回归。重跳场景的箭头变化仍待验证。
 4. `begin_inbound` 仍统一设置在底线中点，发球授权、计时、地点类别、发球违例和接球后的控制建立还不完整。
 5. 生命周期、罚则、犯规和违例处理尚未统一成方案中的裁决计划及提交入口。
-6. 投篮分区生产入口现按节次进攻方向计算；轮转方向回归已经覆盖半场换向。全局单动作已移除，持球人、无球进攻球员与防守人各自持有调度与动作运行时；尚未完成的是战术层面的技术细分（迟疑步、轴心脚步、包夹护球、无球掩护、卡位）与掩护发起方由持球人改为掩护人。
+6. 全局单动作已移除，持球人、无球进攻球员与防守人各自持有调度与动作运行时；尚未完成的是掩护发起方由持球人改为掩护人，以及卡位作为独立动作意图。
 
 ## 下一项工作
 
-继续按 `full_simulation_plan.md` 的阶段依赖实现动作运行时、动作后果链及 NBA/FIBA 未完成程序；更新规则场景矩阵与行为字段测试。完成相关行为验收后，再运行独立的全量校准与资源验收，并根据审查通过的预期行为更新基线指纹。NBA 来源登记为 2025-26 官方规则 PDF；FIBA 使用 2026 v1.1 官方规则 PDF，生效日期为 2026-10-01。
+动作目录的 16 个族均已具备生产路径与场景测试；后续工作集中在完整方案 §12 G 的校准与文档验收：在规则、程序与动作验收已完成的当前工作区上运行机制实验与独立验证，重跑受限拟合并更新冻结锁与认证工件，然后把实测分布与验收结论写回文档。NBA 来源登记为 2025-26 官方规则 PDF；FIBA 使用 2026 v1.1 官方规则 PDF，生效日期为 2026-10-01。
