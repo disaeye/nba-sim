@@ -43,6 +43,7 @@ impl Fact {
             Self::Shot { .. } => "SHOT",
             Self::Foul { .. } => "FOUL",
             Self::FreeThrow { .. } => "FREE_THROW",
+            Self::FreeThrowLaneViolation { .. } => "FREE_THROW_LANE_VIOLATION",
             Self::Rebound { .. } => "REBOUND",
             Self::ReboundOpportunity { .. } => "REBOUND_OPPORTUNITY",
             Self::LooseBallRecovered { .. } => "LOOSE_BALL_RECOVERED",
@@ -358,6 +359,9 @@ impl World {
                 "index": index,
                 "total": total,
                 "foul_id": foul_id,
+            }),
+            Fact::FreeThrowLaneViolation { side } => json!({
+                "side": side,
             }),
             Fact::Rebound {
                 player,

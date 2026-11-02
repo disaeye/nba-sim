@@ -50,6 +50,7 @@ fn fact_kind(fact: &Fact) -> &'static str {
         Fact::Shot { .. } => "shot",
         Fact::Foul { .. } => "foul",
         Fact::FreeThrow { .. } => "free_throw",
+        Fact::FreeThrowLaneViolation { .. } => "free_throw_lane_violation",
         Fact::Rebound { .. } => "rebound",
         Fact::ReboundOpportunity { .. } => "rebound_opportunity",
         Fact::LooseBallRecovered { .. } => "loose_ball_recovered",

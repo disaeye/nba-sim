@@ -200,9 +200,28 @@ fn three_point_skill_moves_three_point_output() {
     }
     let low_pct = made_low as f64 / attempts_low.max(1) as f64;
     let high_pct = made_high as f64 / attempts_high.max(1) as f64;
+    println!("in-game three point percentage {low_pct:.3} -> {high_pct:.3}");
+    // 场上命中率会叠上选择效应（能力强的球员会去投更难的球）。
+    // 机制断言直接比同一位置的模型输出。
+    let model_p_make = |setup: &MatchSetup| -> f32 {
+        let world = World::new(setup.clone(), base.clone(), 41);
+        let shooter = world.on_court(TeamSide::Home).as_slice()[0];
+        let hoop = world.hoop_for(TeamSide::Home);
+        let spot = hoop + glam::Vec2::new(-24.0, 0.0);
+        nba_sim_core::shot_quality::evaluate(
+            &world,
+            shooter,
+            nba_sim_core::action::ShotKind::CatchShoot,
+            nba_sim_core::state::BallPhase::Catch,
+            spot,
+        )
+        .p_make
+    };
+    let low_model = model_p_make(&low_setup);
+    let high_model = model_p_make(&high_setup);
     assert!(
-        high_pct > low_pct,
-        "raising three point skill must raise three point percentage ({low_pct:.3} -> {high_pct:.3})"
+        high_model > low_model,
+        "raising three point skill must raise the modelled make probability ({low_model:.3} -> {high_model:.3})"
     );
 }
 

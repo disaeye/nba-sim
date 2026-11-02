@@ -117,6 +117,13 @@ pub struct PendingJumpBall {
     pub waited: f32,
 }
 
+/// 罚球期间的禁区站位记录：球离手之前有人进区就是违例。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FreeThrowLane {
+    pub offense_early: bool,
+    pub defense_early: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct World {
     pub params: RuntimeParams,
@@ -171,6 +178,8 @@ pub struct World {
     pub pending_rebound: Option<crate::resolve::rebound::PendingRebound>,
     /// 停表跳球的准备：双方参跳人与到位时刻。到位后才掷球。
     pub pending_jump_ball: Option<PendingJumpBall>,
+    /// 当前罚球程序的禁区提前进区记录。
+    pub free_throw_lane: Option<FreeThrowLane>,
     /// 刚被切掉球的持球人，以及恢复之前不可再次被切的截止时间。
     pub poke_cooldown: Option<(usize, f64)>,
     /// 当前生效的护球姿态。开始其他动作或窗口到期即失效。
@@ -906,6 +915,7 @@ impl World {
             pending_shot: None,
             pending_rebound: None,
             pending_jump_ball: None,
+            free_throw_lane: None,
             poke_cooldown: None,
             protection: None,
             possession_points: 0,
@@ -1934,7 +1944,35 @@ impl World {
         }
         self.check_closely_guarded(dt);
         self.check_backcourt();
+        self.check_free_throw_lane();
         self.check_period_end();
+    }
+
+    /// 罚球禁区：球离手之前，任何球员不得进入禁区内侧。
+    fn check_free_throw_lane(&mut self) {
+        if !matches!(self.phase, Phase::FreeThrows { .. }) {
+            return;
+        }
+        let Some(mut lane) = self.free_throw_lane else {
+            return;
+        };
+        let offense = self.possession.team;
+        let attacking_right = self.attacking_right(offense);
+        for handle in 0..self.players.len() {
+            let player = &self.players[handle];
+            if !player.on_court {
+                continue;
+            }
+            if !self.rules.court.is_in_lane(player.pos, attacking_right) {
+                continue;
+            }
+            if player.team == offense {
+                lane.offense_early = true;
+            } else {
+                lane.defense_early = true;
+            }
+        }
+        self.free_throw_lane = Some(lane);
     }
 
     /// 紧逼盯防五秒：收球后被贴身盯住且不再推进，五秒必吹违例。

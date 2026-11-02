@@ -230,6 +230,50 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
         let eligible_rebound =
             !meta.retain_possession && matches!(result, ShotResult::Missed { rim_contact: true });
         if eligible_rebound {
+            // 罚球禁区违例：球碰筐之前不得有人提前进区。
+            let lane = world.free_throw_lane.take().unwrap_or_default();
+            if lane.offense_early {
+                world.emit(Fact::FreeThrowLaneViolation { side: "offense" });
+                let enemy = team.other();
+                world.possession.shot_clock_start = world.clock.shot_clock();
+                world.adjudicate(
+                    crate::adjudicate::Adjudication::new(
+                        crate::adjudicate::StoppageCause::FreeThrow,
+                        crate::adjudicate::RestartPlan::Stoppage {
+                            team: enemy,
+                            ready_after: 1.0,
+                        },
+                    )
+                    .ending(
+                        nba_domain::event::PossessionEndCause::TurnoverViolation,
+                        "free_throw_lane_violation",
+                    ),
+                );
+                world.release_ball(BallState::Loose {
+                    pos: world.hoop_for(enemy),
+                    vel: Vec2::ZERO,
+                });
+                return;
+            }
+            if lane.defense_early {
+                // 防守方提前进区：重罚一次。
+                world.emit(Fact::FreeThrowLaneViolation { side: "defense" });
+                world.free_throw_lane = Some(crate::world::FreeThrowLane::default());
+                world.set_phase(Phase::FreeThrows {
+                    shooter: pending.shooter,
+                    total: meta.total,
+                    remaining: 1,
+                    made: made_count,
+                    next_at: world.now() + world.rules.free_throw_interval_seconds as f64,
+                    and_one: meta.and_one,
+                    retain_possession: meta.retain_possession,
+                    foul_id: meta.foul_id,
+                    technical_retained_team: meta.technical_retained_team,
+                    after_technical: None,
+                });
+                world.set_ball_held(pending.shooter);
+                return;
+            }
             let rim_contact = matches!(result, ShotResult::Missed { rim_contact: true });
             world.possession.shot_clock_start = world.clock.shot_clock();
             world.release_ball(BallState::Loose {
@@ -240,6 +284,7 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
             return;
         }
         world.possession.shot_clock_start = world.clock.shot_clock();
+        world.free_throw_lane = None;
         let restart_team = if meta.technical_retained_team.is_some() || meta.retain_possession {
             team
         } else {

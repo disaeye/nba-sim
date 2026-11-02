@@ -188,3 +188,137 @@ fn carrying_the_ball_back_over_half_court_is_a_backcourt_violation() {
         other => panic!("回场后必须停表换边，实际 {other:?}"),
     }
 }
+
+#[test]
+fn a_defender_inside_the_lane_before_the_release_is_recorded() {
+    let mut world = world(331);
+    let shooter = world.on_court(TeamSide::Home).as_slice()[0];
+    let defender = world.on_court(TeamSide::Away).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == shooter || index == defender;
+        player.vel = Vec2::ZERO;
+    }
+    let hoop = world.hoop_for(TeamSide::Home);
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.ball.set_held(shooter);
+    world.players[shooter].pos = hoop + Vec2::new(-18.0, 0.0);
+    world.players[defender].pos = hoop + Vec2::new(-6.0, 0.0);
+    world.free_throw_lane = Some(nba_sim_core::world::FreeThrowLane::default());
+    world.set_phase(Phase::FreeThrows {
+        shooter,
+        total: 1,
+        remaining: 1,
+        made: 0,
+        next_at: world.now() + 100.0,
+        and_one: false,
+        retain_possession: false,
+        foul_id: 1,
+        technical_retained_team: None,
+        after_technical: None,
+    });
+    world.step(TICK_SECONDS);
+    let lane = world.free_throw_lane.expect("罚球期间必须有禁区记录");
+    assert!(lane.defense_early, "防守人站在禁区里必须被记为提前进区");
+    assert!(!lane.offense_early, "进攻方没有进区");
+}
+
+#[test]
+fn an_early_defensive_entry_awards_another_free_throw() {
+    let mut world = world(337);
+    let shooter = world.on_court(TeamSide::Home).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == shooter;
+        player.vel = Vec2::ZERO;
+    }
+    let hoop = world.hoop_for(TeamSide::Home);
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.ball.set_held(shooter);
+    world.players[shooter].pos = hoop + Vec2::new(-18.0, 0.0);
+    world.free_throw_lane = Some(nba_sim_core::world::FreeThrowLane {
+        offense_early: false,
+        defense_early: true,
+    });
+    world.set_phase(Phase::FreeThrows {
+        shooter,
+        total: 1,
+        remaining: 1,
+        made: 0,
+        next_at: world.now(),
+        and_one: false,
+        retain_possession: false,
+        foul_id: 1,
+        technical_retained_team: None,
+        after_technical: None,
+    });
+    // 第一步发射罚球，第二步把结果定为碰筐不中并结算。
+    world.step(TICK_SECONDS);
+    if let Some(pending) = world.pending_shot.as_mut() {
+        pending.result = Some(nba_sim_core::resolve::shot::ShotResult::Missed {
+            rim_contact: true,
+        });
+    }
+    world.step(TICK_SECONDS);
+    assert!(
+        world.events.iter().any(|event| matches!(
+            &event.fact,
+            Fact::FreeThrowLaneViolation { side: "defense" }
+        )),
+        "防守方提前进区必须被记录"
+    );
+    assert!(
+        matches!(world.phase(), Phase::FreeThrows { remaining: 1, .. }),
+        "防守方提前进区后必须重罚一次，实际 {:?}",
+        world.phase()
+    );
+}
+
+#[test]
+fn an_early_offensive_entry_gives_the_ball_to_the_defence() {
+    let mut world = world(341);
+    let shooter = world.on_court(TeamSide::Home).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == shooter;
+        player.vel = Vec2::ZERO;
+    }
+    let hoop = world.hoop_for(TeamSide::Home);
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.ball.set_held(shooter);
+    world.players[shooter].pos = hoop + Vec2::new(-18.0, 0.0);
+    world.free_throw_lane = Some(nba_sim_core::world::FreeThrowLane {
+        offense_early: true,
+        defense_early: false,
+    });
+    world.set_phase(Phase::FreeThrows {
+        shooter,
+        total: 1,
+        remaining: 1,
+        made: 0,
+        next_at: world.now(),
+        and_one: false,
+        retain_possession: false,
+        foul_id: 1,
+        technical_retained_team: None,
+        after_technical: None,
+    });
+    world.step(TICK_SECONDS);
+    if let Some(pending) = world.pending_shot.as_mut() {
+        pending.result = Some(nba_sim_core::resolve::shot::ShotResult::Missed {
+            rim_contact: true,
+        });
+    }
+    world.step(TICK_SECONDS);
+    assert!(
+        world.events.iter().any(|event| matches!(
+            &event.fact,
+            Fact::FreeThrowLaneViolation { side: "offense" }
+        )),
+        "进攻方提前进区必须被记录"
+    );
+    match world.phase() {
+        Phase::DeadBall { team, .. } => assert_eq!(team, TeamSide::Away, "球权交给对方"),
+        other => panic!("进攻方提前进区后必须停表换边，实际 {other:?}"),
+    }
+}

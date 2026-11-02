@@ -177,6 +177,8 @@ pub fn apply_shooting_foul(
     );
     world.pending_rebound = None;
     world.set_ball_held(shooter);
+    // 新罚球程序：清空上一轮的禁区记录。
+    world.free_throw_lane = Some(crate::world::FreeThrowLane::default());
     world.set_phase(Phase::FreeThrows {
         shooter,
         total: booking.free_throws,

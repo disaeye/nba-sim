@@ -669,6 +669,10 @@ pub enum Fact {
         total: u8,
         foul_id: u64,
     },
+    /// 罚球禁区违例：`side` 是提前进区的一方（`offense` 或 `defense`）。
+    FreeThrowLaneViolation {
+        side: &'static str,
+    },
     Rebound {
         player: usize,
         offensive: bool,
@@ -828,6 +832,7 @@ impl Fact {
             Self::Shot { .. } => "Shot",
             Self::Foul { .. } => "Foul",
             Self::FreeThrow { .. } => "FreeThrow",
+            Self::FreeThrowLaneViolation { .. } => "FreeThrowLaneViolation",
             Self::Rebound { .. } => "Rebound",
             Self::ReboundOpportunity { .. } => "ReboundOpportunity",
             Self::LooseBallRecovered { .. } => "LooseBallRecovered",
