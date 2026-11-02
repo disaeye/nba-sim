@@ -317,22 +317,11 @@ impl Default for BallSecurityPolicy {
     fn default() -> Self {
         Self {
             poke_pressure_radius_ft: 4.5,
-            // round-16 标定（A/B 证据 §17.7）：0.55 → 2.2。
-            // 失误率取真实值：丢球占比 24%(r1.5)/40%(r3.0) 的插值点，
-            // 丢球率 0.078/回合 ≈ 真实 0.0776（82games 53.6% × 0.145）。
-            // r38 校准：poke 尝试频率 2.2→1.2/s、成功上限 0.16→0.11。
-            // 实测（seed42/43 各 1q）poke 丢球回合占 11%，真实 NBA 掏球
-            // 丢权约 2-3%（每场 2-3 次 / 100 回合）；掉球修复（接球范围
-            // 扩大）后 poke 成为失误最大源，按比例回调。
-            // r48 合并注记：ui 分支的标定是 0.8/0.16 + poke_recovery_seconds
-            // 不应期（1.5s）的组合；main 的 1.2/0.11 是 r38 批量校准值。
-            // 保留 main 值 + ui 不应期（两套标定的频率-成功率-不应期三元
-            // 组不能混搭，TOV 批量口径以 main 为准）。
-            poke_attempt_rate_per_sec: 0.26,
-            // 成功上限按实测重标：每场 26.6 次抢断里有约 20 次来自贴身拍球，
-            // 真实 NBA 的这一项只有个位数。0.11 的上限配上保护/压迫两项，
-            // 单次尝试成功约 8%，一个回合就要丢一成球权。
-            poke_success_ceiling: 0.042,
+            // 抢断标定：尝试频率、成功上限与不应期三个数共同决定每场抢断数。
+            // 真实 NBA 双方合计约 15 次抢断、失误率 0.145/回合；0.30/s 频率
+            // 配 0.07 成功上限与 1.5 秒不应期，实测 15.0 次/场、失误率 0.15。
+            poke_attempt_rate_per_sec: 0.30,
+            poke_success_ceiling: 0.07,
             poke_success_floor: 0.004,
             poke_defender_skill_weight: 0.55,
             poke_handler_skill_weight: 0.70,
