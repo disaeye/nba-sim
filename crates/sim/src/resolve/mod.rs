@@ -21,7 +21,7 @@ use rand::Rng;
 use crate::action::{
     ActionIntent, ActionKind, ActionOutcome, Completion, Fact, StateDelta, TurnoverKind,
 };
-use crate::state::{DribbleState, PossessionKind, TeamSide};
+use crate::state::{DribbleState, TeamSide};
 use crate::world::World;
 
 pub fn resolve(world: &mut World, intent: ActionIntent) -> ActionOutcome {
