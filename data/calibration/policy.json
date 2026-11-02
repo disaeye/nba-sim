@@ -320,7 +320,7 @@
     "screen_max_distance_ft": 28.0,
     "relocate_reference_ft": 14.0,
     "cut_open_distance_ft": 6.0,
-    "cut_payoff_ratio": 1.5,
+    "cut_payoff_ratio": 1.2,
     "screen_contact_range_ft": 12.0,
     "screen_under_relief_ft": 6.0,
     "screen_under_relief_max": 0.95,
