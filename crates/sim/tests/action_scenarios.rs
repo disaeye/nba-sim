@@ -834,3 +834,117 @@ fn a_defender_in_the_lane_denies_the_pass() {
         "站进传球路线的防守人必须降低完成概率：{denied} vs {open}"
     );
 }
+
+/// 抢断后的转换：球权立刻转给抢断方，并且该回合很快就发起第一个动作。
+#[test]
+fn a_steal_hands_possession_over_and_starts_a_quick_transition() {
+    let mut steals = 0u32;
+    let mut quick = 0u32;
+    for seed in 1..=4u64 {
+        let report = world(seed).run();
+        let mut possession_team = None;
+        let mut steal_ids: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+        let mut pending_steal = false;
+        for event in &report.events {
+            match &event.fact {
+                Fact::Steal { .. } => {
+                    steals += 1;
+                    pending_steal = true;
+                }
+                Fact::PossessionStarted {
+                    team,
+                    possession_id,
+                    ..
+                } => {
+                    if pending_steal {
+                        let expected = possession_team.map(|t: TeamSide| t.other());
+                        if let Some(expected) = expected {
+                            assert_eq!(
+                                *team, expected,
+                                "抢断之后球权必须转给抢断方（seed {seed}）"
+                            );
+                        }
+                        steal_ids.insert(*possession_id);
+                        pending_steal = false;
+                    }
+                    possession_team = Some(*team);
+                }
+                _ => {}
+            }
+        }
+        // 抢断之后的那个回合必须很快起手：这就是转换进攻的实质。
+        for record in &report.possessions {
+            if steal_ids.contains(&record.id)
+                && record
+                    .first_action_seconds
+                    .is_some_and(|seconds| seconds < 8.0)
+            {
+                quick += 1;
+            }
+        }
+    }
+    assert!(steals > 0, "真实比赛里必须有抢断");
+    assert!(quick > 0, "抢断回合必须在八秒内起手");
+}
+
+/// 防守篮板后的转换推进：球必须在快攻窗口内越过中场。
+#[test]
+fn a_defensive_rebound_advances_past_midcourt_within_the_transition_window() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let transition = params.policy.g("transition_window_seconds") as f64;
+    let mut monitored = 0u32;
+    let mut advanced = 0u32;
+    for seed in 1..=3u64 {
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            Params::load(&workspace_calibration_dir()).expect("calibration tables load"),
+            seed,
+        );
+        let mid = world.rules.court.width_ft * 0.5;
+        let mut pending: Option<(f64, TeamSide)> = None;
+        let mut guard = 0;
+        while !world.finished && guard < 200_000 {
+            let before = world.events.len();
+            world.step(TICK_SECONDS);
+            guard += 1;
+            for event in &world.events[before..] {
+                if let Fact::Rebound {
+                    offensive: false, ..
+                } = &event.fact
+                {
+                    pending = Some((world.now(), world.possession.team));
+                }
+            }
+            let Some((since, team)) = pending else {
+                continue;
+            };
+            let elapsed = world.now() - since;
+            let holder_side = world
+                .holder()
+                .map(|handle| (world.players[handle].pos, world.players[handle].team));
+            if let Some((pos, side)) = holder_side {
+                if side == team {
+                    let ahead = if world.attacking_right(team) {
+                        pos.x > mid
+                    } else {
+                        pos.x < mid
+                    };
+                    if ahead {
+                        advanced += 1;
+                        pending = None;
+                        continue;
+                    }
+                }
+            }
+            if elapsed > transition * 3.0 {
+                monitored += 1;
+                pending = None;
+            }
+        }
+    }
+    assert_eq!(
+        monitored, 0,
+        "防守篮板后的推进必须在快攻窗口内完成，超时次数 {monitored}"
+    );
+    assert!(advanced > 0, "必须有防守篮板后的推进");
+}
