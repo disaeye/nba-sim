@@ -1106,9 +1106,18 @@ pub fn pass_intercept_radius(world: &World, defender: &crate::state::PlayerState
     // 半径是防守人的手掌在身侧能够到的范围：只有手臂正好在传球
     // 线路上的防守人才碰得到球，站得离开线路半个身位就碰不到。
     // 抄球半径随抢断属性放大：抢断能力强的防守人真的能把球断下来。
-    let base = world.rules.ball_radius_ft
+    let base_radius = world.rules.ball_radius_ft
         + world.params.policy.g("pass_intercept_base_ft")
         + defender.attribute("steal") * world.params.policy.g("pass_intercept_steal_ft");
+    // 传球判断决定出球点：读得出协防的传球人把球送到防守人够不到的地方。
+    // 以 0.5 为锚点，平均判断不变，只把区间拉开。
+    let passer_iq = world
+        .possession
+        .last_pass_from
+        .map(|passer| world.players[passer].data.attributes.decision_iq.clamp(0.0, 1.0))
+        .unwrap_or(0.5);
+    let base =
+        base_radius * (1.0 + world.params.policy.w("pass_iq_intercept_shrink") * (0.5 - passer_iq));
     // 被传球假动作骗到的防守人重心已偏向假目标，真实线路上的手位收窄。
     let bait_relief = match defender.bait {
         Some(bait)

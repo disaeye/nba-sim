@@ -51,6 +51,7 @@
     "pass_iq_penalty": 0.22,
     "desperation_shot_value": 0.1,
     "bad_pass_iq_weight": 1.5,
+    "pass_iq_intercept_shrink": 0.5,
 
     "rebound_boxout_weight": 1.0,
     "screen_base_displacement_ft": 0.25,
