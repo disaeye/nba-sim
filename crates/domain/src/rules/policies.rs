@@ -84,10 +84,10 @@ impl Default for CapabilityCurveRules {
             risk_tolerance_gain: 0.35,
             // r42：0.10→0.30。OREB 率 0.316 vs 真实 0.250（攻方争抢偏强），
             // 提防守卡位保底加成让防守篮板归属向真实收敛。
-            boxout_bonus_base: 0.0,
+            boxout_bonus_base: 0.225,
             // r85：属性区间拉到 0.35，同时把基数降 0.10——均值不变，
             // 防守篮板才真的对 defensive_rebound 敏感。
-            boxout_bonus_primary_gain: 1.5,
+            boxout_bonus_primary_gain: 0.30,
             boxout_bonus_secondary_gain: 0.10,
             putback_bias_base: 0.05,
             putback_bias_gain: 0.35,
