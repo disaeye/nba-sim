@@ -81,7 +81,7 @@ impl MechanismAttribute {
             Self::Stamina => Metric::MinutesMax,
             Self::Strength => Metric::ScreenDisplacement,
             Self::OffensiveRebound => Metric::OffensiveReboundRate,
-            Self::DefensiveRebound => Metric::ContestedReboundShare,
+            Self::DefensiveRebound => Metric::DefensiveReboundRate,
             Self::DecisionIq => Metric::TurnoversPerPass,
             Self::Block => Metric::BlocksPerShot,
             Self::Steal => Metric::StealsPerPossession,
@@ -638,7 +638,7 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
         // 防守篮板 + 对手前场篮板」会把分子分母一起抬高，扰动被自己抵消。
         Metric::DefensiveReboundRate => (
             home.dreb as f64,
-            (away.fga as i64 - away.fgm as i64).max(1) as f64,
+            (home.dreb + away.dreb).max(1) as f64,
         ),
         Metric::TurnoverRate => {
             let home_possessions = report

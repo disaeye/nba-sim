@@ -1,6 +1,6 @@
 {
-  "certification_status": "insufficient_evidence",
-  "commit": "18aafc8a66ab944d72d87ea060bb5586420426d2",
+  "certification_status": "defects_found",
+  "commit": "8205333992ede701646c39d3f99f12d95eb4bd20",
   "coverage": {
     "gate_criteria": 38,
     "mechanism_attributes": 13,
@@ -12,13 +12,13 @@
   },
   "criteria": {
     "defects": [],
-    "known_insufficient": [
-      "mechanism:defensive_rebound"
-    ],
+    "known_insufficient": [],
     "marginal": [
       "mechanism:offensive_rebound（下界比 0.55）"
     ],
-    "new_insufficient": [],
+    "new_insufficient": [
+      "mechanism:defensive_rebound"
+    ],
     "not_applicable": []
   },
   "games": 32,
