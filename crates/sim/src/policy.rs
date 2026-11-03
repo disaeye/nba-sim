@@ -254,6 +254,8 @@ pub fn off_ball_tick(world: &mut World) {
             revalidation: Revalidation::Accepted,
         });
         let participants = [(actor, crate::action::ActionIntentRole::Primary)];
+        // 无球掩护需要决策时的防守人：交给结算层做接触与路线判定。
+        world.screen_defender = decision.screen_defender;
         // 无球球员自己可能已经离场：这条无球动作自然作废。
         if !world.start_action(intent, &participants) {
             return;
@@ -419,15 +421,61 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
             relocate.3.tactical_bonus += weights.g("cut_open_distance_ft") * 0.5;
         }
     }
-    let mut candidates = [relocate; 2];
+    let mut candidates = [relocate; 3];
     let mut count = 1usize;
     if cut_available {
         candidates[count] = cut;
         count += 1;
     }
+    // 无球掩护：掩护人自己发起，不等持球人点名。站位在持球人与持球人
+    // 防守人之间——只有贴住防守人移动的那一侧才会真的接触。
+    let mut screen_call = None;
+    if let Some(ball) = world.holder() {
+        if world.players[ball].team == team
+            && ball != actor
+            && marker >= weights.g("screen_initiative_marker_ft")
+        {
+            let ball_pos = world.players[ball].pos;
+            let mut nearest = f32::INFINITY;
+            let mut target = None;
+            for (index, player) in world.players.iter().enumerate() {
+                if !player.on_court || player.team == team {
+                    continue;
+                }
+                let gap = (player.pos - ball_pos).length();
+                if gap < nearest {
+                    nearest = gap;
+                    target = Some((index, player.pos));
+                }
+            }
+            if let Some((defender, defender_pos)) = target {
+                if nearest <= weights.g("screen_initiative_radius_ft") {
+                    let to_ball = (ball_pos - defender_pos).normalize_or_zero();
+                    let spot = defender_pos - to_ball * weights.g("screen_set_distance_ft");
+                    candidates[count] = (
+                        ActionKind::Screen(ScreenKind::OffBall),
+                        Some(actor),
+                        spot,
+                        Utility {
+                            epv: EpvTerms {
+                                ability: weights.b("screen_initiative_base"),
+                                ..Default::default()
+                            },
+                            variance: f32::default(),
+                            clock_cost: clock_cost(world, shot_clock) * 0.6,
+                            foul_cost: f32::default(),
+                            tactical_bonus: f32::default(),
+                        },
+                    );
+                    screen_call = Some((count, defender));
+                    count += 1;
+                }
+            }
+        }
+    }
     let gamma = f32::default();
     // 固定数组，逐 tick 的热路径上不分配。
-    let mut totals = [0.0f32; 2];
+    let mut totals = [0.0f32; 3];
     for (slot, candidate) in candidates[..count].iter().enumerate() {
         totals[slot] = candidate.3.total(gamma);
     }
@@ -436,7 +484,7 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
         .iter()
         .copied()
         .fold(f32::NEG_INFINITY, f32::max);
-    let mut weights_soft = [0.0f32; 2];
+    let mut weights_soft = [0.0f32; 3];
     for slot in 0..count {
         weights_soft[slot] = (beta * (totals[slot] - peak)).exp();
     }
@@ -508,7 +556,9 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
         beta,
         gamma,
         candidate_count: count,
-        screen_defender: None,
+        screen_defender: screen_call
+            .filter(|(slot, _)| *slot == chosen)
+            .map(|(_, defender)| defender),
         trace,
     })
 }

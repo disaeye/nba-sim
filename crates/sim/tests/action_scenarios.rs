@@ -1809,3 +1809,18 @@ fn a_defender_out_of_position_recovers_to_his_man() {
         "贴在対位人身边时不该进入回位"
     );
 }
+
+/// 无球掩护由掩护人自己发起：真实比赛里必须出现 on_ball == false 的掩护。
+#[test]
+fn real_games_include_off_ball_screens() {
+    let mut off_ball = 0u32;
+    for seed in 1..=12u64 {
+        let report = world(seed).run();
+        off_ball += report
+            .events
+            .iter()
+            .filter(|event| matches!(&event.fact, Fact::Screen { on_ball: false, .. }))
+            .count() as u32;
+    }
+    assert!(off_ball > 0, "真实比赛里必须有掩护人自己发起的无球掩护");
+}
