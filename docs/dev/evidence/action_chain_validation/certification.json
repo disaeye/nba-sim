@@ -1,6 +1,6 @@
 {
-  "certification_status": "defects_found",
-  "commit": "2b8776e82ae927ed3d29bea79614081bf3d1ef29",
+  "certification_status": "insufficient_evidence",
+  "commit": "0866b47f526433eab53ef8bd340f40b45dabad94",
   "coverage": {
     "gate_criteria": 38,
     "mechanism_attributes": 13,
@@ -11,12 +11,12 @@
     "unregistered": []
   },
   "criteria": {
-    "defects": [
+    "defects": [],
+    "known_insufficient": [
       "mechanism:defensive_rebound"
     ],
-    "known_insufficient": [],
     "marginal": [
-      "mechanism:offensive_rebound（下界比 0.68）"
+      "mechanism:offensive_rebound（下界比 0.59）"
     ],
     "new_insufficient": [],
     "not_applicable": []

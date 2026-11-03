@@ -108,21 +108,21 @@
 
 | 属性 | 指标 | 方向 | 相对变化 | 同向种子 |
 | --- | --- | --- | --- | --- |
-| shooting_three | three_point_pct | 上升 | +0.478 | 67/80 |
-| shooting_close | rim_pct | 上升 | +0.437 | 78/80 |
-| shooting_mid | mid_pct | 上升 | +0.476 | 31/80 |
-| free_throw | free_throw_pct | 上升 | +0.167 | 72/80 |
-| speed | possessions | 上升 | +0.021 | 50/80 |
-| acceleration | possessions | 上升 | +0.038 | 59/80 |
-| stamina | minutes_max | 上升 | +0.266 | 80/80 |
-| strength | screen_displacement_ft | 上升 | +1.533 | 80/80 |
-| offensive_rebound | offensive_rebound_rate | 上升 | +450.158 | 3/80 |
-| defensive_rebound | defensive_rebound_rate | 上升 | +0.013 | 46/80 |
-| decision_iq | turnovers_per_pass | 下降 | −0.299 | 65/80 |
-| block | blocks_per_shot | 上升 | +2.354 | 67/80 |
-| steal | steals_per_possession | 上升 | +1.349 | 76/80 |
+| shooting_three | three_point_pct | 上升 | +0.516 | 133/160 |
+| shooting_close | rim_pct | 上升 | +0.423 | 154/160 |
+| shooting_mid | mid_pct | 上升 | +0.541 | 65/159 |
+| free_throw | free_throw_pct | 上升 | +0.169 | 135/160 |
+| speed | possessions | 上升 | +0.017 | 102/160 |
+| acceleration | possessions | 上升 | +0.025 | 109/160 |
+| stamina | minutes_max | 上升 | +0.285 | 160/160 |
+| strength | screen_displacement_ft | 上升 | +1.500 | 160/160 |
+| offensive_rebound | offensive_rebound_rate | 上升 | +200.201 | 10/160 |
+| defensive_rebound | defensive_rebound_rate | 上升 | +0.020 | 84/160 |
+| decision_iq | turnovers_per_pass | 下降 | −0.236 | 114/160 |
+| block | blocks_per_shot | 上升 | +2.310 | 143/160 |
+| steal | steals_per_possession | 上升 | +1.373 | 155/160 |
 
-12 项在 80 个种子上通过；`defensive_rebound` 逐种子效应的均值约 +0.049、标准差约 0.181，配对区间在 80 个种子上仍会跨零，因此按 `known_insufficient.json` 记为 `more_games`、需要 160 个种子（机制本身已通过 contested 卡位加成接进篮板争抢，缺的是样本）。其余三项早先的缺口已经补齐：`strength` 接上了掩护推人（80/80 同向），`stamina` 改看主队单人最高出场分钟（80/80），`decision_iq` 接进坏传率与拦截半径（65/80）。
+12 项在 160 个种子上通过；`defensive_rebound` 的相对变化为 +0.020、84/160 同向，配对区间仍跨零，因此按 `known_insufficient.json` 记为 `more_games`、需要 640 个种子。该属性经过多种度量与机制写法都只得到 1%–4% 的效应量：篮板归属主要由站位与球弹向决定，卡位加成改变伸手半径很少改变赢家。其余两项早先的缺口已经补齐：`stamina` 改看主队单人最高出场分钟（160/160），`decision_iq` 接进坏传率与拦截半径（114/160）。
 
 ## 已确认的待修复项
 

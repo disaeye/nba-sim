@@ -57,12 +57,12 @@
       "source": "shufinskiy/nba_data shotdetail"
     }
   },
-  "commit": "2b8776e82ae927ed3d29bea79614081bf3d1ef29",
+  "commit": "0866b47f526433eab53ef8bd340f40b45dabad94",
   "games": 32,
   "mechanism": {
     "high_value": 0.95,
     "low_value": 0.1,
-    "passed": false,
+    "passed": true,
     "possessions": null,
     "seeds": 160
   },
