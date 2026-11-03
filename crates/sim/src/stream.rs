@@ -678,10 +678,7 @@ impl World {
                 event_type: primary,
                 events: event_names,
                 game_flow: match self.phase() {
-                    Phase::Live
-                    | Phase::PassFlight { .. }
-                    | Phase::ShotFlight { .. }
-                    | Phase::JumpBallFlight => "LiveBall",
+                    Phase::Live => "LiveBall",
                     Phase::Finished => "Finished",
                     _ => "DeadBall",
                 }

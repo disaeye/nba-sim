@@ -5,7 +5,7 @@ use glam::Vec2;
 use crate::action::{Fact, ShotKind};
 use crate::draw::{purpose, Stream};
 use crate::resolve::shot::{PendingShot, ShotResult};
-use crate::state::{BallState, Phase};
+use crate::state::BallState;
 use crate::world::World;
 
 #[derive(Debug, Clone, Copy, PartialEq)]

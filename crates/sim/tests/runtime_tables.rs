@@ -160,10 +160,7 @@ fn pass_flight_consumes_both_live_clocks() {
     world.step(TICK_SECONDS);
     assert_eq!(world.clock.game_clock(), game_clock - TICK_SECONDS);
     assert_eq!(world.clock.shot_clock(), shot_clock - TICK_SECONDS);
-    assert!(matches!(
-        world.phase(),
-        Phase::PassFlight { .. } | Phase::Live
-    ));
+    assert!(matches!(world.phase(), Phase::PassFlight { .. }));
 }
 
 #[test]

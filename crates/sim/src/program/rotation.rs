@@ -32,7 +32,6 @@ pub fn is_substitution_window(world: &World) -> bool {
         Phase::DeadBall { .. }
             | Phase::Inbound { .. }
             | Phase::JumpBall { .. }
-            | Phase::JumpBallFlight
             | Phase::FreeThrows { .. }
             | Phase::PeriodBreak { .. }
             | Phase::Timeout { .. }

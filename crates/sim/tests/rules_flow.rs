@@ -46,10 +46,7 @@ fn live_world_with_rules(seed: u64, rules: GameRules) -> World {
 }
 
 fn is_dead_ball(phase: &Phase) -> bool {
-    !matches!(
-        phase,
-        Phase::Live | Phase::PassFlight { .. } | Phase::ShotFlight { .. }
-    )
+    !matches!(phase, Phase::Live)
 }
 
 fn possession_start_events(world: &World) -> Vec<u64> {

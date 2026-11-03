@@ -138,10 +138,12 @@ pub fn control(world: &mut World, handle: usize) {
     let Some(state) = world.pending_rebound.take() else {
         return;
     };
-    assert_ne!(
-        world.possession.id, 0,
-        "a rebound control requires an active possession"
-    );
+    // 回合已经结束（例如时钟违例或出界）：这次拿球只把球交给控制者，
+    // 不再记篮板或失误。
+    if world.possession.id == 0 {
+        take_live_ball(world, handle);
+        return;
+    }
     if state.turnover {
         let team = world.players[handle].team;
         world.emit(Fact::LooseBallRecovered {

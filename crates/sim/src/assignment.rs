@@ -340,7 +340,12 @@ pub fn assign_offense_jobs(world: &mut World) {
             .is_some_and(|screen| screen.screener == handle)
         {
             OffenseJob::Roll
-        } else if world.phase().is_shot_flight()
+        } else if world.ball_flight.is_some_and(|flight| {
+            matches!(
+                flight.kind,
+                crate::state::FlightKind::Shot | crate::state::FlightKind::FreeThrow
+            )
+        })
             && (world.players[handle].pos - world.hoop_for(offense)).length() < 12.0
         {
             OffenseJob::Rebound

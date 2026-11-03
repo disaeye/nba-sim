@@ -231,7 +231,10 @@ fn step_loose(world: &mut World, dt: f64) {
         step_jump_ball_toss(world, dt);
         return;
     }
-    if matches!(world.phase(), crate::state::Phase::JumpBallFlight) {
+    if world
+        .ball_flight
+        .is_some_and(|flight| flight.kind == crate::state::FlightKind::JumpBall)
+    {
         step_jump_ball_flight(world, dt);
         return;
     }
@@ -1154,7 +1157,10 @@ fn player_contact(
     coefficients: &crate::physical::Coefficients,
     reach_share: f32,
 ) -> Option<(usize, &'static str)> {
-    if matches!(world.phase(), crate::state::Phase::JumpBallFlight) {
+    if world
+        .ball_flight
+        .is_some_and(|flight| flight.kind == crate::state::FlightKind::JumpBall)
+    {
         return None;
     }
     let ball_radius = rules.ball_radius_ft;

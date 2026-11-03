@@ -5,12 +5,15 @@ use glam::Vec2;
 use crate::action::{ActionIntent, ActionKind, ActionOutcome, Completion, Fact, ShotKind, StateDelta};
 use crate::draw::{purpose, Stream};
 use crate::resolve::{clamp01, shooter_zone};
-use crate::world::{Phase, World};
+use crate::world::World;
 
 /// 干扰球：球在下落、水平位置还在篮筐上方的筐柱范围内时被防守人碰到，
 /// 出手直接记中。球越过最高点之前可以合法封盖，越过后就是干扰。
 pub fn check_goaltending(world: &mut World) -> bool {
-    if !matches!(world.phase(), Phase::ShotFlight { .. }) {
+    if !world
+        .ball_flight
+        .is_some_and(|flight| flight.kind == crate::state::FlightKind::Shot)
+    {
         return false;
     }
     let (shooter, shot_id, pending) = match world.pending_shot.as_ref() {
@@ -373,6 +376,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
 
 /// 球到筐：应用得分、犯规、罚球与打铁后的篮板。
 pub fn finish(world: &mut World) {
+    world.clear_flight();
     let pending = world
         .pending_shot
         .take()

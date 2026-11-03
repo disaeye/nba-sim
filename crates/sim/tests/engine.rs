@@ -220,7 +220,7 @@ fn double_dribble_after_gather_is_a_turnover() {
     let rules = nba_domain::GameRules::default();
     let mut world = World::new(MatchSetup::builtin(rules), params(), 5);
     let mut guard = 0;
-    while !matches!(world.phase(), Phase::Live) {
+    while !(matches!(world.phase(), Phase::Live) && world.holder().is_some()) {
         world.step(0.05);
         guard += 1;
         assert!(guard < 4000, "world never reached live play");

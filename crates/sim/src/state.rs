@@ -817,10 +817,7 @@ impl ResumePhase {
     }
 
     pub const fn is_live_gameplay(self) -> bool {
-        matches!(
-            self,
-            Self::Live | Self::PassFlight { .. } | Self::ShotFlight { .. }
-        )
+        matches!(self, Self::Live)
     }
 }
 
@@ -961,10 +958,6 @@ impl Phase {
             self,
             Self::Live | Self::PassFlight { .. } | Self::ShotFlight { .. } | Self::JumpBallFlight
         )
-    }
-
-    pub const fn is_shot_flight(self) -> bool {
-        matches!(self, Self::ShotFlight { .. } | Self::FreeThrowFlight { .. })
     }
 
     pub const fn stage(self, period: u32, regulation_periods: u32) -> MatchStage {

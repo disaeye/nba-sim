@@ -712,6 +712,7 @@ impl World {
     }
 
     fn award_opening_tip_control(&mut self, tapped_team: TeamSide, receiver: usize) {
+        self.clear_flight();
         let kind = self
             .jump_ball_kind
             .take()
@@ -761,6 +762,8 @@ impl World {
     }
 
     pub(crate) fn set_ball_held(&mut self, holder: usize) {
+        // 球落到人手里，飞行结束。
+        self.clear_flight();
         self.ball.set_held(holder);
         self.last_touch = Some(holder);
     }
@@ -832,6 +835,7 @@ impl World {
     /// 飞行将成为唯一权威的球体维度，阶段回到活球。
     pub fn set_flight(&mut self, kind: crate::state::FlightKind, resolve_at: f64) {
         self.ball_flight = Some(crate::state::BallFlight { kind, resolve_at });
+        // 飞行阶段照旧写进阶段：读取方与回放仍按阶段判定，飞行记录同步保存。
         self.set_phase(match kind {
             crate::state::FlightKind::Pass => Phase::PassFlight { resolve_at },
             crate::state::FlightKind::Shot => Phase::ShotFlight { resolve_at },
@@ -1092,12 +1096,21 @@ impl World {
     ) -> bool {
         // 决策到执行之间有人离场（换人窗口、被逐）：把他从参与人里剔除，
         // 动作照常开始；主执行人自己离场是编程错误，仍然就地失败。
-        let live: Vec<(usize, crate::action::ActionIntentRole)> = participants
+        // 常规路径不分配：只有真的有人离场时才收集一份过滤后的副本。
+        let any_off_court = participants
             .iter()
-            .copied()
-            .filter(|(player, _)| self.players[*player].on_court)
-            .collect();
-        let participants = live.as_slice();
+            .any(|(player, _)| !self.players[*player].on_court);
+        let filtered;
+        let participants = if any_off_court {
+            filtered = participants
+                .iter()
+                .copied()
+                .filter(|(player, _)| self.players[*player].on_court)
+                .collect::<Vec<_>>();
+            filtered.as_slice()
+        } else {
+            participants
+        };
         // 主执行人已经离场：动作不成立，返回假，不做断言——这是换人与
         // 被逐带来的正常时序，不是内核错误。
         if !participants.iter().any(|(player, role)| {
@@ -2056,6 +2069,7 @@ impl World {
         }
         self.clock.advance_tick();
         let phase_before_step = self.phase;
+        let flight_before_step = self.ball_flight;
         let momentum_phase = if matches!(phase_before_step, Phase::Timeout { .. }) {
             match phase_before_step {
                 Phase::Timeout { resume_phase, .. } => resume_phase.phase(),
@@ -2065,16 +2079,14 @@ impl World {
             phase_before_step
         };
         let game_clock_before_advance = self.clock.game_clock();
-        let clock_advance = crate::clock::advance(phase_before_step, &mut self.clock, dt);
+        let clock_advance =
+            crate::clock::advance(phase_before_step, flight_before_step, &mut self.clock, dt);
         let player_time_seconds = if clock_advance.player_time {
             dt.min(game_clock_before_advance)
         } else {
             0.0
         };
-        if !matches!(
-            momentum_phase,
-            Phase::Live | Phase::PassFlight { .. } | Phase::ShotFlight { .. }
-        ) {
+        if !matches!(momentum_phase, Phase::Live) {
             crate::motion::decay_momentum(self, dt);
         }
         if player_time_seconds > 0.0 {
@@ -2095,7 +2107,9 @@ impl World {
         self.advance_defensive_actions();
         self.advance_steal_attempts();
         self.advance_block_jumps();
-        if matches!(phase_before_step, Phase::JumpBallFlight) {
+        if flight_before_step
+            .is_some_and(|flight| flight.kind == crate::state::FlightKind::JumpBall)
+        {
             self.move_jump_ball_receiver(dt);
         } else if !matches!(phase_before_step, Phase::JumpBall { .. }) {
             self.advance_movement(dt);
@@ -2365,7 +2379,7 @@ impl World {
     }
 
     fn advance_defensive_actions(&mut self) {
-        if !matches!(self.phase(), Phase::Live | Phase::ShotFlight { .. }) {
+        if !matches!(self.phase(), Phase::Live) {
             self.cancel_defensive_actions_of(
                 DefensiveActionKind::CloseoutContest,
                 "shot_action_ended",
@@ -2466,7 +2480,7 @@ impl World {
         // 只有死球或球权易主才取消。
         if !matches!(
             self.phase(),
-            Phase::Live | Phase::PassFlight { .. } | Phase::ShotFlight { .. }
+            Phase::Live
         ) {
             self.cancel_defensive_actions_of(DefensiveActionKind::StealAttempt, "not_live");
             return;
@@ -2566,7 +2580,7 @@ impl World {
     ///
     /// 跳起的人无法卡位抢篮板：起跳期间他不参与 box-out，这是这次冒险的代价。
     fn advance_block_jumps(&mut self) {
-        if !matches!(self.phase(), Phase::Live | Phase::ShotFlight { .. }) {
+        if !matches!(self.phase(), Phase::Live) {
             self.cancel_defensive_actions_of(DefensiveActionKind::BlockJump, "shot_ended");
             return;
         }
@@ -2918,6 +2932,60 @@ impl World {
             .any(|interaction| predicate(&interaction.intent))
     }
 
+    /// 球在飞行中：传接、投篮与罚球结算、跳球撮球的接球都在这里推进。
+    /// 飞行不属于比赛程序，所以这一步只看 `ball_flight`。
+    fn settle_ball_flight(&mut self, now: f64) {
+        let Some(flight) = self.ball_flight else {
+            return;
+        };
+        match flight.kind {
+            crate::state::FlightKind::JumpBall => {
+                if let Some(tapper) = self.jump_ball_tapper {
+                    let tapped_team = self.players[tapper].team;
+                    let controller = self
+                        .jump_ball_receiver
+                        .expect("jump-ball tap must select a receiver");
+                    let reach = self.params.policy.w("loose_ball_catch_base_ft")
+                        + self.players[controller].attribute("ball_handling")
+                            * self.params.policy.w("loose_ball_catch_skill_ft");
+                    let physical = crate::physical::Physical::of(
+                        &self.players[controller],
+                        &self.params.policy,
+                    );
+                    let hand_height = physical.standing_reach_ft + physical.vertical_ft;
+                    if self.ball.z <= hand_height + reach
+                        && (self.players[controller].pos - self.ball.pos).length() <= reach
+                    {
+                        self.jump_ball_tapper = None;
+                        self.jump_ball_receiver = None;
+                        self.award_opening_tip_control(tapped_team, controller);
+                    }
+                }
+            }
+            crate::state::FlightKind::Pass => {
+                if self.pass_result.is_some() || now >= flight.resolve_at {
+                    self.finish_pass();
+                }
+            }
+            crate::state::FlightKind::Shot | crate::state::FlightKind::FreeThrow => {
+                // 没有待结算的出手说明飞行已经结束：清掉飞行记录，不重复结算。
+                if self.pending_shot.is_none() {
+                    self.clear_flight();
+                    return;
+                }
+                crate::resolve::shot::check_goaltending(self);
+                if self
+                    .pending_shot
+                    .as_ref()
+                    .is_some_and(|pending| pending.result.is_some())
+                    || now >= flight.resolve_at
+                {
+                    crate::resolve::shot::finish(self);
+                }
+            }
+        }
+    }
+
     fn advance_phase(&mut self) {
         let now = self.now();
         match self.phase {
@@ -2979,44 +3047,12 @@ impl World {
                     self.resolve_opening_jump_ball(home_jumper, away_jumper, kind);
                 }
             }
-            Phase::JumpBallFlight => {
-                if let Some(tapper) = self.jump_ball_tapper {
-                    let tapped_team = self.players[tapper].team;
-                    let controller = self
-                        .jump_ball_receiver
-                        .expect("jump-ball tap must select a receiver");
-                    let reach = self.params.policy.w("loose_ball_catch_base_ft")
-                        + self.players[controller].attribute("ball_handling")
-                            * self.params.policy.w("loose_ball_catch_skill_ft");
-                    let physical = crate::physical::Physical::of(
-                        &self.players[controller],
-                        &self.params.policy,
-                    );
-                    let hand_height = physical.standing_reach_ft + physical.vertical_ft;
-                    if self.ball.z <= hand_height + reach
-                        && (self.players[controller].pos - self.ball.pos).length() <= reach
-                    {
-                        self.jump_ball_tapper = None;
-                        self.jump_ball_receiver = None;
-                        self.award_opening_tip_control(tapped_team, controller);
-                    }
-                }
-            }
-            Phase::PassFlight { resolve_at } => {
-                if self.pass_result.is_some() || now >= resolve_at {
-                    self.finish_pass();
-                }
-            }
-            Phase::ShotFlight { resolve_at } | Phase::FreeThrowFlight { resolve_at } => {
-                crate::resolve::shot::check_goaltending(self);
-                if self
-                    .pending_shot
-                    .as_ref()
-                    .is_some_and(|pending| pending.result.is_some())
-                    || now >= resolve_at
-                {
-                    crate::resolve::shot::finish(self);
-                }
+            Phase::JumpBallFlight
+            | Phase::PassFlight { .. }
+            | Phase::ShotFlight { .. }
+            | Phase::FreeThrowFlight { .. } => {
+                // 四种飞行共用一套结算：种类与结算时刻在 `ball_flight`。
+                self.settle_ball_flight(now);
             }
             Phase::FreeThrows {
                 shooter,
@@ -3030,6 +3066,8 @@ impl World {
                 technical_retained_team,
                 after_technical,
             } => {
+                // 罚球飞行仍在本程序里：先把飞行结算掉。
+                self.settle_ball_flight(now);
                 // 罚球人离场（换人或被逐）：由在场队友替他罚完剩下的球。
                 if !self.players[shooter].on_court {
                     let team = self.players[shooter].team;
@@ -3076,7 +3114,8 @@ impl World {
                         return;
                     }
                 }
-                if now >= next_at {
+                // 球已经在空中就不再重复出手：结算会打开下一次罚球。
+                if now >= next_at && self.ball_flight.is_none() {
                     crate::resolve::freethrow::shoot(
                         self,
                         shooter,
@@ -3140,11 +3179,18 @@ impl World {
                 }
             }
             Phase::Live => {
+                // 飞行先结算：球在空中时那次传导或出手自己解出结果，
+                // 然后再看活球里该不该判时钟违例。
+                self.settle_ball_flight(now);
                 // 球在空中时时钟走完不是违例：那一球会自己解出进与不进，
                 // 违例只在计时归零时球还在某个球员手里成立。
                 let shooting =
                     self.any_interaction(|intent| matches!(&intent.kind, ActionKind::Shoot(_)));
-                if self.clock.shot_clock() <= 0.0 && self.pending_rebound.is_none() && !shooting {
+                if self.clock.shot_clock() <= 0.0
+                    && self.pending_rebound.is_none()
+                    && self.ball_flight.is_none()
+                    && !shooting
+                {
                     if std::env::var("NBA_TRACE_CLOCK").is_ok() {
                         eprintln!(
                             "CLOCK VIOLATION now={:.2} started={:.2} elapsed={:.2} phase={:?} holder={:?} next_decide={:.2} pending={:?} active={:?} play={:?}",
@@ -3210,6 +3256,7 @@ impl World {
     }
 
     fn finish_pass(&mut self) {
+        self.clear_flight();
         let Some(info) = self.pass_in_flight.take() else {
             return;
         };

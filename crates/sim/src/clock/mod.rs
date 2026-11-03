@@ -42,8 +42,18 @@ impl<'a> ClockController<'a> {
 }
 
 /// 根据当前比赛阶段推进对应时钟。
-pub fn advance(phase: Phase, clock: &mut Clock, seconds: f64) -> ClockAdvance {
-    let clocks = phase.clocks();
+pub fn advance(
+    phase: Phase,
+    flight: Option<crate::state::BallFlight>,
+    clock: &mut Clock,
+    seconds: f64,
+) -> ClockAdvance {
+    // 飞行期间按飞行种类走钟：传球两钟都走，投篮与跳球只走比赛钟，
+    // 罚球停钟；没有飞行时由比赛阶段决定。
+    let clocks = match flight {
+        Some(flight) => flight.kind.clocks(),
+        None => phase.clocks(),
+    };
     clock.advance(seconds, clocks);
     clocks
 }
@@ -86,7 +96,6 @@ mod tests {
                 false,
                 false,
             ),
-            (Phase::JumpBallFlight, true, false, true),
             (
                 Phase::FreeThrows {
                     shooter: 0,
@@ -132,15 +141,7 @@ mod tests {
                 false,
                 false,
             ),
-            (
-                Phase::FreeThrowFlight { resolve_at: 0.0 },
-                false,
-                false,
-                false,
-            ),
             (Phase::Live, true, true, true),
-            (Phase::PassFlight { resolve_at: 1.0 }, true, true, true),
-            (Phase::ShotFlight { resolve_at: 1.0 }, true, false, true),
             (
                 Phase::PeriodBreak {
                     resume_at: 1.0,
@@ -154,7 +155,7 @@ mod tests {
         ];
         for (phase, game_clock_runs, shot_clock_runs, elapsed_runs) in phases {
             let mut clock = Clock::new(720.0, 24.0);
-            let advanced = advance(phase, &mut clock, 0.25);
+            let advanced = advance(phase, None, &mut clock, 0.25);
             assert_eq!(advanced.game_clock, game_clock_runs, "{phase:?}");
             assert_eq!(advanced.shot_clock, shot_clock_runs, "{phase:?}");
             assert_eq!(advanced.elapsed, elapsed_runs, "{phase:?}");
@@ -169,6 +170,22 @@ mod tests {
             );
             assert_eq!(clock.elapsed(), if elapsed_runs { 0.25 } else { 0.0 });
             assert_eq!(clock.simulation_time(), 0.25);
+        }
+        // 飞行按种类走钟：传球两钟都走，投篮与跳球只走比赛钟，罚球停钟。
+        for (kind, game_clock_runs, shot_clock_runs) in [
+            (crate::state::FlightKind::Pass, true, true),
+            (crate::state::FlightKind::Shot, true, false),
+            (crate::state::FlightKind::JumpBall, true, false),
+            (crate::state::FlightKind::FreeThrow, false, false),
+        ] {
+            let mut clock = Clock::new(720.0, 24.0);
+            let flight = crate::state::BallFlight {
+                kind,
+                resolve_at: 1.0,
+            };
+            let advanced = advance(Phase::Live, Some(flight), &mut clock, 0.25);
+            assert_eq!(advanced.game_clock, game_clock_runs, "{kind:?}");
+            assert_eq!(advanced.shot_clock, shot_clock_runs, "{kind:?}");
         }
     }
 
