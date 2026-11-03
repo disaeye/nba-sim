@@ -14,7 +14,7 @@
 
 动作目录的 16 个族全部有生产路径与通过测试，`missing_evidence` 为空；传球八种技术、切入六种路线、背身步法、欧洲步、后撤步、包夹与护球、挤过与绕过、回位均已接入候选与后果消费者。规则侧已接入后场八秒与回场、出界归属与发球地点分类、紧逼五秒、停表跳球准备、罚球禁区违例、教练复核与挑战、干扰球、赛前名单检查，以及加时、换边、八秒清除与防守犯规重置八秒、最后一罚命中后的底线发球。
 
-裁决已收拢到 `World::adjudicate` 一个提交入口（`PenaltyPlan`、`RestartPlan`、`ResumeContext`、`InboundLocation`、`ControlState`）；时钟有 `ClockState`、`ClockDirective`、`ClockController`；内核按职责分到 `clock/`、`program/`、`officiating/`、`actions/`、`control/`、`ledger/` 六个目录，旧路径经 crate 根重导出保持可用；`LeagueProfile` 另有 `PeriodPolicy`、`ClockPolicy`、`FoulPolicy`、`TimeoutPolicy` 四个策略族。
+裁决已收拢到 `World::adjudicate` 一个提交入口（`PenaltyPlan`、`RestartPlan`、`ResumeContext`、`InboundLocation`、`ControlState`）；时钟有 `ClockState`、`ClockDirective`、`ClockController`；内核按职责分到 `clock/`、`program/`、`officiating/`、`actions/`、`control/`、`ledger/` 六个目录，旧路径经 crate 根重导出保持可用；`LeagueProfile` 的存储本身就是 `PeriodPolicy`、`ClockPolicy`、`FoulPolicy`、`TimeoutPolicy` 四个策略族（`#[serde(flatten)]` 让磁盘上仍是扁平键）。球的飞行是 `World.ball_flight`（种类 + 结算时刻）：四种飞行与比赛程序分存，`clock::advance` 按飞行种类决定哪个钟走。
 
 完整工作区测试（75 个二进制）在最近一次运行中全部通过，基线指纹已按当前行为重记；32 场 `validate-core` 的 38 条分布判据全部在带内，认证 `pass`。未闭合项：进攻三秒与清空禁区行为、非法触球、干扰球在篮框上方与碰板后的两种情形、动作技术细分中的收球步法与轴心脚（清单见 `docs/dev/evidence/stage_gate_map.md`）。
 
