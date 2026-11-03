@@ -563,20 +563,17 @@ fn try_control_loose(world: &mut World) {
         } else if is_offense {
             base_reach - penalty
         } else {
-            // 防守卡位加成来自 defensive_rebound 与 strength：只有真的有人
-            // 在身边争这球时才生效——没人抢的防守篮板多几英寸没有意义，
-            // 而把加成平摊到每一次抢板会把属性差异冲淡。
+            // 防守卡位加成来自 defensive_rebound 与 strength：只有真的
+            // 执行了卡位的防守人才拿得到。卡位是一个动作，出手时离球近
+            // 的防守人去卡，别人去抢自己的位置；因此加成跟着卡位事实走，
+            // 而不是靠一个几何巧合判定。
             let boxout = nba_domain::capability::effective_defensive_boxout_bonus(
                 &world.rules,
                 &player.data.attributes,
             );
-            let radius = world.params.policy.g("boxout_contest_radius_ft");
-            let contested = world
-                .on_court(state.offense)
-                .as_slice()
-                .iter()
-                .any(|handle| (world.players[*handle].pos - player.pos).length() <= radius);
-            let boxout_gain = if contested {
+            let boxout_gain = if state.box_outs[..state.box_out_count as usize]
+                .contains(&handle)
+            {
                 boxout * world.params.policy.w("rebound_boxout_weight")
             } else {
                 0.0

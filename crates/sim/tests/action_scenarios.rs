@@ -1496,6 +1496,8 @@ fn a_tie_for_the_ball_enters_a_held_ball_jump_ball() {
         turnover: false,
         poke_by: None,
         pass_by: None,
+        box_outs: [usize::MAX; nba_sim_core::state::MAX_ON_COURT],
+        box_out_count: 0,
     });
     let before = world.events.len();
     nba_sim_core::ball::step(&mut world, TICK_SECONDS);

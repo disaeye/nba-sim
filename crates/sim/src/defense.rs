@@ -315,7 +315,17 @@ pub fn apply_defense_targets(world: &mut World) {
                 (crate::state::TargetKind::Pressure, man, target)
             }
             crate::state::DefenseResponsibility::BoxOut => {
-                let target = if man != usize::MAX && world.players[man].on_court {
+                // 卡位目标：球落点。这是卡位的位置意义：站到球落点与
+                // 自己的对位人之间，把进攻球员挤在身后。
+                let target = if world
+                    .pending_rebound
+                    .is_some_and(|rebound| !rebound.turnover)
+                {
+                    let spot = crate::resolve::rebound::rebound_spot(world);
+                    let to_ball = (spot - world.players[*handle].pos).normalize_or_zero();
+                    // 卡位点：球落点再往后一点，留出自己抢球的空间。
+                    spot - to_ball * (pressure * 0.5)
+                } else if man != usize::MAX && world.players[man].on_court {
                     let direction = (hoop - world.players[man].pos).normalize_or_zero();
                     world.players[man].pos + direction * pressure
                 } else {

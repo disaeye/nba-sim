@@ -3,7 +3,7 @@
 use glam::Vec2;
 
 use crate::action::{Fact, TeamSide, TurnoverKind};
-use crate::state::TargetKind;
+use crate::state::{TargetKind, MAX_ON_COURT};
 use crate::world::{Phase, World};
 
 #[derive(Debug, Clone, Copy)]
@@ -20,6 +20,14 @@ pub struct PendingRebound {
     /// 这次松球来自一次没接住的传球时，记录传球人；球落到对方手里才
     /// 记失误与抢断，回到自己人手里则进攻继续。
     pub pass_by: Option<usize>,
+    /// 这一球上真正执行了卡位的防守人：只有他们拿卡位加成。
+    /// 「卡位」是一个动作，而不是一个几何巧合：出手时离球近的防守人
+    /// 才会去卡位，别人去抢自己的位置。
+    ///
+    /// 定长数组而不是 `Vec`：这个结构每 tick 都会被读，稳态路径不能分配。
+    pub box_outs: [usize; MAX_ON_COURT],
+    /// 实际执行卡位的人数。
+    pub box_out_count: u8,
 }
 
 pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_contact: bool) {
@@ -33,6 +41,8 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
     }
     let offense = world.possession.team;
     let ball_pos = world.ball.pos;
+    let mut box_outs = [usize::MAX; MAX_ON_COURT];
+    let mut box_out_count = 0u8;
     // 所有场上球员都向球移动；防守人先占篮下卡位，随后再抢球。
     for handle in 0..world.players.len() {
         if !world.players[handle].on_court {
@@ -54,6 +64,28 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
             world.players[handle].defense_responsibility =
                 crate::state::DefenseResponsibility::BoxOut;
             world.players[handle].assignment_since = world.now();
+            // 卡位是一件事：好的卡位者往球落点的方向挤，把进攻球员
+            // 挤到身后。只有伸手半径一项的话，卡位能力不会真的改变
+            // 谁先碰到球，防守篮板属性因此几乎不产生可见效果。
+            let boxout = nba_domain::capability::effective_defensive_boxout_bonus(
+                &world.rules,
+                &world.players[handle].data.attributes,
+            );
+            let to_ball = (ball_pos - world.players[handle].pos).normalize_or_zero();
+            // 卡位强度直接读属性：好的卡位者把进攻球员挤到身后更多。
+            // 属性与曲线分开：曲线是「卡位能力加成」，属性是「卡位意愿」，
+            // 两者相加才是他实际挤开的距离。
+            let willingness = world.players[handle].attribute("defensive_rebound");
+            let push = world.params.policy.g("boxout_position_push_ft")
+                * (boxout / world.params.policy.g("boxout_position_push_reference")
+                    + (willingness - 0.5) * world.params.policy.g("boxout_willingness_gain"));
+            world.players[handle].target = ball_pos - to_ball * push;
+            world.players[handle].target_kind = TargetKind::Window;
+            world.players[handle].target_partner = handle;
+            if (box_out_count as usize) < box_outs.len() {
+                box_outs[box_out_count as usize] = handle;
+                box_out_count += 1;
+            }
         }
     }
     // 真实篮板机会：场上人数与当前球位置、控球半径都满足的人数。
@@ -91,6 +123,8 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
         turnover: false,
         poke_by: None,
         pass_by: None,
+        box_outs,
+        box_out_count,
     });
     world.set_phase(Phase::Live);
 }
@@ -119,6 +153,8 @@ pub fn resolve_turnover(world: &mut World) {
         turnover: true,
         poke_by: None,
         pass_by: None,
+        box_outs: [usize::MAX; MAX_ON_COURT],
+        box_out_count: 0,
     });
     world.set_phase(Phase::Live);
 }
