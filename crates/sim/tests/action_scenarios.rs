@@ -711,7 +711,7 @@ fn a_charge_requires_a_planted_defender() {
 #[test]
 fn holding_the_ball_closely_guarded_for_five_seconds_is_a_violation() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
-    let limit = GameRules::default().league.closely_guarded_seconds;
+    let limit = GameRules::default().league.clocks.closely_guarded_seconds;
     let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 179);
     let holder = world.on_court(TeamSide::Home).as_slice()[0];
     let defender = world.on_court(TeamSide::Away).as_slice()[0];
@@ -766,7 +766,7 @@ fn holding_the_ball_closely_guarded_for_five_seconds_is_a_violation() {
 /// 紧逼计时会被打断：防守人走开就清零，运球状态不受这条规则限制。
 #[test]
 fn the_closely_guarded_timer_resets_and_spares_the_dribbler() {
-    let limit = GameRules::default().league.closely_guarded_seconds;
+    let limit = GameRules::default().league.clocks.closely_guarded_seconds;
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 181);
     let holder = world.on_court(TeamSide::Home).as_slice()[0];

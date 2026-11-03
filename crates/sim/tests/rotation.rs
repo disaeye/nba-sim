@@ -92,11 +92,11 @@ fn nba_team_keeps_five_players_when_all_substitutes_are_disqualified() {
         .filter(|handle| world.players[*handle].team == team && !world.players[*handle].on_court)
         .collect();
     for handle in bench {
-        world.players[handle].fouls = world.rules.league.max_personal_fouls;
+        world.players[handle].fouls = world.rules.league.fouls.max_personal_fouls;
         world.players[handle].disqualified = true;
     }
     let fouled_out = on_court[0];
-    world.players[fouled_out].fouls = world.rules.league.max_personal_fouls - 1;
+    world.players[fouled_out].fouls = world.rules.league.fouls.max_personal_fouls - 1;
     world.set_phase(Phase::DeadBall {
         team,
         ready_at: f64::MAX,
@@ -148,11 +148,11 @@ fn nba_foul_out_with_empty_bench_assesses_team_technical_and_resumes_foul_proced
         .collect::<Vec<_>>();
     for handle in 0..world.players.len() {
         if world.players[handle].team == team && !world.players[handle].on_court {
-            world.players[handle].fouls = world.rules.league.max_personal_fouls;
+            world.players[handle].fouls = world.rules.league.fouls.max_personal_fouls;
             world.players[handle].disqualified = true;
         }
     }
-    world.players[fouler].fouls = world.rules.league.max_personal_fouls - 1;
+    world.players[fouler].fouls = world.rules.league.fouls.max_personal_fouls - 1;
     world.ball.set_held(fouled);
 
     nba_sim_core::resolve::foul::apply_non_shooting_foul(&mut world, fouler, fouled);
@@ -216,7 +216,7 @@ fn nba_foul_out_with_empty_bench_assesses_team_technical_and_resumes_foul_proced
 fn a_six_foul_player_never_returns_to_the_court() {
     let mut world = live_world(13);
     let rules = world.rules.clone();
-    let limit = rules.league.max_personal_fouls;
+    let limit = rules.league.fouls.max_personal_fouls;
     let victim = world.on_court(TeamSide::Home).as_slice()[0];
     for _ in 0..limit - 1 {
         record_foul(&mut world, victim);

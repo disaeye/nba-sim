@@ -10,7 +10,7 @@ use crate::world::World;
 
 /// 剩余比赛时间（秒）：本节剩余加上后续各节整节时长。
 pub fn remaining_seconds(world: &World) -> f64 {
-    let periods = world.rules.league.regulation_periods;
+    let periods = world.rules.league.periods.regulation_periods;
     let left = periods.saturating_sub(world.clock.period());
     world.clock.game_clock() + left as f64 * world.clock.period_seconds()
 }
@@ -99,7 +99,7 @@ fn free_throw_award(world: &World, defense: TeamSide, off_ball: bool) -> (f64, b
     let final_window = league.in_final_window(world.clock.period(), world.clock.game_clock());
     if off_ball && final_window {
         // 一罚一掷：罚球次数是 1，且球权不转。
-        return (league.away_from_play_free_throws as f64, false);
+        return (league.fouls.away_from_play_free_throws as f64, false);
     }
     let index = World::team_index(defense);
     let after = world.fouls[index].period as u32 + 1;
@@ -181,7 +181,7 @@ pub fn intentional_foul(world: &World) -> Option<FoulPlan> {
             continue;
         }
         // 执行人：犯规额度充裕的防守人中离目标最近的一个。
-        let limit = world.rules.league.max_personal_fouls as u32;
+        let limit = world.rules.league.fouls.max_personal_fouls as u32;
         let fouler = defenders
             .as_slice()
             .iter()

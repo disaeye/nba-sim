@@ -46,7 +46,7 @@ fn rest_priority(world: &World, handle: usize) -> Option<f32> {
     let rules = &world.rules;
     let policy = &world.params.policy;
     let player = &world.players[handle];
-    if player.disqualified || player.fouls >= rules.league.max_personal_fouls {
+    if player.disqualified || player.fouls >= rules.league.fouls.max_personal_fouls {
         return Some(f32::MAX);
     }
     // 刚换上场的人不能立刻被换下去：否则替补上去一个回合就被当成
@@ -58,7 +58,7 @@ fn rest_priority(world: &World, handle: usize) -> Option<f32> {
     }
     let base_threshold = policy.w("stamina_rest_threshold");
     let in_foul_trouble = if player.data.starter {
-        let foul_limit = rules.league.max_personal_fouls;
+        let foul_limit = rules.league.fouls.max_personal_fouls;
         let threshold = match world.clock.period() {
             1 => policy.w("foul_trouble_first") as u8,
             2 => policy.w("foul_trouble_second") as u8,
@@ -109,7 +109,7 @@ fn garbage_decided(world: &World, team: TeamSide) -> bool {
 /// 的配额：胜负已定时教练换上的是整套替补，现实里也是死球后一次换完。
 /// 出场时间最长的首发先下，直到替补席用尽。
 fn empty_the_bench(world: &mut World, team: TeamSide, index: usize) {
-    let foul_limit = world.rules.league.max_personal_fouls;
+    let foul_limit = world.rules.league.fouls.max_personal_fouls;
     let roster = world.players.len();
     let mut swapped = 0usize;
     loop {
@@ -188,7 +188,7 @@ fn best_bench(
     handle: usize,
     respect_min_rest: bool,
 ) -> Option<usize> {
-    let foul_limit = world.rules.league.max_personal_fouls;
+    let foul_limit = world.rules.league.fouls.max_personal_fouls;
     let eligible: Vec<usize> = (0..world.players.len())
         .filter(|candidate| {
             let player = &world.players[*candidate];
@@ -422,7 +422,7 @@ pub fn apply_dead_ball_window(world: &mut World) {
 /// 返回本次犯规是否触发了犯满离场，供调用方立即进入停表程序——
 /// 场上不能留一个已经犯满的球员继续打。
 pub fn record_foul(world: &mut World, handle: usize) -> bool {
-    let limit = world.rules.league.max_personal_fouls;
+    let limit = world.rules.league.fouls.max_personal_fouls;
     let player = &mut world.players[handle];
     player.fouls = player.fouls.saturating_add(1);
     if player.fouls >= limit {

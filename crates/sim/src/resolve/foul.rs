@@ -36,7 +36,7 @@ pub fn book(
         "only an on-court player can foul"
     );
     let was_disqualified = world.players[fouler].disqualified;
-    let foul_limit = world.rules.league.max_personal_fouls;
+    let foul_limit = world.rules.league.fouls.max_personal_fouls;
     let exhausted_bench = world.rules.league.id == nba_domain::league::LeagueId::Nba
         && !(0..world.players.len()).any(|handle| {
             let player = &world.players[handle];
@@ -224,7 +224,7 @@ pub fn apply_shooting_foul(
 pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) {
     let away_from_play = is_away_from_play(world, fouled);
     let award = if away_from_play {
-        world.rules.league.away_from_play_free_throws
+        world.rules.league.fouls.away_from_play_free_throws
     } else {
         0
     };

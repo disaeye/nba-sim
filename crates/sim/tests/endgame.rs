@@ -35,7 +35,7 @@ fn fourth_quarter_live(world: &mut World) -> usize {
     let rules = nba_domain::GameRules::default();
     world.clock.set_regulation_clock(
         4,
-        f64::from(rules.league.period_duration_seconds),
+        f64::from(rules.league.periods.period_duration_seconds),
         world.clock.shot_clock(),
     );
     carrier
@@ -273,7 +273,7 @@ fn a_poor_free_throw_shooter_is_fouled_more_often_than_a_good_one() {
         world.players[carrier].data.attributes.free_throw = free_throw;
         // 砍人只能在 bonus 内：没进 bonus 的犯规不给罚球，砍了也换不回球权。
         let defense = World::team_index(team.other());
-        world.fouls[defense].period = world.rules.league.bonus_fouls_per_period as u8;
+        world.fouls[defense].period = world.rules.league.fouls.bonus_fouls_per_period as u8;
         intentional_foul(&world).is_some()
     };
     assert!(

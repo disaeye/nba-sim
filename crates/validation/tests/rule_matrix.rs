@@ -16,14 +16,14 @@ fn profiles() -> [(&'static str, LeagueProfile); 2] {
 fn nba_and_fiba_period_boundaries_match_their_rule_profiles() {
     let nba = LeagueProfile::nba();
     let fiba = LeagueProfile::fiba();
-    assert_eq!(nba.period_duration_seconds, 720.0);
-    assert_eq!(fiba.period_duration_seconds, 600.0);
-    assert_eq!(nba.overtime_duration_seconds, 300.0);
-    assert_eq!(fiba.overtime_duration_seconds, 300.0);
-    assert_eq!(nba.shot_clock_seconds, 24.0);
-    assert_eq!(fiba.shot_clock_seconds, 24.0);
-    assert_eq!(nba.regulation_periods, 4);
-    assert_eq!(fiba.regulation_periods, 4);
+    assert_eq!(nba.periods.period_duration_seconds, 720.0);
+    assert_eq!(fiba.periods.period_duration_seconds, 600.0);
+    assert_eq!(nba.periods.overtime_duration_seconds, 300.0);
+    assert_eq!(fiba.periods.overtime_duration_seconds, 300.0);
+    assert_eq!(nba.clocks.shot_clock_seconds, 24.0);
+    assert_eq!(fiba.clocks.shot_clock_seconds, 24.0);
+    assert_eq!(nba.periods.regulation_periods, 4);
+    assert_eq!(fiba.periods.regulation_periods, 4);
 }
 
 /// 开球程序：NBA 只有开场跳球、后续节次交替拥有；FIBA 同样只有开场跳球，
@@ -95,7 +95,7 @@ fn team_foul_bonus_thresholds_cover_before_at_and_after_threshold() {
 #[test]
 fn final_window_boundary_is_inclusive_at_its_edge() {
     let nba = LeagueProfile::nba();
-    let window = f64::from(nba.bonus_final_seconds);
+    let window = f64::from(nba.fouls.bonus_final_seconds);
     assert!(!nba.in_final_window(4, window + 0.1), "outside the window");
     assert!(nba.in_final_window(4, window), "at the edge");
     assert!(nba.in_final_window(4, window - 0.1), "inside the window");
@@ -123,12 +123,12 @@ fn away_from_play_penalty_changes_inside_the_final_window() {
     let fiba = LeagueProfile::fiba();
     // 档案记录：NBA 的无球犯规给一罚一掷，FIBA 通过另一条罚则路径表达，
     // 其档案值为 0。测试断言记录值，避免把推断当成规则。
-    assert_eq!(nba.away_from_play_free_throws, 1);
-    assert_eq!(fiba.away_from_play_free_throws, 0);
+    assert_eq!(nba.fouls.away_from_play_free_throws, 1);
+    assert_eq!(fiba.fouls.away_from_play_free_throws, 0);
     for (name, profile) in [("nba", &nba), ("fiba", &fiba)] {
         // 末段窗口只在档案登记了末段罚则时存在：NBA 登记第四节最后 120 秒，
         // FIBA 的 bonus_final_period 为 0，因此没有这条窗口。
-        let has_final_window = profile.bonus_final_period > 0;
+        let has_final_window = profile.fouls.bonus_final_period > 0;
         assert_eq!(
             profile.in_final_window(4, 30.0),
             has_final_window,
@@ -145,8 +145,8 @@ fn away_from_play_penalty_changes_inside_the_final_window() {
 #[test]
 fn changing_bonus_threshold_changes_the_profile_result() {
     let mut rules = GameRules::default();
-    rules.league.bonus_fouls_per_period = 1;
-    rules.league.bonus_fouls_final = 1;
+    rules.league.fouls.bonus_fouls_per_period = 1;
+    rules.league.fouls.bonus_fouls_final = 1;
     assert_eq!(rules.league.bonus_free_throws_for(1, 2, 400.0), 2);
     // 同一份改动对第二节与第四节都生效。
     assert_eq!(rules.league.bonus_free_throws_for(1, 4, 400.0), 2);
@@ -191,9 +191,10 @@ fn overtime_and_timeout_budgets_follow_the_league_profile() {
     assert_eq!(fiba.period_duration(1), 600.0);
     assert_eq!(nba.period_duration(5), 300.0);
     assert_eq!(fiba.period_duration(5), 300.0);
-    assert!(nba.league.timeouts_per_game >= fiba.league.timeouts_per_game);
+    assert!(nba.league.timeouts.timeouts_per_game >= fiba.league.timeouts.timeouts_per_game);
     assert!(
-        nba.league.timeouts_fourth_quarter_max >= nba.league.timeouts_final_max,
+        nba.league.timeouts.timeouts_fourth_quarter_max
+            >= nba.league.timeouts.timeouts_final_max,
         "the final-window cap cannot exceed the quarter cap"
     );
 }

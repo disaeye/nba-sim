@@ -71,7 +71,7 @@ fn box_score_conserves_points_and_attempts() {
 #[test]
 fn no_player_exceeds_the_foul_limit_on_court() {
     let report = short_play(13);
-    let limit = nba_domain::GameRules::default().league.max_personal_fouls as u32;
+    let limit = nba_domain::GameRules::default().league.fouls.max_personal_fouls as u32;
     for line in report
         .box_score
         .home
@@ -93,9 +93,11 @@ fn minutes_stay_within_the_game_length() {
     let report = short_play(17);
     let period = common::nba_short()
         .league
+        .periods
         .period_duration_seconds as f64;
     let overtime = common::nba_short()
         .league
+        .periods
         .overtime_duration_seconds as f64;
     let ceiling = (4.0 * period + 4.0 * overtime) / 60.0;
     for line in report

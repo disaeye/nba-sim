@@ -897,13 +897,14 @@ pub fn frame_rules(rules: &nba_domain::GameRules) -> FrameRules {
         three_point_distance_ft: rules.league.three_point_distance_ft,
         shot_clock_seconds: rules
             .league
+            .clocks
             .shot_clock_seconds
-            .max(rules.league.offensive_rebound_shot_clock_seconds),
+            .max(rules.league.clocks.offensive_rebound_shot_clock_seconds),
         holder_leash_ft: rules.invariant_holder_leash_ft,
         speed_tolerance_ftps: rules.invariant_speed_tolerance_ftps,
         ball_z_max_ft: rules.ball_z_max_ft,
-        max_personal_fouls: rules.league.max_personal_fouls,
-        bonus_fouls_per_period: rules.league.bonus_fouls_per_period,
+        max_personal_fouls: rules.league.fouls.max_personal_fouls,
+        bonus_fouls_per_period: rules.league.fouls.bonus_fouls_per_period,
     }
 }
 

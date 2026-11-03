@@ -22,7 +22,7 @@ fn a_tied_regulation_end_enters_overtime() {
     let mut world = World::new(MatchSetup::builtin(short_rules()), params, 601);
     // 打到第四节末尾：短节次把这段压到几秒钟。
     let mut guard = 0;
-    while world.clock.period() < short_rules().league.regulation_periods && guard < 400_000 {
+    while world.clock.period() < short_rules().league.periods.regulation_periods && guard < 400_000 {
         world.step(TICK_SECONDS);
         guard += 1;
     }
@@ -34,12 +34,12 @@ fn a_tied_regulation_end_enters_overtime() {
     world.clock.set_game_clock(0.0);
     for _ in 0..60 {
         world.step(TICK_SECONDS);
-        if world.clock.period() > short_rules().league.regulation_periods {
+        if world.clock.period() > short_rules().league.periods.regulation_periods {
             break;
         }
     }
     assert!(
-        world.clock.period() > short_rules().league.regulation_periods,
+        world.clock.period() > short_rules().league.periods.regulation_periods,
         "平局必须进入加时，实际节次 {}",
         world.clock.period()
     );
@@ -51,8 +51,8 @@ fn a_tied_regulation_end_enters_overtime() {
 
 #[test]
 fn fiba_overtime_is_five_minutes() {
-    let nba = LeagueProfile::nba().periods();
-    let fiba = LeagueProfile::fiba().periods();
+    let nba = LeagueProfile::nba().periods;
+    let fiba = LeagueProfile::fiba().periods;
     assert!(
         (fiba.overtime_duration_seconds - 300.0).abs() < 0.01,
         "FIBA 加时必须是五分钟，实际 {}",
@@ -72,11 +72,11 @@ fn overtime_timeouts_follow_the_league_budget() {
     let budget = TimeoutBudget::new(&rules);
     assert_eq!(
         budget.remaining,
-        rules.league.timeouts().timeouts_per_game,
+        rules.league.timeouts.timeouts_per_game,
         "开局暂停额度必须等于档案额度"
     );
     assert!(
-        rules.league.timeouts().overtime_timeouts > 0,
+        rules.league.timeouts.overtime_timeouts > 0,
         "每个加时必须给出暂停额度"
     );
 }

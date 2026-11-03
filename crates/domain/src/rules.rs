@@ -604,17 +604,17 @@ impl GameRules {
     /// （末段秒数、罚则次数、暂停额度等）保持不变。
     pub fn shortened(&self, period_seconds: f32, overtime_seconds: f32) -> Self {
         assert!(
-            period_seconds >= self.league.shot_clock_seconds,
+            period_seconds >= self.league.clocks.shot_clock_seconds,
             "shortened period must be at least one shot clock"
         );
         assert!(
-            overtime_seconds >= self.league.shot_clock_seconds,
+            overtime_seconds >= self.league.clocks.shot_clock_seconds,
             "shortened overtime must be at least one shot clock"
         );
         let mut rules = self.clone();
-        let scale = period_seconds / self.league.period_duration_seconds;
-        rules.league.period_duration_seconds = period_seconds;
-        rules.league.overtime_duration_seconds = overtime_seconds;
+        let scale = period_seconds / self.league.periods.period_duration_seconds;
+        rules.league.periods.period_duration_seconds = period_seconds;
+        rules.league.periods.overtime_duration_seconds = overtime_seconds;
         rules.estimated_possessions_per_period =
             ((self.estimated_possessions_per_period as f32 * scale).ceil() as u32).max(1);
         rules.validate().expect("shortened rules must stay valid");
@@ -623,10 +623,10 @@ impl GameRules {
 
     pub fn period_duration(&self, period: u32) -> f32 {
         let league = &self.league;
-        if period > league.regulation_periods {
-            league.overtime_duration_seconds
+        if period > league.periods.regulation_periods {
+            league.periods.overtime_duration_seconds
         } else {
-            league.period_duration_seconds
+            league.periods.period_duration_seconds
         }
     }
 

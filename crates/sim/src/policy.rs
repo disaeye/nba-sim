@@ -993,7 +993,7 @@ fn variance_of(p: f32, magnitude: f32) -> f32 {
 fn clock_slack(world: &World, state: &DecisionState) -> f32 {
     let weights = &world.params.policy;
     let end = weights.g("shot_slack_end_seconds");
-    let full = world.rules.league.shot_clock_seconds;
+    let full = world.rules.league.clocks.shot_clock_seconds;
     let span = (full - end).max(f32::MIN_POSITIVE);
     ((state.shot_clock as f32 - end) / span).clamp(f32::default(), f32::from(1u8))
 }
@@ -1031,7 +1031,7 @@ fn early_shot_cost(
 /// 其它候选的结果，而不是写死的规则。
 fn clock_cost(world: &World, shot_clock: f64) -> f32 {
     let weights = &world.params.policy;
-    let full = f64::from(world.rules.league.shot_clock_seconds);
+    let full = f64::from(world.rules.league.clocks.shot_clock_seconds);
     let remaining = (shot_clock / full).clamp(0.0, 1.0);
     let possession_seconds = weights.w("seconds_per_possession").max(1.0) as f64;
     let per_second = weights.w("possession_value") as f64 / possession_seconds;

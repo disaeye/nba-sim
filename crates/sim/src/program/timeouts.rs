@@ -26,7 +26,7 @@ pub struct TimeoutBudget {
 impl TimeoutBudget {
     pub fn new(rules: &GameRules) -> Self {
         Self {
-            remaining: rules.league.timeouts().timeouts_per_game,
+            remaining: rules.league.timeouts.timeouts_per_game,
             used_in_fourth: 0,
             used_in_final_window: 0,
             period: 0,
@@ -67,14 +67,14 @@ pub fn can_request(world: &World, team: TeamSide) -> Result<(), TimeoutRejection
     if ledger.remaining == 0 {
         return Err(TimeoutRejection::NoRemaining);
     }
-    if world.clock.period() == rules.league.periods().regulation_periods
-        && ledger.used_in_fourth >= rules.league.timeouts().timeouts_fourth_quarter_max
+    if world.clock.period() == rules.league.periods.regulation_periods
+        && ledger.used_in_fourth >= rules.league.timeouts.timeouts_fourth_quarter_max
     {
         return Err(TimeoutRejection::FourthQuarterExhausted);
     }
-    if world.clock.period() >= rules.league.fouls().bonus_final_period
-        && world.clock.game_clock() <= rules.league.timeouts().timeouts_final_seconds as f64
-        && ledger.used_in_final_window >= rules.league.timeouts().timeouts_final_max
+    if world.clock.period() >= rules.league.fouls.bonus_final_period
+        && world.clock.game_clock() <= rules.league.timeouts.timeouts_final_seconds as f64
+        && ledger.used_in_final_window >= rules.league.timeouts.timeouts_final_max
     {
         return Err(TimeoutRejection::FinalWindowExhausted);
     }
@@ -100,11 +100,11 @@ pub fn request(world: &mut World, team: TeamSide) -> bool {
         ledger.used_in_final_window = 0;
     }
     ledger.remaining -= 1;
-    if period == world.rules.league.periods().regulation_periods {
+    if period == world.rules.league.periods.regulation_periods {
         ledger.used_in_fourth += 1;
     }
-    if period >= world.rules.league.fouls().bonus_final_period
-        && world.clock.game_clock() <= world.rules.league.timeouts().timeouts_final_seconds as f64
+    if period >= world.rules.league.fouls.bonus_final_period
+        && world.clock.game_clock() <= world.rules.league.timeouts.timeouts_final_seconds as f64
     {
         ledger.used_in_final_window += 1;
     }

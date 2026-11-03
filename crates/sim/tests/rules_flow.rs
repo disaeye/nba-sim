@@ -611,8 +611,8 @@ fn rule_coverage_matrix_is_complete() {
 #[test]
 fn mutating_the_league_profile_changes_the_called_rule() {
     let mut rules = GameRules::default();
-    rules.league.bonus_fouls_per_period = 1;
-    rules.league.bonus_fouls_final = 1;
+    rules.league.fouls.bonus_fouls_per_period = 1;
+    rules.league.fouls.bonus_fouls_final = 1;
     let mut world = live_world_with_rules(31, rules);
     let offense = world.possession.team;
     let fouler = world
@@ -631,7 +631,7 @@ fn mutating_the_league_profile_changes_the_called_rule() {
     );
 
     let mut rules = GameRules::default();
-    rules.league.offensive_rebound_shot_clock_seconds = 6.0;
+    rules.league.clocks.offensive_rebound_shot_clock_seconds = 6.0;
     let mut world = live_world_with_rules(31, rules);
     let offense = world.possession.team;
     let rebounder = world.holder().expect("live possession has a holder");
@@ -644,7 +644,7 @@ fn mutating_the_league_profile_changes_the_called_rule() {
     );
 
     let mut rules = GameRules::default();
-    rules.league.max_personal_fouls = 1;
+    rules.league.fouls.max_personal_fouls = 1;
     let mut world = live_world_with_rules(31, rules);
     let offense = world.possession.team;
     let fouler = world
@@ -662,7 +662,7 @@ fn mutating_the_league_profile_changes_the_called_rule() {
     );
 
     let mut rules = GameRules::default();
-    rules.league.timeouts_final_max = 1;
+    rules.league.timeouts.timeouts_final_max = 1;
     let mut world = live_world_with_rules(31, rules);
     world
         .clock

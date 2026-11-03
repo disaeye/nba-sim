@@ -23,12 +23,12 @@ impl GameRules {
 
         let finite = [
             self.tick_seconds,
-            self.league.period_duration_seconds,
-            self.league.overtime_duration_seconds,
-            self.league.shot_clock_seconds,
-            self.league.offensive_rebound_shot_clock_seconds,
-            self.league.bonus_final_seconds,
-            self.league.timeouts_final_seconds,
+            self.league.periods.period_duration_seconds,
+            self.league.periods.overtime_duration_seconds,
+            self.league.clocks.shot_clock_seconds,
+            self.league.clocks.offensive_rebound_shot_clock_seconds,
+            self.league.fouls.bonus_final_seconds,
+            self.league.timeouts.timeouts_final_seconds,
             self.inbound_seconds,
             self.inbound_setup_seconds,
             self.backcourt_seconds,
@@ -163,10 +163,10 @@ impl GameRules {
             return Err("rules contain a non-finite number".to_string());
         }
         if self.tick_seconds <= 0.0
-            || self.league.period_duration_seconds <= 0.0
-            || self.league.overtime_duration_seconds <= 0.0
-            || self.league.shot_clock_seconds <= 0.0
-            || self.league.offensive_rebound_shot_clock_seconds <= 0.0
+            || self.league.periods.period_duration_seconds <= 0.0
+            || self.league.periods.overtime_duration_seconds <= 0.0
+            || self.league.clocks.shot_clock_seconds <= 0.0
+            || self.league.clocks.offensive_rebound_shot_clock_seconds <= 0.0
             || self.inbound_seconds <= 0.0
             || self.tip_off_tap_speed_ftps <= 0.0
             || self.tip_off_tap_distance_ft <= 0.0
@@ -181,18 +181,20 @@ impl GameRules {
             || self.redecide_interval_seconds <= 0.0
             || self.redecide_interval_seconds > 5.0
             || self.free_throw_interval_seconds <= 0.0
-            || self.league.regulation_periods == 0
+            || self.league.periods.regulation_periods == 0
             || self.league.center_circle_radius_ft <= 0.0
             || self.league.jump_ball_receiver_distance_ft <= self.league.center_circle_radius_ft
             || self.league.jump_ball_receiver_distance_ft >= self.court.width_ft * 0.5
             || self.league.center_circle_radius_ft >= self.court.width_ft * 0.25
-            || self.league.bonus_final_seconds < f32::default()
-            || (self.league.bonus_fouls_final != 0
-                && self.league.bonus_fouls_final > self.league.bonus_fouls_per_period)
-            || self.league.bonus_final_period > self.league.regulation_periods
-            || self.league.timeouts_final_seconds < f32::default()
-            || self.league.timeouts_final_max > self.league.timeouts_fourth_quarter_max
-            || self.league.timeouts_fourth_quarter_max > self.league.timeouts_per_game
+            || self.league.fouls.bonus_final_seconds < f32::default()
+            || (self.league.fouls.bonus_fouls_final != 0
+                && self.league.fouls.bonus_fouls_final > self.league.fouls.bonus_fouls_per_period)
+            || self.league.fouls.bonus_final_period > self.league.periods.regulation_periods
+            || self.league.timeouts.timeouts_final_seconds < f32::default()
+            || self.league.timeouts.timeouts_final_max
+                > self.league.timeouts.timeouts_fourth_quarter_max
+            || self.league.timeouts.timeouts_fourth_quarter_max
+                > self.league.timeouts.timeouts_per_game
             || self.estimated_possessions_per_period == 0
         {
             return Err("clock and period policy contains an invalid value".to_string());

@@ -136,8 +136,8 @@ fn foul_accounting_separates_personal_and_team_period_counters() {
 #[test]
 fn changed_league_threshold_changes_bonus_result() {
     let mut rules = GameRules::default();
-    rules.league.bonus_fouls_per_period = 3;
-    rules.league.bonus_fouls_final = 2;
+    rules.league.fouls.bonus_fouls_per_period = 3;
+    rules.league.fouls.bonus_fouls_final = 2;
     assert_eq!(rules.league.bonus_free_throws_for(2, 2, 400.0), 0);
     assert_eq!(rules.league.bonus_free_throws_for(3, 2, 400.0), 2);
     assert_eq!(rules.league.bonus_free_throws_for(1, 4, 90.0), 0);

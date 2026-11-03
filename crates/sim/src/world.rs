@@ -309,7 +309,10 @@ impl World {
             "finished stage requires finished phase"
         );
         assert_eq!(
-            phase.stage(self.clock.period(), self.rules.league.regulation_periods),
+            phase.stage(
+                self.clock.period(),
+                self.rules.league.periods.regulation_periods,
+            ),
             stage,
             "phase and match stage disagree"
         );
@@ -350,7 +353,7 @@ impl World {
             panic!("period phase requires a period break");
         };
         let next_period = self.clock.period() + 1;
-        let expected_stage = if next_period > self.rules.league.regulation_periods {
+        let expected_stage = if next_period > self.rules.league.periods.regulation_periods {
             crate::state::MatchStage::Overtime
         } else {
             crate::state::MatchStage::Intermission
@@ -367,7 +370,10 @@ impl World {
             ),
             "period break cannot begin from {current_stage:?}"
         );
-        let stage = phase.stage(self.clock.period(), self.rules.league.regulation_periods);
+        let stage = phase.stage(
+            self.clock.period(),
+            self.rules.league.periods.regulation_periods,
+        );
         assert!(
             matches!(
                 stage,
@@ -805,7 +811,10 @@ impl World {
             resume_phase,
         };
         assert_eq!(phase.program(), crate::state::MatchProgram::Timeout);
-        let stage = phase.stage(self.clock.period(), self.rules.league.regulation_periods);
+        let stage = phase.stage(
+            self.clock.period(),
+            self.rules.league.periods.regulation_periods,
+        );
         assert_eq!(
             stage,
             self.match_stage(),
@@ -824,7 +833,10 @@ impl World {
             self.set_period_phase(phase);
             return;
         }
-        let stage = phase.stage(self.clock.period(), self.rules.league.regulation_periods);
+        let stage = phase.stage(
+            self.clock.period(),
+            self.rules.league.periods.regulation_periods,
+        );
         let program = phase.program();
         self.set_program_phase(stage, program, phase);
     }
@@ -850,8 +862,10 @@ impl World {
     }
 
     pub fn match_stage(&self) -> crate::state::MatchStage {
-        self.phase()
-            .stage(self.clock.period(), self.rules.league.regulation_periods)
+        self.phase().stage(
+            self.clock.period(),
+            self.rules.league.periods.regulation_periods,
+        )
     }
 
     pub fn match_program(&self) -> crate::state::MatchProgram {
@@ -926,8 +940,8 @@ impl World {
                 )
             })
             .collect();
-        let period_seconds = rules.league.period_duration_seconds as f64;
-        let shot_clock = rules.league.shot_clock_seconds as f64;
+        let period_seconds = rules.league.periods.period_duration_seconds as f64;
+        let shot_clock = rules.league.clocks.shot_clock_seconds as f64;
         let rules_capture = rules.clone();
         let draws = DrawSource::new(seed);
         let (home_jumper, away_jumper) = Self::opening_tip_setup(&players, &params.policy);
@@ -1406,9 +1420,9 @@ impl World {
             home_score: self.score[0],
             away_score: self.score[1],
             periods: self.clock.period(),
-            regulation_periods: self.rules.league.regulation_periods,
-            period_duration_seconds: self.rules.league.period_duration_seconds,
-            overtime_duration_seconds: self.rules.league.overtime_duration_seconds,
+            regulation_periods: self.rules.league.periods.regulation_periods,
+            period_duration_seconds: self.rules.league.periods.period_duration_seconds,
+            overtime_duration_seconds: self.rules.league.periods.overtime_duration_seconds,
             tick_seconds: self.rules.tick_seconds,
             ticks: self.clock.tick(),
             redecide_interval_seconds: self.rules.redecide_interval_seconds as f64,
@@ -1845,7 +1859,7 @@ impl World {
             self.possession_count + 1
         };
         self.alternate_spacing = next_possession_id.is_multiple_of(2);
-        let full_shot_clock = self.rules.league.shot_clock_seconds as f64;
+        let full_shot_clock = self.rules.league.clocks.shot_clock_seconds as f64;
         let shot_clock = if continuing_possession {
             self.clock.shot_clock()
         } else {
@@ -2174,7 +2188,7 @@ impl World {
 
     /// 紧逼盯防五秒：收球后被贴身盯住且不再推进，五秒必吹违例。
     fn check_closely_guarded(&mut self, dt: f64) {
-        if !self.rules.league.closely_guarded_seconds.is_finite()
+        if !self.rules.league.clocks.closely_guarded_seconds.is_finite()
             || !matches!(self.phase, Phase::Live)
         {
             self.possession.closely_guarded_seconds = 0.0;
@@ -2189,7 +2203,7 @@ impl World {
             self.possession.closely_guarded_seconds = 0.0;
             return;
         }
-        let limit = self.rules.league.closely_guarded_distance_ft;
+        let limit = self.rules.league.clocks.closely_guarded_distance_ft;
         let team = self.players[holder].team;
         let guarded = self.players.iter().enumerate().any(|(index, player)| {
             index != holder
@@ -2203,7 +2217,7 @@ impl World {
         }
         self.possession.closely_guarded_seconds += dt as f32;
         if self.possession.closely_guarded_seconds + f32::EPSILON
-            < self.rules.league.closely_guarded_seconds
+            < self.rules.league.clocks.closely_guarded_seconds
         {
             return;
         }
@@ -3134,7 +3148,7 @@ impl World {
             } => {
                 if now >= resume_at {
                     let stage_after_break =
-                        if self.clock.period() >= self.rules.league.regulation_periods {
+                        if self.clock.period() >= self.rules.league.periods.regulation_periods {
                             crate::state::MatchStage::Overtime
                         } else {
                             crate::state::MatchStage::Intermission
@@ -3144,14 +3158,14 @@ impl World {
                         "period break destination must match the next period"
                     );
                     let next_period_duration =
-                        if self.clock.period() >= self.rules.league.regulation_periods {
-                            f64::from(self.rules.league.overtime_duration_seconds)
+                        if self.clock.period() >= self.rules.league.periods.regulation_periods {
+                            f64::from(self.rules.league.periods.overtime_duration_seconds)
                         } else {
-                            f64::from(self.rules.league.period_duration_seconds)
+                            f64::from(self.rules.league.periods.period_duration_seconds)
                         };
                     self.clock.start_next_period(
                         next_period_duration,
-                        self.rules.league.shot_clock_seconds as f64,
+                        self.rules.league.clocks.shot_clock_seconds as f64,
                     );
                     self.fouls[0].period = 0;
                     self.fouls[1].period = 0;

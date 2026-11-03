@@ -186,7 +186,7 @@ fn a_late_deficit_produces_an_intentional_foul_within_seconds() {
         );
         set_margin(&mut world, TeamSide::Away, 2);
         let defense = index(TeamSide::Home);
-        world.fouls[defense].period = world.rules.league.bonus_fouls_per_period as u8;
+        world.fouls[defense].period = world.rules.league.fouls.bonus_fouls_per_period as u8;
         // 比分是注入的，所以自然比赛里留下的一波得分已经无效。
         world.scoring_run = 0;
         world.last_scoring = None;
@@ -194,7 +194,7 @@ fn a_late_deficit_produces_an_intentional_foul_within_seconds() {
         // 场景是一次新回合：进攻方才拿到球，进攻时钟是满的。
         world
             .clock
-            .set_shot_clock(world.rules.league.shot_clock_seconds as f64);
+            .set_shot_clock(world.rules.league.clocks.shot_clock_seconds as f64);
         let before = world.events.len();
         let deadline = world.now() + 5.0;
         let mut committed = false;
@@ -267,7 +267,7 @@ fn a_poor_free_throw_big_is_hacked_only_before_the_final_window() {
         world.players[big].data.attributes.free_throw = 0.38;
         set_margin(&mut world, offense, 8);
         let defense = index(offense.other());
-        world.fouls[defense].period = world.rules.league.bonus_fouls_per_period as u8;
+        world.fouls[defense].period = world.rules.league.fouls.bonus_fouls_per_period as u8;
         world.clock.set_game_clock(240.0);
         let before = world.events.len();
         let deadline = world.now() + 40.0;
@@ -317,7 +317,7 @@ fn a_poor_free_throw_big_is_hacked_only_before_the_final_window() {
         world.players[big].data.attributes.free_throw = 0.30;
         set_margin(&mut world, offense, 8);
         let defense = index(offense.other());
-        world.fouls[defense].period = world.rules.league.bonus_fouls_per_period as u8;
+        world.fouls[defense].period = world.rules.league.fouls.bonus_fouls_per_period as u8;
         world.clock.set_game_clock(110.0);
         let mut seen = world.events.len();
         let deadline = world.now() + 40.0;
@@ -350,7 +350,7 @@ fn a_blown_out_team_uses_its_bench_at_the_next_dead_ball() {
     let mut world = world(1);
     world
         .clock
-        .set_regulation_clock(4, 240.0, world.rules.league.shot_clock_seconds as f64);
+        .set_regulation_clock(4, 240.0, world.rules.league.clocks.shot_clock_seconds as f64);
     set_margin(&mut world, TeamSide::Home, 24);
     let core: Vec<usize> = world
         .on_court(TeamSide::Home)
@@ -367,7 +367,7 @@ fn a_blown_out_team_uses_its_bench_at_the_next_dead_ball() {
                     && !player.on_court
                     && !player.data.starter
                     && !player.disqualified
-                    && player.fouls < world.rules.league.max_personal_fouls
+                    && player.fouls < world.rules.league.fouls.max_personal_fouls
             })
             .count(),
         3,

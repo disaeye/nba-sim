@@ -426,7 +426,7 @@ fn a_made_basket_inbounds_from_the_conceding_baseline() {
 fn a_late_timeout_may_inbound_in_the_frontcourt() {
     // 短节次：三步之内就能打到第四节。
     let mut rules = GameRules::default();
-    rules.league.period_duration_seconds = 8.0;
+    rules.league.periods.period_duration_seconds = 8.0;
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     let mut world = World::new(MatchSetup::builtin(rules), params, 353);
     let mut guard = 0;
@@ -568,8 +568,8 @@ fn the_period_ends_when_the_clock_hits_zero_during_a_dead_ball() {
 fn the_final_score_does_not_change_after_the_game_ends() {
     // 短节次：几步之内就能打到终场。
     let mut rules = GameRules::default();
-    rules.league.period_duration_seconds = 2.0;
-    rules.league.overtime_duration_seconds = 2.0;
+    rules.league.periods.period_duration_seconds = 2.0;
+    rules.league.periods.overtime_duration_seconds = 2.0;
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     let mut world = World::new(MatchSetup::builtin(rules), params, 373);
     let mut guard = 0;
