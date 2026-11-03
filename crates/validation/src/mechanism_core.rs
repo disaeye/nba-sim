@@ -595,7 +595,7 @@ fn run_limited(
 
 fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
     let home = report.box_score.team_totals(TeamSide::Home);
-    let away = report.box_score.team_totals(TeamSide::Away);
+    let _away = report.box_score.team_totals(TeamSide::Away);
     let possessions = report.possessions.len().max(1) as f64;
     match metric {
         Metric::ThreePointPct => (home.tpm as f64, home.tpa as f64),
@@ -636,10 +636,49 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
         Metric::OffensiveReboundRate => (home.oreb as f64, (home.fga - home.fgm).max(1) as f64),
         // 防守篮板率的分母是对手投丢的球：拿自己的防守篮板除以「自己的
         // 防守篮板 + 对手前场篮板」会把分子分母一起抬高，扰动被自己抵消。
-        Metric::DefensiveReboundRate => (
-            home.dreb as f64,
-            (away.fga as i64 - away.fgm as i64).max(1) as f64,
-        ),
+        Metric::DefensiveReboundRate => {
+            // 防守篮板率直接用事件流算：对手投失之后，主队拿到球的下一次
+            // 控制（抢下篮板或被拨到后自己捡到）都算一个防守篮板。只数
+            // `dreb` 会把“被拨到后捡到”的那部分漏掉，而那部分正是卡位
+            // 加成会把归属拉过来的区间。
+            let home_lines = report.box_score.home.len();
+            let team_of = |handle: usize| -> Option<TeamSide> {
+                if handle < home_lines {
+                    Some(TeamSide::Home)
+                } else if handle - home_lines < report.box_score.away.len() {
+                    Some(TeamSide::Away)
+                } else {
+                    None
+                }
+            };
+            let mut chances: f64 = 0.0;
+            let mut secured: f64 = 0.0;
+            let mut awaiting: Option<TeamSide> = None;
+            for event in &report.events {
+                match &event.fact {
+                    nba_sim_core::action::Fact::Shot { shooter, made, .. } => {
+                        awaiting = if *made {
+                            None
+                        } else {
+                            team_of(*shooter)
+                        };
+                        if awaiting == Some(TeamSide::Away) {
+                            chances += 1.0;
+                        }
+                    }
+                    nba_sim_core::action::Fact::Rebound { player, .. }
+                    | nba_sim_core::action::Fact::LooseBallRecovered { player, .. } => {
+                        if let (Some(shooting), Some(team)) = (awaiting.take(), team_of(*player)) {
+                            if shooting == TeamSide::Away && team == TeamSide::Home {
+                                secured += 1.0;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            (secured, chances.max(1.0))
+        }
         Metric::TurnoverRate => {
             let home_possessions = report
                 .possessions
