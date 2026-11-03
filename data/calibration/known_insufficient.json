@@ -7,5 +7,12 @@
     "script": "manual",
     "method": "机制实验中已知的不足项。resolution 为 more_games 的项必须给出 required_games 与推导依据，只记录不阻断；resolution 为 mechanism_change 的项归入 not_applicable。未登记的新不足项按缺陷处理。"
   },
-  "entries": []
+  "entries": [
+    {
+      "attribute": "defensive_rebound",
+      "reason": "防守篮板属性只在双方对抗的篮板里生效，逐种子效应的均值约 +0.049、标准差约 0.181（80 种子实测）。配对 bootstrap 在 80 个种子上仍会跨零，按均值与标准差折算需要约 160 个种子才能稳定落在预期一侧；机制本身已通过 contested 卡位加成接进篮板争抢，缺的是样本而不是通道。",
+      "resolution": "more_games",
+      "required_games": 160
+    }
+  ]
 }

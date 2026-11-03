@@ -1,35 +1,26 @@
 {
   "certification_status": "defects_found",
-  "commit": "a7228e0c8f44e5eea2605f002d502beb23946b3c",
+  "commit": "a1472f09452764e56441816058fb084148361369",
   "coverage": {
-    "gate_criteria": 37,
+    "gate_criteria": 38,
     "mechanism_attributes": 13,
-    "not_applicable": 1,
-    "registered": 50,
-    "sampled": 50,
+    "not_applicable": 0,
+    "registered": 51,
+    "sampled": 51,
     "uncovered": 0,
     "unregistered": []
   },
   "criteria": {
-    "defects": [
-      "shooting_fouls_per_game"
-    ],
+    "defects": [],
     "known_insufficient": [],
     "marginal": [
-      "mechanism:shooting_mid（下界比 0.52）",
-      "mechanism:free_throw（下界比 0.40）",
-      "mechanism:block（下界比 0.58）"
+      "mechanism:speed（下界比 0.49）",
+      "mechanism:offensive_rebound（下界比 0.49）"
     ],
     "new_insufficient": [
-      "mechanism:speed",
-      "mechanism:acceleration",
-      "mechanism:strength",
-      "mechanism:defensive_rebound",
-      "mechanism:decision_iq"
+      "mechanism:defensive_rebound"
     ],
-    "not_applicable": [
-      "mechanism:stamina（体能对整场命中率的效应被轮换吸收：首发体能降到替换阈值后由替补顶替，两个扰动臂的在场体能分布趋同，全队命中率衡量的是轮换节奏。改指标（首发在场时段的命中率或按轮换分段）之前，放大场次也分不出方向）"
-    ]
+    "not_applicable": []
   },
   "games": 32,
   "per_game_ledger": {

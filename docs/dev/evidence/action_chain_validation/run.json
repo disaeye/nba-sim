@@ -2,11 +2,11 @@
   "calibration": {
     "formations": {
       "contest": "",
-      "method": "半-court 站位（英尺，进攻向右）：持球 19 ft、弱侧翼 16.4 ft、底角 22.4 ft（真实三分）、低位 8.9 ft、顺下 7.8 ft；除底角外都在弧内，站位决定出手区域分布",
+      "method": "三外线两内线半场站位（英尺，进攻向右）：弧顶持球 24.45 ft、两侧翼 26.05 ft，三个外线点全部在三分线外，接球投篮因此来自外线；低位点站篮下 8.80 ft、顺下点站篮下 8.05 ft，两个内线点都站在三秒区边缘而不是篮下，站定出手因此不会直接变成扣篮",
       "sample": 0,
       "script": "hand-authored formation geometry, reviewed against the shot zone shares",
       "season": "2024-25",
-      "source": "modern five-out half-court spacing; three perimeter slots and two interior slots"
+      "source": "modern four-out one-in half-court spacing; four perimeter slots and one interior slot"
     },
     "freethrow": {
       "contest": "",
@@ -42,7 +42,7 @@
     },
     "shot_make": {
       "contest": "modeled: centred at 0.5 so the fitted mean is preserved; sensitivity documented in table",
-      "method": "empirical make rate per (shot kind, distance bin, two/three), sparse cells smoothed toward the kind mean",
+      "method": "empirical make rate per (shot kind, distance bin, two/three), sparse cells smoothed toward the same-distance-band rate and forced monotone decreasing in distance",
       "sample": 219527,
       "script": "scripts/calibrate/fit_tables.py",
       "season": "2024-25",
@@ -57,14 +57,14 @@
       "source": "shufinskiy/nba_data shotdetail"
     }
   },
-  "commit": "a7228e0c8f44e5eea2605f002d502beb23946b3c",
+  "commit": "a1472f09452764e56441816058fb084148361369",
   "games": 32,
   "mechanism": {
     "high_value": 0.95,
     "low_value": 0.1,
     "passed": true,
     "possessions": null,
-    "seeds": 40
+    "seeds": 80
   },
   "seed_start": 1,
   "working_tree_dirty": true

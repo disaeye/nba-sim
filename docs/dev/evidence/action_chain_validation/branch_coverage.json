@@ -1,9 +1,9 @@
 {
-  "gate_criteria": 37,
+  "gate_criteria": 38,
   "mechanism_attributes": 13,
-  "not_applicable": 1,
-  "registered": 50,
-  "sampled": 50,
+  "not_applicable": 0,
+  "registered": 51,
+  "sampled": 51,
   "uncovered": 0,
   "unregistered": []
 }
