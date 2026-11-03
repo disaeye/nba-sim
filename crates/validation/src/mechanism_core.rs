@@ -199,7 +199,9 @@ pub struct MechanismConfig {
 impl Default for MechanismConfig {
     fn default() -> Self {
         Self {
-            seeds: 40,
+            // 80 个子样本：能力扰动的真实效应量在 2%–5%，40 个样本的
+            // 配对区间有时会跨零，样本翻倍才稳定分得出方向。
+            seeds: 80,
             seed_start: 1,
             possessions: None,
             low_value: 0.10,
