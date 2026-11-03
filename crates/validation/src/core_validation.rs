@@ -250,7 +250,6 @@ pub fn run_core_validation_scoped_with_dir(
     })
 }
 
-
 fn run_scoped_game(seed: u64, params: &Params, scope: ValidationScope) -> GameReport {
     let setup = MatchSetup::builtin(rule_profile());
     let mut world = World::new(setup, params.clone(), seed);
@@ -380,23 +379,70 @@ fn check_ledger_scoped(seed: u64, report: &GameReport, require_closed: bool) -> 
     }
     let player_ledgers: [(&BTreeMap<usize, u32>, fn(&PlayerLine) -> u32, &str); 15] = [
         (&reconstructed.player_points, |line| line.points, "points"),
-        (&reconstructed.player_assists, |line| line.assists, "assists"),
-        (&reconstructed.player_free_throw_attempts, |line| line.fta, "free-throw attempts"),
-        (&reconstructed.player_free_throw_makes, |line| line.ftm, "free-throw makes"),
-        (&reconstructed.personal_fouls, |line| line.fouls, "personal fouls"),
-        (&reconstructed.player_field_goal_attempts, |line| line.fga, "field-goal attempts"),
-        (&reconstructed.player_field_goal_makes, |line| line.fgm, "field-goal makes"),
-        (&reconstructed.player_three_attempts, |line| line.tpa, "three-point attempts"),
-        (&reconstructed.player_three_makes, |line| line.tpm, "three-point makes"),
-        (&reconstructed.shooting_fouls, |line| line.shooting_fouls, "shooting fouls"),
+        (
+            &reconstructed.player_assists,
+            |line| line.assists,
+            "assists",
+        ),
+        (
+            &reconstructed.player_free_throw_attempts,
+            |line| line.fta,
+            "free-throw attempts",
+        ),
+        (
+            &reconstructed.player_free_throw_makes,
+            |line| line.ftm,
+            "free-throw makes",
+        ),
+        (
+            &reconstructed.personal_fouls,
+            |line| line.fouls,
+            "personal fouls",
+        ),
+        (
+            &reconstructed.player_field_goal_attempts,
+            |line| line.fga,
+            "field-goal attempts",
+        ),
+        (
+            &reconstructed.player_field_goal_makes,
+            |line| line.fgm,
+            "field-goal makes",
+        ),
+        (
+            &reconstructed.player_three_attempts,
+            |line| line.tpa,
+            "three-point attempts",
+        ),
+        (
+            &reconstructed.player_three_makes,
+            |line| line.tpm,
+            "three-point makes",
+        ),
+        (
+            &reconstructed.shooting_fouls,
+            |line| line.shooting_fouls,
+            "shooting fouls",
+        ),
         (&reconstructed.and_ones, |line| line.and_one, "and-one"),
         (&reconstructed.player_steals, |line| line.steals, "steals"),
-        (&reconstructed.player_turnovers, |line| line.turnovers, "turnovers"),
+        (
+            &reconstructed.player_turnovers,
+            |line| line.turnovers,
+            "turnovers",
+        ),
         (&reconstructed.player_blocks, |line| line.blocks, "blocks"),
         (&event_rebounds, PlayerLine::rebounds, "rebounds"),
     ];
     for (values, field, label) in player_ledgers {
-        assert_player_ledger(report, values, field, label, &mut player_stats_reconcile, &mut detail);
+        assert_player_ledger(
+            report,
+            values,
+            field,
+            label,
+            &mut player_stats_reconcile,
+            &mut detail,
+        );
     }
 
     for team in [TeamSide::Home, TeamSide::Away] {
@@ -408,7 +454,10 @@ fn check_ledger_scoped(seed: u64, report: &GameReport, require_closed: bool) -> 
         let player_points: u32 = lines.iter().map(|line| line.points).sum();
         if player_points != totals.points {
             points_reconcile = false;
-            detail.push_str(&format!("{:?} player points {} != team points {}; ", team, player_points, totals.points));
+            detail.push_str(&format!(
+                "{:?} player points {} != team points {}; ",
+                team, player_points, totals.points
+            ));
         }
         let event_stats = reconstructed.team_stats[World::team_index(team)];
         let expected_stats = [
@@ -510,24 +559,112 @@ pub fn reconstruct(report: &GameReport) -> Reconstructed {
     let mut totals = Reconstructed::default();
     for event in &report.events {
         match &event.fact {
-            Fact::Shot { shooter, is_three, blocked_by, made, points, assisted_by, .. } => {
+            Fact::Shot {
+                shooter,
+                is_three,
+                blocked_by,
+                made,
+                points,
+                assisted_by,
+                ..
+            } => {
                 let shooting_team = player_team_index(report, *shooter);
                 totals.fga += 1;
                 totals.team_stats[shooting_team][2] += 1;
-                *totals.player_field_goal_attempts.entry(*shooter).or_default() += 1;
-                if *is_three { totals.team_stats[shooting_team][4] += 1; *totals.player_three_attempts.entry(*shooter).or_default() += 1; }
-                if let Some(blocker) = blocked_by { totals.blocks += 1; totals.team_stats[player_team_index(report, *blocker)][11] += 1; *totals.player_blocks.entry(*blocker).or_default() += 1; }
-                if *made { totals.fgm += 1; totals.points += *points as u32; totals.team_stats[shooting_team][0] += u32::from(*points); totals.team_stats[shooting_team][1] += 1; *totals.player_field_goal_makes.entry(*shooter).or_default() += 1; if *is_three { totals.team_stats[shooting_team][3] += 1; *totals.player_three_makes.entry(*shooter).or_default() += 1; } *totals.player_points.entry(*shooter).or_default() += u32::from(*points); }
-                if let Some(passer) = assisted_by.filter(|_| *made) { totals.team_stats[player_team_index(report, passer)][9] += 1; *totals.player_assists.entry(passer).or_default() += 1; }
+                *totals
+                    .player_field_goal_attempts
+                    .entry(*shooter)
+                    .or_default() += 1;
+                if *is_three {
+                    totals.team_stats[shooting_team][4] += 1;
+                    *totals.player_three_attempts.entry(*shooter).or_default() += 1;
+                }
+                if let Some(blocker) = blocked_by {
+                    totals.blocks += 1;
+                    totals.team_stats[player_team_index(report, *blocker)][11] += 1;
+                    *totals.player_blocks.entry(*blocker).or_default() += 1;
+                }
+                if *made {
+                    totals.fgm += 1;
+                    totals.points += *points as u32;
+                    totals.team_stats[shooting_team][0] += u32::from(*points);
+                    totals.team_stats[shooting_team][1] += 1;
+                    *totals.player_field_goal_makes.entry(*shooter).or_default() += 1;
+                    if *is_three {
+                        totals.team_stats[shooting_team][3] += 1;
+                        *totals.player_three_makes.entry(*shooter).or_default() += 1;
+                    }
+                    *totals.player_points.entry(*shooter).or_default() += u32::from(*points);
+                }
+                if let Some(passer) = assisted_by.filter(|_| *made) {
+                    totals.team_stats[player_team_index(report, passer)][9] += 1;
+                    *totals.player_assists.entry(passer).or_default() += 1;
+                }
             }
             Fact::FreeThrow { shooter, made, .. } => {
-                let team = player_team_index(report, *shooter); totals.fta += 1; totals.team_stats[team][6] += 1; *totals.player_free_throw_attempts.entry(*shooter).or_default() += 1;
-                if *made { totals.ftm += 1; totals.points += 1; totals.team_stats[team][0] += 1; totals.team_stats[team][5] += 1; *totals.player_free_throw_makes.entry(*shooter).or_default() += 1; *totals.player_points.entry(*shooter).or_default() += 1; }
+                let team = player_team_index(report, *shooter);
+                totals.fta += 1;
+                totals.team_stats[team][6] += 1;
+                *totals
+                    .player_free_throw_attempts
+                    .entry(*shooter)
+                    .or_default() += 1;
+                if *made {
+                    totals.ftm += 1;
+                    totals.points += 1;
+                    totals.team_stats[team][0] += 1;
+                    totals.team_stats[team][5] += 1;
+                    *totals.player_free_throw_makes.entry(*shooter).or_default() += 1;
+                    *totals.player_points.entry(*shooter).or_default() += 1;
+                }
             }
-            Fact::Rebound { player, offensive, .. } => { totals.rebounds += 1; let team = player_team_index(report, *player); let counts = totals.player_rebounds.entry(*player).or_default(); if *offensive { totals.team_stats[team][7] += 1; counts.0 += 1; } else { totals.team_stats[team][8] += 1; counts.1 += 1; } }
-            Fact::Turnover { player, .. } => { totals.turnovers += 1; totals.team_stats[player_team_index(report, *player)][12] += 1; *totals.player_turnovers.entry(*player).or_default() += 1; }
-            Fact::Steal { player, .. } => { totals.steals += 1; totals.team_stats[player_team_index(report, *player)][10] += 1; *totals.player_steals.entry(*player).or_default() += 1; }
-            Fact::Foul { fouler, fouled, kind, and_one, .. } => { totals.player_fouls_total += 1; totals.team_stats[player_team_index(report, *fouler)][13] += 1; if nba_domain::rules::counts_toward_personal_limit(*kind) { *totals.personal_fouls.entry(*fouler).or_default() += 1; } if matches!(kind, nba_domain::event::FoulKind::Shooting) { totals.shooting_foul_total += 1; totals.team_stats[player_team_index(report, *fouler)][14] += 1; *totals.shooting_fouls.entry(*fouler).or_default() += 1; } if *and_one { totals.and_ones_total += 1; totals.team_stats[player_team_index(report, *fouled)][15] += 1; *totals.and_ones.entry(*fouled).or_default() += 1; } }
+            Fact::Rebound {
+                player, offensive, ..
+            } => {
+                totals.rebounds += 1;
+                let team = player_team_index(report, *player);
+                let counts = totals.player_rebounds.entry(*player).or_default();
+                if *offensive {
+                    totals.team_stats[team][7] += 1;
+                    counts.0 += 1;
+                } else {
+                    totals.team_stats[team][8] += 1;
+                    counts.1 += 1;
+                }
+            }
+            Fact::Turnover { player, .. } => {
+                totals.turnovers += 1;
+                totals.team_stats[player_team_index(report, *player)][12] += 1;
+                *totals.player_turnovers.entry(*player).or_default() += 1;
+            }
+            Fact::Steal { player, .. } => {
+                totals.steals += 1;
+                totals.team_stats[player_team_index(report, *player)][10] += 1;
+                *totals.player_steals.entry(*player).or_default() += 1;
+            }
+            Fact::Foul {
+                fouler,
+                fouled,
+                kind,
+                and_one,
+                ..
+            } => {
+                totals.player_fouls_total += 1;
+                totals.team_stats[player_team_index(report, *fouler)][13] += 1;
+                if nba_domain::rules::counts_toward_personal_limit(*kind) {
+                    *totals.personal_fouls.entry(*fouler).or_default() += 1;
+                }
+                if matches!(kind, nba_domain::event::FoulKind::Shooting) {
+                    totals.shooting_foul_total += 1;
+                    totals.team_stats[player_team_index(report, *fouler)][14] += 1;
+                    *totals.shooting_fouls.entry(*fouler).or_default() += 1;
+                }
+                if *and_one {
+                    totals.and_ones_total += 1;
+                    totals.team_stats[player_team_index(report, *fouled)][15] += 1;
+                    *totals.and_ones.entry(*fouled).or_default() += 1;
+                }
+            }
             _ => {}
         }
     }
@@ -543,18 +680,33 @@ fn audit_possession_events(report: &GameReport, require_closed: bool) -> Result<
     let mut ended = BTreeMap::new();
     for event in &report.events {
         match &event.fact {
-            Fact::PossessionStarted { team, possession_id, .. } => {
+            Fact::PossessionStarted {
+                team,
+                possession_id,
+                ..
+            } => {
                 if *possession_id == 0 || started.insert(*possession_id, *team).is_some() {
-                    return Err(format!("possession {possession_id} has a zero or duplicate start"));
+                    return Err(format!(
+                        "possession {possession_id} has a zero or duplicate start"
+                    ));
                 }
                 if let Some((active_id, _)) = active {
-                    return Err(format!("possession {active_id} remained active when {possession_id} started"));
+                    return Err(format!(
+                        "possession {active_id} remained active when {possession_id} started"
+                    ));
                 }
                 active = Some((*possession_id, *team));
             }
-            Fact::PossessionEnded { team, possession_id, end_reason, .. } => {
+            Fact::PossessionEnded {
+                team,
+                possession_id,
+                end_reason,
+                ..
+            } => {
                 if active != Some((*possession_id, *team)) {
-                    return Err(format!("possession end {possession_id} does not match the active identity"));
+                    return Err(format!(
+                        "possession end {possession_id} does not match the active identity"
+                    ));
                 }
                 if ended.insert(*possession_id, *end_reason).is_some() {
                     return Err(format!("possession {possession_id} ended more than once"));
@@ -567,7 +719,10 @@ fn audit_possession_events(report: &GameReport, require_closed: bool) -> Result<
     let active_count = usize::from(active.is_some());
     if require_closed {
         if active.is_some() {
-            return Err(format!("completed report ends with active possession {:?}", active));
+            return Err(format!(
+                "completed report ends with active possession {:?}",
+                active
+            ));
         }
         if started.len() != report.possessions.len() || ended.len() != report.possessions.len() {
             return Err(format!(
@@ -577,8 +732,7 @@ fn audit_possession_events(report: &GameReport, require_closed: bool) -> Result<
                 report.possessions.len()
             ));
         }
-    } else if started.len() != ended.len() + active_count
-        || ended.len() != report.possessions.len()
+    } else if started.len() != ended.len() + active_count || ended.len() != report.possessions.len()
     {
         return Err(format!(
             "{} starts, {} ends, {} records, {} active",
@@ -590,26 +744,58 @@ fn audit_possession_events(report: &GameReport, require_closed: bool) -> Result<
     }
     for record in &report.possessions {
         if started.get(&record.id) != Some(&record.team) || ended.get(&record.id).is_none() {
-            return Err(format!("record {} has no matching start and end events", record.id));
+            return Err(format!(
+                "record {} has no matching start and end events",
+                record.id
+            ));
         }
     }
     Ok(())
 }
 
-fn assert_player_ledger(report: &GameReport, reconstructed: &BTreeMap<usize, u32>, field: fn(&PlayerLine) -> u32, label: &str, player_stats_reconcile: &mut bool, detail: &mut String) {
+fn assert_player_ledger(
+    report: &GameReport,
+    reconstructed: &BTreeMap<usize, u32>,
+    field: fn(&PlayerLine) -> u32,
+    label: &str,
+    player_stats_reconcile: &mut bool,
+    detail: &mut String,
+) {
     let mut seen = BTreeMap::new();
-    for (handle, value) in reconstructed { seen.insert(*handle, *value); }
+    for (handle, value) in reconstructed {
+        seen.insert(*handle, *value);
+    }
     for handle in 0..report.box_score.home.len() + report.box_score.away.len() {
-        let line = if handle < report.box_score.home.len() { &report.box_score.home[handle] } else { &report.box_score.away[handle - report.box_score.home.len()] };
+        let line = if handle < report.box_score.home.len() {
+            &report.box_score.home[handle]
+        } else {
+            &report.box_score.away[handle - report.box_score.home.len()]
+        };
         let observed = seen.remove(&handle).unwrap_or_default();
         let expected = field(line);
-        if observed != expected { *player_stats_reconcile = false; detail.push_str(&format!("player {handle} {label}: event {observed} != box score {expected}; ")); }
+        if observed != expected {
+            *player_stats_reconcile = false;
+            detail.push_str(&format!(
+                "player {handle} {label}: event {observed} != box score {expected}; "
+            ));
+        }
     }
-    assert!(seen.is_empty(), "reconstructed player ledger contains an unknown player");
+    assert!(
+        seen.is_empty(),
+        "reconstructed player ledger contains an unknown player"
+    );
 }
 
 fn player_team_index(report: &GameReport, player: usize) -> usize {
-    if player < report.box_score.home.len() { 0 } else { assert!(player - report.box_score.home.len() < report.box_score.away.len(), "event references a player outside the box score"); 1 }
+    if player < report.box_score.home.len() {
+        0
+    } else {
+        assert!(
+            player - report.box_score.home.len() < report.box_score.away.len(),
+            "event references a player outside the box score"
+        );
+        1
+    }
 }
 
 /// 批次判定总览：把四层判定与机制实验合成一份可读结论。
@@ -659,11 +845,16 @@ pub fn certification_artifact(
         }
     }
     for attribute in &insufficient {
-        match known_insufficient.iter().find(|entry| entry.attribute == *attribute) {
+        match known_insufficient
+            .iter()
+            .find(|entry| entry.attribute == *attribute)
+        {
             Some(entry) if entry.resolution == "more_games" => {
                 known.push(format!("mechanism:{attribute}"));
             }
-            Some(entry) => not_applicable.push(format!("mechanism:{}（{}）", attribute, entry.reason)),
+            Some(entry) => {
+                not_applicable.push(format!("mechanism:{}（{}）", attribute, entry.reason))
+            }
             None => new_insufficient.push(format!("mechanism:{attribute}")),
         }
     }
@@ -675,26 +866,38 @@ pub fn certification_artifact(
         "pass"
     };
     let games = report.games.len();
-    let clean_games = report.games.iter().filter(|game| {
-        game.ledger.points_reconcile
-            && game.ledger.attempts_reconcile
-            && game.ledger.rebounds_reconcile
-            && game.ledger.turnovers_reconcile
-            && game.ledger.minutes_reconcile
-            && game.ledger.fouls_reconcile
-            && game.ledger.possessions_reconcile
-            && game.ledger.player_stats_reconcile
-    }).count();
-    let evaluated: std::collections::BTreeSet<&str> = report.gate.layers.iter()
-        .map(|layer| layer.criterion.as_str()).collect();
-    let sampled_gate = REGISTERED_GATE_CRITERIA.iter()
-        .filter(|name| evaluated.contains(*name)).count();
-    let unregistered: Vec<String> = evaluated.iter()
+    let clean_games = report
+        .games
+        .iter()
+        .filter(|game| {
+            game.ledger.points_reconcile
+                && game.ledger.attempts_reconcile
+                && game.ledger.rebounds_reconcile
+                && game.ledger.turnovers_reconcile
+                && game.ledger.minutes_reconcile
+                && game.ledger.fouls_reconcile
+                && game.ledger.possessions_reconcile
+                && game.ledger.player_stats_reconcile
+        })
+        .count();
+    let evaluated: std::collections::BTreeSet<&str> = report
+        .gate
+        .layers
+        .iter()
+        .map(|layer| layer.criterion.as_str())
+        .collect();
+    let sampled_gate = REGISTERED_GATE_CRITERIA
+        .iter()
+        .filter(|name| evaluated.contains(*name))
+        .count();
+    let unregistered: Vec<String> = evaluated
+        .iter()
         .filter(|name| !REGISTERED_GATE_CRITERIA.contains(name))
-        .map(|name| (*name).to_string()).collect();
+        .map(|name| (*name).to_string())
+        .collect();
     let mechanism_attributes = mechanism.map(|value| value.results.len()).unwrap_or(0);
-    let registered = REGISTERED_GATE_CRITERIA.len()
-        + crate::mechanism_core::MechanismAttribute::all().len();
+    let registered =
+        REGISTERED_GATE_CRITERIA.len() + crate::mechanism_core::MechanismAttribute::all().len();
     let sampled = sampled_gate + mechanism_attributes;
     serde_json::json!({
         "certification_status": status,
@@ -722,18 +925,44 @@ pub fn certification_artifact(
 
 /// 已登记的判定准则。
 pub const REGISTERED_GATE_CRITERIA: [&str; 38] = [
-    "zone_share_rim", "zone_share_near", "zone_share_mid", "zone_share_three",
-    "creation_share_drive", "creation_share_cut", "creation_share_post",
-    "creation_share_pull_up", "creation_share_putback", "creation_share_transition",
-    "creation_share_set", "turnover_per_possession", "fga_per_possession",
-    "fta_per_game", "points_per_game", "oreb_per_game", "possessions_per_game",
-    "blocks_per_game", "steals_per_game", "shooting_fouls_per_game", "and_one_per_game",
+    "zone_share_rim",
+    "zone_share_near",
+    "zone_share_mid",
+    "zone_share_three",
+    "creation_share_drive",
+    "creation_share_cut",
+    "creation_share_post",
+    "creation_share_pull_up",
+    "creation_share_putback",
+    "creation_share_transition",
+    "creation_share_set",
+    "turnover_per_possession",
+    "fga_per_possession",
+    "fta_per_game",
+    "points_per_game",
+    "oreb_per_game",
+    "possessions_per_game",
+    "blocks_per_game",
+    "steals_per_game",
+    "shooting_fouls_per_game",
+    "and_one_per_game",
     "free_throw_percentage",
-    "early_contested_rate", "usage_top1_over_fifth", "assisted_fg_spread", "ping_pong_rate",
-    "minutes_max", "shot_clock_buckets_complete", "defender_distance_buckets_complete",
-    "post_scorer_three_share", "stationary_shooter_three_share", "play_activation_rate",
-    "play_window_gap", "substitutions_per_game", "pass_chain_mean", "screen_read_under_shoot",
-    "screen_read_over_drive", "shot_points_by_clock",
+    "early_contested_rate",
+    "usage_top1_over_fifth",
+    "assisted_fg_spread",
+    "ping_pong_rate",
+    "minutes_max",
+    "shot_clock_buckets_complete",
+    "defender_distance_buckets_complete",
+    "post_scorer_three_share",
+    "stationary_shooter_three_share",
+    "play_activation_rate",
+    "play_window_gap",
+    "substitutions_per_game",
+    "pass_chain_mean",
+    "screen_read_under_shoot",
+    "screen_read_over_drive",
+    "shot_points_by_clock",
 ];
 
 /// 逐准则的观测值与基准，供批次统计工件消费。
@@ -742,21 +971,32 @@ pub fn batch_statistical_artifact(
     params: &Params,
 ) -> serde_json::Value {
     let games = report.games.len().max(1) as f64;
-    let points: f64 = report.games.iter()
-        .map(|game| (game.home_score + game.away_score) as f64).sum();
-    let possessions: f64 = report.games.iter()
-        .map(|game| game.possessions as f64).sum();
-    let criteria: Vec<serde_json::Value> = report.gate.layers.iter().map(|layer| {
-        let band = params.policy.band(&layer.criterion);
-        serde_json::json!({
-            "criterion": layer.criterion,
-            "observed": layer.observed,
-            "target": layer.target,
-            "band": { "lower": band.lower, "upper": band.upper },
-            "relative_error": layer.relative_error,
-            "passed": layer.passed,
+    let points: f64 = report
+        .games
+        .iter()
+        .map(|game| (game.home_score + game.away_score) as f64)
+        .sum();
+    let possessions: f64 = report
+        .games
+        .iter()
+        .map(|game| game.possessions as f64)
+        .sum();
+    let criteria: Vec<serde_json::Value> = report
+        .gate
+        .layers
+        .iter()
+        .map(|layer| {
+            let band = params.policy.band(&layer.criterion);
+            serde_json::json!({
+                "criterion": layer.criterion,
+                "observed": layer.observed,
+                "target": layer.target,
+                "band": { "lower": band.lower, "upper": band.upper },
+                "relative_error": layer.relative_error,
+                "passed": layer.passed,
+            })
         })
-    }).collect();
+        .collect();
     serde_json::json!({
         "games": report.games.len(),
         "criteria": criteria,

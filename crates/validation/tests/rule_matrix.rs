@@ -9,7 +9,10 @@ use nba_domain::rules::{counts_toward_personal_limit, counts_toward_team_period_
 use nba_domain::LeagueProfile;
 
 fn profiles() -> [(&'static str, LeagueProfile); 2] {
-    [("nba", LeagueProfile::nba()), ("fiba", LeagueProfile::fiba())]
+    [
+        ("nba", LeagueProfile::nba()),
+        ("fiba", LeagueProfile::fiba()),
+    ]
 }
 
 #[test]
@@ -99,7 +102,10 @@ fn final_window_boundary_is_inclusive_at_its_edge() {
     assert!(!nba.in_final_window(4, window + 0.1), "outside the window");
     assert!(nba.in_final_window(4, window), "at the edge");
     assert!(nba.in_final_window(4, window - 0.1), "inside the window");
-    assert!(!nba.in_final_window(3, window - 0.1), "only the final period");
+    assert!(
+        !nba.in_final_window(3, window - 0.1),
+        "only the final period"
+    );
 }
 
 /// 个人犯规与球队犯规是两套计数器：技术犯规不计入任何一套，
@@ -193,8 +199,7 @@ fn overtime_and_timeout_budgets_follow_the_league_profile() {
     assert_eq!(fiba.period_duration(5), 300.0);
     assert!(nba.league.timeouts.timeouts_per_game >= fiba.league.timeouts.timeouts_per_game);
     assert!(
-        nba.league.timeouts.timeouts_fourth_quarter_max
-            >= nba.league.timeouts.timeouts_final_max,
+        nba.league.timeouts.timeouts_fourth_quarter_max >= nba.league.timeouts.timeouts_final_max,
         "the final-window cap cannot exceed the quarter cap"
     );
 }

@@ -90,7 +90,10 @@ impl GameReport {
         } else if other.games > 0 {
             assert_eq!(self.regulation_periods, other.regulation_periods);
             assert_eq!(self.period_duration_seconds, other.period_duration_seconds);
-            assert_eq!(self.overtime_duration_seconds, other.overtime_duration_seconds);
+            assert_eq!(
+                self.overtime_duration_seconds,
+                other.overtime_duration_seconds
+            );
             assert_eq!(self.tick_seconds, other.tick_seconds);
         }
         self.games += other.games;

@@ -126,6 +126,20 @@ fn shoot_with_retained_team(
         technical_retained_team,
         after_technical,
     };
+    // 罚球属于罚球程序：飞行是球的维度，这一罚的程序载荷必须与账本一致，
+    // 否则结算时读到的罚球上下文与实际发球对不上。
+    world.set_phase(crate::state::Phase::FreeThrows {
+        shooter,
+        total: meta.total,
+        remaining: meta.remaining,
+        made: meta.made,
+        next_at: world.now() + f64::from(world.rules.free_throw_interval_seconds),
+        and_one: meta.and_one,
+        retain_possession: meta.retain_possession,
+        foul_id: meta.foul_id,
+        technical_retained_team: meta.technical_retained_team,
+        after_technical: meta.after_technical,
+    });
     world.pending_shot = Some(PendingShot {
         shooter,
         kind: ShotKind::CatchShoot,
@@ -196,16 +210,31 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
                     and_one,
                     retain_possession,
                     foul_id,
-                } => shoot(
-                    world,
-                    shooter,
-                    total,
-                    remaining,
-                    made,
-                    and_one,
-                    retain_possession,
-                    foul_id,
-                ),
+                } => {
+                    // 主罚球程序接管：阶段载荷换成主罚球的账。
+                    world.set_phase(crate::state::Phase::FreeThrows {
+                        shooter,
+                        total,
+                        remaining,
+                        made,
+                        next_at: world.now() + f64::from(world.rules.free_throw_interval_seconds),
+                        and_one,
+                        retain_possession,
+                        foul_id,
+                        technical_retained_team: None,
+                        after_technical: None,
+                    });
+                    shoot(
+                        world,
+                        shooter,
+                        total,
+                        remaining,
+                        made,
+                        and_one,
+                        retain_possession,
+                        foul_id,
+                    );
+                }
                 FreeThrowFollowUp::DeadBall { team } => {
                     world.adjudicate(crate::adjudicate::Adjudication::new(
                         crate::adjudicate::StoppageCause::FreeThrow,

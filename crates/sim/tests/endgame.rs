@@ -29,9 +29,7 @@ fn fourth_quarter_live(world: &mut World) -> usize {
             break;
         }
     }
-    let carrier = world
-        .holder()
-        .expect("no fourth-quarter live possession");
+    let carrier = world.holder().expect("no fourth-quarter live possession");
     let rules = nba_domain::GameRules::default();
     world.clock.set_regulation_clock(
         4,

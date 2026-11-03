@@ -215,8 +215,7 @@ pub fn solve_defense_targets(world: &World) -> [Vec2; MAX_ON_COURT] {
         // 突破发生时他要跑的距离才在一两步之内。
         let sag = if man_to_hoop > potential.perimeter_attribution_ft {
             potential.sag_distance_perimeter_ft
-                + (potential.sag_distance_weak_side_ft - potential.sag_distance_perimeter_ft)
-                    * weak
+                + (potential.sag_distance_weak_side_ft - potential.sag_distance_perimeter_ft) * weak
         } else {
             potential.sag_distance_interior_ft
         } * scheme.sag_multiplier;

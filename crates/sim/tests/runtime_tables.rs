@@ -106,7 +106,11 @@ fn free_throw_is_resolved_by_ball_flight_not_by_a_table_draw() {
         .pending_shot
         .as_ref()
         .is_some_and(|pending| pending.free_throw.is_some()));
-    assert!(matches!(world.phase(), Phase::FreeThrowFlight { .. }));
+    // 罚球飞行仍在罚球程序里：程序是罚球，球在飞行中。
+    assert!(matches!(world.phase(), Phase::FreeThrows { .. }));
+    assert!(world
+        .ball_flight
+        .is_some_and(|flight| flight.kind == nba_sim_core::state::FlightKind::FreeThrow));
     let game_clock = world.clock.game_clock();
     let shot_clock = world.clock.shot_clock();
     let mut steps = 0;
@@ -160,7 +164,11 @@ fn pass_flight_consumes_both_live_clocks() {
     world.step(TICK_SECONDS);
     assert_eq!(world.clock.game_clock(), game_clock - TICK_SECONDS);
     assert_eq!(world.clock.shot_clock(), shot_clock - TICK_SECONDS);
-    assert!(matches!(world.phase(), Phase::PassFlight { .. }));
+    // 传球飞行仍在开放进攻程序里：球在飞行中。
+    assert!(matches!(world.phase(), Phase::Live));
+    assert!(world
+        .ball_flight
+        .is_some_and(|flight| flight.kind == nba_sim_core::state::FlightKind::Pass));
 }
 
 #[test]

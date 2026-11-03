@@ -7,7 +7,7 @@
 use crate::action::{
     ActionIntent, ActionKind, ActionOutcome, Completion, Fact, FakeKind, StateDelta,
 };
-use crate::state::{Bait, Phase};
+use crate::state::Bait;
 use crate::world::World;
 
 /// 最近的防守人：距离上限来自策略，太远的人没有被骗的意义。
@@ -134,7 +134,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: FakeKind) -> Acti
 
 /// 假动作只在活球且持球人未被收球时成立。
 pub fn available(world: &World, actor: usize) -> bool {
-    matches!(world.phase(), Phase::Live)
+    world.live_play()
         && world.holder() == Some(actor)
         && world.possession.dribble_state == crate::state::DribbleState::Dribbling
 }

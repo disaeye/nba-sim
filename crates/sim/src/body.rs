@@ -36,25 +36,33 @@ pub fn integrate(world: &mut World, dt: f64) {
     let policy = &world.params.policy;
     let now = world.now();
     let holder = world.holder();
-    let live = matches!(world.phase(), crate::state::Phase::Live);
+    let live = world.live_play();
     let inbound_passer = if matches!(world.phase(), crate::state::Phase::Inbound { .. }) {
         world.inbound_passer
     } else {
         None
     };
-    let screen_screener = world.players.iter().enumerate().find_map(|(handle, player)| {
-        player.action.as_ref().and_then(|runtime| {
-            (runtime.role == crate::action::ActionIntentRole::ScreenPartner).then_some(handle)
-        })
-    });
+    let screen_screener = world
+        .players
+        .iter()
+        .enumerate()
+        .find_map(|(handle, player)| {
+            player.action.as_ref().and_then(|runtime| {
+                (runtime.role == crate::action::ActionIntentRole::ScreenPartner).then_some(handle)
+            })
+        });
     // 空切的人：高吊球的接球人必须往切点跑，且不参与绕行判定。
     // 传球在空中的接球人同样适用：球正飞向他，他停下等人传球就落地了。
     let cut_cutter = world.pass_in_flight.map(|info| info.to).or_else(|| {
-        world.players.iter().enumerate().find_map(|(handle, player)| {
-            player.action.as_ref().and_then(|runtime| {
-                (runtime.role == crate::action::ActionIntentRole::CutPartner).then_some(handle)
+        world
+            .players
+            .iter()
+            .enumerate()
+            .find_map(|(handle, player)| {
+                player.action.as_ref().and_then(|runtime| {
+                    (runtime.role == crate::action::ActionIntentRole::CutPartner).then_some(handle)
+                })
             })
-        })
     });
     for (i, p) in world.players.iter().enumerate() {
         world.body_before[i] = p.pos;
@@ -91,13 +99,12 @@ pub fn integrate(world: &mut World, dt: f64) {
                 runtime.phase == nba_domain::action_window::ActionPhase::Execution
                     && !runtime.completed
             });
-        let mut target = runtime.map_or(world.players[handle].target, |runtime| {
-            match runtime.role {
+        let mut target =
+            runtime.map_or(world.players[handle].target, |runtime| match runtime.role {
                 crate::action::ActionIntentRole::Primary => runtime.intent.to_ft,
                 crate::action::ActionIntentRole::CutPartner
                 | crate::action::ActionIntentRole::ScreenPartner => world.players[handle].target,
-            }
-        });
+            });
         if let Some(closeout_target) = world
             .defensive_actions
             .get(handle)
@@ -116,10 +123,14 @@ pub fn integrate(world: &mut World, dt: f64) {
         let before = world.players[handle].pos;
         let player_side = world.players[handle].avoidance_side;
         // 在飞传球的接球人也不绕行：球正飞向他，绕路就接不到。
-        let holder_or_actor =
-            has_action || has_defensive_action || holder == Some(handle) || cut_cutter == Some(handle);
-        let allow_forward =
-            has_action || has_defensive_action || holder == Some(handle) || cut_cutter == Some(handle);
+        let holder_or_actor = has_action
+            || has_defensive_action
+            || holder == Some(handle)
+            || cut_cutter == Some(handle);
+        let allow_forward = has_action
+            || has_defensive_action
+            || holder == Some(handle)
+            || cut_cutter == Some(handle);
         let (steered, blocker, side, blocked) = if holder_or_actor {
             (target, usize::MAX, player_side, false)
         } else {

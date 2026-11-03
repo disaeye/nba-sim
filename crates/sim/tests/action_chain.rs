@@ -1,13 +1,11 @@
 use glam::Vec2;
-use nba_sim_core::action::{
-    ActionIntent, ActionIntentRole, ActionKind, ActionRuntime, Fact,
-};
+use nba_domain::action_window::ActionPhase;
+use nba_sim_core::action::{ActionIntent, ActionIntentRole, ActionKind, ActionRuntime, Fact};
 use nba_sim_core::params::RuntimeParams;
 use nba_sim_core::resolve::drive;
 use nba_sim_core::resolve::pass::resolve_cut;
 use nba_sim_core::state::Phase;
 use nba_sim_core::world::{MatchSetup, World, TICK_SECONDS};
-use nba_domain::action_window::ActionPhase;
 use nba_sim_core::TeamSide;
 
 fn two_player_world() -> World {
@@ -109,7 +107,10 @@ fn shared_action_runtime_assigns_one_interaction_to_each_participant() {
         world.step(TICK_SECONDS);
     }
     assert!(matches!(
-        world.players[0].action.as_ref().map(|runtime| runtime.phase),
+        world.players[0]
+            .action
+            .as_ref()
+            .map(|runtime| runtime.phase),
         Some(ActionPhase::Execution)
     ));
     let phase_changes = world
@@ -284,11 +285,13 @@ fn live_shot_starts_parallel_closeout_and_changes_the_on_ball_target() {
     let completed_actions = world
         .events
         .iter()
-        .filter(|event| matches!(
-            event.fact,
-            Fact::DefensiveActionCompleted { defender: event_defender, .. }
-                if event_defender == defender
-        ))
+        .filter(|event| {
+            matches!(
+                event.fact,
+                Fact::DefensiveActionCompleted { defender: event_defender, .. }
+                    if event_defender == defender
+            )
+        })
         .count();
     assert_eq!(completed_actions, 1);
     assert!(world.events.iter().any(|event| matches!(
@@ -303,14 +306,23 @@ fn live_shot_starts_parallel_closeout_and_changes_the_on_ball_target() {
         world.step(TICK_SECONDS);
     }
     assert!(world.interactions.is_empty());
-    assert!(matches!(world.phase(), Phase::ShotFlight { .. }));
+    // 飞行是球的维度：出手后程序仍是开放进攻，球在飞行中。
+    assert!(matches!(world.phase(), Phase::Live));
     match world.pending_shot.as_ref() {
-        Some(pending_shot) => assert!(
-            pending_shot.contest > baseline_model.contest,
-            "shot contest {} must exceed baseline {}",
-            pending_shot.contest,
-            baseline_model.contest
-        ),
+        Some(pending_shot) => {
+            assert!(
+                world
+                    .ball_flight
+                    .is_some_and(|flight| flight.kind == nba_sim_core::state::FlightKind::Shot),
+                "出手尚未结算时球必须在飞行中"
+            );
+            assert!(
+                pending_shot.contest > baseline_model.contest,
+                "shot contest {} must exceed baseline {}",
+                pending_shot.contest,
+                baseline_model.contest
+            );
+        }
         None => {
             // 扑防到位后手真的碰到了球：这次出手被封盖，同样的几何后果。
             assert!(
@@ -325,11 +337,13 @@ fn live_shot_starts_parallel_closeout_and_changes_the_on_ball_target() {
     let started_actions = world
         .events
         .iter()
-        .filter(|event| matches!(
-            event.fact,
-            Fact::DefensiveActionStarted { defender: event_defender, .. }
-                if event_defender == defender
-        ))
+        .filter(|event| {
+            matches!(
+                event.fact,
+                Fact::DefensiveActionStarted { defender: event_defender, .. }
+                    if event_defender == defender
+            )
+        })
         .count();
     assert_eq!(started_actions, 1);
     assert!(world.events.iter().any(|event| matches!(
@@ -357,7 +371,11 @@ fn cut_uses_lob_flight_and_received_fact_before_control() {
     resolve_cut(&mut world, &intent);
     assert!(world.ball.holder().is_none());
     assert!(world.pass_in_flight.is_some());
-    assert!(matches!(world.phase(), Phase::PassFlight { .. }));
+    // 传球飞行是球的维度：程序仍是开放进攻。
+    assert!(matches!(world.phase(), Phase::Live));
+    assert!(world
+        .ball_flight
+        .is_some_and(|flight| flight.kind == nba_sim_core::state::FlightKind::Pass));
     assert!(!world
         .events
         .iter()

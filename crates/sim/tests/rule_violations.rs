@@ -60,10 +60,7 @@ fn a_backcourt_possession_that_never_advances_is_an_eight_second_violation() {
         Phase::DeadBall { team, .. } => assert_eq!(team, TeamSide::Away, "八秒违例后由对方发球"),
         other => panic!("八秒违例后必须停表换边，实际 {other:?}"),
     }
-    assert_eq!(
-        world.possession.id, 0,
-        "违例之后旧回合必须结清"
-    );
+    assert_eq!(world.possession.id, 0, "违例之后旧回合必须结清");
 }
 
 #[test]
@@ -81,8 +78,7 @@ fn a_loose_ball_over_the_sideline_hands_possession_to_the_opponent() {
     world.players[handler].target = world.players[handler].pos;
     // 进攻人把球碰出边线：最后触球是进攻方，按违例交出球权。
     world.last_touch = Some(handler);
-    world.ball =
-        nba_sim_core::ball::BallBody::loose(Vec2::new(2.0, 25.0), Vec2::new(-30.0, 0.0));
+    world.ball = nba_sim_core::ball::BallBody::loose(Vec2::new(2.0, 25.0), Vec2::new(-30.0, 0.0));
 
     let mut contact = false;
     for _ in 0..40 {
@@ -128,10 +124,7 @@ fn a_loose_ball_over_the_sideline_hands_possession_to_the_opponent() {
     }
     let passer = world.inbound_passer.expect("发球人必须已确定");
     let target = world.players[passer].target;
-    assert!(
-        target.x <= 4.0,
-        "出界后的发球点必须在边线一侧：{target:?}"
-    );
+    assert!(target.x <= 4.0, "出界后的发球点必须在边线一侧：{target:?}");
     assert!(
         (target.y - 25.0).abs() <= 3.0,
         "发球点必须留在出界处的纵向位置：{target:?}"
@@ -255,9 +248,8 @@ fn an_early_defensive_entry_awards_another_free_throw() {
     // 第一步发射罚球，第二步把结果定为碰筐不中并结算。
     world.step(TICK_SECONDS);
     if let Some(pending) = world.pending_shot.as_mut() {
-        pending.result = Some(nba_sim_core::resolve::shot::ShotResult::Missed {
-            rim_contact: true,
-        });
+        pending.result =
+            Some(nba_sim_core::resolve::shot::ShotResult::Missed { rim_contact: true });
     }
     world.step(TICK_SECONDS);
     assert!(
@@ -305,9 +297,8 @@ fn an_early_offensive_entry_gives_the_ball_to_the_defence() {
     });
     world.step(TICK_SECONDS);
     if let Some(pending) = world.pending_shot.as_mut() {
-        pending.result = Some(nba_sim_core::resolve::shot::ShotResult::Missed {
-            rim_contact: true,
-        });
+        pending.result =
+            Some(nba_sim_core::resolve::shot::ShotResult::Missed { rim_contact: true });
     }
     world.step(TICK_SECONDS);
     assert!(
@@ -483,9 +474,7 @@ fn a_foul_before_the_horn_still_produces_free_throws() {
     world.ball.z = world.rules.ball_radius_ft;
     let intent = nba_sim_core::action::ActionIntent {
         actor: shooter,
-        kind: nba_sim_core::action::ActionKind::Shoot(
-            nba_sim_core::action::ShotKind::CatchShoot,
-        ),
+        kind: nba_sim_core::action::ActionKind::Shoot(nba_sim_core::action::ShotKind::CatchShoot),
         target: None,
         from_ft: world.players[shooter].pos,
         to_ft: world.players[shooter].pos,
@@ -613,9 +602,7 @@ fn touching_a_descending_shot_inside_the_cylinder_is_goaltending() {
     world.ball.z = world.rules.ball_radius_ft;
     let intent = nba_sim_core::action::ActionIntent {
         actor: shooter,
-        kind: nba_sim_core::action::ActionKind::Shoot(
-            nba_sim_core::action::ShotKind::CatchShoot,
-        ),
+        kind: nba_sim_core::action::ActionKind::Shoot(nba_sim_core::action::ShotKind::CatchShoot),
         target: None,
         from_ft: spot,
         to_ft: spot,
@@ -667,9 +654,7 @@ fn an_ascending_ball_may_be_blocked_without_goaltending() {
     world.ball.z = world.rules.ball_radius_ft;
     let intent = nba_sim_core::action::ActionIntent {
         actor: shooter,
-        kind: nba_sim_core::action::ActionKind::Shoot(
-            nba_sim_core::action::ShotKind::CatchShoot,
-        ),
+        kind: nba_sim_core::action::ActionKind::Shoot(nba_sim_core::action::ShotKind::CatchShoot),
         target: None,
         from_ft: spot,
         to_ft: spot,
@@ -763,7 +748,13 @@ fn a_ball_leaving_behind_the_baseline_inbounds_from_that_baseline() {
         let before = world.events.len();
         world.step(TICK_SECONDS);
         if world.events[before..].iter().any(|event| {
-            matches!(&event.fact, Fact::BallContact { kind: "out_of_bounds", .. })
+            matches!(
+                &event.fact,
+                Fact::BallContact {
+                    kind: "out_of_bounds",
+                    ..
+                }
+            )
         }) {
             contact = true;
             break;

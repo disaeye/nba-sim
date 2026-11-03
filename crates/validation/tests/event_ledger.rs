@@ -229,16 +229,36 @@ fn check_ledger_reconciles_each_player_stat_from_events() {
     assert!(ledger.rebounds_reconcile, "{}", ledger.detail);
     assert!(ledger.turnovers_reconcile, "{}", ledger.detail);
 
-    report.box_score.home.iter_mut().for_each(|line| line.seconds = 40.1 * 60.0);
-    report.box_score.away.iter_mut().for_each(|line| line.seconds = 40.1 * 60.0);
+    report
+        .box_score
+        .home
+        .iter_mut()
+        .for_each(|line| line.seconds = 40.1 * 60.0);
+    report
+        .box_score
+        .away
+        .iter_mut()
+        .for_each(|line| line.seconds = 40.1 * 60.0);
     report.period_duration_seconds = 10.0 * 60.0;
     report.periods = 4;
     let ledger = check_ledger(9, &report);
     assert!(!ledger.minutes_reconcile);
-    assert!(ledger.detail.contains("player-time ticks"), "{}", ledger.detail);
+    assert!(
+        ledger.detail.contains("player-time ticks"),
+        "{}",
+        ledger.detail
+    );
 
-    report.box_score.home.iter_mut().for_each(|line| line.seconds = 40.0 * 60.0);
-    report.box_score.away.iter_mut().for_each(|line| line.seconds = 40.0 * 60.0);
+    report
+        .box_score
+        .home
+        .iter_mut()
+        .for_each(|line| line.seconds = 40.0 * 60.0);
+    report
+        .box_score
+        .away
+        .iter_mut()
+        .for_each(|line| line.seconds = 40.0 * 60.0);
     let ledger = check_ledger(9, &report);
     assert!(ledger.minutes_reconcile, "{}", ledger.detail);
 }

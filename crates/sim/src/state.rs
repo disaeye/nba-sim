@@ -615,17 +615,7 @@ pub enum Phase {
         resolve_at: f64,
         kind: crate::action::JumpBallKind,
     },
-    JumpBallFlight,
     Live,
-    PassFlight {
-        resolve_at: f64,
-    },
-    ShotFlight {
-        resolve_at: f64,
-    },
-    FreeThrowFlight {
-        resolve_at: f64,
-    },
     FreeThrows {
         shooter: usize,
         total: u8,
@@ -669,17 +659,7 @@ pub enum ResumePhase {
         resolve_at: f64,
         kind: crate::action::JumpBallKind,
     },
-    JumpBallFlight,
     Live,
-    PassFlight {
-        resolve_at: f64,
-    },
-    ShotFlight {
-        resolve_at: f64,
-    },
-    FreeThrowFlight {
-        resolve_at: f64,
-    },
     FreeThrows {
         shooter: usize,
         total: u8,
@@ -719,11 +699,7 @@ impl ResumePhase {
                 resolve_at,
                 kind,
             },
-            Phase::JumpBallFlight => Self::JumpBallFlight,
             Phase::Live => Self::Live,
-            Phase::PassFlight { resolve_at } => Self::PassFlight { resolve_at },
-            Phase::ShotFlight { resolve_at } => Self::ShotFlight { resolve_at },
-            Phase::FreeThrowFlight { resolve_at } => Self::FreeThrowFlight { resolve_at },
             Phase::FreeThrows {
                 shooter,
                 total,
@@ -775,11 +751,7 @@ impl ResumePhase {
                 resolve_at,
                 kind,
             },
-            Self::JumpBallFlight => Phase::JumpBallFlight,
             Self::Live => Phase::Live,
-            Self::PassFlight { resolve_at } => Phase::PassFlight { resolve_at },
-            Self::ShotFlight { resolve_at } => Phase::ShotFlight { resolve_at },
-            Self::FreeThrowFlight { resolve_at } => Phase::FreeThrowFlight { resolve_at },
             Self::FreeThrows {
                 shooter,
                 total,
@@ -843,17 +815,7 @@ impl Phase {
                 resolve_at: resolve_at + seconds,
                 kind,
             },
-            Self::JumpBallFlight => Self::JumpBallFlight,
             Self::Live => Self::Live,
-            Self::PassFlight { resolve_at } => Self::PassFlight {
-                resolve_at: resolve_at + seconds,
-            },
-            Self::ShotFlight { resolve_at } => Self::ShotFlight {
-                resolve_at: resolve_at + seconds,
-            },
-            Self::FreeThrowFlight { resolve_at } => Self::FreeThrowFlight {
-                resolve_at: resolve_at + seconds,
-            },
             Self::FreeThrows {
                 shooter,
                 total,
@@ -923,27 +885,14 @@ pub enum MatchProgram {
 impl Phase {
     pub const fn clock_advance(self) -> ClockAdvance {
         match self {
-            Self::Live | Self::PassFlight { .. } => ClockAdvance {
+            Self::Live => ClockAdvance {
                 game_clock: true,
                 shot_clock: true,
                 elapsed: true,
                 player_time: true,
             },
-            Self::JumpBallFlight => ClockAdvance {
-                game_clock: true,
-                shot_clock: false,
-                elapsed: true,
-                player_time: true,
-            },
-            Self::ShotFlight { .. } => ClockAdvance {
-                game_clock: true,
-                shot_clock: false,
-                elapsed: true,
-                player_time: true,
-            },
             Self::Pregame
             | Self::FreeThrows { .. }
-            | Self::FreeThrowFlight { .. }
             | Self::Inbound { .. }
             | Self::JumpBall { .. }
             | Self::DeadBall { .. }
@@ -954,10 +903,7 @@ impl Phase {
     }
 
     pub const fn is_live_gameplay(self) -> bool {
-        matches!(
-            self,
-            Self::Live | Self::PassFlight { .. } | Self::ShotFlight { .. } | Self::JumpBallFlight
-        )
+        matches!(self, Self::Live)
     }
 
     pub const fn stage(self, period: u32, regulation_periods: u32) -> MatchStage {
@@ -982,12 +928,10 @@ impl Phase {
 
     pub const fn program(self) -> MatchProgram {
         match self {
-            Self::Live | Self::PassFlight { .. } | Self::ShotFlight { .. } => {
-                MatchProgram::OpenPlay
-            }
+            Self::Live => MatchProgram::OpenPlay,
             Self::Inbound { .. } => MatchProgram::Inbound,
-            Self::JumpBall { .. } | Self::JumpBallFlight => MatchProgram::JumpBall,
-            Self::FreeThrows { .. } | Self::FreeThrowFlight { .. } => MatchProgram::FreeThrows,
+            Self::JumpBall { .. } => MatchProgram::JumpBall,
+            Self::FreeThrows { .. } => MatchProgram::FreeThrows,
             Self::Timeout { .. } => MatchProgram::Timeout,
             Self::DeadBall { .. } => MatchProgram::PenaltyAdministration,
             Self::PeriodBreak { .. } => MatchProgram::PeriodSettlement,
@@ -1093,7 +1037,8 @@ pub struct PossessionState {
     /// 只在掩护换防或突破得手时重算，其余时间保持不变。
     pub matchup: [usize; MAX_ON_COURT],
     /// 当前生效的选板窗口，未激活时为 `None`。
-    pub play: Option<crate::tactics::PlayWindow>,    /// 本回合是否已经叫过战术：每个回合只叫一次，之后进自由进攻。
+    pub play: Option<crate::tactics::PlayWindow>,
+    /// 本回合是否已经叫过战术：每个回合只叫一次，之后进自由进攻。
     pub play_called: bool,
     /// 快攻跑位改过的球员及其原站位：窗口结束时按这里还回去。
     pub break_return: Vec<(usize, Vec2)>,

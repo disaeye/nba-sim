@@ -122,7 +122,7 @@ fn free_throw_award(world: &World, defense: TeamSide, off_ball: bool) -> (f64, b
 pub fn intentional_foul(world: &World) -> Option<FoulPlan> {
     // 只有活球回合才能犯规。`possession.kind` 记录的是回合如何开始
     // （死球发球还是活球抢断），不能用来判断当前是否在打球。
-    if !matches!(world.phase(), crate::state::Phase::Live) {
+    if !world.live_play() {
         return None;
     }
     let offense = world.possession.team;

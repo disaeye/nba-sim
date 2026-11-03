@@ -249,9 +249,7 @@ impl LeagueProfile {
     /// 前场篮板后的进攻时钟重置：只补足至档案时长，不缩短已有时长。
     pub fn shot_clock_after_offensive_rebound(&self, current: f64, rim_contact: bool) -> f64 {
         if rim_contact {
-            current.max(f64::from(
-                self.clocks.offensive_rebound_shot_clock_seconds,
-            ))
+            current.max(f64::from(self.clocks.offensive_rebound_shot_clock_seconds))
         } else {
             current
         }

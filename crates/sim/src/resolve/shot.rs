@@ -2,7 +2,9 @@
 
 use glam::Vec2;
 
-use crate::action::{ActionIntent, ActionKind, ActionOutcome, Completion, Fact, ShotKind, StateDelta};
+use crate::action::{
+    ActionIntent, ActionKind, ActionOutcome, Completion, Fact, ShotKind, StateDelta,
+};
 use crate::draw::{purpose, Stream};
 use crate::resolve::{clamp01, shooter_zone};
 use crate::world::World;
@@ -43,15 +45,19 @@ pub fn check_goaltending(world: &mut World) -> bool {
     let reach = policy.g("goaltending_reach_ft");
     let ball_pos = world.ball.pos;
     let ball_z = world.ball.z;
-    let offender = world.players.iter().enumerate().find_map(|(index, player)| {
-        if !player.on_court || player.team == team {
-            return None;
-        }
-        let physical = crate::physical::Physical::of(player, policy);
-        let hand = physical.contest_reach_ft(policy);
-        let flat = (player.pos - ball_pos).length();
-        (flat <= reach && ball_z <= hand + 0.5).then_some(index)
-    });
+    let offender = world
+        .players
+        .iter()
+        .enumerate()
+        .find_map(|(index, player)| {
+            if !player.on_court || player.team == team {
+                return None;
+            }
+            let physical = crate::physical::Physical::of(player, policy);
+            let hand = physical.contest_reach_ft(policy);
+            let flat = (player.pos - ball_pos).length();
+            (flat <= reach && ball_z <= hand + 0.5).then_some(index)
+        });
     let Some(defender) = offender else {
         return false;
     };

@@ -20,7 +20,11 @@ fn engine_and_validator_share_the_same_rule_profile() {
         profile.league.fouls.max_personal_fouls
     );
     assert_eq!(
-        world.rules.league.clocks.offensive_rebound_shot_clock_seconds,
+        world
+            .rules
+            .league
+            .clocks
+            .offensive_rebound_shot_clock_seconds,
         profile.league.clocks.offensive_rebound_shot_clock_seconds
     );
 }

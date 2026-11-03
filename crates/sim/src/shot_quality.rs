@@ -49,8 +49,9 @@ const MIN_ARC_PROBABILITY: f32 = 1.0e-4;
 /// 给定有效筐口与穿筐概率，反解落点分散程度：球心的落点偏移服从
 /// Rayleigh 分布，半径小于筐口的概率就是 1 - exp(-r²/(2σ²))。
 fn solve_sigma(aperture: f32, swish: f32) -> f32 {
-    let log_argument = (-2.0 * (1.0 - swish.clamp(MIN_ARC_PROBABILITY, 1.0 - MIN_ARC_PROBABILITY)).ln())
-        .max(MIN_LOG_ARGUMENT);
+    let log_argument = (-2.0
+        * (1.0 - swish.clamp(MIN_ARC_PROBABILITY, 1.0 - MIN_ARC_PROBABILITY)).ln())
+    .max(MIN_LOG_ARGUMENT);
     (aperture / log_argument.sqrt()).max(MIN_LOG_ARGUMENT)
 }
 
@@ -456,25 +457,28 @@ pub fn blocking_hands(world: &World, shooter: usize) -> Vec<BlockingHand> {
         .filter(|(_, player)| player.on_court && player.team != team)
         .map(|(handle, defender)| {
             // 垂直起跳封盖在执行窗口内真的把手举得更高：摸高按策略增加。
-            let jumping = world.defensive_actions[handle].as_ref().is_some_and(|action| {
-                action.kind == crate::action::DefensiveActionKind::BlockJump
-                    && action.phase == nba_domain::action_window::ActionPhase::Execution
-            });
+            let jumping = world.defensive_actions[handle]
+                .as_ref()
+                .is_some_and(|action| {
+                    action.kind == crate::action::DefensiveActionKind::BlockJump
+                        && action.phase == nba_domain::action_window::ActionPhase::Execution
+                });
             let jump_bonus = if jumping {
                 rules.resolve.technique.block_jump_extra_reach_ft
             } else {
                 f32::default()
             };
             BlockingHand {
-            handle,
-            pos: defender.pos
-                + defender.facing.normalize_or_zero() * (rules.ball_holder_offset_ft + 0.4),
-            // 手的高度就是防守人的摸高：站立摸高加上起跳。身材与弹跳因此
-            // 决定了他能不能把手伸到球飞的轨迹上。
-            z: crate::physical::Physical::of(defender, policy).contest_reach_ft(policy) + jump_bonus,
-            radius: rules.ball_radius_ft
-                + policy.w("block_hand_radius_base_ft")
-                + defender.attribute("block") * policy.w("block_hand_radius_skill_ft"),
+                handle,
+                pos: defender.pos
+                    + defender.facing.normalize_or_zero() * (rules.ball_holder_offset_ft + 0.4),
+                // 手的高度就是防守人的摸高：站立摸高加上起跳。身材与弹跳因此
+                // 决定了他能不能把手伸到球飞的轨迹上。
+                z: crate::physical::Physical::of(defender, policy).contest_reach_ft(policy)
+                    + jump_bonus,
+                radius: rules.ball_radius_ft
+                    + policy.w("block_hand_radius_base_ft")
+                    + defender.attribute("block") * policy.w("block_hand_radius_skill_ft"),
             }
         })
         .collect()
@@ -627,7 +631,9 @@ pub fn evaluate(
             kind.as_str(),
             zone,
             release_distance,
-            measured.map(|rate| format!("{rate:.4}")).unwrap_or_else(|| "none".to_string()),
+            measured
+                .map(|rate| format!("{rate:.4}"))
+                .unwrap_or_else(|| "none".to_string()),
             target,
             skill,
             spread
@@ -654,14 +660,15 @@ pub fn evaluate(
     // 比基准更干净的出手不额外加成，因为实测曲线已经含有联盟平均干扰。
     let contest_reference = contest_reference(world, kind);
     let contest_factor_of = |contest: f32| {
-        (1.0 - (contest - contest_reference).max(0.0) * policy.w("shot_quality_contest_sensitivity"))
-            .max(MIN_SIGMA_FACTOR)
+        (1.0 - (contest - contest_reference).max(0.0)
+            * policy.w("shot_quality_contest_sensitivity"))
+        .max(MIN_SIGMA_FACTOR)
     };
     // 出手时的移动同样压低命中率：移动基准是全速的比例，基准处因子为 1。
     let movement_factor = (1.0
         - (movement - movement_reference(world, kind)).max(0.0)
             * policy.w("shot_aim_movement_sensitivity"))
-        .max(MIN_SIGMA_FACTOR);
+    .max(MIN_SIGMA_FACTOR);
     let gather_factor = if phase == BallPhase::Gather {
         policy.w("shot_gather_sigma_scale")
     } else {
@@ -690,8 +697,7 @@ pub fn evaluate(
         let mut sigma_reference = solve_sigma(aperture, conditional);
         for _ in 0..4 {
             let contact = 1.0
-                - (-(contact_radius * contact_radius) /
-                    (2.0 * sigma_reference * sigma_reference))
+                - (-(contact_radius * contact_radius) / (2.0 * sigma_reference * sigma_reference))
                     .exp();
             let arc_target = ((conditional - rim_in * contact) / (1.0 - rim_in).max(MIN_SURVIVE))
                 .clamp(MIN_ARC_PROBABILITY, MAX_ARC_PROBABILITY);
@@ -715,15 +721,18 @@ pub fn evaluate(
         // 球径带以内的出手才碰得到筐沿，偏离更远的球直接飞出。执行层
         // 用同一个筐口、同一个接触带、同一个补进概率抽样，两边同账。
         let swish = 1.0 - (-(aperture * aperture) / (2.0 * sigma * sigma)).exp();
-        let contact = 1.0
-            - (-(contact_radius * contact_radius) / (2.0 * sigma * sigma)).exp();
+        let contact = 1.0 - (-(contact_radius * contact_radius) / (2.0 * sigma * sigma)).exp();
         (swish + (contact - swish) * rim_in).clamp(0.0, 1.0)
     };
     let p_make = (p_make_cond * survive).clamp(0.0, 1.0);
     // 体能直接压低出手概率：累了的人脚步与手腕都跟不上，落点误差更大。
     // 耐力属性把同一次疲劳放大，均值保持不变。
     let fatigue = world.players[shooter].stamina.clamp(0.0, 1.0);
-    let endurance = world.players[shooter].data.attributes.stamina.clamp(0.0, 1.0);
+    let endurance = world.players[shooter]
+        .data
+        .attributes
+        .stamina
+        .clamp(0.0, 1.0);
     let fatigue_scale = 1.0 + 1.2 * (0.5 - endurance);
     let p_make = (p_make
         * (1.0 - policy.w("shot_fatigue_penalty") * (1.0 - fatigue) * fatigue_scale))

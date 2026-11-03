@@ -164,7 +164,11 @@ fn nba_foul_out_with_empty_bench_assesses_team_technical_and_resumes_foul_proced
             _ => None,
         })
         .expect("foul-out technical is recorded");
-    assert!(matches!(world.phase(), Phase::FreeThrowFlight { .. }));
+    // 球队技术犯规的罚球在飞：程序是罚球，球在飞行中。
+    assert!(matches!(world.phase(), Phase::FreeThrows { .. }));
+    assert!(world
+        .ball_flight
+        .is_some_and(|flight| flight.kind == nba_sim_core::state::FlightKind::FreeThrow));
     assert!(world.players[fouler].disqualified);
     assert!(world.players[fouler].retained_after_foul_limit);
     assert_eq!(world.fouls[World::team_index(team)].technical, 1);
@@ -182,20 +186,39 @@ fn nba_foul_out_with_empty_bench_assesses_team_technical_and_resumes_foul_proced
     let mut saw_free_throw = false;
     for _ in 0..800 {
         world.step(TICK_SECONDS);
-        saw_free_throw |= world.events.iter().any(|event| matches!(
-            event.fact,
-            nba_sim_core::action::Fact::FreeThrow { foul_id, .. } if foul_id == technical_id
-        ));
-        if saw_free_throw && matches!(world.phase(), Phase::DeadBall { team: TeamSide::Away, .. }) {
+        saw_free_throw |= world.events.iter().any(|event| {
+            matches!(
+                event.fact,
+                nba_sim_core::action::Fact::FreeThrow { foul_id, .. } if foul_id == technical_id
+            )
+        });
+        if saw_free_throw
+            && matches!(
+                world.phase(),
+                Phase::DeadBall {
+                    team: TeamSide::Away,
+                    ..
+                }
+            )
+        {
             break;
         }
     }
     assert!(saw_free_throw, "team technical free throw did not resolve");
-    assert!(matches!(world.phase(), Phase::DeadBall { team: TeamSide::Away, .. }));
+    assert!(matches!(
+        world.phase(),
+        Phase::DeadBall {
+            team: TeamSide::Away,
+            ..
+        }
+    ));
     assert_eq!(world.possession.team, TeamSide::Away);
     assert_eq!(world.possession.id, possession_id);
     assert_eq!(world.possession_count, possession_count);
-    assert!(world.possession_log.iter().all(|record| record.id != possession_id));
+    assert!(world
+        .possession_log
+        .iter()
+        .all(|record| record.id != possession_id));
     assert_eq!(
         world
             .events

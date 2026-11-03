@@ -345,8 +345,7 @@ pub fn assign_offense_jobs(world: &mut World) {
                 flight.kind,
                 crate::state::FlightKind::Shot | crate::state::FlightKind::FreeThrow
             )
-        })
-            && (world.players[handle].pos - world.hoop_for(offense)).length() < 12.0
+        }) && (world.players[handle].pos - world.hoop_for(offense)).length() < 12.0
         {
             OffenseJob::Rebound
         } else {

@@ -187,9 +187,7 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
     // 而不是只用一个联盟标量。三分占比高时预期的前场篮板率会不同。
     let zone_names = ["rim", "near", "mid", "three"];
     let zone_shots: Vec<f64> = (0..4)
-        .map(|index| {
-            (report.shot_zone_counts[0][index] + report.shot_zone_counts[1][index]) as f64
-        })
+        .map(|index| (report.shot_zone_counts[0][index] + report.shot_zone_counts[1][index]) as f64)
         .collect();
     let zone_total: f64 = zone_shots.iter().sum();
     let zone_rate = if zone_total > f64::default() {
@@ -583,8 +581,7 @@ fn push_process_layers(gate: &mut GateReport, report: &GameReport, params: &Para
         .possessions
         .iter()
         .filter(|record| {
-            record.kind == crate::state::PossessionKind::Live
-                && record.duration >= activation_after
+            record.kind == crate::state::PossessionKind::Live && record.duration >= activation_after
         })
         .count();
     push_process_range(

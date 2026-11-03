@@ -408,7 +408,11 @@ fn a_stronger_screener_pushes_the_defender_further() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     let mut pushed = Vec::new();
     for strength in [0.10f32, 0.95] {
-        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 151);
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            params.clone(),
+            151,
+        );
         let offense = world.on_court(TeamSide::Home).as_slice()[0];
         let screener = world.on_court(TeamSide::Home).as_slice()[1];
         let defender = world.on_court(TeamSide::Away).as_slice()[0];
@@ -454,7 +458,11 @@ fn a_stronger_screener_pushes_the_defender_further() {
 fn the_screener_rolls_or_pops_after_setting_a_screen() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     for sagging in [true, false] {
-        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 167);
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            params.clone(),
+            167,
+        );
         let holder = world.on_court(TeamSide::Home).as_slice()[0];
         let screener = world.on_court(TeamSide::Home).as_slice()[1];
         let marker = world.on_court(TeamSide::Away).as_slice()[0];
@@ -551,7 +559,10 @@ fn only_gather_steps_beyond_the_allowance_are_travels() {
     let legal_turnover = world.events[before..].iter().any(|event| {
         matches!(
             &event.fact,
-            Fact::Turnover { kind: TurnoverKind::Travel, .. }
+            Fact::Turnover {
+                kind: TurnoverKind::Travel,
+                ..
+            }
         )
     });
     assert_eq!(
@@ -564,9 +575,11 @@ fn only_gather_steps_beyond_the_allowance_are_travels() {
     // 走步：迈出的距离超过容限，且判罚不由随机频率决定。
     let mut caught = false;
     for seed_step in 0..8u64 {
-        let mut world = World::new(MatchSetup::builtin(GameRules::default()),
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
             Params::load(&workspace_calibration_dir()).expect("calibration tables load"),
-            173 + seed_step);
+            173 + seed_step,
+        );
         let finisher = world.on_court(TeamSide::Home).as_slice()[0];
         for (index, player) in world.players.iter_mut().enumerate() {
             player.on_court = index == finisher;
@@ -597,7 +610,10 @@ fn only_gather_steps_beyond_the_allowance_are_travels() {
             && world.events[before..].iter().any(|event| {
                 matches!(
                     &event.fact,
-                    Fact::Turnover { kind: TurnoverKind::Travel, .. }
+                    Fact::Turnover {
+                        kind: TurnoverKind::Travel,
+                        ..
+                    }
                 )
             });
         if travel {
@@ -667,11 +683,7 @@ fn a_charge_requires_a_planted_defender() {
             let toward = (hoop - spot).normalize_or_zero();
             world.players[defender].pos = spot + toward * 2.5;
             world.players[defender].target = world.players[defender].pos;
-            world.players[defender].vel = if planted {
-                Vec2::ZERO
-            } else {
-                toward * 9.0
-            };
+            world.players[defender].vel = if planted { Vec2::ZERO } else { toward * 9.0 };
             world.possession.team = TeamSide::Home;
             world.start_possession(TeamSide::Home, PossessionKind::Live);
             world.set_phase(Phase::Live);
@@ -693,7 +705,10 @@ fn a_charge_requires_a_planted_defender() {
             if world.events[before..].iter().any(|event| {
                 matches!(
                     &event.fact,
-                    Fact::Foul { kind: nba_domain::event::FoulKind::Offensive, .. }
+                    Fact::Foul {
+                        kind: nba_domain::event::FoulKind::Offensive,
+                        ..
+                    }
                 )
             }) {
                 charges += 1;
@@ -703,8 +718,14 @@ fn a_charge_requires_a_planted_defender() {
     };
     let planted = planted_charges(true);
     let sliding = planted_charges(false);
-    assert!(planted > 0, "站定的防守人必须能造进攻犯规，观测到 {planted}");
-    assert_eq!(sliding, 0, "滑步中的防守人不得造成进攻犯规，观测到 {sliding}");
+    assert!(
+        planted > 0,
+        "站定的防守人必须能造进攻犯规，观测到 {planted}"
+    );
+    assert_eq!(
+        sliding, 0,
+        "滑步中的防守人不得造成进攻犯规，观测到 {sliding}"
+    );
 }
 
 /// 紧逼盯防五秒：收球后被贴身盯住不动，超过限时就是违例。
@@ -745,7 +766,10 @@ fn holding_the_ball_closely_guarded_for_five_seconds_is_a_violation() {
         for event in &world.events[before..] {
             if matches!(
                 &event.fact,
-                Fact::Turnover { kind: TurnoverKind::CloselyGuarded, .. }
+                Fact::Turnover {
+                    kind: TurnoverKind::CloselyGuarded,
+                    ..
+                }
             ) {
                 violation = Some(world.now());
             }
@@ -796,7 +820,10 @@ fn the_closely_guarded_timer_resets_and_spares_the_dribbler() {
             .filter(|event| {
                 matches!(
                     &event.fact,
-                    Fact::Turnover { kind: TurnoverKind::CloselyGuarded, .. }
+                    Fact::Turnover {
+                        kind: TurnoverKind::CloselyGuarded,
+                        ..
+                    }
                 )
             })
             .count()
@@ -842,7 +869,11 @@ fn the_closely_guarded_timer_resets_and_spares_the_dribbler() {
 fn a_defender_in_the_lane_denies_the_pass() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     let build = |with_denier: bool| {
-        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 191);
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            params.clone(),
+            191,
+        );
         let passer = world.on_court(TeamSide::Home).as_slice()[0];
         let cutter = world.on_court(TeamSide::Home).as_slice()[2];
         let denier = world.on_court(TeamSide::Away).as_slice()[0];
@@ -1028,9 +1059,9 @@ fn a_possession_change_sends_every_defender_back() {
             let before = world.events.len();
             world.step(TICK_SECONDS);
             guard += 1;
-            let started = world.events[before..].iter().any(|event| {
-                matches!(&event.fact, Fact::PossessionStarted { .. })
-            });
+            let started = world.events[before..]
+                .iter()
+                .any(|event| matches!(&event.fact, Fact::PossessionStarted { .. }));
             if !started {
                 continue;
             }
@@ -1115,7 +1146,11 @@ fn the_on_ball_defender_closes_the_gap() {
 fn a_step_back_shot_creates_space_before_the_release() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     let separation_after = |kind: ShotKind| -> f32 {
-        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 199);
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            params.clone(),
+            199,
+        );
         let shooter = world.on_court(TeamSide::Home).as_slice()[0];
         let defender = world.on_court(TeamSide::Away).as_slice()[0];
         for (index, player) in world.players.iter_mut().enumerate() {
@@ -1164,7 +1199,11 @@ fn a_step_back_shot_creates_space_before_the_release() {
 fn a_stronger_backdown_gets_closer_to_the_rim() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     let target_distance = |strength: f32| -> f32 {
-        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 211);
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            params.clone(),
+            211,
+        );
         let offense = world.on_court(TeamSide::Home).as_slice()[0];
         let defender = world.on_court(TeamSide::Away).as_slice()[0];
         for (index, player) in world.players.iter_mut().enumerate() {
@@ -1200,7 +1239,10 @@ fn a_stronger_backdown_gets_closer_to_the_rim() {
         let fouled = world.events[before..].iter().any(|event| {
             matches!(
                 &event.fact,
-                Fact::Foul { kind: nba_domain::event::FoulKind::Offensive, .. }
+                Fact::Foul {
+                    kind: nba_domain::event::FoulKind::Offensive,
+                    ..
+                }
             )
         });
         assert!(
@@ -1222,52 +1264,57 @@ fn a_stronger_backdown_gets_closer_to_the_rim() {
 #[test]
 fn post_footwork_follows_the_defenders_stance() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
-    let run = |defender_vel: f32, offset_y: f32, strength: f32, defense: f32| -> (&'static str, f32) {
-        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 223);
-        let offense = world.on_court(TeamSide::Home).as_slice()[0];
-        let defender = world.on_court(TeamSide::Away).as_slice()[0];
-        for (index, player) in world.players.iter_mut().enumerate() {
-            player.on_court = index == offense || index == defender;
-            player.vel = Vec2::ZERO;
-        }
-        world.players[offense].data.attributes.strength = strength;
-        world.players[defender].data.attributes.strength = defense;
-        world.players[defender].data.attributes.defense_interior = defense;
-        let hoop = world.hoop_for(TeamSide::Home);
-        let spot = hoop + Vec2::new(-8.0, offset_y);
-        world.players[offense].pos = spot;
-        world.players[offense].target = spot;
-        world.players[offense].facing = (hoop - spot).normalize_or_zero();
-        world.players[defender].pos = spot + Vec2::new(-2.0, 0.0);
-        world.players[defender].target = world.players[defender].pos;
-        world.players[defender].vel = Vec2::new(-defender_vel, 0.0);
-        world.possession.team = TeamSide::Home;
-        world.start_possession(TeamSide::Home, PossessionKind::Live);
-        world.set_phase(Phase::Live);
-        world.ball.set_held(offense);
-        world.ball.pos = spot;
-        world.ball.z = world.rules.ball_radius_ft;
-        let intent = ActionIntent {
-            actor: offense,
-            kind: ActionKind::PostUp,
-            target: None,
-            from_ft: spot,
-            to_ft: spot,
-            start_time: world.now(),
-            duration: 0.8,
+    let run =
+        |defender_vel: f32, offset_y: f32, strength: f32, defense: f32| -> (&'static str, f32) {
+            let mut world = World::new(
+                MatchSetup::builtin(GameRules::default()),
+                params.clone(),
+                223,
+            );
+            let offense = world.on_court(TeamSide::Home).as_slice()[0];
+            let defender = world.on_court(TeamSide::Away).as_slice()[0];
+            for (index, player) in world.players.iter_mut().enumerate() {
+                player.on_court = index == offense || index == defender;
+                player.vel = Vec2::ZERO;
+            }
+            world.players[offense].data.attributes.strength = strength;
+            world.players[defender].data.attributes.strength = defense;
+            world.players[defender].data.attributes.defense_interior = defense;
+            let hoop = world.hoop_for(TeamSide::Home);
+            let spot = hoop + Vec2::new(-8.0, offset_y);
+            world.players[offense].pos = spot;
+            world.players[offense].target = spot;
+            world.players[offense].facing = (hoop - spot).normalize_or_zero();
+            world.players[defender].pos = spot + Vec2::new(-2.0, 0.0);
+            world.players[defender].target = world.players[defender].pos;
+            world.players[defender].vel = Vec2::new(-defender_vel, 0.0);
+            world.possession.team = TeamSide::Home;
+            world.start_possession(TeamSide::Home, PossessionKind::Live);
+            world.set_phase(Phase::Live);
+            world.ball.set_held(offense);
+            world.ball.pos = spot;
+            world.ball.z = world.rules.ball_radius_ft;
+            let intent = ActionIntent {
+                actor: offense,
+                kind: ActionKind::PostUp,
+                target: None,
+                from_ft: spot,
+                to_ft: spot,
+                start_time: world.now(),
+                duration: 0.8,
+            };
+            let before = world.events.len();
+            nba_sim_core::resolve::drive::resolve_post(&mut world, &intent);
+            let kind = world.events[before..]
+                .iter()
+                .find_map(|event| match &event.fact {
+                    Fact::PostUp { kind, .. } => Some(*kind),
+                    _ => None,
+                })
+                .expect("背身必须发出带步法的事实");
+            let distance = (world.players[offense].target - hoop).length();
+            (kind, distance)
         };
-        let before = world.events.len();
-        nba_sim_core::resolve::drive::resolve_post(&mut world, &intent);
-        let kind = world.events[before..]
-            .iter()
-            .find_map(|event| match &event.fact {
-                Fact::PostUp { kind, .. } => Some(*kind),
-                _ => None,
-            })
-            .expect("背身必须发出带步法的事实");
-        let distance = (world.players[offense].target - hoop).length();
-        (kind, distance)
-    };
     let (planted_kind, _) = run(0.0, 0.0, 0.9, 0.1);
     let (retreating_kind, _) = run(9.0, 0.0, 0.9, 0.1);
     assert_eq!(planted_kind, "up_and_under", "站定的防守人必须走上下步");
@@ -1297,20 +1344,17 @@ fn a_deflected_pass_becomes_a_loose_ball_decided_by_control() {
             // 被点到的球要么成为松球争抢，要么直接被碰到球的人控下来
             // 记作失误，要么两人同时抱住形成争球；三种都是控制权的转移。
             // 窗口只看到随后六十个事件，不能拿很久以后的结果来充数。
-            let settled = report.events[index + 1..]
-                .iter()
-                .take(60)
-                .any(|other| {
-                    matches!(
-                        &other.fact,
-                        Fact::LooseBallRecovered { .. }
-                            | Fact::Turnover { .. }
-                            | Fact::PossessionEnded {
-                                end_reason: nba_domain::event::PossessionEndCause::HeldBall,
-                                ..
-                            }
-                    )
-                });
+            let settled = report.events[index + 1..].iter().take(60).any(|other| {
+                matches!(
+                    &other.fact,
+                    Fact::LooseBallRecovered { .. }
+                        | Fact::Turnover { .. }
+                        | Fact::PossessionEnded {
+                            end_reason: nba_domain::event::PossessionEndCause::HeldBall,
+                            ..
+                        }
+                )
+            });
             assert!(
                 settled,
                 "被点到的传球必须进入松球争夺或形成争球（seed {seed}, defender {defender}）"
@@ -1324,8 +1368,17 @@ fn a_deflected_pass_becomes_a_loose_ball_decided_by_control() {
 #[test]
 fn fakes_and_protection_keep_the_pivot_foot_planted() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
-    for fake in [FakeKind::Shot, FakeKind::Pass, FakeKind::JabStep, FakeKind::Hesitation] {
-        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 227);
+    for fake in [
+        FakeKind::Shot,
+        FakeKind::Pass,
+        FakeKind::JabStep,
+        FakeKind::Hesitation,
+    ] {
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            params.clone(),
+            227,
+        );
         let actor = world.on_court(TeamSide::Home).as_slice()[0];
         let defender = world.on_court(TeamSide::Away).as_slice()[0];
         for (index, player) in world.players.iter_mut().enumerate() {
@@ -1364,7 +1417,11 @@ fn fakes_and_protection_keep_the_pivot_foot_planted() {
         );
     }
     for protect in [ProtectKind::FaceUp, ProtectKind::Post, ProtectKind::Spin] {
-        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 229);
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            params.clone(),
+            229,
+        );
         let actor = world.on_court(TeamSide::Home).as_slice()[0];
         let defender = world.on_court(TeamSide::Away).as_slice()[0];
         for (index, player) in world.players.iter_mut().enumerate() {
@@ -1414,7 +1471,8 @@ fn a_tie_for_the_ball_enters_a_held_ball_jump_ball() {
     let home_mate = world.on_court(TeamSide::Home).as_slice()[1];
     let away_mate = world.on_court(TeamSide::Away).as_slice()[1];
     for (index, player) in world.players.iter_mut().enumerate() {
-        player.on_court = index == offense || index == defense || index == home_mate || index == away_mate;
+        player.on_court =
+            index == offense || index == defense || index == home_mate || index == away_mate;
         player.vel = Vec2::ZERO;
     }
     let ball_spot = Vec2::new(62.0, 25.0);
@@ -1442,7 +1500,13 @@ fn a_tie_for_the_ball_enters_a_held_ball_jump_ball() {
     let before = world.events.len();
     nba_sim_core::ball::step(&mut world, TICK_SECONDS);
     let held_ball = world.events[before..].iter().any(|event| {
-        matches!(&event.fact, Fact::BallContact { kind: "held_ball", .. })
+        matches!(
+            &event.fact,
+            Fact::BallContact {
+                kind: "held_ball",
+                ..
+            }
+        )
     });
     assert!(held_ball, "同时够到球必须发出停表事实");
     assert!(
@@ -1460,11 +1524,7 @@ fn a_tie_for_the_ball_enters_a_held_ball_jump_ball() {
     // 参跳四人必须走到圈边：整个过程没有瞬移。
     let mut guard = 0;
     loop {
-        let prior: Vec<Vec2> = world
-            .players
-            .iter()
-            .map(|player| player.pos)
-            .collect();
+        let prior: Vec<Vec2> = world.players.iter().map(|player| player.pos).collect();
         world.step(TICK_SECONDS);
         guard += 1;
         for (index, player) in world.players.iter().enumerate() {
@@ -1499,13 +1559,19 @@ fn a_tie_for_the_ball_enters_a_held_ball_jump_ball() {
 fn a_trap_raises_poke_risk_and_protection_helps_the_exit() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     let build = |trapped: bool, protection: bool| {
-        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 239);
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            params.clone(),
+            239,
+        );
         let holder = world.on_court(TeamSide::Home).as_slice()[0];
         let receiver = world.on_court(TeamSide::Home).as_slice()[1];
         let first = world.on_court(TeamSide::Away).as_slice()[0];
         let second = world.on_court(TeamSide::Away).as_slice()[1];
         for (index, player) in world.players.iter_mut().enumerate() {
-            player.on_court = index == holder || index == receiver || index == first
+            player.on_court = index == holder
+                || index == receiver
+                || index == first
                 || (trapped && index == second);
             player.vel = Vec2::ZERO;
         }
@@ -1535,7 +1601,8 @@ fn a_trap_raises_poke_risk_and_protection_helps_the_exit() {
     };
 
     let (single, holder, receiver, thief) = build(false, false);
-    let single_poke = nba_sim_core::resolve::poke::poke_success(&single, thief, holder, 2.0, single.now());
+    let single_poke =
+        nba_sim_core::resolve::poke::poke_success(&single, thief, holder, 2.0, single.now());
     let single_pass = nba_sim_core::value::pass_completion_probability(
         &single,
         holder,
@@ -1544,7 +1611,8 @@ fn a_trap_raises_poke_risk_and_protection_helps_the_exit() {
     );
     let (trapped, holder, receiver, thief) = build(true, false);
     assert!(trapped.trapped(holder), "两名防守人贴身必须判定为包夹");
-    let trapped_poke = nba_sim_core::resolve::poke::poke_success(&trapped, thief, holder, 2.0, trapped.now());
+    let trapped_poke =
+        nba_sim_core::resolve::poke::poke_success(&trapped, thief, holder, 2.0, trapped.now());
     let trapped_pass = nba_sim_core::value::pass_completion_probability(
         &trapped,
         holder,
@@ -1552,7 +1620,8 @@ fn a_trap_raises_poke_risk_and_protection_helps_the_exit() {
         nba_sim_core::action::PassKind::Chest,
     );
     let (protected, holder, receiver, thief) = build(true, true);
-    let protected_poke = nba_sim_core::resolve::poke::poke_success(&protected, thief, holder, 2.0, protected.now());
+    let protected_poke =
+        nba_sim_core::resolve::poke::poke_success(&protected, thief, holder, 2.0, protected.now());
     let protected_pass = nba_sim_core::value::pass_completion_probability(
         &protected,
         holder,
@@ -1587,7 +1656,11 @@ fn a_trap_raises_poke_risk_and_protection_helps_the_exit() {
 fn a_contested_lane_finish_takes_a_euro_step_around_the_defender() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     let lateral_offset = |blocked: bool| -> f32 {
-        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 241);
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            params.clone(),
+            241,
+        );
         let finisher = world.on_court(TeamSide::Home).as_slice()[0];
         let defender = world.on_court(TeamSide::Away).as_slice()[0];
         for (index, player) in world.players.iter_mut().enumerate() {
@@ -1632,16 +1705,14 @@ fn a_contested_lane_finish_takes_a_euro_step_around_the_defender() {
         straight.abs() < 0.2,
         "无人堵路时收球步必须走直线：{straight:.2}"
     );
-    assert!(
-        around.abs() > 1.0,
-        "有人堵路时必须绕着走：{around:.2}"
-    );
+    assert!(around.abs() > 1.0, "有人堵路时必须绕着走：{around:.2}");
 }
 
 /// 无球切入路线：真实比赛里必须用到不止一种路线，且每种路线都被记录。
 #[test]
 fn real_games_use_several_cut_routes() {
-    let mut counts: std::collections::BTreeMap<&'static str, u32> = std::collections::BTreeMap::new();
+    let mut counts: std::collections::BTreeMap<&'static str, u32> =
+        std::collections::BTreeMap::new();
     for seed in 1..=4u64 {
         let report = world(seed).run();
         for event in &report.events {
@@ -1652,10 +1723,7 @@ fn real_games_use_several_cut_routes() {
             }
         }
     }
-    assert!(
-        counts.len() >= 2,
-        "切入路线必须不止一种，实际 {counts:?}"
-    );
+    assert!(counts.len() >= 2, "切入路线必须不止一种，实际 {counts:?}");
     assert!(
         counts.get("basket").copied().unwrap_or(0) > 0,
         "直切篮下仍是主要路线：{counts:?}"
@@ -1669,13 +1737,18 @@ fn screen_navigation_route_decides_the_defender_target() {
     use nba_sim_core::state::{DefenseResponsibility, ScreenRead};
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     let run = |route: DefenderRoute| {
-        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 251);
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            params.clone(),
+            251,
+        );
         let carrier = world.on_court(TeamSide::Home).as_slice()[0];
         let screener = world.on_court(TeamSide::Home).as_slice()[1];
         let guard = world.on_court(TeamSide::Away).as_slice()[0];
         let helper = world.on_court(TeamSide::Away).as_slice()[1];
         for (index, player) in world.players.iter_mut().enumerate() {
-            player.on_court = index == carrier || index == screener || index == guard || index == helper;
+            player.on_court =
+                index == carrier || index == screener || index == guard || index == helper;
             player.vel = Vec2::ZERO;
         }
         let hoop = world.hoop_for(TeamSide::Home);
@@ -1752,13 +1825,18 @@ fn a_defender_out_of_position_recovers_to_his_man() {
     use nba_sim_core::state::{DefenseResponsibility, TargetKind};
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     let run = |gap_ft: f32| {
-        let mut world = World::new(MatchSetup::builtin(GameRules::default()), params.clone(), 257);
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            params.clone(),
+            257,
+        );
         let carrier = world.on_court(TeamSide::Home).as_slice()[0];
         let man = world.on_court(TeamSide::Home).as_slice()[1];
         let lost = world.on_court(TeamSide::Away).as_slice()[0];
         let ball_guard = world.on_court(TeamSide::Away).as_slice()[1];
         for (index, player) in world.players.iter_mut().enumerate() {
-            player.on_court = index == carrier || index == man || index == lost || index == ball_guard;
+            player.on_court =
+                index == carrier || index == man || index == lost || index == ball_guard;
             player.vel = Vec2::ZERO;
         }
         let hoop = world.hoop_for(TeamSide::Home);

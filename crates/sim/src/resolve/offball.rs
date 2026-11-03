@@ -7,12 +7,11 @@
 
 use crate::action::{ActionIntent, ActionKind, ActionOutcome, Completion, Fact, StateDelta};
 use crate::draw::{purpose, Stream};
-use crate::state::Phase;
 use crate::world::World;
 
 /// 每个 tick 遍历防守人与其附近无球球员的配对，按相对移动的速度抽样。
 pub fn step(world: &mut World, dt: f64) {
-    if !matches!(world.phase(), Phase::Live) {
+    if !world.live_play() {
         return;
     }
     let Some(holder) = world.holder() else {
@@ -69,7 +68,11 @@ pub fn step(world: &mut World, dt: f64) {
 ///
 /// 与持球人发起的空切（高吊球送到切入点）不同，这条路线的产出是位置与
 /// 接球窗口：切入人真的跑到篮下，后续的传球候选按他的新位置估值。
-pub fn cut_route(world: &mut World, intent: &ActionIntent, kind: crate::action::CutKind) -> ActionOutcome {
+pub fn cut_route(
+    world: &mut World,
+    intent: &ActionIntent,
+    kind: crate::action::CutKind,
+) -> ActionOutcome {
     let cutter = intent.actor;
     // 到位容差按接球半径量级取：停在接球点一个身位以内就算切到了。
     let tolerance = world

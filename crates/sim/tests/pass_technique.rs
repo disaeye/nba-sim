@@ -43,8 +43,14 @@ fn fixture(seed: u64, gap_ft: f32, along_ft: f32, lateral_ft: f32) -> (World, us
 fn each_pass_technique_changes_the_completion_probability() {
     // 近距离交接：防守人贴在两人之间。
     let (close, passer, receiver) = fixture(301, 7.0, 3.5, 1.9);
-    let handoff = nba_sim_core::value::pass_completion_probability(&close, passer, receiver, PassKind::Handoff);
-    let chest_close = nba_sim_core::value::pass_completion_probability(&close, passer, receiver, PassKind::Chest);
+    let handoff = nba_sim_core::value::pass_completion_probability(
+        &close,
+        passer,
+        receiver,
+        PassKind::Handoff,
+    );
+    let chest_close =
+        nba_sim_core::value::pass_completion_probability(&close, passer, receiver, PassKind::Chest);
     assert!(
         handoff > chest_close,
         "手递手必须比胸前传球更安全：{handoff:.3} vs {chest_close:.3}"
@@ -52,10 +58,22 @@ fn each_pass_technique_changes_the_completion_probability() {
 
     // 长距离推进：防守人堵在线路上。
     let (far, passer, receiver) = fixture(307, 22.0, 11.0, 2.6);
-    let overhead = nba_sim_core::value::pass_completion_probability(&far, passer, receiver, PassKind::Overhead);
-    let chest = nba_sim_core::value::pass_completion_probability(&far, passer, receiver, PassKind::Chest);
-    let one_hand = nba_sim_core::value::pass_completion_probability(&far, passer, receiver, PassKind::OneHand);
-    let behind_back = nba_sim_core::value::pass_completion_probability(&far, passer, receiver, PassKind::BehindBack);
+    let overhead = nba_sim_core::value::pass_completion_probability(
+        &far,
+        passer,
+        receiver,
+        PassKind::Overhead,
+    );
+    let chest =
+        nba_sim_core::value::pass_completion_probability(&far, passer, receiver, PassKind::Chest);
+    let one_hand =
+        nba_sim_core::value::pass_completion_probability(&far, passer, receiver, PassKind::OneHand);
+    let behind_back = nba_sim_core::value::pass_completion_probability(
+        &far,
+        passer,
+        receiver,
+        PassKind::BehindBack,
+    );
     assert!(
         overhead > chest,
         "头顶传球必须从手上方过去：{overhead:.3} vs {chest:.3}"

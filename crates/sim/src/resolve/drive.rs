@@ -125,7 +125,10 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
                     crate::adjudicate::StoppageCause::PossessionChange,
                     crate::adjudicate::RestartPlan::Live { team: team.other() },
                 )
-                .ending(nba_domain::event::PossessionEndCause::TurnoverSteal, "lost_ball"),
+                .ending(
+                    nba_domain::event::PossessionEndCause::TurnoverSteal,
+                    "lost_ball",
+                ),
             );
             return ActionOutcome {
                 actor: driver,
@@ -190,7 +193,10 @@ fn book_travel(world: &mut World, actor: usize, team: crate::TeamSide) {
             crate::adjudicate::StoppageCause::Violation(crate::adjudicate::ViolationKind::Travel),
             crate::adjudicate::RestartPlan::Live { team: team.other() },
         )
-        .ending(nba_domain::event::PossessionEndCause::TurnoverTravel, "travel"),
+        .ending(
+            nba_domain::event::PossessionEndCause::TurnoverTravel,
+            "travel",
+        ),
     );
 }
 
@@ -223,8 +229,7 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
             ((player.pos - closest).length(), t)
         })
         .filter(|(distance, t)| {
-            *distance <= world.params.policy.g("euro_step_defender_ft")
-                && (0.2..=0.8).contains(t)
+            *distance <= world.params.policy.g("euro_step_defender_ft") && (0.2..=0.8).contains(t)
         })
         .min_by(|left, right| left.0.total_cmp(&right.0))
         .map(|(_, _)| ())

@@ -348,9 +348,11 @@ fn a_poor_free_throw_big_is_hacked_only_before_the_final_window() {
 #[test]
 fn a_blown_out_team_uses_its_bench_at_the_next_dead_ball() {
     let mut world = world(1);
-    world
-        .clock
-        .set_regulation_clock(4, 240.0, world.rules.league.clocks.shot_clock_seconds as f64);
+    world.clock.set_regulation_clock(
+        4,
+        240.0,
+        world.rules.league.clocks.shot_clock_seconds as f64,
+    );
     set_margin(&mut world, TeamSide::Home, 24);
     let core: Vec<usize> = world
         .on_court(TeamSide::Home)

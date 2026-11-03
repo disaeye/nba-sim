@@ -227,15 +227,15 @@ fn step_loose(world: &mut World, dt: f64) {
     let radius = world.rules.ball_radius_ft;
     let restitution = world.rules.loose_ball_player_restitution;
     let dt = dt as f32;
-    if matches!(world.phase(), crate::state::Phase::JumpBall { .. }) {
-        step_jump_ball_toss(world, dt);
-        return;
-    }
     if world
         .ball_flight
         .is_some_and(|flight| flight.kind == crate::state::FlightKind::JumpBall)
     {
         step_jump_ball_flight(world, dt);
+        return;
+    }
+    if matches!(world.phase(), crate::state::Phase::JumpBall { .. }) {
+        step_jump_ball_toss(world, dt);
         return;
     }
     let mut ball = world.ball.clone();
@@ -575,9 +575,7 @@ fn try_control_loose(world: &mut World) {
                 .on_court(state.offense)
                 .as_slice()
                 .iter()
-                .any(|handle| {
-                    (world.players[*handle].pos - player.pos).length() <= radius
-                });
+                .any(|handle| (world.players[*handle].pos - player.pos).length() <= radius);
             let boxout_gain = if contested {
                 boxout * world.params.policy.w("rebound_boxout_weight")
             } else {
@@ -1119,7 +1117,13 @@ pub fn pass_intercept_radius(world: &World, defender: &crate::state::PlayerState
     let passer_iq = world
         .possession
         .last_pass_from
-        .map(|passer| world.players[passer].data.attributes.decision_iq.clamp(0.0, 1.0))
+        .map(|passer| {
+            world.players[passer]
+                .data
+                .attributes
+                .decision_iq
+                .clamp(0.0, 1.0)
+        })
         .unwrap_or(0.5);
     let base =
         base_radius * (1.0 + world.params.policy.w("pass_iq_intercept_shrink") * (0.5 - passer_iq));

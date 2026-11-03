@@ -624,13 +624,22 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
             (values.iter().sum(), values.len().max(1) as f64)
         }
         Metric::ScreenDisplacement => {
-            let values: Vec<f64> = report.events.iter().filter_map(|event| {
-                if let nba_sim_core::action::Fact::Screen { team, displacement_ft, .. } = &event.fact {
-                    (*team == TeamSide::Home).then_some(f64::from(*displacement_ft))
-                } else {
-                    None
-                }
-            }).collect();
+            let values: Vec<f64> = report
+                .events
+                .iter()
+                .filter_map(|event| {
+                    if let nba_sim_core::action::Fact::Screen {
+                        team,
+                        displacement_ft,
+                        ..
+                    } = &event.fact
+                    {
+                        (*team == TeamSide::Home).then_some(f64::from(*displacement_ft))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
             (values.iter().sum(), values.len().max(1) as f64)
         }
         Metric::OffensiveReboundRate => (home.oreb as f64, (home.fga - home.fgm).max(1) as f64),
@@ -657,11 +666,7 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
             for event in &report.events {
                 match &event.fact {
                     nba_sim_core::action::Fact::Shot { shooter, made, .. } => {
-                        awaiting = if *made {
-                            None
-                        } else {
-                            team_of(*shooter)
-                        };
+                        awaiting = if *made { None } else { team_of(*shooter) };
                         if awaiting == Some(TeamSide::Away) {
                             chances += 1.0;
                         }
@@ -703,7 +708,8 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
             (home.blocks as f64, away.fga.max(1) as f64)
         }
         // 主队抢断 ÷ 客队回合：抢断剥夺的是对手的回合。
-        Metric::StealsPerPossession => {            let away_possessions = report
+        Metric::StealsPerPossession => {
+            let away_possessions = report
                 .possessions
                 .iter()
                 .filter(|record| record.team == TeamSide::Away)
@@ -723,7 +729,7 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
         Metric::ContestedReboundShare => (
             report.contested_rebounds[0] as f64,
             (report.contested_rebounds[0] + report.contested_rebounds[1]).max(1) as f64,
-        )
+        ),
     }
 }
 

@@ -292,7 +292,10 @@ impl ShotDistanceProfile {
     /// 最后一个实测档的距离上限。超出这个距离之后没有实测数据，需要
     /// 另加衰减。
     pub fn last_upper_ft(&self) -> f32 {
-        self.cells.last().map(|cell| cell.upper_ft).unwrap_or_default()
+        self.cells
+            .last()
+            .map(|cell| cell.upper_ft)
+            .unwrap_or_default()
     }
 }
 

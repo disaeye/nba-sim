@@ -462,6 +462,9 @@ impl World {
         self.jump_ball_tapper = None;
         self.jump_ball_receiver = None;
         self.jump_ball_receivers = [None; 2];
+        // 新跳球就是新球：上一轮残留的飞行记录必须清掉，否则结算层会
+        // 把它当成这一轮已经在飞的球，永远等不到撮球。
+        self.clear_flight();
         let center = self.rules.court.center();
         let radius = self.rules.league.center_circle_radius_ft * 0.5;
         let home_spot = center - Vec2::new(radius, 0.0);
@@ -568,6 +571,8 @@ impl World {
 
     /// 双方同时控住球：停表，参跳的四人走到中圈，到位后再掷球。
     pub(crate) fn stage_held_ball(&mut self, home_jumper: usize, away_jumper: usize) {
+        // 停表跳球同样是一次新的掷球：清掉上一轮的飞行记录。
+        self.clear_flight();
         let center = self.rules.court.center();
         let radius = self.rules.league.center_circle_radius_ft * 0.5;
         let distance = self.rules.tip_off_tap_distance_ft;
@@ -714,7 +719,12 @@ impl World {
             tapper,
             tapped_team,
         });
-        self.set_flight(crate::state::FlightKind::JumpBall, self.now());
+        // 撮球飞行有一个期限：接应人必须在期限内碰到球，否则这次跳球
+        // 没有归属，按死球发球处理。
+        self.set_flight(
+            crate::state::FlightKind::JumpBall,
+            self.now() + f64::from(self.params.policy.g("jump_ball_staging_seconds")),
+        );
     }
 
     fn award_opening_tip_control(&mut self, tapped_team: TeamSide, receiver: usize) {
@@ -765,6 +775,52 @@ impl World {
 
     pub fn phase(&self) -> Phase {
         self.phase
+    }
+
+    /// 活球判定：比赛程序是开放进攻，且球不在飞行中。
+    ///
+    /// 旧模型用飞行阶段替换活球阶段（传球飞行、投篮飞行各占一个阶段），
+    /// 所以凡是读「活球」的地方都隐含了「球不在飞行中」。飞行现在是球的
+    /// 独立维度，这个判定把旧语义还原出来：飞行期间程序仍然是活球，
+    /// 但没有人在打球。
+    pub fn live_play(&self) -> bool {
+        matches!(self.phase(), Phase::Live) && self.ball_flight.is_none()
+    }
+
+    /// 旧模型里的「活球」：活球阶段与三种飞行阶段都算，罚球飞行不算。
+    ///
+    /// 换人门控与犯满离场检查读的是这个口径：球在传球或投篮飞行中时，
+    /// 比赛仍在进行，阵容不能动。
+    pub fn live_or_flight(&self) -> bool {
+        match self.phase() {
+            Phase::Live => true,
+            // 跳球撮球在空中：旧模型是跳球飞行阶段，属于活球。
+            Phase::JumpBall { .. } => self.ball_flight.is_some(),
+            _ => false,
+        }
+    }
+
+    /// 罚球程序进行中且球尚未离手。
+    ///
+    /// 罚球飞行仍在罚球程序里，但球已经离手：禁区检查与下一罚的上下文
+    /// 都不再成立。
+    pub fn free_throw_pending(&self) -> bool {
+        matches!(self.phase(), Phase::FreeThrows { .. }) && self.ball_flight.is_none()
+    }
+
+    /// 换人窗口：死球、发球、跳球准备、罚球准备、暂停与节间。
+    ///
+    /// 球在空中时没有窗口：飞行是球的维度，球飞在空中时换人等于在活球
+    /// 中换人。
+    pub fn substitution_window(&self) -> bool {
+        match self.phase() {
+            Phase::DeadBall { .. }
+            | Phase::Inbound { .. }
+            | Phase::PeriodBreak { .. }
+            | Phase::Timeout { .. } => true,
+            Phase::JumpBall { .. } | Phase::FreeThrows { .. } => self.ball_flight.is_none(),
+            _ => false,
+        }
     }
 
     pub(crate) fn set_ball_held(&mut self, holder: usize) {
@@ -841,19 +897,12 @@ impl World {
         self.set_program_phase(stage, program, phase);
     }
 
-    /// 开始一次飞行：记下种类与结算时刻，球的飞行与比赛程序分开存。
+    /// 开始一次飞行：记下种类与结算时刻。
     ///
-    /// 当前阶段仍同步写成飞行阶段，供尚未迁移的读取方使用；这一步之后
-    /// 飞行将成为唯一权威的球体维度，阶段回到活球。
+    /// 飞行是球的第二个维度，不替换比赛程序：阶段仍是活球，程序仍是
+    /// 开放进攻。飞行期间走哪个钟由 `FlightKind::clocks` 决定。
     pub fn set_flight(&mut self, kind: crate::state::FlightKind, resolve_at: f64) {
         self.ball_flight = Some(crate::state::BallFlight { kind, resolve_at });
-        // 飞行阶段照旧写进阶段：读取方与回放仍按阶段判定，飞行记录同步保存。
-        self.set_phase(match kind {
-            crate::state::FlightKind::Pass => Phase::PassFlight { resolve_at },
-            crate::state::FlightKind::Shot => Phase::ShotFlight { resolve_at },
-            crate::state::FlightKind::FreeThrow => Phase::FreeThrowFlight { resolve_at },
-            crate::state::FlightKind::JumpBall => Phase::JumpBallFlight,
-        });
     }
 
     /// 飞行结束：清空飞行记录。
@@ -1516,15 +1565,15 @@ impl World {
     /// 飞行与死球标志、本回合是否触筐。
     pub fn control_state(&self) -> crate::adjudicate::ControlState {
         use crate::adjudicate::ControlState;
+        // 罚球球已离手时不算死球：旧模型的罚球飞行阶段不在死球之列。
         let dead = matches!(
             self.phase(),
             Phase::Pregame
                 | Phase::DeadBall { .. }
                 | Phase::Inbound { .. }
-                | Phase::FreeThrows { .. }
                 | Phase::PeriodBreak { .. }
                 | Phase::Finished
-        );
+        ) || self.free_throw_pending();
         let mut state = ControlState {
             holder: None,
             team: Some(self.possession.team),
@@ -1553,7 +1602,8 @@ impl World {
     }
 
     /// 持球人是否被包夹：两名以上对手挤在包夹半径内。
-    pub fn trapped(&self, holder: usize) -> bool {        let radius = self.params.policy.g("trap_radius_ft");
+    pub fn trapped(&self, holder: usize) -> bool {
+        let radius = self.params.policy.g("trap_radius_ft");
         let team = self.players[holder].team;
         let pos = self.players[holder].pos;
         let mut count = 0u8;
@@ -1576,7 +1626,11 @@ impl World {
 
     /// 该球员正在执行的切入路线类型；没有切入动作时按直切处理。
     pub fn cut_kind_name(&self, cutter: usize) -> &'static str {
-        match self.players[cutter].action.as_ref().map(|action| action.intent.kind) {
+        match self.players[cutter]
+            .action
+            .as_ref()
+            .map(|action| action.intent.kind)
+        {
             Some(ActionKind::Cut(kind)) => kind.as_str(),
             _ => crate::action::CutKind::Basket.as_str(),
         }
@@ -1626,8 +1680,7 @@ impl World {
         // 事件日志有确定上界：越过它说明内核在没有推进地反复发布事实。
         // 就地失败，不让内存跟着一起增长。
         if self.events.len() >= EVENT_LOG_LIMIT {
-            let tail: Vec<String> = self.events
-                [self.events.len().saturating_sub(3)..]
+            let tail: Vec<String> = self.events[self.events.len().saturating_sub(3)..]
                 .iter()
                 .map(|event| format!("{:?}", event.fact))
                 .collect();
@@ -1774,10 +1827,7 @@ impl World {
         } else {
             court.height_ft - radius
         };
-        Vec2::new(
-            ball.x.clamp(radius, court.width_ft - radius),
-            y,
-        )
+        Vec2::new(ball.x.clamp(radius, court.width_ft - radius), y)
     }
 
     fn begin_inbound(&mut self, team: TeamSide) {
@@ -1791,9 +1841,10 @@ impl World {
         };
         // 发球地点优先用停表时记录的位置：出界在边线上发，违例在断点发；
         // 没有记录时（命中、节次开局）回到本方底线。
-        let inbound_spot = self.inbound_spot.take().unwrap_or_else(|| {
-            glam::Vec2::new(baseline_x, height * 0.5)
-        });
+        let inbound_spot = self
+            .inbound_spot
+            .take()
+            .unwrap_or_else(|| glam::Vec2::new(baseline_x, height * 0.5));
         // 发球由离发球点最近的队员执行：他就在本方底线附近，不用瞬移，也
         // 不用把进攻时钟耗在走位上。
         let handler = self
@@ -2092,6 +2143,11 @@ impl World {
         } else {
             phase_before_step
         };
+        // 飞行期间势头照旧衰减：旧模型里飞行阶段不是活球阶段。传球飞行
+        // 同样衰减，这一点由飞行记录给出。
+        if !matches!(momentum_phase, Phase::Live) || flight_before_step.is_some() {
+            crate::motion::decay_momentum(self, dt);
+        }
         let game_clock_before_advance = self.clock.game_clock();
         let clock_advance =
             crate::clock::advance(phase_before_step, flight_before_step, &mut self.clock, dt);
@@ -2100,9 +2156,6 @@ impl World {
         } else {
             0.0
         };
-        if !matches!(momentum_phase, Phase::Live) {
-            crate::motion::decay_momentum(self, dt);
-        }
         if player_time_seconds > 0.0 {
             for &handle in self.on_court_home.as_slice() {
                 let slot = self.line_slot[handle] as usize;
@@ -2125,7 +2178,10 @@ impl World {
             .is_some_and(|flight| flight.kind == crate::state::FlightKind::JumpBall)
         {
             self.move_jump_ball_receiver(dt);
-        } else if !matches!(phase_before_step, Phase::JumpBall { .. }) {
+        } else if !(matches!(phase_before_step, Phase::JumpBall { .. })
+            && flight_before_step.is_none())
+        {
+            // 跳球准备阶段球员不走位；撮球在空中时照常走位。
             self.advance_movement(dt);
         }
         crate::resolve::poke::step(self, dt);
@@ -2135,7 +2191,7 @@ impl World {
         self.advance_phase();
         self.expire_break_targets();
         self.expire_catch_phase();
-        if matches!(self.phase, Phase::Live) && self.holder().is_some() {
+        if self.live_play() && self.holder().is_some() {
             self.maybe_decide();
         }
         self.check_closely_guarded(dt);
@@ -2161,7 +2217,7 @@ impl World {
 
     /// 罚球禁区：球离手之前，任何球员不得进入禁区内侧。
     fn check_free_throw_lane(&mut self) {
-        if !matches!(self.phase, Phase::FreeThrows { .. }) {
+        if !self.free_throw_pending() {
             return;
         }
         let Some(mut lane) = self.free_throw_lane else {
@@ -2188,9 +2244,7 @@ impl World {
 
     /// 紧逼盯防五秒：收球后被贴身盯住且不再推进，五秒必吹违例。
     fn check_closely_guarded(&mut self, dt: f64) {
-        if !self.rules.league.clocks.closely_guarded_seconds.is_finite()
-            || !matches!(self.phase, Phase::Live)
-        {
+        if !self.rules.league.clocks.closely_guarded_seconds.is_finite() || !self.live_play() {
             self.possession.closely_guarded_seconds = 0.0;
             return;
         }
@@ -2235,7 +2289,7 @@ impl World {
 
     /// 后场八秒：控球方在后场停留超过规则秒数即违例。
     fn check_backcourt(&mut self) {
-        if !matches!(self.phase, Phase::Live) {
+        if !self.live_play() {
             self.possession.backcourt_started_game_clock = None;
             return;
         }
@@ -2393,7 +2447,7 @@ impl World {
     }
 
     fn advance_defensive_actions(&mut self) {
-        if !matches!(self.phase(), Phase::Live) {
+        if !self.live_play() {
             self.cancel_defensive_actions_of(
                 DefensiveActionKind::CloseoutContest,
                 "shot_action_ended",
@@ -2492,10 +2546,7 @@ impl World {
     fn advance_steal_attempts(&mut self) {
         // 活球飞行阶段（传球、出手在空中）仍然算这次赌博在继续；
         // 只有死球或球权易主才取消。
-        if !matches!(
-            self.phase(),
-            Phase::Live
-        ) {
+        if !self.live_play() {
             self.cancel_defensive_actions_of(DefensiveActionKind::StealAttempt, "not_live");
             return;
         }
@@ -2594,7 +2645,7 @@ impl World {
     ///
     /// 跳起的人无法卡位抢篮板：起跳期间他不参与 box-out，这是这次冒险的代价。
     fn advance_block_jumps(&mut self) {
-        if !matches!(self.phase(), Phase::Live) {
+        if !self.live_play() {
             self.cancel_defensive_actions_of(DefensiveActionKind::BlockJump, "shot_ended");
             return;
         }
@@ -2973,7 +3024,25 @@ impl World {
                         self.jump_ball_tapper = None;
                         self.jump_ball_receiver = None;
                         self.award_opening_tip_control(tapped_team, controller);
+                    } else if now >= flight.resolve_at {
+                        // 没人接到球：这次跳球没有归属，摸到球的一方发球。
+                        // 飞行记录必须清掉，否则这一轮永远等不到结算，
+                        // 下一节也起不来。
+                        self.jump_ball_tapper = None;
+                        self.jump_ball_receiver = None;
+                        self.clear_flight();
+                        self.set_phase(Phase::DeadBall {
+                            team: tapped_team,
+                            ready_at: now + 1.0,
+                        });
                     }
+                } else if now >= flight.resolve_at {
+                    // 球还没被摸到就超时：同样要有出口。
+                    self.clear_flight();
+                    self.set_phase(Phase::DeadBall {
+                        team: self.possession.team,
+                        ready_at: now + 1.0,
+                    });
                 }
             }
             crate::state::FlightKind::Pass => {
@@ -3057,31 +3126,36 @@ impl World {
                 resolve_at,
                 kind,
             } => {
-                if now >= resolve_at {
+                // 撮球之后球在空中：飞行是球的维度，阶段仍是跳球程序，
+                // 因此这里先结算飞行，球尚未离手时才掷球。
+                if self
+                    .ball_flight
+                    .is_some_and(|flight| flight.kind == crate::state::FlightKind::JumpBall)
+                {
+                    self.settle_ball_flight(now);
+                } else if now >= resolve_at {
                     self.resolve_opening_jump_ball(home_jumper, away_jumper, kind);
                 }
             }
-            Phase::JumpBallFlight
-            | Phase::PassFlight { .. }
-            | Phase::ShotFlight { .. }
-            | Phase::FreeThrowFlight { .. } => {
-                // 四种飞行共用一套结算：种类与结算时刻在 `ball_flight`。
-                self.settle_ball_flight(now);
-            }
-            Phase::FreeThrows {
-                shooter,
-                total,
-                remaining,
-                made,
-                next_at,
-                and_one,
-                retain_possession,
-                foul_id,
-                technical_retained_team,
-                after_technical,
-            } => {
+            Phase::FreeThrows { .. } => {
                 // 罚球飞行仍在本程序里：先把飞行结算掉。
                 self.settle_ball_flight(now);
+                // 结算可能已经开了下一次罚球或换了程序：重读当前状态。
+                let Phase::FreeThrows {
+                    shooter,
+                    total,
+                    remaining,
+                    made,
+                    next_at,
+                    and_one,
+                    retain_possession,
+                    foul_id,
+                    technical_retained_team,
+                    after_technical,
+                } = self.phase
+                else {
+                    return;
+                };
                 // 罚球人离场（换人或被逐）：由在场队友替他罚完剩下的球。
                 if !self.players[shooter].on_court {
                     let team = self.players[shooter].team;
@@ -3450,10 +3524,7 @@ impl World {
         if self.clock.game_clock() > 0.0 || self.finished {
             return;
         }
-        if matches!(
-            self.phase(),
-            Phase::FreeThrows { .. } | Phase::FreeThrowFlight { .. }
-        ) {
+        if matches!(self.phase(), Phase::FreeThrows { .. }) {
             return;
         }
         if self
@@ -3461,6 +3532,11 @@ impl World {
             .as_ref()
             .is_some_and(|shot| shot.result.is_none() && shot.free_throw.is_none())
         {
+            return;
+        }
+        // 跳球还在空中时本节不能收尾：撮球的归属必须在节末之前确定，
+        // 否则这一节会以没有球权结束，球永远落不到任何人手里。
+        if matches!(self.phase(), Phase::JumpBall { .. }) {
             return;
         }
         crate::tactics::close_play_window(self);

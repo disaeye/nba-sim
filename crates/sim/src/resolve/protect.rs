@@ -7,7 +7,7 @@
 use crate::action::{
     ActionIntent, ActionKind, ActionOutcome, Completion, Fact, ProtectKind, StateDelta,
 };
-use crate::state::{BallProtection, Phase};
+use crate::state::BallProtection;
 use crate::world::World;
 
 pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ProtectKind) -> ActionOutcome {
@@ -48,7 +48,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ProtectKind) -> A
 
 /// 护球只在活球、持球人未被收球时成立。
 pub fn available(world: &World, actor: usize) -> bool {
-    matches!(world.phase(), Phase::Live)
+    world.live_play()
         && world.holder() == Some(actor)
         && world.possession.dribble_state == crate::state::DribbleState::Dribbling
 }

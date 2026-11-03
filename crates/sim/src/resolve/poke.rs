@@ -5,7 +5,7 @@ use glam::Vec2;
 use crate::action::Fact;
 use crate::draw::{purpose, Stream};
 use crate::state::BallState;
-use crate::world::{Phase, World};
+use crate::world::World;
 
 /// 单次伸手的成功概率：几何、能力与当前姿态（护球、失衡）全部计入。
 ///
@@ -75,7 +75,7 @@ pub fn poke_success(world: &World, thief: usize, holder: usize, nearest: f32, no
 /// 每个 tick 判定一次：几何筛出最近的贴身防守人，按速率抽样是否伸手，
 /// 伸手后用领域层的模型判定是否拍到球。
 pub fn step(world: &mut World, dt: f64) {
-    if !matches!(world.phase(), Phase::Live) {
+    if !world.live_play() {
         return;
     }
     let Some(holder) = world.holder() else {

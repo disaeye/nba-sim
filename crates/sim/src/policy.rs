@@ -13,7 +13,7 @@ use nba_domain::capability::{fatigue_attenuation, map_skill_to_interval};
 use crate::action::{ActionIntent, ActionKind, DefenderRoute, PassKind, ScreenKind, ShotKind};
 use crate::draw::{purpose, Stream};
 use crate::resolve::shooter_zone;
-use crate::state::{DecisionRecord, DecisionSample, DecisionState, Phase, Revalidation};
+use crate::state::{DecisionRecord, DecisionSample, DecisionState, Revalidation};
 use crate::utility::{softmax_pick_at, EpvTerms, Utility};
 use crate::world::World;
 
@@ -36,7 +36,7 @@ fn pass_trace() -> bool {
 /// 决策由动作完成、球权变化、接球、掩护接触、协防承诺等事件触发；
 /// 没有事件时，`rules.redecide_interval_seconds` 是最小回退间隔。
 pub fn tick(world: &mut World) {
-    if !matches!(world.phase(), Phase::Live) {
+    if !world.live_play() {
         return;
     }
     let Some(holder) = world.holder() else {
@@ -160,8 +160,7 @@ pub fn tick(world: &mut World) {
         _ => {}
     }
     // 主执行人可能已经离场（换人或被逐）：这条决策自然作废。
-    if !world.start_action(intent, &participants) {
-    }
+    if !world.start_action(intent, &participants) {}
 }
 
 /// 无球球员的独立决策：每名不在持球位置上的进攻球员按自己的候选集与
@@ -170,7 +169,7 @@ pub fn tick(world: &mut World) {
 /// 这条路径与持球人的决策完全分开：动作的执行人是无球球员自己，动作的
 /// 后果（跑位、切入、接球窗口）由他自己的运行时产出，不是持球人代选的。
 pub fn off_ball_tick(world: &mut World) {
-    if !matches!(world.phase(), Phase::Live) {
+    if !world.live_play() {
         return;
     }
     let Some(holder) = world.holder() else {
@@ -1266,8 +1265,7 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
     };
     // 持球跳投是自主创造出来的出手：运球到位的干拔不等接球窗口，否则
     // 决策模型只会在球刚到手时出手。
-    let pull_up_bonus = if !just_received && matches!(phase, crate::state::BallPhase::Dribble)
-    {
+    let pull_up_bonus = if !just_received && matches!(phase, crate::state::BallPhase::Dribble) {
         weights.b("shoot_pull_up_bonus")
     } else {
         0.0
@@ -1424,8 +1422,7 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     // 阈值与四个几何参数都在参数表里，不写死系数。同一档终结能力的球员
     // 里有人偏爱抛投、有人偏爱篮下，用球员句柄上的固定偏移把这一档拆开，
     // 不用随机数也不会同一档全体走同一条路。
-    let tiebreak =
-        weights.g("drive_finish_tiebreak_spread") * hash_unit(state.actor as u64);
+    let tiebreak = weights.g("drive_finish_tiebreak_spread") * hash_unit(state.actor as u64);
     let finishes_at_rim = finishing + tiebreak > weights.g("drive_rim_finishing_threshold");
     let shortfall = (1.0 - finishing).clamp(0.0, 1.0);
     let drive_target_distance = if finishes_at_rim {
@@ -1620,7 +1617,9 @@ fn pass_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
         let gap = view
             .map(|view| (view.pos - state.actor_pos).length())
             .unwrap_or(f32::INFINITY);
-        let lane = view.map(|view| view.lane_clearance).unwrap_or(f32::INFINITY);
+        let lane = view
+            .map(|view| view.lane_clearance)
+            .unwrap_or(f32::INFINITY);
         let advancement = view
             .map(|view| {
                 if state.attacking_right {

@@ -273,11 +273,7 @@ pub fn build_review(
         .iter()
         .map(|index| (candidates[*index].0.id, candidates[*index].2))
         .collect::<BTreeMap<_, _>>();
-    let mut frame_world = World::new(
-        setup,
-        RuntimeParams::load(calibration_dir)?,
-        seed,
-    );
+    let mut frame_world = World::new(setup, RuntimeParams::load(calibration_dir)?, seed);
     let mut selected_frames: BTreeMap<u64, Vec<StreamTick>> = BTreeMap::new();
     let mut pending_inbound: Vec<StreamTick> = Vec::new();
     let mut inbounded_possessions = BTreeSet::new();
@@ -304,7 +300,9 @@ pub fn build_review(
             }
         }
         if frame_world.clock.tick() > 2_000_000 {
-            return Err(format!("seed {seed} did not finish while collecting review frames"));
+            return Err(format!(
+                "seed {seed} did not finish while collecting review frames"
+            ));
         }
     }
     for id in inbounded_possessions {

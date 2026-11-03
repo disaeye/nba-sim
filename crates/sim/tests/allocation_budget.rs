@@ -50,7 +50,7 @@ const TICK: f64 = 0.05;
 /// 十名球员各自调度，因此只看持球人不够；判据要盖所有在场球员。
 fn quiet_tick(world: &World) -> bool {
     let horizon = world.now() + TICK;
-    matches!(world.phase(), Phase::Live)
+    world.live_play()
         && world
             .players
             .iter()
@@ -79,7 +79,9 @@ fn measure(world: &mut World) -> usize {
     let footprint = world.buffer_footprint();
     let phase = world.phase();
     let possession = world.possession.id;
-    let live = matches!(phase, Phase::Live);
+    // 球在飞行中时跑的是球体物理与接触判定，不在稳态预算范围内。
+    // 飞行是球的维度，不再替换阶段，因此这里要显式看飞行记录。
+    let live = matches!(phase, Phase::Live) && world.ball_flight.is_none();
     world.step(TICK);
     let delta = ALLOCATIONS.load(Ordering::Relaxed) - before;
     let produced = world.events.len() != events

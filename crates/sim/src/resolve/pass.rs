@@ -47,8 +47,8 @@ pub fn resolve(
         crate::action::PassKind::BehindBack => 0.9,
         _ => 1.0,
     };
-    let duration = flight
-        .unwrap_or_else(|| f64::from(rules.pass_duration(distance, false)) * kind_flight);
+    let duration =
+        flight.unwrap_or_else(|| f64::from(rules.pass_duration(distance, false)) * kind_flight);
     world.ball.release_pass(crate::ball::PassRelease {
         rules: &rules,
         from_player: &from_player,
@@ -84,7 +84,11 @@ pub fn resolve(
         .fold(0.0f32, f32::max);
     let gamble_effect = 1.0 + (defense_gamble - 0.5) * 0.1;
     // 传球判断决定出球的冒险程度：读不出协防的人更容易把球送到防守人手里。
-    let iq = world.players[from].data.attributes.decision_iq.clamp(0.0, 1.0);
+    let iq = world.players[from]
+        .data
+        .attributes
+        .decision_iq
+        .clamp(0.0, 1.0);
     let iq_effect = 1.0 + (0.5 - iq) * world.params.policy.w("bad_pass_iq_weight");
     let rate = (base * (1.0 + (skill_base - passing) * 1.0) * gamble_effect * iq_effect)
         .clamp(0.005, 0.08);
@@ -100,10 +104,7 @@ pub fn resolve(
     if drawn < rate {
         world.pass_result = Some(crate::ball::PassResult::Incomplete);
     }
-    world.set_flight(
-        crate::state::FlightKind::Pass,
-        now + duration + 0.5,
-    );
+    world.set_flight(crate::state::FlightKind::Pass, now + duration + 0.5);
     world.emit(Fact::Pass {
         pass_id,
         from,

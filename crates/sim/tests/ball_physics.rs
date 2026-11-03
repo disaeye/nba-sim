@@ -181,10 +181,17 @@ fn world_step_emits_typed_possession_end_for_a_pass_interception() {
         start_time: world.now(),
         duration: 0.1,
     };
-    assert!(world.start_action(intent, &[(from, nba_sim_core::action::ActionIntentRole::Primary)]));
+    assert!(world.start_action(
+        intent,
+        &[(from, nba_sim_core::action::ActionIntentRole::Primary)]
+    ));
     for _ in 0..200 {
         world.step(TICK_SECONDS);
-        if world.possession_log.iter().any(|record| record.id == possession_id) {
+        if world
+            .possession_log
+            .iter()
+            .any(|record| record.id == possession_id)
+        {
             break;
         }
     }
@@ -201,7 +208,10 @@ fn world_step_emits_typed_possession_end_for_a_pass_interception() {
             _ => None,
         })
         .expect("the intercepted pass must end the recorded possession");
-    assert_eq!(ended.0, nba_domain::event::PossessionEndCause::TurnoverSteal);
+    assert_eq!(
+        ended.0,
+        nba_domain::event::PossessionEndCause::TurnoverSteal
+    );
     assert_eq!(ended.1, "pass_intercepted");
     assert_eq!(ended.2, possession_id);
     assert!(world.events.iter().any(|event| matches!(
@@ -228,10 +238,17 @@ fn a_deflected_pass_ends_the_possession_only_after_a_defender_recovers_it() {
             start_time: world.now(),
             duration: 0.1,
         };
-        assert!(world.start_action(intent, &[(from, nba_sim_core::action::ActionIntentRole::Primary)]));
+        assert!(world.start_action(
+            intent,
+            &[(from, nba_sim_core::action::ActionIntentRole::Primary)]
+        ));
         for _ in 0..200 {
             world.step(TICK_SECONDS);
-            if world.possession_log.iter().any(|record| record.id == possession_id) {
+            if world
+                .possession_log
+                .iter()
+                .any(|record| record.id == possession_id)
+            {
                 break;
             }
         }

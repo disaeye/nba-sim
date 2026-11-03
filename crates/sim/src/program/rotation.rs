@@ -1,4 +1,3 @@
-use crate::state::Phase;
 use crate::world::World;
 use crate::TeamSide;
 /// 体能的消耗与恢复。
@@ -27,15 +26,7 @@ pub fn update_stamina(world: &mut World, dt: f64) {
 /// 活球期间教练只能登记意图，不能把人换上来。这条门控是
 /// 「主力身背 4 犯却因为两分钟没有死球而下不了场」这类真实博弈的前提。
 pub fn is_substitution_window(world: &World) -> bool {
-    matches!(
-        world.phase(),
-        Phase::DeadBall { .. }
-            | Phase::Inbound { .. }
-            | Phase::JumpBall { .. }
-            | Phase::FreeThrows { .. }
-            | Phase::PeriodBreak { .. }
-            | Phase::Timeout { .. }
-    )
+    world.substitution_window()
 }
 
 /// 需要换下的紧迫度：数值越大越应该先下场，`None` 表示不需要休息。
@@ -279,21 +270,15 @@ fn swap(world: &mut World, team: TeamSide, outgoing: usize, incoming: usize) {
 /// 停表后由 [`apply_dead_ball_window`] 把人换下；球权不变，所以这不是
 /// 球权转换，只是把比赛停下来一次。
 fn enforce_disqualification(world: &mut World) {
-    let live = world.phase().is_live_gameplay();
+    let live = world.live_or_flight();
     if !live {
         return;
     }
-    let disqualified_team = [TeamSide::Home, TeamSide::Away]
-        .into_iter()
-        .find(|team| {
-            world.on_court(*team)
-                .as_slice()
-                .iter()
-                .any(|handle| {
-                    world.players[*handle].disqualified
-                        && !world.players[*handle].retained_after_foul_limit
-                })
-        });
+    let disqualified_team = [TeamSide::Home, TeamSide::Away].into_iter().find(|team| {
+        world.on_court(*team).as_slice().iter().any(|handle| {
+            world.players[*handle].disqualified && !world.players[*handle].retained_after_foul_limit
+        })
+    });
     let Some(team) = disqualified_team else {
         return;
     };
@@ -303,10 +288,10 @@ fn enforce_disqualification(world: &mut World) {
             .as_slice()
             .iter()
             .copied()
-                .filter(|handle| {
-                    world.players[*handle].disqualified
-                        && !world.players[*handle].retained_after_foul_limit
-                })
+            .filter(|handle| {
+                world.players[*handle].disqualified
+                    && !world.players[*handle].retained_after_foul_limit
+            })
             .any(|handle| best_bench(world, team, handle, false).is_some());
         if !has_legal_replacement {
             return;
@@ -359,15 +344,10 @@ pub fn apply_dead_ball_window(world: &mut World) {
         // 配额耗尽挡下来，否则场上会留下一个已经犯满的球员。
         loop {
             let on_court = world.on_court(team);
-            let Some(outgoing) = on_court
-                .as_slice()
-                .iter()
-                .copied()
-                .find(|handle| {
-                    world.players[*handle].disqualified
-                        && !world.players[*handle].retained_after_foul_limit
-                })
-            else {
+            let Some(outgoing) = on_court.as_slice().iter().copied().find(|handle| {
+                world.players[*handle].disqualified
+                    && !world.players[*handle].retained_after_foul_limit
+            }) else {
                 break;
             };
             let Some(incoming) = best_bench(world, team, outgoing, false) else {

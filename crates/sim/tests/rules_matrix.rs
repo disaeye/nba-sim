@@ -22,7 +22,8 @@ fn a_tied_regulation_end_enters_overtime() {
     let mut world = World::new(MatchSetup::builtin(short_rules()), params, 601);
     // 打到第四节末尾：短节次把这段压到几秒钟。
     let mut guard = 0;
-    while world.clock.period() < short_rules().league.periods.regulation_periods && guard < 400_000 {
+    while world.clock.period() < short_rules().league.periods.regulation_periods && guard < 400_000
+    {
         world.step(TICK_SECONDS);
         guard += 1;
     }
@@ -71,8 +72,7 @@ fn overtime_timeouts_follow_the_league_budget() {
     let rules = GameRules::default();
     let budget = TimeoutBudget::new(&rules);
     assert_eq!(
-        budget.remaining,
-        rules.league.timeouts.timeouts_per_game,
+        budget.remaining, rules.league.timeouts.timeouts_per_game,
         "开局暂停额度必须等于档案额度"
     );
     assert!(
@@ -192,10 +192,7 @@ fn team_period_fouls_reset_at_the_next_period() {
         guard += 1;
     }
     assert!(world.clock.period() > period, "必须进入下一节");
-    assert_eq!(
-        world.fouls[0].period, 0,
-        "下一节球队犯规计数必须清零"
-    );
+    assert_eq!(world.fouls[0].period, 0, "下一节球队犯规计数必须清零");
     assert!(
         world.fouls[0].total >= 9,
         "全场累计犯规不得被清零，实际 {}",
@@ -236,8 +233,6 @@ fn a_free_throw_shooter_who_never_releases_is_called_for_delay() {
     };
     assert_eq!(team, TeamSide::Away, "罚球超时由对方获得球权");
 }
-
-
 
 #[test]
 fn a_pass_nobody_controls_becomes_loose() {
@@ -289,7 +284,6 @@ fn a_pass_nobody_controls_becomes_loose() {
     }
     assert!(loose, "无人接住的传球必须成为松球");
 }
-
 
 #[test]
 fn the_control_state_carries_who_holds_and_what_was_touched() {

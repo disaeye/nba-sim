@@ -339,7 +339,10 @@ pub fn move_toward_targets(world: &mut World) {
         // 否则切入人永远到不了切入点，动作只能以失败结束。
         if let Some(own) = world.players[handle].action.as_ref().filter(|action| {
             action.intent.actor == handle
-                && matches!(action.intent.kind, ActionKind::Cut(_) | ActionKind::Relocate)
+                && matches!(
+                    action.intent.kind,
+                    ActionKind::Cut(_) | ActionKind::Relocate
+                )
         }) {
             let spot = own.intent.to_ft;
             crate::assignment::force_target_as(
