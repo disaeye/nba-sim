@@ -1463,24 +1463,44 @@ impl World {
         self.ball.holder()
     }
 
-    /// 当前控制状态：死球程序、持球、飞行中、还是松球。
+    /// 当前球权控制状态：控球人、控制方、最后触球、控制建立时刻、前场控制、
+    /// 飞行与死球标志、本回合是否触筐。
     pub fn control_state(&self) -> crate::adjudicate::ControlState {
         use crate::adjudicate::ControlState;
-        match self.phase() {
+        let dead = matches!(
+            self.phase(),
             Phase::Pregame
-            | Phase::DeadBall { .. }
-            | Phase::Inbound { .. }
-            | Phase::FreeThrows { .. }
-            | Phase::PeriodBreak { .. }
-            | Phase::Finished => ControlState::DeadBall,
-            _ => match self.ball.state() {
-                crate::state::BallState::Held { holder } => ControlState::Held(holder),
-                crate::state::BallState::Pass { .. } | crate::state::BallState::Shot { .. } => {
-                    ControlState::InFlight
-                }
-                crate::state::BallState::Loose { .. } => ControlState::Loose,
-            },
+                | Phase::DeadBall { .. }
+                | Phase::Inbound { .. }
+                | Phase::FreeThrows { .. }
+                | Phase::PeriodBreak { .. }
+                | Phase::Finished
+        );
+        let mut state = ControlState {
+            holder: None,
+            team: Some(self.possession.team),
+            last_touch: self.last_touch,
+            last_touch_team: self.last_touch.map(|handle| self.players[handle].team),
+            control_since: Some(self.possession.started_at),
+            frontcourt: self.possession.frontcourt_established,
+            in_flight: false,
+            dead,
+            rim_contact: self.possession.rim_contact,
+        };
+        if dead {
+            return state;
         }
+        match self.ball.state() {
+            crate::state::BallState::Held { holder } => {
+                state.holder = Some(holder);
+                state.team = Some(self.players[holder].team);
+            }
+            crate::state::BallState::Pass { .. } | crate::state::BallState::Shot { .. } => {
+                state.in_flight = true;
+            }
+            crate::state::BallState::Loose { .. } => {}
+        }
+        state
     }
 
     /// 持球人是否被包夹：两名以上对手挤在包夹半径内。

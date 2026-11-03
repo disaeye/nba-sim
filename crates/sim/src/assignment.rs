@@ -128,8 +128,8 @@ pub fn station_target_valid(world: &World, handle: usize, target: Vec2) -> bool 
     {
         return false;
     }
-    let min_separation = world.rules.min_player_separation_ft;
-    let team = world.players[handle].team;
+    let _min_separation = world.rules.min_player_separation_ft;
+    let _team = world.players[handle].team;
     for (other, player) in world.players.iter().enumerate() {
         if other == handle || !player.on_court {
             continue;
@@ -173,7 +173,7 @@ fn validate_target(
             if world.players[handle].defense_responsibility
                 == crate::state::DefenseResponsibility::Help
             {
-                distance >= 0.5 && distance <= 12.0
+                (0.5..=12.0).contains(&distance)
             } else {
                 distance >= separation - 0.25 && distance <= separation + 2.5
             }

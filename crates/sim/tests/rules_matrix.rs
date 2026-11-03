@@ -290,3 +290,46 @@ fn a_pass_nobody_controls_becomes_loose() {
     assert!(loose, "无人接住的传球必须成为松球");
 }
 
+
+#[test]
+fn the_control_state_carries_who_holds_and_what_was_touched() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 673);
+    let holder = world.on_court(TeamSide::Home).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == holder;
+        player.vel = Vec2::ZERO;
+    }
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(holder);
+    world.last_touch = Some(holder);
+    let state = world.control_state();
+    assert_eq!(state.holder, Some(holder), "控制状态必须给出控球人");
+    assert_eq!(state.team, Some(TeamSide::Home), "控制状态必须给出控制方");
+    assert_eq!(state.last_touch, Some(holder), "控制状态必须给出最后触球人");
+    assert_eq!(
+        state.last_touch_team,
+        Some(TeamSide::Home),
+        "控制状态必须给出最后触球方"
+    );
+    assert_eq!(
+        state.control_since,
+        Some(world.possession.started_at),
+        "控制状态必须给出控制建立时刻"
+    );
+    assert!(
+        !state.dead && !state.in_flight && !state.frontcourt && !state.rim_contact,
+        "活球开局既不是死球也不在飞行中"
+    );
+    // 死球程序期间：控制状态标成死球，持球人与飞行标志都不成立。
+    world.set_phase(Phase::DeadBall {
+        team: TeamSide::Home,
+        ready_at: world.now() + 2.0,
+    });
+    let dead = world.control_state();
+    assert!(dead.dead, "死球程序必须标成死球");
+    assert_eq!(dead.holder, None, "死球期间没有控球人");
+    assert!(!dead.in_flight, "死球期间球不在飞行中");
+}

@@ -1059,6 +1059,8 @@ pub struct PossessionState {
     pub backcourt_started_game_clock: Option<f64>,
     /// 本回合是否已经在前场建立控制：已建立后不能再把球带回后场。
     pub frontcourt_established: bool,
+    /// 本回合球是否已经触过筐。
+    pub rim_contact: bool,
 }
 
 impl PossessionState {
@@ -1109,6 +1111,7 @@ impl PossessionState {
             closely_guarded_seconds: 0.0,
             backcourt_started_game_clock: None,
             frontcourt_established: false,
+            rim_contact: false,
         }
     }
 }

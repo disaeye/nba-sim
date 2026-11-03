@@ -872,6 +872,8 @@ fn step_flight(world: &mut World, dt: f64) {
                 ball.z = next_z;
                 ball.vel *= -rules.rim_contact_restitution_graze;
                 ball.vz = -ball.vz * rules.rim_contact_vertical_restitution;
+                // 本回合已经触筐：控制状态与篮板结算都读这个标志。
+                world.possession.rim_contact = true;
                 world.emit(Fact::BallContact {
                     kind: "rim",
                     entity: None,

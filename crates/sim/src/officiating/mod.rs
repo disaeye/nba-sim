@@ -77,17 +77,49 @@ impl ClockAdjustment {
     }
 }
 
-/// 球权的控制状态：谁拿着球、球是否活着。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ControlState {
-    /// 某名球员持球。
-    Held(usize),
-    /// 活球无人控制（地滚球、拍飞的球）。
-    Loose,
-    /// 球在空中（传球或投篮飞行中）。
-    InFlight,
-    /// 死球程序期间。
-    DeadBall,
+/// 球权的控制状态：谁控球、哪队控制、谁最后触球、控制何时建立、是否已过
+/// 前场、球是否在空中或已触及篮筐。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ControlState {
+    /// 当前控球人；无人控制时为 `None`。
+    pub holder: Option<usize>,
+    /// 当前控制球队：持球人的队；无人持球时取最后控球方。
+    pub team: Option<TeamSide>,
+    /// 最后触球的球员与他的球队。
+    pub last_touch: Option<usize>,
+    pub last_touch_team: Option<TeamSide>,
+    /// 当前这次控制建立的时刻。
+    pub control_since: Option<f64>,
+    /// 是否已经建立前场控制。
+    pub frontcourt: bool,
+    /// 球是否在空中（传球、投篮或罚球飞行）。
+    pub in_flight: bool,
+    /// 是否处在死球程序。
+    pub dead: bool,
+    /// 本回合球是否已经触过筐。
+    pub rim_contact: bool,
+}
+
+impl ControlState {
+    /// 死球程序期间的控制状态。
+    pub fn dead_ball() -> Self {
+        Self {
+            holder: None,
+            team: None,
+            last_touch: None,
+            last_touch_team: None,
+            control_since: None,
+            frontcourt: false,
+            in_flight: false,
+            dead: true,
+            rim_contact: false,
+        }
+    }
+
+    /// 是否有人持球。
+    pub fn is_held(&self) -> bool {
+        self.holder.is_some()
+    }
 }
 
 /// 发球地点：底线发球与本场地点发球分开记。
