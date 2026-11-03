@@ -45,7 +45,9 @@ pub fn decision_state(world: &World) -> DecisionState {
     let teammates = world
         .on_court(team)
         .into_iter()
-        .filter(|handle| *handle != actor)
+        // 候选只能指向真的在场上的队友：名单缓存与球员标志不同步时，
+        // 以球员标志为准，不把不在场的人当成可以接球的人。
+        .filter(|handle| *handle != actor && world.players[*handle].on_court)
         .map(|handle| {
             let teammate = &world.players[handle];
             // 最近防守人的摸高与距离一起决定接球人的空位程度，

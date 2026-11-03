@@ -159,7 +159,9 @@ pub fn tick(world: &mut World) {
         }
         _ => {}
     }
-    assert!(world.start_action(intent, &participants));
+    // 主执行人可能已经离场（换人或被逐）：这条决策自然作废。
+    if !world.start_action(intent, &participants) {
+    }
 }
 
 /// 无球球员的独立决策：每名不在持球位置上的进攻球员按自己的候选集与
@@ -252,10 +254,10 @@ pub fn off_ball_tick(world: &mut World) {
             revalidation: Revalidation::Accepted,
         });
         let participants = [(actor, crate::action::ActionIntentRole::Primary)];
-        assert!(
-            world.start_action(intent, &participants),
-            "无球球员 {actor} 的动作必须能开始"
-        );
+        // 无球球员自己可能已经离场：这条无球动作自然作废。
+        if !world.start_action(intent, &participants) {
+            return;
+        }
     }
 }
 

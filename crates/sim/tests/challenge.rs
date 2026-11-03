@@ -92,6 +92,9 @@ fn the_team_that_won_the_ruling_cannot_challenge_it() {
 #[test]
 fn a_ruling_free_stoppage_has_nothing_to_review() {
     let mut world = late_world(411);
+    // 这个场景只要一条「没有裁决可复核」的停表：把上一回合留下的
+    // 可复核裁定清掉。
+    world.last_ruling = None;
     let error = world
         .request_challenge(TeamSide::Away)
         .expect_err("没有裁决记录时不得挑战");

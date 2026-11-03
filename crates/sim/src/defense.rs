@@ -326,7 +326,18 @@ pub fn apply_defense_targets(world: &mut World) {
             }
             crate::state::DefenseResponsibility::Help
             | crate::state::DefenseResponsibility::Sink => {
-                (crate::state::TargetKind::Station, usize::MAX, targets[slot])
+                // 协防站位点必须先夹到场内：目标落在边线外时，提交会被
+                // 站位校验反复拒绝，防守人在场上原地站着不动。
+                let radius = world.rules.player_radius_ft.max(0.1);
+                let spot = Vec2::new(
+                    targets[slot]
+                        .x
+                        .clamp(radius, world.rules.court.width_ft - radius),
+                    targets[slot]
+                        .y
+                        .clamp(radius, world.rules.court.height_ft - radius),
+                );
+                (crate::state::TargetKind::Station, usize::MAX, spot)
             }
             // 从掩护上方挤过：继续站在持球人与篮筐之间，贴着人不放。
             crate::state::DefenseResponsibility::GoOver => {

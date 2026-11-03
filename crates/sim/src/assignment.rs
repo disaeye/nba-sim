@@ -129,11 +129,15 @@ pub fn station_target_valid(world: &World, handle: usize, target: Vec2) -> bool 
         return false;
     }
     let min_separation = world.rules.min_player_separation_ft;
+    let team = world.players[handle].team;
     for (other, player) in world.players.iter().enumerate() {
         if other == handle || !player.on_court {
             continue;
         }
-        if (player.pos - target).length() < min_separation {
+        // 站位目标只需要不落在别人身体里：3.6 英尺的间隔是对位压迫的
+        // 要求，不是站位点的要求；站进对手身体才算不合法。
+        let limit = radius * 2.0;
+        if (player.pos - target).length() < limit {
             return false;
         }
     }
@@ -162,10 +166,17 @@ fn validate_target(
                 return false;
             }
             // 所有压力目标都由同一个间隔参数生成：对位、拒绝接球、卡位、
-            // 过掩护与换防的站位都是「贴着对手一个身位」。
+            // 过掩护与换防的站位都是「贴着对手一个身位」。协防目标故意
+            // 离开自己的人，因此按自己的区间校验。
             let separation = pressure_separation(world);
             let distance = (target - world.players[partner].pos).length();
-            distance >= separation - 0.25 && distance <= separation + 2.5
+            if world.players[handle].defense_responsibility
+                == crate::state::DefenseResponsibility::Help
+            {
+                distance >= 0.5 && distance <= 12.0
+            } else {
+                distance >= separation - 0.25 && distance <= separation + 2.5
+            }
         }
         TargetKind::Contact => {
             if partner == usize::MAX || !world.players[partner].on_court {

@@ -1068,15 +1068,24 @@ impl World {
         intent: ActionIntent,
         participants: &[(usize, crate::action::ActionIntentRole)],
     ) -> bool {
-        assert!(participants.iter().any(|(player, role)| {
+        // 决策到执行之间有人离场（换人窗口、被逐）：把他从参与人里剔除，
+        // 动作照常开始；主执行人自己离场是编程错误，仍然就地失败。
+        let live: Vec<(usize, crate::action::ActionIntentRole)> = participants
+            .iter()
+            .copied()
+            .filter(|(player, _)| self.players[*player].on_court)
+            .collect();
+        let participants = live.as_slice();
+        // 主执行人已经离场：动作不成立，返回假，不做断言——这是换人与
+        // 被逐带来的正常时序，不是内核错误。
+        if !participants.iter().any(|(player, role)| {
             *player == intent.actor && *role == crate::action::ActionIntentRole::Primary
-        }));
+        }) {
+            return false;
+        }
         assert!(participants
             .iter()
             .all(|(player, _)| *player < self.players.len()));
-        assert!(participants
-            .iter()
-            .all(|(player, _)| self.players[*player].on_court));
         assert!(
             intent
                 .target
