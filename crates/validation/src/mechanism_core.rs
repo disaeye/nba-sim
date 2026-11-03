@@ -81,7 +81,7 @@ impl MechanismAttribute {
             Self::Stamina => Metric::MinutesMax,
             Self::Strength => Metric::ScreenDisplacement,
             Self::OffensiveRebound => Metric::OffensiveReboundRate,
-            Self::DefensiveRebound => Metric::DefensiveReboundRate,
+            Self::DefensiveRebound => Metric::ContestedReboundShare,
             Self::DecisionIq => Metric::TurnoversPerPass,
             Self::Block => Metric::BlocksPerShot,
             Self::Steal => Metric::StealsPerPossession,
@@ -147,6 +147,8 @@ pub enum Metric {
     StealsPerPossession,
     /// 主队单人最高出场分钟：耐力决定一个球员能留在场上的时长。
     MinutesMax,
+    /// 有对抗篮板的归属份额：卡位加成只在这种篮板里生效。
+    ContestedReboundShare,
 }
 
 impl Metric {
@@ -168,6 +170,7 @@ impl Metric {
             Self::BlocksPerShot => "blocks_per_shot",
             Self::StealsPerPossession => "steals_per_possession",
             Self::MinutesMax => "minutes_max",
+            Self::ContestedReboundShare => "contested_rebound_share",
         }
     }
 }
@@ -678,6 +681,10 @@ fn metric_parts(metric: Metric, report: &GameReport) -> (f64, f64) {
                 .fold(0.0, f64::max);
             (max_minutes, 1.0)
         }
+        Metric::ContestedReboundShare => (
+            report.contested_rebounds[0] as f64,
+            (report.contested_rebounds[0] + report.contested_rebounds[1]).max(1) as f64,
+        )
     }
 }
 

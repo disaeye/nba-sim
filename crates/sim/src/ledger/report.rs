@@ -20,6 +20,8 @@ pub struct GameReport {
     pub redecide_interval_seconds: f64,
     pub open_business_instances: u64,
     pub rebound_attempts: u64,
+    /// 有对抗的篮板归属（队下标）。
+    pub contested_rebounds: [u32; 2],
     pub possessions: Vec<PossessionRecord>,
     pub box_score: BoxScore,
     pub events: Vec<TimedFact>,
@@ -55,6 +57,7 @@ impl GameReport {
             redecide_interval_seconds: 0.0,
             open_business_instances: 0,
             rebound_attempts: 0,
+            contested_rebounds: [0, 0],
             possessions: Vec::new(),
             box_score: BoxScore::default(),
             events: Vec::new(),

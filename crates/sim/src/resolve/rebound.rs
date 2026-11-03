@@ -217,6 +217,20 @@ pub fn control(world: &mut World, handle: usize) {
         offensive,
         distance_ft,
     });
+    // 有对抗的篮板：对手就在卡位半径内。卡位加成只在这种篮板里生效，
+    // 机制实验也用它度量 defensive_rebound 的效果。
+    let contest_radius = world.params.policy.g("boxout_contest_radius_ft");
+    let winner_team = world.players[handle].team;
+    let contested = world
+        .on_court(winner_team.other())
+        .as_slice()
+        .iter()
+        .any(|opponent| {
+            (world.players[*opponent].pos - world.players[handle].pos).length() <= contest_radius
+        });
+    if contested {
+        world.contested_rebounds[World::team_index(winner_team)] += 1;
+    }
     if offensive {
         world.line_mut(handle).oreb += 1;
         world.possession.had_offensive_rebound = true;

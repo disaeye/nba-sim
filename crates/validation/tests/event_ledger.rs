@@ -57,6 +57,7 @@ fn report_with_events(events: Vec<Fact>) -> GameReport {
         redecide_interval_seconds: 0.0,
         open_business_instances: 0,
         rebound_attempts: 0,
+        contested_rebounds: [0, 0],
         possessions: Vec::new(),
         box_score: BoxScore { home, away },
         events,

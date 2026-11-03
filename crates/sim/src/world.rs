@@ -268,6 +268,8 @@ pub struct World {
     /// 走到篮板结算的投失次数。犯规导致的投失不进入篮板，
     /// 前场篮板率的分子分母必须用这个数对账。
     pub rebound_attempts: u64,
+    /// 有对抗的篮板归属计数（队下标）：卡位加成只在这种篮板里生效。
+    pub contested_rebounds: [u32; 2],
     /// 连续得分带来的势头（0 = 无，越大越热）。按队存，随时间衰减。
     pub momentum: [f32; 2],
     /// 读球历史：防守的协防轮转看的是 `delay` 秒之前的球位。
@@ -1002,6 +1004,7 @@ impl World {
             next_pass_id: 0,
             next_foul_id: 0,
             rebound_attempts: 0,
+            contested_rebounds: [0, 0],
             momentum: [f32::default(); 2],
             ball_history: Vec::with_capacity(history_capacity),
             body_before: vec![Vec2::ZERO; player_count],
@@ -1367,6 +1370,7 @@ impl World {
             redecide_interval_seconds: self.rules.redecide_interval_seconds as f64,
             open_business_instances: self.open_business_instances(),
             rebound_attempts: self.rebound_attempts,
+            contested_rebounds: self.contested_rebounds,
             possessions: self.possession_log.clone(),
             box_score: self.box_score.clone(),
             events: std::mem::take(&mut self.events),

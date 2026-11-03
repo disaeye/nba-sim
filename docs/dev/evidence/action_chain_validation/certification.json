@@ -1,6 +1,6 @@
 {
   "certification_status": "insufficient_evidence",
-  "commit": "923b62d73047883bc28c5eeacf764f300ccc2b4d",
+  "commit": "18aafc8a66ab944d72d87ea060bb5586420426d2",
   "coverage": {
     "gate_criteria": 38,
     "mechanism_attributes": 13,
@@ -16,8 +16,7 @@
       "mechanism:defensive_rebound"
     ],
     "marginal": [
-      "mechanism:speed（下界比 0.49）",
-      "mechanism:offensive_rebound（下界比 0.49）"
+      "mechanism:offensive_rebound（下界比 0.55）"
     ],
     "new_insufficient": [],
     "not_applicable": []
