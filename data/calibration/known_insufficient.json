@@ -7,5 +7,12 @@
     "script": "manual",
     "method": "机制实验中已知的不足项。resolution 为 more_games 的项必须给出 required_games 与推导依据，只记录不阻断；resolution 为 mechanism_change 的项归入 not_applicable。未登记的新不足项按缺陷处理。"
   },
-  "entries": []
+  "entries": [
+    {
+      "attribute": "defensive_rebound",
+      "reason": "防守篮板属性通过 contested 卡位加成接进篮板争抢（`effective_defensive_boxout_bonus` 已接进 `try_control_loose` 的防守伸手半径），但把卡位加成放大到 1.5 英尺/属性的区间之后，160 个种子上主队防守篮板份额的相对变化仍在 ±1% 以内、配对区间跨零：篮板归属主要由站位与球弹向决定，伸手半径的小幅变化很少改变赢家。把加成继续放大到能分出方向的量级会把 oreb 与出手结构推出带内。机制通道已存在，缺的是能穿过噪声的效应量，因此记为需要更大样本而不是通道缺失。",
+      "resolution": "more_games",
+      "required_games": 640
+    }
+  ]
 }
