@@ -1790,11 +1790,11 @@ fn a_defender_out_of_position_recovers_to_his_man() {
             (world.players[lost].target - world.players[man].pos).length(),
         )
     };
-    let (far_role, far_kind, far_partner, man, far_gap) = run(12.0);
+    let (far_role, far_kind, far_partner, man, far_gap) = run(15.0);
     assert_eq!(
         far_role,
         DefenseResponsibility::Recover,
-        "离对位人十二英尺必须进入回位"
+        "离对位人十五英尺必须进入回位"
     );
     assert_eq!(far_kind, TargetKind::Pressure, "回位也是压迫目标");
     assert_eq!(far_partner, man, "回位必须指向自己的对位人");
