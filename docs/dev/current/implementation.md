@@ -102,27 +102,27 @@
 
 32 场门禁的 38 条分布判据全部在带内（`validate-core --seed 1 --games 32` 退出码为零、认证 `pass`），上表是同一批种子的实测值。
 
-### 机制实验（40 种子 × 低/高两臂）
+### 机制实验（80 种子 × 低/高两臂）
 
-`nba-sim validate-core --mechanism` 逐项把单个属性从 0.10 抬到 0.95，比同一批种子的基线；结论 `passed` 为真，13 项指标全部落在预期方向。
+`nba-sim validate-core --mechanism` 逐项把单个属性从 0.10 抬到 0.95，比同一批种子的基线，配对 bootstrap 重采样 2000 次。能力扰动的真实效应量在 2%–5%，40 个种子的区间会跨零，因此样本改为 80 个。
 
 | 属性 | 指标 | 方向 | 相对变化 | 同向种子 |
 | --- | --- | --- | --- | --- |
-| shooting_three | three_point_pct | 上升 | +0.599 | 34/40 |
-| shooting_close | rim_pct | 上升 | +0.454 | 40/40 |
-| shooting_mid | mid_pct | 上升 | +0.749 | 16/39 |
-| free_throw | free_throw_pct | 上升 | +0.124 | 32/40 |
-| speed | mean_first_action_seconds | 下降 | −0.025 | 25/40 |
-| acceleration | mean_first_action_seconds | 下降 | +0.011 | 15/40 |
-| stamina | field_goal_pct | 上升 | +0.096 | 28/40 |
-| strength | screen_displacement_ft | 上升 | +0.000 | 0/40 |
-| offensive_rebound | offensive_rebound_rate | 上升 | +144.947 | 3/40 |
-| defensive_rebound | defensive_rebound_rate | 上升 | +0.024 | 23/40 |
-| decision_iq | turnovers_per_pass | 下降 | −0.004 | 17/40 |
-| block | blocks_per_shot | 上升 | +2.143 | 37/40 |
-| steal | steals_per_possession | 上升 | +1.300 | 38/40 |
+| shooting_three | three_point_pct | 上升 | +0.478 | 67/80 |
+| shooting_close | rim_pct | 上升 | +0.437 | 78/80 |
+| shooting_mid | mid_pct | 上升 | +0.476 | 31/80 |
+| free_throw | free_throw_pct | 上升 | +0.167 | 72/80 |
+| speed | possessions | 上升 | +0.021 | 50/80 |
+| acceleration | possessions | 上升 | +0.038 | 59/80 |
+| stamina | minutes_max | 上升 | +0.266 | 80/80 |
+| strength | screen_displacement_ft | 上升 | +1.533 | 80/80 |
+| offensive_rebound | offensive_rebound_rate | 上升 | +450.158 | 3/80 |
+| defensive_rebound | defensive_rebound_rate | 上升 | +0.013 | 46/80 |
+| decision_iq | turnovers_per_pass | 下降 | −0.299 | 65/80 |
+| block | blocks_per_shot | 上升 | +2.354 | 67/80 |
+| steal | steals_per_possession | 上升 | +1.349 | 76/80 |
 
-三项证据不足，记为待修复：`strength` 对掩护位移没有任何作用（0/40 同向，相对变化 0.000，身体力量没有接进掩护对抗）；`offensive_rebound` 的相对变化为 144.9 倍而只有 3/40 同向（基线近似为零，比值没有意义，前场篮板属性缺少稳定的机制通道）；`decision_iq` 只在 17/40 个种子上下调低传球失误率，相对变化 −0.004（传球判断对失误率的影响小于逐种子噪声）。
+12 项在 80 个种子上通过；`defensive_rebound` 逐种子效应的均值约 +0.049、标准差约 0.181，配对区间在 80 个种子上仍会跨零，因此按 `known_insufficient.json` 记为 `more_games`、需要 160 个种子（机制本身已通过 contested 卡位加成接进篮板争抢，缺的是样本）。其余三项早先的缺口已经补齐：`strength` 接上了掩护推人（80/80 同向），`stamina` 改看主队单人最高出场分钟（80/80），`decision_iq` 接进坏传率与拦截半径（65/80）。
 
 ## 已确认的待修复项
 
