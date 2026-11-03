@@ -157,9 +157,10 @@ fn shoot_with_retained_team(
         plan: model.plan,
         aim_offset,
     });
-    world.set_phase(Phase::FreeThrowFlight {
-        resolve_at: world.now() + f64::from(rules.max_shot_duration_seconds) + 2.0,
-    });
+    world.set_flight(
+        crate::state::FlightKind::FreeThrow,
+        world.now() + f64::from(rules.max_shot_duration_seconds) + 2.0,
+    );
 }
 
 pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {

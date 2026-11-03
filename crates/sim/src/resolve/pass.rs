@@ -100,9 +100,10 @@ pub fn resolve(
     if drawn < rate {
         world.pass_result = Some(crate::ball::PassResult::Incomplete);
     }
-    world.set_phase(crate::world::Phase::PassFlight {
-        resolve_at: now + duration + 0.5,
-    });
+    world.set_flight(
+        crate::state::FlightKind::Pass,
+        now + duration + 0.5,
+    );
     world.emit(Fact::Pass {
         pass_id,
         from,

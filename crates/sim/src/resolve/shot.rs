@@ -354,9 +354,10 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
             aim_offset,
         });
     }
-    world.set_phase(Phase::ShotFlight {
-        resolve_at: now + f64::from(rules.max_shot_duration_seconds) + 2.0,
-    });
+    world.set_flight(
+        crate::state::FlightKind::Shot,
+        now + f64::from(rules.max_shot_duration_seconds) + 2.0,
+    );
 
     ActionOutcome {
         actor: shooter,

@@ -176,6 +176,8 @@ pub struct World {
     pub clock: Clock,
     phase: Phase,
     pub ball: BallBody,
+    /// 球的飞行状态：与比赛阶段分开存在，飞行不替换比赛程序。
+    pub ball_flight: Option<crate::state::BallFlight>,
     pub pass_result: Option<crate::ball::PassResult>,
     pub pass_in_flight: Option<crate::ball::PassInFlight>,
     /// 最后触球的球员。出界判定按最后触球方决定球权，所以每次持球与
@@ -706,7 +708,7 @@ impl World {
             tapper,
             tapped_team,
         });
-        self.set_phase(Phase::JumpBallFlight);
+        self.set_flight(crate::state::FlightKind::JumpBall, self.now());
     }
 
     fn award_opening_tip_control(&mut self, tapped_team: TeamSide, receiver: usize) {
@@ -824,6 +826,25 @@ impl World {
         self.set_program_phase(stage, program, phase);
     }
 
+    /// 开始一次飞行：记下种类与结算时刻，球的飞行与比赛程序分开存。
+    ///
+    /// 当前阶段仍同步写成飞行阶段，供尚未迁移的读取方使用；这一步之后
+    /// 飞行将成为唯一权威的球体维度，阶段回到活球。
+    pub fn set_flight(&mut self, kind: crate::state::FlightKind, resolve_at: f64) {
+        self.ball_flight = Some(crate::state::BallFlight { kind, resolve_at });
+        self.set_phase(match kind {
+            crate::state::FlightKind::Pass => Phase::PassFlight { resolve_at },
+            crate::state::FlightKind::Shot => Phase::ShotFlight { resolve_at },
+            crate::state::FlightKind::FreeThrow => Phase::FreeThrowFlight { resolve_at },
+            crate::state::FlightKind::JumpBall => Phase::JumpBallFlight,
+        });
+    }
+
+    /// 飞行结束：清空飞行记录。
+    pub fn clear_flight(&mut self) {
+        self.ball_flight = None;
+    }
+
     pub fn match_stage(&self) -> crate::state::MatchStage {
         self.phase()
             .stage(self.clock.period(), self.rules.league.regulation_periods)
@@ -917,6 +938,7 @@ impl World {
             clock: Clock::new(period_seconds, shot_clock),
             phase: Phase::Pregame,
             ball: BallBody::loose(center, Vec2::ZERO),
+            ball_flight: None,
             pass_result: None,
             pass_in_flight: None,
             last_touch: None,

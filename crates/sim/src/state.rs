@@ -518,7 +518,58 @@ impl Clock {
     }
 }
 
+/// 球的飞行状态：球在空中时才有值，与比赛阶段分开存在。
+///
+/// 传球、投篮、罚球与跳球撮球的飞行不替换比赛程序：程序仍是活球，
+/// 飞行只是球的第二个维度。
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BallFlight {
+    pub kind: FlightKind,
+    /// 飞行结束、该结算的时刻。
+    pub resolve_at: f64,
+}
+
+/// 四种飞行：传球、投篮（含上篮）、罚球、跳球撮球。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlightKind {
+    Pass,
+    Shot,
+    FreeThrow,
+    JumpBall,
+}
+
+impl FlightKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::Shot => "shot",
+            Self::FreeThrow => "free_throw",
+            Self::JumpBall => "jump_ball",
+        }
+    }
+
+    /// 飞行期间哪些时钟继续走：传球两个钟都走；投篮与跳球只走比赛钟；
+    /// 罚球飞行全停。
+    pub fn clocks(self) -> ClockAdvance {
+        match self {
+            Self::Pass => ClockAdvance {
+                game_clock: true,
+                shot_clock: true,
+                elapsed: true,
+                player_time: true,
+            },
+            Self::Shot | Self::JumpBall => ClockAdvance {
+                game_clock: true,
+                shot_clock: false,
+                elapsed: true,
+                player_time: true,
+            },
+            Self::FreeThrow => ClockAdvance::STOPPED,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum BallState {
     Held {
         holder: usize,
