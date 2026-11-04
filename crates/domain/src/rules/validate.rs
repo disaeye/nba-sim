@@ -176,6 +176,9 @@ impl GameRules {
             || self.inbound_setup_seconds < 0.0
             || self.backcourt_seconds <= 0.0
             || self.three_second_lane_seconds <= 0.0
+            || self.defensive_three_second_seconds < 0.0
+            || (self.defensive_three_second_seconds > 0.0
+                && !self.defensive_three_second_is_technical)
             || self.period_break_seconds < 0.0
             || self.tactical_initiation_seconds < 0.0
             || self.redecide_interval_seconds <= 0.0

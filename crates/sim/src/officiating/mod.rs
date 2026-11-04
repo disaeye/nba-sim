@@ -32,6 +32,8 @@ pub enum ViolationKind {
     EightSecond,
     Backcourt,
     CloselyGuarded,
+    /// 进攻方三秒违例。
+    OffensiveThreeSecond,
     ShotClock,
     Travel,
     DoubleDribble,
@@ -46,6 +48,7 @@ impl ViolationKind {
             Self::EightSecond => "eight_second",
             Self::Backcourt => "backcourt",
             Self::CloselyGuarded => "closely_guarded",
+            Self::OffensiveThreeSecond => "offensive_three_second",
             Self::ShotClock => "shot_clock",
             Self::Travel => "travel",
             Self::DoubleDribble => "double_dribble",

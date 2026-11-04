@@ -18,6 +18,7 @@ pub mod draw;
 pub mod endgame;
 pub mod formation;
 pub mod footwork;
+pub mod lane;
 pub mod gate;
 pub mod motion;
 pub mod officiating;

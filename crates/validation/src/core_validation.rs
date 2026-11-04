@@ -649,9 +649,12 @@ pub fn reconstruct(report: &GameReport) -> Reconstructed {
                 and_one,
                 ..
             } => {
-                totals.player_fouls_total += 1;
-                totals.team_stats[player_team_index(report, *fouler)][13] += 1;
+                // 个人犯规总数按「计入个人犯规累计」的那一类算：技术犯规
+                // 不计入个人犯规累计（NBA Rule 12A §II），箱体账本因此
+                // 也不把它算进去。两边必须用同一条规则。
                 if nba_domain::rules::counts_toward_personal_limit(*kind) {
+                    totals.player_fouls_total += 1;
+                    totals.team_stats[player_team_index(report, *fouler)][13] += 1;
                     *totals.personal_fouls.entry(*fouler).or_default() += 1;
                 }
                 if matches!(kind, nba_domain::event::FoulKind::Shooting) {

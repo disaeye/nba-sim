@@ -130,7 +130,10 @@ pub fn integrate(world: &mut World, dt: f64) {
         let allow_forward = has_action
             || has_defensive_action
             || holder == Some(handle)
-            || cut_cutter == Some(handle);
+            || cut_cutter == Some(handle)
+            // 正在走出限制区的球员可以正面穿过队友：他要从一条挤满了人的
+            // 区域里出来，绕行规则会让他卡在原地，出秒的计时因此停不下来。
+            || crate::lane::clearing_lane(world, handle);
         let (steered, blocker, side, blocked) = if holder_or_actor {
             (target, usize::MAX, player_side, false)
         } else {

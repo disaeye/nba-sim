@@ -276,7 +276,18 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
     let weights = &world.params.policy;
 
     // 跑位：回到编队空位。价值是该位置的接球价值，成本是跑动占用的时钟。
-    let spot = crate::formation::spot_target(world, actor);
+    //
+    // 编队空位落在限制区里时改用区外的落点：跑位不能把球员拉回限制区，
+    // 否则进攻三秒的计时停不下来（NBA Rule 10 §VI）。
+    let mut spot = crate::formation::spot_target(world, actor);
+    if crate::lane::clearing_required(world, actor)
+        && world
+            .rules
+            .court
+            .is_in_lane(pos, world.attacking_right(team))
+    {
+        spot = crate::lane::exit_target(world, actor);
+    }
     let travel = (spot - pos).length();
     let relocate: Candidate = (
         ActionKind::Relocate,

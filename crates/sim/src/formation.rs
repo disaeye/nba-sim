@@ -344,7 +344,16 @@ pub fn move_toward_targets(world: &mut World) {
                     ActionKind::Cut(_) | ActionKind::Relocate
                 )
         }) {
-            let spot = own.intent.to_ft;
+            let mut spot = own.intent.to_ft;
+            // 跑位动作也不能把球员拉回限制区（NBA Rule 10 §VI）。
+            if crate::lane::clearing_required(world, handle)
+                && world
+                    .rules
+                    .court
+                    .is_in_lane(world.players[handle].pos, world.attacking_right(offense))
+            {
+                spot = crate::lane::exit_target(world, handle);
+            }
             crate::assignment::force_target_as(
                 world,
                 handle,
@@ -354,9 +363,35 @@ pub fn move_toward_targets(world: &mut World) {
             );
             continue;
         }
-        let desired = spot_target_for(world, handle, &spots);
+        // 无球清空限制区：进攻方在前场控制球时，进攻人不能一直待在
+        // 限制区里（NBA Rule 10 §VI）。阵型站位里的低位点与顺下点都在
+        // 限制区内，因此站位必须按三秒计时修正。
+        //
+        // 修正是持久的：只要阵型站位本身落在限制区里，落点就一直是区外
+        // 的那个点。只按「球员此刻在不在区里」修正会让球员走到区沿之后
+        // 立刻又被阵型拉回去，计时因此停不下来。
+        let formation_spot = spot_target_for(world, handle, &spots);
+        let mut desired = formation_spot;
+        // 清空限制区：进攻方在前场控制球时，限制区里的进攻人要往外走
+        // （NBA Rule 10 §VI）。这道修正必须写在落点提交之前：它在运动
+        // 积分之前生效，球员这一 tick 才真的朝区外走。
+        if crate::lane::clearing_required(world, handle)
+            && world
+                .rules
+                .court
+                .is_in_lane(world.players[handle].pos, world.attacking_right(offense))
+        {
+            desired = crate::lane::exit_target(world, handle);
+        }
         if world.players[handle].target_kind != crate::state::TargetKind::Contact {
-            crate::assignment::commit_target(world, handle, desired);
+            if desired != formation_spot {
+                // 落点变了：绕开职责层的死区，这次提交必须让球员真的
+                // 朝区外走。限制区里的球员离外沿本来就不到五英尺，用
+                // 死区判定就等于把他钉在区里，计时永远停不下来。
+                crate::assignment::commit_target_forced(world, handle, desired);
+            } else {
+                crate::assignment::commit_target(world, handle, desired);
+            }
             crate::assignment::reselect_yielding(world, handle, desired);
         }
     }

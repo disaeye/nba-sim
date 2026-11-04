@@ -476,6 +476,8 @@ pub enum TurnoverKind {
     ShotClock,
     OutOfBounds,
     CloselyGuarded,
+    /// 进攻三秒违例：进攻人在限制区里连续停留超过三秒。
+    LaneViolation,
     /// 后场八秒未过中线。
     EightSecond,
     /// 已过中线又把球带回后场。
@@ -495,6 +497,7 @@ impl TurnoverKind {
             Self::CloselyGuarded => "closely_guarded",
             Self::EightSecond => "eight_second",
             Self::Backcourt => "backcourt",
+            Self::LaneViolation => "lane_violation",
         }
     }
 }

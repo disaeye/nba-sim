@@ -45,8 +45,17 @@ pub fn book(
                 && !player.disqualified
                 && player.fouls < foul_limit
         });
-    world.line_mut(fouler).fouls += 1;
-    let disqualified = crate::rotation::record_foul(world, fouler);
+    // 技术犯规不计入个人犯规累计（NBA Rule 12A §II）：它不是一次个人
+    // 犯规，也不计入球队单节犯规。账本的个人犯规计数按同一条规则。
+    let personal = nba_domain::rules::counts_toward_personal_limit(kind);
+    if personal {
+        world.line_mut(fouler).fouls += 1;
+    }
+    let disqualified = if personal {
+        crate::rotation::record_foul(world, fouler)
+    } else {
+        false
+    };
     let index = World::team_index(world.players[fouler].team);
     let counts = nba_domain::rules::counts_toward_team_period_fouls(kind);
     if counts {

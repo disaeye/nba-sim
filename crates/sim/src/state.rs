@@ -218,6 +218,12 @@ pub struct PlayerState {
     pub progress_best_ft: f32,
     /// 本 tick 运动积分产生的位移，供职责段测量。
     pub last_motion_ft: f32,
+    /// 这个球员在限制区里已经连续停留的秒数。
+    ///
+    /// 进攻三秒与防守三秒都按「某个球员连续停留」计时（NBA Rule 10
+    /// §VI.1「An offensive player shall not remain for more than three
+    /// seconds」），因此计时记在球员身上而不是回合上。
+    pub lane_seconds: f32,
     /// 本 tick 碰撞分离产生的位移，供职责段测量。
     pub last_separation_ft: f32,
     pub home_spot: Vec2,
@@ -270,6 +276,7 @@ impl PlayerState {
             nonprogress_seconds: 0.0,
             progress_best_ft: f32::MAX,
             last_motion_ft: 0.0,
+            lane_seconds: 0.0,
             last_separation_ft: 0.0,
             home_spot: pos,
             entered_at: f64::default(),
@@ -1057,6 +1064,13 @@ pub struct PossessionState {
     pub break_return: Vec<(usize, Vec2)>,
     /// 持球人被紧逼盯防的累计秒数：一旦不再紧逼就清零。
     pub closely_guarded_seconds: f32,
+    /// 进攻人在限制区里已经连续停留的秒数：进攻三秒的计时。
+    ///
+    /// 攻方三秒只对进攻方的前场球员计时，而且只在他**持球或准备接球**
+    /// 时算——无球球员在限制区里站位是允许的（NBA Rule 10 §VI）。
+    pub offense_lane_seconds: f32,
+    /// 防守人在限制区里已经连续停留的秒数：防守三秒的计时。
+    pub defense_lane_seconds: f32,
     /// 后场八秒的起算点（比赛时钟）：过中线即清空。
     pub backcourt_started_game_clock: Option<f64>,
     /// 本回合是否已经在前场建立控制：已建立后不能再把球带回后场。
@@ -1117,6 +1131,8 @@ impl PossessionState {
             play_called: false,
             break_return: Vec::new(),
             closely_guarded_seconds: 0.0,
+            offense_lane_seconds: 0.0,
+            defense_lane_seconds: 0.0,
             backcourt_started_game_clock: None,
             frontcourt_established: false,
             rim_contact: false,

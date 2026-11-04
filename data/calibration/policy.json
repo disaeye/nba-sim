@@ -343,6 +343,7 @@
     "footwork_step_per_cm_ft": 0.012,
     "footwork_step_cap_ft": 3.8,
     "footwork_steps_allowed": 2,
+    "lane_passing_speed_ftps": 3.0,
     "footwork_pivot_bias": 0.0,
     "reach_in_dead_ball_seconds": 1.2,
     "drive_finish_distance_ft": 6.0,

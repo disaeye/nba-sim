@@ -109,6 +109,37 @@ pub fn force_target_as(
     true
 }
 
+/// 提交一个必须生效的落点：落点被占时找一个替代点。
+///
+/// 走位修正需要这种提交：落点被占时如果直接放弃，球员会一直卡在
+/// 原地，目标形同虚设。替代点按八个方向由近及远找。
+pub fn commit_target_forced(world: &mut World, handle: usize, desired: Vec2) -> bool {
+    let target = if validate_target(world, handle, desired, TargetKind::Station, usize::MAX) {
+        Some(desired)
+    } else {
+        alternative_target(world, handle, desired, TargetKind::Station, usize::MAX)
+    };
+    let Some(target) = target else {
+        return false;
+    };
+    // 落点被占时用替代点，替代点离得远，死区会把它判成「没有变化」。
+    // 因此这里绕开死区：这次提交必须让球员真的朝落点走。
+    let now = world.now();
+    let player = &mut world.players[handle];
+    let moved = (player.target - target).length() > 0.05;
+    player.target = target;
+    player.target_kind = TargetKind::Station;
+    player.target_partner = usize::MAX;
+    player.target_changed_at = now;
+    if moved {
+        player.progress_best_ft = f32::MAX;
+        player.nonprogress_seconds = 0.0;
+        player.yielding_since = 0.0;
+        player.recovery_path_ft = 0.0;
+    }
+    true
+}
+
 pub fn pressure_separation(world: &World) -> f32 {
     world.params.policy.g("pressure_separation_ft")
 }

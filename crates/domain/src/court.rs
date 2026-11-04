@@ -236,6 +236,45 @@ impl CourtGeometry {
         (pos.x - baseline_x).abs() <= lane_length_ft
             && (pos.y - self.hoop_y_ft).abs() <= lane_half_width_ft
     }
+
+    /// 罚球线延长线（NBA Rule 10 §VI 的罚则发球位置）。
+    ///
+    /// 罚球线延长线是罚球线那条垂直于底线的线向边线的延长部分：进攻方
+    /// 罚球线在离自己底线十九英尺处，因此延长线的横坐标就是那条线。
+    /// 三秒违例与走步的罚则都在这条线上发球（NBA Rule 10 §VI 与 §XIII）。
+    pub fn free_throw_line_extended_x(self, attacking_right: bool) -> f32 {
+        let baseline_x = if attacking_right {
+            self.width_ft
+        } else {
+            f32::from(0u8)
+        };
+        let lane_length_ft = LANE_LENGTH_FROM_BASELINE_FT * (self.width_ft / COURT_WIDTH_FT);
+        if attacking_right {
+            baseline_x - lane_length_ft
+        } else {
+            baseline_x + lane_length_ft
+        }
+    }
+
+    /// 罚球线延长线上的边线发球点：靠近违例发生的那一侧边线。
+    ///
+    /// 球在罚球线延长线与边线的交点。球的纵向位置决定取哪一侧边线。
+    pub fn sideline_at_free_throw_line_extended(
+        self,
+        pos: Vec2,
+        attacking_right: bool,
+    ) -> Vec2 {
+        let radius = 0.5;
+        let y = if pos.y < self.height_ft * 0.5 {
+            radius
+        } else {
+            self.height_ft - radius
+        };
+        Vec2::new(
+            self.free_throw_line_extended_x(attacking_right),
+            y,
+        )
+    }
 }
 
 /// 统一出手分区的距离阈值（ft，attributes.md §2.3a）。

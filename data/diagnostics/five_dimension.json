@@ -39,14 +39,14 @@
       "metrics": [
         {
           "key": "trace_coverage",
-          "value": 0.9973599295981226,
+          "value": 0.9980400624522473,
           "lower": 0.99,
           "upper": 1.0,
           "passed": true
         },
         {
           "key": "mean_candidates",
-          "value": 4.470519213845702,
+          "value": 4.475733315616384,
           "lower": 2.0,
           "upper": 12.0,
           "passed": true
@@ -60,7 +60,7 @@
         },
         {
           "key": "mean_beta",
-          "value": 5.6451480005769765,
+          "value": 5.621220360102259,
           "lower": 3.0,
           "upper": 10.0,
           "passed": true
@@ -94,7 +94,7 @@
         },
         {
           "key": "endgame_three_share",
-          "value": 0.35311572700296734,
+          "value": 0.4553846153846154,
           "lower": 0.15,
           "upper": 0.8,
           "passed": true
@@ -107,28 +107,28 @@
       "metrics": [
         {
           "key": "play_activation_share",
-          "value": 0.2863083320498999,
+          "value": 0.2688041331104695,
           "lower": 0.15,
           "upper": 1.0,
           "passed": true
         },
         {
           "key": "action_family_entropy_bits",
-          "value": 2.910458407791926,
+          "value": 2.904673855467202,
           "lower": 1.0,
           "upper": 3.2,
           "passed": true
         },
         {
           "key": "pass_share",
-          "value": 0.6732648899514801,
+          "value": 0.6783545895455362,
           "lower": 0.15,
           "upper": 0.85,
           "passed": true
         },
         {
           "key": "tactical_bonus_share",
-          "value": 0.13050107136970496,
+          "value": 0.13037771002710027,
           "lower": 0.04,
           "upper": 1.0,
           "passed": true
@@ -196,7 +196,7 @@
         },
         {
           "key": "events_per_game",
-          "value": 9731.34375,
+          "value": 9607.09375,
           "lower": 1000.0,
           "upper": 10000.0,
           "passed": true

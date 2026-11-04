@@ -43,6 +43,13 @@ pub struct GameRules {
     /// 攻方三秒时限（charter §6.2）：前场控制时进攻人在限制区连续停留超过
     /// 该时限判违例。NBA 与 FIBA 同为 3 秒。
     pub three_second_lane_seconds: f32,
+    /// 守方三秒时限：防守人在限制区连续停留超过该时限判违例。
+    ///
+    /// NBA Rule 10 §VII：违例判技术犯规，对方罚一次并保留球权。
+    /// FIBA Article 26：FIBA 没有守方三秒规则，因此该值为零表示不启用。
+    pub defensive_three_second_seconds: f32,
+    /// 守方三秒违例是否判技术犯规（NBA 是，FIBA 无此规则）。
+    pub defensive_three_second_is_technical: bool,
     pub period_break_seconds: f32,
     pub tactical_initiation_seconds: f32,
     /// 无事件触发时的最小重决策间隔（秒）。决策由动作完成、球权变化、
@@ -421,6 +428,8 @@ impl Default for GameRules {
             inbound_safety_distance_ft: 8.0,
             backcourt_seconds: 8.0,
             three_second_lane_seconds: 3.0,
+            defensive_three_second_seconds: 3.0,
+            defensive_three_second_is_technical: true,
             period_break_seconds: 15.0,
             tactical_initiation_seconds: 6.5,
             redecide_interval_seconds: 0.5,
