@@ -57,7 +57,7 @@
       "source": "shufinskiy/nba_data shotdetail"
     }
   },
-  "commit": "b05c1196099af4e99e2f1d2e46b5de206aae9ca5",
+  "commit": "f7d15a4880a4bf9685a23705271a9446e3f5b9ac",
   "games": 32,
   "mechanism": {
     "high_value": 0.95,
@@ -67,5 +67,5 @@
     "seeds": 160
   },
   "seed_start": 1,
-  "working_tree_dirty": true
+  "working_tree_dirty": false
 }

@@ -37,7 +37,7 @@
 - `crates/sim/tests/clock_scenarios.rs` 10 项：传球飞行两钟都走、投篮飞行只走比赛钟、罚球飞行两钟都停、死球与发球期间两钟都停、新的控制权把进攻钟设回二十四秒、触筐的前场篮板补到十四秒、没有触筐的前场篮板不动、进攻钟归零判违例、哨响停表、发球程序期间停表。
 - `crates/sim/tests/boundary_scenarios.rs` 11 项：发球五秒违例、发球计时从程序开始算、进攻方碰出界交出球权、防守方碰出界进攻方保留球权、投篮出手之后球飞出界不记失误、收球后再运球判违例、合法恢复不算二次运球、移动轴心脚判走步、两步之内的收球步合法、第三步判走步、跳步违例。
 - `crates/sim/tests/jump_ball_scenarios.rs` 8 项、`crates/sim/tests/jump_ball.rs` 5 项：拍球的人必须是跳球员之一、合法拍球的高度、停表跳球等人到位才掷球、撮球之前两钟不走、双方违例之后跳球重来且跳球员不变、交替拥有箭头的初始值、NBA 不使用箭头、跳球是它自己的比赛程序、加时以新的跳球开始。
-- `crates/sim/tests/shot_scenarios.rs` 8 项：弧内出手记两分、弧外出手记三分、底角出手记三分、被盖之后球成活球、投篮犯规之后罚球、筐上方下落的球被碰到判干扰球、上升段的球可以合法封盖、筐柱圆柱段之外的球不算干扰球。
+- `crates/sim/tests/shot_scenarios.rs` 10 项：弧内出手记两分、弧外出手记三分、底角出手记三分、被盖之后球成活球、投篮犯规之后罚球、筐上方下落的球被碰到判干扰球、上升段的球可以合法封盖、筐柱圆柱段之外的球不算干扰球、碰过篮板之后防守人再碰球判干扰球、球坐在筐沿上被碰到判干扰球。
 - `crates/sim/tests/action_variants.rs` 7 项：突破变体写进突破事实、变体不改落点但改过掉防守人的机会、变体按几何选、背身步法的空间效果、对位防守人挑站位姿态、姿态发布一次变化事实、贴身的防守人施压而不是滑步。
 - `crates/sim/tests/architecture_decoupling.rs` 5 项：`Phase` 不含飞行变体、飞行种类独立于比赛程序、`ControlState` 带着全部控制字段、联赛档案按四个策略族存储、两个档案声明同一组字段、档案少一个键读不出来。
 - `crates/domain/tests/rule_catalog.rs` 3 项：程序与动作目录的结构与场景身份唯一性、目录里的每一条证据都指向真实存在的测试。
@@ -67,28 +67,28 @@
 
 | 指标 | 观测 | 基准 |
 | --- | --- | --- |
-| possessions_per_game | 203.1 | 198.2 |
-| points_per_game | 236.4 | 227.6 |
-| blocks_per_game | 10.19 | 9.66 |
-| shooting_fouls_per_game | 17.56 | 19.60 |
-| fta_per_game | 47.19 | 43.33 |
-| oreb_per_game | 28.22 | 27.39 |
-| fga_per_possession | 0.945 | 0.898 |
-| turnover_per_possession | 0.142 | 0.144 |
-| steals_per_game | 13.78 | 16.12 |
-| and_one_per_game | 2.16 | 2.50 |
-| free_throw_percentage | 0.766 | 0.780 |
-| zone_share 篮下 | 0.310 | 0.316 |
-| zone_share 近筐 | 0.198 | 0.191 |
-| zone_share 中距离 | 0.079 | 0.072 |
-| zone_share 三分 | 0.414 | 0.421 |
-| creation_share drive | 0.238 | 0.220 |
+| possessions_per_game | 203.06 | 198.20 |
+| points_per_game | 237.53 | 227.59 |
+| blocks_per_game | 10.19 | 9.65 |
+| shooting_fouls_per_game | 17.97 | 19.60 |
+| fta_per_game | 46.66 | 43.33 |
+| oreb_per_game | 28.78 | 27.26 |
+| fga_per_possession | 0.949 | 0.898 |
+| turnover_per_possession | 0.144 | 0.144 |
+| steals_per_game | 13.91 | 16.12 |
+| and_one_per_game | 2.31 | 2.50 |
+| free_throw_percentage | 0.768 | 0.780 |
+| zone_share 篮下 | 0.315 | 0.316 |
+| zone_share 近筐 | 0.199 | 0.191 |
+| zone_share 中距离 | 0.082 | 0.072 |
+| zone_share 三分 | 0.404 | 0.421 |
+| creation_share drive | 0.241 | 0.220 |
 | creation_share cut | 0.044 | 0.045 |
-| creation_share post | 0.066 | 0.064 |
-| creation_share pull_up | 0.189 | 0.190 |
-| creation_share putback | 0.049 | 0.045 |
+| creation_share post | 0.067 | 0.064 |
+| creation_share pull_up | 0.185 | 0.190 |
+| creation_share putback | 0.050 | 0.045 |
 | creation_share transition | 0.130 | 0.121 |
-| creation_share set | 0.284 | 0.316 |
+| creation_share set | 0.282 | 0.316 |
 
 ### 机制实验
 
@@ -96,13 +96,13 @@
 
 每一项按它自己的效应量定样本量，而不是所有属性用同一个数：160 个种子对效应量只有 2% 的属性不够，跨零不是「没效应」，是「样本不够」。样本量写在 `crates/validation/src/mechanism_core.rs` 的 `REQUIRED_SEEDS` 里，因此 `defensive_rebound` 跑 640 个种子，其余属性跑 160 个。
 
-13 项属性的判定结果写在 `docs/dev/evidence/action_chain_validation/mechanism_core.json`，认证状态写在同目录的 `certification.json`。`defensive_rebound` 在 640 个种子上的相对变化是 +0.0198，配对区间 [+0.0090, +0.0307]，整段在零的一侧，因此这一项判定为 `pass`，`known_insufficient.json` 的登记表已经清空。它的效应量本来就只有 2%：篮板归属主要由站位与球弹向决定，防守篮板属性改变伸手半径，很少改变赢家——这正是它需要 640 个种子的原因。
+13 项属性的判定结果写在 `docs/dev/evidence/action_chain_validation/mechanism_core.json`，认证状态写在同目录的 `certification.json`。`defensive_rebound` 在 640 个种子上的相对变化是 +0.0194，配对区间 [+0.0090, +0.0298]，整段在零的一侧，因此这一项判定为 `pass`，`known_insufficient.json` 的登记表已经清空，认证工件的 `certification_status` 是 `pass`。它的效应量本来就只有 2%：篮板归属主要由站位与球弹向决定，防守篮板属性改变伸手半径，很少改变赢家——这正是它需要 640 个种子的原因。
 
 ## 当前残差
 
 以下一项是当前内核明确的残差，逐项标注范围；它是方案的已知残差，不是未开工的阶段。
 
-1. 五维诊断里 `events_per_game` 的上界是一条量程守卫，不是分布目标：它要挡住的是事件日志失控（引擎另有一层 50 万条事实的硬上限），因此上界跟着引擎的事实粒度一起抬。2026-11-04 这一轮把限制区计时、发球五秒、非法触球、突破变体、背身步法与对位站位姿态都接上了生产路径，每一类都发布自己的事实，因此每场的事实数从约 9600 涨到约 10500，上界抬到 13000 并记在 `data/diagnostics/five_dimension_bands.json` 的 `band_rationale` 里。
+1. 五维诊断里 `events_per_game` 的上界是一条量程守卫，不是分布目标：它要挡住的是事件日志失控（引擎另有一层 50 万条事实的硬上限），因此上界跟着引擎的事实粒度一起抬。2026-11-04 这一轮把限制区计时、发球五秒、非法触球、突破变体、背身步法、对位站位姿态与干扰球的三种情形都接上了生产路径，每一类都发布自己的事实，因此每场的事实数从约 9600 涨到约 10500，上界抬到 13000 并记在 `data/diagnostics/five_dimension_bands.json` 的 `band_rationale` 里。
 
 ## 后续工作
 
