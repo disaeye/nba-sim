@@ -15,7 +15,7 @@
 - 交付物：`Clock`（整数 tick 与仿真时间）、`Phase` 时钟推进表、`Fact` 事件身份与序号、`World::step` 的固定步长循环、控制与球权状态。
 - 代码：`crates/sim/src/state.rs`、`crates/sim/src/clock.rs`、`crates/sim/src/world.rs`。
 - 证据：`crates/sim/tests/frame_stream.rs`（帧流因果 ID）、`crates/sim/tests/event_sequence.rs`（事件序号与游标缺口）、`crates/sim/tests/interface_determinism.rs`（重复运行与检查点续跑一致）、`crates/validation/tests/event_ledger.rs`（事件派生账本）、`crates/sim/tests/runtime_tables.rs`（传球飞行消耗两个时钟、罚球飞行停钟）。
-- 状态：时钟与阶段推进完成；统一的裁决计划提交入口尚未把全部停表原因收拢到单一类型（见 C）。
+- 状态：时钟与阶段推进完成；停表后果已经收拢到 `World::adjudicate` 一个提交入口（`StoppageCause`、`PenaltyPlan`、`RestartPlan`、`ResumeContext`、`InboundLocation`、`ControlState`）。
 
 ## C. 程序与判罚
 
@@ -62,7 +62,7 @@
   - 动作场景：`crates/sim/tests/action_scenarios.rs` 29 项（含切入六种路线、挤过与绕过、回位、包夹与护球、欧洲步、后撤步）。
   - 决策与价值：`crates/sim/tests/policy_utility.rs`、`crates/sim/tests/value_invariants.rs`、`crates/sim/tests/decision_trace.rs`。
   - 情境：`crates/sim/tests/situational_emergence.rs` 5 项（含落后方末段主动犯规、砍罚球差的大个子）。
-- 状态：16 个动作族均有生产路径与通过测试；进攻三秒对应的「清空禁区」行为尚未实现。
+- 状态：16 个动作族均有生产路径与通过测试，状态全部是 `verified`；进攻三秒对应的「清空禁区」行为已经实现（`lane::clearing_required` 与 `lane::exit_target`），回归见 `crates/sim/tests/lane_clock.rs`。
 
 ## F. 事件消费者与交付验证
 
