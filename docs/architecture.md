@@ -115,17 +115,21 @@ flowchart TD
 ### 3.1 设计：分离"归属"与"轨迹"，位置是派生量
 
 ```
-BallState (归属 · 唯一事实源 · crates/domain)
-├── Held { carrier: PlayerId }                       // 突破中的持球亦是 Held，
+BallState (归属 · 唯一事实源 · crates/sim)
+├── Held { holder: PlayerId }                        // 突破中的持球亦是 Held，
 │                                                    // 突破由动作窗口（§4.2）描述
-├── Transfer { from, to, kind }                      // 控球交接/发球递交
-│     kind = ControlTransfer | InboundTransfer
-├── InFlight { kind: FlightKind, flight: FlightParams }
-│     FlightKind = Pass | Shot | FreeThrow | InboundPass | OutletPass
-│     FlightParams = 起点/落点/弧线参数/起飞时刻（可闭式采样的参数集）
-├── Loose { params: LooseParams }                    // 松球/篮板弹跳的参数集
-├── Dead { reason: DeadReason, next: DeadTransition }
-└── InboundSetup { inbounder: PlayerId, phase: InboundPhase }
+├── Pass { pass_id, from, to, kind,                  // 传球飞行：起点、落点与
+│          from_pos, to_pos, start, duration }       // 起飞时刻，可闭式采样
+├── Shot { shot_id, shooter, from_pos, target,       // 投篮飞行：出手点、落点、
+│           start, aperture_ft,                      // 有效筐口与补进概率
+│           rim_in_probability, aim_offset }
+└── Loose { pos, vel }                               // 松球与篮板弹跳
+
+World::ball_flight (飞行的第二个维度 · crates/sim)
+  kind = FlightKind = Pass | Shot | FreeThrow | JumpBall
+  resolve_at = 飞行结束、该结算的时刻
+  飞行是球的第二个维度：它不替换比赛程序（MatchProgram），只决定走哪个钟
+  与由哪一层结算（§4.1）
 
 BallTrajectoryKind (运动学采样参数 · crates/physics · 私有于执行)
   退化为采样函数的参数载体，不再承载归属语义
