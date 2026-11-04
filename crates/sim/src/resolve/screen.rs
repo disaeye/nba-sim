@@ -14,10 +14,18 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
     let defender = world
         .screen_defender
         .expect("screen resolution requires its decision-time defender");
-    assert!(
-        world.players[defender].on_court && world.players[defender].team != team,
-        "screen defender must remain on court and opposite the screener's team"
-    );
+    // 掩护的防守人是决策时刻定下的，不是动作的参与人：死球换人可以在
+    // 决策与结算之间把他换下场。这种时序不是内核错误，掩护因此没有
+    // 接触也没有路线，动作按失败结束。
+    if !world.players[defender].on_court || world.players[defender].team == team {
+        return ActionOutcome {
+            actor: intent.actor,
+            kind: ActionKind::Screen(kind),
+            completion: Completion::Failed,
+            delta: StateDelta::default(),
+            facts: Vec::new(),
+        };
+    }
 
     let defender_pos = world.players[defender].pos;
 

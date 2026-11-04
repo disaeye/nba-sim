@@ -135,9 +135,11 @@ mod tests {
 
     #[test]
     fn the_step_length_grows_with_height_and_is_capped() {
-        let short = step_length_ft(180, 3.0, 0.01, 4.5);
-        let tall = step_length_ft(215, 3.0, 0.01, 4.5);
+        // 身高项在上限之内必须真的起作用：否则所有球员的步长都一样，
+        // 脚步模型就退化成固定值。
+        let short = step_length_ft(180, 1.2, 0.012, 3.8);
+        let tall = step_length_ft(215, 1.2, 0.012, 3.8);
         assert!(tall > short);
-        assert_eq!(step_length_ft(240, 3.0, 0.01, 4.5), 4.5);
+        assert_eq!(step_length_ft(240, 1.2, 0.012, 3.8), 3.8);
     }
 }

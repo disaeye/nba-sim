@@ -410,14 +410,19 @@ fn experiment(
     // 登记为 `more_games` 的属性按登记的场次跑：登记表里的
     // `required_games` 就是这一项判得出来的样本量。跑少了仍然是跨零，
     // 跑够了就该给出通过或缺陷的确定裁决。
+    //
+    // 限定回合数的快速档不套用登记的场次：那种配置按设计只看前若干个
+    // 回合，套上去会让一次契约检查跑完整场比赛。
     let config = match declaration {
-        Some(entry) if entry.resolution == "more_games" => match entry.required_games {
-            Some(required) if required as usize > config.seeds => MechanismConfig {
-                seeds: required as usize,
-                ..config
-            },
-            _ => config,
-        },
+        Some(entry) if entry.resolution == "more_games" && config.possessions.is_none() => {
+            match entry.required_games {
+                Some(required) if required as usize > config.seeds => MechanismConfig {
+                    seeds: required as usize,
+                    ..config
+                },
+                _ => config,
+            }
+        }
         _ => config,
     };
     let baseline = run_arm(params, attribute, config.low_value, config)?;

@@ -586,6 +586,56 @@ fn a_third_step_after_the_gather_is_a_travel() {
     );
 }
 
+/// 掩护的防守人不是动作的参与人：死球换人可以在决策与结算之间把他
+/// 换下场。那种时序不是内核错误，掩护按失败结束而不是崩掉。
+#[test]
+fn a_screen_whose_defender_left_the_court_fails_instead_of_crashing() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 149);
+    let offense = world.on_court(TeamSide::Home).as_slice()[0];
+    let screener = world.on_court(TeamSide::Home).as_slice()[1];
+    let defender = world.on_court(TeamSide::Away).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == offense || index == screener || index == defender;
+        player.vel = Vec2::ZERO;
+    }
+    let spot = Vec2::new(60.0, 25.0);
+    world.players[offense].pos = spot;
+    world.players[offense].target = spot;
+    world.players[screener].pos = spot + Vec2::new(0.8, 0.6);
+    world.players[screener].target = world.players[screener].pos;
+    world.players[defender].pos = spot + Vec2::new(1.0, 0.9);
+    world.players[defender].target = world.players[defender].pos;
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+
+    // 决策时刻的防守人，之后被换下场。
+    world.screen_defender = Some(defender);
+    world.players[defender].on_court = false;
+
+    let intent = ActionIntent {
+        actor: offense,
+        kind: ActionKind::Screen(ScreenKind::OnBall),
+        target: Some(screener),
+        from_ft: spot,
+        to_ft: spot,
+        start_time: world.now(),
+        duration: 1.0,
+    };
+    let outcome = nba_sim_core::resolve::screen::resolve(&mut world, &intent, ScreenKind::OnBall);
+    assert_eq!(
+        outcome.completion,
+        nba_sim_core::action::Completion::Failed,
+        "防守人已经离场的掩护必须按失败结束"
+    );
+    assert_eq!(
+        world.possession.screens,
+        0,
+        "失败的掩护不计入掩护次数"
+    );
+}
+
 /// 突破后的收球分球：同一次进攻里突破之后仍然可以把球传出去。
 #[test]
 fn a_drive_can_stop_and_pass_within_the_same_possession() {
