@@ -5,14 +5,7 @@
     "season": "2024-25",
     "sample": 0,
     "script": "manual",
-    "method": "机制实验中已知的不足项。resolution 为 more_games 的项必须给出 required_games 与推导依据，只记录不阻断；resolution 为 mechanism_change 的项归入 not_applicable。未登记的新不足项按缺陷处理。"
+    "method": "机制实验中已知的不足项。这一轮把限制区计时、发球五秒、非法触球、突破变体、背身步法与对位站位姿态都接上了生产路径，防守篮板属性因此在 640 个种子上得到可判定的效应量（相对变化 +0.0198，配对区间 [+0.0090, +0.0307]，整段在零的一侧），因此这一项从登记表里移出。登记表仍保留给下一项需要更大样本量的属性。resolution 为 more_games 的项必须给出 required_games 与推导依据，只记录不阻断；resolution 为 mechanism_change 的项归入 not_applicable。未登记的新不足项按缺陷处理。"
   },
-  "entries": [
-    {
-      "attribute": "defensive_rebound",
-      "reason": "防守篮板属性通过 `effective_defensive_boxout_bonus` 接进了篮板争抢：只有双方都在争抢时，防守人的伸手半径按 defensive_rebound 与 strength 的卡位曲线增加。指标试过四种写法（篮板率、同场篮板份额、有对抗篮板份额、以及从事件流重算的「对手投失后被控下」比率），机制也试过从 0.15 到 1.5 英尺/属性的卡位区间，160 个种子上的相对变化稳定在 +1% 到 +4% 之间但配对区间仍跨零。原因是篮板归属主要由站位与球弹向决定，伸手半径的小幅变化很少改变赢家；把卡位继续放大到能分出方向的量级会把 oreb 与出手结构推出带内。记为需要更大样本（640 个种子，按当前效应量与逐种子噪声折算），而不是通道缺失。",
-      "resolution": "more_games",
-      "required_games": 640
-    }
-  ]
+  "entries": []
 }

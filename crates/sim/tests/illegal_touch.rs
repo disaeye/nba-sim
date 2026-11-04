@@ -63,7 +63,7 @@ fn a_defender_who_reaches_across_the_handler_commits_the_illegal_touch() {
         "夹具必须让防守人守得比合法间隔更近"
     );
     assert!(
-        illegal_touch::closing_speed(&world, defender, holder) > 0.0,
+        illegal_touch::closing_toward_holder(&world, defender, holder) > 0.0,
         "夹具必须让防守人朝持球人移动"
     );
     assert_eq!(

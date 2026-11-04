@@ -16,7 +16,7 @@
 
 裁决已收拢到 `World::adjudicate` 一个提交入口（`PenaltyPlan`、`RestartPlan`、`ResumeContext`、`InboundLocation`、`ControlState`）；时钟有 `ClockState`、`ClockDirective`、`ClockController`；内核按职责分到 `clock/`、`program/`、`officiating/`、`actions/`、`control/`、`ledger/` 六个目录，旧路径经 crate 根重导出保持可用；`LeagueProfile` 的存储本身就是 `PeriodPolicy`、`ClockPolicy`、`FoulPolicy`、`TimeoutPolicy` 四个策略族（`#[serde(flatten)]` 让磁盘上仍是扁平键）。球的飞行是 `World.ball_flight`（种类 + 结算时刻）：四种飞行与比赛程序分存，`clock::advance` 按飞行种类决定哪个钟走。
 
-完整工作区测试（99 个二进制）在最近一次运行中全部通过，基线指纹已按当前行为重记；32 场 `validate-core` 的 38 条分布判据全部在带内，认证 `pass`。权威状态与档案结构已解耦：`Phase` 不含飞行变体，`ControlState` 是一个结构体，`LeagueProfile` 按四个策略族存储且没有未声明的默认值（`crates/sim/tests/architecture_decoupling.rs` 6 项）。未闭合项：干扰球在篮框上方与碰板后的两种情形（清单见 `docs/dev/evidence/stage_gate_map.md`）。
+完整工作区测试（99 个二进制）在最近一次运行中全部通过，基线指纹已按当前行为重记；32 场 `validate-core` 的 38 条分布判据全部在带内，认证 `pass`。权威状态与档案结构已解耦：`Phase` 不含飞行变体，`ControlState` 是一个结构体，`LeagueProfile` 按四个策略族存储且没有未声明的默认值（`crates/sim/tests/architecture_decoupling.rs` 5 项）。机制实验的 13 项属性全部判定为 `pass`（每一项按自己的效应量定样本量，`defensive_rebound` 跑 640 个种子），认证工件是 `pass`，`known_insufficient.json` 的登记表清空。未闭合项见 `docs/dev/evidence/stage_gate_map.md`。
 
 ## 2. 历史门矩阵：2026-10-21
 

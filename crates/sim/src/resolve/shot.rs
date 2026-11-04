@@ -18,33 +18,53 @@ pub fn check_goaltending(world: &mut World) -> bool {
     {
         return false;
     }
-    let (shooter, shot_id, pending) = match world.pending_shot.as_ref() {
+    let (shooter, shot_id, touched_backboard) = match world.pending_shot.as_ref() {
         Some(pending) if pending.result.is_none() && pending.free_throw.is_none() => {
-            (pending.shooter, pending.shot_id, true)
+            (
+                pending.shooter,
+                pending.shot_id,
+                pending.touched_backboard,
+            )
         }
         _ => (0, 0, false),
     };
-    if !pending {
-        return false;
-    }
     let team = world.players[shooter].team;
     let hoop = world.hoop_for(team);
     let policy = &world.params.policy;
     let rim_height = world.rules.rim_height_ft;
-    if world.ball.vz >= 0.0 {
-        return false;
-    }
-    // 球在下落，并且已经进入筐上方到筐下的圆柱段：这一段里碰球就是干扰，
-    // 无论它原本会不会进。
-    if world.ball.z > rim_height + 0.75 || world.ball.z < rim_height * 0.5 {
-        return false;
-    }
-    if (world.ball.pos - hoop).length() > policy.g("goaltending_cylinder_radius_ft") {
-        return false;
-    }
     let reach = policy.g("goaltending_reach_ft");
     let ball_pos = world.ball.pos;
     let ball_z = world.ball.z;
+    let descending = world.ball.vz < 0.0;
+    // 球碰到了篮板：碰过篮板之后如果球还有得分机会，防守人再碰它就是
+    // 干扰（NBA Rule 11 §I.3：碰过篮板之上之后，无论球在上升还是
+    // 下落，碰到都算干扰）。
+    //
+    // 这一条读的是本次出手自己的记录，不是扫事件日志：上一次出手碰过
+    // 篮板不该让这一次出手的球也变成干扰。
+    // 球是否还在筐上（坐在筐沿上或者滚在筐沿上）：这种球被碰到就是干扰，
+    // 无论防守人有没有把它按进（NBA Rule 11 §I.1）。
+    let on_ring = (ball_pos - hoop).length()
+        <= world.rules.rim_radius_ft + world.rules.ball_radius_ft
+        && (ball_z - rim_height).abs() <= world.rules.ball_radius_ft;
+
+    // 三种成立的情形（NBA Rule 11 §I）：
+    //
+    // 1. 球在筐上方到筐下的圆柱段里下落：这一段里碰球就是干扰，
+    //    无论它原本会不会进。
+    // 2. 球碰过篮板而且还有得分机会：碰球就是干扰，不管球在上升还是
+    //    下落。
+    // 3. 球坐在或者滚在筐沿上：碰球就是干扰。
+    let inside_cylinder = (ball_pos - hoop).length()
+        <= policy.g("goaltending_cylinder_radius_ft")
+        && ball_z <= rim_height + 0.75
+        && ball_z >= rim_height * 0.5;
+    let descending_in_cylinder = descending && inside_cylinder;
+    let after_backboard = touched_backboard && inside_cylinder;
+    let touching_ring = on_ring && descending;
+    if !(descending_in_cylinder || after_backboard || touching_ring) {
+        return false;
+    }
     let offender = world
         .players
         .iter()
@@ -100,6 +120,9 @@ pub struct PendingShot {
     pub block_by: Option<usize>,
     /// 球穿过筐口、触筐、触地或触手后才有值；出手瞬间保持未定。
     pub result: Option<ShotResult>,
+    /// 这一次出手有没有碰过篮板：碰过之后防守人再碰球就是干扰
+    /// （NBA Rule 11 §I.3）。
+    pub touched_backboard: bool,
 }
 
 pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> ActionOutcome {
@@ -348,6 +371,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         block_by,
         // 模型判定的封盖必须算作封盖：球在出手点就被拍掉，而不是先飞出去再赌接触。
         result: block_by.map(|by| ShotResult::Blocked { by }),
+        touched_backboard: false,
     });
     let now = world.now();
     world.players[shooter].facing = (hoop - pos).normalize_or_zero();

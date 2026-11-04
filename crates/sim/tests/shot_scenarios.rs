@@ -224,6 +224,7 @@ fn touching_a_descending_shot_inside_the_cylinder_is_goaltending() {
         free_throw: None,
         block_by: None,
         result: None,
+        touched_backboard: false,
     });
     let called = nba_sim_core::resolve::shot::check_goaltending(&mut world);
     assert!(called, "下落段里碰到筐上方的球必须判干扰球");
@@ -277,9 +278,107 @@ fn an_ascending_ball_may_be_blocked_without_goaltending() {
         free_throw: None,
         block_by: None,
         result: None,
+        touched_backboard: false,
     });
     let called = nba_sim_core::resolve::shot::check_goaltending(&mut world);
     assert!(!called, "上升段的球可以合法封盖，不是干扰球");
+}
+
+/// 建立一笔待结算的出手：干扰球的判定读它。
+fn pending_shot(world: &mut World, shooter: usize, is_three: bool) {
+    world.pending_shot = Some(nba_sim_core::resolve::shot::PendingShot {
+        shooter,
+        kind: ShotKind::CatchShoot,
+        zone: "rim",
+        distance_ft: 8.0,
+        contest: 0.0,
+        fouled: false,
+        and_one: false,
+        free_throws: 0,
+        points: 2,
+        is_three,
+        assisted_by: None,
+        shot_id: 1,
+        free_throw: None,
+        block_by: None,
+        result: None,
+        touched_backboard: false,
+    });
+}
+
+#[test]
+fn touching_a_ball_that_touched_the_backboard_is_goaltending() {
+    // NBA Rule 11 §I.3：球碰过篮板而且还有得分机会时，防守人再碰它就是
+    // 干扰，不管球在上升还是下落。
+    let mut world = live_world(1009);
+    let team = world.possession.team;
+    let shooter = place_shooter(&mut world, Vec2::new(-8.0, 0.0));
+    let defender = world
+        .on_court(team.other())
+        .as_slice()
+        .first()
+        .copied()
+        .expect("a defender is on the court");
+    let hoop = world.hoop_for(team);
+    // 球在筐上方的圆柱段里，而且在上升：上升段本身不是干扰。
+    world.ball.pos = hoop;
+    world.ball.z = world.rules.rim_height_ft + 0.2;
+    world.ball.vel = Vec2::ZERO;
+    world.ball.vz = 3.0;
+    world.players[defender].pos = hoop;
+    world.players[defender].target = hoop;
+    world.set_flight(
+        nba_sim_core::state::FlightKind::Shot,
+        world.now() + 2.0,
+    );
+    pending_shot(&mut world, shooter, false);
+    // 还没有碰过篮板：上升段的球可以合法封盖。
+    assert!(
+        !nba_sim_core::resolve::shot::check_goaltending(&mut world),
+        "上升段且没有碰过篮板的球可以合法封盖"
+    );
+    // 记一次碰篮板：此后防守人再碰它就是干扰。这一条记在本次出手自己
+    // 的记录上，而不是扫事件日志——上一次出手碰过篮板不该让这一次的
+    // 球也变成干扰。
+    if let Some(pending) = world.pending_shot.as_mut() {
+        pending.touched_backboard = true;
+    }
+    assert!(
+        nba_sim_core::resolve::shot::check_goaltending(&mut world),
+        "碰过篮板之后防守人再碰球就是干扰球"
+    );
+}
+
+#[test]
+fn touching_a_ball_that_is_sitting_on_the_ring_is_goaltending() {
+    // NBA Rule 11 §I.1：球坐在或者滚在筐沿上时，防守人碰它就是干扰，
+    // 无论他有没有把它按进。
+    let mut world = live_world(1010);
+    let team = world.possession.team;
+    let shooter = place_shooter(&mut world, Vec2::new(-8.0, 0.0));
+    let defender = world
+        .on_court(team.other())
+        .as_slice()
+        .first()
+        .copied()
+        .expect("a defender is on the court");
+    let hoop = world.hoop_for(team);
+    // 球坐在筐沿上：高度就是筐高，位置就是筐心。
+    world.ball.pos = hoop;
+    world.ball.z = world.rules.rim_height_ft;
+    world.ball.vel = Vec2::ZERO;
+    world.ball.vz = -0.5;
+    world.players[defender].pos = hoop;
+    world.players[defender].target = hoop;
+    world.set_flight(
+        nba_sim_core::state::FlightKind::Shot,
+        world.now() + 2.0,
+    );
+    pending_shot(&mut world, shooter, false);
+    assert!(
+        nba_sim_core::resolve::shot::check_goaltending(&mut world),
+        "球坐在筐沿上时碰它就是干扰球"
+    );
 }
 
 #[test]
@@ -321,6 +420,7 @@ fn a_ball_outside_the_cylinder_is_not_goaltending() {
         free_throw: None,
         block_by: None,
         result: None,
+        touched_backboard: false,
     });
     let called = nba_sim_core::resolve::shot::check_goaltending(&mut world);
     assert!(!called, "筐柱圆柱段之外的球不算干扰球");

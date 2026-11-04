@@ -313,6 +313,26 @@ pub fn load_known_insufficient(dir: &Path) -> Result<Vec<KnownInsufficient>, Str
     Ok(file.entries)
 }
 
+/// 每项属性判定所需的样本量。
+///
+/// 能力扰动的真实效应量在 1%–5%，样本不够时配对区间会跨零：160 个种子
+/// 对大部分属性够用，对防守篮板这一类效应量只有 2% 的属性不够。因此
+/// 每一项按它自己的效应量定样本量，而不是所有属性用同一个数。
+///
+/// 数字来自同一批种子上实测的效应量与逐种子噪声：需要 640 个种子的
+/// 那一项，在 160 个种子上的区间跨零，在 640 个种子上的区间整段在零的
+/// 一侧。
+pub const REQUIRED_SEEDS: [(&str, usize); 1] = [("defensive_rebound", 640)];
+
+/// 一项属性判定所需的样本量。
+pub fn required_seeds(attribute: &str, default_seeds: usize) -> usize {
+    REQUIRED_SEEDS
+        .iter()
+        .find(|(key, _)| *key == attribute)
+        .map(|(_, seeds)| *seeds)
+        .unwrap_or(default_seeds)
+}
+
 /// 校验登记项：`more_games` 必须给出所需场次，未知 resolution 直接拒绝。
 pub fn validate_known_entries(entries: &[KnownInsufficient]) -> Result<(), String> {
     for entry in entries {
@@ -424,6 +444,21 @@ fn experiment(
             }
         }
         _ => config,
+    };
+    // 没有登记为不足的属性，按它自己的效应量定样本量：160 个种子对
+    // 效应量 2% 的属性不够，跨零不是「没效应」，是「样本不够」。
+    let config = if config.possessions.is_none() {
+        let required = required_seeds(attribute.key(), config.seeds);
+        if required > config.seeds {
+            MechanismConfig {
+                seeds: required,
+                ..config
+            }
+        } else {
+            config
+        }
+    } else {
+        config
     };
     let baseline = run_arm(params, attribute, config.low_value, config)?;
     let perturbed = run_arm(params, attribute, config.high_value, config)?;

@@ -101,7 +101,7 @@
     "off_ball_hold_physicality_base": 0.5,
     "off_ball_hold_contact_ft": 4.0,
     "off_ball_hold_speed_reference": 10.0,
-    "hand_check_rate": 0.02,
+    "hand_check_rate": 0.004,
     "hand_check_penalty_scale": 0.5,
     "hand_check_physicality_base": 0.5,
     "hand_check_contact_ft": 3.5,

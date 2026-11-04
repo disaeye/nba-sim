@@ -126,7 +126,10 @@ pub fn contact_distance(world: &World) -> f32 {
 }
 
 /// 防守人朝持球人的速度分量，供诊断使用。
-pub fn closing_speed(world: &World, defender: usize, holder: usize) -> f32 {
+///
+/// 状态层的 `closing_speed_ftps` 量的是同一件事：防守人在靠近持球人还是
+/// 在离开他。这里是模块内的读法，因此读的是当前的瞬时速度。
+pub fn closing_toward_holder(world: &World, defender: usize, holder: usize) -> f32 {
     let guard = &world.players[defender];
     let holder = &world.players[holder];
     let to_holder = holder.pos - guard.pos;

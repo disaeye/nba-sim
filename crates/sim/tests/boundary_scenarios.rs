@@ -192,6 +192,7 @@ fn a_shot_that_leaves_the_court_is_not_a_turnover() {
         free_throw: None,
         block_by: None,
         result: None,
+        touched_backboard: false,
     });
     for _ in 0..40 {
         world.step(TICK_SECONDS);

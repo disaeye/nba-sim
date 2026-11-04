@@ -402,8 +402,8 @@
       "scenario_tests": {
         "RULE-GOALTENDING-DOWNWARD-FLIGHT": "nba_sim_core::rule_violations::touching_a_descending_shot_inside_the_cylinder_is_goaltending",
         "RULE-GOALTENDING-NO-VIOLATION-UPWARD": "nba_sim_core::rule_violations::an_ascending_ball_may_be_blocked_without_goaltending",
-        "RULE-GOALTENDING-AFTER-BACKBOARD": "nba_sim_core::shot_scenarios::touching_a_descending_shot_inside_the_cylinder_is_goaltending",
-        "RULE-INTERFERENCE-BALL-ON-RING": "nba_sim_core::shot_scenarios::a_ball_outside_the_cylinder_is_not_goaltending"
+        "RULE-GOALTENDING-AFTER-BACKBOARD": "nba_sim_core::shot_scenarios::touching_a_ball_that_touched_the_backboard_is_goaltending",
+        "RULE-INTERFERENCE-BALL-ON-RING": "nba_sim_core::shot_scenarios::touching_a_ball_that_is_sitting_on_the_ring_is_goaltending"
       }
     },
     {

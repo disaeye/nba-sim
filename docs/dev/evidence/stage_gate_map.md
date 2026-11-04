@@ -80,6 +80,7 @@
 
 ## 未闭合项汇总
 
-1. 干扰球只覆盖球的下落段：篮板后球在篮筐上方、以及碰板后的情形仍缺场景证据。
-2. 动作目录的技术细分已补齐（收球步法与轴心脚、突破的三种变体、跳步收球与离散脚步、掩护由掩护人自主发起、`ReboundJump` 的仿真层消费者），16 个动作族的状态全部是 `verified`，`missing_evidence` 为空。
-3. 权威状态与档案结构已解耦：`Phase` 不含飞行变体，`ControlState` 是结构体，`LeagueProfile` 按四个策略族存储且没有未声明的默认值（`crates/sim/tests/architecture_decoupling.rs` 6 项）。
+1. 动作目录的技术细分已补齐（收球步法与轴心脚、突破的三种变体、跳步收球与离散脚步、掩护由掩护人自主发起、`ReboundJump` 的仿真层消费者），16 个动作族的状态全部是 `verified`，`missing_evidence` 为空。
+2. 权威状态与档案结构已解耦：`Phase` 不含飞行变体，`ControlState` 是结构体，`LeagueProfile` 按四个策略族存储且没有未声明的默认值（`crates/sim/tests/architecture_decoupling.rs` 5 项）。
+3. 干扰球的三种情形（下落段、碰过篮板之后、球在筐沿上）都已接入生产路径并各有场景测试（`crates/sim/tests/shot_scenarios.rs` 10 项），`PROC-GOALTENDING` 的场景清单没有缺失项。
+4. 机制实验的 13 项属性全部判定为 `pass`：每一项按它自己的效应量定样本量（`REQUIRED_SEEDS`），`defensive_rebound` 跑 640 个种子，相对变化 +0.0198、配对区间 [+0.0090, +0.0307] 整段在零的一侧，`known_insufficient.json` 的登记表因此清空。
