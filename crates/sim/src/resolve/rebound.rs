@@ -49,7 +49,18 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
             continue;
         }
         let distance = (world.players[handle].pos - ball_pos).length();
-        world.players[handle].target = ball_pos;
+        // 冲抢篮板倾向决定进攻人冲不冲这一球：愿意冲的去抢球，不愿意的
+        // 守在原位，因此自然抢不到。倾向改的是落点，不是伸手范围——伸手
+        // 范围里再加一项会与防守篮板属性在同一场争抢里直接抵消，把防守
+        // 篮板属性的效应量压掉一半。
+        let crashes = world.players[handle].team != offense
+            || world.players[handle].data.tendencies.offensive_rebound_frequency
+                >= world.params.policy.g("oreb_crash_tendency_floor");
+        world.players[handle].target = if crashes {
+            ball_pos
+        } else {
+            world.players[handle].pos
+        };
         world.players[handle].target_kind = TargetKind::Window;
         world.players[handle].target_partner = handle;
         // 跳起封盖的人还在空中：他没有落脚点去卡位，这一球他不参与 box-out。
@@ -101,18 +112,8 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
         } else {
             "defensive_rebound"
         };
-        // 冲抢篮板倾向：进攻人愿意冲就抢得更远。防守人的那一项是
-        // 防守篮板属性，进攻人的这一项是冲抢倾向——两者都是「意愿」，
-        // 能力由 attribute 那一项给出。
-        let willingness = if player.team == offense {
-            (player.data.tendencies.offensive_rebound_frequency - 0.5)
-                * world.params.policy.g("oreb_tendency_reach_gain_ft")
-        } else {
-            0.0
-        };
         let reach = base
             + player.attribute(attribute) * skill
-            + willingness
             + if player.team == offense { -1.15 } else { 1.75 };
         let vertical = (world.ball.z - 4.0).max(0.0);
         let distance = (player.pos - world.ball.pos).length().hypot(vertical);

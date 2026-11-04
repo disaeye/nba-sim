@@ -418,6 +418,6 @@
     "post_step_push_ft": 0.5,
     "hand_check_pressure_ft": 1.2,
     "break_sprint_tendency_gain_ftps": 0.8,
-    "oreb_tendency_reach_gain_ft": 0.3
+    "oreb_crash_tendency_floor": 0.6
   }
 }
