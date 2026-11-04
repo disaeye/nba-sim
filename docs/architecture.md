@@ -96,14 +96,14 @@ flowchart TD
 flowchart TD
     A["World::step(dt)"] --> B["[1] 时钟推进<br/>clock::advance（按 Phase 的时钟表）"]
     B --> C["[2] 动量衰减与轮转意图<br/>note_intents"]
-    C --> D["[3] 动作运行时推进<br/>advance_action_phases · advance_defensive_actions · advance_steal_attempts · advance_block_jumps"]
+    C --> D["[3] 动作运行时推进<br/>advance_action_phases · advance_defensive_actions · advance_steal_attempts · advance_on_ball_positioning · advance_block_jumps"]
     D --> E["[4] 移动与身体积分<br/>advance_movement（跳球飞行走专用路径）"]
-    E --> F["[5] 球的飞行与地面接触<br/>ball::step"]
+    E --> F["[5] 球的飞行与地面接触<br/>poke::step · offball::step · check_hand_check · ball::step"]
     F --> G["[6] 交互结算<br/>resolve_due_interactions"]
     G --> H["[7] 阶段推进与结算<br/>advance_phase · resolve::{shot,pass,rebound,foul,freethrow}"]
     H --> I["[8] 停表裁决提交<br/>World::adjudicate（违例、得分、犯规、罚球）"]
     I --> J["[9] 决策<br/>policy::tick 与 policy::off_ball_tick（仅 Live 且有持球人）"]
-    J --> K["[10] 规则计时器与节末<br/>check_closely_guarded · check_backcourt · check_period_end"]
+    J --> K["[10] 规则计时器与节末<br/>check_closely_guarded · check_back_to_basket · check_backcourt · check_free_throw_lane · check_period_end"]
 ```
 
 > **写入路径**：事件一律经 `World::emit` 进入事实流；停表的比分、球权、时钟与阶段后果一律经 `World::adjudicate(Adjudication)` 提交（见 `adjudication_design.md`）；动作生命周期由运行时推进发布 `ActionStarted` / `ActionPhaseChanged` / 终态事实。回放与验证只读事实流，不读引擎内部累加值。
