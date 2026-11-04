@@ -520,108 +520,70 @@ fn the_screener_rolls_or_pops_after_setting_a_screen() {
     }
 }
 
-/// 收球步法：容限内的两步合法，超过容限就是走步。
+/// 收球步法：收球确立轴心脚，收球后的第三步是走步，出手前判掉。
+///
+/// 走步按「收球 → 轴心脚 → 脚步接触 → 释放」判定：轴心脚在收球那一刻
+/// 定下，移动层把收球后的位移记成脚步接触，出手那一刻结算。
 #[test]
-fn only_gather_steps_beyond_the_allowance_are_travels() {
+fn a_third_step_after_the_gather_is_a_travel() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
-    let allowance = params.policy.g("gather_travel_allowance_ft");
+    let steps_allowed = params.policy.g("footwork_steps_allowed");
     let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 173);
-    let finisher = world.on_court(TeamSide::Home).as_slice()[0];
+    let shooter = world.on_court(TeamSide::Home).as_slice()[0];
+    // 步长按球员自己的身高算：测试不能用别人的身高推步长。
+    let step = nba_sim_core::footwork::step_length(&world, shooter);
     for (index, player) in world.players.iter_mut().enumerate() {
-        player.on_court = index == finisher;
+        player.on_court = index == shooter;
         player.vel = Vec2::ZERO;
     }
     let hoop = world.hoop_for(TeamSide::Home);
     let spot = hoop + Vec2::new(-6.0, 0.0);
-    world.players[finisher].pos = spot;
-    world.players[finisher].target = spot;
-
-    // 合法：迈出的距离正好在容限内。
+    world.players[shooter].pos = spot;
+    world.players[shooter].target = spot;
     world.possession.team = TeamSide::Home;
     world.start_possession(TeamSide::Home, PossessionKind::Live);
     world.set_phase(Phase::Live);
-    world.ball.set_held(finisher);
+    world.ball.set_held(shooter);
     world.ball.pos = spot;
     world.ball.z = world.rules.ball_radius_ft;
-    world.possession.gather_pos = Some(spot);
-    let legal_to = spot + (hoop - spot).normalize_or_zero() * (allowance * 0.8);
-    let legal = ActionIntent {
-        actor: finisher,
-        kind: ActionKind::Finish,
-        target: None,
-        from_ft: spot,
-        to_ft: legal_to,
-        start_time: world.now(),
-        duration: 0.4,
-    };
-    let before = world.events.len();
-    let outcome = nba_sim_core::resolve::drive::resolve_finish(&mut world, &legal);
-    let legal_turnover = world.events[before..].iter().any(|event| {
-        matches!(
-            &event.fact,
-            Fact::Turnover {
-                kind: TurnoverKind::Travel,
-                ..
-            }
-        )
-    });
-    assert_eq!(
-        outcome.completion,
-        nba_sim_core::action::Completion::Completed,
-        "容限内的收球必须有结果，而不是被吹走步"
-    );
-    assert!(!legal_turnover, "容限内的收球不得被判走步");
 
-    // 走步：迈出的距离超过容限，且判罚不由随机频率决定。
-    let mut caught = false;
-    for seed_step in 0..8u64 {
-        let mut world = World::new(
-            MatchSetup::builtin(GameRules::default()),
-            Params::load(&workspace_calibration_dir()).expect("calibration tables load"),
-            173 + seed_step,
-        );
-        let finisher = world.on_court(TeamSide::Home).as_slice()[0];
-        for (index, player) in world.players.iter_mut().enumerate() {
-            player.on_court = index == finisher;
-            player.vel = Vec2::ZERO;
-        }
-        world.players[finisher].pos = spot;
-        world.players[finisher].target = spot;
-        world.possession.team = TeamSide::Home;
-        world.start_possession(TeamSide::Home, PossessionKind::Live);
-        world.set_phase(Phase::Live);
-        world.ball.set_held(finisher);
-        world.ball.pos = spot;
-        world.ball.z = world.rules.ball_radius_ft;
-        world.possession.gather_pos = Some(spot);
-        let over_to = spot + (hoop - spot).normalize_or_zero() * (allowance + 3.0);
-        let over = ActionIntent {
-            actor: finisher,
-            kind: ActionKind::Finish,
-            target: None,
-            from_ft: spot,
-            to_ft: over_to,
-            start_time: world.now(),
-            duration: 0.4,
-        };
-        let before = world.events.len();
-        let outcome = nba_sim_core::resolve::drive::resolve_finish(&mut world, &over);
-        let travel = outcome.completion == nba_sim_core::action::Completion::Failed
-            && world.events[before..].iter().any(|event| {
-                matches!(
-                    &event.fact,
-                    Fact::Turnover {
-                        kind: TurnoverKind::Travel,
-                        ..
-                    }
-                )
-            });
-        if travel {
-            caught = true;
-            break;
-        }
+    // 收球：确立轴心脚。
+    nba_sim_core::footwork::establish_pivot(&mut world, shooter, spot);
+    assert!(
+        world.possession.pivot.is_some(),
+        "收球必须确立轴心脚"
+    );
+    assert_eq!(
+        world.possession.pivot.map(|pivot| pivot.steps_taken),
+        Some(0),
+        "收球时还没有用掉任何一步"
+    );
+
+    // 两步之内：合法。
+    nba_sim_core::footwork::accumulate_contact(&mut world, shooter);
+    let mut moved = spot;
+    for _ in 0..(steps_allowed as usize) {
+        moved = moved + Vec2::new(step, 0.0);
+        world.players[shooter].pos = moved;
+        world.players[shooter].vel = Vec2::new(step, 0.0);
+        nba_sim_core::footwork::accumulate_contact(&mut world, shooter);
     }
-    assert!(caught, "超过容限的收球必须被判走步");
+    assert!(
+        nba_sim_core::footwork::judge_release(&world, shooter)
+            == nba_sim_core::footwork::FootworkVerdict::Legal,
+        "收球后的两步之内不得判走步"
+    );
+
+    // 第三步：走步。
+    moved = moved + Vec2::new(step, 0.0);
+    world.players[shooter].pos = moved;
+    world.players[shooter].vel = Vec2::new(step, 0.0);
+    nba_sim_core::footwork::accumulate_contact(&mut world, shooter);
+    assert!(
+        nba_sim_core::footwork::judge_release(&world, shooter)
+            != nba_sim_core::footwork::FootworkVerdict::Legal,
+        "收球后的第三步必须判走步"
+    );
 }
 
 /// 突破后的收球分球：同一次进攻里突破之后仍然可以把球传出去。

@@ -11,6 +11,7 @@ pub mod court;
 pub mod data;
 pub mod event;
 pub mod flow;
+pub mod footwork;
 pub mod league;
 pub mod play;
 pub mod possession;
@@ -19,6 +20,7 @@ pub mod resolve;
 pub mod rules;
 pub mod tactics;
 pub use action_window::Foot;
+pub use footwork::{step_length_ft, FootContact, PivotState, SupportFoot};
 pub use capability::{
     drive_finishing_delta, effective_catch_radius, effective_defensive_boxout_bonus,
     effective_help_awareness, effective_max_accel, effective_max_speed,

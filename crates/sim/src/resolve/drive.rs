@@ -173,31 +173,11 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     }
 }
 
-/// 走步判定：收球点到终结点的位移超过容限。容限是两步加起跳的
-/// 英尺量，来自 `policy.geometry`。
-pub fn travel_on_drive(gather: Vec2, finish: Vec2, allowance: f32) -> bool {
-    (finish - gather).length() > allowance
-}
-
 /// 收球步：从触球点向篮筐迈两步。位移超过容限就是走步，容限是
 /// 两步加起跳的英尺量，来自 `policy.geometry`。
 /// 走步的账本与裁决：两条触发路径共用这里的写入。
 fn book_travel(world: &mut World, actor: usize, team: crate::TeamSide) {
-    world.line_mut(actor).turnovers += 1;
-    world.emit(Fact::Turnover {
-        player: actor,
-        kind: TurnoverKind::Travel,
-    });
-    world.adjudicate(
-        crate::adjudicate::Adjudication::new(
-            crate::adjudicate::StoppageCause::Violation(crate::adjudicate::ViolationKind::Travel),
-            crate::adjudicate::RestartPlan::Live { team: team.other() },
-        )
-        .ending(
-            nba_domain::event::PossessionEndCause::TurnoverTravel,
-            "travel",
-        ),
-    );
+    crate::footwork::book_travel(world, actor, team);
 }
 
 pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
@@ -206,8 +186,6 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
     let hoop = world.hoop_for(team);
     let pos = world.players[actor].pos;
     let direction = (hoop - pos).normalize_or_zero();
-    let mut allowance = world.params.policy.g("gather_travel_allowance_ft");
-    let gather = world.possession.gather_pos.unwrap_or(intent.from_ft);
     // 收球步的终结位置由决策意图给出：突破上篮进入篮下完成，抛投在近筐
     // 区域完成，低位保持低位位置。
     let mut finish = intent.to_ft;
@@ -244,23 +222,13 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
             .fold(0.0f32, |acc, value| acc + value.signum());
         let away = if side >= 0.0 { -1.0 } else { 1.0 };
         finish += lateral * (away * world.params.policy.g("euro_step_lateral_ft"));
-        allowance += world.params.policy.g("euro_step_allowance_ft");
     }
-    if travel_on_drive(gather, finish, allowance) {
-        book_travel(world, actor, team);
-        return ActionOutcome {
-            actor,
-            kind: ActionKind::Finish,
-            completion: Completion::Failed,
-            delta: StateDelta {
-                turnover: Some(TurnoverKind::Travel),
-                ..Default::default()
-            },
-            facts: Vec::new(),
-        };
-    }
-    // 走步是步数违规，与收球位移是同一件事的两种尺度：容限检查抓到
-    // 迈得太远的那几次，剩下的由判罚频率补上。
+    // 收球确立轴心：球被双手控制的那一刻定下轴心脚，之后的两步从这个
+    // 点算起。球手接下来从收球点走到终结点，那段位移由移动层记成脚步
+    // 接触，走步在释放（出手或传球）那一刻结算。
+    crate::footwork::establish_pivot(world, actor, pos);
+    // 脚步接触能抓住系统性走步，剩下的一部分由判罚频率补上：真实比赛里
+    // 走步多是脚步没踩实，模型里那是收球步本身的失误。
     if world.draw(Stream::Decision, actor, purpose::GATHER_TRAVEL, 0)
         < world.params.policy.w("gather_travel_rate")
     {

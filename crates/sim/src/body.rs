@@ -200,12 +200,17 @@ pub fn integrate(world: &mut World, dt: f64) {
         let after = world.players[handle].pos;
         let player = &mut world.players[handle];
         player.last_motion_ft = (after - before).length();
-        player.last_separation_ft = 0.0;
-        if player.recovery_since > 0.0 || (player.target - player.pos).length() > min_separation {
+        player.last_separation_ft = 0.0;        if player.recovery_since > 0.0 || (player.target - player.pos).length() > min_separation {
             player.recovery_path_ft += player.last_motion_ft;
         }
     }
     separate(world, dt, max_speed, min_separation);
+    // 持球人收球后的每一步都算一次脚步接触：走步判定读的是脚步数。
+    // 接触只记账，判定在释放（出手或传球）那一刻做：走步是移动当下就
+    // 成立的违例，但记账在移动层、裁决在释放层，两边读同一份脚步状态。
+    if let Some(holder) = world.holder() {
+        crate::footwork::accumulate_contact(world, holder);
+    }
     for &handle in on_court_home
         .as_slice()
         .iter()

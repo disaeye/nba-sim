@@ -2,7 +2,9 @@
 
 use glam::Vec2;
 
-use crate::action::{ActionIntent, ActionKind, Completion, Fact, PassKind, StateDelta};
+use crate::action::{
+    ActionIntent, ActionKind, ActionOutcome, Completion, Fact, PassKind, StateDelta, TurnoverKind,
+};
 use crate::world::World;
 
 pub fn resolve(
@@ -11,11 +13,28 @@ pub fn resolve(
     kind: PassKind,
 ) -> crate::action::ActionOutcome {
     let from = intent.actor;
+    let team = world.players[from].team;
+    // 释放时的走步判定：收球确立的轴心脚被移动、或者脚步用尽。
+    // 判定在传球之前，传球被取消，球权转给对手。
+    if crate::footwork::judge_release(world, from) != crate::footwork::FootworkVerdict::Legal {
+        crate::footwork::book_travel(world, from, team);
+        return ActionOutcome {
+            actor: from,
+            kind: ActionKind::Pass(kind),
+            completion: Completion::Failed,
+            delta: StateDelta {
+                turnover: Some(TurnoverKind::Travel),
+                ..Default::default()
+            },
+            facts: Vec::new(),
+        };
+    }
     let to = intent.target.expect("pass requires a receiver");
     let pass_id = world.new_pass_id();
     // 传球终结了持球状态：收球标志在出手时清掉。
     world.possession.dribble_state = crate::state::DribbleState::Dribbling;
     world.possession.gather_pos = None;
+    crate::footwork::clear_pivot(world);
     world.possession.ball_phase = crate::state::BallPhase::Dribble;
     world.possession.passes += 1;
     world.possession.last_pass_at = Some(world.now());

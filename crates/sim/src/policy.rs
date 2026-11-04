@@ -1452,9 +1452,7 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
 /// 收球步：把运球收成上篮步。到了终结距离之后不用再突，这两步就是出手。
 fn finish_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Candidate> {
     let weights = &world.params.policy;
-    let finish_limit = weights
-        .g("finish_zone_ft")
-        .min(weights.g("gather_travel_allowance_ft") - 1.0);
+    let finish_limit = weights.g("finish_zone_limit_ft").min(weights.g("finish_zone_ft"));
     if state.distance_to_hoop() > finish_limit {
         return None;
     }

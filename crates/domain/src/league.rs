@@ -60,64 +60,25 @@ pub struct LeagueProfile {
     #[serde(flatten)]
     pub timeouts: TimeoutPolicy,
     /// 赛前名单上限（NBA 15，FIBA 12）。
-    #[serde(default = "default_roster_limit")]
     pub roster_limit: u32,
     /// 每队每场的教练挑战额度（NBA 1，无挑战的档案为 0）。
-    #[serde(default = "default_challenges_per_game")]
     pub challenges_per_game: u32,
     /// 复核窗口：本节剩余时间不超过该值时才能申请复核。
-    #[serde(default = "default_challenge_final_seconds")]
     pub challenge_final_seconds: f32,
     /// 罚球人必须在这么多秒内出手，否则违例。
-    #[serde(default = "default_free_throw_time_limit_seconds")]
     pub free_throw_time_limit_seconds: f32,
     /// 三分线弧顶距离，单位为英尺。
     pub three_point_distance_ft: f32,
     /// 底角三分线距离，单位为英尺；零值表示无单独底角距离。
     pub corner_three_distance_ft: f32,
     /// 球场几何。
-    #[serde(default)]
     pub court: CourtGeometry,
     /// 是否使用交替拥有箭头程序。
     pub use_alternate_possession_arrow: bool,
     /// 场地中心圆的半径（英尺），用于跳球站位。
-    #[serde(default = "default_center_circle_radius_ft")]
     pub center_circle_radius_ft: f32,
     /// 跳球时场上接应队员距中圈的最小站位距离（英尺）。
-    #[serde(default = "default_jump_ball_receiver_distance_ft")]
     pub jump_ball_receiver_distance_ft: f32,
-}
-
-fn default_closely_guarded_seconds() -> f32 {
-    5.0
-}
-
-fn default_roster_limit() -> u32 {
-    15
-}
-
-fn default_challenges_per_game() -> u32 {
-    1
-}
-
-fn default_challenge_final_seconds() -> f32 {
-    120.0
-}
-
-fn default_free_throw_time_limit_seconds() -> f32 {
-    10.0
-}
-
-fn default_closely_guarded_distance_ft() -> f32 {
-    6.0
-}
-
-fn default_center_circle_radius_ft() -> f32 {
-    6.0
-}
-
-fn default_jump_ball_receiver_distance_ft() -> f32 {
-    8.0
 }
 
 /// 节次策略族：常规节数、节时长与加时时长。
@@ -133,9 +94,7 @@ pub struct PeriodPolicy {
 pub struct ClockPolicy {
     pub shot_clock_seconds: f32,
     pub offensive_rebound_shot_clock_seconds: f32,
-    #[serde(default = "default_closely_guarded_seconds")]
     pub closely_guarded_seconds: f32,
-    #[serde(default = "default_closely_guarded_distance_ft")]
     pub closely_guarded_distance_ft: f32,
 }
 
@@ -206,7 +165,7 @@ impl LeagueProfile {
 
     /// 读取 FIBA 2026 v1.1 官方规则档案。
     pub fn fiba() -> Self {
-        let mut profile: Self = serde_json::from_str(FIBA_PROFILE)
+        let profile: Self = serde_json::from_str(FIBA_PROFILE)
             .expect("data/rules/league_fiba.json must be a valid league profile");
         assert_eq!(profile.id, LeagueId::Fiba);
         assert_eq!(profile.ruleset_version, "2026-v1.1");
@@ -214,7 +173,6 @@ impl LeagueProfile {
             .source
             .validate()
             .expect("FIBA rule source metadata must be complete");
-        profile.court = CourtGeometry::fiba();
         profile
             .validate()
             .expect("FIBA jump-ball settings must be valid");

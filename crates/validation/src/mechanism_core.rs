@@ -407,6 +407,19 @@ fn experiment(
     config: MechanismConfig,
     declaration: Option<&KnownInsufficient>,
 ) -> Result<MechanismResult, String> {
+    // 登记为 `more_games` 的属性按登记的场次跑：登记表里的
+    // `required_games` 就是这一项判得出来的样本量。跑少了仍然是跨零，
+    // 跑够了就该给出通过或缺陷的确定裁决。
+    let config = match declaration {
+        Some(entry) if entry.resolution == "more_games" => match entry.required_games {
+            Some(required) if required as usize > config.seeds => MechanismConfig {
+                seeds: required as usize,
+                ..config
+            },
+            _ => config,
+        },
+        _ => config,
+    };
     let baseline = run_arm(params, attribute, config.low_value, config)?;
     let perturbed = run_arm(params, attribute, config.high_value, config)?;
     let metric = attribute.metric();

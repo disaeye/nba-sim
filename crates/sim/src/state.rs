@@ -1029,6 +1029,19 @@ pub struct PossessionState {
     /// 持球状态与收球位置。
     pub dribble_state: DribbleState,
     pub gather_pos: Option<Vec2>,
+    /// 收球后确立的轴心与脚步状态。
+    ///
+    /// 收球那一刻确定轴心脚，此后不再改变；每一步的接触都记在这里，
+    /// 走步判定按「轴心脚被移动」与「步数用尽」两条规则走，不用收球后
+    /// 的平面位移一次性判定。
+    pub pivot: Option<nba_domain::footwork::PivotState>,
+    /// 当前持球人：脚步与轴心都跟着这个人走。
+    pub pivot_holder: Option<usize>,
+    /// 支撑脚状态：哪只脚在地上、落在哪里。
+    ///
+    /// 脚步接触在左右之间交替，落点记在接触位置。收球时确立的轴心脚
+    /// 从这里取：支撑脚就是收球瞬间地上的那只脚。
+    pub support_foot: nba_domain::footwork::SupportFoot,
     /// 当前进攻阶段：由实际动作结算写入，出手类型只读这里。
     pub ball_phase: BallPhase,
     /// 最近一次掩护结算出的防守人路线，供下一次决策读取。
@@ -1091,6 +1104,12 @@ impl PossessionState {
             pairing_changed_at: 0.0,
             dribble_state: DribbleState::Dribbling,
             gather_pos: None,
+            pivot: None,
+            pivot_holder: None,
+            support_foot: nba_domain::footwork::SupportFoot::new(
+                nba_domain::action_window::Foot::Left,
+                Vec2::ZERO,
+            ),
             ball_phase: BallPhase::Dribble,
             last_screen: None,
             matchup: [usize::MAX; MAX_ON_COURT],

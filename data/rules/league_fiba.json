@@ -33,5 +33,18 @@
   "corner_three_distance_ft": 0.0,
   "use_alternate_possession_arrow": true,
   "closely_guarded_seconds": 5.0,
-  "closely_guarded_distance_ft": 3.28
+  "closely_guarded_distance_ft": 3.28,
+  "roster_limit": 12,
+  "challenges_per_game": 0,
+  "challenge_final_seconds": 120.0,
+  "free_throw_time_limit_seconds": 10.0,
+  "center_circle_radius_ft": 6.0,
+  "jump_ball_receiver_distance_ft": 8.0,
+  "court": {
+    "width_ft": 91.86,
+    "height_ft": 49.21,
+    "hoop_left_x_ft": 5.25,
+    "hoop_right_x_ft": 86.61,
+    "hoop_y_ft": 24.605
+  }
 }

@@ -3,7 +3,7 @@
 use glam::Vec2;
 
 use crate::action::{
-    ActionIntent, ActionKind, ActionOutcome, Completion, Fact, ShotKind, StateDelta,
+    ActionIntent, ActionKind, ActionOutcome, Completion, Fact, ShotKind, StateDelta, TurnoverKind,
 };
 use crate::draw::{purpose, Stream};
 use crate::resolve::{clamp01, shooter_zone};
@@ -105,6 +105,21 @@ pub struct PendingShot {
 pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> ActionOutcome {
     let shooter = intent.actor;
     let team = world.players[shooter].team;
+    // 释放时的走步判定：收球确立的轴心脚被移动、或者脚步用尽。
+    // 判定在出手之前，出手被取消，球权转给对手。
+    if crate::footwork::judge_release(world, shooter) != crate::footwork::FootworkVerdict::Legal {
+        crate::footwork::book_travel(world, shooter, team);
+        return ActionOutcome {
+            actor: shooter,
+            kind: ActionKind::Shoot(kind),
+            completion: Completion::Failed,
+            delta: StateDelta {
+                turnover: Some(TurnoverKind::Travel),
+                ..Default::default()
+            },
+            facts: Vec::new(),
+        };
+    }
     let hoop = world.hoop_for(team);
     // 后撤步：出手前先把投篮人撤向远离防守人的方向，空间是这一步换来的。
     let start_pos = world.players[shooter].pos;
@@ -145,6 +160,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     // 投篮终结了持球状态：收球标志在出手时清掉。
     world.possession.dribble_state = crate::state::DribbleState::Dribbling;
     world.possession.gather_pos = None;
+    crate::footwork::clear_pivot(world);
     world.possession.ball_phase = crate::state::BallPhase::Dribble;
     let p_make = model.p_make;
 

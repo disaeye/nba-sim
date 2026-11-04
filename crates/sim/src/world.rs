@@ -2246,8 +2246,7 @@ impl World {
     }
 
     /// 紧逼盯防五秒：收球后被贴身盯住且不再推进，五秒必吹违例。
-    fn check_closely_guarded(&mut self, dt: f64) {
-        if !self.rules.league.clocks.closely_guarded_seconds.is_finite() || !self.live_play() {
+    fn check_closely_guarded(&mut self, dt: f64) {        if !self.rules.league.clocks.closely_guarded_seconds.is_finite() || !self.live_play() {
             self.possession.closely_guarded_seconds = 0.0;
             return;
         }

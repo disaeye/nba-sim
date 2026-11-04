@@ -70,7 +70,7 @@ fn resolve_dribble(
         DribbleMoveKind::Hesitation => (0.3, 0.30),
         DribbleMoveKind::Retreat => (1.0, 0.40),
     };
-    if world.possession.dribble_state == DribbleState::Gathered {
+    if crate::footwork::dribble_after_gather(world, actor) {
         world.line_mut(actor).turnovers += 1;
         world.emit(Fact::Turnover {
             player: actor,
@@ -105,10 +105,14 @@ fn resolve_dribble(
         world.possession.dribble_state = DribbleState::Gathered;
         world.possession.gather_pos = Some(player.pos);
         world.possession.ball_phase = crate::state::BallPhase::Gather;
+        // 收球确立轴心脚：此后直到重新运球，轴心脚与脚步额度都不再改变。
+        crate::footwork::establish_pivot(world, actor, player.pos);
     } else {
         world.possession.dribble_state = DribbleState::Dribbling;
         world.possession.gather_pos = None;
         world.possession.ball_phase = crate::state::BallPhase::Dribble;
+        // 没有收球就没有轴心：重新运球之前不保留旧的轴心状态。
+        crate::footwork::clear_pivot(world);
     }
     // 球的暴露程度按技术设定，窗口覆盖这一次运球的持续时间。
     world.possession.dribble_exposure = exposure;

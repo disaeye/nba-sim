@@ -231,6 +231,9 @@ fn double_dribble_after_gather_is_a_turnover() {
     let actor = world.holder().expect("live play has a holder");
     world.possession.dribble_state = DribbleState::Gathered;
     world.possession.gather_pos = Some(world.players[actor].pos);
+    // 收球确立轴心脚：二次运球按「收球 → 轴心脚 → 释放」判定。
+    let actor_pos = world.players[actor].pos;
+    nba_sim_core::footwork::establish_pivot(&mut world, actor, actor_pos);
     world.interactions.clear();
     let intent = ActionIntent {
         actor,
@@ -246,29 +249,23 @@ fn double_dribble_after_gather_is_a_turnover() {
     assert_eq!(outcome.delta.turnover, Some(TurnoverKind::DoubleDribble));
 }
 
-/// 走步判定：收球点到终结点的位移超过容限。容限是两步加起跳的
-/// 英尺量，来自 `policy.geometry`。
+/// 走步判定：收球确立轴心脚，移动量程由身高给出。收球后的第三步是
+/// 走步，两步之内合法。
 #[test]
-fn travel_predicate_uses_the_two_step_allowance() {
-    use nba_sim_core::resolve::drive::travel_on_drive;
-    let gather = glam::Vec2::new(24.0, 25.0);
-    let allowance = 12.0;
-    // 位移正好等于容限不算走步，超出一步才算。
-    assert!(!travel_on_drive(
-        gather,
-        glam::Vec2::new(12.0, 25.0),
-        allowance
-    ));
-    assert!(travel_on_drive(
-        gather,
-        glam::Vec2::new(11.9, 25.0),
-        allowance
-    ));
-    assert!(travel_on_drive(
-        gather,
-        glam::Vec2::new(6.0, 25.0),
-        allowance
-    ));
+fn the_footwork_model_counts_steps_instead_of_displacement() {
+    use nba_domain::footwork::PivotState;
+    let mut pivot = PivotState::new(nba_domain::action_window::Foot::Right, glam::Vec2::ZERO, 2);
+    assert!(pivot.has_step_left());
+    // 两步之内：还有额度。
+    pivot.record_contact(glam::Vec2::new(2.0, 0.0));
+    assert!(pivot.has_step_left());
+    pivot.record_contact(glam::Vec2::new(4.0, 0.0));
+    assert!(!pivot.has_step_left());
+    // 轴心脚被移动：抬起的那只脚就是轴心脚，落点与原位不同即移动。
+    assert!(!pivot.pivot_moved(nba_domain::action_window::Foot::Right, glam::Vec2::new(0.2, 0.0)));
+    assert!(pivot.pivot_moved(nba_domain::action_window::Foot::Right, glam::Vec2::new(1.0, 0.0)));
+    // 抬起的是另一只脚：不算移动轴心脚。
+    assert!(!pivot.pivot_moved(nba_domain::action_window::Foot::Left, glam::Vec2::new(1.0, 0.0)));
 }
 
 #[test]
