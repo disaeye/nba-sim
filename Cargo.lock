@@ -183,6 +183,7 @@ dependencies = [
 name = "nba-validation"
 version = "0.1.0"
 dependencies = [
+ "glam",
  "nba-domain",
  "nba-sim-core",
  "rand",

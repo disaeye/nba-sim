@@ -39,6 +39,8 @@ pub enum ViolationKind {
     DoubleDribble,
     /// 罚球人没有在规定时限内出手。
     FreeThrowTimeout,
+    /// 发球人没有在五秒内把球传入场内。
+    InboundTimeout,
 }
 
 impl ViolationKind {
@@ -53,6 +55,7 @@ impl ViolationKind {
             Self::Travel => "travel",
             Self::DoubleDribble => "double_dribble",
             Self::FreeThrowTimeout => "free_throw_timeout",
+            Self::InboundTimeout => "inbound_timeout",
         }
     }
 }

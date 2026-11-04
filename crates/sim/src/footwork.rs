@@ -16,6 +16,12 @@ use nba_domain::footwork::PivotState;
 use crate::action::{Fact, TurnoverKind};
 use crate::world::World;
 
+/// 脚步接触的距离容差（英尺）。
+///
+/// 浮点加减会让「正好走满一步」算成差一点点。没有容差时脚步永远记不满，
+/// 收球后的两步额度因此停不下来。
+const CONTACT_EPSILON_FT: f32 = 0.05;
+
 /// 收球时确立轴心脚与脚步状态。
 ///
 /// 轴心脚就是收球瞬间地上的那只支撑脚：支撑脚状态在每次脚步接触时在
@@ -71,7 +77,9 @@ pub fn accumulate_contact(world: &mut World, actor: usize) -> bool {
     }
     let last = pivot.last_contact.unwrap_or(pivot.position);
     let travelled = (world.players[actor].pos - last).length();
-    if travelled < step {
+    // 容差：浮点加减会让「正好走满一步」算成差一点点，脚步因此永远
+    // 记不满，计时与走步判定都停在半步之外。
+    if travelled < step - CONTACT_EPSILON_FT {
         return false;
     }
     let contact = world.players[actor].pos;

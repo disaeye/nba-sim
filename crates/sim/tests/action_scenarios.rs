@@ -636,6 +636,125 @@ fn a_screen_whose_defender_left_the_court_fails_instead_of_crashing() {
     );
 }
 
+/// 脚步模型：收球确立轴心脚，收球之后的两步之内合法，第三步是走步。
+///
+/// 走步按「收球 → 轴心脚 → 脚步接触 → 释放」判定：轴心脚在收球那一刻
+/// 定下，脚步接触在收球之后累积，出手那一刻结算。收球后的平面位移不再
+/// 一次性判定全部走步。
+#[test]
+fn the_gather_grants_two_steps_before_a_travel() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 173);
+    let holder = world.on_court(TeamSide::Home).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == holder;
+        player.vel = Vec2::ZERO;
+    }
+    let spot = Vec2::new(60.0, 25.0);
+    world.players[holder].pos = spot;
+    world.players[holder].target = spot;
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(holder);
+    world.ball.pos = spot;
+    world.ball.z = world.rules.ball_radius_ft;
+
+    // 收球：确立轴心脚，脚步额度还没有用掉。
+    nba_sim_core::footwork::establish_pivot(&mut world, holder, spot);
+    let pivot = world.possession.pivot.expect("收球必须确立轴心脚");
+    assert_eq!(pivot.steps_taken, 0, "收球时还没有用掉任何一步");
+    assert_eq!(pivot.steps_allowed, 2, "收球之后有���步");
+    assert!(
+        world.possession.pivot_holder == Some(holder),
+        "轴心脚记在持球人身上"
+    );
+
+    // 两步之内：合法。
+    let step = nba_sim_core::footwork::step_length(&world, holder);
+    assert!(step > 0.0, "步长必须为正");
+    let mut moved = spot;
+    for _ in 0..pivot.steps_allowed {
+        moved = moved + Vec2::new(step, 0.0);
+        world.players[holder].pos = moved;
+        world.players[holder].vel = Vec2::new(step, 0.0);
+        nba_sim_core::footwork::accumulate_contact(&mut world, holder);
+    }
+    assert_eq!(
+        world.possession.pivot.map(|pivot| pivot.steps_taken),
+        Some(2),
+        "两步都已经用掉"
+    );
+    assert_eq!(
+        nba_sim_core::footwork::judge_release(&world, holder),
+        nba_sim_core::footwork::FootworkVerdict::Legal,
+        "收球后的两步之内不得判走步"
+    );
+
+    // 第三步：走步。
+    moved = moved + Vec2::new(step, 0.0);
+    world.players[holder].pos = moved;
+    world.players[holder].vel = Vec2::new(step, 0.0);
+    nba_sim_core::footwork::accumulate_contact(&mut world, holder);
+    assert_eq!(
+        world.possession.pivot.map(|pivot| pivot.steps_taken),
+        Some(3),
+        "第三步已经用掉了额度"
+    );
+    assert_eq!(
+        nba_sim_core::footwork::judge_release(&world, holder),
+        nba_sim_core::footwork::FootworkVerdict::StepsExhausted,
+        "收球后的第三步必须判走步"
+    );
+}
+
+/// 支撑脚在每次脚步接触时交替：收球确立的那只脚不动，抬起的是另一只。
+#[test]
+fn the_support_foot_alternates_on_every_contact() {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 173);
+    let holder = world.on_court(TeamSide::Home).as_slice()[0];
+    for (index, player) in world.players.iter_mut().enumerate() {
+        player.on_court = index == holder;
+        player.vel = Vec2::ZERO;
+    }
+    let spot = Vec2::new(60.0, 25.0);
+    world.players[holder].pos = spot;
+    world.players[holder].target = spot;
+    world.possession.team = TeamSide::Home;
+    world.start_possession(TeamSide::Home, PossessionKind::Live);
+    world.set_phase(Phase::Live);
+    world.ball.set_held(holder);
+    world.ball.pos = spot;
+
+    nba_sim_core::footwork::establish_pivot(&mut world, holder, spot);
+    let axis = world
+        .possession
+        .pivot
+        .expect("收球必须确立轴心脚")
+        .foot;
+    let step = nba_sim_core::footwork::step_length(&world, holder);
+    for index in 0u32..3 {
+        world.players[holder].pos = spot + Vec2::new(step * (index as f32 + 1.0), 0.0);
+        world.players[holder].vel = Vec2::new(step, 0.0);
+        nba_sim_core::footwork::accumulate_contact(&mut world, holder);
+        let support = world.possession.support_foot;
+        if index.is_multiple_of(2) {
+            // 奇数次接触之后，支撑脚变成收球时抬起来的那只脚。
+            assert_eq!(support.foot, axis.opposite(), "第一次接触后支撑脚交替");
+        } else {
+            // 偶数次接触之后，支撑脚回到收球时的那只脚。
+            assert_eq!(support.foot, axis, "第二次接触后支撑脚回到原来那只");
+        }
+        // 收球确立的轴心脚在整个持球段里不改变。
+        assert_eq!(
+            world.possession.pivot.map(|pivot| pivot.foot),
+            Some(axis),
+            "轴心脚在持球段里不改变"
+        );
+    }
+}
+
 /// 突破后的收球分球：同一次进攻里突破之后仍然可以把球传出去。
 #[test]
 fn a_drive_can_stop_and_pass_within_the_same_possession() {

@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+glam.workspace = true
 nba-domain = { path = "../domain" }
 nba-sim-core.workspace = true
 serde = { workspace = true }

@@ -243,6 +243,11 @@ pub struct World {
     pub inbound_passer: Option<usize>,
     /// 本次发球的地点：由停表原因写入（出界点、违例点）；无记录时用本方底线。
     pub inbound_spot: Option<Vec2>,
+    /// 发球程序开始的时刻：发球五秒从这一刻算起（NBA Rule 8 §III）。
+    ///
+    /// 发球队员走位的时间也算在五秒之内：裁判在发球队员拿到球并准备
+    /// 发球的那一刻开始计时，而那一刻是发球程序开始的时候。
+    pub inbound_started_at: Option<f64>,
     pub violations: Vec<String>,
     pub last_separation: Option<(usize, f32, f64)>,
     /// 选板冷却表：剧本下标 → 可再次激活的时刻。
@@ -1074,6 +1079,7 @@ impl World {
             possession_points: 0,
             inbound_passer: None,
             inbound_spot: None,
+            inbound_started_at: None,
             violations: Vec::new(),
             last_separation: None,
             play_cooldowns,
@@ -1859,6 +1865,8 @@ impl World {
             })
             .expect("every team must have an on-court player");
         self.inbound_passer = Some(handler);
+        // 发球五秒从发球程序开始这一刻算起（NBA Rule 8 §III）。
+        self.inbound_started_at = Some(self.now());
         self.cancel_actions("inbound");
         self.set_ball_held(handler);
         crate::formation::set_targets(self, team);
@@ -3120,6 +3128,35 @@ impl World {
                 }
             }
             Phase::Inbound { team, ready_at } => {
+                // 发球五秒：发球队员必须在五秒内把球传入场内（NBA Rule 8
+                // §III）。超时是发球违例，球权交给对方，对方在原来的发球
+                // 点发球。
+                //
+                // 违例的成立事实是「发球程序走了超过五秒仍未把球交出去」，
+                // 因此判据读的是发球程序的开始时刻，而不是球员的走位。
+                let started = self.inbound_started_at.unwrap_or(now);
+                let limit = f64::from(self.rules.inbound_seconds);
+                if now - started > limit {
+                    self.inbound_started_at = None;
+                    let opponent = self.players[self.primary_handler(team)].team.other();
+                    self.adjudicate(
+                        crate::adjudicate::Adjudication::new(
+                            crate::adjudicate::StoppageCause::Violation(
+                                crate::adjudicate::ViolationKind::InboundTimeout,
+                            ),
+                            crate::adjudicate::RestartPlan::Inbound {
+                                team: opponent,
+                                location: crate::adjudicate::InboundLocation::OwnBaseline,
+                                ready_after: None,
+                            },
+                        )
+                        .ending(
+                            nba_domain::event::PossessionEndCause::TurnoverViolation,
+                            "inbound_timeout",
+                        ),
+                    );
+                    return;
+                }
                 if now >= ready_at {
                     self.start_possession(team, PossessionKind::Dead);
                 }

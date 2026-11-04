@@ -173,10 +173,11 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     }
 }
 
-/// 收球步：从触球点向篮筐迈两步。位移超过容限就是走步，容限是
-/// 两步加起跳的英尺量，来自 `policy.geometry`。
-/// 走步的账本与裁决：两条触发路径共用这里的写入。
-fn book_travel(world: &mut World, actor: usize, team: crate::TeamSide) {
+/// 走步的账本与裁决：收球步的两条触发路径共用这里的写入。
+///
+/// 判定与罚则在 [`crate::footwork`] 里：那里按轴心脚与脚步接触判定，
+/// 这里只负责把它记进账本并写裁决。
+fn book_gather_travel(world: &mut World, actor: usize, team: crate::TeamSide) {
     crate::footwork::book_travel(world, actor, team);
 }
 
@@ -232,7 +233,7 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
     if world.draw(Stream::Decision, actor, purpose::GATHER_TRAVEL, 0)
         < world.params.policy.w("gather_travel_rate")
     {
-        book_travel(world, actor, team);
+        book_gather_travel(world, actor, team);
         return ActionOutcome {
             actor,
             kind: ActionKind::Finish,
