@@ -29,7 +29,20 @@
   - 紧逼五秒：`crates/sim/tests/action_scenarios.rs::holding_the_ball_closely_guarded_for_five_seconds_is_a_violation`、`the_closely_guarded_timer_resets_and_spares_the_dribbler`。
   - 停表跳球：`crates/sim/tests/action_scenarios.rs::a_tie_for_the_ball_enters_a_held_ball_jump_ball`（参跳四人走到中圈后才掷球，无瞬移）。
   - 阵容与犯满：`crates/sim/tests/rotation.rs` 5 项。
-- 未闭合：进攻三秒（需要先重做无球清空禁区的站位，见 `rule_catalog_sources.md`）、复核、非法触球、发球五秒与踩线（引擎自动出手，无持續窗口）。
+  - 限制区计时：`crates/sim/tests/lane_clock.rs` 5 项（进攻三秒违例、及时离开不违例、防守三秒技术犯规、主动盯防不判罚、进攻方进入前场前不计时）。
+  - 非法触球：`crates/sim/tests/illegal_touch.rs` 5 项（一臂之内伸手阻挡成立、合法间隔上的平行贴防不成立、够不到不成立、退开之后不再成立、活球里记为个人犯规）。
+  - 背身五秒：`crates/sim/tests/back_to_basket.rs` 5 项（背身运球满五秒违例、面朝篮筐不违例、越过罚球线延长线不违例、收球终止计时、球被碰开终止计时）。
+  - 双方犯规、恶意犯规与清晰路径：`crates/sim/tests/foul_scenarios.rs` 11 项。
+  - 暂停配额：`crates/sim/tests/timeout_scenarios.rs` 9 项（NBA 整场与第四节与末段额度、FIBA 整场与第四节额度、加时额度独立、活球只有持球方能叫、恢复比赛）。
+  - 节次开始与交替拥有箭头：`crates/sim/tests/period_start_scenarios.rs` 7 项。
+  - 罚球禁区与罚球人替换：`crates/sim/tests/free_throw_scenarios.rs` 5 项。
+  - 换人：`crates/sim/tests/substitution_scenarios.rs` 7 项。
+  - 后场八秒与「踢球」重置：`crates/sim/tests/backcourt_clock_scenarios.rs` 4 项。
+  - 比赛钟与进攻钟：`crates/sim/tests/clock_scenarios.rs` 10 项。
+  - 出界与脚步：`crates/sim/tests/boundary_scenarios.rs` 11 项（含跳步：连续两次同一只脚触地）。
+  - 跳球：`crates/sim/tests/jump_ball_scenarios.rs` 8 项、`crates/sim/tests/jump_ball.rs` 5 项。
+  - 投篮与干扰球：`crates/sim/tests/shot_scenarios.rs` 8 项。
+- 状态：22 项程序全部 `implemented`，没有缺失场景（`data/rules/rule_catalog.json`）。进攻三秒、防守三秒、发球五秒、非法触球四项各有生产消费路径与场景测试。
 
 ## D. 并行动作与执行证据
 
@@ -67,8 +80,6 @@
 
 ## 未闭合项汇总
 
-1. 进攻三秒与无球清空禁区：阵型的低位与顺下站位在三秒区内，清空禁区的走位尚未建立，该规则仍未启用（理由见 `rule_catalog_sources.md`）。
-2. 非法触球（hand-check 与球体触碰判定）尚未建立。
-3. 干扰球只覆盖球的下落段；篮板后球在篮筐上方、以及碰板后的情形仍缺场景证据。
-4. 动作目录仍有技术细分缺口：收球步法与轴心脚、突破分球的技术变体、跳步收球与离散脚步、掩护由掩护人自主发起、`ReboundJump` 的仿真层消费者。
-5. `LeagueProfile` 仍是扁平结构，尚未整理为 `PeriodPolicy`、`ClockPolicy`、`FoulPolicy` 等策略族。
+1. 干扰球只覆盖球的下落段：篮板后球在篮筐上方、以及碰板后的情形仍缺场景证据。
+2. 动作目录的技术细分已补齐（收球步法与轴心脚、突破的三种变体、跳步收球与离散脚步、掩护由掩护人自主发起、`ReboundJump` 的仿真层消费者），16 个动作族的状态全部是 `verified`，`missing_evidence` 为空。
+3. 权威状态与档案结构已解耦：`Phase` 不含飞行变体，`ControlState` 是结构体，`LeagueProfile` 按四个策略族存储且没有未声明的默认值（`crates/sim/tests/architecture_decoupling.rs` 6 项）。

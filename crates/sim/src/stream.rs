@@ -62,6 +62,7 @@ impl Fact {
             Self::FoulOutRetention { .. } => "FOUL_OUT_RETENTION",
             Self::TeamTechnicalFoul { .. } => "TEAM_TECHNICAL_FOUL",
             Self::Ejected { .. } => "EJECTED",
+            Self::OnBallPositioningChanged { .. } => "ON_BALL_POSITIONING_CHANGED",
             Self::Timeout { .. } => "TIMEOUT",
             Self::JumpBall { .. } => "JUMP_BALL",
             Self::PeriodEnd { .. } => "PERIOD_END",
@@ -298,12 +299,14 @@ impl World {
                 defender_beaten,
                 distance_ft,
                 separation_ft,
+                kind,
             } => json!({
                 "driver_id": self.player_id(*driver),
                 "reached": reached,
                 "defender_beaten": defender_beaten,
                 "distance_ft": distance_ft,
                 "separation_ft": separation_ft,
+                "kind": kind,
             }),
             Fact::PostUp { player, kind } => json!({
                 "player_id": self.player_id(*player),
@@ -505,6 +508,10 @@ impl World {
                 "team": team.as_str(),
                 "player_id": self.player_id(*player),
                 "reason": reason,
+            }),
+            Fact::OnBallPositioningChanged { defender, kind } => json!({
+                "defender_id": self.player_id(*defender),
+                "kind": kind,
             }),
             Fact::PlayActivated { play, possession } => {
                 json!({ "play_id": PLAY_SOURCES[*play].0, "possession": possession })

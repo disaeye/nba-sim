@@ -401,8 +401,8 @@ fn release_contest(
     let policy = &world.params.policy;
     let mut best_contest = 0.0_f32;
     let mut best_distance = f32::INFINITY;
-    for defender in world.players.iter().filter(|player| player.on_court) {
-        if defender.team == team {
+    for defender in world.players.iter() {
+        if !defender.on_court || defender.team == team {
             continue;
         }
         let predicted = defender.pos + defender.vel * delay;
@@ -421,7 +421,25 @@ fn release_contest(
         }
         best_distance = best_distance.min(distance);
     }
-    (best_contest, best_distance)
+    (best_contest.clamp(0.0, 1.0), best_distance)
+}
+
+/// 站位动作给这次出手的压力：贴身施压与站位吃犯规都让出手更难。
+///
+/// 压力只作用在命中目标上，不作用在干扰强度上：干扰是几何事实，站位
+/// 动作改不了它。把它乘进干扰会让封盖概率跟着涨，那不是站位动作的
+/// 后果。
+fn positioning_pressure(world: &World, team: crate::action::TeamSide) -> f32 {
+    let mut pressure = 1.0_f32;
+    for (index, defender) in world.players.iter().enumerate() {
+        if !defender.on_court || defender.team == team {
+            continue;
+        }
+        if let Some(factor) = crate::action::on_ball_pressure(world, index) {
+            pressure *= factor;
+        }
+    }
+    pressure
 }
 
 /// 封盖风险：这一手真实落点的轨迹与防守人手的拦截体积相交的概率。
@@ -680,11 +698,15 @@ pub fn evaluate(
     // 乘子作用在命中目标上：目标对乘子是线性的，以本类出手的总体均值为
     // 中心时两侧对称、均值不变。作用在瞄准误差上则会系统性放大命中率，
     // 因为命中率对瞄准偏差是凸函数，乘子的方差会抬高均值。
+    // 站位动作的压力：贴身施压与站位吃犯规都压低命中目标，因此这个
+    // 乘子小于 1。它只作用在这里，不进干扰强度，因此封盖概率不受影响。
+    let positioning = positioning_pressure(world, team);
     let adjust = kind_factor(kind)
         * phase_factor(world, phase)
         * movement_factor
         * contest_factor_of(contest)
         * gather_factor
+        * positioning
         * policy.w("shot_aim_sigma_scale");
     let target = (target * adjust).clamp(0.0, 1.0);
     // 参考条件下的瞄准误差：把条件命中率换算成「落点离筐多远」。

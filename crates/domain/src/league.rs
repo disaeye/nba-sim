@@ -114,12 +114,10 @@ pub struct FoulPolicy {
     /// NBA 2025-26 Rule 12B §V：加时每节前三次普通球队犯规只发球，
     /// 第四次起进罚则。FIBA 2026 Article 42.1.3：加时犯规计入第四节
     /// 累计数，因此沿用常规节门槛（该值为零）。
-    #[serde(default)]
     pub bonus_fouls_overtime: u32,
     /// 加时球队犯规是否计入第四节累计。
     ///
     /// NBA 为否（加时单独计数），FIBA 为是（Article 42.1.3）。
-    #[serde(default)]
     pub overtime_fouls_carry_from_fourth: bool,
 }
 

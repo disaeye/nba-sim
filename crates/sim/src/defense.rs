@@ -298,14 +298,15 @@ pub fn apply_defense_targets(world: &mut World) {
                 // 一个身位的间隔。已经贴得更近时目标点就是当前位置——把目标
                 // 强行拉到间隔之外会落在非法区域，职责层会把它算成一次无效
                 // 提交。
+                let separation = pressure;
                 let target = if let Some(carrier) = carrier {
                     let direction = (hoop - world.players[carrier].pos).normalize_or_zero();
                     let distance =
                         (world.players[carrier].pos - world.players[*handle].pos).length();
-                    if distance <= pressure {
+                    if distance <= separation {
                         world.players[*handle].pos
                     } else {
-                        world.players[carrier].pos + direction * pressure
+                        world.players[carrier].pos + direction * separation
                     }
                 } else {
                     targets[slot]

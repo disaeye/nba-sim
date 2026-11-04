@@ -126,14 +126,18 @@ fn drive_resolution_reports_actual_arrival_and_separation() {
     let mut world = two_player_world();
     let intent = ActionIntent {
         actor: 0,
-        kind: ActionKind::Drive,
+        kind: ActionKind::Drive(nba_domain::action_window::DriveKind::Straight),
         target: None,
         from_ft: world.players[0].pos,
         to_ft: world.hoop_for(TeamSide::Home),
         start_time: world.now(),
         duration: 1.0,
     };
-    drive::resolve(&mut world, &intent);
+    drive::resolve(
+        &mut world,
+        &intent,
+        nba_domain::action_window::DriveKind::Straight,
+    );
     let event = world
         .events
         .iter()
@@ -288,12 +292,15 @@ fn live_shot_starts_parallel_closeout_and_changes_the_on_ball_target() {
         .filter(|event| {
             matches!(
                 event.fact,
-                Fact::DefensiveActionCompleted { defender: event_defender, .. }
-                    if event_defender == defender
+                Fact::DefensiveActionCompleted {
+                    defender: event_defender,
+                    kind: "closeout_contest",
+                    ..
+                } if event_defender == defender
             )
         })
         .count();
-    assert_eq!(completed_actions, 1);
+    assert_eq!(completed_actions, 1, "这一次扑防必须完成一次");
     assert!(world.events.iter().any(|event| matches!(
         event.fact,
         Fact::DefensiveActionPhaseChanged {
@@ -340,12 +347,15 @@ fn live_shot_starts_parallel_closeout_and_changes_the_on_ball_target() {
         .filter(|event| {
             matches!(
                 event.fact,
-                Fact::DefensiveActionStarted { defender: event_defender, .. }
-                    if event_defender == defender
+                Fact::DefensiveActionStarted {
+                    defender: event_defender,
+                    kind: "closeout_contest",
+                    ..
+                } if event_defender == defender
             )
         })
         .count();
-    assert_eq!(started_actions, 1);
+    assert_eq!(started_actions, 1, "这一次出手必须起一次扑防");
     assert!(world.events.iter().any(|event| matches!(
         event.fact,
         Fact::DefensiveActionCancelled {

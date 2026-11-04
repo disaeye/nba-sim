@@ -69,6 +69,7 @@ fn fact_kind(fact: &Fact) -> &'static str {
         Fact::FoulOutRetention { .. } => "foul_out_retention",
         Fact::TeamTechnicalFoul { .. } => "team_technical_foul",
         Fact::Ejected { .. } => "ejected",
+        Fact::OnBallPositioningChanged { .. } => "on_ball_positioning_changed",
         Fact::Timeout { .. } => "timeout",
         Fact::JumpBall { .. } => "jump_ball",
         Fact::PeriodEnd { .. } => "period_end",

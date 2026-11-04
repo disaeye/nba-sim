@@ -91,6 +91,9 @@ pub fn integrate(world: &mut World, dt: f64) {
         let is_inbound_passer = inbound_passer == Some(handle);
         let runtime = world.players[handle].action.as_ref();
         let has_action = runtime.is_some();
+        // 只有接管落点的防守动作（扑防、封盖、切球）让防守人直冲目标，
+        // 不绕开挡路的人。站位动作（滑步、贴身施压、站位吃犯规）改的是
+        // 结算层读到的防守状态，落点仍然归职责层管，因此它们不接管移动。
         let has_defensive_action = world
             .defensive_actions
             .get(handle)
@@ -98,6 +101,12 @@ pub fn integrate(world: &mut World, dt: f64) {
             .is_some_and(|runtime| {
                 runtime.phase == nba_domain::action_window::ActionPhase::Execution
                     && !runtime.completed
+                    && matches!(
+                        runtime.kind,
+                        crate::action::DefensiveActionKind::CloseoutContest
+                            | crate::action::DefensiveActionKind::BlockJump
+                            | crate::action::DefensiveActionKind::StealAttempt
+                    )
             });
         let mut target =
             runtime.map_or(world.players[handle].target, |runtime| match runtime.role {
@@ -105,12 +114,17 @@ pub fn integrate(world: &mut World, dt: f64) {
                 crate::action::ActionIntentRole::CutPartner
                 | crate::action::ActionIntentRole::ScreenPartner => world.players[handle].target,
             });
+        // 只有扑防在执行窗口里接管落点：扑防要扑到球那里去。站位动作
+        // （滑步、贴身施压、站位吃犯规）不改落点——它们改的是结算层读到
+        // 的那个防守状态。落点由职责层管，站位动作抢过来就等于把对位从
+        // 职责层手里拿走了。
         if let Some(closeout_target) = world
             .defensive_actions
             .get(handle)
             .and_then(Option::as_ref)
             .filter(|runtime| {
-                runtime.phase == nba_domain::action_window::ActionPhase::Execution
+                runtime.kind == crate::action::DefensiveActionKind::CloseoutContest
+                    && runtime.phase == nba_domain::action_window::ActionPhase::Execution
                     && !runtime.completed
             })
             .map(|runtime| runtime.target_position)

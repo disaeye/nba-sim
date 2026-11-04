@@ -233,6 +233,14 @@ pub struct PlayerState {
     pub resting_until: f64,
     /// 重决策调度：事件触发加最小间隔。
     pub schedule: DecisionSchedule,
+    /// 对位防守人下一次评估站位动作的时刻：站位与切球是两条独立的
+    /// 调度，因此各有各的间隔。
+    pub positioning_next_at: f64,
+    /// 对位防守人当前的站位姿态：滑步、贴身施压或站位吃犯规。
+    ///
+    /// 姿态不是带窗口的动作，因此它不带运行时：它只是一条持续到局面
+    /// 变了为止的状态，发布一次变化事实就够了。
+    pub on_ball_positioning: Option<crate::action::OnBallPositioning>,
     /// 本球员当前执行的身体动作；多人配合使用相同的 interaction_id。
     pub action: Option<ActionRuntime>,
     /// 被假动作骗到后的失衡窗口：干扰、抄截半径与切球成功率都读它。
@@ -283,6 +291,8 @@ impl PlayerState {
             resting_until: f64::default(),
             screened_at: f64::NEG_INFINITY,
             schedule: DecisionSchedule::default(),
+            positioning_next_at: 0.0,
+            on_ball_positioning: None,
             action: None,
             bait: None,
         }

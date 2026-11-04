@@ -11,29 +11,29 @@
 //! 判定分三层：
 //!
 //! 1. 距离：防守人在一臂之内（`hand_check_contact_ft`）。
-//! 2. 动作：防守人的速度里有一块朝着持球人的分量，说明他不是在平行
+//! 2. 站位：防守人是持球人的对位防守人，而且他守得比职责层给的间隔
+//!    更近（`hand_check_pressure_ft`）。职责层给的间隔是合法贴防的
+//!    距离，比它更近说明防守人在往持球人身上压。
+//! 3. 动作：防守人的速度里有一块朝着持球人的分量，说明他不是在平行
 //!    贴防，而是在伸手挡路（`hand_check_speed_reference` 量的是这一块
 //!    相对速度的量级）。
-//! 3. 位置：防守人没有处在合法防守位置——他的身体没有正对持球人
-//!    （`facing` 与两人连线的点积小于 `hand_check_facing_dot`）。
 //!
-//! 三层都成立才算一次非法接触。犯规是在接触发生的那一刻判的，不是
-//! 在接触持续期间反复抽样：因此上一次接触的防守人记在世界上，同一个
-//! 防守人持续挡路只判一次，他一离开再回来才算新的接触。
+//! 三层都成立才抽样吹哨，抽样概率按防守人的身体对抗倾向放大。合法
+//! 防守位置上的平行贴防不吹，这是 §I.5.e 的偶然接触例外。
 
 use crate::draw::{purpose, Stream};
 use crate::world::World;
 
-/// 这次接触的三层条件是否都成立。
+/// 防守人对持球人伸手阻挡时的判定。
 ///
-/// 返回 `Some(defender)` 表示防守人正在非法接触持球人。
+/// 返回被吹哨的防守人；没有成立时返回 `None`。
 pub fn illegal_contact(world: &World) -> Option<usize> {
     if !world.live_play() {
         return None;
     }
     let holder = world.holder()?;
     let contact_ft = world.params.policy.w("hand_check_contact_ft");
-    let facing_limit = world.params.policy.g("hand_check_facing_dot");
+    let pressure_ft = world.params.policy.g("hand_check_pressure_ft");
     let holder_team = world.players[holder].team;
     let holder_pos = world.players[holder].pos;
 
@@ -58,16 +58,17 @@ pub fn illegal_contact(world: &World) -> Option<usize> {
     }
     let direction = to_holder / gap;
 
-    // 防守人朝持球人的速度分量：平行贴防时这一块接近零，伸手挡路时
-    // 明显为正。
-    let closing = (guard.vel - world.players[holder].vel).dot(direction);
-    if closing <= 0.0 {
+    // 站位：防守人守得比职责层给的间隔更近，说明他在往持球人身上压。
+    // 职责层给的间隔（`pressure_separation_ft`）是合法贴防的距离。
+    let legal = world.params.policy.g("pressure_separation_ft");
+    if gap >= legal.max(pressure_ft) {
         return None;
     }
 
-    // 合法防守位置：防守人的身体正对着持球人。身体压过去或者背对着
-    // 持球人伸手，都不是合法位置（Rule 12B §I.2）。
-    if guard.facing.normalize_or_zero().dot(direction) >= facing_limit {
+    // 动作：防守人朝持球人的速度分量。平行贴防时这一块接近零，伸手
+    // 挡路时明显为正。
+    let closing = (guard.vel - world.players[holder].vel).dot(direction);
+    if closing <= 0.0 {
         return None;
     }
     Some(defender)
@@ -136,15 +137,13 @@ pub fn closing_speed(world: &World, defender: usize, holder: usize) -> f32 {
     (guard.vel - holder.vel).dot(to_holder / gap)
 }
 
-/// 防守人的身体是否正对持球人。合法防守位置要求它成立。
-pub fn in_legal_guarding_position(world: &World, defender: usize, holder: usize) -> bool {
-    let guard = &world.players[defender];
-    let holder = &world.players[holder];
-    let to_holder = holder.pos - guard.pos;
-    let gap = to_holder.length();
-    if gap <= f32::EPSILON {
-        return false;
-    }
-    let limit = world.params.policy.g("hand_check_facing_dot");
-    guard.facing.normalize_or_zero().dot(to_holder / gap) >= limit
+/// 防守人守得比合法贴防的间隔更近没有。
+///
+/// 职责层给的间隔是合法贴防的距离；比它更近说明防守人在往持球人身上
+/// 压，那就是 §I.2 说的非法接触。
+pub fn pressing_past_legal_separation(world: &World, defender: usize, holder: usize) -> bool {
+    let gap = (world.players[holder].pos - world.players[defender].pos).length();
+    let legal = world.params.policy.g("pressure_separation_ft");
+    let threshold = legal.max(world.params.policy.g("hand_check_pressure_ft"));
+    gap < threshold
 }

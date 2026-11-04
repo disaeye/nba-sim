@@ -73,6 +73,26 @@ pub struct TechniquePolicy {
     pub steal_attempt_exec_seconds: f32,
     /// 主动伸手切球的收势窗口（秒）。
     pub steal_attempt_follow_seconds: f32,
+    /// 滑步跟防的准备窗口（秒）。
+    pub slide_prep_seconds: f32,
+    /// 滑步跟防的执行窗口（秒）。
+    pub slide_exec_seconds: f32,
+    /// 滑步跟防的收势窗口（秒）。
+    pub slide_follow_seconds: f32,
+    /// 贴身施压的准备窗口（秒）。
+    pub contain_prep_seconds: f32,
+    /// 贴身施压的执行窗口（秒）。
+    pub contain_exec_seconds: f32,
+    /// 贴身施压的收势窗口（秒）。
+    pub contain_follow_seconds: f32,
+    /// 站位吃犯规的准备窗口（秒）。
+    pub charge_take_prep_seconds: f32,
+    /// 站位吃犯规的执行窗口（秒）。
+    pub charge_take_exec_seconds: f32,
+    /// 站位吃犯规的收势窗口（秒）。
+    pub charge_take_follow_seconds: f32,
+    /// 贴身施压时与持球人保持的距离（英尺）：伸手就能够到的距离。
+    pub contain_separation_ft: f32,
     /// 执行窗口内切球成功率的加成比例（0 = 无加成）。
     pub steal_attempt_exec_bonus: f32,
     /// 收势窗口内该防守人干扰的折减比例（0 = 无损失，1 = 完全失去干扰）。
@@ -106,6 +126,20 @@ impl Default for TechniquePolicy {
             steal_attempt_prep_seconds: 0.12,
             steal_attempt_exec_seconds: 0.18,
             steal_attempt_follow_seconds: 0.35,
+            // 滑步跟防：准备短、执行长（滑步本身要持续一段）、收势短。
+            slide_prep_seconds: 0.06,
+            slide_exec_seconds: 0.45,
+            slide_follow_seconds: 0.12,
+            // 贴身施压：准备与执行都短，因为它是一次压上去的赌博。
+            contain_prep_seconds: 0.05,
+            contain_exec_seconds: 0.25,
+            contain_follow_seconds: 0.10,
+            // 站位吃犯规：站定之后要保持位置，因此执行窗口最长。
+            charge_take_prep_seconds: 0.08,
+            charge_take_exec_seconds: 0.60,
+            charge_take_follow_seconds: 0.15,
+            // 贴身施压的距离：伸手就能够到，两个身位之内。
+            contain_separation_ft: 3.0,
             steal_attempt_exec_bonus: 0.9,
             steal_attempt_follow_penalty: 0.5,
             block_jump_prep_seconds: 0.08,

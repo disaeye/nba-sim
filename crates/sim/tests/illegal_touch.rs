@@ -53,14 +53,14 @@ fn matchup_fixture(seed: u64) -> (World, usize, usize) {
 #[test]
 fn a_defender_who_reaches_across_the_handler_commits_the_illegal_touch() {
     let (world, holder, defender) = matchup_fixture(401);
-    // 防守人把身体压向持球人：速度朝持球人，而且身体没有正对他。
+    // 防守人贴得比合法间隔更近，而且速度朝着持球人：他在往持球人身上压。
     let mut world = world;
-    world.players[defender].facing = Vec2::NEG_X;
+    world.players[defender].pos = world.players[holder].pos - Vec2::X * 0.8;
     world.players[defender].vel = Vec2::new(4.0, 0.0);
     world.players[holder].vel = Vec2::ZERO;
     assert!(
-        !illegal_touch::in_legal_guarding_position(&world, defender, holder),
-        "夹具必须让防守人处在非法防守位置"
+        illegal_touch::pressing_past_legal_separation(&world, defender, holder),
+        "夹具必须让防守人守得比合法间隔更近"
     );
     assert!(
         illegal_touch::closing_speed(&world, defender, holder) > 0.0,
@@ -76,25 +76,24 @@ fn a_defender_who_reaches_across_the_handler_commits_the_illegal_touch() {
 #[test]
 fn a_defender_in_a_legal_guarding_position_commits_no_illegal_touch() {
     let (mut world, holder, defender) = matchup_fixture(402);
-    // 平行贴防：身体正对持球人，速度只是横向的。
-    world.players[defender].facing = Vec2::X;
+    // 平行贴防：守在职责层给的间隔上，速度只是横向的。
+    world.players[defender].pos = world.players[holder].pos - Vec2::X * 2.5;
     world.players[defender].vel = Vec2::new(0.0, 3.0);
     world.players[holder].vel = Vec2::ZERO;
     assert!(
-        illegal_touch::in_legal_guarding_position(&world, defender, holder),
-        "夹具必须让防守人处在合法防守位置"
+        !illegal_touch::pressing_past_legal_separation(&world, defender, holder),
+        "夹具必须让防守人守在合法间隔上"
     );
     assert_eq!(
         illegal_touch::illegal_contact(&world),
         None,
-        "合法防守位置上的平行贴防不是非法触球"
+        "合法间隔上的平行贴防不是非法触球"
     );
 }
 
 #[test]
 fn a_defender_out_of_arm_reach_commits_no_illegal_touch() {
     let (mut world, holder, defender) = matchup_fixture(403);
-    world.players[defender].facing = Vec2::NEG_X;
     world.players[defender].vel = Vec2::new(4.0, 0.0);
     world.players[holder].vel = Vec2::ZERO;
     // 防守人退到一臂之外：伸手够不到，不构成阻挡。
@@ -112,17 +111,17 @@ fn a_defender_out_of_arm_reach_commits_no_illegal_touch() {
 #[test]
 fn a_defender_who_backs_off_stops_being_an_illegal_touch() {
     let (mut world, holder, defender) = matchup_fixture(404);
-    world.players[defender].facing = Vec2::NEG_X;
+    world.players[defender].pos = world.players[holder].pos - Vec2::X * 0.8;
     world.players[defender].vel = Vec2::new(4.0, 0.0);
     world.players[holder].vel = Vec2::ZERO;
     assert_eq!(illegal_touch::illegal_contact(&world), Some(defender));
-    // 防守人退开并且转回正面：接触结束。
+    // 防守人退开并且不再朝持球人移动：接触结束。
     world.players[defender].vel = Vec2::new(-2.0, 0.0);
-    world.players[defender].facing = Vec2::X;
+    world.players[defender].pos = world.players[holder].pos - Vec2::X * 2.5;
     assert_eq!(
         illegal_touch::illegal_contact(&world),
         None,
-        "防守人退开并转回正面之后不再是非法接触"
+        "防守人退开之后不再是非法接触"
     );
 }
 

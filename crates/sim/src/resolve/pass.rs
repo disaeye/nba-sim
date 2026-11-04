@@ -16,7 +16,14 @@ pub fn resolve(
     let team = world.players[from].team;
     // 释放时的走步判定：收球确立的轴心脚被移动、或者脚步用尽。
     // 判定在传球之前，传球被取消，球权转给对手。
-    if crate::footwork::judge_release(world, from) != crate::footwork::FootworkVerdict::Legal {
+    let release = crate::footwork::judge_release(world, from);
+    if release != crate::footwork::FootworkVerdict::Legal {
+        // 跳步与走步是两条不同的违例（NBA Rule 10 §XIII）。
+        if release == crate::footwork::FootworkVerdict::Hop {
+            crate::footwork::book_hop(world, from, team);
+        } else {
+            crate::footwork::book_travel(world, from, team);
+        }
         crate::footwork::book_travel(world, from, team);
         return ActionOutcome {
             actor: from,

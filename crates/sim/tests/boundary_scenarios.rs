@@ -292,6 +292,44 @@ fn a_gather_within_two_steps_is_legal() {
 }
 
 #[test]
+fn touching_the_floor_twice_with_the_same_foot_is_a_hop() {
+    let mut world = live_world(1111);
+    let holder = world.holder().expect("live possession has a holder");
+    world.possession.dribble_state = DribbleState::Gathered;
+    let gather = world.players[holder].pos;
+    nba_sim_core::footwork::establish_pivot(&mut world, holder, gather);
+    let step = nba_sim_core::footwork::step_length(&world, holder);
+    // 第一步：正常落地，支撑脚换到另一只。
+    let mut moved = gather;
+    moved += Vec2::X * step;
+    world.players[holder].pos = moved;
+    world.players[holder].vel = Vec2::X * step;
+    nba_sim_core::footwork::accumulate_contact(&mut world, holder);
+    assert_eq!(
+        nba_sim_core::footwork::judge_release(&world, holder),
+        nba_sim_core::footwork::FootworkVerdict::Legal,
+        "第一步之后不得判跳步"
+    );
+    // 跳步：把支撑脚拨回上一只脚，第二次接触就是同一只脚落地。
+    let support = world.possession.support_foot;
+    let previous = support.foot.opposite();
+    world.possession.support_foot = nba_domain::footwork::SupportFoot {
+        foot: previous,
+        planted_at: support.planted_at,
+        last_contact: support.last_contact,
+    };
+    moved += Vec2::X * step;
+    world.players[holder].pos = moved;
+    world.players[holder].vel = Vec2::X * step;
+    nba_sim_core::footwork::accumulate_contact(&mut world, holder);
+    assert_eq!(
+        nba_sim_core::footwork::judge_release(&world, holder),
+        nba_sim_core::footwork::FootworkVerdict::Hop,
+        "连续两次同一只脚触地必须判跳步（NBA Rule 10 §XIII.8）"
+    );
+}
+
+#[test]
 fn a_gather_beyond_two_steps_is_a_travel() {
     let mut world = live_world(1110);
     let holder = world.holder().expect("live possession has a holder");

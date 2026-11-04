@@ -107,8 +107,14 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     let team = world.players[shooter].team;
     // 释放时的走步判定：收球确立的轴心脚被移动、或者脚步用尽。
     // 判定在出手之前，出手被取消，球权转给对手。
-    if crate::footwork::judge_release(world, shooter) != crate::footwork::FootworkVerdict::Legal {
-        crate::footwork::book_travel(world, shooter, team);
+    let release = crate::footwork::judge_release(world, shooter);
+    if release != crate::footwork::FootworkVerdict::Legal {
+        // 跳步与走步是两条不同的违例（NBA Rule 10 §XIII）。
+        if release == crate::footwork::FootworkVerdict::Hop {
+            crate::footwork::book_hop(world, shooter, team);
+        } else {
+            crate::footwork::book_travel(world, shooter, team);
+        }
         return ActionOutcome {
             actor: shooter,
             kind: ActionKind::Shoot(kind),

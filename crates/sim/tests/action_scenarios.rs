@@ -824,7 +824,7 @@ fn a_charge_requires_a_planted_defender() {
             world.possession.gather_pos = Some(spot);
             let intent = ActionIntent {
                 actor: driver,
-                kind: ActionKind::Drive,
+                kind: ActionKind::Drive(nba_domain::action_window::DriveKind::Straight),
                 target: None,
                 from_ft: spot,
                 to_ft: spot + toward * 1.0,
@@ -832,7 +832,11 @@ fn a_charge_requires_a_planted_defender() {
                 duration: 0.4,
             };
             let before = world.events.len();
-            nba_sim_core::resolve::drive::resolve(&mut world, &intent);
+            nba_sim_core::resolve::drive::resolve(
+                &mut world,
+                &intent,
+                nba_domain::action_window::DriveKind::Straight,
+            );
             if world.events[before..].iter().any(|event| {
                 matches!(
                     &event.fact,

@@ -219,7 +219,7 @@ impl ProtectKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ActionKind {
     Dribble(nba_domain::action_window::DribbleMoveKind),
-    Drive,
+    Drive(nba_domain::action_window::DriveKind),
     Finish,
     Pass(PassKind),
     Screen(ScreenKind),
@@ -235,7 +235,7 @@ impl ActionKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Dribble(_) => "Dribble",
-            Self::Drive => "Drive",
+            Self::Drive(_) => "Drive",
             Self::Finish => "Finish",
             Self::Pass(_) => "Pass",
             Self::Screen(_) => "Screen",
@@ -252,7 +252,7 @@ impl ActionKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Shoot(_) => "shoot",
-            Self::Drive => "drive",
+            Self::Drive(_) => "drive",
             Self::Pass(_) => "pass",
             Self::Screen(_) => "screen",
             Self::Cut(_) => "cut",
@@ -269,7 +269,7 @@ impl ActionKind {
     pub fn family(self) -> u8 {
         match self {
             Self::Shoot(_) => 0,
-            Self::Drive => 1,
+            Self::Drive(_) => 1,
             Self::Pass(_) => 2,
             Self::Screen(_) => 3,
             Self::Cut(_) => 4,
@@ -408,6 +408,69 @@ pub enum DefensiveActionKind {
     StealAttempt,
     /// 垂直起跳封盖：执行窗口内摸高增加，跳起的人无法卡位抢篮板。
     BlockJump,
+    /// 滑步跟防：横向移动保持一个身位的间隔，不越过持球人的合法
+    /// 防守位置（NBA Rule 12B §II.5）。
+    Slide,
+    /// 贴身施压：把间隔压到伸手的距离上，代价是赌博失败后失位。
+    Contain,
+    /// 站位吃犯规：面对突破时站定占住位置，逼进攻方绕开或撞人
+    /// （NBA Rule 12B §II.1）。
+    ChargeTake,
+}
+
+/// 对位防守人自己选的站位动作。
+///
+/// 这三种与「伸手切球」「扑防」「起跳封盖」不同：它们不是赌博，而是
+/// 防守人面对持球人时自己选的站位方式，因此单独成一个枚举，选取与起手
+/// 两处都不必处理其余防守动作。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnBallPositioning {
+    /// 滑步跟防：横向移动保持一个身位的间隔。
+    Slide,
+    /// 贴身施压：把间隔压到伸手的距离上。
+    Contain,
+    /// 站位吃犯规：面对突破时站定占住位置。
+    ChargeTake,
+}
+
+impl OnBallPositioning {
+    /// 转成防守动作的种类：站位动作与防守动作共用同一套运行时。
+    pub fn defensive_kind(self) -> DefensiveActionKind {
+        match self {
+            Self::Slide => DefensiveActionKind::Slide,
+            Self::Contain => DefensiveActionKind::Contain,
+            Self::ChargeTake => DefensiveActionKind::ChargeTake,
+        }
+    }
+}
+
+/// 防守人正在跑的站位动作。
+///
+/// 返回防守人当前正在跑的那一种站位动作；没有在跑时返回 `None`。
+pub fn on_ball_positioning(
+    world: &crate::World,
+    defender: usize,
+) -> Option<OnBallPositioning> {
+    world.players.get(defender)?.on_ball_positioning
+}
+
+/// 站位动作对持球人的影响：贴身施压压低他的出手与出球质量。
+///
+/// 站位动作不改防守人站哪：那是职责层的事。站位动作改的是结算层读到
+/// 的那个防守状态，因此它不会干扰对位的连续性。
+pub fn on_ball_pressure(world: &crate::World, defender: usize) -> Option<f32> {
+    match on_ball_positioning(world, defender)? {
+        // 滑步跟防：守住位置，没有额外压力。
+        OnBallPositioning::Slide => None,
+        // 贴身施压：持球人被贴住，出手与出球都更难。
+        OnBallPositioning::Contain => Some(
+            world.params.policy.g("contain_pressure_multiplier"),
+        ),
+        // 站位吃犯规：防守人站住逼他绕开，进攻方要付出绕路的时间。
+        OnBallPositioning::ChargeTake => Some(
+            world.params.policy.g("charge_take_pressure_multiplier"),
+        ),
+    }
 }
 
 impl DefensiveActionKind {
@@ -416,6 +479,9 @@ impl DefensiveActionKind {
             Self::CloseoutContest => "closeout_contest",
             Self::StealAttempt => "steal_attempt",
             Self::BlockJump => "block_jump",
+            Self::Slide => "slide",
+            Self::Contain => "contain",
+            Self::ChargeTake => "charge_take",
         }
     }
 }
@@ -640,6 +706,8 @@ pub enum Fact {
         defender_beaten: bool,
         distance_ft: f32,
         separation_ft: f32,
+        /// 本次突破的技术变体：直接、变向还是转身。
+        kind: &'static str,
     },
     /// 背身单打：持球人进入低位开始背打（本身不产出结果，结果由后续出手给出）。
     PostUp {
@@ -773,6 +841,14 @@ pub enum Fact {
         reason: &'static str,
         foul_id: u64,
     },
+    /// 对位防守人的站位姿态变了：滑步、贴身施压、站位吃犯规。
+    ///
+    /// 姿态不是带窗口的动作，因此它只发布一次变化事实，不发布阶段变化
+    /// 与完成事实：那三类事实是给「有准备、执行、收势三段」的动作用的。
+    OnBallPositioningChanged {
+        defender: usize,
+        kind: &'static str,
+    },
     /// 球员被逐：犯规升级到恶意犯规时使用（NBA Rule 12B §IV）。
     Ejected {
         team: TeamSide,
@@ -877,6 +953,7 @@ impl Fact {
             Self::BenchDepleted { .. } => "BenchDepleted",
             Self::FoulOutRetention { .. } => "FoulOutRetention",
             Self::TeamTechnicalFoul { .. } => "TeamTechnicalFoul",
+            Self::OnBallPositioningChanged { .. } => "ON_BALL_POSITIONING_CHANGED",
             Self::Ejected { .. } => "EJECTED",
             Self::Timeout { .. } => "Timeout",
             Self::JumpBall { .. } => "JumpBall",

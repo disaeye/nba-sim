@@ -8,7 +8,11 @@ use crate::action::{
 use crate::draw::{purpose, Stream};
 use crate::world::World;
 
-pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
+pub fn resolve(
+    world: &mut World,
+    intent: &ActionIntent,
+    kind: nba_domain::action_window::DriveKind,
+) -> ActionOutcome {
     let driver = intent.actor;
     let team = world.players[driver].team;
     let hoop = world.hoop_for(team);
@@ -56,7 +60,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
             }
             return ActionOutcome {
                 actor: driver,
-                kind: ActionKind::Drive,
+                kind: ActionKind::Drive(kind),
                 completion: Completion::Failed,
                 delta: StateDelta::default(),
                 facts: Vec::new(),
@@ -72,6 +76,10 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
         ));
     }
 
+    // 变体不改落点：落点是突破意图给的那个点，动了它，出手的区域分布
+    // 整段跟着变。变体的区别在「怎么过去」而不是「停在哪」：变向突破
+    // 从防守人外侧绕过去，过掉他的机会更大；转身突破以轴心脚为轴，球
+    // 护得更稳，丢球的可能更小。这些差别由决策层读变体算出来。
     let separation_ft = nearest
         .map(|defender| (world.players[defender].pos - pos).length())
         .unwrap_or(30.0);
@@ -83,14 +91,30 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     // 防守人的速度上，而不是进攻人的速度。
     if separation_ft <= world.rules.min_player_separation_ft + 0.7 {
         if let Some(defender) = nearest {
+            // 防守人站住了：他占住了合法防守位置，撞人因此判进攻方犯规
+            // （NBA Rule 12B §II.1-§II.2）。
             let planted = world.players[defender].vel.length() < 3.0;
             let strength = world.players[driver].data.attributes.strength;
             let rate = world.params.policy.w("charge_rate_drive") * (0.6 + strength);
+            // 正在跑「站位吃犯规」这个动作的防守人，本来就是冲着吃这次
+            // 犯规去的：撞人判犯规的机会因此放大。放大倍数在策略表里。
+            //
+            // 站位吃犯规不改「防守人有没有站住」：站住仍然只看他的速度。
+            // 它改的是「撞上了算谁的」——防守人主动占住了位置，撞人因此
+            // 判进攻方犯规，频率上升而不是下降。
+            let taking_charge =
+                crate::action::on_ball_positioning(world, defender)
+                    == Some(crate::action::OnBallPositioning::ChargeTake);
+            let rate = if taking_charge {
+                rate * world.params.policy.w("charge_take_rate_multiplier")
+            } else {
+                rate
+            };
             if planted && world.draw(Stream::Foul, driver, purpose::DRIVE_CHARGE, 0) < rate {
                 crate::resolve::foul::apply_offensive_foul(world, driver, defender);
                 return ActionOutcome {
                     actor: driver,
-                    kind: ActionKind::Drive,
+                    kind: ActionKind::Drive(kind),
                     completion: Completion::Failed,
                     delta: StateDelta {
                         turnover: Some(TurnoverKind::OffensiveFoul),
@@ -132,7 +156,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
             );
             return ActionOutcome {
                 actor: driver,
-                kind: ActionKind::Drive,
+                kind: ActionKind::Drive(kind),
                 completion: Completion::Failed,
                 delta: StateDelta {
                     turnover: Some(TurnoverKind::LostBall),
@@ -160,10 +184,11 @@ pub fn resolve(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
         defender_beaten,
         distance_ft,
         separation_ft,
+        kind: kind.as_str(),
     });
     ActionOutcome {
         actor: driver,
-        kind: ActionKind::Drive,
+        kind: ActionKind::Drive(kind),
         completion: Completion::Completed,
         delta: StateDelta {
             separation_ft: Some(separation_ft),
@@ -325,10 +350,47 @@ pub fn resolve_post(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     } else {
         "backdown"
     };
-    let target = hoop
-        - direction
-            * (5.5 + world.draw(Stream::Aim, actor, purpose::POST_TARGET, 0) * 4.0
-                - target_distance);
+    let base_distance =
+        5.5 + world.draw(Stream::Aim, actor, purpose::POST_TARGET, 0) * 4.0 - target_distance;
+    // 每种步法都有自己的空间效果，而空间效果作用在防守人身上：上下步把
+    // 防守人顶到身后，撤步转身绕到底线一侧，背身挤打把人挤开。
+    //
+    // 效果落在防守人身上而不是进攻人的落点上，是因为落点一改，出手的
+    // 区域分布整段跟着变：低位出手的位置是标定出来的，不能被步法的
+    // 落点偏移带走。顶开防守人则改的是这次单打的结果分布，出手位置
+    // 仍在原来的地方。
+    let lateral = Vec2::new(-direction.y, direction.x);
+    let push_ft = world.params.policy.g("post_step_push_ft");
+    if let Some(defender) = defender {
+        let pushed = match kind_name {
+            // 上下步：往底线方向顶，防守人被挤到身后。
+            "up_and_under" => {
+                let baseline = if baseline_side { lateral } else { -lateral };
+                baseline * push_ft
+            }
+            // 撤步转身：往底线一侧绕过去，防守人被挤到另一侧。
+            "drop_step" => -lateral * push_ft,
+            // 背身挤打：朝防守人的反方向挤。
+            _ => {
+                let away = (world.players[defender].pos - pos).normalize_or_zero();
+                Vec2::new(-away.y, away.x) * push_ft
+            }
+        };
+        let radius = world.rules.player_radius_ft;
+        let spot = world.players[defender].pos + pushed;
+        let clamped = glam::Vec2::new(
+            spot.x.clamp(radius, world.rules.court.width_ft - radius),
+            spot.y.clamp(radius, world.rules.court.height_ft - radius),
+        );
+        crate::assignment::force_target_as(
+            world,
+            defender,
+            clamped,
+            crate::state::TargetKind::Station,
+            actor,
+        );
+    }
+    let target = hoop - direction * base_distance;
     world.players[actor].target = target;
     world.players[actor].target_kind = crate::state::TargetKind::Window;
     world.players[actor].target_partner = actor;

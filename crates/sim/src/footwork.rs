@@ -84,15 +84,18 @@ pub fn accumulate_contact(world: &mut World, actor: usize) -> bool {
     }
     let contact = world.players[actor].pos;
     let mut pivot = pivot;
-    pivot.record_contact(contact);
-    // 脚步用尽之后的这一步就是走步：前面的接触已经用掉了额度。
-    let exhausted = !pivot.has_step_left();
-    world.possession.pivot = Some(pivot);
     // 支撑脚交替：这一步是另一只脚落地的。
     let mut support = world.possession.support_foot;
     support.record_contact(contact);
+    let landing_foot = support.foot;
     world.possession.support_foot = support;
-    exhausted
+    // 跳步：连续两次同一只脚触地（NBA Rule 10 §XIII.8）。
+    pivot.record_contact_with_foot(contact, landing_foot);
+    let hop = pivot.hop;
+    // 脚步用尽之后的这一步就是走步：前面的接触已经用掉了额度。
+    let exhausted = !pivot.has_step_left();
+    world.possession.pivot = Some(pivot);
+    exhausted || hop
 }
 
 /// 释放（出手或传球）时的走步判定。
@@ -110,6 +113,10 @@ pub fn judge_release(world: &World, actor: usize) -> FootworkVerdict {
     // 脚步用尽：收球之后的两步已经走完。
     if pivot.steps_taken > pivot.steps_allowed {
         return FootworkVerdict::StepsExhausted;
+    }
+    // 跳步：连续两次同一只脚触地（NBA Rule 10 §XIII.8）。
+    if pivot.hop {
+        return FootworkVerdict::Hop;
     }
     // 轴心脚被移动：收球之后球手离开了轴心脚的位置。
     let step = step_length(world, actor);
@@ -140,6 +147,8 @@ pub enum FootworkVerdict {
     PivotMoved,
     /// 走步：脚步数用尽。
     StepsExhausted,
+    /// 跳步：连续两次用同一只脚触地（NBA Rule 10 §XIII.8）。
+    Hop,
 }
 
 /// 判定收球步是否合法。
@@ -180,6 +189,28 @@ pub fn judge_gather(
 }
 
 /// 走步的账本与裁决。
+/// 跳步的账本与裁决（NBA Rule 10 §XIII.8）。
+///
+/// 跳步与走步是两条不同的违例：走步是脚步用尽或移动了轴心脚，跳步是
+/// 连续两次用同一只脚触地。罚则相同：球权交给对方。
+pub fn book_hop(world: &mut World, actor: usize, team: crate::TeamSide) {
+    world.line_mut(actor).turnovers += 1;
+    world.emit(Fact::Turnover {
+        player: actor,
+        kind: TurnoverKind::Travel,
+    });
+    world.adjudicate(
+        crate::adjudicate::Adjudication::new(
+            crate::adjudicate::StoppageCause::Violation(crate::adjudicate::ViolationKind::Travel),
+            crate::adjudicate::RestartPlan::Live { team: team.other() },
+        )
+        .ending(
+            nba_domain::event::PossessionEndCause::TurnoverTravel,
+            "hop",
+        ),
+    );
+}
+
 pub fn book_travel(world: &mut World, actor: usize, team: crate::TeamSide) {
     world.line_mut(actor).turnovers += 1;
     world.emit(Fact::Turnover {

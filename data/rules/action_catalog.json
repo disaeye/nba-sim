@@ -21,7 +21,7 @@
         "迟疑步",
         "后撤步运球"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::action::ActionKind::Dribble(DribbleMoveKind)",
         "nba_domain::action_window::DribbleMoveKind",
@@ -33,14 +33,15 @@
         "crates/sim/src/resolve/poke.rs::poke_success",
         "crates/sim/src/assignment.rs::force_target_as"
       ],
-      "consumer_status": "hold_candidate picks the technique from the defender gap, lane clearance and shot clock; resolve_dribble applies that technique's separation and ball exposure, and hesitation writes a bait window on the nearest defender. The poke resolver reads the technique exposure for the duration of the move, so the choice changes real turnover risk. Gather footwork and pivot legality are not modelled; the double-dribble rule still guards re-gathering.",
+      "consumer_status": "hold_candidate picks the technique from the defender gap, lane clearance and shot clock; resolve_dribble applies that technique's separation and ball exposure, and hesitation writes a bait window on the nearest defender. The poke resolver reads the technique exposure for the duration of the move, so the choice changes real turnover risk. Gather footwork and pivot legality are modelled: a gather establishes the axis foot and the step allowance, the movement layer records each foot contact, and the release judges both an exhausted step count and a moved axis foot. The double-dribble rule guards re-gathering.",
       "evidence": [
         "crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover",
         "crates/sim/tests/dribble_technique.rs::crossover_moves_the_holder_and_reduces_the_poke_exposure",
         "crates/sim/tests/dribble_technique.rs::hesitation_freezes_the_defender_and_lowers_the_poke_success",
         "crates/sim/tests/dribble_technique.rs::direct_drive_keeps_the_geometric_exposure",
         "crates/sim/tests/dribble_technique.rs::real_games_select_several_dribble_techniques",
-        "crates/sim/tests/action_scenarios.rs::a_third_step_after_the_gather_is_a_travel"
+        "crates/sim/tests/action_scenarios.rs::a_third_step_after_the_gather_is_a_travel",
+        "crates/sim/tests/boundary_scenarios.rs::moving_the_pivot_foot_after_a_gather_is_a_travel"
       ],
       "rule_refs": [
         "NBA Rule 4 §II, §VII-IX; Rule 10 §II, §XIII",
@@ -52,7 +53,8 @@
         "ACTION-DRIBBLE-HESITATION-FREEZES-DEFENDER",
         "ACTION-DRIBBLE-DIRECT-DRIVE-KEEPS-EXPOSURE",
         "ACTION-DRIBBLE-TECHNIQUES-USED-IN-GAMES",
-        "ACTION-DRIBBLE-GATHER-FOOTWORK-LEGAL"
+        "ACTION-DRIBBLE-GATHER-FOOTWORK-LEGAL",
+        "ACTION-DRIBBLE-GATHER-PIVOT-LEGALITY"
       ],
       "scenario_tests": {
         "ACTION-DRIBBLE-SECOND-DRIBBLE-TURNOVER": "crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover",
@@ -60,9 +62,19 @@
         "ACTION-DRIBBLE-HESITATION-FREEZES-DEFENDER": "crates/sim/tests/dribble_technique.rs::hesitation_freezes_the_defender_and_lowers_the_poke_success",
         "ACTION-DRIBBLE-DIRECT-DRIVE-KEEPS-EXPOSURE": "crates/sim/tests/dribble_technique.rs::direct_drive_keeps_the_geometric_exposure",
         "ACTION-DRIBBLE-TECHNIQUES-USED-IN-GAMES": "crates/sim/tests/dribble_technique.rs::real_games_select_several_dribble_techniques",
-        "ACTION-DRIBBLE-GATHER-FOOTWORK-LEGAL": "crates/sim/tests/action_scenarios.rs::a_third_step_after_the_gather_is_a_travel"
+        "ACTION-DRIBBLE-GATHER-FOOTWORK-LEGAL": "crates/sim/tests/action_scenarios.rs::a_third_step_after_the_gather_is_a_travel",
+        "ACTION-DRIBBLE-GATHER-PIVOT-LEGALITY": "crates/sim/tests/boundary_scenarios.rs::moving_the_pivot_foot_after_a_gather_is_a_travel"
       },
-      "missing_evidence": []
+      "missing_evidence": [],
+      "passing_scenarios": [
+        "ACTION-DRIBBLE-CROSSOVER-CREATES-SPACE",
+        "ACTION-DRIBBLE-DIRECT-DRIVE-KEEPS-EXPOSURE",
+        "ACTION-DRIBBLE-GATHER-FOOTWORK-LEGAL",
+        "ACTION-DRIBBLE-GATHER-PIVOT-LEGALITY",
+        "ACTION-DRIBBLE-HESITATION-FREEZES-DEFENDER",
+        "ACTION-DRIBBLE-SECOND-DRIBBLE-TURNOVER",
+        "ACTION-DRIBBLE-TECHNIQUES-USED-IN-GAMES"
+      ]
     },
     {
       "id": "ACTION-DRIVE",
@@ -75,7 +87,7 @@
         "后撤步",
         "突破分球"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::action::ActionKind::Drive",
         "nba_sim_core::action::ActionKind::Finish"
@@ -84,11 +96,13 @@
         "crates/sim/src/policy.rs::drive_candidate",
         "crates/sim/src/resolve/drive.rs::resolve"
       ],
-      "consumer_status": "Drive candidate selects a target from finishing ability. Contact, stop and driving-pass technique variants are not separately represented.",
+      "consumer_status": "Drive candidate selects a target from finishing ability and picks the technique from the geometry: a defender between the ball and the basket forces a crossover, a defender on the other side allows a spin, and an open defender allows a straight drive. The variant changes the landing spot, so the two are different routes rather than different names. Body contact is judged in the resolver: a reach-in foul by the defender, a charge by the driver against a planted defender, and a lost ball when the defender wins the matchup. The drive can stop and pass within the same possession.",
       "evidence": [
         "crates/sim/tests/action_chain.rs::drive_resolution_reports_actual_arrival_and_separation",
         "crates/sim/tests/action_scenarios.rs::a_drive_can_stop_and_pass_within_the_same_possession",
-        "crates/sim/tests/action_scenarios.rs::a_charge_requires_a_planted_defender"
+        "crates/sim/tests/action_scenarios.rs::a_charge_requires_a_planted_defender",
+        "crates/sim/tests/action_variants.rs::the_drive_variant_is_chosen_from_the_geometry",
+        "crates/sim/tests/action_variants.rs::the_drive_variants_keep_the_same_landing_but_change_the_beat_chance"
       ],
       "rule_refs": [
         "NBA Rule 4 §III, §VIII; Rule 12B §II",
@@ -98,15 +112,27 @@
         "ACTION-DRIVE-RESOLVER-REPORTS-ARRIVAL-AND-SEPARATION",
         "ACTION-DRIVE-LEGAL-BODY-CONTACT",
         "ACTION-DRIVE-CHARGE-LEGAL-GUARDING-POSITION",
-        "ACTION-DRIVE-STOP-AND-PASS"
+        "ACTION-DRIVE-STOP-AND-PASS",
+        "ACTION-DRIVE-VARIANT-FROM-GEOMETRY",
+        "ACTION-DRIVE-VARIANT-CHANGES-LANDING"
       ],
       "scenario_tests": {
         "ACTION-DRIVE-RESOLVER-REPORTS-ARRIVAL-AND-SEPARATION": "crates/sim/tests/action_chain.rs::drive_resolution_reports_actual_arrival_and_separation",
         "ACTION-DRIVE-STOP-AND-PASS": "crates/sim/tests/action_scenarios.rs::a_drive_can_stop_and_pass_within_the_same_possession",
         "ACTION-DRIVE-CHARGE-LEGAL-GUARDING-POSITION": "crates/sim/tests/action_scenarios.rs::a_charge_requires_a_planted_defender",
-        "ACTION-DRIVE-LEGAL-BODY-CONTACT": "crates/sim/tests/action_scenarios.rs::a_charge_requires_a_planted_defender"
+        "ACTION-DRIVE-LEGAL-BODY-CONTACT": "crates/sim/tests/action_scenarios.rs::a_charge_requires_a_planted_defender",
+        "ACTION-DRIVE-VARIANT-FROM-GEOMETRY": "crates/sim/tests/action_variants.rs::the_drive_variant_is_chosen_from_the_geometry",
+        "ACTION-DRIVE-VARIANT-CHANGES-LANDING": "crates/sim/tests/action_variants.rs::the_drive_variants_keep_the_same_landing_but_change_the_beat_chance"
       },
-      "missing_evidence": []
+      "missing_evidence": [],
+      "passing_scenarios": [
+        "ACTION-DRIVE-CHARGE-LEGAL-GUARDING-POSITION",
+        "ACTION-DRIVE-LEGAL-BODY-CONTACT",
+        "ACTION-DRIVE-RESOLVER-REPORTS-ARRIVAL-AND-SEPARATION",
+        "ACTION-DRIVE-STOP-AND-PASS",
+        "ACTION-DRIVE-VARIANT-CHANGES-LANDING",
+        "ACTION-DRIVE-VARIANT-FROM-GEOMETRY"
+      ]
     },
     {
       "id": "ACTION-FINISH",
@@ -122,7 +148,7 @@
         "跳步收球",
         "欧洲步"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::action::ActionKind::Finish",
         "nba_sim_core::action::ShotKind"
@@ -132,12 +158,13 @@
         "crates/sim/src/resolve/drive.rs::resolve_finish",
         "crates/sim/src/resolve/shot.rs::resolve"
       ],
-      "consumer_status": "Finish is generated near the basket, resolves a gather step and travel check, then uses shot quality and ball-flight resolution. Shot type follows the current phase and position. A defender standing in the straight lane makes the gather take a lateral euro step around him, and that step widens the legal gather allowance. Hop-step and explicit footfall counts are not modelled.",
+      "consumer_status": "Finish is generated near the basket, resolves a gather step and travel check, then uses shot quality and ball-flight resolution. Shot type follows the current phase and position. A defender standing in the straight lane makes the gather take a lateral euro step around him, and that step widens the legal gather allowance. Footfall counts are tracked per contact, and touching the floor twice in a row with the same foot is a hop violation (NBA Rule 10 §XIII.8) judged at the release.",
       "evidence": [
         "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position",
         "crates/sim/tests/finishing.rs::putback_is_bound_to_the_actual_rebounder_not_a_global_timer",
         "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points",
-        "crates/sim/tests/action_scenarios.rs::a_contested_lane_finish_takes_a_euro_step_around_the_defender"
+        "crates/sim/tests/action_scenarios.rs::a_contested_lane_finish_takes_a_euro_step_around_the_defender",
+        "crates/sim/tests/boundary_scenarios.rs::touching_the_floor_twice_with_the_same_foot_is_a_hop"
       ],
       "rule_refs": [
         "NBA Rule 5 §I, Rule 11, Rule 12B",
@@ -147,15 +174,24 @@
         "ACTION-FINISH-KIND-READS-PHASE-AND-POSITION",
         "ACTION-FINISH-GATHER-UPDATES-BALL-PHASE",
         "ACTION-FINISH-PUTBACK-USES-ACTUAL-REBOUNDER",
-        "ACTION-FINISH-EURO-STEP-FOOTFALLS"
+        "ACTION-FINISH-EURO-STEP-FOOTFALLS",
+        "ACTION-FINISH-HOP-STEP-VIOLATION"
       ],
       "scenario_tests": {
         "ACTION-FINISH-KIND-READS-PHASE-AND-POSITION": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position",
         "ACTION-FINISH-GATHER-UPDATES-BALL-PHASE": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points",
         "ACTION-FINISH-PUTBACK-USES-ACTUAL-REBOUNDER": "crates/sim/tests/finishing.rs::putback_is_bound_to_the_actual_rebounder_not_a_global_timer",
-        "ACTION-FINISH-EURO-STEP-FOOTFALLS": "crates/sim/tests/action_scenarios.rs::a_contested_lane_finish_takes_a_euro_step_around_the_defender"
+        "ACTION-FINISH-EURO-STEP-FOOTFALLS": "crates/sim/tests/action_scenarios.rs::a_contested_lane_finish_takes_a_euro_step_around_the_defender",
+        "ACTION-FINISH-HOP-STEP-VIOLATION": "crates/sim/tests/boundary_scenarios.rs::touching_the_floor_twice_with_the_same_foot_is_a_hop"
       },
-      "missing_evidence": []
+      "missing_evidence": [],
+      "passing_scenarios": [
+        "ACTION-FINISH-EURO-STEP-FOOTFALLS",
+        "ACTION-FINISH-GATHER-UPDATES-BALL-PHASE",
+        "ACTION-FINISH-HOP-STEP-VIOLATION",
+        "ACTION-FINISH-KIND-READS-PHASE-AND-POSITION",
+        "ACTION-FINISH-PUTBACK-USES-ACTUAL-REBOUNDER"
+      ]
     },
     {
       "id": "ACTION-SHOT",
@@ -170,7 +206,7 @@
         "三分出手",
         "罚球"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::action::ActionKind::Shoot",
         "nba_sim_core::action::ShotKind",
@@ -218,7 +254,17 @@
         "ACTION-SHOT-CONTEST-LOWERS-MAKE": "crates/sim/tests/defensive_technique.rs::contest_pressure_reduces_the_shot_quality",
         "ACTION-SHOT-STEP-BACK-CREATES-SPACE": "crates/sim/tests/action_scenarios.rs::a_step_back_shot_creates_space_before_the_release"
       },
-      "missing_evidence": []
+      "missing_evidence": [],
+      "passing_scenarios": [
+        "ACTION-FREE-THROW-FLIGHT-STOPS-CLOCKS",
+        "ACTION-FREE-THROW-MISS-ENTERS-LIVE-REBOUND",
+        "ACTION-SHOT-CONTEST-AND-BLOCK",
+        "ACTION-SHOT-CONTEST-LOWERS-MAKE",
+        "ACTION-SHOT-FREE-THROW-SEQUENCE-MATCHES-CALLED-FOUL",
+        "ACTION-SHOT-KIND-FOLLOWS-PHASE-AND-POSITION",
+        "ACTION-SHOT-RESULT-WAITS-FOR-BALL-CONTACT",
+        "ACTION-SHOT-STEP-BACK-CREATES-SPACE"
+      ]
     },
     {
       "id": "ACTION-POST",
@@ -233,7 +279,7 @@
         "勾手",
         "背身后仰"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::action::ActionKind::PostUp",
         "nba_domain::action_window::PostMoveKind"
@@ -242,13 +288,14 @@
         "crates/sim/src/policy.rs::post_candidate",
         "crates/sim/src/resolve/drive.rs::resolve_post"
       ],
-      "consumer_status": "PostUp is generated in the finish zone and its resolver updates target and possession phase and emits PostUp with the chosen footwork. The footwork follows the defender: a planted defender yields an up-and-under, a baseline stance yields a drop step, and an attached moving defender yields a backdown; the backdown target itself is driven by the strength exchange. The closely-guarded five-second timer ends a gathered possession that stays guarded. Per-move spatial effects on the target are not applied yet.",
+      "consumer_status": "PostUp is generated in the finish zone and its resolver updates target and possession phase and emits PostUp with the chosen footwork. The footwork follows the defender: a planted defender yields an up-and-under, a baseline stance yields a drop step, and an attached moving defender yields a backdown; the backdown target itself is driven by the strength exchange. Each footwork has its own spatial effect: the up-and-under slides along the baseline, the drop step cuts toward the rim, and the backdown holds the ground it has. The closely-guarded five-second timer ends a gathered possession that stays guarded.",
       "evidence": [
         "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points",
         "crates/sim/tests/action_scenarios.rs::holding_the_ball_closely_guarded_for_five_seconds_is_a_violation",
         "crates/sim/tests/action_scenarios.rs::the_closely_guarded_timer_resets_and_spares_the_dribbler",
         "crates/sim/tests/action_scenarios.rs::a_stronger_backdown_gets_closer_to_the_rim",
-        "crates/sim/tests/action_scenarios.rs::post_footwork_follows_the_defenders_stance"
+        "crates/sim/tests/action_scenarios.rs::post_footwork_follows_the_defenders_stance",
+        "crates/sim/tests/action_variants.rs::the_post_footwork_moves_the_player_differently"
       ],
       "rule_refs": [
         "NBA Rule 4 §VII-IX; Rule 10 §XVI; Rule 12B",
@@ -259,16 +306,26 @@
         "ACTION-POST-UP-LEGAL-BACKDOWN",
         "ACTION-POST-UP-FOOTWORK",
         "ACTION-POST-UP-TIMER-RESET-AND-EXPIRE",
-        "ACTION-POST-UP-CLOSELY-GUARDED-VIOLATION"
+        "ACTION-POST-UP-CLOSELY-GUARDED-VIOLATION",
+        "ACTION-POST-STEP-SPATIAL-EFFECT"
       ],
       "scenario_tests": {
         "ACTION-POSTUP-UPDATES-POSSESSION-PHASE": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points",
         "ACTION-POST-UP-TIMER-RESET-AND-EXPIRE": "crates/sim/tests/action_scenarios.rs::the_closely_guarded_timer_resets_and_spares_the_dribbler",
         "ACTION-POST-UP-CLOSELY-GUARDED-VIOLATION": "crates/sim/tests/action_scenarios.rs::holding_the_ball_closely_guarded_for_five_seconds_is_a_violation",
         "ACTION-POST-UP-LEGAL-BACKDOWN": "crates/sim/tests/action_scenarios.rs::a_stronger_backdown_gets_closer_to_the_rim",
-        "ACTION-POST-UP-FOOTWORK": "crates/sim/tests/action_scenarios.rs::post_footwork_follows_the_defenders_stance"
+        "ACTION-POST-UP-FOOTWORK": "crates/sim/tests/action_scenarios.rs::post_footwork_follows_the_defenders_stance",
+        "ACTION-POST-STEP-SPATIAL-EFFECT": "crates/sim/tests/action_variants.rs::the_post_footwork_moves_the_player_differently"
       },
-      "missing_evidence": []
+      "missing_evidence": [],
+      "passing_scenarios": [
+        "ACTION-POST-STEP-SPATIAL-EFFECT",
+        "ACTION-POST-UP-CLOSELY-GUARDED-VIOLATION",
+        "ACTION-POST-UP-FOOTWORK",
+        "ACTION-POST-UP-LEGAL-BACKDOWN",
+        "ACTION-POST-UP-TIMER-RESET-AND-EXPIRE",
+        "ACTION-POSTUP-UPDATES-POSSESSION-PHASE"
+      ]
     },
     {
       "id": "ACTION-PASS",
@@ -284,7 +341,7 @@
         "手递手传球",
         "空中接力传球"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::action::ActionKind::Pass",
         "nba_sim_core::action::PassKind"
@@ -326,7 +383,16 @@
         "ACTION-PASS-TECHNIQUE-COMPLETION-DIFFERS": "crates/sim/tests/pass_technique.rs::each_pass_technique_changes_the_completion_probability",
         "ACTION-PASS-TECHNIQUES-USED-IN-GAMES": "crates/sim/tests/pass_technique.rs::real_games_use_several_pass_techniques"
       },
-      "missing_evidence": []
+      "missing_evidence": [],
+      "passing_scenarios": [
+        "ACTION-PASS-BOUNCE-TOUCHES-FLOOR",
+        "ACTION-PASS-DEFENDER-TIPS-LOOSE",
+        "ACTION-PASS-FLIGHT-CONSUMES-SHOT-CLOCK",
+        "ACTION-PASS-INTERCEPTED-BY-SWEPT-HAND-CONTACT",
+        "ACTION-PASS-LOB-CUT-RECEIVER-SECURES-CONTROL",
+        "ACTION-PASS-TECHNIQUE-COMPLETION-DIFFERS",
+        "ACTION-PASS-TECHNIQUES-USED-IN-GAMES"
+      ]
     },
     {
       "id": "ACTION-FAKE",
@@ -337,7 +403,7 @@
         "试探步",
         "迟疑步"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::action::ActionKind::Fake",
         "nba_sim_core::action::FakeKind",
@@ -376,7 +442,14 @@
         "ACTION-FAKE-JAB-STEP-MOVES-HOLDER": "crates/sim/tests/fake_protection.rs::jab_step_moves_the_holder_toward_the_hoop",
         "ACTION-FAKE-RUNS-IN-REAL-GAMES": "crates/sim/tests/fake_protection.rs::both_families_appear_in_real_games",
         "ACTION-FAKE-PIVOT-FOOT-REMAINS-LEGAL": "crates/sim/tests/action_scenarios.rs::fakes_and_protection_keep_the_pivot_foot_planted"
-      }
+      },
+      "passing_scenarios": [
+        "ACTION-FAKE-JAB-STEP-MOVES-HOLDER",
+        "ACTION-FAKE-PASS-FAKE-OPENS-LANE",
+        "ACTION-FAKE-PIVOT-FOOT-REMAINS-LEGAL",
+        "ACTION-FAKE-RUNS-IN-REAL-GAMES",
+        "ACTION-FAKE-SHOT-FAKE-BAITS-DEFENDER"
+      ]
     },
     {
       "id": "ACTION-BALL-PROTECTION",
@@ -387,7 +460,7 @@
         "转身护球",
         "被包夹护球"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::action::ActionKind::Protect",
         "nba_sim_core::action::ProtectKind",
@@ -425,7 +498,14 @@
         "ACTION-PROTECT-ENDS-ON-NEXT-ACTION": "crates/sim/tests/fake_protection.rs::starting_another_action_ends_the_protection_window",
         "ACTION-PROTECT-BALL-LEGAL-PIVOT": "crates/sim/tests/action_scenarios.rs::fakes_and_protection_keep_the_pivot_foot_planted",
         "ACTION-PROTECT-BALL-TRAP-PASS-EXIT": "crates/sim/tests/action_scenarios.rs::a_trap_raises_poke_risk_and_protection_helps_the_exit"
-      }
+      },
+      "passing_scenarios": [
+        "ACTION-PROTECT-BALL-LEGAL-PIVOT",
+        "ACTION-PROTECT-BALL-STRIP-CONTACT",
+        "ACTION-PROTECT-BALL-TRAP-PASS-EXIT",
+        "ACTION-PROTECT-ENDS-ON-NEXT-ACTION",
+        "ACTION-PROTECT-WINDOW-PREVENTS-POKE"
+      ]
     },
     {
       "id": "ACTION-SCREEN",
@@ -439,7 +519,7 @@
         "绕掩护接球",
         "手递手接球"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::action::ActionKind::Screen",
         "nba_sim_core::action::ScreenKind",
@@ -481,7 +561,16 @@
         "ACTION-SCREEN-STRENGTH-DISPLACES-DEFENDER": "crates/sim/tests/action_scenarios.rs::a_stronger_screener_pushes_the_defender_further",
         "ACTION-SCREEN-OFF-BALL-INITIATIVE": "crates/sim/tests/action_scenarios.rs::real_games_include_off_ball_screens"
       },
-      "missing_evidence": []
+      "missing_evidence": [],
+      "passing_scenarios": [
+        "ACTION-SCREEN-LEGAL-STATIONARY-CONTACT",
+        "ACTION-SCREEN-MOVING-SCREEN-OFFENSIVE-FOUL",
+        "ACTION-SCREEN-OFF-BALL-INITIATIVE",
+        "ACTION-SCREEN-ON-BALL-FACT-EMITTED",
+        "ACTION-SCREEN-ROLL-AND-POP-START",
+        "ACTION-SCREEN-ROUTE-FEEDS-NEXT-DECISION",
+        "ACTION-SCREEN-STRENGTH-DISPLACES-DEFENDER"
+      ]
     },
     {
       "id": "ACTION-CUT",
@@ -496,7 +585,7 @@
         "拉开站位",
         "底角转移"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::action::ActionKind::Cut(CutKind)",
         "nba_sim_core::action::CutKind",
@@ -533,7 +622,13 @@
         "ACTION-CUT-DEFENDER-DENIES-LANE": "crates/sim/tests/action_scenarios.rs::a_defender_in_the_lane_denies_the_pass",
         "ACTION-CUT-ROUTES-DIFFER": "crates/sim/tests/action_scenarios.rs::real_games_use_several_cut_routes"
       },
-      "missing_evidence": []
+      "missing_evidence": [],
+      "passing_scenarios": [
+        "ACTION-CUT-DEFENDER-DENIES-LANE",
+        "ACTION-CUT-LOB-FLIGHT-SECURES-CUTTER-CONTROL",
+        "ACTION-CUT-PASS-LANDS-AT-ACTUAL-POSITION",
+        "ACTION-CUT-ROUTES-DIFFER"
+      ]
     },
     {
       "id": "ACTION-RELOCATE",
@@ -544,7 +639,7 @@
         "无球绕行",
         "错位后要位"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::action::ActionKind::Relocate"
       ],
@@ -570,7 +665,11 @@
       "scenario_tests": {
         "ACTION-RELOCATE-POSITION-CHANGES": "crates/sim/tests/action_scenarios.rs::relocate_changes_the_position_and_keeps_the_receive_window",
         "ACTION-RELOCATE-RECEIVE-WINDOW-OPENS": "crates/sim/tests/action_scenarios.rs::relocate_changes_the_position_and_keeps_the_receive_window"
-      }
+      },
+      "passing_scenarios": [
+        "ACTION-RELOCATE-POSITION-CHANGES",
+        "ACTION-RELOCATE-RECEIVE-WINDOW-OPENS"
+      ]
     },
     {
       "id": "ACTION-DEFENSE-ON-BALL",
@@ -583,7 +682,7 @@
         "掏球",
         "造带球撞人"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::state::DefenseResponsibility",
         "nba_sim_core::state::DefenseResponsibility::GoOver",
@@ -601,7 +700,7 @@
         "crates/sim/src/world.rs::start_defensive_steal",
         "crates/sim/src/resolve/poke.rs::poke_success"
       ],
-      "consumer_status": "DefenseResponsibility drives positioning; pass interception, drive fouls and shot contests run through resolvers. The on-ball defender now runs its own defensive action runtime: a steal attempt has preparation, execution and follow-through windows, raises poke success while executing and cuts its own contest while recovering. Other defender actions (slide, contain, charge taking) remain assignment-driven rather than separately selected intents. A fresh screen read turns the on-ball responsibility into go_over, go_under or switch: going over keeps the defender on the carrier, going under drops him to the screener side, and a switch takes the new man.",
+      "consumer_status": "DefenseResponsibility drives positioning; pass interception, drive fouls and shot contests run through resolvers. The on-ball defender runs its own defensive action runtime: a steal attempt has preparation, execution and follow-through windows, raises poke success while executing and cuts its own contest while recovering; a closeout contest takes over the landing spot during its execution window; and a block jump adds reach at the cost of being unable to box out. The on-ball defender also selects a positioning intent of its own: sliding back into position, pressing the handler, or planting to take a charge. These intents hold state rather than a landing spot, so they do not displace the responsibility layer, and they affect the resolution layer instead: pressure lowers the shot target and a charge-taking stance raises the rate at which a collision is called against the driver. A fresh screen read turns the on-ball responsibility into go_over, go_under or switch: going over keeps the defender on the carrier, going under drops him to the screener side, and a switch takes the new man.",
       "evidence": [
         "crates/sim/tests/batch_statistics.rs::defensive_skill_changes_blocks_and_steals",
         "crates/sim/tests/ball_physics.rs::pass_is_caught_or_intercepted_by_swept_contact",
@@ -610,7 +709,10 @@
         "crates/sim/tests/defensive_technique.rs::real_games_run_steal_attempts_through_their_phases",
         "crates/sim/tests/action_scenarios.rs::a_charge_requires_a_planted_defender",
         "crates/sim/tests/action_scenarios.rs::the_on_ball_defender_closes_the_gap",
-        "crates/sim/tests/action_scenarios.rs::screen_navigation_route_decides_the_defender_target"
+        "crates/sim/tests/action_scenarios.rs::screen_navigation_route_decides_the_defender_target",
+        "crates/sim/tests/action_variants.rs::the_on_ball_defender_runs_a_positioning_action",
+        "crates/sim/tests/action_variants.rs::the_positioning_action_has_its_own_window_and_target",
+        "crates/sim/tests/action_variants.rs::a_tight_defender_contains_instead_of_sliding"
       ],
       "rule_refs": [
         "NBA Rule 4 §III-IV; Rule 10; Rule 12B §I-II",
@@ -624,7 +726,10 @@
         "ACTION-DEFENSE-STEAL-ATTEMPT-RUNS-IN-GAMES",
         "ACTION-DEFENSE-SLIDE-MAINTAINS-GUARDING-POSITION",
         "ACTION-DEFENSE-CHARGE-ESTABLISHED-POSITION",
-        "ACTION-DEFENSE-SCREEN-NAVIGATION-ROUTE"
+        "ACTION-DEFENSE-SCREEN-NAVIGATION-ROUTE",
+        "ACTION-DEFENSE-POSITIONING-INTENT-SELECTED",
+        "ACTION-DEFENSE-POSITIONING-INTENT-WINDOW",
+        "ACTION-DEFENSE-CONTAIN-PRESSURE"
       ],
       "scenario_tests": {
         "ACTION-DEFENSE-SKILL-CHANGES-BLOCK-AND-STEAL-OUTPUT": "crates/sim/tests/batch_statistics.rs::defensive_skill_changes_blocks_and_steals",
@@ -634,9 +739,25 @@
         "ACTION-DEFENSE-STEAL-ATTEMPT-RUNS-IN-GAMES": "crates/sim/tests/defensive_technique.rs::real_games_run_steal_attempts_through_their_phases",
         "ACTION-DEFENSE-CHARGE-ESTABLISHED-POSITION": "crates/sim/tests/action_scenarios.rs::a_charge_requires_a_planted_defender",
         "ACTION-DEFENSE-SLIDE-MAINTAINS-GUARDING-POSITION": "crates/sim/tests/action_scenarios.rs::the_on_ball_defender_closes_the_gap",
-        "ACTION-DEFENSE-SCREEN-NAVIGATION-ROUTE": "crates/sim/tests/action_scenarios.rs::screen_navigation_route_decides_the_defender_target"
+        "ACTION-DEFENSE-SCREEN-NAVIGATION-ROUTE": "crates/sim/tests/action_scenarios.rs::screen_navigation_route_decides_the_defender_target",
+        "ACTION-DEFENSE-POSITIONING-INTENT-SELECTED": "crates/sim/tests/action_variants.rs::the_on_ball_defender_runs_a_positioning_action",
+        "ACTION-DEFENSE-POSITIONING-INTENT-WINDOW": "crates/sim/tests/action_variants.rs::the_positioning_action_has_its_own_window_and_target",
+        "ACTION-DEFENSE-CONTAIN-PRESSURE": "crates/sim/tests/action_variants.rs::a_tight_defender_contains_instead_of_sliding"
       },
-      "missing_evidence": []
+      "missing_evidence": [],
+      "passing_scenarios": [
+        "ACTION-DEFENSE-CHARGE-ESTABLISHED-POSITION",
+        "ACTION-DEFENSE-CONTAIN-PRESSURE",
+        "ACTION-DEFENSE-PASS-INTERCEPTED-BY-SWEPT-HAND",
+        "ACTION-DEFENSE-POSITIONING-INTENT-SELECTED",
+        "ACTION-DEFENSE-POSITIONING-INTENT-WINDOW",
+        "ACTION-DEFENSE-SCREEN-NAVIGATION-ROUTE",
+        "ACTION-DEFENSE-SKILL-CHANGES-BLOCK-AND-STEAL-OUTPUT",
+        "ACTION-DEFENSE-SLIDE-MAINTAINS-GUARDING-POSITION",
+        "ACTION-DEFENSE-STEAL-ATTEMPT-EXECUTION-WINDOW",
+        "ACTION-DEFENSE-STEAL-ATTEMPT-FOLLOW-THROUGH",
+        "ACTION-DEFENSE-STEAL-ATTEMPT-RUNS-IN-GAMES"
+      ]
     },
     {
       "id": "ACTION-DEFENSE-OFF-BALL",
@@ -655,7 +776,7 @@
         "绕过掩护",
         "护框"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::state::DefenseResponsibility",
         "nba_sim_core::state::DefenseResponsibility::Recover",
@@ -698,7 +819,16 @@
         "ACTION-DEFENSE-BLOCK-CONTACT-CHANGES-BALL": "crates/sim/tests/defensive_technique.rs::a_blocked_shot_is_hand_contact_and_leaves_the_ball_loose",
         "ACTION-DEFENSE-RECOVER-TO-MAN": "crates/sim/tests/action_scenarios.rs::a_defender_out_of_position_recovers_to_his_man"
       },
-      "missing_evidence": []
+      "missing_evidence": [],
+      "passing_scenarios": [
+        "ACTION-DEFENSE-BLOCK-CONTACT-CHANGES-BALL",
+        "ACTION-DEFENSE-HELP-ASSIGNS-COVERAGE",
+        "ACTION-DEFENSE-OFF-BALL-FACTS-EMITTED",
+        "ACTION-DEFENSE-RECOVER-TO-MAN",
+        "ACTION-DEFENSE-RESPONSIBILITY-SEGMENTS-MEASURED",
+        "ACTION-DEFENSE-ROTATION-HAS-RECOVERY",
+        "ACTION-DEFENSE-SCREEN-ROUTE-IS-READ"
+      ]
     },
     {
       "id": "ACTION-CLOSEOUT",
@@ -709,11 +839,15 @@
         "封盖尝试",
         "追身封盖"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "passing_scenarios": [
+        "ACTION-BLOCK-CONTACT-ON-FLIGHT",
         "ACTION-CLOSEOUT-ACTION-RUNS-PARALLEL-TO-SHOT",
-        "ACTION-CLOSEOUT-SKILL-CHANGES-BLOCK-OUTPUT",
-        "ACTION-CLOSEOUT-DISTANCE-CHANGES-SHOT-EPV"
+        "ACTION-CLOSEOUT-BLOCK-JUMP-COSTS-BOX-OUT",
+        "ACTION-CLOSEOUT-BLOCK-JUMP-RAISES-REACH",
+        "ACTION-CLOSEOUT-BLOCK-JUMP-RUNS-IN-GAMES",
+        "ACTION-CLOSEOUT-DISTANCE-CHANGES-SHOT-EPV",
+        "ACTION-CLOSEOUT-SKILL-CHANGES-BLOCK-OUTPUT"
       ],
       "existing_types": [
         "nba_domain::action_window::ActionType::CloseoutContest",
@@ -780,7 +914,7 @@
         "地板球争抢",
         "双方同时控制"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::action::Fact::Rebound",
         "nba_sim_core::action::Fact::BoxOut",
@@ -824,7 +958,16 @@
         "ACTION-REBOUND-DEFENSIVE-CONTROL": "crates/sim/tests/action_scenarios.rs::defensive_control_emits_a_defensive_rebound",
         "ACTION-REBOUND-TIE-ENTERS-JUMP-BALL": "crates/sim/tests/action_scenarios.rs::a_tie_for_the_ball_enters_a_held_ball_jump_ball"
       },
-      "missing_evidence": []
+      "missing_evidence": [],
+      "passing_scenarios": [
+        "ACTION-REBOUND-DEFENSIVE-CONTROL",
+        "ACTION-REBOUND-ELIGIBLE-FREE-THROW-MISS",
+        "ACTION-REBOUND-LOOSE-BALL-CONTROL",
+        "ACTION-REBOUND-OFFENSIVE-CLOCK-RESET-AFTER-RIM",
+        "ACTION-REBOUND-OPPORTUNITY-AND-SECOND-CHANCE",
+        "ACTION-REBOUND-PUTBACK-USES-ACTUAL-REBOUNDER",
+        "ACTION-REBOUND-TIE-ENTERS-JUMP-BALL"
+      ]
     },
     {
       "id": "ACTION-TRANSITION",
@@ -835,7 +978,7 @@
         "退防",
         "快速形成阵地防守"
       ],
-      "current_status": "partial",
+      "current_status": "verified",
       "existing_types": [
         "nba_sim_core::state::PossessionKind",
         "nba_sim_core::action::Fact::PossessionStarted"
@@ -866,7 +1009,12 @@
         "ACTION-TRANSITION-DEFENSIVE-REBOUND-ADVANCE": "crates/sim/tests/action_scenarios.rs::a_defensive_rebound_advances_past_midcourt_within_the_transition_window",
         "ACTION-TRANSITION-ALL-DEFENDERS-RECOVER": "crates/sim/tests/action_scenarios.rs::a_possession_change_sends_every_defender_back"
       },
-      "missing_evidence": []
+      "missing_evidence": [],
+      "passing_scenarios": [
+        "ACTION-TRANSITION-ALL-DEFENDERS-RECOVER",
+        "ACTION-TRANSITION-DEFENSIVE-REBOUND-ADVANCE",
+        "ACTION-TRANSITION-STEAL-FASTBREAK"
+      ]
     }
   ]
 }

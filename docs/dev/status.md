@@ -3,7 +3,7 @@
 > 状态类型：当前快照，不是执行日志。
 > 动作链内核（`crates/sim`）的设计与缺口清单见 `docs/dev/action_chain_engine.md`。
 > 证据原则：本文件只写当前工作区可以由代码、测试或守卫复核的结论。旧引擎的记录保留在 `docs/dev/cycles/`、`docs/dev/evidence/` 与 `docs/decisions.md`，本文件不再复述。
-> 复核日期：2026-11-02。
+> 复核日期：2026-11-04。
 > 校准正在按 `full_simulation_plan.md` §12 G 进行；残差记录在 `docs/dev/current/implementation.md` 的校准一节。
 
 ## 1. 当前工作区状态
@@ -12,11 +12,11 @@
 
 全局单动作 `World::active` 已移除：`World::advance_parallel_actions` 逐人推进每名球员自己的 `ActionRuntime`，多人配合由交互编号结算，防守动作另有 `CloseoutContest`、`StealAttempt`、`BlockJump` 三种运行时。并发性由 `crates/sim/tests/parallel_actions.rs` 4 项直接验证（多人运行时同一 tick 共存且种类不同、出手期间防守并行、每个 `ActionStarted` 恰有一个终态、死球终态不起手）。
 
-动作目录的 16 个族全部有生产路径与通过测试，`missing_evidence` 为空；传球八种技术、切入六种路线、背身步法、欧洲步、后撤步、包夹与护球、挤过与绕过、回位均已接入候选与后果消费者。规则侧已接入后场八秒与回场、出界归属与发球地点分类、紧逼五秒、停表跳球准备、罚球禁区违例、教练复核与挑战、干扰球、赛前名单检查，以及加时、换边、八秒清除与防守犯规重置八秒、最后一罚命中后的底线发球。
+动作目录的 16 个族全部有生产路径与通过测试，状态是 `verified`，`missing_evidence` 为空；传球八种技术、切入六种路线、突破三种变体（直接、变向、转身）、背身步法、跳步违例、欧洲步、后撤步、包夹与护球、挤过与绕过、回位均已接入候选与后果消费者。规则程序目录的 22 项程序全部是 `implemented`，没有缺失场景；新接入的有进攻三秒、防守三秒、背身五秒、发球五秒、非法触球、双方犯规、恶意犯规、清晰路径犯规、后场八秒的「踢球」重置，以及暂停配额、罚球禁区与罚球人替换、换人、节次开始与交替拥有箭头。
 
 裁决已收拢到 `World::adjudicate` 一个提交入口（`PenaltyPlan`、`RestartPlan`、`ResumeContext`、`InboundLocation`、`ControlState`）；时钟有 `ClockState`、`ClockDirective`、`ClockController`；内核按职责分到 `clock/`、`program/`、`officiating/`、`actions/`、`control/`、`ledger/` 六个目录，旧路径经 crate 根重导出保持可用；`LeagueProfile` 的存储本身就是 `PeriodPolicy`、`ClockPolicy`、`FoulPolicy`、`TimeoutPolicy` 四个策略族（`#[serde(flatten)]` 让磁盘上仍是扁平键）。球的飞行是 `World.ball_flight`（种类 + 结算时刻）：四种飞行与比赛程序分存，`clock::advance` 按飞行种类决定哪个钟走。
 
-完整工作区测试（75 个二进制）在最近一次运行中全部通过，基线指纹已按当前行为重记；32 场 `validate-core` 的 38 条分布判据全部在带内，认证 `pass`。未闭合项：进攻三秒与清空禁区行为、非法触球、干扰球在篮框上方与碰板后的两种情形、动作技术细分中的收球步法与轴心脚（清单见 `docs/dev/evidence/stage_gate_map.md`）。
+完整工作区测试（99 个二进制）在最近一次运行中全部通过，基线指纹已按当前行为重记；32 场 `validate-core` 的 38 条分布判据全部在带内，认证 `pass`。权威状态与档案结构已解耦：`Phase` 不含飞行变体，`ControlState` 是一个结构体，`LeagueProfile` 按四个策略族存储且没有未声明的默认值（`crates/sim/tests/architecture_decoupling.rs` 6 项）。未闭合项：干扰球在篮框上方与碰板后的两种情形（清单见 `docs/dev/evidence/stage_gate_map.md`）。
 
 ## 2. 历史门矩阵：2026-10-21
 

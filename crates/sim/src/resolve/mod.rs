@@ -28,7 +28,7 @@ pub fn resolve(world: &mut World, intent: ActionIntent) -> ActionOutcome {
     let outcome = match intent.kind {
         ActionKind::Pass(kind) => pass::resolve(world, &intent, kind),
         ActionKind::Screen(kind) => screen::resolve(world, &intent, kind),
-        ActionKind::Drive => drive::resolve(world, &intent),
+        ActionKind::Drive(kind) => drive::resolve(world, &intent, kind),
         ActionKind::Finish => drive::resolve_finish(world, &intent),
         ActionKind::Shoot(kind) => shot::resolve(world, &intent, kind),
         ActionKind::PostUp => drive::resolve_post(world, &intent),

@@ -102,7 +102,7 @@ pub fn tick(world: &mut World) {
     // 决策选出的动作决定接下来的持球阶段。出手类型的选择读当前阶段：
     // 阶段写在这里，出手结算读到的阶段与刚选定的动作一致。
     world.possession.ball_phase = match intent.kind {
-        ActionKind::Drive => crate::state::BallPhase::Drive,
+        ActionKind::Drive(_) => crate::state::BallPhase::Drive,
         ActionKind::Finish => crate::state::BallPhase::Gather,
         ActionKind::PostUp => crate::state::BallPhase::Post,
         ActionKind::Dribble(_)
@@ -115,7 +115,7 @@ pub fn tick(world: &mut World) {
         ActionKind::Shoot(_) => world.possession.ball_phase,
     };
     match intent.kind {
-        ActionKind::Drive
+        ActionKind::Drive(_)
         | ActionKind::Finish
         | ActionKind::Dribble(_)
         | ActionKind::PostUp
@@ -791,7 +791,7 @@ fn action_duration(
             let distance = (to_ft - state.actor_pos).length();
             (distance / 28.0).clamp(0.35, 1.4) as f64
         }
-        ActionKind::Drive => {
+        ActionKind::Drive(_) => {
             // 突破时长按「跑到落点」估算，而不是按到筐距离。落点在篮下
             // 四尺左右，从外线起步时到筐距离有二十多英尺；用到筐距离
             // 估时间会把动作压缩到跑不完，突破在半路就结束，收球步
@@ -888,7 +888,7 @@ pub fn candidate_utilities(world: &World, state: &DecisionState) -> Vec<Candidat
                     matches!(kind, ActionKind::Shoot(_) | ActionKind::Pass(_) | ActionKind::Dribble(_))
                 },
                 DefenderRoute::Over => |kind| {
-                    matches!(kind, ActionKind::Drive | ActionKind::Finish | ActionKind::Pass(_))
+                    matches!(kind, ActionKind::Drive(_) | ActionKind::Finish | ActionKind::Pass(_))
                 },
                 DefenderRoute::Switch | DefenderRoute::Trapped => |_| true,
             };
@@ -899,7 +899,7 @@ pub fn candidate_utilities(world: &World, state: &DecisionState) -> Vec<Candidat
             if read == DefenderRoute::Over {
                 let bonus = world.params.policy.w("screen_over_drive_bonus");
                 for candidate in &mut candidates {
-                    if matches!(candidate.0, ActionKind::Drive | ActionKind::Finish) {
+                    if matches!(candidate.0, ActionKind::Drive(_) | ActionKind::Finish) {
                         candidate.3.tactical_bonus += bonus;
                     }
                 }
@@ -1361,7 +1361,7 @@ fn shot_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
 
 /// 把球员句柄映射到 [0, 1)：同一名球员整场比赛得到同一个值，用来在
 /// 同一档能力的球员之间区分技术偏好。
-fn hash_unit(seed: u64) -> f32 {
+pub(crate) fn hash_unit(seed: u64) -> f32 {
     let mut x = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
     x ^= x >> 30;
     x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -1369,6 +1369,34 @@ fn hash_unit(seed: u64) -> f32 {
     x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
     x ^= x >> 31;
     (x >> 40) as f32 / 16_777_216.0
+}
+
+/// 突破的技术变体：按防守人的距离与站位选。
+///
+/// - 防守人贴得很紧（`drive_tight_defender_ft` 以内）且处在球与篮筐之
+///   间：只能绕过去，走变向突破。
+/// - 防守人贴得紧但站在球的另一侧：可以背对防守人再突，走转身突破。
+/// - 防守人离得开：直接突进。
+///
+/// 变体还决定突破的落点：变向与转身的落点先偏离防守人所在的一侧。
+pub fn drive_kind_for(
+    world: &World,
+    state: &DecisionState,
+) -> nba_domain::action_window::DriveKind {
+    use nba_domain::action_window::DriveKind;
+    let tight_ft = world.params.policy.g("drive_tight_defender_ft");
+    let Some(defender) = state.primary_defender else {
+        return DriveKind::Straight;
+    };
+    if defender.distance_ft > tight_ft {
+        return DriveKind::Straight;
+    }
+    // 防守人站在球与篮筐之间：他挡在路上，只能绕。
+    if defender.between_ball_and_hoop {
+        return DriveKind::Crossover;
+    }
+    // 防守人在球的另一侧：可以背对他再突。
+    DriveKind::Spin
 }
 
 fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
@@ -1403,7 +1431,19 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
         .help
         .map(|help| (1.0 / help.arrival_seconds.max(0.1)).min(2.0))
         .unwrap_or(0.0);
-    let p_beat = blow_by_probability(world, state.skill_edge, lane_norm, help_term);
+    // 变体决定「怎么过去」：变向突破从防守人外侧绕过去，过掉他的机会
+    // 更大；转身突破以轴心脚为轴，球护在身体侧面，丢球的可能更小。
+    // 变体不改落点——落点一改，出手的区域分布整段跟着变。系数都在策略
+    // 表里，因此这个差别对分布的影响是可调的。
+    let drive_kind = drive_kind_for(world, state);
+    let p_beat = blow_by_probability(world, state.skill_edge, lane_norm, help_term)
+        * match drive_kind {
+            nba_domain::action_window::DriveKind::Straight => 1.0,
+            nba_domain::action_window::DriveKind::Crossover => {
+                weights.g("drive_variant_crossover_beat")
+            }
+            nba_domain::action_window::DriveKind::Spin => weights.g("drive_variant_spin_beat"),
+        };
     let possession_value = weights.w("possession_value");
     // 突破价值按「推进成功后自己终结或急停」一条链计算；传球是决策点上的
     // 另一个候选，不在突破价值里重复计入。
@@ -1423,10 +1463,20 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     if screen_over {
         epv.context += weights.b("drive_screen_bonus");
     }
+    // 丢球的风险也按变体走：转身突破把球护得更稳，风险更低；变向突破
+    // 换手的那一下球暴露在外面，风险更高。
+    let variant_turnover = match drive_kind {
+        nba_domain::action_window::DriveKind::Straight => 1.0,
+        nba_domain::action_window::DriveKind::Crossover => {
+            weights.g("drive_variant_crossover_turnover")
+        }
+        nba_domain::action_window::DriveKind::Spin => weights.g("drive_variant_spin_turnover"),
+    };
     epv.turnover = -weights.w("epv_turnover_cost")
         * possession_value
         * (f32::from(1u8) - p_beat)
-        * weights.w("drive_turnover_rate");
+        * weights.w("drive_turnover_rate")
+        * variant_turnover;
     // 突破的落点按终结能力决定：终结能力强的球员在篮下合球完成上篮，
     // 其余球员突到抛投区域完成近筐抛投。落点必须留在近筐区（4 ft 以外），
     // 否则每一条突破都变成篮下出手，出手的区域分布整段压在篮下。
@@ -1447,7 +1497,7 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     let to_ft =
         state.hoop + (state.actor_pos - state.hoop).normalize_or_zero() * drive_target_distance;
     Some((
-        ActionKind::Drive,
+        ActionKind::Drive(drive_kind),
         None,
         to_ft,
         Utility {

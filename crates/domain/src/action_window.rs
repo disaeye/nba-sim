@@ -64,6 +64,31 @@ pub enum DribbleMoveKind {
     /// 后撤步运球：把球拉回远离防守人的一侧。
     Retreat,
 }
+/// 突破的技术变体（NBA Rule 10 §XIII 的走步条款与 NBA Rule 12B §II 的
+/// 身体接触条款）。
+///
+/// 变体决定突破的路线与身体接触的判定方式：直接突破走直线，变向突破
+/// 从防守人的外侧绕，转身突破以轴心脚为轴改变方向。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DriveKind {
+    /// 直接突破：朝篮筐直线突进。
+    Straight,
+    /// 变向突破：先向一侧切入，再从防守人的外侧绕过去。
+    Crossover,
+    /// 转身突破：以轴心脚为轴背对防守人再突进。
+    Spin,
+}
+
+impl DriveKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Straight => "straight",
+            Self::Crossover => "crossover",
+            Self::Spin => "spin",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JumperKind {
     CatchAndShoot,

@@ -67,6 +67,12 @@ pub struct PivotState {
     pub steps_allowed: u8,
     /// 最近一脚的落点：判断下一步是否构成移动轴心脚。
     pub last_contact: Option<Vec2>,
+    /// 上一次落地的是哪只脚：连续两次同一只脚落地就是跳步
+    /// （NBA Rule 10 §XIII.8）。
+    pub last_contact_foot: Option<Foot>,
+    /// 上一次接触是不是紧接着来的：两次接触之间球手如果离地再落回
+    /// 同一只脚，中间没有另一只脚落地，那也是跳步。
+    pub hop: bool,
 }
 
 impl PivotState {
@@ -77,6 +83,8 @@ impl PivotState {
             steps_taken: 0,
             steps_allowed,
             last_contact: Some(position),
+            last_contact_foot: None,
+            hop: false,
         }
     }
 
@@ -89,6 +97,16 @@ impl PivotState {
     pub fn record_contact(&mut self, contact: Vec2) {
         self.steps_taken = self.steps_taken.saturating_add(1);
         self.last_contact = Some(contact);
+    }
+
+    /// 记录一次落地接触并记下是哪只脚落地。
+    ///
+    /// 连续两次同一只脚落地就是跳步（NBA Rule 10 §XIII.8）：收球之后
+    /// 球手不得连续两次用同一只脚触地。
+    pub fn record_contact_with_foot(&mut self, contact: Vec2, foot: Foot) {
+        self.hop = self.last_contact_foot == Some(foot);
+        self.last_contact_foot = Some(foot);
+        self.record_contact(contact);
     }
 
     /// 轴心脚是否被移动：抬起的那只脚就是轴心脚，落点与原位不同即移动。

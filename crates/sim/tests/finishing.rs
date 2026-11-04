@@ -221,14 +221,18 @@ fn ball_phase_changes_only_at_actual_resolution_points() {
     }
     let intent = ActionIntent {
         actor: 0,
-        kind: ActionKind::Drive,
+        kind: ActionKind::Drive(nba_domain::action_window::DriveKind::Straight),
         target: None,
         from_ft: world.players[0].pos,
         to_ft: world.hoop_for(TeamSide::Home),
         start_time: world.now(),
         duration: 1.0,
     };
-    drive::resolve(&mut world, &intent);
+    drive::resolve(
+        &mut world,
+        &intent,
+        nba_domain::action_window::DriveKind::Straight,
+    );
     assert_eq!(world.possession.ball_phase, BallPhase::Drive);
 
     world.players[0].pos = world.hoop_for(TeamSide::Home) - Vec2::new(4.0, 0.0);
@@ -259,7 +263,9 @@ fn drive_and_finish_do_not_both_carry_the_full_possession_value() {
     let state = world.decision_state();
     let drive = candidate_utilities(&world, &state)
         .into_iter()
-        .find(|candidate| candidate.0 == ActionKind::Drive)
+        .find(|candidate| {
+            matches!(candidate.0, ActionKind::Drive(_))
+        })
         .expect("drive candidate at 20 ft");
     let possession_value = world.params.policy.w("possession_value");
     let old_full_value = possession_value * (1.0 + world.params.policy.w("drive_paint_bonus"));

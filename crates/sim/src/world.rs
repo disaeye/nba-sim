@@ -1371,7 +1371,7 @@ impl World {
                 rules.screen_exec_seconds,
                 rules.screen_follow_seconds,
             ),
-            ActionKind::Drive
+            ActionKind::Drive(_)
             | ActionKind::Dribble(_)
             | ActionKind::Cut(_)
             | ActionKind::PostUp
@@ -2271,6 +2271,7 @@ impl World {
         self.advance_action_phases();
         self.advance_defensive_actions();
         self.advance_steal_attempts();
+        self.advance_on_ball_positioning();
         self.advance_block_jumps();
         if flight_before_step
             .is_some_and(|flight| flight.kind == crate::state::FlightKind::JumpBall)
@@ -2707,6 +2708,20 @@ impl World {
                 self.cancel_defensive_action(player, "matchup_changed");
             }
         }
+        // 扑防优先于站位：出手那一刻对位防守人必须去扑，站位动作因此
+        // 让位。否则防守人被站位占住，扑防就再也起不来手。
+        if self.defensive_actions[defender].is_some()
+            && matches!(
+                self.defensive_actions[defender].as_ref().map(|action| action.kind),
+                Some(
+                    DefensiveActionKind::Slide
+                        | DefensiveActionKind::Contain
+                        | DefensiveActionKind::ChargeTake
+                )
+            )
+        {
+            self.cancel_defensive_action(defender, "closeout_takes_over");
+        }
         if self.defensive_actions[defender].is_none() {
             self.start_defensive_closeout(defender, shooter);
         }
@@ -2853,6 +2868,111 @@ impl World {
         }
     }
 
+    /// 对位防守人的站位动作：滑步、贴身施压与站位吃犯规。
+    ///
+    /// 这三种是防守人自己选的动作，不是职责层给出的目标点：滑步保持
+    /// 间隔，贴身施压把间隔压到伸手的距离上，站位吃犯规在突破路线上
+    /// 占住位置。三者都带自己的窗口，窗口结束时防守人回到职责层给的
+    /// 目标上。
+    fn advance_on_ball_positioning(&mut self) {
+        // 姿态是对位防守人的一条状态，不是带窗口的动作：它一直保持到对位
+        // 变了为止。因此这里只处理两件事——对位变了就清掉旧姿态，没有
+        // 姿态的位防守人才挑一次。
+        let now = self.now();
+        for defender in 0..self.players.len() {
+            if self.players[defender].on_ball_positioning.is_none() {
+                continue;
+            }
+            let still_on_ball = self.players[defender].on_court
+                && self.players[defender].defense_responsibility
+                    == crate::state::DefenseResponsibility::OnBall;
+            if still_on_ball {
+                continue;
+            }
+            // 对位变了：这段姿态结束，防守人可以重新挑一次。
+            self.players[defender].on_ball_positioning = None;
+            self.players[defender].positioning_next_at = now;
+        }
+        let Some(holder) = self.holder() else {
+            return;
+        };
+        let offense = self.possession.team;
+        // 挑一次姿态：对位防守人在局面稳定之后做一次选择，之后保持。
+        for defender in 0..self.players.len() {
+            if !self.players[defender].on_court
+                || self.players[defender].team != offense.other()
+                || self.players[defender].defense_responsibility
+                    != crate::state::DefenseResponsibility::OnBall
+            {
+                continue;
+            }
+            if self.players[defender].on_ball_positioning.is_some() {
+                continue;
+            }
+            if now < self.players[defender].positioning_next_at {
+                continue;
+            }
+            // 换过对位之后才允许重挑姿态：同一段对位里只挑一次。
+            self.players[defender].positioning_next_at =
+                now + f64::from(self.rules.redecide_interval_seconds)
+                    * f64::from(
+                        self.params.policy.g("on_ball_reposition_interval_multiplier"),
+                    );
+            let gap = self.players[defender].pos.distance(self.players[holder].pos);
+            let Some(kind) = self.on_ball_positioning_kind(defender, holder, gap) else {
+                continue;
+            };
+            self.set_on_ball_positioning(defender, kind);
+        }
+    }
+
+    /// 设定一位防守人的站位姿态，并发布一次变化事实。
+    ///
+    /// 姿态不接管落点：落点归职责层管。姿态改的是结算层读到的那个防守
+    /// 状态，因此它不会干扰对位的连续性。
+    fn set_on_ball_positioning(&mut self, defender: usize, kind: crate::action::OnBallPositioning) {
+        self.players[defender].on_ball_positioning = Some(kind);
+        self.emit(Fact::OnBallPositioningChanged {
+            defender,
+            kind: match kind {
+                crate::action::OnBallPositioning::Slide => "slide",
+                crate::action::OnBallPositioning::Contain => "contain",
+                crate::action::OnBallPositioning::ChargeTake => "charge_take",
+            },
+        });
+    }
+
+    /// 站位动作的选择：按防守人与持球人的距离和持球人的处境决定。
+    ///
+    /// - 防守人离得远（超过 `on_ball_slide_start_ft`）：滑步过去，保持
+    ///   一个身位的间隔。
+    /// - 防守人已经很近但持球人正在突破：站位吃犯规，占住突破路线。
+    /// - 防守人很近且持球人在运球：贴身施压，把间隔压到伸手的距离上。
+    fn on_ball_positioning_kind(
+        &self,
+        _defender: usize,
+        _holder: usize,
+        gap: f32,
+    ) -> Option<crate::action::OnBallPositioning> {
+        use crate::action::OnBallPositioning;
+        let policy = &self.params.policy;
+        let slide_start = policy.g("on_ball_slide_start_ft");
+        let contain_range = policy.g("on_ball_contain_range_ft");
+        if gap > slide_start {
+            return Some(OnBallPositioning::Slide);
+        }
+        // 持球人正在突破：防守人站住占位置，逼迫他绕开。
+        if self.possession.ball_phase == crate::state::BallPhase::Drive
+            && gap <= policy.g("on_ball_charge_take_range_ft")
+        {
+            return Some(OnBallPositioning::ChargeTake);
+        }
+        if gap <= contain_range {
+            return Some(OnBallPositioning::Contain);
+        }
+        Some(OnBallPositioning::Slide)
+    }
+
     /// 垂直起跳封盖：协防人跳起伸手，执行窗口内摸高增加。
     ///
     /// 跳起的人无法卡位抢篮板：起跳期间他不参与 box-out，这是这次冒险的代价。
@@ -2915,7 +3035,18 @@ impl World {
         let spot = self.players[shooter].pos;
         let mut closest: Option<(usize, f32)> = None;
         for defender in self.on_court(defense).as_slice().iter().copied() {
-            if self.defensive_actions[defender].is_some() {
+            // 已经在跑扑防或切球的人不能再去起跳：一次只能做一个动作。
+            // 站位动作是可以让位的：起跳封盖是一次更重要的冒险。
+            if self.defensive_actions[defender].is_some()
+                && !matches!(
+                    self.defensive_actions[defender].as_ref().map(|action| action.kind),
+                    Some(
+                        DefensiveActionKind::Slide
+                            | DefensiveActionKind::Contain
+                            | DefensiveActionKind::ChargeTake
+                    )
+                )
+            {
                 continue;
             }
             let gap = (self.players[defender].pos - spot).length();
@@ -2929,6 +3060,16 @@ impl World {
         let Some((defender, _)) = closest else {
             return;
         };
+        // 协防人已经在跑站位动作时，他起不来跳：起跳封盖是更重要的一次
+        // 冒险，站位动作让位。防守人因此不会既压人又跳。
+        if self.defensive_actions[defender].is_some()
+            && !matches!(
+                self.defensive_actions[defender].as_ref().map(|action| action.kind),
+                Some(DefensiveActionKind::BlockJump)
+            )
+        {
+            self.cancel_defensive_action(defender, "block_jump_takes_over");
+        }
         self.start_defensive_block_jump(defender, shooter, &policy);
     }
 

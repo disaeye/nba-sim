@@ -53,7 +53,6 @@
     "desperation_shot_value": 0.1,
     "bad_pass_iq_weight": 1.5,
     "pass_iq_intercept_shrink": 0.5,
-
     "rebound_boxout_weight": 1.0,
     "screen_base_displacement_ft": 0.25,
     "shoot_tendency": 1.05,
@@ -172,7 +171,7 @@
     "shot_skill_reference_mid": 0.6773,
     "shot_skill_reference_three": 0.7657,
     "shot_release_vertical_share": 1.0,
-    "block_hand_radius_base_ft": 0.80,
+    "block_hand_radius_base_ft": 0.8,
     "block_hand_radius_skill_ft": 0.8,
     "shot_aim_sigma_scale": 0.9980641733344193,
     "shot_rim_in_probability": 0.0,
@@ -247,7 +246,8 @@
     "shot_contest_reference_rim": 0.4462,
     "shot_contest_reference_near": 0.45,
     "shot_contest_reference_perimeter": 0.04,
-    "drive_kick_out_share": 0.45
+    "drive_kick_out_share": 0.45,
+    "charge_take_rate_multiplier": 1.3
   },
   "bands": {
     "default": {
@@ -339,7 +339,6 @@
     "cut_payoff_ratio": 1.2,
     "screen_roll_payoff_ratio": 1.25,
     "screen_contact_range_ft": 12.0,
-    "hand_check_facing_dot": 0.5,
     "screen_under_relief_ft": 6.0,
     "screen_under_relief_max": 0.95,
     "screen_under_relief_floor": 0.0,
@@ -355,6 +354,13 @@
     "drive_finish_distance_ft": 6.0,
     "drive_finish_spread_ft": 7.0,
     "drive_min_zone_ft": 14.0,
+    "drive_tight_defender_ft": 4.0,
+    "on_ball_reposition_interval_multiplier": 6.0,
+    "contain_pressure_multiplier": 0.97,
+    "charge_take_pressure_multiplier": 0.99,
+    "on_ball_slide_start_ft": 8.0,
+    "on_ball_contain_range_ft": 5.0,
+    "on_ball_charge_take_range_ft": 6.0,
     "finish_zone_ft": 16.0,
     "post_max_distance_ft": 20.0,
     "drive_max_zone_ft": 32.0,
@@ -388,7 +394,7 @@
     "closeout_contest_weight": 0.04,
     "drive_rim_finish_ft": 0.5,
     "drive_rim_finishing_threshold": 0.85,
-    "drive_finish_tiebreak_spread": 0.10,
+    "drive_finish_tiebreak_spread": 0.1,
     "drive_rim_spread_ft": 4.0,
     "transition_window_seconds": 9.0,
     "play_activation_after_seconds": 7.0,
@@ -402,6 +408,14 @@
     "screen_initiative_marker_ft": 2.0,
     "screen_set_distance_ft": 1.5,
     "break_speed_edge_ftps": 1.5,
-    "break_max_runners": 2.0
+    "break_max_runners": 2.0,
+    "drive_variant_beat_multiplier": 1.0,
+    "drive_variant_crossover_beat": 1.02,
+    "drive_variant_spin_beat": 0.99,
+    "drive_variant_crossover_turnover": 1.02,
+    "drive_variant_spin_turnover": 0.98,
+    "on_ball_positioning_duration_seconds": 2.5,
+    "post_step_push_ft": 0.5,
+    "hand_check_pressure_ft": 1.2
   }
 }
