@@ -869,19 +869,21 @@ pub fn candidate_utilities(world: &World, state: &DecisionState) -> Vec<Candidat
 
     // 读到掩护路线后，候选收敛到该路线的应答集：钻下沿只能拔或传，
     // 挤过只能攻框或传。读球决定行动，而不是把权重叠加到已有候选上。
+    // 应答集为空时读球让位：防守人的路线不能把持球人留在没有动作的位置上。
     if reacting {
         if let Some(read) = route {
-            candidates.retain(|(kind, _, _, _)| match read {
-                DefenderRoute::Under => matches!(
-                    kind,
-                    ActionKind::Shoot(_) | ActionKind::Pass(_) | ActionKind::Dribble(_)
-                ),
-                DefenderRoute::Over => matches!(
-                    kind,
-                    ActionKind::Drive | ActionKind::Finish | ActionKind::Pass(_)
-                ),
-                DefenderRoute::Switch | DefenderRoute::Trapped => true,
-            });
+            let response_set: fn(&ActionKind) -> bool = match read {
+                DefenderRoute::Under => |kind| {
+                    matches!(kind, ActionKind::Shoot(_) | ActionKind::Pass(_) | ActionKind::Dribble(_))
+                },
+                DefenderRoute::Over => |kind| {
+                    matches!(kind, ActionKind::Drive | ActionKind::Finish | ActionKind::Pass(_))
+                },
+                DefenderRoute::Switch | DefenderRoute::Trapped => |_| true,
+            };
+            if candidates.iter().any(|(kind, _, _, _)| response_set(kind)) {
+                candidates.retain(|(kind, _, _, _)| response_set(kind));
+            }
             assert!(!candidates.is_empty(), "掩护路线的应答集不能为空");
             if read == DefenderRoute::Over {
                 let bonus = world.params.policy.w("screen_over_drive_bonus");

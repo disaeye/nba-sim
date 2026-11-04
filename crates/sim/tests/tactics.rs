@@ -237,3 +237,54 @@ fn play_prior_only_touches_the_tactical_term() {
     }
     assert!(moved > 0, "没有任何剧本改到战术项，这条断言会变成空话");
 }
+
+/// 硬抑制不得让持球人无动作可做：进攻钟将尽、又找不到传球路线时，
+/// 持球人只剩运球这一个合法动作，选板的硬抑制必须让位。
+#[test]
+fn a_hard_inhibition_yields_when_it_would_remove_the_only_legal_action() {
+    let params = Params::load(&workspace_calibration_dir()).expect("tactics load");
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 13);
+    for _ in 0..40_000 {
+        world.step(TICK_SECONDS);
+        if matches!(world.phase(), Phase::Live) && world.holder().is_some() {
+            break;
+        }
+    }
+    let play = world
+        .params
+        .tactics
+        .plays
+        .iter()
+        .position(|play| {
+            play.inhibitions
+                .iter()
+                .any(|inhibition| matches!(inhibition.mode, PlayInhibitionMode::Hard))
+        })
+        .expect("some play declares a hard inhibition");
+    let blocked = world.params.tactics.plays[play]
+        .inhibitions
+        .iter()
+        .filter(|inhibition| matches!(inhibition.mode, PlayInhibitionMode::Hard))
+        .filter_map(|inhibition| family_code(inhibition.action_family))
+        .collect::<Vec<u8>>();
+    world.possession.play = Some(nba_sim_core::tactics::PlayWindow {
+        play,
+        ends_at: world.now() + 5.0,
+    });
+    // 候选集里只剩被硬抑制的那一族：抑制若照常生效，持球人就无动作可做。
+    let mut candidates = vec![(
+        ActionKind::Dribble(nba_domain::action_window::DribbleMoveKind::Crossover),
+        None,
+        glam::Vec2::ZERO,
+        nba_sim_core::utility::Utility::default(),
+    )];
+    nba_sim_core::tactics::apply_play_effects(&world, &mut candidates);
+    assert!(
+        !candidates.is_empty(),
+        "硬抑制清空了唯一合法的动作，持球人被留在原地"
+    );
+    assert!(
+        blocked.contains(&candidates[0].0.family()),
+        "让位之后保留的必须是抑制前就有的那个动作"
+    );
+}

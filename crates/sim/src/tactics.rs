@@ -355,6 +355,11 @@ fn family_code(family: DecisionActionFamily) -> Option<usize> {
 ///
 /// 硬抑制把整个族从候选集里移除，软抑制扣分，持球人偏好加分；
 /// 规则级偏好只在规则的 `when` 全真时生效。
+///
+/// 硬抑制不得让持球人无动作可做。候选集在进入这里之前已经过进攻钟
+/// 与投篮点的筛选，剩下的候选都是位置上成立的合法动作。选板的硬抑制
+/// 是战术偏好，不能取消唯一合法的动作：那种局面（进攻钟将尽又找不到
+/// 传球路线）里硬抑制整体让位，保留抑制前的候选集。
 pub fn apply_play_effects(world: &World, candidates: &mut Vec<crate::policy::Candidate>) {
     let Some(play) = active_play(world) else {
         return;
@@ -385,7 +390,13 @@ pub fn apply_play_effects(world: &World, candidates: &mut Vec<crate::policy::Can
             }
         }
     }
-    candidates.retain(|(kind, _, _, _)| !hard[kind.family() as usize]);
+    // 硬抑制只有在还剩别的动作时才生效。
+    if candidates
+        .iter()
+        .any(|(kind, _, _, _)| !hard[kind.family() as usize])
+    {
+        candidates.retain(|(kind, _, _, _)| !hard[kind.family() as usize]);
+    }
     assert!(
         !candidates.is_empty(),
         "选板的硬抑制不能清空候选集：{}",

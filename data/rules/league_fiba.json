@@ -21,6 +21,8 @@
   "bonus_final_period": 0,
   "bonus_final_seconds": 0.0,
   "bonus_fouls_final": 0,
+  "bonus_fouls_overtime": 0,
+  "overtime_fouls_carry_from_fourth": true,
   "away_from_play_free_throws": 0,
   "timeouts_per_game": 5,
   "timeouts_fourth_quarter_max": 3,

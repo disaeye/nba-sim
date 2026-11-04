@@ -200,6 +200,8 @@ pub struct World {
     pub draws: DrawSource,
     pub seed: u64,
     pub fouls: [TeamFouls; 2],
+    /// 第四节的球队犯规数（队下标）：FIBA 的加时把它带进加时节的累计。
+    pub fourth_quarter_fouls: [u8; 2],
     pub rotation: RotationState,
     pub timeouts: [crate::timeouts::TimeoutBudget; 2],
     /// 最近一条可复核的裁决：发球类裁定写入它。
@@ -1034,6 +1036,7 @@ impl World {
             draws,
             seed,
             fouls: [TeamFouls::default(), TeamFouls::default()],
+            fourth_quarter_fouls: [0, 0],
             rotation: RotationState::default(),
             timeouts: [
                 crate::timeouts::TimeoutBudget::new(&rules_capture),
@@ -3243,6 +3246,25 @@ impl World {
                     );
                     self.fouls[0].period = 0;
                     self.fouls[1].period = 0;
+                    // 第四节的球队犯规数记下来：FIBA 的加时要把第四节累计
+                    // 带进加时节（Article 42.1.3）。
+                    if self.clock.period() == self.rules.league.periods.regulation_periods {
+                        self.fourth_quarter_fouls = [self.fouls[0].period, self.fouls[1].period];
+                    }
+                    // FIBA Article 42.1.3：加时节的球队犯规计入第四节累计，
+                    // 因此加时开始时把第四节的球队犯规带过来。NBA 加时单独
+                    // 计数（Rule 12B §V），保持为零。
+                    if self
+                        .rules
+                        .league
+                        .fouls
+                        .overtime_fouls_carry_from_fourth
+                        && self.clock.period() > self.rules.league.periods.regulation_periods
+                    {
+                        let carried = self.fourth_quarter_fouls;
+                        self.fouls[0].period = carried[0];
+                        self.fouls[1].period = carried[1];
+                    }
                     // 换节后最后时段的暂停配额重新计算。
                     for ledger in self.timeouts.iter_mut() {
                         ledger.period = self.clock.period();

@@ -220,3 +220,70 @@ fn shortened_rules_keep_the_adjudication_thresholds() {
         full.league.shot_clock_after_offensive_rebound(8.0, true)
     );
 }
+
+/// NBA 加时节的球队犯规门槛独立于常规节：前三次普通犯规只发球，
+/// 第四次起进罚则（Rule 12B §V）。
+#[test]
+fn nba_overtime_uses_its_own_team_foul_threshold() {
+    let nba = LeagueProfile::nba();
+    assert_eq!(nba.fouls.bonus_fouls_overtime, 4);
+    // 加时：第三犯不发球，第四犯进罚则。
+    assert_eq!(nba.bonus_free_throws_for(3, 5, 150.0), 0);
+    assert_eq!(nba.bonus_free_throws_for(4, 5, 150.0), 2);
+    // 常规节仍是第五犯进罚则：两条门槛互不影响。
+    assert_eq!(nba.bonus_free_throws_for(4, 2, 400.0), 0);
+    assert_eq!(nba.bonus_free_throws_for(5, 2, 400.0), 2);
+    // 加时单独计数：不带入第四节的累计。
+    assert!(!nba.fouls.overtime_fouls_carry_from_fourth);
+    assert_eq!(nba.carried_fouls(5, 4), 0);
+}
+
+/// NBA 第四节最后两分钟的球队犯规阈值更严（Rule 12B §V 第 3 款）。
+#[test]
+fn nba_final_two_minutes_use_the_stricter_team_foul_threshold() {
+    let nba = LeagueProfile::nba();
+    let window = f64::from(nba.fouls.bonus_final_seconds);
+    assert!(nba.in_final_window(4, window));
+    assert_eq!(nba.bonus_foul_threshold(4, window), nba.fouls.bonus_fouls_final);
+    assert!(
+        nba.bonus_foul_threshold(4, window) < nba.fouls.bonus_fouls_per_period,
+        "the final window threshold must be stricter than the period threshold"
+    );
+    // 阈值前后各判一次。
+    let threshold = nba.fouls.bonus_fouls_final;
+    assert_eq!(nba.bonus_free_throws_for(threshold - 1, 4, window), 0);
+    assert_eq!(nba.bonus_free_throws_for(threshold, 4, window), 2);
+    // 窗口之外仍是常规节门槛。
+    assert_eq!(nba.bonus_free_throws_for(4, 4, window + 0.1), 0);
+    assert_eq!(nba.bonus_free_throws_for(5, 4, window + 0.1), 2);
+}
+
+/// FIBA 第五节（每节）的球队犯规门槛：每节第五犯进罚则
+///（Article 42.1.1）。
+#[test]
+fn fiba_quarter_team_foul_threshold_is_the_fifth_foul() {
+    let fiba = LeagueProfile::fiba();
+    assert_eq!(fiba.fouls.bonus_fouls_per_period, 5);
+    for period in 1..=4 {
+        assert_eq!(fiba.bonus_free_throws_for(4, period, 300.0), 0);
+        assert_eq!(fiba.bonus_free_throws_for(5, period, 300.0), 2);
+    }
+    // FIBA 没有 NBA 的末段更严门槛。
+    assert_eq!(fiba.fouls.bonus_fouls_final, 0);
+    assert_eq!(fiba.bonus_foul_threshold(4, 60.0), 5);
+}
+
+/// FIBA 加时节的球队犯规计入第四节累计（Article 42.1.3）：
+/// 加时节的罚则门槛按「第四节累计 + 本节犯规」判定。
+#[test]
+fn fiba_overtime_fouls_carry_into_the_fourth_quarter_total() {
+    let fiba = LeagueProfile::fiba();
+    assert!(fiba.fouls.overtime_fouls_carry_from_fourth);
+    assert_eq!(fiba.carried_fouls(5, 4), 4);
+    assert_eq!(fiba.carried_fouls(5, 0), 0);
+    // 常规节的带入数为零：这条只对加时成立。
+    assert_eq!(fiba.carried_fouls(4, 4), 0);
+    // 加时沿用常规节门槛（该值为零时）。
+    assert_eq!(fiba.fouls.bonus_fouls_overtime, 0);
+    assert_eq!(fiba.bonus_foul_threshold(5, 150.0), 5);
+}

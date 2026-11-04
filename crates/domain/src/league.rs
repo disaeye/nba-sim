@@ -150,6 +150,18 @@ pub struct FoulPolicy {
     pub bonus_final_seconds: f32,
     pub bonus_fouls_final: u32,
     pub away_from_play_free_throws: u8,
+    /// 加时节的球队犯规罚则门槛：零表示加时沿用常规节门槛。
+    ///
+    /// NBA 2025-26 Rule 12B §V：加时每节前三次普通球队犯规只发球，
+    /// 第四次起进罚则。FIBA 2026 Article 42.1.3：加时犯规计入第四节
+    /// 累计数，因此沿用常规节门槛（该值为零）。
+    #[serde(default)]
+    pub bonus_fouls_overtime: u32,
+    /// 加时球队犯规是否计入第四节累计。
+    ///
+    /// NBA 为否（加时单独计数），FIBA 为是（Article 42.1.3）。
+    #[serde(default)]
+    pub overtime_fouls_carry_from_fourth: bool,
 }
 
 /// 暂停策略族：额度、末段限制与加时额度。
@@ -223,11 +235,31 @@ impl LeagueProfile {
     }
 
     /// 返回当前节适用的球队犯规罚则序号。
+    ///
+    /// 顺序：加时节的独立门槛先于末段规则，最后是常规节门槛。
+    /// NBA 加时前三次普通犯规只发球（Rule 12B §V），FIBA 加时沿用
+    /// 第四节累计（Article 42.1.3）。
     pub fn bonus_foul_threshold(&self, period: u32, period_seconds_left: f64) -> u32 {
         if self.in_final_window(period, period_seconds_left) {
             self.fouls.bonus_fouls_final
+        } else if period > self.periods.regulation_periods
+            && self.fouls.bonus_fouls_overtime > 0
+        {
+            self.fouls.bonus_fouls_overtime
         } else {
             self.fouls.bonus_fouls_per_period
+        }
+    }
+
+    /// 某节开始时球队已经累计的犯规数（加时是否带入第四节）。
+    ///
+    /// FIBA Article 42.1.3：加时节的球队犯规计入第四节累计，因此加时
+    /// 的罚则门槛按「第四节累计 + 本节犯规」判定。NBA 单独计数。
+    pub fn carried_fouls(&self, period: u32, fourth_quarter_fouls: u32) -> u32 {
+        if period > self.periods.regulation_periods && self.fouls.overtime_fouls_carry_from_fourth {
+            fourth_quarter_fouls
+        } else {
+            0
         }
     }
 
