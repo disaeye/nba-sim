@@ -1,6 +1,6 @@
 {
   "certification_status": "pass",
-  "commit": "f7d15a4880a4bf9685a23705271a9446e3f5b9ac",
+  "commit": "63c04b99f533defb49742ce3d1f43ccefcc48f63",
   "coverage": {
     "gate_criteria": 38,
     "mechanism_attributes": 13,
@@ -14,8 +14,7 @@
     "defects": [],
     "known_insufficient": [],
     "marginal": [
-      "mechanism:offensive_rebound（下界比 0.64）",
-      "mechanism:defensive_rebound（下界比 0.47）"
+      "mechanism:offensive_rebound（下界比 0.57）"
     ],
     "new_insufficient": [],
     "not_applicable": []

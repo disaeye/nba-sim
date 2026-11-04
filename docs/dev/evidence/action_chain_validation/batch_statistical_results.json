@@ -6,9 +6,9 @@
         "upper": 0.15
       },
       "criterion": "zone_share_rim",
-      "observed": 0.31463770465229374,
+      "observed": 0.30962410887880754,
       "passed": true,
-      "relative_error": -0.00369941282694064,
+      "relative_error": -0.01957496855060281,
       "target": 0.31580600142478943
     },
     {
@@ -17,9 +17,9 @@
         "upper": 0.15
       },
       "criterion": "zone_share_near",
-      "observed": 0.19938401685848597,
+      "observed": 0.18940375891121192,
       "passed": true,
-      "relative_error": 0.04613000933823197,
+      "relative_error": -0.006234505651904421,
       "target": 0.19059200584888458
     },
     {
@@ -28,9 +28,9 @@
         "upper": 0.93
       },
       "criterion": "zone_share_mid",
-      "observed": 0.0818609174906792,
+      "observed": 0.07712248865845756,
       "passed": true,
-      "relative_error": 0.12994209981521632,
+      "relative_error": 0.06453664885487109,
       "target": 0.07244700193405151
     },
     {
@@ -39,9 +39,9 @@
         "upper": 0.15
       },
       "criterion": "zone_share_three",
-      "observed": 0.4041173609985411,
+      "observed": 0.423849643551523,
       "passed": true,
-      "relative_error": -0.0404545700859994,
+      "relative_error": 0.006398209261814669,
       "target": 0.42115500569343567
     },
     {
@@ -50,9 +50,9 @@
         "upper": 0.15
       },
       "criterion": "creation_share_drive",
-      "observed": 0.24104392932403956,
+      "observed": 0.241250810110175,
       "passed": true,
-      "relative_error": 0.09601791273927995,
+      "relative_error": 0.09695859209196844,
       "target": 0.21992699801921844
     },
     {
@@ -61,9 +61,9 @@
         "upper": 0.15
       },
       "criterion": "creation_share_cut",
-      "observed": 0.04376722321283839,
+      "observed": 0.04228775113415424,
       "passed": true,
-      "relative_error": -0.025163774700298847,
+      "relative_error": -0.05811635589575603,
       "target": 0.04489700123667717
     },
     {
@@ -72,9 +72,9 @@
         "upper": 0.15
       },
       "criterion": "creation_share_post",
-      "observed": 0.06710974225968552,
+      "observed": 0.05460142579390797,
       "passed": true,
-      "relative_error": 0.054952348771642345,
+      "relative_error": -0.1416760004133314,
       "target": 0.06361400336027145
     },
     {
@@ -83,9 +83,9 @@
         "upper": 0.15
       },
       "criterion": "creation_share_pull_up",
-      "observed": 0.1854433457610634,
+      "observed": 0.19539857420609202,
       "passed": true,
-      "relative_error": -0.023581570648021133,
+      "relative_error": 0.02883588591933095,
       "target": 0.1899220049381256
     },
     {
@@ -94,9 +94,9 @@
         "upper": 0.15
       },
       "criterion": "creation_share_putback",
-      "observed": 0.05025125628140704,
+      "observed": 0.04941672067401166,
       "passed": true,
-      "relative_error": 0.1124917955760314,
+      "relative_error": 0.09401635665079744,
       "target": 0.045170001685619354
     },
     {
@@ -105,9 +105,9 @@
         "upper": 0.15
       },
       "criterion": "creation_share_transition",
-      "observed": 0.13032906467822986,
+      "observed": 0.13091380427738172,
       "passed": true,
-      "relative_error": 0.07904374534050729,
+      "relative_error": 0.08388502620656357,
       "target": 0.12078200280666351
     },
     {
@@ -116,9 +116,9 @@
         "upper": 0.15
       },
       "criterion": "creation_share_set",
-      "observed": 0.2820554384827363,
+      "observed": 0.2861309138042774,
       "passed": true,
-      "relative_error": -0.10653738518078637,
+      "relative_error": -0.09362756554744445,
       "target": 0.31568801403045654
     },
     {
@@ -127,9 +127,9 @@
         "upper": 0.15
       },
       "criterion": "turnover_per_possession",
-      "observed": 0.1435826408125577,
+      "observed": 0.1488619119878604,
       "passed": true,
-      "relative_error": -0.00265595836816801,
+      "relative_error": 0.03401455849271362,
       "target": 0.1439650058746338
     },
     {
@@ -138,9 +138,9 @@
         "upper": 0.15
       },
       "criterion": "fga_per_possession",
-      "observed": 0.9493690366266544,
+      "observed": 0.9365705614567527,
       "passed": true,
-      "relative_error": 0.05776570795835401,
+      "relative_error": 0.04350593370135725,
       "target": 0.8975229859352112
     },
     {
@@ -149,9 +149,9 @@
         "upper": 0.15
       },
       "criterion": "fta_per_game",
-      "observed": 46.65625,
+      "observed": 43.90625,
       "passed": true,
-      "relative_error": 0.07666367306250987,
+      "relative_error": 0.013203255628148947,
       "target": 43.33409881591797
     },
     {
@@ -160,9 +160,9 @@
         "upper": 0.15
       },
       "criterion": "points_per_game",
-      "observed": 237.53125,
+      "observed": 233.5,
       "passed": true,
-      "relative_error": 0.04367550070698689,
+      "relative_error": 0.0259628129565328,
       "target": 227.59109497070312
     },
     {
@@ -171,10 +171,10 @@
         "upper": 0.2
       },
       "criterion": "oreb_per_game",
-      "observed": 28.78125,
+      "observed": 27.5,
       "passed": true,
-      "relative_error": 0.05576075330189978,
-      "target": 27.261147859480875
+      "relative_error": -0.005904336094235796,
+      "target": 27.66333361917458
     },
     {
       "band": {
@@ -182,9 +182,9 @@
         "upper": 0.05
       },
       "criterion": "possessions_per_game",
-      "observed": 203.0625,
+      "observed": 205.9375,
       "passed": true,
-      "relative_error": 0.02455035287884333,
+      "relative_error": 0.03905614427078752,
       "target": 198.1967010498047
     },
     {
@@ -193,9 +193,9 @@
         "upper": 0.15
       },
       "criterion": "blocks_per_game",
-      "observed": 10.1875,
+      "observed": 10.5,
       "passed": true,
-      "relative_error": 0.05520741539690355,
+      "relative_error": 0.08757574102257548,
       "target": 9.654500007629395
     },
     {
@@ -204,9 +204,9 @@
         "upper": 0.15
       },
       "criterion": "steals_per_game",
-      "observed": 13.90625,
+      "observed": 14.65625,
       "passed": true,
-      "relative_error": -0.13738823930008393,
+      "relative_error": -0.09086535782413341,
       "target": 16.1210994720459
     },
     {
@@ -215,9 +215,9 @@
         "upper": 0.15
       },
       "criterion": "shooting_fouls_per_game",
-      "observed": 17.96875,
+      "observed": 17.15625,
       "passed": true,
-      "relative_error": -0.08307269146410245,
+      "relative_error": -0.12453375237181263,
       "target": 19.59670066833496
     },
     {
@@ -226,9 +226,9 @@
         "upper": 0.15
       },
       "criterion": "and_one_per_game",
-      "observed": 2.3125,
+      "observed": 2.21875,
       "passed": true,
-      "relative_error": -0.07499999999999996,
+      "relative_error": -0.11250000000000004,
       "target": 2.5
     },
     {
@@ -237,9 +237,9 @@
         "upper": 0.15
       },
       "criterion": "free_throw_percentage",
-      "observed": 0.7675820495646349,
+      "observed": 0.795017793594306,
       "passed": true,
-      "relative_error": -0.015689496124056124,
+      "relative_error": 0.01949278965942991,
       "target": 0.7798169851303101
     },
     {
@@ -248,9 +248,9 @@
         "upper": 0.15
       },
       "criterion": "early_contested_rate",
-      "observed": 0.0003242016534284325,
+      "observed": 0.0,
       "passed": true,
-      "relative_error": -0.9783865559550063,
+      "relative_error": -1.0,
       "target": 0.014999999664723873
     },
     {
@@ -259,9 +259,9 @@
         "upper": 0.15
       },
       "criterion": "usage_top1_over_fifth",
-      "observed": 3.979022012297796,
+      "observed": 4.39872277669937,
       "passed": true,
-      "relative_error": 0.8947724728558955,
+      "relative_error": 1.0946299887899296,
       "target": 2.0999999046325684
     },
     {
@@ -270,9 +270,9 @@
         "upper": 0.15
       },
       "criterion": "assisted_fg_spread",
-      "observed": 0.5687213397177675,
+      "observed": 0.5619962335216573,
       "passed": true,
-      "relative_error": 0.6249181411515268,
+      "relative_error": 0.6057035516925607,
       "target": 0.3499999940395355
     },
     {
@@ -281,9 +281,9 @@
         "upper": 0.15
       },
       "criterion": "ping_pong_rate",
-      "observed": 0.0005426917510853835,
+      "observed": 0.0007092198581560284,
       "passed": true,
-      "relative_error": -0.9638205491189674,
+      "relative_error": -0.9527186750661115,
       "target": 0.014999999664723873
     },
     {
@@ -292,9 +292,9 @@
         "upper": 0.15
       },
       "criterion": "screen_read_under_shoot",
-      "observed": 0.9805825242718447,
+      "observed": 0.9666666666666667,
       "passed": true,
-      "relative_error": 1.1790723338853581,
+      "relative_error": 1.1481482050546419,
       "target": 0.44999998807907104
     },
     {
@@ -303,9 +303,9 @@
         "upper": 0.15
       },
       "criterion": "screen_read_over_drive",
-      "observed": 0.7298050139275766,
+      "observed": 0.7076502732240437,
       "passed": true,
-      "relative_error": 0.32691817838087134,
+      "relative_error": 0.2866368325202499,
       "target": 0.550000011920929
     },
     {
@@ -314,10 +314,10 @@
         "upper": 0.15
       },
       "criterion": "minutes_max",
-      "observed": 1333.0241666674124,
+      "observed": 1411.5066666675023,
       "passed": true,
-      "relative_error": -0.3087608522704501,
-      "target": 1928.4558333333334
+      "relative_error": -0.2679644555155871,
+      "target": 1928.194166666667
     },
     {
       "band": {
@@ -325,9 +325,9 @@
         "upper": 0.15
       },
       "criterion": "shot_clock_buckets_complete",
-      "observed": 624.0,
+      "observed": 618.0,
       "passed": true,
-      "relative_error": 623.0,
+      "relative_error": 617.0,
       "target": 1.0
     },
     {
@@ -336,9 +336,9 @@
         "upper": 0.15
       },
       "criterion": "defender_distance_buckets_complete",
-      "observed": 759.0,
+      "observed": 791.0,
       "passed": true,
-      "relative_error": 758.0,
+      "relative_error": 790.0,
       "target": 1.0
     },
     {
@@ -347,10 +347,10 @@
         "upper": 0.15
       },
       "criterion": "shot_points_by_clock",
-      "observed": 2.733974358974359,
+      "observed": 2.7326283987915407,
       "passed": true,
-      "relative_error": 0.2839297306069458,
-      "target": 2.129380053908356
+      "relative_error": 0.2783984484883969,
+      "target": 2.1375404530744335
     },
     {
       "band": {
@@ -369,9 +369,9 @@
         "upper": 0.15
       },
       "criterion": "stationary_shooter_three_share",
-      "observed": 0.6360975609756098,
+      "observed": 0.663048394391678,
       "passed": true,
-      "relative_error": 0.8174216337379624,
+      "relative_error": 0.8944240162380714,
       "target": 0.3499999940395355
     },
     {
@@ -380,9 +380,9 @@
         "upper": 0.15
       },
       "criterion": "play_activation_rate",
-      "observed": 0.6854838709677419,
+      "observed": 0.69097605893186,
       "passed": true,
-      "relative_error": -0.19354840971713216,
+      "relative_error": -0.18708701229352467,
       "target": 0.8500000238418579
     },
     {
@@ -402,9 +402,9 @@
         "upper": 0.15
       },
       "criterion": "substitutions_per_game",
-      "observed": 10.96875,
+      "observed": 11.4375,
       "passed": true,
-      "relative_error": 0.37109375,
+      "relative_error": 0.4296875,
       "target": 8.0
     },
     {
@@ -413,9 +413,9 @@
         "upper": 0.15
       },
       "criterion": "pass_chain_mean",
-      "observed": 2.5040012311480457,
+      "observed": 2.50804248861912,
       "passed": true,
-      "relative_error": -0.49919975377039083,
+      "relative_error": -0.498391502276176,
       "target": 5.0
     }
   ],
@@ -424,7 +424,7 @@
     "context_violations": 0,
     "geometry_violations": 0,
     "ledger_failures": 0,
-    "points_per_game": 237.53125,
-    "possessions_per_game": 203.0625
+    "points_per_game": 233.5,
+    "possessions_per_game": 205.9375
   }
 }

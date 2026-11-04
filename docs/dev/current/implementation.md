@@ -67,28 +67,28 @@
 
 | 指标 | 观测 | 基准 |
 | --- | --- | --- |
-| possessions_per_game | 203.06 | 198.20 |
-| points_per_game | 237.53 | 227.59 |
-| blocks_per_game | 10.19 | 9.65 |
-| shooting_fouls_per_game | 17.97 | 19.60 |
-| fta_per_game | 46.66 | 43.33 |
-| oreb_per_game | 28.78 | 27.26 |
-| fga_per_possession | 0.949 | 0.898 |
-| turnover_per_possession | 0.144 | 0.144 |
-| steals_per_game | 13.91 | 16.12 |
-| and_one_per_game | 2.31 | 2.50 |
-| free_throw_percentage | 0.768 | 0.780 |
-| zone_share 篮下 | 0.315 | 0.316 |
-| zone_share 近筐 | 0.199 | 0.191 |
-| zone_share 中距离 | 0.082 | 0.072 |
-| zone_share 三分 | 0.404 | 0.421 |
+| possessions_per_game | 205.938 | 198.197 |
+| points_per_game | 233.500 | 227.591 |
+| blocks_per_game | 10.500 | 9.655 |
+| shooting_fouls_per_game | 17.156 | 19.597 |
+| fta_per_game | 43.906 | 43.334 |
+| oreb_per_game | 27.500 | 27.663 |
+| fga_per_possession | 0.937 | 0.898 |
+| turnover_per_possession | 0.149 | 0.144 |
+| steals_per_game | 14.656 | 16.121 |
+| and_one_per_game | 2.219 | 2.500 |
+| free_throw_percentage | 0.795 | 0.780 |
+| zone_share 篮下 | 0.310 | 0.316 |
+| zone_share 近筐 | 0.189 | 0.191 |
+| zone_share 中距离 | 0.077 | 0.072 |
+| zone_share 三分 | 0.424 | 0.421 |
 | creation_share drive | 0.241 | 0.220 |
-| creation_share cut | 0.044 | 0.045 |
-| creation_share post | 0.067 | 0.064 |
-| creation_share pull_up | 0.185 | 0.190 |
-| creation_share putback | 0.050 | 0.045 |
-| creation_share transition | 0.130 | 0.121 |
-| creation_share set | 0.282 | 0.316 |
+| creation_share cut | 0.042 | 0.045 |
+| creation_share post | 0.055 | 0.064 |
+| creation_share pull_up | 0.195 | 0.190 |
+| creation_share putback | 0.049 | 0.045 |
+| creation_share transition | 0.131 | 0.121 |
+| creation_share set | 0.286 | 0.316 |
 
 ### 机制实验
 
@@ -96,7 +96,7 @@
 
 每一项按它自己的效应量定样本量，而不是所有属性用同一个数：160 个种子对效应量只有 2% 的属性不够，跨零不是「没效应」，是「样本不够」。样本量写在 `crates/validation/src/mechanism_core.rs` 的 `REQUIRED_SEEDS` 里，因此 `defensive_rebound` 跑 640 个种子，其余属性跑 160 个。
 
-13 项属性的判定结果写在 `docs/dev/evidence/action_chain_validation/mechanism_core.json`，认证状态写在同目录的 `certification.json`。`defensive_rebound` 在 640 个种子上的相对变化是 +0.0194，配对区间 [+0.0090, +0.0298]，整段在零的一侧，因此这一项判定为 `pass`，`known_insufficient.json` 的登记表已经清空，认证工件的 `certification_status` 是 `pass`。它的效应量本来就只有 2%：篮板归属主要由站位与球弹向决定，防守篮板属性改变伸手半径，很少改变赢家——这正是它需要 640 个种子的原因。
+13 项属性的判定结果写在 `docs/dev/evidence/action_chain_validation/mechanism_core.json`，认证状态写在同目录的 `certification.json`。`defensive_rebound` 在 640 个种子上的相对变化是 +0.0282，配对区间 [+0.0174, +0.0387]，整段在零的一侧，因此这一项判定为 `pass`，`known_insufficient.json` 的登记表已经清空，认证工件的 `certification_status` 是 `pass`。它的效应量本来就只有 2%：篮板归属主要由站位与球弹向决定，防守篮板属性改变伸手半径，很少改变赢家——这正是它需要 640 个种子的原因。
 
 ## 当前残差
 
