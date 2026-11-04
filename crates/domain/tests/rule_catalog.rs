@@ -392,3 +392,94 @@ fn action_catalog_records_production_evidence_and_unique_scenario_ids() {
         );
     }
 }
+
+/// 从一段 Rust 源码里读出所有函数名。
+fn function_names(source: &str) -> HashSet<String> {
+    source
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim_start();
+            let rest = trimmed.strip_prefix("fn ").or_else(|| trimmed.strip_prefix("pub fn "))?;
+            let name: String = rest
+                .chars()
+                .take_while(|character| character.is_alphanumeric() || *character == '_')
+                .collect();
+            if name.is_empty() {
+                None
+            } else {
+                Some(name)
+            }
+        })
+        .collect()
+}
+
+/// 目录里的每一条证据都必须指向真实存在的测试。
+///
+/// 目录结构测试只检查字符串格式：测试被改名或删除之后，目录仍然「完整」，
+/// 但指向的证据已经不存在。这条测试真的去源码里找那个函数。
+#[test]
+fn every_catalog_evidence_points_at_a_real_test() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("the workspace root must be reachable from the domain crate")
+        .to_path_buf();
+    let sim_tests = root.join("crates/sim/tests");
+    let validation_tests = root.join("crates/validation/tests");
+
+    let catalog = rule_catalog();
+    for procedure in &catalog.procedures {
+        for (scenario, identity) in procedure.scenario_tests.clone().unwrap_or_default() {
+            let parts: Vec<&str> = identity.split("::").collect();
+            assert_eq!(
+                parts.len(),
+                3,
+                "{} 的场景测试身份格式不对：{identity}",
+                procedure.id
+            );
+            let (module, function) = (parts[1], parts[2]);
+            let mut names = HashSet::new();
+            for directory in [&sim_tests, &validation_tests] {
+                let path = directory.join(format!("{module}.rs"));
+                if path.exists() {
+                    names.extend(function_names(&std::fs::read_to_string(&path).unwrap()));
+                }
+            }
+            assert!(
+                names.contains(function),
+                "{} 的场景 {scenario} 指向不存在的测试 {module}.rs::{function}",
+                procedure.id
+            );
+        }
+    }
+
+    let catalog = action_catalog();
+    for family in &catalog.families {
+        let mut identities: Vec<String> = family.evidence.clone();
+        identities.extend(
+            family
+                .scenario_tests
+                .clone()
+                .unwrap_or_default()
+                .values()
+                .cloned(),
+        );
+        for identity in identities {
+            let (path, function) = identity
+                .split_once("::")
+                .expect("证据必须是 路径::函数");
+            let source = root.join(path);
+            assert!(
+                source.exists(),
+                "{} 的证据指向不存在的文件 {path}",
+                family.id
+            );
+            let names = function_names(&std::fs::read_to_string(&source).unwrap());
+            assert!(
+                names.contains(function),
+                "{} 的证据指向不存在的测试 {path}::{function}",
+                family.id
+            );
+        }
+    }
+}

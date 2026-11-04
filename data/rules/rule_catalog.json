@@ -536,7 +536,7 @@
       "missing_scenarios": [],
       "scenario_tests": {
         "RULE-DRIBBLE-SECOND-DRIBBLE": "nba_sim_core::engine::double_dribble_after_gather_is_a_turnover",
-        "RULE-TRAVEL-GATHER-STEPS": "nba_sim_core::action_scenarios::only_gather_steps_beyond_the_allowance_are_travels",
+        "RULE-TRAVEL-GATHER-STEPS": "nba_sim_core::action_scenarios::a_third_step_after_the_gather_is_a_travel",
         "RULE-BACKCOURT-RETURN-TEAM-CONTROL": "nba_sim_core::rule_violations::carrying_the_ball_back_over_half_court_is_a_backcourt_violation",
         "RULE-DRIBBLE-CARRYING": "nba_sim_core::boundary_scenarios::a_second_dribble_after_a_gather_is_a_turnover",
         "RULE-DRIBBLE-LEGAL-RECOVERY": "nba_sim_core::boundary_scenarios::a_legal_recovery_after_a_loose_ball_is_not_a_dribble_violation"
