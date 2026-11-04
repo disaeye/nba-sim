@@ -298,6 +298,131 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
     }
 }
 
+/// 双方犯规：双方各记一次个人犯规，但不计入球队单节犯规，也不罚球。
+///
+/// 球权按规则留给当时持球的一方（NBA Rule 12B §VI.3）：双方犯规时球权
+/// 留在进攻方，从靠近中断点的边线发球；进攻钟在前场发球时保持不变或
+/// 补到十四秒，在后场发球时回到二十四秒。
+pub fn apply_double_foul(world: &mut World, fouler: usize, fouled: usize) {
+    let team = world.players[fouler].team;
+    let other = world.players[fouled].team;
+    // 双方各记一次个人犯规：两边都进个人累计。
+    book(world, fouler, fouled, FoulKind::Double, 0, false);
+    book(world, fouled, fouler, FoulKind::Double, 0, false);
+    // 球权留在持球的一方：进攻方犯规时球权给对方，防守方犯规时球权留在
+    // 进攻方。两边都在场上，因此双方犯规的球权就是双方犯规发生时控球的
+    // 那一方。
+    let retained = world
+        .holder()
+        .map(|handle| world.players[handle].team)
+        .unwrap_or_else(|| world.possession.team);
+    let retained = if retained == team && retained == other {
+        world.possession.team
+    } else {
+        retained
+    };
+    world.cancel_actions("double_foul");
+    let spot = world.inbound_point_of_interruption();
+    world.adjudicate(crate::adjudicate::Adjudication::new(
+        crate::adjudicate::StoppageCause::Foul,
+        crate::adjudicate::RestartPlan::Inbound {
+            team: retained,
+            location: crate::adjudicate::InboundLocation::Spot(spot),
+            ready_after: None,
+        },
+    ));
+    world.apply_dead_ball_window();
+}
+
+/// 清晰路径犯规（NBA Rule 12B §I.5.f）。
+///
+/// 罚则是两次罚球加上球权（Rule 12B §I.5.f.6）：被犯规方在罚球之后
+/// 拿到球权。犯规计入个人累计与球队单节犯规：它是一次个人犯规。
+///
+/// 成立条件由调用方判断：球在对方半场且在进攻机会中，防守人从背后
+/// 犯规导致这次进攻机会丢失。
+pub fn apply_clear_path_foul(world: &mut World, fouler: usize, fouled: usize) {
+    let team = world.players[fouler].team;
+    let beneficiary = world.players[fouled].team;
+    let booking = book(world, fouler, fouled, FoulKind::Personal, 2, false);
+    world.pending_rebound = None;
+    // 新罚球程序：清空上一轮的禁区记录。
+    world.free_throw_lane = Some(crate::world::FreeThrowLane::default());
+    // 罚球之后由被犯规方在罚球线延长线发球（Rule 12B §I.5.f.6）。
+    let spot = world.rules.court.sideline_at_free_throw_line_extended(
+        world.players[fouled].pos,
+        world.attacking_right(beneficiary),
+    );
+    world.adjudicate(crate::adjudicate::Adjudication::new(
+        crate::adjudicate::StoppageCause::Foul,
+        crate::adjudicate::RestartPlan::FreeThrows {
+            shooter: fouled,
+            total: booking.free_throws,
+            remaining: booking.free_throws,
+            made: 0,
+            and_one: false,
+            retain_possession: true,
+            foul_id: booking.foul_id,
+            technical_retained_team: None,
+            after_technical: None,
+        },
+    ));
+    world.apply_dead_ball_window();
+    world.inbound_spot = Some(spot);
+    let _ = team;
+}
+
+/// 恶意犯规（NBA Rule 12B §IV）。
+///
+/// 罚则分两级：
+///
+/// - 一级（penalty 1）：两次罚球，被犯规方在罚球线延长线的任意一侧
+///   发球。
+/// - 二级（penalty 2）：两次罚球加球权，而且犯规者被逐（Rule 12B
+///   §IV.2）。
+///
+/// 恶意犯规计入个人犯规累计与球队单节犯规：它是一���个人犯规。
+pub fn apply_flagrant_foul(world: &mut World, fouler: usize, fouled: usize, excessive: bool) {
+    let team = world.players[fouler].team;
+    let beneficiary = world.players[fouled].team;
+    let booking = book(world, fouler, fouled, FoulKind::Flagrant, 2, false);
+    world.pending_rebound = None;
+    // 新罚球程序：清空上一轮的禁区记录。
+    world.free_throw_lane = Some(crate::world::FreeThrowLane::default());
+    // 恶意犯规计入个人犯规累计：被逐之前先看他的个人犯规是否已经到顶
+    // （NBA Rule 3 §I 的个人犯规离场）。
+    crate::rotation::record_foul(world, fouler);
+    if excessive {
+        // 二级恶意犯规：犯规者被逐（NBA Rule 12B §IV.2）。
+        world.players[fouler].disqualified = true;
+        world.rotation.pending[World::team_index(team)] = true;
+        world.emit(Fact::Ejected {
+            team,
+            player: fouler,
+            reason: "flagrant_penalty_2",
+        });
+    }
+    // 罚球：两次。罚完之后，一级在罚球线延长线发球（Rule 12B §IV.1），
+    // 二级由被犯规方直接拿到球权（Rule 12B §IV.2）。
+    world.adjudicate(crate::adjudicate::Adjudication::new(
+        crate::adjudicate::StoppageCause::Foul,
+        crate::adjudicate::RestartPlan::FreeThrows {
+            shooter: fouled,
+            total: booking.free_throws,
+            remaining: booking.free_throws,
+            made: 0,
+            and_one: false,
+            // 二级恶意犯规：被犯规方在罚球之后拿到球权。
+            retain_possession: excessive,
+            foul_id: booking.foul_id,
+            technical_retained_team: None,
+            after_technical: None,
+        },
+    ));
+    world.apply_dead_ball_window();
+    let _ = beneficiary;
+}
+
 /// 进攻犯规：计入个人累计与球队全场犯规，不计入球队单节犯规，
 /// 不判给对手罚球，只把球权交给对方。
 pub fn apply_offensive_foul(world: &mut World, fouler: usize, fouled: usize) {

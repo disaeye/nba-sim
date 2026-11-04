@@ -16,8 +16,13 @@ pub fn counts_toward_personal_limit(kind: FoulKind) -> bool {
 /// 该犯规是否计入球队单节犯规（即 bonus 计数）。
 ///
 /// 进攻犯规与技术犯规都不计入：前者是进攻方的失误，后者不改变球权。
+/// 双方犯规也不计入（NBA Rule 12B §VI.2：「Double personal fouls shall
+/// add to a player's total, but not to the team total」）。
 pub fn counts_toward_team_period_fouls(kind: FoulKind) -> bool {
-    !matches!(kind, FoulKind::Offensive | FoulKind::Technical)
+    !matches!(
+        kind,
+        FoulKind::Offensive | FoulKind::Technical | FoulKind::Double
+    )
 }
 
 /// 该犯规是否让对手获得罚球机会（bonus 之外的直接判罚）。

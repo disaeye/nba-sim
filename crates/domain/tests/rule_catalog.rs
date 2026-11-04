@@ -127,13 +127,13 @@ fn rule_catalog_has_versioned_sources_and_unique_scenario_ids() {
         .iter()
         .find(|procedure| procedure.id == "PROC-OPENING-JUMP")
         .expect("opening jump-ball procedure");
-    assert_eq!(opening_jump.implementation, "partial");
+    assert_eq!(opening_jump.implementation, "implemented");
     let period_start = catalog
         .procedures
         .iter()
         .find(|procedure| procedure.id == "PROC-PERIOD-START")
         .expect("period-start procedure");
-    assert_eq!(period_start.implementation, "partial");
+    assert_eq!(period_start.implementation, "implemented");
     let overtime = catalog
         .procedures
         .iter()

@@ -322,6 +322,26 @@ pub fn move_toward_targets(world: &mut World) {
         if Some(handle) == holder {
             continue;
         }
+        // 跳球程序里的参跳人与接应人持有自己的点位：编队站位不能把它覆写
+        // 回去，否则他们走不到圈边，掷球永远等不到人到位。
+        //
+        // 这道保护只在跳球程序进行中成立：比赛开始之后点位就失效了，
+        // 否则场上永远有四个人被钉在圈边。
+        if let Some(spot) = world
+            .jump_ball_procedure_spots()
+            .iter()
+            .find(|(participant, _)| *participant == handle)
+            .map(|(_, spot)| *spot)
+        {
+            crate::assignment::force_target_as(
+                world,
+                handle,
+                spot,
+                crate::state::TargetKind::Station,
+                handle,
+            );
+            continue;
+        }
         if world.pass_in_flight.is_some_and(|info| info.to == handle) {
             continue;
         }

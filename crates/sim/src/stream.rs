@@ -61,6 +61,7 @@ impl Fact {
             Self::BenchDepleted { .. } => "BENCH_DEPLETED",
             Self::FoulOutRetention { .. } => "FOUL_OUT_RETENTION",
             Self::TeamTechnicalFoul { .. } => "TEAM_TECHNICAL_FOUL",
+            Self::Ejected { .. } => "EJECTED",
             Self::Timeout { .. } => "TIMEOUT",
             Self::JumpBall { .. } => "JUMP_BALL",
             Self::PeriodEnd { .. } => "PERIOD_END",
@@ -495,6 +496,15 @@ impl World {
                 "team": team.as_str(),
                 "reason": reason,
                 "foul_id": foul_id,
+            }),
+            Fact::Ejected {
+                team,
+                player,
+                reason,
+            } => json!({
+                "team": team.as_str(),
+                "player_id": self.player_id(*player),
+                "reason": reason,
             }),
             Fact::PlayActivated { play, possession } => {
                 json!({ "play_id": PLAY_SOURCES[*play].0, "possession": possession })

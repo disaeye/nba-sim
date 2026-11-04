@@ -115,18 +115,12 @@ fn lane_by_role(world: &World, player: usize) -> bool {
 /// 进攻方的形状因此整个变了。
 fn shooting_toward_basket(world: &World, player: usize, attacking_right: bool) -> bool {
     let state = &world.players[player];
-    // 正要离开限制区：落点已经在区外，他自己会走出去。
-    if !world
-        .rules
-        .court
-        .is_in_lane(state.target, attacking_right)
-    {
-        return true;
-    }
-    // 职责是切入：这个人正要往篮下跑，规则允许他继续。
+    // 职责是切入：这个人正要往篮下跑，规则允许他在第三秒的末尾继续
+    // （NBA Rule 10 §VI.2 的「continuous motion toward the basket」）。
     if matches!(state.offense_job, crate::state::OffenseJob::Cut) {
         return true;
     }
+    // 正在朝篮筐发起动作：出手与上篮都是「in the act of shooting」。
     let Some(runtime) = state.action.as_ref() else {
         return false;
     };
@@ -135,9 +129,7 @@ fn shooting_toward_basket(world: &World, player: usize, attacking_right: bool) -
     }
     let to_basket = matches!(
         runtime.intent.kind,
-        crate::action::ActionKind::Finish
-            | crate::action::ActionKind::Shoot(_)
-            | crate::action::ActionKind::Cut(_)
+        crate::action::ActionKind::Finish | crate::action::ActionKind::Shoot(_)
     );
     if !to_basket {
         return false;
@@ -302,11 +294,12 @@ pub fn exit_target(world: &World, player: usize) -> Vec2 {
     } else {
         baseline_x + lane_length + 1.0
     };
-    // 纵向方向：留在自己的半场一侧，不越过中线。区宽之外同样留一英尺。
+    // 纵向方向：往离篮筐更远的一侧走，落在区宽之外。区沿之内仍然算在
+    // 禁区里，因此落点必须越过区沿再留一英尺。
     let out_y = if pos.y > court.hoop_y_ft {
         court.hoop_y_ft + lane_half + 1.0
     } else {
-        court.hoop_y_ft - lane_half + 1.0
+        court.hoop_y_ft - lane_half - 1.0
     };
     let radius = world.rules.player_radius_ft;
     let along_x = Vec2::new(
@@ -356,7 +349,27 @@ pub fn clearing_required(world: &World, player: usize) -> bool {
     if shooting_toward_basket(world, player, attacking_right) {
         return false;
     }
+    // 正在跑自己的动作的球员不受这道修正：跑位与切入本来就可能把落点
+    // 定在禁区边上（NBA Rule 10 §VI.2 允许他继续）。落点的修正只针对
+    // 站着不动的人。
+    if running_own_action(world, player) {
+        return false;
+    }
     true
+}
+
+/// 这个球员是不是正在跑自己的动作。
+///
+/// 跑位与切入有自己的落点：编队不能把它改回站位，限制区的修正同样
+/// 不能——否则他永远到不了自己的落点。
+fn running_own_action(world: &World, player: usize) -> bool {
+    world.players[player].action.as_ref().is_some_and(|runtime| {
+        runtime.intent.actor == player
+            && matches!(
+                runtime.intent.kind,
+                crate::action::ActionKind::Relocate | crate::action::ActionKind::Cut(_)
+            )
+    })
 }
 
 /// 这个球员是否正在走出限制区。

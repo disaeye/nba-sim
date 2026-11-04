@@ -482,6 +482,8 @@ pub enum TurnoverKind {
     EightSecond,
     /// 已过中线又把球带回后场。
     Backcourt,
+    /// 背身五秒违例（NBA Rule 10 §XVI）。
+    BackToBasket,
 }
 
 impl TurnoverKind {
@@ -497,6 +499,7 @@ impl TurnoverKind {
             Self::CloselyGuarded => "closely_guarded",
             Self::EightSecond => "eight_second",
             Self::Backcourt => "backcourt",
+            Self::BackToBasket => "back_to_basket",
             Self::LaneViolation => "lane_violation",
         }
     }
@@ -770,6 +773,12 @@ pub enum Fact {
         reason: &'static str,
         foul_id: u64,
     },
+    /// 球员被逐：犯规升级到恶意犯规时使用（NBA Rule 12B §IV）。
+    Ejected {
+        team: TeamSide,
+        player: usize,
+        reason: &'static str,
+    },
     /// 暂停被批准：比分与两个边界的暂停余额。
     Timeout {
         team: TeamSide,
@@ -868,6 +877,7 @@ impl Fact {
             Self::BenchDepleted { .. } => "BenchDepleted",
             Self::FoulOutRetention { .. } => "FoulOutRetention",
             Self::TeamTechnicalFoul { .. } => "TeamTechnicalFoul",
+            Self::Ejected { .. } => "EJECTED",
             Self::Timeout { .. } => "Timeout",
             Self::JumpBall { .. } => "JumpBall",
             Self::PeriodEnd { .. } => "PeriodEnd",

@@ -160,6 +160,9 @@ pub struct PendingJumpBall {
     pub spots: Vec<(usize, Vec2)>,
     /// 已经等待的秒数：迟迟有人到不了位时不能无限停表。
     pub waited: f32,
+    /// 两队的接应人：停表跳球的接应人已经站到点球落点上，掷球时必须
+    /// 复用他们，不能重新按「离圈心最近」挑人。
+    pub receivers: [Option<usize>; 2],
 }
 
 /// 罚球期间的禁区站位记录：球离手之前有人进区就是违例。
@@ -223,6 +226,12 @@ pub struct World {
     /// 决定，接球人必须是该队已经站到落点上的那个人。
     pub(crate) jump_ball_receivers: [Option<usize>; 2],
     pub(crate) jump_ball_kind: Option<crate::action::JumpBallKind>,
+    /// 当前跳球程序里参跳人与接应人的点位。
+    ///
+    /// 跳球程序从「等待到位」一直持续到「球被接住或者没人接」：这段时间
+    /// 里这四个人必须留在自己的点位上，不能被编队站位与职责层拉走。
+    /// 记录在程序开始时写入，程序结束时清空。
+    pub(crate) jump_ball_spots: Vec<(usize, Vec2)>,
     pub first_possession: Option<TeamSide>,
     pub finished: bool,
     pub home_team_name: String,
@@ -248,6 +257,8 @@ pub struct World {
     /// 发球队员走位的时间也算在五秒之内：裁判在发球队员拿到球并准备
     /// 发球的那一刻开始计时，而那一刻是发球程序开始的时候。
     pub inbound_started_at: Option<f64>,
+    /// 正在非法接触持球人的防守人：持续挡路只判一次（NBA Rule 12B §I）。
+    pub hand_check_active: Option<usize>,
     pub violations: Vec<String>,
     pub last_separation: Option<(usize, f32, f64)>,
     /// 选板冷却表：剧本下标 → 可再次激活的时刻。
@@ -465,10 +476,33 @@ impl World {
         // 不再写位置，只确认目标。
         place: bool,
     ) {
+        self.begin_period_jump_ball_with_receivers(
+            home_jumper,
+            away_jumper,
+            kind,
+            place,
+            [None; 2],
+        )
+    }
+
+    /// 带指定接应人的跳球程序。
+    ///
+    /// 停表跳球的接应人已经站到点球落点上，掷球时必须复用他们：重新按
+    /// 「离圈心最近」挑人会让接应人换人，而那个新接应人还在往落点走，
+    /// 于是球没人接。
+    fn begin_period_jump_ball_with_receivers(
+        &mut self,
+        home_jumper: usize,
+        away_jumper: usize,
+        kind: crate::action::JumpBallKind,
+        place: bool,
+        receivers: [Option<usize>; 2],
+    ) {
         self.jump_ball_kind = Some(kind);
         self.jump_ball_tapper = None;
         self.jump_ball_receiver = None;
         self.jump_ball_receivers = [None; 2];
+        self.jump_ball_spots = Vec::new();
         // 新跳球就是新球：上一轮残留的飞行记录必须清掉，否则结算层会
         // 把它当成这一轮已经在飞的球，永远等不到撮球。
         self.clear_flight();
@@ -476,6 +510,8 @@ impl World {
         let radius = self.rules.league.center_circle_radius_ft * 0.5;
         let home_spot = center - Vec2::new(radius, 0.0);
         let away_spot = center + Vec2::new(radius, 0.0);
+        self.jump_ball_spots.push((home_jumper, home_spot));
+        self.jump_ball_spots.push((away_jumper, away_spot));
         if place {
             crate::body::place(self, home_jumper, home_spot);
             crate::body::place(self, away_jumper, away_spot);
@@ -503,17 +539,23 @@ impl World {
             } else {
                 away_jumper
             };
-            let receiver = self
-                .on_court(team)
-                .into_iter()
-                .filter(|handle| *handle != jumper)
-                .min_by(|left, right| {
-                    (self.players[*left].pos - center)
-                        .length_squared()
-                        .total_cmp(&(self.players[*right].pos - center).length_squared())
-                        .then_with(|| self.players[*left].id.cmp(&self.players[*right].id))
-                })
-                .expect("each team needs a jump-ball receiver");
+            // 停表跳球已经指定了接应人：复用他，不要另挑一个还没到位的人。
+            let receiver = receivers[World::team_index(team)]
+                .filter(|handle| self.players[*handle].on_court && *handle != jumper)
+                .unwrap_or_else(|| {
+                    self.on_court(team)
+                        .into_iter()
+                        .filter(|handle| *handle != jumper)
+                        .min_by(|left, right| {
+                            (self.players[*left].pos - center)
+                                .length_squared()
+                                .total_cmp(&(self.players[*right].pos - center).length_squared())
+                                .then_with(|| {
+                                    self.players[*left].id.cmp(&self.players[*right].id)
+                                })
+                        })
+                        .expect("each team needs a jump-ball receiver")
+                });
             let direction = if team == TeamSide::Home {
                 -Vec2::X
             } else {
@@ -553,6 +595,7 @@ impl World {
             self.players[receiver].target_kind = crate::state::TargetKind::Station;
             self.players[receiver].target_partner = jumper;
             self.jump_ball_receivers[World::team_index(team)] = Some(receiver);
+            self.jump_ball_spots.push((receiver, target));
             self.emit(Fact::PlacementApplied {
                 player: receiver,
                 reason: "jump_ball_receiver",
@@ -577,13 +620,18 @@ impl World {
     }
 
     /// 双方同时控住球：停表，参跳的四人走到中圈，到位后再掷球。
-    pub(crate) fn stage_held_ball(&mut self, home_jumper: usize, away_jumper: usize) {
+    /// 停表跳球：双方抱住球之后的程序（NBA Rule 6 §VII）。
+    ///
+    /// 参跳人与接应人走到圈边点位才掷球；点位由本函数写入待跳球记录，
+    /// 到位检查读同一份记录，因此两件事不会各算一遍。
+    pub fn stage_held_ball(&mut self, home_jumper: usize, away_jumper: usize) {
         // 停表跳球同样是一次新的掷球：清掉上一轮的飞行记录。
         self.clear_flight();
         let center = self.rules.court.center();
         let radius = self.rules.league.center_circle_radius_ft * 0.5;
         let distance = self.rules.tip_off_tap_distance_ft;
         let mut spots: Vec<(usize, Vec2)> = Vec::with_capacity(4);
+        let mut receivers: [Option<usize>; 2] = [None; 2];
         for jumper in [home_jumper, away_jumper] {
             let team = self.players[jumper].team;
             let opponent = if jumper == home_jumper {
@@ -604,17 +652,27 @@ impl World {
                 opponent,
             );
             spots.push((jumper, spot));
+            // 接应人按「离自己的落点最近」挑：挑「离圈心最近」会把站在
+            // 参跳人位上的那个人选成接应人，两个人挤在同一点上，谁也走
+            // 不到位。
+            let receiver_spot = center
+                + if team == TeamSide::Home {
+                    Vec2::NEG_X
+                } else {
+                    Vec2::X
+                } * distance;
             let receiver = self
                 .on_court(team)
                 .into_iter()
                 .filter(|handle| *handle != jumper)
                 .min_by(|left, right| {
-                    (self.players[*left].pos - center)
+                    (self.players[*left].pos - receiver_spot)
                         .length_squared()
-                        .total_cmp(&(self.players[*right].pos - center).length_squared())
+                        .total_cmp(&(self.players[*right].pos - receiver_spot).length_squared())
                         .then_with(|| self.players[*left].id.cmp(&self.players[*right].id))
                 });
             if let Some(receiver) = receiver {
+                receivers[World::team_index(team)] = Some(receiver);
                 let direction = if team == TeamSide::Home {
                     -Vec2::X
                 } else {
@@ -633,12 +691,16 @@ impl World {
         }
         let team = self.possession.team;
         let ready_at = self.now() + f64::from(self.params.policy.g("jump_ball_staging_seconds"));
+        // 点位同时记进跳球程序：等待到位的那段时间里，编队站位与职责层
+        // 都不得把这四个人拉走。
+        self.jump_ball_spots = spots.clone();
         self.pending_jump_ball = Some(PendingJumpBall {
             home: home_jumper,
             away: away_jumper,
             ready_at,
             spots,
             waited: 0.0,
+            receivers,
         });
         self.set_phase(Phase::DeadBall { team, ready_at });
     }
@@ -679,15 +741,35 @@ impl World {
         let control_reach = self.params.policy.w("loose_ball_catch_base_ft")
             + self.players[receiver].attribute("ball_handling")
                 * self.params.policy.w("loose_ball_catch_skill_ft");
-        // 停表跳球的接应人可能还在跑位：到位了就直接接，没到位就让球成为
-        // 松球，由地板球争抢决定，而不是把他瞬移过去。
+        // 接应人到位与否：到位就直接接，没到位球就成为活球，由地板球争抢
+        // 决定。两种情况都必须先发布跳球事实：跳球发生了就是发生了，事件
+        // 账本不能因为没人接到球就少一条。
         let receiver_in_reach = (target - self.players[receiver].pos).length() <= control_reach;
+        // 先发布跳球事实，再决定结果：事实记录的是跳球本身，结果是另一样
+        // 东西，顺序反了会让账本在「没人接到球」时少一条。
+        self.emit(Fact::BallContact {
+            kind: "jump_ball_tap",
+            entity: Some(tapper),
+            time: self.now(),
+            x: center.x,
+            y: center.y,
+            z: self.rules.tip_off_tap_height_ft,
+            sub_tick: 0,
+        });
+        self.emit(Fact::JumpBall {
+            kind,
+            home_jumper,
+            away_jumper,
+            tapper,
+            tapped_team,
+        });
         if !receiver_in_reach {
-            // 接应人还没跑到接球点：这次战球不判归属，改由发球重新开始。
+            // 接应人还没跑到接球点：这次跳球没有归属，改由发球重新开始。
             self.jump_ball_kind = None;
             self.jump_ball_tapper = None;
             self.jump_ball_receiver = None;
             self.jump_ball_receivers = [None; 2];
+            self.jump_ball_spots = Vec::new();
             self.set_phase(Phase::DeadBall {
                 team: tapped_team,
                 ready_at: self.now() + 1.0,
@@ -710,22 +792,6 @@ impl World {
         self.players[receiver].target_partner = tapper;
         self.possession.team = tapped_team;
         self.period_started_with = tapped_team;
-        self.emit(Fact::BallContact {
-            kind: "jump_ball_tap",
-            entity: Some(tapper),
-            time: self.now(),
-            x: center.x,
-            y: center.y,
-            z: self.ball.z,
-            sub_tick: 0,
-        });
-        self.emit(Fact::JumpBall {
-            kind,
-            home_jumper,
-            away_jumper,
-            tapper,
-            tapped_team,
-        });
         // 撮球飞行有一个期限：接应人必须在期限内碰到球，否则这次跳球
         // 没有归属，按死球发球处理。
         self.set_flight(
@@ -830,7 +896,7 @@ impl World {
         }
     }
 
-    pub(crate) fn set_ball_held(&mut self, holder: usize) {
+    pub fn set_ball_held(&mut self, holder: usize) {
         // 球落到人手里，飞行结束。
         self.clear_flight();
         self.ball.set_held(holder);
@@ -1062,6 +1128,7 @@ impl World {
             jump_ball_tapper: None,
             jump_ball_receiver: None,
             jump_ball_receivers: [None; 2],
+            jump_ball_spots: Vec::new(),
             jump_ball_kind: None,
             first_possession: None,
             finished: false,
@@ -1080,6 +1147,7 @@ impl World {
             inbound_passer: None,
             inbound_spot: None,
             inbound_started_at: None,
+            hand_check_active: None,
             violations: Vec::new(),
             last_separation: None,
             play_cooldowns,
@@ -1514,6 +1582,25 @@ impl World {
 
     pub fn hoop_for(&self, team: TeamSide) -> Vec2 {
         self.rules.court.hoop_pos(self.attacking_right(team))
+    }
+
+    /// 本次跳球的两名接应人：按球队顺序（主队、客队）。
+    pub fn jump_ball_receivers(&self) -> [Option<usize>; 2] {
+        self.jump_ball_receivers
+    }
+
+    /// 跳球程序进行中时，参跳人与接应人的点位。
+    ///
+    /// 只有程序还在进行时才有点位：比赛开始之后这道保护就失效了，
+    /// 否则场上永远有四个人被钉在圈边不走。程序进行中指两种情形：
+    /// 跳球阶段本身，以及停表跳球等待人到位的那段时间。
+    pub fn jump_ball_procedure_spots(&self) -> &[(usize, Vec2)] {
+        let staging = self.pending_jump_ball.is_some();
+        if staging || matches!(self.phase(), Phase::JumpBall { .. }) {
+            &self.jump_ball_spots
+        } else {
+            &[]
+        }
     }
 
     pub fn attacking_right(&self, team: TeamSide) -> bool {
@@ -2197,6 +2284,7 @@ impl World {
         }
         crate::resolve::poke::step(self, dt);
         crate::resolve::offball::step(self, dt);
+        self.check_hand_check(dt);
         crate::ball::step(self, dt);
         self.resolve_due_interactions();
         self.advance_phase();
@@ -2206,6 +2294,7 @@ impl World {
             self.maybe_decide();
         }
         self.check_closely_guarded(dt);
+        self.check_back_to_basket(dt);
         self.check_backcourt();
         crate::lane::step(self, dt);
         self.check_free_throw_lane();
@@ -2228,7 +2317,7 @@ impl World {
     }
 
     /// 罚球禁区：球离手之前，任何球员不得进入禁区内侧。
-    fn check_free_throw_lane(&mut self) {
+    pub fn check_free_throw_lane(&mut self) {
         if !self.free_throw_pending() {
             return;
         }
@@ -2299,8 +2388,100 @@ impl World {
         ));
     }
 
+    /// 非法触球：防守人对持球人伸手阻挡（NBA Rule 12B §I.1-§I.2）。
+    ///
+    /// 判定在 `illegal_touch` 模块里，这里只负责把它接到裁判流程上：
+    /// 吹哨之后进攻方在断点发球。
+    fn check_hand_check(&mut self, dt: f64) {
+        let Some(defender) = crate::illegal_touch::judge(self, dt) else {
+            return;
+        };
+        let Some(holder) = self.holder() else {
+            return;
+        };
+        crate::resolve::foul::apply_non_shooting_foul(self, defender, holder);
+    }
+
+    /// 背身五秒违例（NBA Rule 10 §XVI）。
+    ///
+    /// 进攻人在前场罚球线延长线以下背身或侧身运球超过五秒即违例。计时
+    /// 在三种情况下终止（规则的「count ends when」）：持球人收球、运球
+    /// 越过罚球线延长线、或者防守人把球碰开。
+    pub fn check_back_to_basket(&mut self, dt: f64) {
+        if !self.rules.back_to_basket_seconds.is_finite() || self.rules.back_to_basket_seconds <= 0.0 {
+            self.possession.back_to_basket_seconds = 0.0;
+            self.possession.holder_back_to_basket = false;
+            return;
+        }
+        let Some(holder) = self.holder() else {
+            self.possession.back_to_basket_seconds = 0.0;
+            self.possession.holder_back_to_basket = false;
+            return;
+        };
+        if !self.live_play() {
+            self.possession.back_to_basket_seconds = 0.0;
+            self.possession.holder_back_to_basket = false;
+            return;
+        }
+        let team = self.players[holder].team;
+        let attacking_right = self.attacking_right(team);
+        let court = self.rules.court;
+        let pos = self.players[holder].pos;
+        // 罚球线延长线以下 = 罚球线与底线之间的那个区域，也就是禁区所在
+        // 的那一侧：Home 向右进攻时它在 x >= 75。
+        let below_line = if attacking_right {
+            pos.x >= court.free_throw_line_extended_x(attacking_right)
+        } else {
+            pos.x <= court.free_throw_line_extended_x(attacking_right)
+        };
+        // 前场：罚球线延长线本身在前场一侧。
+        let in_frontcourt = !court.is_backcourt(pos, attacking_right);
+        // 背身或侧身：身体朝向与篮筐方向相反，或者垂直。
+        let hoop = self.hoop_for(team);
+        let to_hoop = (hoop - pos).normalize_or_zero();
+        let facing = self.players[holder].facing.normalize_or_zero();
+        // 侧身也算，因此用点积的绝对值：正对篮筐是 1，完全背对是 -1。
+        let alignment = facing.dot(to_hoop);
+        let back_to_basket = alignment <= 0.0;
+        // 三个终止条件：收球、越过罚球线延长线、球被碰开。
+        let gathered = self.possession.dribble_state == crate::state::DribbleState::Gathered;
+        let deflected = self
+            .last_touch
+            .is_some_and(|touched| self.players[touched].team != team);
+        if !(below_line && in_frontcourt && back_to_basket) || gathered || deflected {
+            self.possession.back_to_basket_seconds = 0.0;
+            self.possession.holder_back_to_basket = back_to_basket;
+            return;
+        }
+        self.possession.holder_back_to_basket = true;
+        self.possession.back_to_basket_seconds += dt as f32;
+        if self.possession.back_to_basket_seconds + f32::EPSILON
+            < self.rules.back_to_basket_seconds
+        {
+            return;
+        }
+        self.possession.back_to_basket_seconds = 0.0;
+        self.line_mut(holder).turnovers += 1;
+        self.emit(Fact::Turnover {
+            player: holder,
+            kind: TurnoverKind::BackToBasket,
+        });
+        let spot = self
+            .rules
+            .court
+            .sideline_at_free_throw_line_extended(pos, attacking_right);
+        self.adjudicate(crate::adjudicate::Adjudication::violation(
+            crate::adjudicate::ViolationKind::BackToBasket,
+            crate::adjudicate::RestartPlan::Inbound {
+                team: team.other(),
+                location: crate::adjudicate::InboundLocation::Spot(spot),
+                ready_after: None,
+            },
+        ));
+    }
+
     /// 后场八秒：控球方在后场停留超过规则秒数即违例。
-    fn check_backcourt(&mut self) {
+    pub fn check_backcourt(&mut self) {
         if !self.live_play() {
             self.possession.backcourt_started_game_clock = None;
             return;
@@ -2343,6 +2524,7 @@ impl World {
         if past_mid {
             // 过中线就停八秒计时；只有推进到前场深处才算建立前场控制。
             self.possession.backcourt_started_game_clock = None;
+            self.possession.backcourt_started_last_touch = None;
         }
         if frontcourt_deep {
             self.possession.frontcourt_established = true;
@@ -2354,6 +2536,7 @@ impl World {
         if self.possession.frontcourt_established {
             self.possession.frontcourt_established = false;
             self.possession.backcourt_started_game_clock = None;
+            self.possession.backcourt_started_last_touch = None;
             self.line_mut(holder).turnovers += 1;
             self.emit(Fact::Turnover {
                 player: holder,
@@ -2373,10 +2556,27 @@ impl World {
         // 八秒按比赛时钟计：死球停表期间不消耗后场推进时间。
         let game_clock = self.clock.game_clock();
         let limit = f64::from(self.rules.backcourt_seconds);
+        // 「踢球」：防守人在八秒计时开始之后碰到球，计时重新开始
+        // （NBA Rule 10 §VIII.1 的例外一）。踢与传的区别在于球是碰出去
+        // 的而不是递出去的，因此这里看的是最后触球的一方。
+        if let Some(started_touch) = self.possession.backcourt_started_last_touch {
+            let touched_by_defence = self
+                .last_touch
+                .is_some_and(|touched| self.players[touched].team != team)
+                && self.last_touch != Some(started_touch);
+            if touched_by_defence {
+                self.possession.backcourt_started_game_clock = Some(game_clock);
+                self.possession.backcourt_started_last_touch = self.last_touch;
+            }
+        }
         match self.possession.backcourt_started_game_clock {
-            None => self.possession.backcourt_started_game_clock = Some(game_clock),
+            None => {
+                self.possession.backcourt_started_game_clock = Some(game_clock);
+                self.possession.backcourt_started_last_touch = self.last_touch;
+            }
             Some(start) if start - game_clock >= limit => {
                 self.possession.backcourt_started_game_clock = None;
+                self.possession.backcourt_started_last_touch = None;
                 self.line_mut(holder).turnovers += 1;
                 self.emit(Fact::Turnover {
                     player: holder,
@@ -3035,13 +3235,15 @@ impl World {
                     {
                         self.jump_ball_tapper = None;
                         self.jump_ball_receiver = None;
+                        self.jump_ball_spots = Vec::new();
                         self.award_opening_tip_control(tapped_team, controller);
                     } else if now >= flight.resolve_at {
-                        // 没人接到球：这次跳球没有归属，摸到球的一方发球。
-                        // 飞行记录必须清掉，否则这一轮永远等不到结算，
-                        // 下一节也起不来。
+                        // 没人接到球：这次跳球没有归属，改为发球重新开始
+                        // （NBA Rule 6 §VII）。飞行记录必须清掉，否则这一轮
+                        // 永远等不到结算，下一节也起不来。
                         self.jump_ball_tapper = None;
                         self.jump_ball_receiver = None;
+                        self.jump_ball_spots = Vec::new();
                         self.clear_flight();
                         self.set_phase(Phase::DeadBall {
                             team: tapped_team,
@@ -3050,6 +3252,7 @@ impl World {
                     }
                 } else if now >= flight.resolve_at {
                     // 球还没被摸到就超时：同样要有出口。
+                    self.jump_ball_spots = Vec::new();
                     self.clear_flight();
                     self.set_phase(Phase::DeadBall {
                         team: self.possession.team,
@@ -3093,11 +3296,12 @@ impl World {
                         });
                         if arrived || pending.waited >= 5.0 {
                             self.pending_jump_ball = None;
-                            self.begin_period_jump_ball(
+                            self.begin_period_jump_ball_with_receivers(
                                 pending.home,
                                 pending.away,
                                 crate::action::JumpBallKind::HeldBall,
                                 false,
+                                pending.receivers,
                             );
                         } else {
                             let next = now + 0.5;
@@ -3330,6 +3534,12 @@ impl World {
                 // 飞行先结算：球在空中时那次传导或出手自己解出结果，
                 // 然后再看活球里该不该判时钟违例。
                 self.settle_ball_flight(now);
+                // 结算可能已经开了罚球程序或别的停表程序：那种情况下比赛
+                // 已经不在活球程序里，时钟违例不再成立。不重读阶段的话，
+                // 刚开出来的罚球程序会被这一条违例覆盖掉。
+                if !matches!(self.phase, Phase::Live) {
+                    return;
+                }
                 // 球在空中时时钟走完不是违例：那一球会自己解出进与不进，
                 // 违例只在计时归零时球还在某个球员手里成立。
                 let shooting =

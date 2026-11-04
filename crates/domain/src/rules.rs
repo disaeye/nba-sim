@@ -50,6 +50,9 @@ pub struct GameRules {
     pub defensive_three_second_seconds: f32,
     /// 守方三秒违例是否判技术犯规（NBA 是，FIBA 无此规则）。
     pub defensive_three_second_is_technical: bool,
+    /// 背身五秒时限（NBA Rule 10 §XVI）：进攻人在前场罚球线延长线以下
+    /// 背身或侧身运球超过该时限即违例。零值表示不启用（FIBA 无此规则）。
+    pub back_to_basket_seconds: f32,
     pub period_break_seconds: f32,
     pub tactical_initiation_seconds: f32,
     /// 无事件触发时的最小重决策间隔（秒）。决策由动作完成、球权变化、
@@ -430,6 +433,7 @@ impl Default for GameRules {
             three_second_lane_seconds: 3.0,
             defensive_three_second_seconds: 3.0,
             defensive_three_second_is_technical: true,
+            back_to_basket_seconds: 5.0,
             period_break_seconds: 15.0,
             tactical_initiation_seconds: 6.5,
             redecide_interval_seconds: 0.5,

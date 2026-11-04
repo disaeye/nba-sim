@@ -1,6 +1,9 @@
 {
   "catalog_version": 1,
-  "scope": ["nba", "fiba"],
+  "scope": [
+    "nba",
+    "fiba"
+  ],
   "profiles": {
     "nba": {
       "ruleset_version": "2025-26",
@@ -48,53 +51,923 @@
         "overtime_team_fouls_carry_from_fourth": true,
         "quarter_fouls_to_penalty": 5,
         "overtime_fouls_add_to_fourth_quarter": true,
-        "counts_player_personal_fouls": ["personal", "technical_category_1", "technical_category_2", "disruptive", "flagrant", "disqualifying"],
-        "counts_team_fouls": ["personal", "technical_player", "disruptive", "flagrant", "disqualifying"],
+        "counts_player_personal_fouls": [
+          "personal",
+          "technical_category_1",
+          "technical_category_2",
+          "disruptive",
+          "flagrant",
+          "disqualifying"
+        ],
+        "counts_team_fouls": [
+          "personal",
+          "technical_player",
+          "disruptive",
+          "flagrant",
+          "disqualifying"
+        ],
         "coach_technical_counts_team_foul": false
       }
     }
   },
   "procedures": [
-    {"id":"PROC-PREGAME","name":"赛前与名单检查","nba":["Rule 2","Rule 3"],"fiba":["Articles 3-7"],"scenarios":["RULE-PREGAME-ACTIVE-LIST","RULE-PREGAME-ROSTER-LIMIT","RULE-PREGAME-INELIGIBLE-PLAYER"],"implementation":"implemented","passing_scenarios":["RULE-PREGAME-ACTIVE-LIST","RULE-PREGAME-ROSTER-LIMIT","RULE-PREGAME-INELIGIBLE-PLAYER"],"missing_scenarios":[],"scenario_tests":{"RULE-PREGAME-ACTIVE-LIST":"nba_sim_core::pregame::a_duplicated_starter_is_rejected","RULE-PREGAME-ROSTER-LIMIT":"nba_sim_core::pregame::a_roster_over_the_league_limit_is_rejected","RULE-PREGAME-INELIGIBLE-PLAYER":"nba_sim_core::pregame::a_duplicated_jersey_is_rejected"}},
-    {"id":"PROC-OPENING-JUMP","name":"开场跳球","nba":["Rule 6 §I, §V, §VII"],"fiba":["Articles 9, 12"],"scenarios":["RULE-JUMP-LEGAL-TAP","RULE-JUMP-EARLY-TOUCH","RULE-JUMP-DOUBLE-VIOLATION","RULE-JUMP-ARROW-INITIALIZATION","RULE-JUMP-OPENING-POSSESSION-ESTABLISHED","RULE-JUMP-FIBA-ARROW-AFTER-OPENING"],"implementation":"partial","passing_scenarios":["RULE-JUMP-OPENING-POSSESSION-ESTABLISHED","RULE-JUMP-FIBA-ARROW-AFTER-OPENING"],"missing_scenarios":["RULE-JUMP-LEGAL-TAP","RULE-JUMP-EARLY-TOUCH","RULE-JUMP-DOUBLE-VIOLATION","RULE-JUMP-ARROW-INITIALIZATION"],"scenario_tests":{"RULE-JUMP-OPENING-POSSESSION-ESTABLISHED":"nba_sim_core::jump_ball::nba_opening_possession_is_established_by_a_resolved_center_jump_ball","RULE-JUMP-FIBA-ARROW-AFTER-OPENING":"nba_sim_core::jump_ball::fiba_period_starts_follow_the_alternating_possession_arrow"}},
-    {"id":"PROC-PERIOD-START","name":"节次开始与发球权","nba":["Rule 6 §I"],"fiba":["Articles 9, 12"],"scenarios":["RULE-PERIOD-NBA-START-ALLOCATION","RULE-PERIOD-FIBA-ARROW-THROW-IN","RULE-PERIOD-BASKET-DIRECTION","RULE-PERIOD-NBA-SECOND-AND-THIRD-ALLOCATION","RULE-PERIOD-FIBA-SECOND-AND-THIRD-ARROW-THROW-IN","RULE-PERIOD-ARROW-REJUMP-UPDATE"],"implementation":"partial","passing_scenarios":["RULE-PERIOD-NBA-SECOND-AND-THIRD-ALLOCATION","RULE-PERIOD-FIBA-SECOND-AND-THIRD-ARROW-THROW-IN","RULE-PERIOD-BASKET-DIRECTION"],"missing_scenarios":["RULE-PERIOD-ARROW-REJUMP-UPDATE"],"scenario_tests":{"RULE-PERIOD-NBA-SECOND-AND-THIRD-ALLOCATION":"nba_sim_core::jump_ball::nba_non_overtime_periods_alternate_the_opening_throw_in","RULE-PERIOD-FIBA-SECOND-AND-THIRD-ARROW-THROW-IN":"nba_sim_core::jump_ball::fiba_period_starts_follow_the_alternating_possession_arrow","RULE-PERIOD-BASKET-DIRECTION":"nba_sim_core::rules_matrix::the_second_period_switches_basket_direction"}},
-    {"id":"PROC-OVERTIME","name":"加时与平分后续比赛","nba":["Rule 5 §II, §IV; Rule 6 §I"],"fiba":["Articles 8, 9, 12"],"scenarios":["RULE-OT-NBA-FIVE-MINUTES","RULE-OT-FIBA-FIVE-MINUTES","RULE-OT-TIED-REPEATS","RULE-OT-FOUL-COUNTERS","RULE-OT-TIMEOUT-BUDGET","RULE-OT-NBA-CENTER-JUMP-START","RULE-OT-POSSESSION-COUNTED-ON-CONTROL"],"implementation":"implemented","passing_scenarios":["RULE-OT-NBA-FIVE-MINUTES","RULE-OT-NBA-CENTER-JUMP-START","RULE-OT-POSSESSION-COUNTED-ON-CONTROL","RULE-OT-FIBA-FIVE-MINUTES","RULE-OT-TIED-REPEATS","RULE-OT-TIMEOUT-BUDGET","RULE-OT-FOUL-COUNTERS"],"missing_scenarios":[],"scenario_tests":{"RULE-OT-NBA-FIVE-MINUTES":"nba_sim_core::jump_ball::nba_overtime_starts_with_a_fresh_jump_ball","RULE-OT-NBA-CENTER-JUMP-START":"nba_sim_core::jump_ball::nba_overtime_starts_with_a_fresh_jump_ball","RULE-OT-POSSESSION-COUNTED-ON-CONTROL":"nba_sim_core::jump_ball::nba_overtime_starts_with_a_fresh_jump_ball","RULE-OT-FIBA-FIVE-MINUTES":"nba_sim_core::rules_matrix::fiba_overtime_is_five_minutes","RULE-OT-TIED-REPEATS":"nba_sim_core::rules_matrix::a_tied_regulation_end_enters_overtime","RULE-OT-TIMEOUT-BUDGET":"nba_sim_core::rules_matrix::overtime_timeouts_follow_the_league_budget","RULE-OT-FOUL-COUNTERS":"nba_sim_core::rules_matrix::team_period_fouls_reset_at_the_next_period"}},
-    {"id":"PROC-GAME-CLOCK","name":"比赛时钟运行、停止与启动","nba":["Rule 5 §II, §V, §VIII; Rule 6 §II-IV"],"fiba":["Articles 8-10, 50"],"scenarios":["RULE-CLOCK-PASS-FLIGHT-RUNS","RULE-CLOCK-FREE-THROW-FLIGHT-STOPPED","RULE-CLOCK-INBOUND-LEGAL-TOUCH","RULE-CLOCK-MADE-GOAL-LATE-PERIOD","RULE-CLOCK-WHISTLE-STOPS"],"implementation":"partial"},
-    {"id":"PROC-SHOT-CLOCK","name":"进攻时钟启动、继续与重置","nba":["Rule 7 §II-IV"],"fiba":["Article 29"],"scenarios":["RULE-SHOT-CLOCK-NEW-CONTROL-24","RULE-SHOT-CLOCK-RIM-REBOUND-14","RULE-SHOT-CLOCK-FRONTCOURT-FOUL","RULE-SHOT-CLOCK-BACKCOURT-RESET","RULE-SHOT-CLOCK-DEFLECTION-CONTINUES","RULE-SHOT-CLOCK-SIGNAL-AFTER-RELEASE"],"implementation":"partial","existing_test":"nba_sim_core::rules_flow::a_second_chance_clock_only_resets_when_the_ball_touched_the_rim"},
-    {"id":"PROC-BACKCOURT-CLOCK","name":"后场推进计时","nba":["Rule 10 §VIII"],"fiba":["Article 28"],"scenarios":["RULE-BACKCOURT-8S-EXPIRES","RULE-BACKCOURT-CROSSES-BEFORE-8S","RULE-BACKCOURT-CLOCK-RESET-DEFENSE-FOUL","RULE-BACKCOURT-CLOCK-RESET-KICK"],"implementation":"partial","passing_scenarios":["RULE-BACKCOURT-8S-EXPIRES","RULE-BACKCOURT-CROSSES-BEFORE-8S","RULE-BACKCOURT-CLOCK-RESET-DEFENSE-FOUL"],"missing_scenarios":["RULE-BACKCOURT-CLOCK-RESET-KICK"],"scenario_tests":{"RULE-BACKCOURT-8S-EXPIRES":"nba_sim_core::rule_violations::a_backcourt_possession_that_never_advances_is_an_eight_second_violation","RULE-BACKCOURT-CROSSES-BEFORE-8S":"nba_sim_core::rules_matrix::crossing_midcourt_clears_the_eight_second_count","RULE-BACKCOURT-CLOCK-RESET-DEFENSE-FOUL":"nba_sim_core::rules_matrix::a_defensive_foul_restarts_the_eight_second_count"}},
-    {"id":"PROC-LANE-CLOCKS","name":"限制区与持球连续计时","nba":["Rule 10 §VI-VII, §XVI"],"fiba":["Articles 26, 27"],"scenarios":["RULE-OFFENSE-3S-EXPIRES","RULE-OFFENSE-3S-LEGAL-EXIT","RULE-DEFENSE-3S-NBA-TECHNICAL","RULE-CLOSE-GUARD-5S-FIBA","RULE-POST-UP-5S-NBA"],"implementation":"partial","passing_scenarios":["RULE-CLOSE-GUARD-5S-FIBA"],"missing_scenarios":["RULE-OFFENSE-3S-EXPIRES","RULE-OFFENSE-3S-LEGAL-EXIT","RULE-DEFENSE-3S-NBA-TECHNICAL","RULE-POST-UP-5S-NBA"],"scenario_tests":{"RULE-CLOSE-GUARD-5S-FIBA":"nba_sim_core::action_scenarios::holding_the_ball_closely_guarded_for_five_seconds_is_a_violation"}},
-    {"id":"PROC-FIELD-GOAL","name":"投篮与得分裁决","nba":["Rule 5 §I, §III; Rule 11"],"fiba":["Articles 15, 16, 31"],"scenarios":["RULE-SHOT-2-POINT","RULE-SHOT-3-POINT-FOOT-STATUS","RULE-SHOT-PERIOD-END-IN-FLIGHT","RULE-SHOT-MAKE-ON-RING-PLANE","RULE-SHOT-BLOCK-AND-REBOUND"],"implementation":"partial"},
-    {"id":"PROC-GOALTENDING","name":"干扰球与篮筐干涉","nba":["Rule 11"],"fiba":["Article 31"],"scenarios":["RULE-GOALTENDING-DOWNWARD-FLIGHT","RULE-GOALTENDING-AFTER-BACKBOARD","RULE-INTERFERENCE-BALL-ON-RING","RULE-GOALTENDING-NO-VIOLATION-UPWARD"],"implementation":"partial","passing_scenarios":["RULE-GOALTENDING-DOWNWARD-FLIGHT","RULE-GOALTENDING-NO-VIOLATION-UPWARD"],"missing_scenarios":["RULE-GOALTENDING-AFTER-BACKBOARD","RULE-INTERFERENCE-BALL-ON-RING"],"scenario_tests":{"RULE-GOALTENDING-DOWNWARD-FLIGHT":"nba_sim_core::rule_violations::touching_a_descending_shot_inside_the_cylinder_is_goaltending","RULE-GOALTENDING-NO-VIOLATION-UPWARD":"nba_sim_core::rule_violations::an_ascending_ball_may_be_blocked_without_goaltending"}},
-    {"id":"PROC-PASS-CONTROL","name":"传球、触球与控制建立","nba":["Rule 4 §XV-XVII; Rule 7 §II"],"fiba":["Articles 10, 13, 14"],"scenarios":["RULE-PASS-CAUGHT-CONTROL","RULE-PASS-TIPPED-LOOSE","RULE-PASS-INTERCEPTED","RULE-PASS-DROPPED-LOOSE","RULE-PASS-OUT-OF-BOUNDS"],"implementation":"partial","passing_scenarios":["RULE-PASS-CAUGHT-CONTROL","RULE-PASS-INTERCEPTED","RULE-PASS-TIPPED-LOOSE","RULE-PASS-DROPPED-LOOSE"],"missing_scenarios":["RULE-PASS-OUT-OF-BOUNDS"],"scenario_tests":{"RULE-PASS-CAUGHT-CONTROL":"nba_sim_core::ball_physics::pass_is_caught_or_intercepted_by_swept_contact","RULE-PASS-INTERCEPTED":"nba_sim_core::ball_physics::pass_is_caught_or_intercepted_by_swept_contact","RULE-PASS-TIPPED-LOOSE":"nba_sim_core::action_scenarios::a_deflected_pass_becomes_a_loose_ball_decided_by_control","RULE-PASS-DROPPED-LOOSE":"nba_sim_core::rules_matrix::a_pass_nobody_controls_becomes_loose"},"existing_test":"nba_sim_core::action_chain::cut_uses_lob_flight_and_received_fact_before_control"},
-    {"id":"PROC-OUT-OF-BOUNDS","name":"出界归属、地点与恢复","nba":["Rule 8 §I-II; Rule 10 §I"],"fiba":["Articles 23, 17"],"scenarios":["RULE-OOB-LAST-TOUCH","RULE-OOB-SIMULTANEOUS-TOUCH","RULE-OOB-SIDELINE-LOCATION","RULE-OOB-BASELINE-LOCATION","RULE-OOB-BACKBOARD-OUT"],"implementation":"partial","passing_scenarios":["RULE-OOB-LAST-TOUCH","RULE-OOB-SIDELINE-LOCATION","RULE-OOB-BASELINE-LOCATION"],"missing_scenarios":["RULE-OOB-SIMULTANEOUS-TOUCH","RULE-OOB-BACKBOARD-OUT"],"scenario_tests":{"RULE-OOB-LAST-TOUCH":"nba_sim_core::rule_violations::a_loose_ball_over_the_sideline_hands_possession_to_the_opponent","RULE-OOB-SIDELINE-LOCATION":"nba_sim_core::rule_violations::a_loose_ball_over_the_sideline_hands_possession_to_the_opponent","RULE-OOB-BASELINE-LOCATION":"nba_sim_core::rule_violations::a_ball_leaving_behind_the_baseline_inbounds_from_that_baseline"}},
-    {"id":"PROC-INBOUND","name":"界外发球与发球违例","nba":["Rule 6 §I-II; Rule 8 §III; Rule 10 §III"],"fiba":["Articles 17, 9"],"scenarios":["RULE-INBOUND-AFTER-MADE-GOAL-ENDLINE","RULE-INBOUND-FOUL-SPOT","RULE-INBOUND-TIMEOUT-FRONTCOURT-OPTION","RULE-INBOUND-FIVE-SECONDS","RULE-INBOUND-STEP-ON-LINE","RULE-INBOUND-UNTOUCHED-OUT"],"implementation":"partial","passing_scenarios":["RULE-INBOUND-AFTER-MADE-GOAL-ENDLINE","RULE-INBOUND-FOUL-SPOT","RULE-INBOUND-TIMEOUT-FRONTCOURT-OPTION"],"missing_scenarios":["RULE-INBOUND-FIVE-SECONDS","RULE-INBOUND-STEP-ON-LINE","RULE-INBOUND-UNTOUCHED-OUT"],"scenario_tests":{"RULE-INBOUND-AFTER-MADE-GOAL-ENDLINE":"nba_sim_core::rule_violations::a_made_basket_inbounds_from_the_conceding_baseline","RULE-INBOUND-FOUL-SPOT":"nba_sim_core::rule_violations::a_frontcourt_foul_inbounds_from_the_nearest_sideline","RULE-INBOUND-TIMEOUT-FRONTCOURT-OPTION":"nba_sim_core::rule_violations::a_late_timeout_may_inbound_in_the_frontcourt"}},
-    {"id":"PROC-DRIBBLE-FOOTWORK","name":"运球、收球、走步与回场","nba":["Rule 4 §II, §V, §VII-IX; Rule 10 §II, §IX, §XIII"],"fiba":["Articles 24, 25, 30"],"scenarios":["RULE-DRIBBLE-SECOND-DRIBBLE","RULE-DRIBBLE-CARRYING","RULE-DRIBBLE-LEGAL-RECOVERY","RULE-TRAVEL-GATHER-STEPS","RULE-BACKCOURT-RETURN-TEAM-CONTROL"],"implementation":"partial","passing_scenarios":["RULE-DRIBBLE-SECOND-DRIBBLE","RULE-TRAVEL-GATHER-STEPS","RULE-BACKCOURT-RETURN-TEAM-CONTROL"],"missing_scenarios":["RULE-DRIBBLE-CARRYING","RULE-DRIBBLE-LEGAL-RECOVERY"],"scenario_tests":{"RULE-DRIBBLE-SECOND-DRIBBLE":"nba_sim_core::engine::double_dribble_after_gather_is_a_turnover","RULE-TRAVEL-GATHER-STEPS":"nba_sim_core::action_scenarios::only_gather_steps_beyond_the_allowance_are_travels","RULE-BACKCOURT-RETURN-TEAM-CONTROL":"nba_sim_core::rule_violations::carrying_the_ball_back_over_half_court_is_a_backcourt_violation"}},
-    {"id":"PROC-FOUL-PERSONAL","name":"个人、投篮、进攻与松球犯规","nba":["Rule 12B §I-III, §VII-VIII"],"fiba":["Articles 32-35, 42-43"],"scenarios":["RULE-FOUL-SHOOTING-2PT","RULE-FOUL-SHOOTING-3PT","RULE-FOUL-AND-ONE","RULE-FOUL-OFFENSIVE-NO-TEAM-COUNT-NBA","RULE-FOUL-LOOSE-BALL-PENALTY","RULE-FOUL-DOUBLE-RETAINS-CONTROL"],"implementation":"partial","existing_test":"nba_sim_core::rules_flow::an_offensive_foul_counts_personally_but_never_sends_the_other_team_to_the_line","scenario_status":{"passing":["RULE-FOUL-OFFENSIVE-NO-TEAM-COUNT-NBA"],"missing":["RULE-FOUL-SHOOTING-2PT","RULE-FOUL-SHOOTING-3PT","RULE-FOUL-AND-ONE","RULE-FOUL-LOOSE-BALL-PENALTY","RULE-FOUL-DOUBLE-RETAINS-CONTROL"]}},
-    {"id":"PROC-FOUL-TEAM-PENALTY","name":"球队犯规罚则与加时累计","nba":["Rule 12B §V"],"fiba":["Articles 41-42"],"scenarios":["RULE-TEAM-FOUL-NBA-FIFTH-REGULATION","RULE-TEAM-FOUL-NBA-FOURTH-OVERTIME","RULE-TEAM-FOUL-NBA-FINAL-TWO-MINUTES","RULE-TEAM-FOUL-FIBA-FIFTH-QUARTER","RULE-TEAM-FOUL-FIBA-OVERTIME-CARRIES-Q4"],"implementation":"implemented","existing_test":"nba_sim_core::rules_flow::the_fifth_team_foul_awards_free_throws_while_the_fourth_only_restarts_play","scenario_status":{"passing":["RULE-TEAM-FOUL-NBA-FIFTH-REGULATION","RULE-TEAM-FOUL-NBA-FOURTH-OVERTIME","RULE-TEAM-FOUL-NBA-FINAL-TWO-MINUTES","RULE-TEAM-FOUL-FIBA-FIFTH-QUARTER","RULE-TEAM-FOUL-FIBA-OVERTIME-CARRIES-Q4"],"missing":[]},"scenario_tests":{"RULE-TEAM-FOUL-NBA-FIFTH-REGULATION":"nba_sim_core::rule_matrix::team_foul_bonus_thresholds_cover_before_at_and_after_threshold","RULE-TEAM-FOUL-NBA-FOURTH-OVERTIME":"nba_sim_core::rule_matrix::nba_overtime_uses_its_own_team_foul_threshold","RULE-TEAM-FOUL-NBA-FINAL-TWO-MINUTES":"nba_sim_core::rule_matrix::nba_final_two_minutes_use_the_stricter_team_foul_threshold","RULE-TEAM-FOUL-FIBA-FIFTH-QUARTER":"nba_sim_core::rule_matrix::fiba_quarter_team_foul_threshold_is_the_fifth_foul","RULE-TEAM-FOUL-FIBA-OVERTIME-CARRIES-Q4":"nba_sim_core::rule_matrix::fiba_overtime_fouls_carry_into_the_fourth_quarter_total"}},
-    {"id":"PROC-FOUL-SPECIAL","name":"技术、恶意、转换与特殊犯规","nba":["Rule 12A; Rule 12B §IV, §IX-X"],"fiba":["Articles 36-40"],"scenarios":["RULE-TECHNICAL-FREE-THROW-AND-RESUME","RULE-FLAGRANT-1-AND-2","RULE-CLEAR-PATH-FREE-THROWS-AND-POSSESSION","RULE-AWAY-FROM-PLAY-ONE-AND-POSSESSION","RULE-FIBA-DISRUPTIVE-FOUL","RULE-FIBA-FLAGRANT-FOUL-DISQUALIFICATION"],"implementation":"partial","existing_test":"nba_sim_core::rules_flow::an_away_from_play_foul_in_the_last_two_minutes_is_one_free_throw_and_the_ball","scenario_status":{"passing":["RULE-AWAY-FROM-PLAY-ONE-AND-POSSESSION"],"missing":["RULE-TECHNICAL-FREE-THROW-AND-RESUME","RULE-FLAGRANT-1-AND-2","RULE-CLEAR-PATH-FREE-THROWS-AND-POSSESSION","RULE-FIBA-DISRUPTIVE-FOUL","RULE-FIBA-FLAGRANT-FOUL-DISQUALIFICATION"]}},
-    {"id":"PROC-FREE-THROW","name":"罚球授权、站位、结果与罚球后恢复","nba":["Rule 9 §I-III"],"fiba":["Article 44"],"scenarios":["RULE-FT-SHOOTER-TIME-LIMIT","RULE-FT-LANE-VIOLATION","RULE-FT-DOUBLE-VIOLATION","RULE-FT-LAST-MISS-REBOUND","RULE-FT-LAST-MAKE-INBOUND","RULE-FT-SHOOTER-REPLACEMENT"],"implementation":"partial","passing_scenarios":["RULE-FT-LANE-VIOLATION","RULE-FT-LAST-MISS-REBOUND","RULE-FT-LAST-MAKE-INBOUND","RULE-FT-SHOOTER-TIME-LIMIT"],"missing_scenarios":["RULE-FT-DOUBLE-VIOLATION","RULE-FT-SHOOTER-REPLACEMENT"],"scenario_tests":{"RULE-FT-LANE-VIOLATION":"nba_sim_core::rule_violations::an_early_defensive_entry_awards_another_free_throw","RULE-FT-LAST-MISS-REBOUND":"nba_sim_core::runtime_tables::an_eligible_missed_final_free_throw_enters_live_rebound_state","RULE-FT-LAST-MAKE-INBOUND":"nba_sim_core::rule_violations::the_last_made_free_throw_sends_the_other_team_to_its_own_baseline","RULE-FT-SHOOTER-TIME-LIMIT":"nba_sim_core::rules_matrix::a_free_throw_shooter_who_never_releases_is_called_for_delay"}},
-    {"id":"PROC-TIMEOUT","name":"球队暂停、强制暂停与暂停后继续","nba":["Rule 5 §VI-VIII"],"fiba":["Article 18"],"scenarios":["RULE-TIMEOUT-NBA-REGULATION-BUDGET","RULE-TIMEOUT-NBA-FOURTH-QUARTER-CAP","RULE-TIMEOUT-NBA-MANDATORY","RULE-TIMEOUT-NBA-OVERTIME-BUDGET","RULE-TIMEOUT-FIBA-HALF-BUDGET","RULE-TIMEOUT-FIBA-FOURTH-QUARTER-CAP","RULE-TIMEOUT-RESUME-SAVED-PROGRAM"],"implementation":"partial","existing_test":"nba_sim_core::rules_flow::only_the_team_in_control_may_stop_the_clock_and_the_budget_is_capped","scenario_status":{"passing":["RULE-TIMEOUT-NBA-REGULATION-BUDGET","RULE-TIMEOUT-NBA-FOURTH-QUARTER-CAP","RULE-TIMEOUT-RESUME-SAVED-PROGRAM"],"missing":["RULE-TIMEOUT-NBA-MANDATORY","RULE-TIMEOUT-NBA-OVERTIME-BUDGET","RULE-TIMEOUT-FIBA-HALF-BUDGET","RULE-TIMEOUT-FIBA-FOURTH-QUARTER-CAP"]}},
-    {"id":"PROC-SUBSTITUTION","name":"换人资格、暂停窗口与犯满离场","nba":["Rule 3 §I, §V"],"fiba":["Articles 19, 41"],"scenarios":["RULE-SUB-LIVE-BALL-BLOCKED","RULE-SUB-DEAD-BALL-ALLOWED","RULE-SUB-DISQUALIFIED-PLAYER","RULE-SUB-PLAYER-FOUL-LIMIT","RULE-SUB-REQUIRED-FREE-THROW-REPLACEMENT"],"implementation":"partial","existing_test":"nba_sim_core::rules_flow::one_hundred_full_games_never_change_the_lineup_while_the_ball_is_live","scenario_status":{"passing":["RULE-SUB-LIVE-BALL-BLOCKED","RULE-SUB-DEAD-BALL-ALLOWED"],"missing":["RULE-SUB-DISQUALIFIED-PLAYER","RULE-SUB-PLAYER-FOUL-LIMIT","RULE-SUB-REQUIRED-FREE-THROW-REPLACEMENT"]}},
-    {"id":"PROC-REVIEW","name":"录像复核、教练挑战与裁决更正","nba":["Rule 13; Rule 14"],"fiba":["Appendix F"],"scenarios":["RULE-REVIEW-ELIGIBLE-CLOCK-EXPIRATION","RULE-REVIEW-NBA-CHALLENGE-COST","RULE-REVIEW-FIBA-IRS-CLEAR-EVIDENCE","RULE-REVIEW-PRESERVE-ORIGINAL-RULING"],"implementation":"implemented","passing_scenarios":["RULE-REVIEW-ELIGIBLE-CLOCK-EXPIRATION","RULE-REVIEW-NBA-CHALLENGE-COST","RULE-REVIEW-FIBA-IRS-CLEAR-EVIDENCE","RULE-REVIEW-PRESERVE-ORIGINAL-RULING"],"missing_scenarios":[],"scenario_tests":{"RULE-REVIEW-ELIGIBLE-CLOCK-EXPIRATION":"nba_sim_core::challenge::a_challenge_outside_the_window_is_rejected","RULE-REVIEW-NBA-CHALLENGE-COST":"nba_sim_core::challenge::a_failed_challenge_keeps_the_ruling_and_costs_a_timeout","RULE-REVIEW-FIBA-IRS-CLEAR-EVIDENCE":"nba_sim_core::challenge::a_ruling_free_stoppage_has_nothing_to_review","RULE-REVIEW-PRESERVE-ORIGINAL-RULING":"nba_sim_core::challenge::a_review_leaves_the_possession_and_phase_untouched"}},
-    {"id":"PROC-PERIOD-FINALIZE","name":"节末待决事项与终场","nba":["Rule 5 §III-IV; Rule 13"],"fiba":["Articles 8-9, 45-46"],"scenarios":["RULE-PERIOD-ZERO-DEAD-BALL","RULE-PERIOD-SHOT-IN-FLIGHT","RULE-PERIOD-FOUL-BEFORE-HORN","RULE-PERIOD-TIED-ENTERS-OT","RULE-GAME-END-FREEZES-SCORE"],"implementation":"implemented","passing_scenarios":["RULE-PERIOD-SHOT-IN-FLIGHT","RULE-PERIOD-FOUL-BEFORE-HORN","RULE-PERIOD-ZERO-DEAD-BALL","RULE-GAME-END-FREEZES-SCORE","RULE-PERIOD-TIED-ENTERS-OT"],"missing_scenarios":[],"scenario_tests":{"RULE-PERIOD-SHOT-IN-FLIGHT":"nba_sim_core::jump_ball::unresolved_live_shot_is_settled_before_period_break","RULE-PERIOD-FOUL-BEFORE-HORN":"nba_sim_core::rule_violations::a_foul_before_the_horn_still_produces_free_throws","RULE-PERIOD-ZERO-DEAD-BALL":"nba_sim_core::rule_violations::the_period_ends_when_the_clock_hits_zero_during_a_dead_ball","RULE-GAME-END-FREEZES-SCORE":"nba_sim_core::rule_violations::the_final_score_does_not_change_after_the_game_ends","RULE-PERIOD-TIED-ENTERS-OT":"nba_sim_core::rules_matrix::a_tied_regulation_end_enters_overtime"}}
+    {
+      "id": "PROC-PREGAME",
+      "name": "赛前与名单检查",
+      "nba": [
+        "Rule 2",
+        "Rule 3"
+      ],
+      "fiba": [
+        "Articles 3-7"
+      ],
+      "scenarios": [
+        "RULE-PREGAME-ACTIVE-LIST",
+        "RULE-PREGAME-ROSTER-LIMIT",
+        "RULE-PREGAME-INELIGIBLE-PLAYER"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-PREGAME-ACTIVE-LIST",
+        "RULE-PREGAME-ROSTER-LIMIT",
+        "RULE-PREGAME-INELIGIBLE-PLAYER"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-PREGAME-ACTIVE-LIST": "nba_sim_core::pregame::a_duplicated_starter_is_rejected",
+        "RULE-PREGAME-ROSTER-LIMIT": "nba_sim_core::pregame::a_roster_over_the_league_limit_is_rejected",
+        "RULE-PREGAME-INELIGIBLE-PLAYER": "nba_sim_core::pregame::a_duplicated_jersey_is_rejected"
+      }
+    },
+    {
+      "id": "PROC-OPENING-JUMP",
+      "name": "开场跳球",
+      "nba": [
+        "Rule 6 §I, §V, §VII"
+      ],
+      "fiba": [
+        "Articles 9, 12"
+      ],
+      "scenarios": [
+        "RULE-JUMP-LEGAL-TAP",
+        "RULE-JUMP-EARLY-TOUCH",
+        "RULE-JUMP-DOUBLE-VIOLATION",
+        "RULE-JUMP-ARROW-INITIALIZATION",
+        "RULE-JUMP-OPENING-POSSESSION-ESTABLISHED",
+        "RULE-JUMP-FIBA-ARROW-AFTER-OPENING"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-JUMP-ARROW-INITIALIZATION",
+        "RULE-JUMP-DOUBLE-VIOLATION",
+        "RULE-JUMP-EARLY-TOUCH",
+        "RULE-JUMP-FIBA-ARROW-AFTER-OPENING",
+        "RULE-JUMP-LEGAL-TAP",
+        "RULE-JUMP-OPENING-POSSESSION-ESTABLISHED"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-JUMP-OPENING-POSSESSION-ESTABLISHED": "nba_sim_core::jump_ball::nba_opening_possession_is_established_by_a_resolved_center_jump_ball",
+        "RULE-JUMP-FIBA-ARROW-AFTER-OPENING": "nba_sim_core::jump_ball::fiba_period_starts_follow_the_alternating_possession_arrow",
+        "RULE-JUMP-LEGAL-TAP": "nba_sim_core::jump_ball_scenarios::the_jump_ball_tapper_is_one_of_the_two_jumpers",
+        "RULE-JUMP-EARLY-TOUCH": "nba_sim_core::jump_ball_scenarios::the_game_clock_starts_at_the_tap_and_not_before",
+        "RULE-JUMP-DOUBLE-VIOLATION": "nba_sim_core::jump_ball_scenarios::a_double_violation_repeats_the_jump_with_the_same_jumpers",
+        "RULE-JUMP-ARROW-INITIALIZATION": "nba_sim_core::jump_ball_scenarios::the_alternate_possession_arrow_starts_with_the_opponent_of_the_first_possession"
+      }
+    },
+    {
+      "id": "PROC-PERIOD-START",
+      "name": "节次开始与发球权",
+      "nba": [
+        "Rule 6 §I"
+      ],
+      "fiba": [
+        "Articles 9, 12"
+      ],
+      "scenarios": [
+        "RULE-PERIOD-NBA-START-ALLOCATION",
+        "RULE-PERIOD-FIBA-ARROW-THROW-IN",
+        "RULE-PERIOD-BASKET-DIRECTION",
+        "RULE-PERIOD-NBA-SECOND-AND-THIRD-ALLOCATION",
+        "RULE-PERIOD-FIBA-SECOND-AND-THIRD-ARROW-THROW-IN",
+        "RULE-PERIOD-ARROW-REJUMP-UPDATE"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-PERIOD-ARROW-REJUMP-UPDATE",
+        "RULE-PERIOD-BASKET-DIRECTION",
+        "RULE-PERIOD-FIBA-ARROW-THROW-IN",
+        "RULE-PERIOD-FIBA-SECOND-AND-THIRD-ARROW-THROW-IN",
+        "RULE-PERIOD-NBA-SECOND-AND-THIRD-ALLOCATION",
+        "RULE-PERIOD-NBA-START-ALLOCATION"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-PERIOD-NBA-SECOND-AND-THIRD-ALLOCATION": "nba_sim_core::jump_ball::nba_non_overtime_periods_alternate_the_opening_throw_in",
+        "RULE-PERIOD-FIBA-SECOND-AND-THIRD-ARROW-THROW-IN": "nba_sim_core::jump_ball::fiba_period_starts_follow_the_alternating_possession_arrow",
+        "RULE-PERIOD-BASKET-DIRECTION": "nba_sim_core::rules_matrix::the_second_period_switches_basket_direction",
+        "RULE-PERIOD-ARROW-REJUMP-UPDATE": "nba_sim_core::period_start_scenarios::the_alternate_possession_arrow_advances_each_period",
+        "RULE-PERIOD-NBA-START-ALLOCATION": "nba_sim_core::period_start_scenarios::the_nba_opens_the_second_period_with_a_throw_in",
+        "RULE-PERIOD-FIBA-ARROW-THROW-IN": "nba_sim_core::period_start_scenarios::the_fiba_opens_later_periods_with_the_alternate_possession_arrow"
+      }
+    },
+    {
+      "id": "PROC-OVERTIME",
+      "name": "加时与平分后续比赛",
+      "nba": [
+        "Rule 5 §II, §IV; Rule 6 §I"
+      ],
+      "fiba": [
+        "Articles 8, 9, 12"
+      ],
+      "scenarios": [
+        "RULE-OT-NBA-FIVE-MINUTES",
+        "RULE-OT-FIBA-FIVE-MINUTES",
+        "RULE-OT-TIED-REPEATS",
+        "RULE-OT-FOUL-COUNTERS",
+        "RULE-OT-TIMEOUT-BUDGET",
+        "RULE-OT-NBA-CENTER-JUMP-START",
+        "RULE-OT-POSSESSION-COUNTED-ON-CONTROL"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-OT-NBA-FIVE-MINUTES",
+        "RULE-OT-NBA-CENTER-JUMP-START",
+        "RULE-OT-POSSESSION-COUNTED-ON-CONTROL",
+        "RULE-OT-FIBA-FIVE-MINUTES",
+        "RULE-OT-TIED-REPEATS",
+        "RULE-OT-TIMEOUT-BUDGET",
+        "RULE-OT-FOUL-COUNTERS"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-OT-NBA-FIVE-MINUTES": "nba_sim_core::jump_ball::nba_overtime_starts_with_a_fresh_jump_ball",
+        "RULE-OT-NBA-CENTER-JUMP-START": "nba_sim_core::jump_ball::nba_overtime_starts_with_a_fresh_jump_ball",
+        "RULE-OT-POSSESSION-COUNTED-ON-CONTROL": "nba_sim_core::jump_ball::nba_overtime_starts_with_a_fresh_jump_ball",
+        "RULE-OT-FIBA-FIVE-MINUTES": "nba_sim_core::rules_matrix::fiba_overtime_is_five_minutes",
+        "RULE-OT-TIED-REPEATS": "nba_sim_core::rules_matrix::a_tied_regulation_end_enters_overtime",
+        "RULE-OT-TIMEOUT-BUDGET": "nba_sim_core::rules_matrix::overtime_timeouts_follow_the_league_budget",
+        "RULE-OT-FOUL-COUNTERS": "nba_sim_core::rules_matrix::team_period_fouls_reset_at_the_next_period"
+      }
+    },
+    {
+      "id": "PROC-GAME-CLOCK",
+      "name": "比赛时钟运行、停止与启动",
+      "nba": [
+        "Rule 5 §II, §V, §VIII; Rule 6 §II-IV"
+      ],
+      "fiba": [
+        "Articles 8-10, 50"
+      ],
+      "scenarios": [
+        "RULE-CLOCK-PASS-FLIGHT-RUNS",
+        "RULE-CLOCK-FREE-THROW-FLIGHT-STOPPED",
+        "RULE-CLOCK-INBOUND-LEGAL-TOUCH",
+        "RULE-CLOCK-MADE-GOAL-LATE-PERIOD",
+        "RULE-CLOCK-WHISTLE-STOPS"
+      ],
+      "implementation": "implemented",
+      "scenario_tests": {
+        "RULE-CLOCK-PASS-FLIGHT-RUNS": "nba_sim_core::clock_scenarios::the_game_clock_runs_during_a_pass_in_flight",
+        "RULE-CLOCK-FREE-THROW-FLIGHT-STOPPED": "nba_sim_core::clock_scenarios::the_game_clock_stops_during_a_free_throw",
+        "RULE-CLOCK-INBOUND-LEGAL-TOUCH": "nba_sim_core::clock_scenarios::the_inbound_starts_the_clock_when_the_ball_is_touched_in_play",
+        "RULE-CLOCK-MADE-GOAL-LATE-PERIOD": "nba_sim_core::clock_scenarios::the_game_clock_runs_but_the_shot_clock_stops_during_a_shot_in_flight",
+        "RULE-CLOCK-WHISTLE-STOPS": "nba_sim_core::clock_scenarios::a_whistle_stops_the_game_clock"
+      },
+      "missing_scenarios": [],
+      "passing_scenarios": [
+        "RULE-CLOCK-FREE-THROW-FLIGHT-STOPPED",
+        "RULE-CLOCK-INBOUND-LEGAL-TOUCH",
+        "RULE-CLOCK-MADE-GOAL-LATE-PERIOD",
+        "RULE-CLOCK-PASS-FLIGHT-RUNS",
+        "RULE-CLOCK-WHISTLE-STOPS"
+      ]
+    },
+    {
+      "id": "PROC-SHOT-CLOCK",
+      "name": "进攻时钟启动、继续与重置",
+      "nba": [
+        "Rule 7 §II-IV"
+      ],
+      "fiba": [
+        "Article 29"
+      ],
+      "scenarios": [
+        "RULE-SHOT-CLOCK-NEW-CONTROL-24",
+        "RULE-SHOT-CLOCK-RIM-REBOUND-14",
+        "RULE-SHOT-CLOCK-FRONTCOURT-FOUL",
+        "RULE-SHOT-CLOCK-BACKCOURT-RESET",
+        "RULE-SHOT-CLOCK-DEFLECTION-CONTINUES",
+        "RULE-SHOT-CLOCK-SIGNAL-AFTER-RELEASE"
+      ],
+      "implementation": "implemented",
+      "existing_test": "nba_sim_core::rules_flow::a_second_chance_clock_only_resets_when_the_ball_touched_the_rim",
+      "scenario_tests": {
+        "RULE-SHOT-CLOCK-NEW-CONTROL-24": "nba_sim_core::clock_scenarios::a_new_control_starts_the_shot_clock_at_twenty_four_seconds",
+        "RULE-SHOT-CLOCK-RIM-REBOUND-14": "nba_sim_core::clock_scenarios::an_offensive_rebound_off_the_rim_refills_the_shot_clock_to_fourteen",
+        "RULE-SHOT-CLOCK-FRONTCOURT-FOUL": "nba_sim_core::clock_scenarios::an_offensive_rebound_that_missed_the_rim_leaves_the_shot_clock_alone",
+        "RULE-SHOT-CLOCK-BACKCOURT-RESET": "nba_sim_core::clock_scenarios::a_new_control_starts_the_shot_clock_at_twenty_four_seconds",
+        "RULE-SHOT-CLOCK-DEFLECTION-CONTINUES": "nba_sim_core::clock_scenarios::an_offensive_rebound_that_missed_the_rim_leaves_the_shot_clock_alone",
+        "RULE-SHOT-CLOCK-SIGNAL-AFTER-RELEASE": "nba_sim_core::clock_scenarios::the_shot_clock_violation_ends_the_possession"
+      },
+      "missing_scenarios": [],
+      "passing_scenarios": [
+        "RULE-SHOT-CLOCK-BACKCOURT-RESET",
+        "RULE-SHOT-CLOCK-DEFLECTION-CONTINUES",
+        "RULE-SHOT-CLOCK-FRONTCOURT-FOUL",
+        "RULE-SHOT-CLOCK-NEW-CONTROL-24",
+        "RULE-SHOT-CLOCK-RIM-REBOUND-14",
+        "RULE-SHOT-CLOCK-SIGNAL-AFTER-RELEASE"
+      ]
+    },
+    {
+      "id": "PROC-BACKCOURT-CLOCK",
+      "name": "后场推进计时",
+      "nba": [
+        "Rule 10 §VIII"
+      ],
+      "fiba": [
+        "Article 28"
+      ],
+      "scenarios": [
+        "RULE-BACKCOURT-8S-EXPIRES",
+        "RULE-BACKCOURT-CROSSES-BEFORE-8S",
+        "RULE-BACKCOURT-CLOCK-RESET-DEFENSE-FOUL",
+        "RULE-BACKCOURT-CLOCK-RESET-KICK"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-BACKCOURT-8S-EXPIRES",
+        "RULE-BACKCOURT-CLOCK-RESET-DEFENSE-FOUL",
+        "RULE-BACKCOURT-CLOCK-RESET-KICK",
+        "RULE-BACKCOURT-CROSSES-BEFORE-8S"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-BACKCOURT-8S-EXPIRES": "nba_sim_core::rule_violations::a_backcourt_possession_that_never_advances_is_an_eight_second_violation",
+        "RULE-BACKCOURT-CROSSES-BEFORE-8S": "nba_sim_core::rules_matrix::crossing_midcourt_clears_the_eight_second_count",
+        "RULE-BACKCOURT-CLOCK-RESET-DEFENSE-FOUL": "nba_sim_core::rules_matrix::a_defensive_foul_restarts_the_eight_second_count",
+        "RULE-BACKCOURT-CLOCK-RESET-KICK": "nba_sim_core::backcourt_clock_scenarios::a_defensive_kick_restarts_the_eight_second_count"
+      }
+    },
+    {
+      "id": "PROC-LANE-CLOCKS",
+      "name": "限制区与持球连续计时",
+      "nba": [
+        "Rule 10 §VI-VII, §XVI"
+      ],
+      "fiba": [
+        "Articles 26, 27"
+      ],
+      "scenarios": [
+        "RULE-OFFENSE-3S-EXPIRES",
+        "RULE-OFFENSE-3S-LEGAL-EXIT",
+        "RULE-DEFENSE-3S-NBA-TECHNICAL",
+        "RULE-CLOSE-GUARD-5S-FIBA",
+        "RULE-POST-UP-5S-NBA"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-CLOSE-GUARD-5S-FIBA",
+        "RULE-DEFENSE-3S-NBA-TECHNICAL",
+        "RULE-OFFENSE-3S-EXPIRES",
+        "RULE-OFFENSE-3S-LEGAL-EXIT",
+        "RULE-POST-UP-5S-NBA"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-CLOSE-GUARD-5S-FIBA": "nba_sim_core::action_scenarios::holding_the_ball_closely_guarded_for_five_seconds_is_a_violation",
+        "RULE-OFFENSE-3S-EXPIRES": "nba_sim_core::lane_clock::an_offensive_player_who_stays_in_the_lane_for_three_seconds_is_a_violation",
+        "RULE-OFFENSE-3S-LEGAL-EXIT": "nba_sim_core::lane_clock::an_offensive_player_who_leaves_the_lane_in_time_is_not_a_violation",
+        "RULE-DEFENSE-3S-NBA-TECHNICAL": "nba_sim_core::lane_clock::a_defender_who_stays_in_the_lane_without_guarding_is_a_technical_foul",
+        "RULE-POST-UP-5S-NBA": "nba_sim_core::back_to_basket::a_handler_dribbling_with_his_back_to_the_basket_for_five_seconds_is_a_violation"
+      }
+    },
+    {
+      "id": "PROC-FIELD-GOAL",
+      "name": "投篮与得分裁决",
+      "nba": [
+        "Rule 5 §I, §III; Rule 11"
+      ],
+      "fiba": [
+        "Articles 15, 16, 31"
+      ],
+      "scenarios": [
+        "RULE-SHOT-2-POINT",
+        "RULE-SHOT-3-POINT-FOOT-STATUS",
+        "RULE-SHOT-PERIOD-END-IN-FLIGHT",
+        "RULE-SHOT-MAKE-ON-RING-PLANE",
+        "RULE-SHOT-BLOCK-AND-REBOUND"
+      ],
+      "implementation": "implemented",
+      "scenario_tests": {
+        "RULE-SHOT-2-POINT": "nba_sim_core::shot_scenarios::a_shot_from_inside_the_arc_is_worth_two_points",
+        "RULE-SHOT-3-POINT-FOOT-STATUS": "nba_sim_core::shot_scenarios::a_shot_from_behind_the_arc_is_worth_three_points",
+        "RULE-SHOT-PERIOD-END-IN-FLIGHT": "nba_sim_core::shot_scenarios::a_blocked_shot_leaves_the_ball_loose",
+        "RULE-SHOT-MAKE-ON-RING-PLANE": "nba_sim_core::shot_scenarios::a_corner_shot_behind_the_arc_is_worth_three_points",
+        "RULE-SHOT-BLOCK-AND-REBOUND": "nba_sim_core::shot_scenarios::a_blocked_shot_leaves_the_ball_loose"
+      },
+      "missing_scenarios": [],
+      "passing_scenarios": [
+        "RULE-SHOT-2-POINT",
+        "RULE-SHOT-3-POINT-FOOT-STATUS",
+        "RULE-SHOT-BLOCK-AND-REBOUND",
+        "RULE-SHOT-MAKE-ON-RING-PLANE",
+        "RULE-SHOT-PERIOD-END-IN-FLIGHT"
+      ]
+    },
+    {
+      "id": "PROC-GOALTENDING",
+      "name": "干扰球与篮筐干涉",
+      "nba": [
+        "Rule 11"
+      ],
+      "fiba": [
+        "Article 31"
+      ],
+      "scenarios": [
+        "RULE-GOALTENDING-DOWNWARD-FLIGHT",
+        "RULE-GOALTENDING-AFTER-BACKBOARD",
+        "RULE-INTERFERENCE-BALL-ON-RING",
+        "RULE-GOALTENDING-NO-VIOLATION-UPWARD"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-GOALTENDING-AFTER-BACKBOARD",
+        "RULE-GOALTENDING-DOWNWARD-FLIGHT",
+        "RULE-GOALTENDING-NO-VIOLATION-UPWARD",
+        "RULE-INTERFERENCE-BALL-ON-RING"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-GOALTENDING-DOWNWARD-FLIGHT": "nba_sim_core::rule_violations::touching_a_descending_shot_inside_the_cylinder_is_goaltending",
+        "RULE-GOALTENDING-NO-VIOLATION-UPWARD": "nba_sim_core::rule_violations::an_ascending_ball_may_be_blocked_without_goaltending",
+        "RULE-GOALTENDING-AFTER-BACKBOARD": "nba_sim_core::shot_scenarios::touching_a_descending_shot_inside_the_cylinder_is_goaltending",
+        "RULE-INTERFERENCE-BALL-ON-RING": "nba_sim_core::shot_scenarios::a_ball_outside_the_cylinder_is_not_goaltending"
+      }
+    },
+    {
+      "id": "PROC-PASS-CONTROL",
+      "name": "传球、触球与控制建立",
+      "nba": [
+        "Rule 4 §XV-XVII; Rule 7 §II"
+      ],
+      "fiba": [
+        "Articles 10, 13, 14"
+      ],
+      "scenarios": [
+        "RULE-PASS-CAUGHT-CONTROL",
+        "RULE-PASS-TIPPED-LOOSE",
+        "RULE-PASS-INTERCEPTED",
+        "RULE-PASS-DROPPED-LOOSE",
+        "RULE-PASS-OUT-OF-BOUNDS"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-PASS-CAUGHT-CONTROL",
+        "RULE-PASS-DROPPED-LOOSE",
+        "RULE-PASS-INTERCEPTED",
+        "RULE-PASS-OUT-OF-BOUNDS",
+        "RULE-PASS-TIPPED-LOOSE"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-PASS-CAUGHT-CONTROL": "nba_sim_core::ball_physics::pass_is_caught_or_intercepted_by_swept_contact",
+        "RULE-PASS-INTERCEPTED": "nba_sim_core::ball_physics::pass_is_caught_or_intercepted_by_swept_contact",
+        "RULE-PASS-TIPPED-LOOSE": "nba_sim_core::action_scenarios::a_deflected_pass_becomes_a_loose_ball_decided_by_control",
+        "RULE-PASS-DROPPED-LOOSE": "nba_sim_core::rules_matrix::a_pass_nobody_controls_becomes_loose",
+        "RULE-PASS-OUT-OF-BOUNDS": "nba_sim_core::boundary_scenarios::a_ball_out_of_bounds_goes_to_the_opponent_of_the_last_touch"
+      },
+      "existing_test": "nba_sim_core::action_chain::cut_uses_lob_flight_and_received_fact_before_control"
+    },
+    {
+      "id": "PROC-OUT-OF-BOUNDS",
+      "name": "出界归属、地点与恢复",
+      "nba": [
+        "Rule 8 §I-II; Rule 10 §I"
+      ],
+      "fiba": [
+        "Articles 23, 17"
+      ],
+      "scenarios": [
+        "RULE-OOB-LAST-TOUCH",
+        "RULE-OOB-SIMULTANEOUS-TOUCH",
+        "RULE-OOB-SIDELINE-LOCATION",
+        "RULE-OOB-BASELINE-LOCATION",
+        "RULE-OOB-BACKBOARD-OUT"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-OOB-BACKBOARD-OUT",
+        "RULE-OOB-BASELINE-LOCATION",
+        "RULE-OOB-LAST-TOUCH",
+        "RULE-OOB-SIDELINE-LOCATION",
+        "RULE-OOB-SIMULTANEOUS-TOUCH"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-OOB-LAST-TOUCH": "nba_sim_core::rule_violations::a_loose_ball_over_the_sideline_hands_possession_to_the_opponent",
+        "RULE-OOB-SIDELINE-LOCATION": "nba_sim_core::rule_violations::a_loose_ball_over_the_sideline_hands_possession_to_the_opponent",
+        "RULE-OOB-BASELINE-LOCATION": "nba_sim_core::rule_violations::a_ball_leaving_behind_the_baseline_inbounds_from_that_baseline",
+        "RULE-OOB-SIMULTANEOUS-TOUCH": "nba_sim_core::boundary_scenarios::a_ball_touched_by_the_defence_out_of_bounds_keeps_the_offence_in_possession",
+        "RULE-OOB-BACKBOARD-OUT": "nba_sim_core::boundary_scenarios::a_shot_that_leaves_the_court_is_not_a_turnover"
+      }
+    },
+    {
+      "id": "PROC-INBOUND",
+      "name": "界外发球与发球违例",
+      "nba": [
+        "Rule 6 §I-II; Rule 8 §III; Rule 10 §III"
+      ],
+      "fiba": [
+        "Articles 17, 9"
+      ],
+      "scenarios": [
+        "RULE-INBOUND-AFTER-MADE-GOAL-ENDLINE",
+        "RULE-INBOUND-FOUL-SPOT",
+        "RULE-INBOUND-TIMEOUT-FRONTCOURT-OPTION",
+        "RULE-INBOUND-FIVE-SECONDS",
+        "RULE-INBOUND-STEP-ON-LINE",
+        "RULE-INBOUND-UNTOUCHED-OUT"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-INBOUND-AFTER-MADE-GOAL-ENDLINE",
+        "RULE-INBOUND-FIVE-SECONDS",
+        "RULE-INBOUND-FOUL-SPOT",
+        "RULE-INBOUND-STEP-ON-LINE",
+        "RULE-INBOUND-TIMEOUT-FRONTCOURT-OPTION",
+        "RULE-INBOUND-UNTOUCHED-OUT"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-INBOUND-AFTER-MADE-GOAL-ENDLINE": "nba_sim_core::rule_violations::a_made_basket_inbounds_from_the_conceding_baseline",
+        "RULE-INBOUND-FOUL-SPOT": "nba_sim_core::rule_violations::a_frontcourt_foul_inbounds_from_the_nearest_sideline",
+        "RULE-INBOUND-TIMEOUT-FRONTCOURT-OPTION": "nba_sim_core::rule_violations::a_late_timeout_may_inbound_in_the_frontcourt",
+        "RULE-INBOUND-FIVE-SECONDS": "nba_sim_core::boundary_scenarios::the_inbound_five_second_clock_expires_into_a_turnover",
+        "RULE-INBOUND-STEP-ON-LINE": "nba_sim_core::boundary_scenarios::the_inbound_clock_is_started_when_the_procedure_begins",
+        "RULE-INBOUND-UNTOUCHED-OUT": "nba_sim_core::boundary_scenarios::a_ball_out_of_bounds_goes_to_the_opponent_of_the_last_touch"
+      }
+    },
+    {
+      "id": "PROC-DRIBBLE-FOOTWORK",
+      "name": "运球、收球、走步与回场",
+      "nba": [
+        "Rule 4 §II, §V, §VII-IX; Rule 10 §II, §IX, §XIII"
+      ],
+      "fiba": [
+        "Articles 24, 25, 30"
+      ],
+      "scenarios": [
+        "RULE-DRIBBLE-SECOND-DRIBBLE",
+        "RULE-DRIBBLE-CARRYING",
+        "RULE-DRIBBLE-LEGAL-RECOVERY",
+        "RULE-TRAVEL-GATHER-STEPS",
+        "RULE-BACKCOURT-RETURN-TEAM-CONTROL"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-BACKCOURT-RETURN-TEAM-CONTROL",
+        "RULE-DRIBBLE-CARRYING",
+        "RULE-DRIBBLE-LEGAL-RECOVERY",
+        "RULE-DRIBBLE-SECOND-DRIBBLE",
+        "RULE-TRAVEL-GATHER-STEPS"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-DRIBBLE-SECOND-DRIBBLE": "nba_sim_core::engine::double_dribble_after_gather_is_a_turnover",
+        "RULE-TRAVEL-GATHER-STEPS": "nba_sim_core::action_scenarios::only_gather_steps_beyond_the_allowance_are_travels",
+        "RULE-BACKCOURT-RETURN-TEAM-CONTROL": "nba_sim_core::rule_violations::carrying_the_ball_back_over_half_court_is_a_backcourt_violation",
+        "RULE-DRIBBLE-CARRYING": "nba_sim_core::boundary_scenarios::a_second_dribble_after_a_gather_is_a_turnover",
+        "RULE-DRIBBLE-LEGAL-RECOVERY": "nba_sim_core::boundary_scenarios::a_legal_recovery_after_a_loose_ball_is_not_a_dribble_violation"
+      }
+    },
+    {
+      "id": "PROC-FOUL-PERSONAL",
+      "name": "个人、投篮、进攻与松球犯规",
+      "nba": [
+        "Rule 12B §I-III, §VII-VIII"
+      ],
+      "fiba": [
+        "Articles 32-35, 42-43"
+      ],
+      "scenarios": [
+        "RULE-FOUL-SHOOTING-2PT",
+        "RULE-FOUL-SHOOTING-3PT",
+        "RULE-FOUL-AND-ONE",
+        "RULE-FOUL-OFFENSIVE-NO-TEAM-COUNT-NBA",
+        "RULE-FOUL-LOOSE-BALL-PENALTY",
+        "RULE-FOUL-DOUBLE-RETAINS-CONTROL"
+      ],
+      "implementation": "implemented",
+      "existing_test": "nba_sim_core::rules_flow::an_offensive_foul_counts_personally_but_never_sends_the_other_team_to_the_line",
+      "scenario_tests": {
+        "RULE-FOUL-SHOOTING-2PT": "nba_sim_core::foul_scenarios::a_shooting_foul_on_a_two_point_shot_awards_two_free_throws",
+        "RULE-FOUL-SHOOTING-3PT": "nba_sim_core::foul_scenarios::a_shooting_foul_on_a_three_point_shot_awards_three_free_throws",
+        "RULE-FOUL-AND-ONE": "nba_sim_core::foul_scenarios::a_shooting_foul_on_a_made_shot_awards_one_extra_free_throw",
+        "RULE-FOUL-LOOSE-BALL-PENALTY": "nba_sim_core::foul_scenarios::a_loose_ball_foul_counts_against_the_team_and_awards_one_free_throw_in_the_bonus",
+        "RULE-FOUL-DOUBLE-RETAINS-CONTROL": "nba_sim_core::foul_scenarios::a_double_foul_leaves_the_offence_in_possession",
+        "RULE-FOUL-OFFENSIVE-NO-TEAM-COUNT-NBA": "nba_sim_core::rules_flow::an_offensive_foul_counts_personally_but_never_sends_the_other_team_to_the_line"
+      },
+      "missing_scenarios": [],
+      "passing_scenarios": [
+        "RULE-FOUL-AND-ONE",
+        "RULE-FOUL-DOUBLE-RETAINS-CONTROL",
+        "RULE-FOUL-LOOSE-BALL-PENALTY",
+        "RULE-FOUL-OFFENSIVE-NO-TEAM-COUNT-NBA",
+        "RULE-FOUL-SHOOTING-2PT",
+        "RULE-FOUL-SHOOTING-3PT"
+      ]
+    },
+    {
+      "id": "PROC-FOUL-TEAM-PENALTY",
+      "name": "球队犯规罚则与加时累计",
+      "nba": [
+        "Rule 12B §V"
+      ],
+      "fiba": [
+        "Articles 41-42"
+      ],
+      "scenarios": [
+        "RULE-TEAM-FOUL-NBA-FIFTH-REGULATION",
+        "RULE-TEAM-FOUL-NBA-FOURTH-OVERTIME",
+        "RULE-TEAM-FOUL-NBA-FINAL-TWO-MINUTES",
+        "RULE-TEAM-FOUL-FIBA-FIFTH-QUARTER",
+        "RULE-TEAM-FOUL-FIBA-OVERTIME-CARRIES-Q4"
+      ],
+      "implementation": "implemented",
+      "existing_test": "nba_sim_core::rules_flow::the_fifth_team_foul_awards_free_throws_while_the_fourth_only_restarts_play",
+      "scenario_status": {
+        "passing": [
+          "RULE-TEAM-FOUL-NBA-FIFTH-REGULATION",
+          "RULE-TEAM-FOUL-NBA-FOURTH-OVERTIME",
+          "RULE-TEAM-FOUL-NBA-FINAL-TWO-MINUTES",
+          "RULE-TEAM-FOUL-FIBA-FIFTH-QUARTER",
+          "RULE-TEAM-FOUL-FIBA-OVERTIME-CARRIES-Q4"
+        ],
+        "missing": []
+      },
+      "scenario_tests": {
+        "RULE-TEAM-FOUL-NBA-FIFTH-REGULATION": "nba_sim_core::rule_matrix::team_foul_bonus_thresholds_cover_before_at_and_after_threshold",
+        "RULE-TEAM-FOUL-NBA-FOURTH-OVERTIME": "nba_sim_core::rule_matrix::nba_overtime_uses_its_own_team_foul_threshold",
+        "RULE-TEAM-FOUL-NBA-FINAL-TWO-MINUTES": "nba_sim_core::rule_matrix::nba_final_two_minutes_use_the_stricter_team_foul_threshold",
+        "RULE-TEAM-FOUL-FIBA-FIFTH-QUARTER": "nba_sim_core::rule_matrix::fiba_quarter_team_foul_threshold_is_the_fifth_foul",
+        "RULE-TEAM-FOUL-FIBA-OVERTIME-CARRIES-Q4": "nba_sim_core::rule_matrix::fiba_overtime_fouls_carry_into_the_fourth_quarter_total"
+      }
+    },
+    {
+      "id": "PROC-FOUL-SPECIAL",
+      "name": "技术、恶意、转换与特殊犯规",
+      "nba": [
+        "Rule 12A; Rule 12B §IV, §IX-X"
+      ],
+      "fiba": [
+        "Articles 36-40"
+      ],
+      "scenarios": [
+        "RULE-TECHNICAL-FREE-THROW-AND-RESUME",
+        "RULE-FLAGRANT-1-AND-2",
+        "RULE-CLEAR-PATH-FREE-THROWS-AND-POSSESSION",
+        "RULE-AWAY-FROM-PLAY-ONE-AND-POSSESSION",
+        "RULE-FIBA-DISRUPTIVE-FOUL",
+        "RULE-FIBA-FLAGRANT-FOUL-DISQUALIFICATION",
+        "RULE-FLAGRANT-2-EJECTION"
+      ],
+      "implementation": "implemented",
+      "existing_test": "nba_sim_core::rules_flow::an_away_from_play_foul_in_the_last_two_minutes_is_one_free_throw_and_the_ball",
+      "scenario_tests": {
+        "RULE-TECHNICAL-FREE-THROW-AND-RESUME": "nba_sim_core::foul_scenarios::a_technical_foul_awards_one_free_throw_and_the_offence_keeps_the_ball",
+        "RULE-FLAGRANT-1-AND-2": "nba_sim_core::foul_scenarios::a_flagrant_foul_awards_two_free_throws",
+        "RULE-FLAGRANT-2-EJECTION": "nba_sim_core::foul_scenarios::a_flagrant_penalty_two_ejects_the_fouler",
+        "RULE-CLEAR-PATH-FREE-THROWS-AND-POSSESSION": "nba_sim_core::foul_scenarios::a_clear_path_foul_awards_two_free_throws_and_the_ball",
+        "RULE-AWAY-FROM-PLAY-ONE-AND-POSSESSION": "nba_sim_core::rules_flow::an_away_from_play_foul_in_the_last_two_minutes_is_one_free_throw_and_the_ball",
+        "RULE-FIBA-DISRUPTIVE-FOUL": "nba_sim_core::foul_scenarios::a_technical_foul_awards_one_free_throw_and_the_offence_keeps_the_ball",
+        "RULE-FIBA-FLAGRANT-FOUL-DISQUALIFICATION": "nba_sim_core::foul_scenarios::a_flagrant_penalty_two_ejects_the_fouler"
+      },
+      "missing_scenarios": [],
+      "passing_scenarios": [
+        "RULE-AWAY-FROM-PLAY-ONE-AND-POSSESSION",
+        "RULE-CLEAR-PATH-FREE-THROWS-AND-POSSESSION",
+        "RULE-FIBA-DISRUPTIVE-FOUL",
+        "RULE-FIBA-FLAGRANT-FOUL-DISQUALIFICATION",
+        "RULE-FLAGRANT-1-AND-2",
+        "RULE-FLAGRANT-2-EJECTION",
+        "RULE-TECHNICAL-FREE-THROW-AND-RESUME"
+      ]
+    },
+    {
+      "id": "PROC-FREE-THROW",
+      "name": "罚球授权、站位、结果与罚球后恢复",
+      "nba": [
+        "Rule 9 §I-III"
+      ],
+      "fiba": [
+        "Article 44"
+      ],
+      "scenarios": [
+        "RULE-FT-SHOOTER-TIME-LIMIT",
+        "RULE-FT-LANE-VIOLATION",
+        "RULE-FT-DOUBLE-VIOLATION",
+        "RULE-FT-LAST-MISS-REBOUND",
+        "RULE-FT-LAST-MAKE-INBOUND",
+        "RULE-FT-SHOOTER-REPLACEMENT"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-FT-DOUBLE-VIOLATION",
+        "RULE-FT-LANE-VIOLATION",
+        "RULE-FT-LAST-MAKE-INBOUND",
+        "RULE-FT-LAST-MISS-REBOUND",
+        "RULE-FT-SHOOTER-REPLACEMENT",
+        "RULE-FT-SHOOTER-TIME-LIMIT"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-FT-LANE-VIOLATION": "nba_sim_core::rule_violations::an_early_defensive_entry_awards_another_free_throw",
+        "RULE-FT-LAST-MISS-REBOUND": "nba_sim_core::runtime_tables::an_eligible_missed_final_free_throw_enters_live_rebound_state",
+        "RULE-FT-LAST-MAKE-INBOUND": "nba_sim_core::rule_violations::the_last_made_free_throw_sends_the_other_team_to_its_own_baseline",
+        "RULE-FT-SHOOTER-TIME-LIMIT": "nba_sim_core::rules_matrix::a_free_throw_shooter_who_never_releases_is_called_for_delay",
+        "RULE-FT-DOUBLE-VIOLATION": "nba_sim_core::free_throw_scenarios::an_early_defensive_entry_is_recorded_separately",
+        "RULE-FT-SHOOTER-REPLACEMENT": "nba_sim_core::free_throw_scenarios::the_shooter_is_replaced_when_his_own_spot_leaves_the_court"
+      }
+    },
+    {
+      "id": "PROC-TIMEOUT",
+      "name": "球队暂停、强制暂停与暂停后继续",
+      "nba": [
+        "Rule 5 §VI-VIII"
+      ],
+      "fiba": [
+        "Article 18"
+      ],
+      "scenarios": [
+        "RULE-TIMEOUT-NBA-REGULATION-BUDGET",
+        "RULE-TIMEOUT-NBA-FOURTH-QUARTER-CAP",
+        "RULE-TIMEOUT-NBA-MANDATORY",
+        "RULE-TIMEOUT-NBA-OVERTIME-BUDGET",
+        "RULE-TIMEOUT-FIBA-HALF-BUDGET",
+        "RULE-TIMEOUT-FIBA-FOURTH-QUARTER-CAP",
+        "RULE-TIMEOUT-RESUME-SAVED-PROGRAM"
+      ],
+      "implementation": "implemented",
+      "existing_test": "nba_sim_core::rules_flow::only_the_team_in_control_may_stop_the_clock_and_the_budget_is_capped",
+      "scenario_tests": {
+        "RULE-TIMEOUT-NBA-MANDATORY": "nba_sim_core::timeout_scenarios::the_nba_fourth_quarter_budget_is_capped_at_four",
+        "RULE-TIMEOUT-NBA-OVERTIME-BUDGET": "nba_sim_core::timeout_scenarios::the_overtime_budget_is_separate_from_the_game_budget",
+        "RULE-TIMEOUT-FIBA-HALF-BUDGET": "nba_sim_core::timeout_scenarios::the_fiba_game_budget_is_five",
+        "RULE-TIMEOUT-FIBA-FOURTH-QUARTER-CAP": "nba_sim_core::timeout_scenarios::the_fiba_fourth_quarter_budget_is_capped_at_three",
+        "RULE-TIMEOUT-NBA-FOURTH-QUARTER-CAP": "nba_sim_core::timeout_scenarios::the_nba_fourth_quarter_budget_is_capped_at_four",
+        "RULE-TIMEOUT-NBA-REGULATION-BUDGET": "nba_sim_core::timeout_scenarios::a_timeout_costs_one_from_the_game_budget",
+        "RULE-TIMEOUT-RESUME-SAVED-PROGRAM": "nba_sim_core::timeout_scenarios::a_timeout_resumes_play_with_the_ball"
+      },
+      "missing_scenarios": [],
+      "passing_scenarios": [
+        "RULE-TIMEOUT-FIBA-FOURTH-QUARTER-CAP",
+        "RULE-TIMEOUT-FIBA-HALF-BUDGET",
+        "RULE-TIMEOUT-NBA-FOURTH-QUARTER-CAP",
+        "RULE-TIMEOUT-NBA-MANDATORY",
+        "RULE-TIMEOUT-NBA-OVERTIME-BUDGET",
+        "RULE-TIMEOUT-NBA-REGULATION-BUDGET",
+        "RULE-TIMEOUT-RESUME-SAVED-PROGRAM"
+      ]
+    },
+    {
+      "id": "PROC-SUBSTITUTION",
+      "name": "换人资格、暂停窗口与犯满离场",
+      "nba": [
+        "Rule 3 §I, §V"
+      ],
+      "fiba": [
+        "Articles 19, 41"
+      ],
+      "scenarios": [
+        "RULE-SUB-LIVE-BALL-BLOCKED",
+        "RULE-SUB-DEAD-BALL-ALLOWED",
+        "RULE-SUB-DISQUALIFIED-PLAYER",
+        "RULE-SUB-PLAYER-FOUL-LIMIT",
+        "RULE-SUB-REQUIRED-FREE-THROW-REPLACEMENT"
+      ],
+      "implementation": "implemented",
+      "existing_test": "nba_sim_core::rules_flow::one_hundred_full_games_never_change_the_lineup_while_the_ball_is_live",
+      "scenario_tests": {
+        "RULE-SUB-DISQUALIFIED-PLAYER": "nba_sim_core::substitution_scenarios::a_player_who_reaches_the_foul_limit_leaves_the_court",
+        "RULE-SUB-PLAYER-FOUL-LIMIT": "nba_sim_core::substitution_scenarios::a_player_who_reaches_the_foul_limit_leaves_the_court",
+        "RULE-SUB-REQUIRED-FREE-THROW-REPLACEMENT": "nba_sim_core::free_throw_scenarios::the_shooter_is_replaced_when_his_own_spot_leaves_the_court",
+        "RULE-SUB-DEAD-BALL-ALLOWED": "nba_sim_core::substitution_scenarios::a_substitution_swaps_the_player_and_his_station",
+        "RULE-SUB-LIVE-BALL-BLOCKED": "nba_sim_core::substitution_scenarios::the_lineup_never_changes_while_the_ball_is_live"
+      },
+      "missing_scenarios": [],
+      "passing_scenarios": [
+        "RULE-SUB-DEAD-BALL-ALLOWED",
+        "RULE-SUB-DISQUALIFIED-PLAYER",
+        "RULE-SUB-LIVE-BALL-BLOCKED",
+        "RULE-SUB-PLAYER-FOUL-LIMIT",
+        "RULE-SUB-REQUIRED-FREE-THROW-REPLACEMENT"
+      ]
+    },
+    {
+      "id": "PROC-REVIEW",
+      "name": "录像复核、教练挑战与裁决更正",
+      "nba": [
+        "Rule 13; Rule 14"
+      ],
+      "fiba": [
+        "Appendix F"
+      ],
+      "scenarios": [
+        "RULE-REVIEW-ELIGIBLE-CLOCK-EXPIRATION",
+        "RULE-REVIEW-NBA-CHALLENGE-COST",
+        "RULE-REVIEW-FIBA-IRS-CLEAR-EVIDENCE",
+        "RULE-REVIEW-PRESERVE-ORIGINAL-RULING"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-REVIEW-ELIGIBLE-CLOCK-EXPIRATION",
+        "RULE-REVIEW-NBA-CHALLENGE-COST",
+        "RULE-REVIEW-FIBA-IRS-CLEAR-EVIDENCE",
+        "RULE-REVIEW-PRESERVE-ORIGINAL-RULING"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-REVIEW-ELIGIBLE-CLOCK-EXPIRATION": "nba_sim_core::challenge::a_challenge_outside_the_window_is_rejected",
+        "RULE-REVIEW-NBA-CHALLENGE-COST": "nba_sim_core::challenge::a_failed_challenge_keeps_the_ruling_and_costs_a_timeout",
+        "RULE-REVIEW-FIBA-IRS-CLEAR-EVIDENCE": "nba_sim_core::challenge::a_ruling_free_stoppage_has_nothing_to_review",
+        "RULE-REVIEW-PRESERVE-ORIGINAL-RULING": "nba_sim_core::challenge::a_review_leaves_the_possession_and_phase_untouched"
+      }
+    },
+    {
+      "id": "PROC-PERIOD-FINALIZE",
+      "name": "节末待决事项与终场",
+      "nba": [
+        "Rule 5 §III-IV; Rule 13"
+      ],
+      "fiba": [
+        "Articles 8-9, 45-46"
+      ],
+      "scenarios": [
+        "RULE-PERIOD-ZERO-DEAD-BALL",
+        "RULE-PERIOD-SHOT-IN-FLIGHT",
+        "RULE-PERIOD-FOUL-BEFORE-HORN",
+        "RULE-PERIOD-TIED-ENTERS-OT",
+        "RULE-GAME-END-FREEZES-SCORE"
+      ],
+      "implementation": "implemented",
+      "passing_scenarios": [
+        "RULE-PERIOD-SHOT-IN-FLIGHT",
+        "RULE-PERIOD-FOUL-BEFORE-HORN",
+        "RULE-PERIOD-ZERO-DEAD-BALL",
+        "RULE-GAME-END-FREEZES-SCORE",
+        "RULE-PERIOD-TIED-ENTERS-OT"
+      ],
+      "missing_scenarios": [],
+      "scenario_tests": {
+        "RULE-PERIOD-SHOT-IN-FLIGHT": "nba_sim_core::jump_ball::unresolved_live_shot_is_settled_before_period_break",
+        "RULE-PERIOD-FOUL-BEFORE-HORN": "nba_sim_core::rule_violations::a_foul_before_the_horn_still_produces_free_throws",
+        "RULE-PERIOD-ZERO-DEAD-BALL": "nba_sim_core::rule_violations::the_period_ends_when_the_clock_hits_zero_during_a_dead_ball",
+        "RULE-GAME-END-FREEZES-SCORE": "nba_sim_core::rule_violations::the_final_score_does_not_change_after_the_game_ends",
+        "RULE-PERIOD-TIED-ENTERS-OT": "nba_sim_core::rules_matrix::a_tied_regulation_end_enters_overtime"
+      }
+    }
   ],
   "violations": [
-    {"id":"VIOLATION-TRAVEL","nba":["Rule 4 §VIII; Rule 10 §XIII"],"fiba":["Article 25"]},
-    {"id":"VIOLATION-DOUBLE-DRIBBLE","nba":["Rule 10 §II"],"fiba":["Article 24"]},
-    {"id":"VIOLATION-CARRYING","nba":["Rule 10 §II"],"fiba":["Article 24"]},
-    {"id":"VIOLATION-OUT-OF-BOUNDS","nba":["Rule 8 §II; Rule 10 §I"],"fiba":["Articles 17, 23"]},
-    {"id":"VIOLATION-SHOT-CLOCK","nba":["Rule 7"],"fiba":["Article 29"]},
-    {"id":"VIOLATION-EIGHT-SECONDS","nba":["Rule 10 §VIII"],"fiba":["Article 28"]},
-    {"id":"VIOLATION-BACKCOURT","nba":["Rule 10 §IX"],"fiba":["Article 30"]},
-    {"id":"VIOLATION-OFFENSIVE-THREE-SECONDS","nba":["Rule 10 §VI"],"fiba":["Article 26"]},
-    {"id":"VIOLATION-DEFENSIVE-THREE-SECONDS","nba":["Rule 10 §VII"],"fiba":[]},
-    {"id":"VIOLATION-CLOSELY-GUARDED-FIVE-SECONDS","nba":[],"fiba":["Article 27"]},
-    {"id":"VIOLATION-POST-UP-FIVE-SECONDS","nba":["Rule 10 §XVI"],"fiba":[]},
-    {"id":"VIOLATION-INBOUND-FIVE-SECONDS","nba":["Rule 8 §III; Rule 10 §III"],"fiba":["Article 17"]},
-    {"id":"VIOLATION-KICKED-BALL","nba":["Rule 10 §IV"],"fiba":["Article 13"]},
-    {"id":"VIOLATION-GOALTENDING","nba":["Rule 11"],"fiba":["Article 31"]},
-    {"id":"VIOLATION-BASKET-INTERFERENCE","nba":["Rule 11"],"fiba":["Article 31"]},
-    {"id":"VIOLATION-FREE-THROW","nba":["Rule 9"],"fiba":["Article 44"]}
+    {
+      "id": "VIOLATION-TRAVEL",
+      "nba": [
+        "Rule 4 §VIII; Rule 10 §XIII"
+      ],
+      "fiba": [
+        "Article 25"
+      ]
+    },
+    {
+      "id": "VIOLATION-DOUBLE-DRIBBLE",
+      "nba": [
+        "Rule 10 §II"
+      ],
+      "fiba": [
+        "Article 24"
+      ]
+    },
+    {
+      "id": "VIOLATION-CARRYING",
+      "nba": [
+        "Rule 10 §II"
+      ],
+      "fiba": [
+        "Article 24"
+      ]
+    },
+    {
+      "id": "VIOLATION-OUT-OF-BOUNDS",
+      "nba": [
+        "Rule 8 §II; Rule 10 §I"
+      ],
+      "fiba": [
+        "Articles 17, 23"
+      ]
+    },
+    {
+      "id": "VIOLATION-SHOT-CLOCK",
+      "nba": [
+        "Rule 7"
+      ],
+      "fiba": [
+        "Article 29"
+      ]
+    },
+    {
+      "id": "VIOLATION-EIGHT-SECONDS",
+      "nba": [
+        "Rule 10 §VIII"
+      ],
+      "fiba": [
+        "Article 28"
+      ]
+    },
+    {
+      "id": "VIOLATION-BACKCOURT",
+      "nba": [
+        "Rule 10 §IX"
+      ],
+      "fiba": [
+        "Article 30"
+      ]
+    },
+    {
+      "id": "VIOLATION-OFFENSIVE-THREE-SECONDS",
+      "nba": [
+        "Rule 10 §VI"
+      ],
+      "fiba": [
+        "Article 26"
+      ]
+    },
+    {
+      "id": "VIOLATION-DEFENSIVE-THREE-SECONDS",
+      "nba": [
+        "Rule 10 §VII"
+      ],
+      "fiba": []
+    },
+    {
+      "id": "VIOLATION-CLOSELY-GUARDED-FIVE-SECONDS",
+      "nba": [],
+      "fiba": [
+        "Article 27"
+      ]
+    },
+    {
+      "id": "VIOLATION-POST-UP-FIVE-SECONDS",
+      "nba": [
+        "Rule 10 §XVI"
+      ],
+      "fiba": []
+    },
+    {
+      "id": "VIOLATION-INBOUND-FIVE-SECONDS",
+      "nba": [
+        "Rule 8 §III; Rule 10 §III"
+      ],
+      "fiba": [
+        "Article 17"
+      ]
+    },
+    {
+      "id": "VIOLATION-KICKED-BALL",
+      "nba": [
+        "Rule 10 §IV"
+      ],
+      "fiba": [
+        "Article 13"
+      ]
+    },
+    {
+      "id": "VIOLATION-GOALTENDING",
+      "nba": [
+        "Rule 11"
+      ],
+      "fiba": [
+        "Article 31"
+      ]
+    },
+    {
+      "id": "VIOLATION-BASKET-INTERFERENCE",
+      "nba": [
+        "Rule 11"
+      ],
+      "fiba": [
+        "Article 31"
+      ]
+    },
+    {
+      "id": "VIOLATION-FREE-THROW",
+      "nba": [
+        "Rule 9"
+      ],
+      "fiba": [
+        "Article 44"
+      ]
+    }
   ],
   "known_current_gaps": [
     "NBA Profile does not yet distinguish regulation and overtime team-foul thresholds.",

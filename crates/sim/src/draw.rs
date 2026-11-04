@@ -112,4 +112,5 @@ pub mod purpose {
     pub const GATHER_TRAVEL: u16 = 28;
     pub const SCREEN_FOUL: u16 = 29;
     pub const FAKE_READ: u16 = 30;
+    pub const HAND_CHECK: u16 = 31;
 }

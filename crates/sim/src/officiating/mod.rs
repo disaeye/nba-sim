@@ -41,6 +41,8 @@ pub enum ViolationKind {
     FreeThrowTimeout,
     /// 发球人没有在五秒内把球传入场内。
     InboundTimeout,
+    /// 背身五秒违例（NBA Rule 10 §XVI）。
+    BackToBasket,
 }
 
 impl ViolationKind {
@@ -56,6 +58,7 @@ impl ViolationKind {
             Self::DoubleDribble => "double_dribble",
             Self::FreeThrowTimeout => "free_throw_timeout",
             Self::InboundTimeout => "inbound_timeout",
+            Self::BackToBasket => "back_to_basket",
         }
     }
 }

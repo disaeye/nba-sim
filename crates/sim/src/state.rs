@@ -1071,8 +1071,15 @@ pub struct PossessionState {
     pub offense_lane_seconds: f32,
     /// 防守人在限制区里已经连续停留的秒数：防守三秒的计时。
     pub defense_lane_seconds: f32,
+    /// 持球人背身运球的累计秒数：NBA Rule 10 §XVI 的五秒违例计时。
+    pub back_to_basket_seconds: f32,
+    /// 上一 tick 持球人是否背对篮筐：计时在朝向翻转的那一刻终止。
+    pub holder_back_to_basket: bool,
     /// 后场八秒的起算点（比赛时钟）：过中线即清空。
     pub backcourt_started_game_clock: Option<f64>,
+    /// 八秒计时开始时球最后被谁碰过：防守人之后碰球就是「踢球」，
+    /// 计时重新开始（NBA Rule 10 §VIII.1）。
+    pub backcourt_started_last_touch: Option<usize>,
     /// 本回合是否已经在前场建立控制：已建立后不能再把球带回后场。
     pub frontcourt_established: bool,
     /// 本回合球是否已经触过筐。
@@ -1133,7 +1140,10 @@ impl PossessionState {
             closely_guarded_seconds: 0.0,
             offense_lane_seconds: 0.0,
             defense_lane_seconds: 0.0,
+            back_to_basket_seconds: 0.0,
+            holder_back_to_basket: false,
             backcourt_started_game_clock: None,
+            backcourt_started_last_touch: None,
             frontcourt_established: false,
             rim_contact: false,
         }

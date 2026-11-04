@@ -270,6 +270,26 @@ pub fn apply_defense_targets(world: &mut World) {
     let pressure = crate::assignment::pressure_separation(world);
     let hoop = world.hoop_for(world.possession.team);
     for (slot, handle) in defenders.as_slice().iter().enumerate() {
+        // 跳球程序里的参跳人与接应人持有自己的点位：职责层不能把它覆写
+        // 回去，否则他们走不到圈边，掷球永远等不到人到位。
+        //
+        // 这道保护只在跳球程序进行中成立：比赛开始之后点位就失效了，
+        // 否则场上永远有四个人被钉在圈边。
+        if let Some(spot) = world
+            .jump_ball_procedure_spots()
+            .iter()
+            .find(|(participant, _)| participant == handle)
+            .map(|(_, spot)| *spot)
+        {
+            crate::assignment::force_target_as(
+                world,
+                *handle,
+                spot,
+                crate::state::TargetKind::Station,
+                *handle,
+            );
+            continue;
+        }
         let man = world.possession.matchup[slot];
         let responsibility = world.players[*handle].defense_responsibility;
         let (kind, partner, target) = match responsibility {
