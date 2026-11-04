@@ -28,10 +28,10 @@
 
 ## 已确认的档案差异
 
-1. `bonus_foul_threshold` 目前只表达一般时段与末段的标量阈值。NBA 加时前三次普通球队犯规的处理，以及 FIBA Article 42.1.3 将加时犯规计入第四节球队犯规数的规则需要分别表示。
-2. NBA 第四节球队犯规限额、末段限额、球队犯规例外、暂停强制触发与时长需分别建模。
-3. FIBA 2026 技术犯规类别、disruptive foul、flagrant foul、驱逐累计与罚则恢复需使用相应类型。
-4. 贴身防守五秒程序已由 `LeagueProfile::closely_guarded_seconds` 与 `closely_guarded_distance_ft` 表达（NBA 六英尺、FIBA 一米），引擎在收球后被贴身盯防时按这两个字段判定违例；发球位置与犯规恢复位置仍需补齐。
-5. 发球地点已覆盖出界点（记录为 `inbound_spot`）与本方底线两类；犯规、暂停与命中后的发球位置仍未细分，跳球/交替拥有、录像复核资格与中断恢复上下文（`ResumeContext`）仍未建模。
-6. 时间类规则的状态：`backcourt_seconds`（后场八秒）与回场判定已有消费者；`inbound_seconds` 尚未消费，因为引擎的发球在到达发球点后自动出手，没有持续到五秒的窗口。`three_second_lane_seconds` 暂不启用：按停区几何实现了计数器与「清空禁区」的落点修正（停留 2 秒后把目标推到禁区外沿）后，实测每场仍产生 123–133 次三秒违例（每回合失误率 0.48–0.50，目标 0.14），因为 Post 与 DunkerSpot 两个阵型站的基准坐标就在禁区内，球员被拉出去后会立即被阵型拉回。启用它需要先重做进攻站位与无球清空逻辑，不是再加一条计时器能解决的。
+1. 加时球队犯规的阈值与累计已经分开表示：`FoulPolicy::bonus_fouls_overtime` 给 NBA 加时的独立门槛（4），`FoulPolicy::overtime_fouls_carry_from_fourth` 给 FIBA Article 42.1.3 的「加时犯规计入第四节累计」（NBA 为否，FIBA 为是）。
+2. NBA 第四节球队犯规限额与末段限额、球队犯规例外都已在 `TimeoutPolicy` 与 `FoulPolicy` 里分别表达并有消费者；强制暂停的触发条件与时长仍未建模——那是规则的第四节两个强制暂停点，引擎当前不自动叫。
+3. 恶意犯规已经分两级并带被逐：二级恶意犯规把犯规者逐出球场并留下被逐事实（NBA Rule 12B §IV.2）。FIBA 的 disruptive foul（2026 规则的干扰犯规）还没有单独的类型，它与 NBA 的技术犯规在罚则上不同。
+4. 贴身防守五秒程序由 `LeagueProfile::closely_guarded_seconds` 与 `closely_guarded_distance_ft` 表达（NBA 六英尺、FIBA 一米），引擎在收球后被贴身盯防时按这两个字段判定违例。
+5. 发球地点已经细分：出界点、罚球线延长线上的边线点（`InboundLocation::Spot`）与本方底线（`OwnBaseline`）三类，犯规、暂停、命中与三类违例各自给出正确的地点。中断恢复上下文（`ResumeContext`）已经建模并由暂停与发球程序共用。
+6. 时间类规则的状态：`backcourt_seconds`（后场八秒）、回场判定与八秒的「踢球」例外（NBA Rule 10 §VIII.1）都有消费者。`inbound_seconds` 已经消费：发球五秒从发球程序开始那一刻算起，超时是发球违例，球权交给对方，对方在原来的发球点发球（`World::inbound_started_at` 与 `advance_phase` 的发球分支）。`three_second_lane_seconds` 与守方三秒都已启用：清空禁区的落点修正落在「球员自己的动作落点」之外——正在跑位与切入的球员不被拉回站位，低位与顺下两个本身就要求人在禁区里的角色另有豁免（NBA Rule 10 §VI.2）。实测每场 0.8 次进攻三秒违例与 1.6 次守方三秒技术犯规，回归见 `crates/sim/tests/lane_clock.rs`。
 7. NBA 在线条文完整已读取；官方 PDF 仍须逐项比对文字与例外。未核验部分继续保持待核验状态。

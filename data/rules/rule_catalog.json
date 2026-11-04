@@ -970,12 +970,9 @@
     }
   ],
   "known_current_gaps": [
-    "NBA Profile does not yet distinguish regulation and overtime team-foul thresholds.",
     "NBA Profile does not encode mandatory timeout triggers and timeout durations by source.",
-    "FIBA Profile does not encode 2026 technical foul categories 1 and 2 or disruptive and flagrant foul distinctions.",
-    "FIBA Profile does not encode Article 27 closely guarded five-second handling.",
-    "FIBA team penalty begins after 4 team fouls in a quarter; the fifth qualifying foul is penalised. Overtime fouls count into the fourth-quarter total under Article 42.1.3.",
-    "Neither profile encodes throw-in location categories, per-violation restart spots, referee authorization or review scope.",
+    "FIBA Profile does not distinguish the 2026 technical foul categories, and disruptive fouls are not a separate foul kind from the NBA flagrant one.",
+    "Neither profile encodes referee authorization or the scope of an instant-replay review.",
     "Both profiles require a full rule-program audit before their existing scalar fields can certify compliance."
   ]
 }
