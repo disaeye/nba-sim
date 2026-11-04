@@ -22,12 +22,28 @@ EXPECTED = {
 
 
 def read_source(path):
-    return path.read_text(encoding="utf-8")
+    # 读不到文件就地报错并说清楚是哪一个：抛原始异常会让调用方看到一串
+    # 无路径的栈，信息量比直接报错少。
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise SystemExit(f"{path} unreadable: {error}") from error
+
+
+def load_json(path):
+    # 名册文件坏了就地报错并说清楚是哪一个：json.loads 对格式不对的输入
+    # 抛 JSONDecodeError，那一串栈没有路径，读的人看不出是哪份名单坏了。
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise SystemExit(f"{path} unreadable: {error}") from error
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"{path} is not valid JSON: {error}") from error
 
 
 def check_rosters():
     for path in DATA_FILES:
-        data = json.loads(read_source(path))
+        data = load_json(path)
         for player in data["players"]:
             tendencies = player["tendencies"]
             found = set(tendencies)
@@ -56,15 +72,14 @@ def check_rust_consumers():
         "block_aggressiveness": ["crates/sim/src/resolve/shot.rs"],
         "help_aggressiveness": ["crates/sim/src/resolve/mod.rs"],
         "physicality": ["crates/sim/src/resolve/shot.rs"],
+        "cut_frequency": ["crates/sim/src/policy.rs"],
+        "risk_tolerance": ["crates/sim/src/resolve/poke.rs"],
+        "offensive_rebound_frequency": ["crates/sim/src/resolve/rebound.rs"],
+        "transition_sprint": ["crates/sim/src/formation.rs"],
     }
     # 尚未接入的倾向。登记在这里而不是删掉，使缺口始终可见；
     # 每项接入后从本表移入 consumers。
-    pending = {
-        "cut_frequency": "空切动作已有结算，但选择层还没读倾向",
-        "offensive_rebound_frequency": "冲抢篮板还没有独立动作",
-        "risk_tolerance": "传球风险容忍还没有进入选择层",
-        "transition_sprint": "转换只按回合起始类型区分",
-    }
+    pending: dict[str, str] = {}
     if set(consumers) | set(pending) != EXPECTED:
         raise SystemExit(
             "R6 tendency registry must cover every field: "

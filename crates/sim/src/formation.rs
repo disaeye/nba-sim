@@ -121,7 +121,11 @@ pub fn assign_break_targets(world: &mut World, offense: TeamSide, handler: usize
                 nearest_speed = opponent.effective_speed(&world.params.policy);
             }
         }
-        let edge = speed - nearest_speed;
+        // 转换冲刺倾向：愿意冲的人更容易被选为快攻跑者。它加在速度差
+        // 上，因此它改变的是「谁去冲」，不是「谁跑得快」。
+        let sprint = player.data.tendencies.transition_sprint;
+        let edge = speed - nearest_speed
+            + (sprint - 0.5) * world.params.policy.g("break_sprint_tendency_gain_ftps");
         if edge >= edge_needed {
             runners.push((handle, edge));
         }

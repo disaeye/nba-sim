@@ -416,6 +416,8 @@
     "drive_variant_spin_turnover": 0.98,
     "on_ball_positioning_duration_seconds": 2.5,
     "post_step_push_ft": 0.5,
-    "hand_check_pressure_ft": 1.2
+    "hand_check_pressure_ft": 1.2,
+    "break_sprint_tendency_gain_ftps": 0.8,
+    "oreb_tendency_reach_gain_ft": 0.3
   }
 }

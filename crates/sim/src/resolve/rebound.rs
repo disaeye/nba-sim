@@ -101,8 +101,18 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
         } else {
             "defensive_rebound"
         };
+        // 冲抢篮板倾向：进攻人愿意冲就抢得更远。防守人的那一项是
+        // 防守篮板属性，进攻人的这一项是冲抢倾向——两者都是「意愿」，
+        // 能力由 attribute 那一项给出。
+        let willingness = if player.team == offense {
+            (player.data.tendencies.offensive_rebound_frequency - 0.5)
+                * world.params.policy.g("oreb_tendency_reach_gain_ft")
+        } else {
+            0.0
+        };
         let reach = base
             + player.attribute(attribute) * skill
+            + willingness
             + if player.team == offense { -1.15 } else { 1.75 };
         let vertical = (world.ball.z - 4.0).max(0.0);
         let distance = (player.pos - world.ball.pos).length().hypot(vertical);

@@ -10,7 +10,7 @@ mod common;
 use glam::Vec2;
 use nba_sim_core::action::{Fact, ShotKind};
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::state::{PossessionKind, Phase};
+use nba_sim_core::state::Phase;
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params, TeamSide};
 use nba_domain::rules::GameRules;
