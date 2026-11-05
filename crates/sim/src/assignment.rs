@@ -439,14 +439,11 @@ pub fn assign_defense_responsibilities(world: &mut World, targets: &[Vec2]) {
             && (world.players[*handle].pos - hoop).length_squared() < 144.0
         {
             DefenseResponsibility::BoxOut
-        } else if world
-            .pending_rebound
-            .is_some_and(|rebound| {
-                !rebound.turnover
-                    && rebound.offense != world.players[*handle].team
-                    && rebound.box_outs[..rebound.box_out_count as usize].contains(handle)
-            })
-        {
+        } else if world.pending_rebound.is_some_and(|rebound| {
+            !rebound.turnover
+                && rebound.offense != world.players[*handle].team
+                && rebound.box_outs[..rebound.box_out_count as usize].contains(handle)
+        }) {
             // 防守篮板：这一球上去卡位的人就是卡位责任人。
             // 没有这条职责，防守目标层每 tick 都会把卡位目标改回站位点，
             // 卡位能力因此完全不起作用。

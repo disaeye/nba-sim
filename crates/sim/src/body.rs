@@ -217,7 +217,8 @@ pub fn integrate(world: &mut World, dt: f64) {
         let after = world.players[handle].pos;
         let player = &mut world.players[handle];
         player.last_motion_ft = (after - before).length();
-        player.last_separation_ft = 0.0;        if player.recovery_since > 0.0 || (player.target - player.pos).length() > min_separation {
+        player.last_separation_ft = 0.0;
+        if player.recovery_since > 0.0 || (player.target - player.pos).length() > min_separation {
             player.recovery_path_ft += player.last_motion_ft;
         }
     }

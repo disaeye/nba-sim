@@ -447,10 +447,7 @@ impl OnBallPositioning {
 /// 防守人正在跑的站位动作。
 ///
 /// 返回防守人当前正在跑的那一种站位动作；没有在跑时返回 `None`。
-pub fn on_ball_positioning(
-    world: &crate::World,
-    defender: usize,
-) -> Option<OnBallPositioning> {
+pub fn on_ball_positioning(world: &crate::World, defender: usize) -> Option<OnBallPositioning> {
     world.players.get(defender)?.on_ball_positioning
 }
 
@@ -463,13 +460,11 @@ pub fn on_ball_pressure(world: &crate::World, defender: usize) -> Option<f32> {
         // 滑步跟防：守住位置，没有额外压力。
         OnBallPositioning::Slide => None,
         // 贴身施压：持球人被贴住，出手与出球都更难。
-        OnBallPositioning::Contain => Some(
-            world.params.policy.g("contain_pressure_multiplier"),
-        ),
+        OnBallPositioning::Contain => Some(world.params.policy.g("contain_pressure_multiplier")),
         // 站位吃犯规：防守人站住逼他绕开，进攻方要付出绕路的时间。
-        OnBallPositioning::ChargeTake => Some(
-            world.params.policy.g("charge_take_pressure_multiplier"),
-        ),
+        OnBallPositioning::ChargeTake => {
+            Some(world.params.policy.g("charge_take_pressure_multiplier"))
+        }
     }
 }
 

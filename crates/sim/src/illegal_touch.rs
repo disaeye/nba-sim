@@ -105,13 +105,12 @@ pub fn judge(world: &mut World, dt: f64) -> Option<usize> {
 
     let physicality = world.players[defender].data.tendencies.physicality;
     // 到 bonus 之后防守人收手：同样的对位，伸手阻挡明显变少。
-    let discipline = if crate::resolve::foul::bonus_free_throws(world, world.players[defender].team)
-        > 0
-    {
-        penalty_scale
-    } else {
-        1.0
-    };
+    let discipline =
+        if crate::resolve::foul::bonus_free_throws(world, world.players[defender].team) > 0 {
+            penalty_scale
+        } else {
+            1.0
+        };
     let rate = f64::from(rate_base * (physicality_base + physicality) * exposure * discipline);
     let chance = 1.0 - (-rate * dt).exp();
     if f64::from(world.draw(Stream::Foul, defender, purpose::HAND_CHECK, 0)) < chance {

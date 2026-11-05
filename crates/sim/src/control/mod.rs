@@ -571,9 +571,7 @@ fn try_control_loose(world: &mut World) {
                 &world.rules,
                 &player.data.attributes,
             );
-            let boxout_gain = if state.box_outs[..state.box_out_count as usize]
-                .contains(&handle)
-            {
+            let boxout_gain = if state.box_outs[..state.box_out_count as usize].contains(&handle) {
                 boxout * world.params.policy.w("rebound_boxout_weight")
             } else {
                 0.0

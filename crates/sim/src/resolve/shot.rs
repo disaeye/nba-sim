@@ -20,11 +20,7 @@ pub fn check_goaltending(world: &mut World) -> bool {
     }
     let (shooter, shot_id, touched_backboard) = match world.pending_shot.as_ref() {
         Some(pending) if pending.result.is_none() && pending.free_throw.is_none() => {
-            (
-                pending.shooter,
-                pending.shot_id,
-                pending.touched_backboard,
-            )
+            (pending.shooter, pending.shot_id, pending.touched_backboard)
         }
         _ => (0, 0, false),
     };
@@ -55,8 +51,7 @@ pub fn check_goaltending(world: &mut World) -> bool {
     // 2. 球碰过篮板而且还有得分机会：碰球就是干扰，不管球在上升还是
     //    下落。
     // 3. 球坐在或者滚在筐沿上：碰球就是干扰。
-    let inside_cylinder = (ball_pos - hoop).length()
-        <= policy.g("goaltending_cylinder_radius_ft")
+    let inside_cylinder = (ball_pos - hoop).length() <= policy.g("goaltending_cylinder_radius_ft")
         && ball_z <= rim_height + 0.75
         && ball_z >= rim_height * 0.5;
     let descending_in_cylinder = descending && inside_cylinder;

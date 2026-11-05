@@ -54,7 +54,10 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
         // 范围里再加一项会与防守篮板属性在同一场争抢里直接抵消，把防守
         // 篮板属性的效应量压掉一半。
         let crashes = world.players[handle].team != offense
-            || world.players[handle].data.tendencies.offensive_rebound_frequency
+            || world.players[handle]
+                .data
+                .tendencies
+                .offensive_rebound_frequency
                 >= world.params.policy.g("oreb_crash_tendency_floor");
         world.players[handle].target = if crashes {
             ball_pos

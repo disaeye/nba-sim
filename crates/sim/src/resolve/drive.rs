@@ -102,9 +102,8 @@ pub fn resolve(
             // 站位吃犯规不改「防守人有没有站住」：站住仍然只看他的速度。
             // 它改的是「撞上了算谁的」——防守人主动占住了位置，撞人因此
             // 判进攻方犯规，频率上升而不是下降。
-            let taking_charge =
-                crate::action::on_ball_positioning(world, defender)
-                    == Some(crate::action::OnBallPositioning::ChargeTake);
+            let taking_charge = crate::action::on_ball_positioning(world, defender)
+                == Some(crate::action::OnBallPositioning::ChargeTake);
             let rate = if taking_charge {
                 rate * world.params.policy.w("charge_take_rate_multiplier")
             } else {

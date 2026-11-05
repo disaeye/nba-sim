@@ -476,13 +476,7 @@ impl World {
         // 不再写位置，只确认目标。
         place: bool,
     ) {
-        self.begin_period_jump_ball_with_receivers(
-            home_jumper,
-            away_jumper,
-            kind,
-            place,
-            [None; 2],
-        )
+        self.begin_period_jump_ball_with_receivers(home_jumper, away_jumper, kind, place, [None; 2])
     }
 
     /// 带指定接应人的跳球程序。
@@ -550,9 +544,7 @@ impl World {
                             (self.players[*left].pos - center)
                                 .length_squared()
                                 .total_cmp(&(self.players[*right].pos - center).length_squared())
-                                .then_with(|| {
-                                    self.players[*left].id.cmp(&self.players[*right].id)
-                                })
+                                .then_with(|| self.players[*left].id.cmp(&self.players[*right].id))
                         })
                         .expect("each team needs a jump-ball receiver")
                 });
@@ -2409,7 +2401,9 @@ impl World {
     /// 在三种情况下终止（规则的「count ends when」）：持球人收球、运球
     /// 越过罚球线延长线、或者防守人把球碰开。
     pub fn check_back_to_basket(&mut self, dt: f64) {
-        if !self.rules.back_to_basket_seconds.is_finite() || self.rules.back_to_basket_seconds <= 0.0 {
+        if !self.rules.back_to_basket_seconds.is_finite()
+            || self.rules.back_to_basket_seconds <= 0.0
+        {
             self.possession.back_to_basket_seconds = 0.0;
             self.possession.holder_back_to_basket = false;
             return;
@@ -2456,8 +2450,7 @@ impl World {
         }
         self.possession.holder_back_to_basket = true;
         self.possession.back_to_basket_seconds += dt as f32;
-        if self.possession.back_to_basket_seconds + f32::EPSILON
-            < self.rules.back_to_basket_seconds
+        if self.possession.back_to_basket_seconds + f32::EPSILON < self.rules.back_to_basket_seconds
         {
             return;
         }
@@ -2712,7 +2705,9 @@ impl World {
         // 让位。否则防守人被站位占住，扑防就再也起不来手。
         if self.defensive_actions[defender].is_some()
             && matches!(
-                self.defensive_actions[defender].as_ref().map(|action| action.kind),
+                self.defensive_actions[defender]
+                    .as_ref()
+                    .map(|action| action.kind),
                 Some(
                     DefensiveActionKind::Slide
                         | DefensiveActionKind::Contain
@@ -2913,12 +2908,16 @@ impl World {
                 continue;
             }
             // 换过对位之后才允许重挑姿态：同一段对位里只挑一次。
-            self.players[defender].positioning_next_at =
-                now + f64::from(self.rules.redecide_interval_seconds)
+            self.players[defender].positioning_next_at = now
+                + f64::from(self.rules.redecide_interval_seconds)
                     * f64::from(
-                        self.params.policy.g("on_ball_reposition_interval_multiplier"),
+                        self.params
+                            .policy
+                            .g("on_ball_reposition_interval_multiplier"),
                     );
-            let gap = self.players[defender].pos.distance(self.players[holder].pos);
+            let gap = self.players[defender]
+                .pos
+                .distance(self.players[holder].pos);
             let Some(kind) = self.on_ball_positioning_kind(defender, holder, gap) else {
                 continue;
             };
@@ -3039,7 +3038,9 @@ impl World {
             // 站位动作是可以让位的：起跳封盖是一次更重要的冒险。
             if self.defensive_actions[defender].is_some()
                 && !matches!(
-                    self.defensive_actions[defender].as_ref().map(|action| action.kind),
+                    self.defensive_actions[defender]
+                        .as_ref()
+                        .map(|action| action.kind),
                     Some(
                         DefensiveActionKind::Slide
                             | DefensiveActionKind::Contain
@@ -3064,7 +3065,9 @@ impl World {
         // 冒险，站位动作让位。防守人因此不会既压人又跳。
         if self.defensive_actions[defender].is_some()
             && !matches!(
-                self.defensive_actions[defender].as_ref().map(|action| action.kind),
+                self.defensive_actions[defender]
+                    .as_ref()
+                    .map(|action| action.kind),
                 Some(DefensiveActionKind::BlockJump)
             )
         {
@@ -3637,11 +3640,7 @@ impl World {
                     // FIBA Article 42.1.3：加时节的球队犯规计入第四节累计，
                     // 因此加时开始时把第四节的球队犯规带过来。NBA 加时单独
                     // 计数（Rule 12B §V），保持为零。
-                    if self
-                        .rules
-                        .league
-                        .fouls
-                        .overtime_fouls_carry_from_fourth
+                    if self.rules.league.fouls.overtime_fouls_carry_from_fourth
                         && self.clock.period() > self.rules.league.periods.regulation_periods
                     {
                         let carried = self.fourth_quarter_fouls;

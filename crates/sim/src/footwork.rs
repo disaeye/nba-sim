@@ -204,10 +204,7 @@ pub fn book_hop(world: &mut World, actor: usize, team: crate::TeamSide) {
             crate::adjudicate::StoppageCause::Violation(crate::adjudicate::ViolationKind::Travel),
             crate::adjudicate::RestartPlan::Live { team: team.other() },
         )
-        .ending(
-            nba_domain::event::PossessionEndCause::TurnoverTravel,
-            "hop",
-        ),
+        .ending(nba_domain::event::PossessionEndCause::TurnoverTravel, "hop"),
     );
 }
 

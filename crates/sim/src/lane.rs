@@ -77,7 +77,10 @@ pub fn offense_controls_frontcourt(world: &World) -> bool {
     // 推进到前场深处才置位，用它当判据会让三秒计时在球刚过中线时
     // 停不下来。
     let attacking_right = world.attacking_right(offense);
-    !world.rules.court.is_backcourt(world.ball.pos, attacking_right)
+    !world
+        .rules
+        .court
+        .is_backcourt(world.ball.pos, attacking_right)
 }
 
 /// 这个进攻人是不是因为自己的职责才站在限制区里。
@@ -137,8 +140,7 @@ fn shooting_toward_basket(world: &World, player: usize, attacking_right: bool) -
     // 落点在篮筐一侧：朝篮筐发起的那一步。
     let hoop = world.hoop_for(world.players[player].team);
     let target = runtime.intent.to_ft;
-    world.rules.court.is_in_lane(target, attacking_right)
-        || (target - hoop).length() < 12.0
+    world.rules.court.is_in_lane(target, attacking_right) || (target - hoop).length() < 12.0
 }
 
 /// 进攻三秒此刻在计时的进攻人。
@@ -160,28 +162,33 @@ pub fn offense_timer_holder(world: &World) -> Option<usize> {
         .pass_in_flight
         .map(|info| info.to)
         .filter(|to| world.players[*to].team == offense);
-    world.on_court(offense).as_slice().iter().copied().find(|handle| {
-        if Some(*handle) == holder || Some(*handle) == inbound_receiver {
-            return false;
-        }
-        if shooting_toward_basket(world, *handle, attacking_right) {
-            return false;
-        }
-        if lane_by_role(world, *handle) {
-            return false;
-        }
-        if !world
-            .rules
-            .court
-            .is_in_lane(world.players[*handle].pos, attacking_right)
-        {
-            return false;
-        }
-        // 规则罚的是「remain」——待在禁区里不走。跑过禁区的球员不算
-        // 待在禁区里，因此他在移动时不计时：他正穿过禁区，不是站在
-        // 禁区里等球。
-        !passing_through(world, *handle)
-    })
+    world
+        .on_court(offense)
+        .as_slice()
+        .iter()
+        .copied()
+        .find(|handle| {
+            if Some(*handle) == holder || Some(*handle) == inbound_receiver {
+                return false;
+            }
+            if shooting_toward_basket(world, *handle, attacking_right) {
+                return false;
+            }
+            if lane_by_role(world, *handle) {
+                return false;
+            }
+            if !world
+                .rules
+                .court
+                .is_in_lane(world.players[*handle].pos, attacking_right)
+            {
+                return false;
+            }
+            // 规则罚的是「remain」——待在禁区里不走。跑过禁区的球员不算
+            // 待在禁区里，因此他在移动时不计时：他正穿过禁区，不是站在
+            // 禁区里等球。
+            !passing_through(world, *handle)
+        })
 }
 
 /// 这个球员是不是正跑过限制区而不是待在禁区里。
@@ -210,9 +217,11 @@ fn guarding_in_lane(world: &World, defender: usize, attacking_right: bool) -> bo
     // 一臂之内就算在盯人（NBA Rule 10 §VII.2）：规则盯的是「有没有在
     // 盯住某个进攻人」，不要求盯的是对位的那一个。盯防位是这条规则的
     // 第二半，模型里的间隔就是那个距离。
-    let guarding_arm = world.on_court(offense).as_slice().iter().any(|man| {
-        (world.players[*man].pos - defender_pos).length() <= arm_length
-    });
+    let guarding_arm = world
+        .on_court(offense)
+        .as_slice()
+        .iter()
+        .any(|man| (world.players[*man].pos - defender_pos).length() <= arm_length);
     if guarding_arm {
         return true;
     }
@@ -221,14 +230,21 @@ fn guarding_in_lane(world: &World, defender: usize, attacking_right: bool) -> bo
     // 两个人隔着半个禁区，但那正是盯防位。规则的「一臂之内」指的是
     // 裁判看的伸手距离，模型里的职责分配就是那个距离。
     let defenders = world.on_court(defense);
-    let Some(slot) = defenders.as_slice().iter().position(|handle| *handle == defender) else {
+    let Some(slot) = defenders
+        .as_slice()
+        .iter()
+        .position(|handle| *handle == defender)
+    else {
         return false;
     };
     let man = world.possession.matchup[slot];
     if man == usize::MAX || !world.players[man].on_court {
         return false;
     }
-    world.rules.court.is_in_lane(world.players[man].pos, attacking_right)
+    world
+        .rules
+        .court
+        .is_in_lane(world.players[man].pos, attacking_right)
 }
 
 /// 防守三秒此刻在计时的防守人。
@@ -262,7 +278,11 @@ pub fn defense_timer_holder(world: &World) -> Option<usize> {
         .iter()
         .copied()
         .find(|handle| {
-            if !world.rules.court.is_in_lane(world.players[*handle].pos, attacking_right) {
+            if !world
+                .rules
+                .court
+                .is_in_lane(world.players[*handle].pos, attacking_right)
+            {
                 return false;
             }
             // 正在积极盯防限制区里的进攻人时不计时：他在合法地防守。
@@ -279,11 +299,7 @@ pub fn exit_target(world: &World, player: usize) -> Vec2 {
     let offense = world.possession.team;
     let attacking_right = world.attacking_right(offense);
     let court = world.rules.court;
-    let baseline_x = if attacking_right {
-        court.width_ft
-    } else {
-        0.0
-    };
+    let baseline_x = if attacking_right { court.width_ft } else { 0.0 };
     let lane_length = nba_domain::court::LANE_LENGTH_FROM_BASELINE_FT * (court.width_ft / 94.0);
     let lane_half = nba_domain::court::LANE_HALF_WIDTH_FT * (court.height_ft / 50.0);
     let pos = world.players[player].pos;
@@ -336,10 +352,7 @@ pub fn clearing_required(world: &World, player: usize) -> bool {
     if world.holder() == Some(player) {
         return false;
     }
-    if world
-        .pass_in_flight
-        .is_some_and(|info| info.to == player)
-    {
+    if world.pass_in_flight.is_some_and(|info| info.to == player) {
         return false;
     }
     if lane_by_role(world, player) {
@@ -363,13 +376,16 @@ pub fn clearing_required(world: &World, player: usize) -> bool {
 /// 跑位与切入有自己的落点：编队不能把它改回站位，限制区的修正同样
 /// 不能——否则他永远到不了自己的落点。
 fn running_own_action(world: &World, player: usize) -> bool {
-    world.players[player].action.as_ref().is_some_and(|runtime| {
-        runtime.intent.actor == player
-            && matches!(
-                runtime.intent.kind,
-                crate::action::ActionKind::Relocate | crate::action::ActionKind::Cut(_)
-            )
-    })
+    world.players[player]
+        .action
+        .as_ref()
+        .is_some_and(|runtime| {
+            runtime.intent.actor == player
+                && matches!(
+                    runtime.intent.kind,
+                    crate::action::ActionKind::Relocate | crate::action::ActionKind::Cut(_)
+                )
+        })
 }
 
 /// 这个球员是否正在走出限制区。
