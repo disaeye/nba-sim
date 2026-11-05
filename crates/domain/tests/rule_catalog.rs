@@ -399,7 +399,9 @@ fn function_names(source: &str) -> HashSet<String> {
         .lines()
         .filter_map(|line| {
             let trimmed = line.trim_start();
-            let rest = trimmed.strip_prefix("fn ").or_else(|| trimmed.strip_prefix("pub fn "))?;
+            let rest = trimmed
+                .strip_prefix("fn ")
+                .or_else(|| trimmed.strip_prefix("pub fn "))?;
             let name: String = rest
                 .chars()
                 .take_while(|character| character.is_alphanumeric() || *character == '_')
@@ -465,9 +467,7 @@ fn every_catalog_evidence_points_at_a_real_test() {
                 .cloned(),
         );
         for identity in identities {
-            let (path, function) = identity
-                .split_once("::")
-                .expect("证据必须是 路径::函数");
+            let (path, function) = identity.split_once("::").expect("证据必须是 路径::函数");
             let source = root.join(path);
             assert!(
                 source.exists(),
