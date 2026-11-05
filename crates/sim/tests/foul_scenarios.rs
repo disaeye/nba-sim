@@ -8,13 +8,13 @@
 
 mod common;
 
+use nba_domain::rules::GameRules;
 use nba_sim_core::action::{Fact, FoulKind};
 use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::resolve::foul::{apply_offensive_foul, apply_shooting_foul};
 use nba_sim_core::state::{Phase, PossessionKind};
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params, TeamSide};
-use nba_domain::rules::GameRules;
 
 fn world(seed: u64) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
@@ -105,8 +105,7 @@ fn a_shooting_foul_on_a_three_point_shot_awards_three_free_throws() {
     apply_shooting_foul(&mut world, defender, shooter, 3, false);
     let (_, _, _, free_throws, _) = last_foul(&world).expect("the foul must be recorded");
     assert_eq!(free_throws, 3, "三分投篮犯规必须罚三次");
-    let (_, total, remaining) =
-        free_throw_program(&world).expect("投篮犯规之后必须进入罚球程序");
+    let (_, total, remaining) = free_throw_program(&world).expect("投篮犯规之后必须进入罚球程序");
     assert_eq!(total, 3);
     assert_eq!(remaining, 3);
 }
@@ -188,10 +187,7 @@ fn a_double_foul_leaves_the_offence_in_possession() {
         0,
         "双方犯规不计入球队单节犯规"
     );
-    assert_eq!(
-        world.possession.team, offense,
-        "双方犯规之后球权留在进攻方"
-    );
+    assert_eq!(world.possession.team, offense, "双方犯规之后球权留在进攻方");
     match world.phase() {
         Phase::DeadBall { team, .. } => {
             assert_eq!(team, offense, "双方犯规之后由进攻方发球")
@@ -228,8 +224,7 @@ fn a_loose_ball_foul_counts_against_the_team_and_awards_one_free_throw_in_the_bo
     let (_, _, kind, free_throws, _) = last_foul(&world).expect("the foul must be recorded");
     assert_eq!(kind, FoulKind::Personal);
     assert_eq!(
-        free_throws,
-        2,
+        free_throws, 2,
         "罚则状态下的松球犯规罚一次加一次罚则罚球（NBA Rule 12B §VIII.4）"
     );
     assert!(
@@ -255,17 +250,11 @@ fn a_technical_foul_awards_one_free_throw_and_the_offence_keeps_the_ball() {
         offense,
         offense,
         foul_id,
-        nba_sim_core::resolve::freethrow::FreeThrowFollowUp::DeadBall {
-            team: offense,
-        },
+        nba_sim_core::resolve::freethrow::FreeThrowFollowUp::DeadBall { team: offense },
     );
     let (_, total, _) = free_throw_program(&world).expect("技术犯规之后必须进入罚球程序");
     assert_eq!(total, 1, "技术犯规罚一次");
-    assert_eq!(
-        world.possession.team,
-        offense,
-        "技术犯规之后进攻方保留球权"
-    );
+    assert_eq!(world.possession.team, offense, "技术犯规之后进攻方保留球权");
 }
 
 #[test]

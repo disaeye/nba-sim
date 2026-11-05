@@ -9,13 +9,13 @@
 
 mod common;
 
+use nba_domain::league::LeagueProfile;
+use nba_domain::rules::GameRules;
 use nba_sim_core::action::{Fact, JumpBallKind};
 use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::state::{MatchProgram, Phase};
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params, TeamSide};
-use nba_domain::league::LeagueProfile;
-use nba_domain::rules::GameRules;
 
 fn world_with_profile(seed: u64, league: LeagueProfile) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
@@ -80,10 +80,7 @@ fn the_jump_ball_tapper_is_one_of_the_two_jumpers() {
         "拍球的人必须是跳球员之一"
     );
     let tapper_team = world.players[tapper].team;
-    assert_eq!(
-        tapper_team, tapped_team,
-        "拍球的球队就是获得球权的球队"
-    );
+    assert_eq!(tapper_team, tapped_team, "拍球的球队就是获得球权的球队");
     // 合法拍球：拍球的高度必须是跳球的高度。
     let tap = world
         .events
@@ -130,13 +127,13 @@ fn a_held_ball_rejump_waits_for_the_participants_to_reach_their_spots() {
         .expect("停表跳球必须登记待跳球记录");
     assert_eq!(pending.home, home);
     assert_eq!(pending.away, away);
-    assert!(!pending.spots.is_empty(), "停表跳球必须登记参跳人与接应人的点位");
+    assert!(
+        !pending.spots.is_empty(),
+        "停表跳球必须登记参跳人与接应人的点位"
+    );
     // 参跳人还没到位：比赛停在死球程序里，不得掷球。
     world.step(TICK_SECONDS);
-    assert!(
-        world.pending_jump_ball.is_some(),
-        "参跳人没到位时不得掷球"
-    );
+    assert!(world.pending_jump_ball.is_some(), "参跳人没到位时不得掷球");
     assert!(
         !world
             .events
@@ -175,7 +172,13 @@ fn the_game_clock_starts_at_the_tap_and_not_before() {
     for _ in 0..200 {
         world.step(TICK_SECONDS);
         let tapped = world.events.iter().any(|event| {
-            matches!(&event.fact, Fact::BallContact { kind: "jump_ball_tap", .. })
+            matches!(
+                &event.fact,
+                Fact::BallContact {
+                    kind: "jump_ball_tap",
+                    ..
+                }
+            )
         });
         if tapped {
             tap_seen = true;
@@ -239,10 +242,7 @@ fn a_double_violation_repeats_the_jump_with_the_same_jumpers() {
         })
         .collect();
     assert!(jumps.len() >= 2, "双方违例之后跳球必须重来一次");
-    assert_eq!(
-        jumps[0], jumps[1],
-        "双方违例之后跳球重来，跳球员不变"
-    );
+    assert_eq!(jumps[0], jumps[1], "双方违例之后跳球重来，跳球员不变");
 }
 
 #[test]
@@ -289,17 +289,16 @@ fn the_jump_ball_is_its_own_match_program() {
 fn an_overtime_period_starts_with_a_fresh_jump_ball() {
     let mut world = nba_world(908);
     // 推进到加时：把比赛钟调到第四节结束。
-    world.clock.set_regulation_clock(4, 0.1, world.clock.shot_clock());
+    world
+        .clock
+        .set_regulation_clock(4, 0.1, world.clock.shot_clock());
     for _ in 0..500 {
         world.step(TICK_SECONDS);
         if world.clock.period() > 4 {
             break;
         }
     }
-    assert!(
-        world.clock.period() > 4,
-        "比赛钟归零之后必须进入加时"
-    );
+    assert!(world.clock.period() > 4, "比赛钟归零之后必须进入加时");
     // 加时节的跳球在节间休息结束之后才发生，因此继续推进。
     let mut jumped = false;
     for _ in 0..2_000 {

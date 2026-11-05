@@ -15,12 +15,12 @@
 mod common;
 
 use glam::Vec2;
+use nba_domain::rules::GameRules;
 use nba_sim_core::action::{Fact, TurnoverKind};
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::state::{DribbleState, PossessionKind, Phase};
+use nba_sim_core::state::{DribbleState, Phase, PossessionKind};
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params, TeamSide};
-use nba_domain::rules::GameRules;
 
 fn world(seed: u64) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
@@ -108,10 +108,7 @@ fn a_handler_turning_to_face_the_basket_is_not_a_violation() {
     for _ in 0..600 {
         world.check_back_to_basket(TICK_SECONDS);
     }
-    assert!(
-        !violated(&world),
-        "面朝篮筐的持球人不受背身五秒限制"
-    );
+    assert!(!violated(&world), "面朝篮筐的持球人不受背身五秒限制");
 }
 
 #[test]
@@ -140,10 +137,7 @@ fn a_handler_who_picks_up_the_ball_ends_the_count() {
     for _ in 0..600 {
         world.check_back_to_basket(TICK_SECONDS);
     }
-    assert!(
-        !violated(&world),
-        "收球之后背身五秒的计时终止"
-    );
+    assert!(!violated(&world), "收球之后背身五秒的计时终止");
 }
 
 #[test]
@@ -155,8 +149,5 @@ fn a_deflection_ends_the_count() {
     for _ in 0..600 {
         world.check_back_to_basket(TICK_SECONDS);
     }
-    assert!(
-        !violated(&world),
-        "防守人把球碰开之后背身五秒的计时终止"
-    );
+    assert!(!violated(&world), "防守人把球碰开之后背身五秒的计时终止");
 }

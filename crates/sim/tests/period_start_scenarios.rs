@@ -8,13 +8,13 @@
 
 mod common;
 
+use nba_domain::league::LeagueProfile;
+use nba_domain::rules::GameRules;
 use nba_sim_core::action::Fact;
 use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::state::Phase;
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params, TeamSide};
-use nba_domain::league::LeagueProfile;
-use nba_domain::rules::GameRules;
 
 fn world_with_profile(seed: u64, league: LeagueProfile) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
@@ -47,7 +47,9 @@ fn advance_to_next_period(world: &mut World) {
 fn the_nba_opens_the_second_period_with_a_throw_in() {
     let mut world = nba_world(1401);
     // 第一节结束：比赛钟归零。
-    world.clock.set_regulation_clock(1, 0.05, world.clock.shot_clock());
+    world
+        .clock
+        .set_regulation_clock(1, 0.05, world.clock.shot_clock());
     advance_to_next_period(&mut world);
     assert_eq!(world.clock.period(), 2);
     // NBA 第二节是中线延长线发球，不是跳球。
@@ -93,7 +95,9 @@ fn the_nba_overtime_periods_start_with_a_jump_ball() {
 fn the_alternate_possession_arrow_advances_each_period() {
     let mut world = fiba_world(1404);
     // 走到第一节结束：箭头指向第一节开球球队的对方。
-    world.clock.set_regulation_clock(1, 0.05, world.clock.shot_clock());
+    world
+        .clock
+        .set_regulation_clock(1, 0.05, world.clock.shot_clock());
     let arrow_before = world.alternate_possession_next;
     advance_to_next_period(&mut world);
     assert_eq!(
@@ -119,7 +123,9 @@ fn the_period_start_throw_in_goes_to_the_team_the_arrow_points_at() {
         opening_team.other(),
         "箭头指向第一节开球球队的对方"
     );
-    world.clock.set_regulation_clock(1, 0.05, world.clock.shot_clock());
+    world
+        .clock
+        .set_regulation_clock(1, 0.05, world.clock.shot_clock());
     advance_to_next_period(&mut world);
     // 第二节的发球权交给箭头指向的球队（FIBA Article 12.4）。
     assert_eq!(
@@ -132,7 +138,9 @@ fn the_period_start_throw_in_goes_to_the_team_the_arrow_points_at() {
 #[test]
 fn a_period_break_stops_the_game_clock() {
     let mut world = nba_world(1406);
-    world.clock.set_regulation_clock(1, 0.05, world.clock.shot_clock());
+    world
+        .clock
+        .set_regulation_clock(1, 0.05, world.clock.shot_clock());
     // 归零之后进入节间休息，两钟都停。
     let mut saw_break = false;
     for _ in 0..400 {

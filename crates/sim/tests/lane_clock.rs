@@ -121,13 +121,9 @@ fn an_offensive_player_who_leaves_the_lane_in_time_is_not_a_violation() {
             }
         }
     }
-    assert!(
-        !violation,
-        "及时走出限制区的进攻人不得被判三秒违例"
-    );
+    assert!(!violation, "及时走出限制区的进攻人不得被判三秒违例");
     assert_eq!(
-        world.players[stuck].lane_seconds,
-        0.0,
+        world.players[stuck].lane_seconds, 0.0,
         "走出限制区之后计时归零"
     );
 }
@@ -213,10 +209,7 @@ fn a_defender_who_is_actively_guarding_is_not_called_for_three_seconds() {
             }
         }
     }
-    assert!(
-        !foul,
-        "正在积极盯防的防守人不得被判防守三秒违例"
-    );
+    assert!(!foul, "正在积极盯防的防守人不得被判防守三秒违例");
 }
 
 #[test]
@@ -240,21 +233,17 @@ fn the_three_second_count_does_not_start_before_the_offense_reaches_the_frontcou
         nba_sim_core::lane::step(&mut world, TICK_SECONDS);
     }
     assert!(
-        !world
-            .events
-            .iter()
-            .any(|event| matches!(
-                &event.fact,
-                Fact::Turnover {
-                    kind: TurnoverKind::LaneViolation,
-                    ..
-                }
-            )),
+        !world.events.iter().any(|event| matches!(
+            &event.fact,
+            Fact::Turnover {
+                kind: TurnoverKind::LaneViolation,
+                ..
+            }
+        )),
         "球在后场时不得判进攻三秒违例"
     );
     assert_eq!(
-        world.players[stuck].lane_seconds,
-        0.0,
+        world.players[stuck].lane_seconds, 0.0,
         "球在后场时计时不累积"
     );
 }

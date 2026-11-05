@@ -549,10 +549,7 @@ fn a_third_step_after_the_gather_is_a_travel() {
 
     // 收球：确立轴心脚。
     nba_sim_core::footwork::establish_pivot(&mut world, shooter, spot);
-    assert!(
-        world.possession.pivot.is_some(),
-        "收球必须确立轴心脚"
-    );
+    assert!(world.possession.pivot.is_some(), "收球必须确立轴心脚");
     assert_eq!(
         world.possession.pivot.map(|pivot| pivot.steps_taken),
         Some(0),
@@ -629,11 +626,7 @@ fn a_screen_whose_defender_left_the_court_fails_instead_of_crashing() {
         nba_sim_core::action::Completion::Failed,
         "防守人已经离场的掩护必须按失败结束"
     );
-    assert_eq!(
-        world.possession.screens,
-        0,
-        "失败的掩护不计入掩护次数"
-    );
+    assert_eq!(world.possession.screens, 0, "失败的掩护不计入掩护次数");
 }
 
 /// 脚步模型：收球确立轴心脚，收球之后的两步之内合法，第三步是走步。
@@ -728,11 +721,7 @@ fn the_support_foot_alternates_on_every_contact() {
     world.ball.pos = spot;
 
     nba_sim_core::footwork::establish_pivot(&mut world, holder, spot);
-    let axis = world
-        .possession
-        .pivot
-        .expect("收球必须确立轴心脚")
-        .foot;
+    let axis = world.possession.pivot.expect("收球必须确立轴心脚").foot;
     let step = nba_sim_core::footwork::step_length(&world, holder);
     for index in 0u32..3 {
         world.players[holder].pos = spot + Vec2::new(step * (index as f32 + 1.0), 0.0);
