@@ -349,8 +349,17 @@ async function main() {
           })(),
           facingError: (() => {
             if (!view || !player) return null;
-            if (Math.hypot(player.facing_x || 0, player.facing_y || 0) < 0.2) return null;
-            const target = Math.atan2(player.facing_x, player.facing_y);
+            // 渲染层用插值后的朝向算偏航（court3d.js syncPlayers），
+            // 这里必须用同一套插值：拿实时偏航去比未插值的快照朝向，
+            // 仿真帧一推进就不再相等，误差可达半弧度。
+            const facingX =
+              (player.facing_x || 0) +
+              ((nextPlayer.facing_x || 0) - (player.facing_x || 0)) * alpha;
+            const facingY =
+              (player.facing_y || 0) +
+              ((nextPlayer.facing_y || 0) - (player.facing_y || 0)) * alpha;
+            if (Math.hypot(facingX, facingY) < 0.2) return null;
+            const target = Math.atan2(facingX, facingY);
             let delta = (view.targetYaw - target) % (Math.PI * 2);
             if (delta > Math.PI) delta -= Math.PI * 2;
             if (delta < -Math.PI) delta += Math.PI * 2;

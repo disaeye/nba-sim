@@ -4,6 +4,7 @@
 import base64
 import json
 import os
+import shutil
 import socket
 import subprocess
 import time
@@ -63,11 +64,31 @@ def run_chrome_eval(js_expr: str, port: int = 9224) -> dict:
     s.close()
     return {}
 
+def chrome_binary() -> str:
+    """按 CHROME_BIN → google-chrome → chromium → chromium-browser 找浏览器。
+
+    与 scripts/test_court3d.mjs 的候选顺序一致：机器上只装了
+    chromium 时，硬编码的 google-chrome 会让这个检查直接起不来。
+    """
+    candidates = [
+        os.environ.get("CHROME_BIN"),
+        "google-chrome",
+        "chromium",
+        "chromium-browser",
+    ]
+    for candidate in candidates:
+        if candidate and shutil.which(candidate):
+            return candidate
+    raise RuntimeError(
+        "找不到 Chrome：设置 CHROME_BIN，或安装 google-chrome / chromium"
+    )
+
+
 def main():
     print("🏀 启动球场动效与视觉表现自动化端到端测试...")
 
     chrome_cmd = [
-        "google-chrome", "--headless=new", "--disable-gpu", "--no-sandbox",
+        chrome_binary(), "--headless=new", "--disable-gpu", "--no-sandbox",
         "--remote-debugging-port=9224", f"{SERVER}/?court=2d"
     ]
     proc = subprocess.Popen(chrome_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
