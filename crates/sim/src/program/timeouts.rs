@@ -135,6 +135,78 @@ pub fn request(world: &mut World, team: TeamSide) -> bool {
     world.emit(Fact::Timeout {
         team,
         remaining: [world.timeouts[0].remaining, world.timeouts[1].remaining],
+        mandatory: false,
+    });
+    true
+}
+
+/// 强制暂停：联赛规则在固定时点自动停表，不靠某一方主动申请。
+///
+/// NBA 2025-26 Rule 5 §VI 要求第二节走到 6:59 以下、第四节走到 2:59 以下
+/// 后的第一次死球停表，并给每队记上对应的暂停数。这个函数只在死球时
+/// 触发：活球中停表会把一次正在进行的进攻直接掐断。
+///
+/// 返回这次触发的强制暂停是否停表。
+pub fn enforce_mandatory(world: &mut World) -> bool {
+    if world.finished {
+        return false;
+    }
+    let period = world.clock.period();
+    let remaining = world.clock.game_clock();
+    let triggers = &world.rules.league.timeouts.mandatory_timeouts;
+    let mut due: Option<(usize, nba_domain::league::MandatoryTimeout)> = None;
+    for (index, trigger) in triggers.iter().enumerate() {
+        if world.mandatory_timeouts_fired & (1 << index) != 0 {
+            continue;
+        }
+        if trigger.period == period && remaining <= f64::from(trigger.remaining_seconds) {
+            due = Some((index, *trigger));
+            break;
+        }
+    }
+    let Some((index, trigger)) = due else {
+        return false;
+    };
+    // 只允许在死球时停表：活球期间进攻方正在推进，哨子和停表都不成立。
+    let dead = !world.phase().is_live_gameplay() || world.holder().is_none();
+    if !dead {
+        return false;
+    }
+    // 节次交接期间的时钟还没重置，而缩短节时长的比赛里本节一开始就已经
+    // 低于阈值。开节发球属于上一节留下的程序：第一个回合还没开始，
+    // 这时停表会把开节发球的方向换掉。零剩余时间同样不成立。
+    if world.period_start_inbound_pending || remaining <= 0.0 {
+        return false;
+    }
+    // 罚球、跳球与已经开始的暂停都是进行中的死球程序，强制暂停必须等它们结束。
+    if world.free_throw_pending()
+        || matches!(
+            world.phase(),
+            Phase::JumpBall { .. } | Phase::Timeout { .. }
+        )
+    {
+        return false;
+    }
+    world.mandatory_timeouts_fired |= 1 << index;
+    let charge = trigger.charge;
+    for ledger in world.timeouts.iter_mut() {
+        ledger.remaining = ledger.remaining.saturating_sub(charge);
+    }
+    let previous_phase = world.phase();
+    let resume_phase = ResumePhase::capture(previous_phase);
+    let now = world.now();
+    let resume_at = now + f64::from(trigger.duration_seconds);
+    world.set_timeout_phase(
+        world.possession.team,
+        resume_at,
+        resume_phase,
+        now,
+        previous_phase,
+    );
+    world.emit(Fact::Timeout {
+        team: world.possession.team,
+        remaining: [world.timeouts[0].remaining, world.timeouts[1].remaining],
+        mandatory: true,
     });
     true
 }

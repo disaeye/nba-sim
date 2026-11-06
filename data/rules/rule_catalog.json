@@ -712,7 +712,7 @@
       "implementation": "implemented",
       "existing_test": "nba_sim_core::rules_flow::only_the_team_in_control_may_stop_the_clock_and_the_budget_is_capped",
       "scenario_tests": {
-        "RULE-TIMEOUT-NBA-MANDATORY": "nba_sim_core::timeout_scenarios::the_nba_fourth_quarter_budget_is_capped_at_four",
+        "RULE-TIMEOUT-NBA-MANDATORY": "nba_sim_core::timeout_scenarios::the_nba_mandatory_timeout_fires_at_the_first_dead_ball_under_six_fifty_nine",
         "RULE-TIMEOUT-NBA-OVERTIME-BUDGET": "nba_sim_core::timeout_scenarios::the_overtime_budget_is_separate_from_the_game_budget",
         "RULE-TIMEOUT-FIBA-HALF-BUDGET": "nba_sim_core::timeout_scenarios::the_fiba_game_budget_is_five",
         "RULE-TIMEOUT-FIBA-FOURTH-QUARTER-CAP": "nba_sim_core::timeout_scenarios::the_fiba_fourth_quarter_budget_is_capped_at_three",
@@ -970,9 +970,6 @@
     }
   ],
   "known_current_gaps": [
-    "NBA Profile does not encode mandatory timeout triggers and timeout durations by source.",
-    "FIBA Profile does not distinguish the 2026 technical foul categories, and disruptive fouls are not a separate foul kind from the NBA flagrant one.",
-    "Neither profile encodes referee authorization or the scope of an instant-replay review.",
     "Both profiles require a full rule-program audit before their existing scalar fields can certify compliance."
   ]
 }

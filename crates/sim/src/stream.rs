@@ -72,6 +72,7 @@ impl Fact {
             Self::Goaltending { .. } => "GOALTENDING",
             Self::Review { .. } => "REVIEW",
             Self::PlacementApplied { .. } => "PLACEMENT_APPLIED",
+            Self::Injury { .. } => "INJURY",
             Self::GameEnd => "GAME_END",
         }
     }
@@ -516,10 +517,15 @@ impl World {
             Fact::PlayActivated { play, possession } => {
                 json!({ "play_id": PLAY_SOURCES[*play].0, "possession": possession })
             }
-            Fact::Timeout { team, remaining } => json!({
+            Fact::Timeout {
+                team,
+                remaining,
+                mandatory,
+            } => json!({
                 "team": team.as_str(),
                 "home_remaining": remaining[0],
                 "away_remaining": remaining[1],
+                "mandatory": mandatory,
             }),
             Fact::JumpBall {
                 kind,
@@ -558,6 +564,15 @@ impl World {
             Fact::PlacementApplied { player, reason } => json!({
                 "player_id": self.player_id(*player),
                 "reason": reason,
+            }),
+            Fact::Injury {
+                team,
+                player,
+                severity,
+            } => json!({
+                "team": team,
+                "player_id": self.player_id(*player),
+                "severity": severity,
             }),
             Fact::GameEnd => json!({}),
             Fact::Goaltending {

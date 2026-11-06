@@ -89,7 +89,7 @@ pub fn step(world: &mut World, dt: f64) {
     }
     let radius = world.rules.resolve.ball_security.poke_pressure_radius_ft;
     let offense = world.possession.team;
-    let ball = world.ball.pos;
+    let ball = world.players[holder].pos;
     let mut thief = None;
     let mut nearest = f32::INFINITY;
     for (handle, player) in world.players.iter().enumerate() {
@@ -106,6 +106,20 @@ pub fn step(world: &mut World, dt: f64) {
     let Some(thief) = thief else {
         return;
     };
+    // 停球后的防守抱人/搂抱犯规判定：持球人已停步/合球时，过度逼抢或搂抱构成非投篮犯规
+    let is_stopped = world.possession.dribble_state == crate::state::DribbleState::Gathered
+        || world.players[holder].vel.length() < 1.0;
+    if is_stopped && nearest <= 2.8 {
+        let physicality = world.players[thief].data.tendencies.physicality;
+        let contain = world.players[thief].on_ball_positioning
+            == Some(crate::action::OnBallPositioning::Contain);
+        let annual_rate = (0.001 + 0.010 * physicality) * (if contain { 1.5 } else { 1.0 });
+        let hold_rate = 1.0 - (-annual_rate as f64 * dt).exp();
+        if f64::from(world.draw(Stream::Foul, thief, purpose::HOLD_DEFENDER, 0)) < hold_rate {
+            crate::resolve::foul::apply_non_shooting_foul(world, thief, holder);
+            return;
+        }
+    }
     let security = &world.rules.resolve.ball_security;
     let attempt_rate = security.poke_attempt_rate_per_sec;
     let tendency_floor = security.poke_steal_tendency_floor;

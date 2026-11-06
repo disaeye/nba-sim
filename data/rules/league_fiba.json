@@ -29,6 +29,47 @@
   "timeouts_final_seconds": 120.0,
   "timeouts_final_max": 2,
   "overtime_timeouts": 1,
+  "timeout_durations": {
+    "full_seconds": 60.0,
+    "short_seconds": 0.0,
+    "overtime_seconds": 60.0
+  },
+  "mandatory_timeouts": [],
+  "foul_kinds": {
+    "recognized": [
+      "personal",
+      "shooting",
+      "offensive",
+      "loose_ball",
+      "double",
+      "technical_category_1",
+      "technical_category_2",
+      "disruptive",
+      "flagrant",
+      "disqualifying"
+    ],
+    "technical_categories": ["technical_category_1", "technical_category_2"],
+    "disruptive_is_separate": true
+  },
+  "officials": {
+    "authorization": [
+      "foul_judgement",
+      "violation_judgement",
+      "clock_operation",
+      "replay_review",
+      "disqualification"
+    ],
+    "review_scope": [
+      "out_of_bounds_assignment",
+      "two_versus_three_points",
+      "game_clock_at_period_end",
+      "shot_clock_at_period_end",
+      "unsportsmanlike_upgrade",
+      "disqualifying_upgrade",
+      "clock_malfunction",
+      "last_touch"
+    ]
+  },
   "three_point_distance_ft": 22.15,
   "corner_three_distance_ft": 0.0,
   "use_alternate_possession_arrow": true,

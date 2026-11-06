@@ -12,6 +12,8 @@ use crate::world::World;
 pub struct Ruling {
     pub possession: TeamSide,
     pub call: &'static str,
+    /// 是否存在可推翻原判的事实证据。
+    pub overturnable: bool,
 }
 
 /// 挑战结果。
@@ -26,7 +28,25 @@ pub enum ChallengeOutcome {
 impl World {
     /// 登记一条可复核的裁决。发球类裁决在写阶段时调用。
     pub fn record_ruling(&mut self, possession: TeamSide, call: &'static str) {
-        self.last_ruling = Some(Ruling { possession, call });
+        self.last_ruling = Some(Ruling {
+            possession,
+            call,
+            overturnable: false,
+        });
+    }
+
+    /// 登记一条附带证据状态的可复核裁决。
+    pub fn record_ruling_with_evidence(
+        &mut self,
+        possession: TeamSide,
+        call: &'static str,
+        overturnable: bool,
+    ) {
+        self.last_ruling = Some(Ruling {
+            possession,
+            call,
+            overturnable,
+        });
     }
 
     /// 主教练申请复核。
@@ -55,18 +75,47 @@ impl World {
             return Err("challenge window closed");
         }
         self.challenges_left[index] -= 1;
-        // 复核用的是事件记录本身；记录与裁决一致，所以结论是维持原判。
-        let cost_timeout = self.timeouts[index].remaining > 0;
-        if cost_timeout {
-            self.timeouts[index].remaining -= 1;
+        if ruling.overturnable {
+            // 挑战成功：原判被推翻，不扣除暂停，球权逆转给挑战方
+            let new_possession = team;
+            match self.phase() {
+                Phase::DeadBall { ready_at, .. } => {
+                    self.set_phase(Phase::DeadBall {
+                        team: new_possession,
+                        ready_at,
+                    });
+                }
+                Phase::Inbound { ready_at, .. } => {
+                    self.set_phase(Phase::Inbound {
+                        team: new_possession,
+                        ready_at,
+                    });
+                }
+                _ => {}
+            }
+            self.possession.team = new_possession;
+            self.emit(Fact::Review {
+                team,
+                call: ruling.call,
+                overturned: true,
+                cost_timeout: false,
+                time: self.now(),
+            });
+            Ok(ChallengeOutcome::Overturned)
+        } else {
+            // 复核维持原判：扣除一次暂停
+            let cost_timeout = self.timeouts[index].remaining > 0;
+            if cost_timeout {
+                self.timeouts[index].remaining -= 1;
+            }
+            self.emit(Fact::Review {
+                team,
+                call: ruling.call,
+                overturned: false,
+                cost_timeout,
+                time: self.now(),
+            });
+            Ok(ChallengeOutcome::Upheld)
         }
-        self.emit(Fact::Review {
-            team,
-            call: ruling.call,
-            overturned: false,
-            cost_timeout,
-            time: self.now(),
-        });
-        Ok(ChallengeOutcome::Upheld)
     }
 }

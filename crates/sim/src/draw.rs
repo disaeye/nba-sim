@@ -113,4 +113,8 @@ pub mod purpose {
     pub const SCREEN_FOUL: u16 = 29;
     pub const FAKE_READ: u16 = 30;
     pub const HAND_CHECK: u16 = 31;
+    pub const HOLD_DEFENDER: u16 = 32;
+    pub const REBOUND_PUSH: u16 = 33;
+    pub const CLOSEOUT_DRAW_CONTACT: u16 = 34;
+    pub const CLOSEOUT_SIDESTEP: u16 = 35;
 }

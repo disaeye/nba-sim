@@ -85,7 +85,12 @@ pub fn resolve(
         .unwrap_or(30.0);
     let distance_ft = (pos - hoop).length();
     let reached = distance_ft <= world.params.policy.g("finish_zone_ft");
-    let defender_beaten = separation_ft > world.rules.min_player_separation_ft + 1.0;
+    let defender_in_bait = nearest
+        .and_then(|defender| world.players.get(defender))
+        .and_then(|player| player.bait)
+        .is_some();
+    let defender_beaten =
+        defender_in_bait || separation_ft > world.rules.min_player_separation_ft + 1.0;
     // 带球撞人：防守人在接触前已经站定（双脚落地、不再滑步），碰撞
     // 由进攻方发起。裁判看的就是防守人有没有先占住位置，所以判定挂在
     // 防守人的速度上，而不是进攻人的速度。

@@ -37,7 +37,10 @@ fn rest_priority(world: &World, handle: usize) -> Option<f32> {
     let rules = &world.rules;
     let policy = &world.params.policy;
     let player = &world.players[handle];
-    if player.disqualified || player.fouls >= rules.league.fouls.max_personal_fouls {
+    if player.disqualified
+        || player.injured
+        || player.fouls >= rules.league.fouls.max_personal_fouls
+    {
         return Some(f32::MAX);
     }
     // 刚换上场的人不能立刻被换下去：否则替补上去一个回合就被当成
@@ -133,6 +136,7 @@ fn empty_the_bench(world: &mut World, team: TeamSide, index: usize) {
                     && !player.data.starter
                     && player.fouls < foul_limit
                     && !player.disqualified
+                    && !player.injured
             })
             .max_by(|left, right| {
                 // 先在替补席里找体能最好的人，替补席用尽才用已经歇够的
@@ -187,6 +191,7 @@ fn best_bench(
                 && !player.on_court
                 && player.fouls < foul_limit
                 && !player.disqualified
+                && !player.injured
                 && (!respect_min_rest || player.resting_until <= world.clock.elapsed())
         })
         .collect();
@@ -276,7 +281,8 @@ fn enforce_disqualification(world: &mut World) {
     }
     let disqualified_team = [TeamSide::Home, TeamSide::Away].into_iter().find(|team| {
         world.on_court(*team).as_slice().iter().any(|handle| {
-            world.players[*handle].disqualified && !world.players[*handle].retained_after_foul_limit
+            (world.players[*handle].disqualified || world.players[*handle].injured)
+                && !world.players[*handle].retained_after_foul_limit
         })
     });
     let Some(team) = disqualified_team else {
@@ -340,12 +346,12 @@ pub fn apply_dead_ball_window(world: &mut World) {
     }
     let budget_limit = world.rules.rotation.max_substitutions_per_window;
     for (index, team) in [TeamSide::Home, TeamSide::Away].into_iter().enumerate() {
-        // 犯满离场的替换不是教练的选择：它不占窗口配额，也不能被
-        // 配额耗尽挡下来，否则场上会留下一个已经犯满的球员。
+        // 犯满离场或严重受伤的替换不是教练的选择：它不占窗口配额，也不能被
+        // 配额耗尽挡下来，否则场上会留下一个不可比赛的球员。
         loop {
             let on_court = world.on_court(team);
             let Some(outgoing) = on_court.as_slice().iter().copied().find(|handle| {
-                world.players[*handle].disqualified
+                (world.players[*handle].disqualified || world.players[*handle].injured)
                     && !world.players[*handle].retained_after_foul_limit
             }) else {
                 break;
@@ -411,4 +417,31 @@ pub fn record_foul(world: &mut World, handle: usize) -> bool {
         return true;
     }
     false
+}
+
+impl World {
+    /// 触发球员受伤：置位伤病状态并发布伤病事件。如果该球员在场且比赛处于活球阶段，
+    /// 立即以 StoppageCause::Injury 停表并由换人程序指派替补接替上场。
+    pub fn trigger_injury(&mut self, player: usize, severity: &'static str) {
+        let team = self.players[player].team;
+        self.players[player].injured = true;
+        self.players[player].disqualified = true;
+        self.emit(crate::action::Fact::Injury {
+            team,
+            player,
+            severity,
+        });
+        if self.players[player].on_court {
+            if self.live_or_flight() {
+                self.adjudicate(crate::adjudicate::Adjudication::new(
+                    crate::adjudicate::StoppageCause::Injury,
+                    crate::adjudicate::RestartPlan::Stoppage {
+                        team: self.possession.team,
+                        ready_after: f64::from(self.rules.inbound_setup_seconds),
+                    },
+                ));
+            }
+            apply_dead_ball_window(self);
+        }
+    }
 }

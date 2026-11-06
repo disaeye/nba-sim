@@ -86,6 +86,11 @@ pub enum FoulKind {
     Technical,
     Flagrant,
     TransitionTake,
+    /// FIBA 2026 Article 36 的破坏性行为犯规。
+    ///
+    /// NBA 2025-26 把同类行为归入恶意犯规，FIBA 把它单独成一类：
+    /// 罚则与是否计入个人犯规都不同于恶意犯规。
+    Disruptive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

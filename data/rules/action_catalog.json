@@ -837,7 +837,9 @@
         "扑防干扰",
         "垂直起跳",
         "封盖尝试",
-        "追身封盖"
+        "追身封盖",
+        "造犯规接触",
+        "侧移避让"
       ],
       "current_status": "verified",
       "passing_scenarios": [
@@ -847,6 +849,8 @@
         "ACTION-CLOSEOUT-BLOCK-JUMP-RAISES-REACH",
         "ACTION-CLOSEOUT-BLOCK-JUMP-RUNS-IN-GAMES",
         "ACTION-CLOSEOUT-DISTANCE-CHANGES-SHOT-EPV",
+        "ACTION-CLOSEOUT-SHOOTER-DRAWS-CONTACT",
+        "ACTION-CLOSEOUT-SHOOTER-SIDESTEPS",
         "ACTION-CLOSEOUT-SKILL-CHANGES-BLOCK-OUTPUT"
       ],
       "existing_types": [
@@ -864,10 +868,11 @@
         "crates/sim/src/shot_quality.rs::release_contest",
         "crates/sim/src/shot_quality.rs::blocking_hands",
         "crates/sim/src/resolve/shot.rs::resolve",
+   "crates/sim/src/resolve/shot.rs::closeout_response",
         "crates/sim/src/resolve/rebound.rs::resolve",
         "crates/sim/src/ball.rs::player_contact"
       ],
-      "consumer_status": "A live shooting action starts an independent CloseoutContest runtime for the on-ball defender, and the closest help defender within the jump radius starts a BlockJump runtime. BlockJump execution raises that defender's blocking hand by the configured reach, which the shot resolver's hand geometry reads; the same defender is skipped in box-out because he is airborne. Offensive responses to a jump (drawing contact, side-stepping) remain incomplete.",
+      "consumer_status": "A live shooting action starts an independent CloseoutContest runtime for the on-ball defender, and the closest help defender within the jump radius starts a BlockJump runtime. BlockJump execution raises that defender's blocking hand by the configured reach, which the shot resolver's hand geometry reads; the same defender is skipped in box-out because he is airborne. When the defender is airborne in the execution phase, the shooter chooses between drawing contact into the landing path and side-stepping away from the block; both suppress the block and are driven by the shooter's risk tolerance and agility.",
       "evidence": [
         "crates/sim/tests/action_chain.rs::live_shot_starts_parallel_closeout_and_changes_the_on_ball_target",
         "crates/sim/tests/batch_statistics.rs::defensive_skill_changes_blocks_and_steals",
@@ -875,7 +880,9 @@
         "crates/sim/tests/defensive_technique.rs::block_jump_raises_the_blocking_hand_only_while_executing",
         "crates/sim/tests/defensive_technique.rs::block_jump_leaves_the_jumper_without_a_box_out",
         "crates/sim/tests/defensive_technique.rs::real_games_run_block_jumps_through_their_phases",
-        "crates/sim/tests/defensive_technique.rs::a_blocked_shot_is_hand_contact_and_leaves_the_ball_loose"
+        "crates/sim/tests/defensive_technique.rs::a_blocked_shot_is_hand_contact_and_leaves_the_ball_loose",
+        "crates/sim/tests/closeout_chain.rs::the_contact_branch_follows_the_shooters_risk_tolerance",
+        "crates/sim/tests/closeout_chain.rs::the_sidestep_share_follows_agility"
       ],
       "rule_refs": [
         "NBA Rule 11-12",
@@ -888,7 +895,9 @@
         "ACTION-CLOSEOUT-BLOCK-JUMP-RAISES-REACH",
         "ACTION-CLOSEOUT-BLOCK-JUMP-COSTS-BOX-OUT",
         "ACTION-CLOSEOUT-BLOCK-JUMP-RUNS-IN-GAMES",
-        "ACTION-BLOCK-CONTACT-ON-FLIGHT"
+        "ACTION-BLOCK-CONTACT-ON-FLIGHT",
+        "ACTION-CLOSEOUT-SHOOTER-DRAWS-CONTACT",
+        "ACTION-CLOSEOUT-SHOOTER-SIDESTEPS"
       ],
       "scenario_tests": {
         "ACTION-CLOSEOUT-ACTION-RUNS-PARALLEL-TO-SHOT": "crates/sim/tests/action_chain.rs::live_shot_starts_parallel_closeout_and_changes_the_on_ball_target",
@@ -897,7 +906,9 @@
         "ACTION-CLOSEOUT-BLOCK-JUMP-RAISES-REACH": "crates/sim/tests/defensive_technique.rs::block_jump_raises_the_blocking_hand_only_while_executing",
         "ACTION-CLOSEOUT-BLOCK-JUMP-COSTS-BOX-OUT": "crates/sim/tests/defensive_technique.rs::block_jump_leaves_the_jumper_without_a_box_out",
         "ACTION-CLOSEOUT-BLOCK-JUMP-RUNS-IN-GAMES": "crates/sim/tests/defensive_technique.rs::real_games_run_block_jumps_through_their_phases",
-        "ACTION-BLOCK-CONTACT-ON-FLIGHT": "crates/sim/tests/defensive_technique.rs::a_blocked_shot_is_hand_contact_and_leaves_the_ball_loose"
+        "ACTION-BLOCK-CONTACT-ON-FLIGHT": "crates/sim/tests/defensive_technique.rs::a_blocked_shot_is_hand_contact_and_leaves_the_ball_loose",
+        "ACTION-CLOSEOUT-SHOOTER-DRAWS-CONTACT": "crates/sim/tests/closeout_chain.rs::the_contact_branch_follows_the_shooters_risk_tolerance",
+        "ACTION-CLOSEOUT-SHOOTER-SIDESTEPS": "crates/sim/tests/closeout_chain.rs::the_sidestep_share_follows_agility"
       },
       "missing_evidence": []
     },

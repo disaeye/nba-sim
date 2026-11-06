@@ -80,6 +80,7 @@ fn fact_kind(fact: &Fact) -> &'static str {
         Fact::GameEnd => "game_end",
         Fact::Goaltending { .. } => "goaltending",
         Fact::Review { .. } => "review",
+        Fact::Injury { .. } => "injury",
     }
 }
 

@@ -188,6 +188,23 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     world.possession.ball_phase = crate::state::BallPhase::Dribble;
     let p_make = model.p_make;
 
+    // 防守人已经起跳：滞空的人不能改向，进攻方因此多出两个选择。靠上去
+    // 把身体造进对方身上要犯规，或者侧移把出手点从他身侧让开。一旦选
+    // 定其中一种，这次出手就不再可能被盖：起跳封盖的手臂已经越过了球。
+    let airborne = airborne_block_jumper(world, team, pos);
+    let response = if airborne.is_some() {
+        closeout_response(world, shooter)
+    } else {
+        CloseoutResponse::None
+    };
+    let draw_contact = response == CloseoutResponse::DrawContact;
+    let sidestep = response == CloseoutResponse::Sidestep;
+    let mut p_make = p_make;
+    if sidestep {
+        // 侧移把出手点让开了封盖，代价是出手姿势被拉歪。
+        p_make = clamp01(p_make * world.params.policy.w("closeout_sidestep_make_scale"));
+    }
+
     // 犯规概率按出手价值分开标定：三分出手的投篮犯规比两分低一个数量级，
     // 同一个概率给两档会把罚球数推到实测的一点五倍。
     let base_foul_rate = world.params.policy.w(if is_three {
@@ -196,10 +213,19 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         "shooting_foul_rate_two_point"
     });
     let p_foul = clamp01(base_foul_rate * (0.6 + 0.9 * contest));
+    // 造犯规的那一步是主动把身体送进滞空防守人的落地路线：接触成立，
+    // 犯规因此几乎必然发生。这个概率不乘在底频上，而是直接成为判罚概率。
+    let initiated_contact = draw_contact
+        && world.draw(Stream::Foul, shooter, purpose::CLOSEOUT_DRAW_CONTACT, 1)
+            < world.params.policy.w("closeout_draw_contact_foul_chance");
     // 封盖是球飞到手上才发生的事件，不在出手时抽结果。这里只保留封盖
-    // 尝试带来的犯规风险；封盖本身由手部接触事实决定。
-    let (block_candidate, _physical_block) =
-        block_probability(world, shooter, pos, contest, is_three);
+    // 尝试带来的犯规风险；封盖本身由手部接触事实决定。防守人已经起跳时
+    // 他不能改向，这次出手不可能被盖。
+    let (block_candidate, _physical_block) = if airborne.is_some() {
+        (None, 0.0)
+    } else {
+        block_probability(world, shooter, pos, contest, is_three)
+    };
     let block_foul = match block_candidate {
         Some(candidate) => {
             world.draw(Stream::Foul, candidate, purpose::SHOT_BLOCK_FOUL, 0)
@@ -207,8 +233,9 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         }
         None => false,
     };
-    let fouled =
-        block_foul || world.draw(Stream::Foul, shooter, purpose::SHOOTING_FOUL, 0) < p_foul;
+    let fouled = initiated_contact
+        || block_foul
+        || world.draw(Stream::Foul, shooter, purpose::SHOOTING_FOUL, 0) < p_foul;
     let and_one = fouled
         && world.draw(Stream::Foul, shooter, purpose::AND_ONE, 0)
             < world.params.policy.w("and_one_rate");
@@ -546,6 +573,58 @@ pub fn finish(world: &mut World) {
     } else {
         crate::resolve::rebound::resolve(world, pending.zone, pending.distance_ft, rim_contact);
     }
+}
+
+/// 面对滞空防守人时进攻方的两个应对。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseoutResponse {
+    /// 没有人在滞空，这次出手没有第三个选择。
+    None,
+    /// 主动把身体送进防守人的落地路线，靠接触要犯规。
+    DrawContact,
+    /// 侧移把出手点让开封盖。
+    Sidestep,
+}
+
+/// 出手点附近是否有防守人正在封盖跳跃的执行阶段。
+///
+/// 只有执行阶段算滞空：准备阶段他还在屈膝，跟进阶段他已经落地。
+fn airborne_block_jumper(world: &World, team: crate::action::TeamSide, pos: Vec2) -> Option<usize> {
+    world
+        .players
+        .iter()
+        .enumerate()
+        .filter(|(_, player)| player.on_court && player.team != team)
+        .filter(|(_, player)| {
+            (player.pos - pos).length() < world.rules.resolve.technique.block_jump_radius_ft
+        })
+        .find(|(index, _)| {
+            world.defensive_actions[*index]
+                .as_ref()
+                .is_some_and(|action| {
+                    action.kind == crate::action::DefensiveActionKind::BlockJump
+                        && action.phase == nba_domain::action_window::ActionPhase::Execution
+                })
+        })
+        .map(|(index, _)| index)
+}
+
+/// 进攻方对滞空防守人的选择：先看敢不敢迎上去制造接触，不敢再试图侧移。
+/// 两个都不成立时按原姿势出手。
+pub fn closeout_response(world: &mut World, shooter: usize) -> CloseoutResponse {
+    let lean = world.players[shooter].data.tendencies.risk_tolerance;
+    if world.draw(Stream::Foul, shooter, purpose::CLOSEOUT_DRAW_CONTACT, 0)
+        < lean * world.params.policy.w("closeout_draw_contact_rate")
+    {
+        return CloseoutResponse::DrawContact;
+    }
+    let agility = world.players[shooter].data.attributes.agility;
+    if world.draw(Stream::Decision, shooter, purpose::CLOSEOUT_SIDESTEP, 0)
+        < agility * world.params.policy.w("closeout_sidestep_rate")
+    {
+        return CloseoutResponse::Sidestep;
+    }
+    CloseoutResponse::None
 }
 
 /// 封盖：出手点附近、封盖与弹跳更强的防守人更可能起跳。返回被选中的

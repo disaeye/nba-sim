@@ -1,0 +1,108 @@
+{
+  "cycle": "gap-closure",
+  "scope": "按 docs/dev/current/full_simulation_plan.md 收敛实现与文档之间的差距",
+  "verification": {
+    "workspace_tests": {
+      "command": "cargo test --workspace",
+      "exit_code": 0,
+      "test_binaries_ok": 100,
+      "test_binaries_failed": 0
+    },
+    "documentation_guard": {
+      "command": "python3 scripts/check_docs.py",
+      "documents_scanned": 41,
+      "references_checked": 199,
+      "result": "passed"
+    },
+    "animation_catalog_guard": {
+      "command": "python3 scripts/check_animation_catalog.py",
+      "families": 16,
+      "result": "passed"
+    },
+    "diff_whitespace": {
+      "command": "git diff --check",
+      "result": "clean"
+    },
+    "gate": {
+      "command": "cargo run --release --bin nba-sim -- sim-core --gate --seed 1 --games 16",
+      "geometric_violations": 0,
+      "context_violations": 0,
+      "criteria_total": 39,
+      "criteria_out_of_band": 3,
+      "out_of_band": {
+        "fta_per_game": 55.188,
+        "steals_per_game": 13.125,
+        "and_one_per_game": 1.75
+      },
+      "artifact": "docs/dev/evidence/gap_closure_cycle/gate.txt"
+    }
+  },
+  "deliverables": [
+    {
+      "phase": "战术激活率与基线指纹",
+      "changes": [
+        "crates/sim/src/tactics.rs：有球战术的抽样时机交给触发谓词，转换窗口之外的等待不再阻断早攻",
+        "crates/sim/src/gate.rs：战术激活分母改用转换窗口，与触发谓词的口径一致",
+        "crates/sim/tests/baseline/fingerprint.json：按新行为重录基线"
+      ],
+      "measured": {
+        "play_activation_rate": 0.795,
+        "band": [0.65, 0.85]
+      },
+      "evidence": [
+        "crates/sim/tests/baseline_fingerprint.rs::baseline_fingerprint_matches_recorded_artifact",
+        "crates/sim/tests/baseline_fingerprint.rs::same_seed_produces_identical_fingerprint"
+      ]
+    },
+    {
+      "phase": "规则目录未编码项",
+      "changes": [
+        "crates/domain/src/league.rs：TimeoutPolicy 增加 mandatory_timeouts 与 timeout_durations，新增 FoulKindPolicy 与 OfficialsPolicy",
+        "data/rules/league_nba.json：第二节 6:59、第四节 2:59 两个触发点，75/20/60 三档时长，犯规分类与裁判权限",
+        "data/rules/league_fiba.json：无强制暂停，60 秒完整暂停，破坏性犯规与技术犯规分级",
+        "crates/domain/src/event.rs：新增 FoulKind::Disruptive",
+        "crates/sim/src/program/timeouts.rs::enforce_mandatory：死球时停表、给两队记账、发出一条带 mandatory 标记的暂停事实",
+        "data/rules/rule_catalog.json：已知缺口收敛为规则程序审计一条"
+      ],
+      "evidence": [
+        "crates/sim/tests/timeout_scenarios.rs::the_nba_mandatory_timeout_fires_at_the_first_dead_ball_under_six_fifty_nine",
+        "crates/sim/tests/timeout_scenarios.rs::fiba_has_no_mandatory_timeout",
+        "crates/domain/tests/league_profiles.rs::the_nba_profile_keeps_disruptive_behaviour_inside_the_flagrant_kind",
+        "crates/domain/tests/league_profiles.rs::the_fiba_profile_separates_disruptive_fouls_and_technical_categories",
+        "crates/domain/tests/league_profiles.rs::both_profiles_declare_referee_authority_and_review_scope",
+        "crates/domain/tests/league_profiles.rs::the_two_profiles_review_different_questions"
+      ]
+    },
+    {
+      "phase": "动作目录闭环",
+      "changes": [
+        "crates/sim/src/resolve/shot.rs::closeout_response：滞空防守人面前的两条进攻应对（造犯规接触、侧移避让），两者都让封盖不可能发生",
+        "crates/sim/src/policy.rs::post_mismatch_edge：错位单打的低位红利按身高差进入决策效用",
+        "crates/sim/src/draw.rs：新增 CLOSEOUT_DRAW_CONTACT 与 CLOSEOUT_SIDESTEP 两条抽样槽位",
+        "data/rules/action_catalog.json：ACTION-CLOSEOUT 登记造犯规接触与侧移避让两个动作与其场景",
+        "data/rules/action_animation_catalog.json：两个新动作的骨骼片段与二维动力学配方"
+      ],
+      "evidence": [
+        "crates/sim/tests/closeout_chain.rs::an_airborne_blocker_leaves_the_shooter_two_responses",
+        "crates/sim/tests/closeout_chain.rs::the_contact_branch_follows_the_shooters_risk_tolerance",
+        "crates/sim/tests/closeout_chain.rs::the_sidestep_share_follows_agility",
+        "crates/sim/tests/closeout_chain.rs::the_response_draws_come_from_the_closeout_streams",
+        "crates/sim/src/policy.rs::tests::a_shorter_defender_raises_the_post_up_value"
+      ]
+    },
+    {
+      "phase": "角色属性与监控门禁",
+      "changes": [
+        "crates/domain/tests/roster_roles.rs：每类进攻角色的最低行为要求写成判据，角色与倾向矛盾即失败",
+        "crates/sim/src/gate.rs：新增 travel_per_game 分布判据",
+        "data/calibration/policy.json：travel_per_game 带宽 [1.5, 6.0]"
+      ],
+      "measured": {
+        "travel_per_game": 3.312
+      },
+      "evidence": [
+        "crates/domain/tests/roster_roles.rs::every_declared_offensive_role_is_supported_by_its_tendencies"
+      ]
+    }
+  ]
+}

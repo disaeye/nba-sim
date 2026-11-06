@@ -1,0 +1,2406 @@
+{
+  "catalog_version": 1,
+  "allowed_clips": [
+    "Man_Walk",
+    "Man_Run",
+    "Man_Death",
+    "Man_Idle",
+    "Man_Sitting",
+    "Man_Standing",
+    "Man_Jump",
+    "Man_SwordSlash",
+    "Man_RunningJump",
+    "Man_Clapping",
+    "Man_Punch"
+  ],
+  "families_count": 16,
+  "families": [
+    {
+      "id": "ACTION-DRIBBLE",
+      "name": "运球与持球控制",
+      "actions_count": 8,
+      "actions": [
+        {
+          "name": "原地运球",
+          "kind": "dribble",
+          "variant": "direct_drive",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "dribble_cadence",
+            "label_zh": "原地运球"
+          },
+          "scenario_test": "crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover"
+        },
+        {
+          "name": "推进运球",
+          "kind": "dribble",
+          "variant": "direct_drive",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "dribble_cadence",
+            "label_zh": "推进运球"
+          },
+          "scenario_test": "crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover"
+        },
+        {
+          "name": "体前变向",
+          "kind": "dribble",
+          "variant": "crossover",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "crossover_trail",
+            "label_zh": "体前变向"
+          },
+          "scenario_test": "crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover"
+        },
+        {
+          "name": "胯下运球",
+          "kind": "dribble",
+          "variant": "between_the_legs",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "crossover_trail",
+            "label_zh": "胯下运球"
+          },
+          "scenario_test": "crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover"
+        },
+        {
+          "name": "背后运球",
+          "kind": "dribble",
+          "variant": "behind_the_back",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "crossover_trail",
+            "label_zh": "背后运球"
+          },
+          "scenario_test": "crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover"
+        },
+        {
+          "name": "转身运球",
+          "kind": "dribble",
+          "variant": "spin_move",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "spin_arc",
+            "label_zh": "转身运球"
+          },
+          "scenario_test": "crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover"
+        },
+        {
+          "name": "迟疑步",
+          "kind": "dribble",
+          "variant": "hesitation",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 0.8,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "hesitation_freeze",
+            "label_zh": "迟疑步"
+          },
+          "scenario_test": "crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover"
+        },
+        {
+          "name": "后撤步运球",
+          "kind": "dribble",
+          "variant": "retreat",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "retreat_arrow",
+            "label_zh": "后撤步"
+          },
+          "scenario_test": "crates/sim/tests/engine.rs::double_dribble_after_gather_is_a_turnover"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-DRIVE",
+      "name": "突破与持球推进",
+      "actions_count": 6,
+      "actions": [
+        {
+          "name": "直接突破",
+          "kind": "drive",
+          "variant": "straight",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.3,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "drive_arrow",
+            "label_zh": "直接突破"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::drive_resolution_reports_actual_arrival_and_separation"
+        },
+        {
+          "name": "变向突破",
+          "kind": "drive",
+          "variant": "crossover",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.3,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "crossover_trail",
+            "label_zh": "变向突破"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::drive_resolution_reports_actual_arrival_and_separation"
+        },
+        {
+          "name": "转身突破",
+          "kind": "drive",
+          "variant": "spin",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.3,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "spin_arc",
+            "label_zh": "转身突破"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::drive_resolution_reports_actual_arrival_and_separation"
+        },
+        {
+          "name": "急停",
+          "kind": "drive",
+          "variant": "pull_up_stop",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.0,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "hard_stop",
+            "label_zh": "急停调整"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::drive_resolution_reports_actual_arrival_and_separation"
+        },
+        {
+          "name": "后撤步",
+          "kind": "drive",
+          "variant": "step_back",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "retreat_arrow",
+            "label_zh": "后撤步"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::drive_resolution_reports_actual_arrival_and_separation"
+        },
+        {
+          "name": "突破分球",
+          "kind": "drive",
+          "variant": "drive_kick",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.3,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "pass_line",
+            "label_zh": "突分出球"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::drive_resolution_reports_actual_arrival_and_separation"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-FINISH",
+      "name": "篮下终结",
+      "actions_count": 9,
+      "actions": [
+        {
+          "name": "普通上篮",
+          "kind": "finish",
+          "variant": "layup",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "layup_arc",
+            "label_zh": "三步上篮"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "反手上篮",
+          "kind": "finish",
+          "variant": "reverse_layup",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "layup_arc",
+            "label_zh": "反手上篮"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "拉杆上篮",
+          "kind": "finish",
+          "variant": "double_clutch_layup",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "layup_arc",
+            "label_zh": "空中拉杆"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "挑篮",
+          "kind": "finish",
+          "variant": "finger_roll",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.0,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "layup_arc",
+            "label_zh": "指尖挑篮"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "抛投",
+          "kind": "finish",
+          "variant": "floater",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "layup_arc",
+            "label_zh": "骑马射箭"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "扣篮",
+          "kind": "finish",
+          "variant": "dunk",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_RunningJump",
+            "speed": 1.2,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "dunk_line",
+            "label_zh": "腾空暴扣"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "补篮",
+          "kind": "finish",
+          "variant": "putback",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.2,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "elevation",
+            "label_zh": "补篮点进"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "跳步收球",
+          "kind": "finish",
+          "variant": "pro_hop",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.0,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "gather_hop",
+            "label_zh": "跳步收球"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "欧洲步",
+          "kind": "finish",
+          "variant": "euro_step",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "crossover_trail",
+            "label_zh": "欧洲步"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-SHOT",
+      "name": "跳投与投篮技术",
+      "actions_count": 8,
+      "actions": [
+        {
+          "name": "接球就投",
+          "kind": "jump_shot",
+          "variant": "catch_shoot",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "aim_line",
+            "label_zh": "接球起跳投篮"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "急停跳投",
+          "kind": "jump_shot",
+          "variant": "pull_up",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "aim_line",
+            "label_zh": "急停起跳投篮"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "后仰跳投",
+          "kind": "jump_shot",
+          "variant": "fadeaway",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.0,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "aim_line",
+            "label_zh": "后仰起跳投篮"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "后撤步跳投",
+          "kind": "jump_shot",
+          "variant": "step_back",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "aim_line",
+            "label_zh": "后撤步起跳投篮"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "转身跳投",
+          "kind": "jump_shot",
+          "variant": "turnaround",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "aim_line",
+            "label_zh": "转身起跳投篮"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "勾手",
+          "kind": "jump_shot",
+          "variant": "hook",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.0,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "aim_line",
+            "label_zh": "勾手起跳投篮"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "三分出手",
+          "kind": "jump_shot",
+          "variant": "three_point",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "aim_line",
+            "label_zh": "远投起跳投篮"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        },
+        {
+          "name": "罚球",
+          "kind": "jump_shot",
+          "variant": "free_throw",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 0.9,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "aim_line",
+            "label_zh": "定点罚球"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::shot_type_is_read_from_current_phase_and_actual_position"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-POST",
+      "name": "背身进攻",
+      "actions_count": 8,
+      "actions": [
+        {
+          "name": "背身要位",
+          "kind": "post_up",
+          "variant": "post_up",
+          "role": "primary",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Idle",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "post_elbow",
+            "label_zh": "背身卡位"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points"
+        },
+        {
+          "name": "背身挤打",
+          "kind": "post_up",
+          "variant": "backdown",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Idle",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "post_elbow",
+            "label_zh": "背身挤打"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points"
+        },
+        {
+          "name": "前转身",
+          "kind": "post_up",
+          "variant": "front_turn",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.2,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "spin_arc",
+            "label_zh": "前转身突破"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points"
+        },
+        {
+          "name": "后转身",
+          "kind": "post_up",
+          "variant": "reverse_turn",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.2,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "spin_arc",
+            "label_zh": "后转身突破"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points"
+        },
+        {
+          "name": "撤步转身",
+          "kind": "post_up",
+          "variant": "drop_step",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.2,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "post_elbow",
+            "label_zh": "撤步转身"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points"
+        },
+        {
+          "name": "上下步",
+          "kind": "post_up",
+          "variant": "up_and_under",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "aim_line",
+            "label_zh": "上下步假动作"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points"
+        },
+        {
+          "name": "勾手",
+          "kind": "post_up",
+          "variant": "hook",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.0,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "aim_line",
+            "label_zh": "低位勾手"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points"
+        },
+        {
+          "name": "背身后仰",
+          "kind": "post_up",
+          "variant": "turnaround_fadeaway",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.0,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "aim_line",
+            "label_zh": "背身后仰跳投"
+          },
+          "scenario_test": "crates/sim/tests/finishing.rs::ball_phase_changes_only_at_actual_resolution_points"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-PASS",
+      "name": "传球与控制交接",
+      "actions_count": 9,
+      "actions": [
+        {
+          "name": "胸前传球",
+          "kind": "pass",
+          "variant": "chest",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.35,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "pass_line",
+            "label_zh": "胸前传球"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "击地传球",
+          "kind": "pass",
+          "variant": "bounce",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.35,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "pass_line",
+            "label_zh": "击地传球"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "过顶传球",
+          "kind": "pass",
+          "variant": "overhead",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.35,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "pass_line",
+            "label_zh": "过顶长传"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "单手推传",
+          "kind": "pass",
+          "variant": "one_hand",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.35,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "pass_line",
+            "label_zh": "单手推传"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "背后传球",
+          "kind": "pass",
+          "variant": "behind_back",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.35,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "pass_line",
+            "label_zh": "背后传球"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "高吊传球",
+          "kind": "pass",
+          "variant": "lob",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.2,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "pass_line",
+            "label_zh": "高吊传球"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "快攻长传",
+          "kind": "pass",
+          "variant": "outlet",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.4,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "pass_line",
+            "label_zh": "一传快攻"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "手递手传球",
+          "kind": "pass",
+          "variant": "handoff",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.2,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "pass_line",
+            "label_zh": "手递手交接"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "空中接力传球",
+          "kind": "pass",
+          "variant": "alley_oop",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.35,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "pass_line",
+            "label_zh": "空接抛传"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-FAKE",
+      "name": "假动作与试探",
+      "actions_count": 4,
+      "actions": [
+        {
+          "name": "投篮假动作",
+          "kind": "fake",
+          "variant": "shot_fake",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Idle",
+            "speed": 1.2,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "triple_threat",
+            "label_zh": "投篮假动作"
+          },
+          "scenario_test": "crates/sim/tests/fake_protection.rs::shot_fake_baits_the_defender_and_reduces_the_next_contest"
+        },
+        {
+          "name": "传球假动作",
+          "kind": "fake",
+          "variant": "pass_fake",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.4,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "pass_line",
+            "label_zh": "传球假动作"
+          },
+          "scenario_test": "crates/sim/tests/fake_protection.rs::shot_fake_baits_the_defender_and_reduces_the_next_contest"
+        },
+        {
+          "name": "试探步",
+          "kind": "fake",
+          "variant": "jab_step",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.2,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "triple_threat",
+            "label_zh": "试探步试探"
+          },
+          "scenario_test": "crates/sim/tests/fake_protection.rs::shot_fake_baits_the_defender_and_reduces_the_next_contest"
+        },
+        {
+          "name": "迟疑步",
+          "kind": "fake",
+          "variant": "hesitation",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 0.9,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "hesitation_freeze",
+            "label_zh": "节奏停顿"
+          },
+          "scenario_test": "crates/sim/tests/fake_protection.rs::shot_fake_baits_the_defender_and_reduces_the_next_contest"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-BALL-PROTECTION",
+      "name": "护球与持球保护",
+      "actions_count": 4,
+      "actions": [
+        {
+          "name": "面框护球",
+          "kind": "protect",
+          "variant": "face_up_protect",
+          "role": "primary",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Idle",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "triple_threat",
+            "label_zh": "面框护球"
+          },
+          "scenario_test": "crates/sim/tests/fake_protection.rs::ball_protection_reduces_poke_success"
+        },
+        {
+          "name": "背身护球",
+          "kind": "protect",
+          "variant": "post_protect",
+          "role": "primary",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Idle",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "post_elbow",
+            "label_zh": "背身护球"
+          },
+          "scenario_test": "crates/sim/tests/fake_protection.rs::ball_protection_reduces_poke_success"
+        },
+        {
+          "name": "转身护球",
+          "kind": "protect",
+          "variant": "spin_protect",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "spin_arc",
+            "label_zh": "转身护球"
+          },
+          "scenario_test": "crates/sim/tests/fake_protection.rs::ball_protection_reduces_poke_success"
+        },
+        {
+          "name": "被包夹护球",
+          "kind": "protect",
+          "variant": "trap_protect",
+          "role": "primary",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Idle",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "post_elbow",
+            "label_zh": "包夹护球"
+          },
+          "scenario_test": "crates/sim/tests/fake_protection.rs::ball_protection_reduces_poke_success"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-SCREEN",
+      "name": "掩护与掩护后配合",
+      "actions_count": 7,
+      "actions": [
+        {
+          "name": "持球掩护",
+          "kind": "screen",
+          "variant": "on_ball",
+          "role": "screener",
+          "phases": [
+            "sustained",
+            "execution"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Standing",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "screen_bar",
+            "label_zh": "持球掩护"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "无球掩护",
+          "kind": "screen",
+          "variant": "off_ball",
+          "role": "screener",
+          "phases": [
+            "sustained",
+            "execution"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Standing",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "screen_bar",
+            "label_zh": "无球掩护"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "顺下",
+          "kind": "screen",
+          "variant": "roll",
+          "role": "screener",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.25,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "挡拆下顺"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "外弹",
+          "kind": "screen",
+          "variant": "pop",
+          "role": "screener",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "挡拆外弹"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "提前滑出",
+          "kind": "screen",
+          "variant": "slip",
+          "role": "screener",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.3,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "假掩护滑出"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "绕掩护接球",
+          "kind": "screen",
+          "variant": "curl",
+          "role": "cut_partner",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "绕掩护切入"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "手递手接球",
+          "kind": "screen",
+          "variant": "handoff",
+          "role": "cut_partner",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "pass_line",
+            "label_zh": "接手递手球"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-CUT",
+      "name": "无球切入与空间移动",
+      "actions_count": 8,
+      "actions": [
+        {
+          "name": "空切",
+          "kind": "cut",
+          "variant": "basket",
+          "role": "cut_partner",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.3,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "直接空切"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "背切",
+          "kind": "cut",
+          "variant": "backdoor",
+          "role": "cut_partner",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.35,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "后门背切"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "反跑",
+          "kind": "cut",
+          "variant": "give_and_go",
+          "role": "cut_partner",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.3,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "传切反跑"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "V 字跑位",
+          "kind": "cut",
+          "variant": "v_cut",
+          "role": "cut_partner",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "V字摆脱"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "上提接球",
+          "kind": "cut",
+          "variant": "pop_up",
+          "role": "cut_partner",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "上提接应"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "闪切",
+          "kind": "cut",
+          "variant": "flash",
+          "role": "cut_partner",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.3,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "闪切罚球区"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "拉开站位",
+          "kind": "cut",
+          "variant": "spot_up",
+          "role": "cut_partner",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.1,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "外线拉开"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        },
+        {
+          "name": "底角转移",
+          "kind": "cut",
+          "variant": "corner_relocate",
+          "role": "cut_partner",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "底角转移"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::cut_uses_lob_flight_and_received_fact_before_control"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-RELOCATE",
+      "name": "无球接应与位置调整",
+      "actions_count": 4,
+      "actions": [
+        {
+          "name": "接球点调整",
+          "kind": "relocate",
+          "variant": "adjust",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "跑位调整"
+          },
+          "scenario_test": "crates/sim/tests/action_scenarios.rs::relocate_changes_the_position_and_keeps_the_receive_window"
+        },
+        {
+          "name": "外线定点",
+          "kind": "relocate",
+          "variant": "spot_up",
+          "role": "primary",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Idle",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "stance",
+            "label_zh": "外线定点等待"
+          },
+          "scenario_test": "crates/sim/tests/action_scenarios.rs::relocate_changes_the_position_and_keeps_the_receive_window"
+        },
+        {
+          "name": "无球绕行",
+          "kind": "relocate",
+          "variant": "flare",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "外线绕行"
+          },
+          "scenario_test": "crates/sim/tests/action_scenarios.rs::relocate_changes_the_position_and_keeps_the_receive_window"
+        },
+        {
+          "name": "错位后要位",
+          "kind": "relocate",
+          "variant": "mismatch_seal",
+          "role": "primary",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Idle",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "post_elbow",
+            "label_zh": "错位卡位"
+          },
+          "scenario_test": "crates/sim/tests/action_scenarios.rs::relocate_changes_the_position_and_keeps_the_receive_window"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-DEFENSE-ON-BALL",
+      "name": "持球防守",
+      "actions_count": 6,
+      "actions": [
+        {
+          "name": "防守滑步",
+          "kind": "on_ball_defense",
+          "variant": "slide",
+          "role": "on_ball_defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "跟防滑步"
+          },
+          "scenario_test": "crates/sim/tests/batch_statistics.rs::defensive_skill_changes_blocks_and_steals"
+        },
+        {
+          "name": "贴身施压",
+          "kind": "on_ball_defense",
+          "variant": "contain",
+          "role": "on_ball_defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.1,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "贴身紧逼"
+          },
+          "scenario_test": "crates/sim/tests/batch_statistics.rs::defensive_skill_changes_blocks_and_steals"
+        },
+        {
+          "name": "追防",
+          "kind": "on_ball_defense",
+          "variant": "chase",
+          "role": "on_ball_defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.3,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "全力追防"
+          },
+          "scenario_test": "crates/sim/tests/batch_statistics.rs::defensive_skill_changes_blocks_and_steals"
+        },
+        {
+          "name": "抢断尝试",
+          "kind": "on_ball_defense",
+          "variant": "steal_attempt",
+          "role": "defender",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_SwordSlash",
+            "speed": 1.35,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "steal_reach",
+            "label_zh": "快速抢断"
+          },
+          "scenario_test": "crates/sim/tests/batch_statistics.rs::defensive_skill_changes_blocks_and_steals"
+        },
+        {
+          "name": "掏球",
+          "kind": "on_ball_defense",
+          "variant": "poke",
+          "role": "defender",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_SwordSlash",
+            "speed": 1.4,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "steal_reach",
+            "label_zh": "防守掏球"
+          },
+          "scenario_test": "crates/sim/tests/batch_statistics.rs::defensive_skill_changes_blocks_and_steals"
+        },
+        {
+          "name": "造带球撞人",
+          "kind": "on_ball_defense",
+          "variant": "charge_take",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Standing",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "stance",
+            "label_zh": "站定位制造撞人"
+          },
+          "scenario_test": "crates/sim/tests/batch_statistics.rs::defensive_skill_changes_blocks_and_steals"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-DEFENSE-OFF-BALL",
+      "name": "无球防守与协防责任",
+      "actions_count": 12,
+      "actions": [
+        {
+          "name": "拒绝接球",
+          "kind": "off_ball_defense",
+          "variant": "deny",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.1,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "侧身拒接"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "传球路线拦截",
+          "kind": "off_ball_defense",
+          "variant": "intercept",
+          "role": "defender",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.3,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "steal_reach",
+            "label_zh": "路线抄截"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "协防",
+          "kind": "off_ball_defense",
+          "variant": "help",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "协防补位"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "补位",
+          "kind": "off_ball_defense",
+          "variant": "rotate",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "轮转补防"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "回位",
+          "kind": "off_ball_defense",
+          "variant": "recover",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.3,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "快速归位"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "夹击",
+          "kind": "off_ball_defense",
+          "variant": "double_team",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.1,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "双人合围"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "换防",
+          "kind": "off_ball_defense",
+          "variant": "switch",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.1,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "沟通换防"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "延误",
+          "kind": "off_ball_defense",
+          "variant": "hedge",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.2,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "延阻返位"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "沉退",
+          "kind": "off_ball_defense",
+          "variant": "drop",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "沉退守筐"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "挤过掩护",
+          "kind": "off_ball_defense",
+          "variant": "go_over",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.25,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "挤过掩护"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "绕过掩护",
+          "kind": "off_ball_defense",
+          "variant": "go_under",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.15,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "绕底防守"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        },
+        {
+          "name": "护框",
+          "kind": "off_ball_defense",
+          "variant": "rim_protect",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "垂直护筐"
+          },
+          "scenario_test": "crates/sim/tests/screen_route.rs::screen_route_reaches_the_next_decision"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-CLOSEOUT",
+      "name": "投篮扑防与封盖",
+      "actions_count": 6,
+      "actions": [
+        {
+          "name": "扑防干扰",
+          "kind": "closeout",
+          "variant": "closeout_contest",
+          "role": "defender",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "扑防干扰"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::live_shot_starts_parallel_closeout_and_changes_the_on_ball_target"
+        },
+        {
+          "name": "垂直起跳",
+          "kind": "closeout",
+          "variant": "verticality",
+          "role": "defender",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "elevation",
+            "label_zh": "垂直起跳守则"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::live_shot_starts_parallel_closeout_and_changes_the_on_ball_target"
+        },
+        {
+          "name": "封盖尝试",
+          "kind": "closeout",
+          "variant": "block_jump",
+          "role": "defender",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.2,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "block_arm",
+            "label_zh": "起跳封盖"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::live_shot_starts_parallel_closeout_and_changes_the_on_ball_target"
+        },
+        {
+          "name": "追身封盖",
+          "kind": "closeout",
+          "variant": "chase_down_block",
+          "role": "defender",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_RunningJump",
+            "speed": 1.3,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "block_arm",
+            "label_zh": "追身大帽"
+          },
+          "scenario_test": "crates/sim/tests/action_chain.rs::live_shot_starts_parallel_closeout_and_changes_the_on_ball_target"
+        },
+        {
+          "name": "造犯规接触",
+          "kind": "closeout_response",
+          "variant": "draw_contact",
+          "role": "shooter",
+          "phases": [
+            "preparation",
+            "execution"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Punch",
+            "speed": 1.0,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "contact_seek",
+            "label_zh": "迎上造接触"
+          },
+          "scenario_test": "crates/sim/tests/closeout_chain.rs::the_contact_branch_follows_the_shooters_risk_tolerance"
+        },
+        {
+          "name": "侧移避让",
+          "kind": "closeout_response",
+          "variant": "sidestep",
+          "role": "shooter",
+          "phases": [
+            "preparation",
+            "execution"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.15,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "sidestep_shift",
+            "label_zh": "侧移让开封盖"
+          },
+          "scenario_test": "crates/sim/tests/closeout_chain.rs::the_sidestep_share_follows_agility"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-REBOUND",
+      "name": "篮板、卡位与松球争抢",
+      "actions_count": 8,
+      "actions": [
+        {
+          "name": "卡位",
+          "kind": "rebound",
+          "variant": "box_out",
+          "role": "rebounder",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Standing",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "box_out_arc",
+            "label_zh": "挡人卡位"
+          },
+          "scenario_test": "crates/sim/tests/runtime_tables.rs::rebound_stays_loose_until_a_player_controls_it"
+        },
+        {
+          "name": "起跳争抢",
+          "kind": "rebound",
+          "variant": "jump_rebound",
+          "role": "rebounder",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.1,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "elevation",
+            "label_zh": "起跳争板"
+          },
+          "scenario_test": "crates/sim/tests/runtime_tables.rs::rebound_stays_loose_until_a_player_controls_it"
+        },
+        {
+          "name": "控制篮板",
+          "kind": "rebound",
+          "variant": "secure_rebound",
+          "role": "rebounder",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.0,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "elevation",
+            "label_zh": "保护球权"
+          },
+          "scenario_test": "crates/sim/tests/runtime_tables.rs::rebound_stays_loose_until_a_player_controls_it"
+        },
+        {
+          "name": "点球",
+          "kind": "rebound",
+          "variant": "tap",
+          "role": "rebounder",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.2,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "elevation",
+            "label_zh": "单手点抢"
+          },
+          "scenario_test": "crates/sim/tests/runtime_tables.rs::rebound_stays_loose_until_a_player_controls_it"
+        },
+        {
+          "name": "点传",
+          "kind": "rebound",
+          "variant": "tip_pass",
+          "role": "rebounder",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.2,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "pass_line",
+            "label_zh": "空中点拨"
+          },
+          "scenario_test": "crates/sim/tests/runtime_tables.rs::rebound_stays_loose_until_a_player_controls_it"
+        },
+        {
+          "name": "补篮",
+          "kind": "rebound",
+          "variant": "tip_in",
+          "role": "rebounder",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Jump",
+            "speed": 1.2,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "elevation",
+            "label_zh": "空中点补"
+          },
+          "scenario_test": "crates/sim/tests/runtime_tables.rs::rebound_stays_loose_until_a_player_controls_it"
+        },
+        {
+          "name": "地板球争抢",
+          "kind": "rebound",
+          "variant": "loose_ball_dive",
+          "role": "primary",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.3,
+            "loop": false
+          },
+          "recipe_2d": {
+            "kinetics": "steal_reach",
+            "label_zh": "飞扑地板球"
+          },
+          "scenario_test": "crates/sim/tests/runtime_tables.rs::rebound_stays_loose_until_a_player_controls_it"
+        },
+        {
+          "name": "双方同时控制",
+          "kind": "rebound",
+          "variant": "held_ball",
+          "role": "primary",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Standing",
+            "speed": 1.0,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "stance",
+            "label_zh": "争球执球"
+          },
+          "scenario_test": "crates/sim/tests/runtime_tables.rs::rebound_stays_loose_until_a_player_controls_it"
+        }
+      ]
+    },
+    {
+      "id": "ACTION-TRANSITION",
+      "name": "攻防转换",
+      "actions_count": 4,
+      "actions": [
+        {
+          "name": "快攻推进",
+          "kind": "transition",
+          "variant": "transition_push",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.4,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "drive_arrow",
+            "label_zh": "加速反击推进"
+          },
+          "scenario_test": "crates/sim/tests/action_scenarios.rs::a_steal_hands_possession_over_and_starts_a_quick_transition"
+        },
+        {
+          "name": "快攻跟进",
+          "kind": "transition",
+          "variant": "transition_trail",
+          "role": "primary",
+          "phases": [
+            "preparation",
+            "execution",
+            "follow_through"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.35,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "cut_arrow",
+            "label_zh": "长途奔袭跟进"
+          },
+          "scenario_test": "crates/sim/tests/action_scenarios.rs::a_steal_hands_possession_over_and_starts_a_quick_transition"
+        },
+        {
+          "name": "退防",
+          "kind": "transition",
+          "variant": "transition_retreat",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Run",
+            "speed": 1.3,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "contest_arc",
+            "label_zh": "高速退防"
+          },
+          "scenario_test": "crates/sim/tests/action_scenarios.rs::a_steal_hands_possession_over_and_starts_a_quick_transition"
+        },
+        {
+          "name": "快速形成阵地防守",
+          "kind": "transition",
+          "variant": "transition_wall",
+          "role": "defender",
+          "phases": [
+            "sustained"
+          ],
+          "recipe_3d": {
+            "clip": "Man_Walk",
+            "speed": 1.1,
+            "loop": true
+          },
+          "recipe_2d": {
+            "kinetics": "stance",
+            "label_zh": "建立防守阵型"
+          },
+          "scenario_test": "crates/sim/tests/action_scenarios.rs::a_steal_hands_possession_over_and_starts_a_quick_transition"
+        }
+      ]
+    }
+  ]
+}

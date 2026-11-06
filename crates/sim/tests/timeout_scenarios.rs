@@ -8,13 +8,14 @@
 
 mod common;
 
+use nba_domain::league::LeagueProfile;
+use nba_domain::rules::GameRules;
+use nba_sim_core::action::Fact;
 use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::state::Phase;
 use nba_sim_core::timeouts::{can_request, request, TimeoutRejection};
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params, TeamSide};
-use nba_domain::league::LeagueProfile;
-use nba_domain::rules::GameRules;
 
 fn world_with_profile(seed: u64, league: LeagueProfile) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
@@ -96,7 +97,9 @@ fn the_nba_fourth_quarter_budget_is_capped_at_four() {
     let mut world = live_world(804);
     let team = world.possession.team;
     // 跳到第四节。
-    world.clock.set_regulation_clock(4, 600.0, world.clock.shot_clock());
+    world
+        .clock
+        .set_regulation_clock(4, 600.0, world.clock.shot_clock());
     // 把整场额度用掉，只留第四节的额度。
     let budget = &mut world.timeouts[World::team_index(team)];
     budget.remaining = 10;
@@ -117,10 +120,7 @@ fn the_nba_fourth_quarter_budget_is_capped_at_four() {
             break;
         }
     }
-    assert_eq!(
-        used, 4,
-        "NBA 第四节最多四次暂停（Rule 8 §III 与联赛档案）"
-    );
+    assert_eq!(used, 4, "NBA 第四节最多四次暂停（Rule 8 §III 与联赛档案）");
     assert_eq!(
         can_request(&world, team),
         Err(TimeoutRejection::FourthQuarterExhausted),
@@ -133,7 +133,9 @@ fn the_nba_final_window_budget_is_capped_at_two() {
     let mut world = live_world(805);
     let team = world.possession.team;
     // 第四节最后三分钟：末段窗口生效。
-    world.clock.set_regulation_clock(4, 170.0, world.clock.shot_clock());
+    world
+        .clock
+        .set_regulation_clock(4, 170.0, world.clock.shot_clock());
     let budget = &mut world.timeouts[World::team_index(team)];
     budget.remaining = 10;
     budget.used_in_fourth = 0;
@@ -153,10 +155,7 @@ fn the_nba_final_window_budget_is_capped_at_two() {
             break;
         }
     }
-    assert_eq!(
-        used, 2,
-        "NBA 第四节最后三分钟最多两次暂停"
-    );
+    assert_eq!(used, 2, "NBA 第四节最后三分钟最多两次暂停");
     assert_eq!(
         can_request(&world, team),
         Err(TimeoutRejection::FinalWindowExhausted),
@@ -168,7 +167,9 @@ fn the_nba_final_window_budget_is_capped_at_two() {
 fn the_fiba_fourth_quarter_budget_is_capped_at_three() {
     let mut world = fiba_world(806);
     let team = TeamSide::Home;
-    world.clock.set_regulation_clock(4, 600.0, world.clock.shot_clock());
+    world
+        .clock
+        .set_regulation_clock(4, 600.0, world.clock.shot_clock());
     let budget = &mut world.timeouts[World::team_index(team)];
     budget.remaining = 10;
     let mut used = 0;
@@ -187,10 +188,7 @@ fn the_fiba_fourth_quarter_budget_is_capped_at_three() {
             break;
         }
     }
-    assert_eq!(
-        used, 3,
-        "FIBA 第四节最多三次暂停（Article 29.2.4）"
-    );
+    assert_eq!(used, 3, "FIBA 第四节最多三次暂停（Article 29.2.4）");
     assert_eq!(
         can_request(&world, team),
         Err(TimeoutRejection::FourthQuarterExhausted),
@@ -265,5 +263,70 @@ fn a_timeout_resumes_play_with_the_ball() {
     assert!(
         !matches!(world.phase(), Phase::Timeout { .. }),
         "暂停结束之后比赛必须恢复"
+    );
+}
+
+#[test]
+fn the_nba_mandatory_timeout_fires_at_the_first_dead_ball_under_six_fifty_nine() {
+    let mut world = nba_world(811);
+    let triggers = world.rules.league.timeouts.mandatory_timeouts.clone();
+    assert_eq!(triggers.len(), 2, "NBA 档案必须登记两个强制暂停触发点");
+    assert_eq!(triggers[0].period, 2);
+    assert_eq!(triggers[0].remaining_seconds, 419.0);
+    assert_eq!(triggers[0].charge, 2);
+    assert!(triggers[0].duration_seconds > 0.0);
+    let before = [world.timeouts[0].remaining, world.timeouts[1].remaining];
+    let mut charged = None;
+    for _ in 0..200_000 {
+        world.step(TICK_SECONDS);
+        if world.mandatory_timeouts_fired & 1 != 0 {
+            charged = world
+                .events
+                .iter()
+                .rev()
+                .find_map(|event| match &event.fact {
+                    Fact::Timeout {
+                        mandatory: true,
+                        remaining,
+                        ..
+                    } => Some(*remaining),
+                    _ => None,
+                });
+            break;
+        }
+    }
+    let remaining = charged.expect("强制暂停必须发出一条带 mandatory 标记的暂停事实");
+    assert_eq!(world.clock.period(), 2, "强制暂停发生在第二节");
+    assert!(
+        world.clock.game_clock() <= 419.0,
+        "强制暂停不晚于本节剩 6:59 后的第一次死球"
+    );
+    assert_eq!(
+        remaining[0],
+        before[0].saturating_sub(triggers[0].charge),
+        "主队暂停额度按触发点记录的次数扣除"
+    );
+    assert!(
+        remaining[1] <= before[1].saturating_sub(triggers[0].charge),
+        "客队同样被扣掉触发点记录的次数：{} 从 {} 出发",
+        remaining[1],
+        before[1]
+    );
+}
+
+#[test]
+fn fiba_has_no_mandatory_timeout() {
+    let world = fiba_world(812);
+    assert!(
+        world.rules.league.timeouts.mandatory_timeouts.is_empty(),
+        "FIBA 2026 Article 18 没有强制暂停"
+    );
+    assert_eq!(
+        world.rules.league.timeouts.timeout_durations.full_seconds,
+        60.0
+    );
+    assert_eq!(
+        world.rules.league.timeouts.timeout_durations.short_seconds,
+        0.0
     );
 }

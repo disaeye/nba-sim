@@ -518,6 +518,38 @@ fn try_control_loose(world: &mut World) {
     let Some(state) = world.pending_rebound else {
         return;
     };
+    // 争抢篮板推人犯规判定：在卡位防守人与冲抢进攻人之间检测过度身体推搡
+    if !state.turnover && world.ball.z <= 14.0 && state.box_out_count > 0 {
+        let offense = state.offense;
+        for &box_defender in &state.box_outs[..state.box_out_count as usize] {
+            if box_defender == usize::MAX || !world.players[box_defender].on_court {
+                continue;
+            }
+            let def_pos = world.players[box_defender].pos;
+            for &crasher in world.on_court(offense).as_slice() {
+                if crasher == usize::MAX || !world.players[crasher].on_court {
+                    continue;
+                }
+                let gap = (world.players[crasher].pos - def_pos).length();
+                if gap < world.rules.min_player_separation_ft + 0.6 {
+                    let physicality = world.players[crasher].data.tendencies.physicality;
+                    let strength = world.players[crasher].data.attributes.strength;
+                    let push_rate = 0.002 + 0.008 * (physicality * 0.7 + strength * 0.3);
+                    let roll = world.draw(
+                        crate::draw::Stream::Foul,
+                        crasher,
+                        crate::draw::purpose::REBOUND_PUSH,
+                        0,
+                    );
+                    if roll < push_rate {
+                        world.pending_rebound = None;
+                        crate::resolve::foul::apply_non_shooting_foul(world, crasher, box_defender);
+                        return;
+                    }
+                }
+            }
+        }
+    }
     if world.ball.z > 8.0 {
         return;
     }

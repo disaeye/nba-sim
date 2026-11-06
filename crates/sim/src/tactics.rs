@@ -268,8 +268,9 @@ pub fn update_play_window(world: &mut World) {
     if world.possession.kind != PossessionKind::Live {
         return;
     }
+    let elapsed = world.now() - world.possession.started_at;
     let activation_after = f64::from(world.params.policy.g("play_activation_after_seconds"));
-    if world.now() - world.possession.started_at < activation_after {
+    if elapsed < activation_after {
         return;
     }
     if world.possession.play_called {

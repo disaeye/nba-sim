@@ -7,13 +7,13 @@
 
 mod common;
 
+use nba_domain::rules::GameRules;
 use nba_sim_core::action::{Fact, FoulKind};
 use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::program::rotation::{apply_dead_ball_window, note_intents, record_foul};
 use nba_sim_core::state::Phase;
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params, TeamSide};
-use nba_domain::rules::GameRules;
 
 fn world(seed: u64) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
@@ -59,13 +59,9 @@ fn a_player_who_reaches_the_foul_limit_leaves_the_court() {
     apply_dead_ball_window(&mut world);
     world.set_phase(Phase::Live);
     note_intents(&mut world);
-    if world
-        .players
-        .iter()
-        .any(|player| {
-            player.team == team && !player.on_court && !player.disqualified && player.fouls < limit
-        })
-    {
+    if world.players.iter().any(|player| {
+        player.team == team && !player.on_court && !player.disqualified && player.fouls < limit
+    }) {
         assert!(
             !world.players[player].on_court,
             "有合格替补时，犯满的球员必须下场"
@@ -215,4 +211,25 @@ fn the_foul_ledger_records_the_personal_and_team_counts() {
         })
         .expect("the foul must be recorded");
     assert_eq!(foul, FoulKind::Personal);
+}
+
+#[test]
+fn an_injured_player_is_removed_and_replaced_by_bench() {
+    let mut world = live_world(1305);
+    let team = world.possession.team;
+    let player = world.on_court(team).as_slice()[0];
+    assert!(world.players[player].on_court);
+    assert!(!world.players[player].injured);
+
+    world.trigger_injury(player, "sprained_ankle");
+    assert!(world.players[player].injured, "受伤球员必须标记为 injured");
+    assert!(world.players[player].disqualified, "受伤球员必须离场");
+    assert!(!world.players[player].on_court, "受伤球员必须被换下");
+    assert!(
+        world.events.iter().any(|event| matches!(
+            &event.fact,
+            Fact::Injury { player: p, .. } if *p == player
+        )),
+        "受伤事件必须被记录"
+    );
 }

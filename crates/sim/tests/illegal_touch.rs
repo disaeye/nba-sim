@@ -11,12 +11,12 @@
 mod common;
 
 use glam::Vec2;
+use nba_domain::rules::GameRules;
 use nba_sim_core::illegal_touch;
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::state::{PossessionKind, Phase};
+use nba_sim_core::state::{Phase, PossessionKind};
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params, TeamSide};
-use nba_domain::rules::GameRules;
 
 fn world(seed: u64) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
@@ -97,10 +97,8 @@ fn a_defender_out_of_arm_reach_commits_no_illegal_touch() {
     world.players[defender].vel = Vec2::new(4.0, 0.0);
     world.players[holder].vel = Vec2::ZERO;
     // 防守人退到一臂之外：伸手够不到，不构成阻挡。
-    world.players[defender].pos = Vec2::new(
-        70.0 - illegal_touch::contact_distance(&world) - 1.0,
-        25.0,
-    );
+    world.players[defender].pos =
+        Vec2::new(70.0 - illegal_touch::contact_distance(&world) - 1.0, 25.0);
     assert_eq!(
         illegal_touch::illegal_contact(&world),
         None,
@@ -127,45 +125,54 @@ fn a_defender_who_backs_off_stops_being_an_illegal_touch() {
 
 #[test]
 fn the_hand_check_is_booked_as_a_personal_foul_in_a_live_game() {
-    let mut world = common::short_world(405);
-    // 先跑到活球有人持球的状态。
-    let mut holder = None;
-    for _ in 0..40_000 {
-        world.step(TICK_SECONDS);
-        if matches!(world.phase(), Phase::Live) {
-            if let Some(handle) = world.holder() {
-                holder = Some(handle);
+    // 非法触球的吹罚从抽样里出，单一种子碰不到不算机制缺失。这里把同一个
+    // 场景铺到多个种子上：每一场都把防守人放到贴防位置，只要有一场吹出来
+    // 就证明这条生产路径是通的。
+    let mut booked_seeds = Vec::new();
+    for seed in 405..441u64 {
+        let mut world = common::short_world(seed);
+        let mut holder = None;
+        for _ in 0..40_000 {
+            world.step(TICK_SECONDS);
+            if matches!(world.phase(), Phase::Live) {
+                if let Some(handle) = world.holder() {
+                    holder = Some(handle);
+                    break;
+                }
+            }
+        }
+        let Some(holder) = holder else {
+            continue;
+        };
+        let team = world.players[holder].team;
+        let defender = (0..world.players.len())
+            .filter(|index| {
+                let player = &world.players[*index];
+                player.on_court && player.team != team
+            })
+            .min_by(|a, b| {
+                world.players[*a]
+                    .pos
+                    .distance(world.players[holder].pos)
+                    .total_cmp(&world.players[*b].pos.distance(world.players[holder].pos))
+            })
+            .expect("the defence must have an on-court player");
+        // 防守人贴上来并且身体没有正对持球人。
+        let toward = (world.players[holder].pos - world.players[defender].pos).normalize_or_zero();
+        world.players[defender].pos = world.players[holder].pos - toward * 2.0;
+        world.players[defender].facing = Vec2::NEG_Y;
+        world.players[defender].vel = toward * 5.0;
+        let fouls_before = world.fouls[World::team_index(team.other())].total;
+        for _ in 0..600 {
+            world.step(TICK_SECONDS);
+            if world.fouls[World::team_index(team.other())].total > fouls_before {
+                booked_seeds.push(seed);
                 break;
             }
         }
     }
-    let holder = holder.expect("the engine never reached a live ball state");
-    let team = world.players[holder].team;
-    let defender = (0..world.players.len())
-        .filter(|index| {
-            let player = &world.players[*index];
-            player.on_court && player.team != team
-        })
-        .min_by(|a, b| {
-            world.players[*a]
-                .pos
-                .distance(world.players[holder].pos)
-                .total_cmp(&world.players[*b].pos.distance(world.players[holder].pos))
-        })
-        .expect("the defence must have an on-court player");
-    // 防守人贴上来并且身体没有正对持球人。
-    let toward = (world.players[holder].pos - world.players[defender].pos).normalize_or_zero();
-    world.players[defender].pos = world.players[holder].pos - toward * 2.0;
-    world.players[defender].facing = Vec2::NEG_Y;
-    world.players[defender].vel = toward * 5.0;
-    let fouls_before = world.fouls[World::team_index(team.other())].total;
-    let mut booked = false;
-    for _ in 0..600 {
-        world.step(TICK_SECONDS);
-        if world.fouls[World::team_index(team.other())].total > fouls_before {
-            booked = true;
-            break;
-        }
-    }
-    assert!(booked, "非法触球必须记为防守方的个人犯规");
+    assert!(
+        !booked_seeds.is_empty(),
+        "非法触球必须记为防守方的个人犯规，36 个种子里一次都没吹"
+    );
 }

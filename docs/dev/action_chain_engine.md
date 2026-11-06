@@ -79,7 +79,7 @@
 
 判定单元是动作与回合；聚合统计只作为投影呈现，不进入前两层。
 
-`nba-sim sim-core --gate` 输出四层结果。当前批次几何与语境违规为零；二十一项分布比较里近筐份额、空切份额、回合数与使用率层级四项越界，十八条过程判据里使用率层级越界，成因见 `docs/dev/status.md` §5。
+`nba-sim sim-core --gate` 输出四层结果。当前批次几何与语境违规为零，四十一项判定里有三项越界：每场罚球数、每场抢断数与加罚数，成因见 `docs/dev/status.md` §5。战术激活覆盖率 0.795、每场走步 3.31 次、每场投篮犯规 19.63 次均在带内。
 
 ## 6. 协议流
 
@@ -124,21 +124,25 @@
 - 卡位已经是真实的位置对抗：防守人的卡位强度（`defensive_rebound` 与 `strength`）按卡位曲线把他挤开的位置距离，进攻人因此真的被顶在身后。卡位不是独立动作，但位置争夺已经是接触结算而不再是加权。
 - 十三个倾向字段全部进入生产路径（`scripts/check_r6_tendency_wiring.py` 核对）：空切进切入候选、冲抢篮板加进攻人的触球范围、风险容忍进抄截概率、转换冲刺决定谁去跑快攻。
 - 无球跑位只覆盖空切与掩护，弱侧轮转与错位攻击尚未进入动作空间。
-- 封盖与抢断是单次尝试，没有“尝试→失位→被过”的连续段；协防轮转由势能场求解器给出目标点，没有独立的轮转动作与到位判定。
-- 协防引力场已进生产路径：`defense::solve_defense_targets` 按对位羁绊、朝篮筐下沉、弱侧协防引力三项叠加求解五名防守人的目标点，参数全部读 `world.rules.tactics.defense.potential_field`。协防用 `rim_help_threat_ratio` 做涌现门限，强侧无球人达不到门限就不轮转（实测位移 0.00 ft）。`PossessionState.matchup` 记录对位表，只在掩护换防时交换，其余时间保持不变。尚未接入的是真空吸力、X-Out 补位与滞回双阈值。
+- 封盖与抢断在动作未成功时为防守人赋予失衡失位窗口（`Bait`），持球人突破候选感知防守人失衡并提升过人成功率，形成“防守赌博扑空→失位→突破过人”的连续攻防链条（`crates/sim/tests/potential_field.rs::defender_in_bait_is_beaten_by_drive`）。
+- 协防引力场已进生产路径：`defense::solve_defense_targets` 按对位羁绊、朝篮筐下沉、弱侧协防引力三项叠加求解五名防守人的目标点，参数全部读 `world.rules.tactics.defense.potential_field`。协防用 `rim_help_threat_ratio` 做涌现门限，并已接入滞回双阈值机制（已处于协防状态时按较低门限维持，避免临界抖动）与弱侧 X-Out 补位轮转算法（低位人收缩护筐时弱侧其他人员补位轮转覆盖放空射手，`crates/sim/tests/potential_field.rs::weak_side_high_man_rotates_x_out_to_cover_vacated_shooter_when_low_man_helps_rim`）。`PossessionState.matchup` 记录对位表，只在掩护换防时交换，其余时间保持不变。
 - 掩护路线已经进决策层：`resolve/screen.rs` 结算出的 `Over`、`Under`、`Switch` 回写进 `DefenderView.route`（有效期由 `policy.geometry.screen_read_window_seconds` 限定），`policy::choose_action` 在掩护后首个决策步把候选收敛到路线应答集（`Under` 保留 `Shoot`/`Pass`/`Dribble`，`Over` 保留 `Drive`/`Finish`/`Pass`），实测 `Under` 后干拔三分 46.0%、`Over` 后篮下攻击 70.0%。
 - 早攻强投已压住：`Shoot` 需通过按分区最高可得分的归一化时钟门槛 `H(t_sc)`，时钟超过 `early_clock_seconds` 且外推的出手瞬间干扰超过 `contested_threshold` 时直接排除，实测 1.22%，出手期望得分在 24–18 秒、17–7 秒、不足 6 秒三档为 1.384 / 1.117 / 0.996。
-- 非投篮犯规已接上三条路径：突破失位后的手部犯规（进 bonus 给两罚）、移动掩护（进攻犯规、球权转换），以及残局的故意犯规（`endgame::intentional_foul` 判定，经 `apply_non_shooting_foul` 结算）。还有两类没接：停球后的抱住犯规与抢篮板时的推人。
+- 非投篮犯规已全量接入：突破失位后的手部犯规（进 bonus 给两罚）、移动掩护（进攻犯规、球权转换）、残局的故意犯规（`endgame::intentional_foul` 判定，经 `apply_non_shooting_foul` 结算），以及停球后的抱住犯规（持球人停步合球时防守过度逼抢搂抱，`crates/sim/tests/foul_scenarios.rs::holding_foul_after_ball_stops_triggers_non_shooting_penalty`）与抢篮板时的推人犯规（卡位防守人与冲抢进攻人过度身体推搡，`crates/sim/tests/foul_scenarios.rs::rebound_push_foul_awards_penalty_and_terminates_rebound`）。此外教练挑战支持实质复核改判（`crates/sim/tests/challenge.rs::a_successful_challenge_overturns_ruling_and_retains_timeout`），伤病产生支持停表与替补替换流程（`crates/sim/tests/substitution_scenarios.rs::an_injured_player_is_removed_and_replaced_by_bench`）。
+- 强制暂停与暂停时长按联赛档案走：NBA 档案登记了第二节 6:59 与第四节 2:59 以下第一次死球的强制暂停触发点（`mandatory_timeouts`，每次给每队记 2 次与 3 次）以及完整、短暂与加时三档时长（`timeout_durations`），FIBA 档案的触发表为空、完整暂停 60 秒。触发判定在 `program/timeouts.rs::enforce_mandatory`，只在死球且没有进行中的暂停、罚球或跳球时停表，事实流里的 `Timeout` 带 `mandatory` 标记（`timeout_scenarios.rs::the_nba_mandatory_timeout_fires_at_the_first_dead_ball_under_six_fifty_nine`）。
+- 犯规分类与裁判权限写进联赛档案：`foul_kinds` 记录每个联赛认可的种类、技术犯规子类，以及破坏性犯规是否与恶意犯规分开；`officials` 记录裁判可以单方面作出的判罚类别与录像复核能推翻的裁决类别。NBA 档案没有破坏性犯规这一类、也不区分技术犯规等级，FIBA 档案把它单列并分成两个技术犯规等级（`crates/domain/tests/league_profiles.rs` 四个测试逐项核对）。
+- 封盖起跳之后的应对链已接上：防守人在封盖跳跃的执行阶段滞空时不能改向，`resolve/shot.rs::closeout_response` 给出两个选择——按对抗意愿把身体送进对方的落地路线制造接触（接触成立即判投篮犯规），或者按敏捷度侧移把出手点让开（出手姿势被拉歪但不可能被盖）。两条分支都在 `crates/sim/tests/closeout_chain.rs` 里有直接回归。
+- 错位单打与低位要位：决策层的低位候选多一项按身高差算的红利，防守人比进攻人高出门槛（`post_mismatch_height_cm`）以上时，每多一厘米按 `post_mismatch_bonus_per_cm` 加分（`policy.rs::post_mismatch_edge`，单元测试 `a_shorter_defender_raises_the_post_up_value`）。弱侧自主轮转与 X-Out 已在协防势场里完成。
 - 体能的机制指标改用「主队单人最高出场分钟」度量：轮换会把在场能量拉平，因此按在场总时间度量看不出差别；按单人的出场时长度量，扰动臂与基线臂的差异就判得出来。相对变化 +0.2894，160 个种子上通过。
 - 轮换与残局已进主循环：`rotation` 按犯满、体能阈值、首发犯规危机与垃圾时间换人，换人候选排除本身也需要休息的人（否则两人会来回互换）；`endgame::shot_constraint` 在末节按分差与剩余时间给出三分必投与压时间两种约束，残局指令优先于路线应答集，且早出手的机会成本在残局归零。
 - 走步与二次运球已接上：持球状态机（运球中 / 已收球）记在回合状态里，站定的调整运球以收球结束，收球后再运球判 `DoubleDribble`；走步按「收球 → 轴心脚 → 脚步接触 → 释放」判定，不再只看收球后的平面位移（`footwork::judge_release`，出手与传球两处都判）。策略层在已收球时不再把运球列为候选。`OutOfBounds` 已有产生点（`control/mod.rs`：进攻方碰出界记违例，防守方碰出界进攻方保留球权）。
 - 收球步单独成动作：`Drive` 运球到参考表 `shot_profile.zone_by_creation.drive` 给出的分区份额对应的落点（篮下 0.5–4.5 英尺或近筐 6–13 英尺），把触球点记进 `gather_pos`，保持运球状态；`Finish` 从触球点收球，收球确立轴心脚并给出两步的额度（`footwork_steps_allowed`），之后每走满一步的量程记一次脚步接触。收球步仍记在突破语境里（`last_drive_at` 刷新），否则出手类型会从突破上篮退回定点投篮。
 - 走步因此是收球步的守卫：两步的额度被脚步接触夹住，正常回合不触发；它抓的是「收球后又出现一个超过额度的位移动作」这一非法序列，定向测试直接构造该序列（`action_scenarios.rs::the_gather_grants_two_steps_before_a_travel` 与 `::a_third_step_after_the_gather_is_a_travel`）。
 - 收球步把出手点抬到 3–17 英尺。收球步的距离分布应当贴近真实上篮的 0–8 英尺，铺到步数额度上会压低篮下出手的占比。
-- 走步率判据仍未加：`PossessionRecord.ended_by` 已按字符串记录回合结束原因，等犯规判据能登记时一起进目录。跳步（连续两次同一只脚触地，NBA Rule 10 §XIII.8）已经在释放那一刻与走步分开判定。
+- 走步率判据已进目录：门禁按 `Fact::Turnover` 的 `Travel` 种类统计每场次数（`travel_per_game`），带宽由策略表的 `travel_per_game_min` 与 `travel_per_game_max` 给出。跳步（连续两次同一只脚触地，NBA Rule 10 §XIII.8）在释放那一刻与走步分开判定，两者都记在 `Travel` 种类上。
 - 无球端的犯规已经接上：贴防时的拉拽（`resolve/offball.rs` 按相对移动抽样）与非法触球（`illegal_touch.rs`，防守人守得比合法间隔更近而且朝持球人移动）都进生产路径，罚款与罚球都经 `resolve/foul.rs` 结算。投篮犯规与球队犯规合计都在带宽内。`team_fouls_per_game` 等无球端犯规的建模稳定后再登记为判据。
-- `validation.md` §9.2 的场景目录已经移植：规则程序目录的 22 项程序与动作目录的 16 个族各有场景与直接回归，`crates/sim/tests` 现在有 68 个集成测试文件。目录里的每一条证据都指向真实存在的测试（`crates/domain/tests/rule_catalog.rs::every_catalog_evidence_points_at_a_real_test` 逐条去源码里核对）。
-- 内建名册两队互为镜像，队内八人属性差异明显（`shooting_three` 从 0.50 到 0.91）且带 `offensive_role` 与 `defensive_role`；角色标注只进身份与投影，不进入效用、概率与行为分支，实测背身中锋出手 4 次三分、三分能力 0.91 的定点射手零次三分出手。
+- `validation.md` §9.2 的场景目录已经移植：规则程序目录的 22 项程序与动作目录的 16 个族各有场景与直接回归，`crates/sim/tests` 现在有 70 个集成测试文件。目录里的每一条证据都指向真实存在的测试（`crates/domain/tests/rule_catalog.rs::every_catalog_evidence_points_at_a_real_test` 逐条去源码里核对）。
+- 内建名册两队互为镜像，队内八人属性差异明显（`shooting_three` 从 0.50 到 0.91）且带 `offensive_role` 与 `defensive_role`。角色的行为含义由倾向字段承载，代码不按角色分支；`crates/domain/tests/roster_roles.rs::every_declared_offensive_role_is_supported_by_its_tendencies` 把每一类角色的最低行为要求写成判据，名单里出现与角色矛盾的倾向就直接失败，新增角色必须同时补判据。
 - 检查点级统计差值对照（原 `data/reference/stat_deltas.v1.json`）没有替代品；分布层由门禁的三十八条准则承接。
 - 帧流导出仍逐帧序列化：单场纯模拟 0.03 s，`--stream` 写 NDJSON 需要 1.46 s，58,936 个 tick 的逐帧序列化是主要开销。`replay::replay_possession` 只输出目标回合的帧，是当前的替代路径。
 - `crates/debug-server/static/app.js` 里战术面板的渲染函数已不可达（面板与 `/api/studio` 已删除）：`singleTeamTacticalBoard` 没有任何调用点，只剩定义。名单面板的 `renderRoster` 仍由 `createPlayerButton` 触发，因此它还在。`data/tactics/plays/*.json` 已由 `params.tactics` 加载进引擎，`crates/domain/tests/playbook_data.rs` 只保留 schema 解析夹具的角色。

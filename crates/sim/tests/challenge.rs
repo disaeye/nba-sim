@@ -122,3 +122,35 @@ fn a_review_leaves_the_possession_and_phase_untouched() {
     assert_eq!(world.possession.team, team_before, "复核不改变球权");
     assert_eq!(world.phase(), phase_before, "复核不改变阶段");
 }
+
+#[test]
+fn a_successful_challenge_overturns_ruling_and_retains_timeout() {
+    let mut world = late_world(415);
+    world.record_ruling_with_evidence(TeamSide::Home, "out_of_bounds", true);
+    let away = World::team_index(TeamSide::Away);
+    let before_timeouts = world.timeouts[away].remaining;
+    let outcome = world
+        .request_challenge(TeamSide::Away)
+        .expect("末节最后两分钟必须可以挑战");
+    assert_eq!(outcome, ChallengeOutcome::Overturned, "复核结论是原判推翻");
+    assert_eq!(
+        world.timeouts[away].remaining, before_timeouts,
+        "挑战成功不得扣除暂停"
+    );
+    assert_eq!(
+        world.possession.team,
+        TeamSide::Away,
+        "挑战成功必须翻转球权"
+    );
+    assert!(
+        world.events.iter().any(|event| matches!(
+            &event.fact,
+            Fact::Review {
+                overturned: true,
+                cost_timeout: false,
+                ..
+            }
+        )),
+        "改判事实必须记录在事件里"
+    );
+}

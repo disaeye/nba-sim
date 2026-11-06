@@ -207,6 +207,8 @@ pub struct World {
     pub fourth_quarter_fouls: [u8; 2],
     pub rotation: RotationState,
     pub timeouts: [crate::timeouts::TimeoutBudget; 2],
+    /// 已经发生过的强制暂停触发点（位图，位序同联赛档案里的触发表）。
+    pub mandatory_timeouts_fired: u32,
     /// 最近一条可复核的裁决：发球类裁定写入它。
     pub last_ruling: Option<crate::challenge::Ruling>,
     /// 两队各自剩余的教练挑战额度。
@@ -895,7 +897,7 @@ impl World {
         self.last_touch = Some(holder);
     }
 
-    pub(crate) fn release_ball(&mut self, state: crate::state::BallState) {
+    pub fn release_ball(&mut self, state: crate::state::BallState) {
         self.ball.release(state);
     }
 
@@ -1105,6 +1107,7 @@ impl World {
                 crate::timeouts::TimeoutBudget::new(&rules_capture),
                 crate::timeouts::TimeoutBudget::new(&rules_capture),
             ],
+            mandatory_timeouts_fired: u32::default(),
             last_ruling: None,
             challenges_left: [
                 rules_capture.league.challenges_per_game.min(u8::MAX as u32) as u8,
@@ -2291,6 +2294,7 @@ impl World {
         self.check_backcourt();
         crate::lane::step(self, dt);
         self.check_free_throw_lane();
+        crate::timeouts::enforce_mandatory(self);
         self.check_period_end();
     }
 
@@ -2812,6 +2816,12 @@ impl World {
                 });
                 self.players[defender].schedule.next_redecide_at =
                     now + f64::from(self.rules.redecide_interval_seconds);
+                // 赌博抢断落空进入失位与失衡恢复期
+                self.players[defender].bait = Some(crate::state::Bait {
+                    kind: crate::action::FakeKind::Hesitation,
+                    until: now + 0.8,
+                    displacement_ft: 2.0,
+                });
                 continue;
             }
             self.defensive_actions[defender] = Some(runtime);
@@ -3017,6 +3027,12 @@ impl World {
                     shooter: runtime.shooter,
                     kind: runtime.kind.as_str(),
                     displacement_ft: (self.players[defender].pos - runtime.start_position).length(),
+                });
+                // 起跳封盖落地恢复期进入失衡与失位状态
+                self.players[defender].bait = Some(crate::state::Bait {
+                    kind: crate::action::FakeKind::Hesitation,
+                    until: now + 0.6,
+                    displacement_ft: 1.5,
                 });
                 continue;
             }

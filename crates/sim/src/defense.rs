@@ -163,6 +163,7 @@ pub fn solve_defense_targets(world: &World) -> [Vec2; MAX_ON_COURT] {
         }
         nearest_any = nearest_any.min((hoop - man_pos).length());
     }
+    let mut help_weights = [0.0_f32; MAX_ON_COURT];
     for (slot, defender) in defenders.as_slice().iter().enumerate() {
         let man = world.possession.matchup[slot];
         let player = &world.players[*defender];
@@ -246,17 +247,60 @@ pub fn solve_defense_targets(world: &World) -> [Vec2; MAX_ON_COURT] {
             );
         let tendency = potential.help_tendency_floor
             + player.data.tendencies.help_aggressiveness * potential.help_tendency_span;
-        // 协防涌现门限：威胁占比达不到阈值就不轮转，强侧无球人因此不动。
+        // 滞回双阈值：已处于 Help 责任时降低门限 (threshold_low)，保持协防稳定性，避免在边界往复抖动
+        let is_already_helping =
+            player.defense_responsibility == crate::state::DefenseResponsibility::Help;
+        let threshold_high = potential.rim_help_threat_ratio;
+        let threshold_low = potential.rim_help_threat_ratio * 0.75;
+        let effective_threshold = if is_already_helping {
+            threshold_low
+        } else {
+            threshold_high
+        };
         let ratio = threat * gain * drive_boost;
-        let weight = if ratio < potential.rim_help_threat_ratio {
+        let weight = if ratio < effective_threshold {
             f32::default()
         } else {
-            ((ratio - potential.rim_help_threat_ratio) * tendency * stamina_factor * gamble)
+            ((ratio - effective_threshold) * tendency * stamina_factor * gamble)
                 .min(potential.help_hoop_weight_max)
         };
+        help_weights[slot] = weight;
         let help = rim_help * anchor + sagged * (f32::from(1u8) - anchor);
         targets[slot] = sagged.lerp(help, weight);
     }
+
+    // X-Out 补位轮转算法：
+    // 当弱侧低位人深度收缩护筐时，其放空的对位人需要弱侧其他防守人（高位协防人）补位轮转覆盖
+    let mut max_help = 0.0_f32;
+    let mut low_slot = None;
+    for slot in 0..defenders.as_slice().len() {
+        if help_weights[slot] > max_help && help_weights[slot] > 0.25 {
+            max_help = help_weights[slot];
+            low_slot = Some(slot);
+        }
+    }
+    if let Some(l_slot) = low_slot {
+        let vacated_attacker = world.possession.matchup[l_slot];
+        if vacated_attacker != UNASSIGNED && world.players[vacated_attacker].on_court {
+            let vacated_pos = world.players[vacated_attacker].pos;
+            for slot in 0..defenders.as_slice().len() {
+                if slot == l_slot {
+                    continue;
+                }
+                let man = world.possession.matchup[slot];
+                if man == UNASSIGNED || Some(man) == carrier || !world.players[man].on_court {
+                    continue;
+                }
+                let same_side = (world.players[man].pos.y - 25.0) * (ball.y - 25.0) > 0.0;
+                if !same_side {
+                    let x_out_scale = (max_help * 0.45).min(0.5);
+                    targets[slot] = targets[slot].lerp(vacated_pos, x_out_scale);
+                    break;
+                }
+            }
+        }
+    }
+
     targets
 }
 

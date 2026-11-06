@@ -19,6 +19,7 @@ pub enum StoppageCause {
     Violation(ViolationKind),
     Foul,
     Timeout,
+    Injury,
     PeriodEnd,
     GameEnd,
     /// 球权在活球中直接转移（篮板、抢断、松球回收），没有停表。
@@ -296,6 +297,7 @@ impl World {
                     StoppageCause::FreeThrow => "free_throw",
                     StoppageCause::Foul => "foul",
                     StoppageCause::Timeout => "timeout",
+                    StoppageCause::Injury => "injury",
                     StoppageCause::PeriodEnd => "period_end",
                     StoppageCause::GameEnd => "game_end",
                     StoppageCause::PossessionChange => "possession_change",

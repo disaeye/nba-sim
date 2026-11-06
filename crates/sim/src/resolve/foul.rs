@@ -243,7 +243,7 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
     world.cancel_actions("foul");
     if booking.free_throws > 0 {
         world.pending_rebound = None;
-        world.adjudicate(crate::adjudicate::Adjudication::new(
+        let mut adj = crate::adjudicate::Adjudication::new(
             crate::adjudicate::StoppageCause::Foul,
             crate::adjudicate::RestartPlan::FreeThrows {
                 shooter: fouled,
@@ -256,21 +256,35 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
                 technical_retained_team: None,
                 after_technical: None,
             },
-        ));
+        );
+        if world.players[fouled].team != world.possession.team {
+            adj = adj.ending(
+                nba_domain::event::PossessionEndCause::TurnoverOffensiveFoul,
+                "offensive_foul",
+            );
+        }
+        world.adjudicate(adj);
     } else {
         // 无罚球的犯规同样停表换边（保留球权方为被犯规方）：
         // 阶段写入走同一个提交入口，发球位置取中断点的就近边线。
         // 被犯规方重新从后场发球，八秒计时随之重新开始。
         world.possession.backcourt_started_game_clock = None;
         let spot = world.inbound_point_of_interruption();
-        world.adjudicate(crate::adjudicate::Adjudication::new(
+        let mut adj = crate::adjudicate::Adjudication::new(
             crate::adjudicate::StoppageCause::Foul,
             crate::adjudicate::RestartPlan::Inbound {
                 team: world.players[fouled].team,
                 location: crate::adjudicate::InboundLocation::Spot(spot),
                 ready_after: None,
             },
-        ));
+        );
+        if world.players[fouled].team != world.possession.team {
+            adj = adj.ending(
+                nba_domain::event::PossessionEndCause::TurnoverOffensiveFoul,
+                "offensive_foul",
+            );
+        }
+        world.adjudicate(adj);
     }
     world.apply_dead_ball_window();
     let follow_up = if booking.free_throws > 0 {

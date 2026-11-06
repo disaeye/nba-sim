@@ -573,15 +573,15 @@ fn push_process_layers(gate: &mut GateReport, report: &GameReport, params: &Para
     }
     // 每个阵地回合最多叫一次战术，所以激活数除以阵地回合数就是覆盖率。
     // 回合 id 逐场重置，批次合并后不能拿 id 做匹配。
-    // 分母口径必须与战术系统的激活条件一致：只有「由篮板或抢断开始、且
-    // 活到激活时刻」的回合才可能叫出战术，所以用激活延迟而不是转换窗口
-    // 作为存活门槛，并且只统计这类回合。
-    let activation_after = f64::from(params.policy.g("play_activation_after_seconds"));
+    // 分母口径必须与战术系统的激活条件一致：阵地触发谓词本身要求过了
+    // 转换窗口，所以转换窗口就是存活门槛。用激活延迟当门槛会把「活到
+    // 激活延迟、但根本没进阵地」的短回合也算进分母。
+    let halfcourt_gate = f64::from(params.policy.g("transition_window_seconds"));
     let halfcourt = report
         .possessions
         .iter()
         .filter(|record| {
-            record.kind == crate::state::PossessionKind::Live && record.duration >= activation_after
+            record.kind == crate::state::PossessionKind::Live && record.duration >= halfcourt_gate
         })
         .count();
     push_process_range(
@@ -611,6 +611,29 @@ fn push_process_layers(gate: &mut GateReport, report: &GameReport, params: &Para
         substitutions / games,
         p("substitutions_per_game_min"),
         Bound::Floor,
+    );
+
+    // 走步是脚步结算的真实产出，但它只占违例里的一小块：数量过多说明
+    // 脚步窗口给得太松，过少说明结算根本不执行。按每场计数判分布。
+    let travels = report
+        .events
+        .iter()
+        .filter(|event| {
+            matches!(
+                &event.fact,
+                Fact::Turnover {
+                    kind: crate::action::TurnoverKind::Travel,
+                    ..
+                }
+            )
+        })
+        .count() as f64;
+    push_process_range(
+        gate,
+        "travel_per_game",
+        travels / games,
+        p("travel_per_game_min"),
+        p("travel_per_game_max"),
     );
 
     let pass_total: u32 = report.possessions.iter().map(|record| record.passes).sum();

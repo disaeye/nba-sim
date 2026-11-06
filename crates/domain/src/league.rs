@@ -59,6 +59,10 @@ pub struct LeagueProfile {
     /// 暂停策略族：额度、末段限制与加时额度。
     #[serde(flatten)]
     pub timeouts: TimeoutPolicy,
+    /// 犯规分类族：认可的犯规种类与技术犯规子类。
+    pub foul_kinds: FoulKindPolicy,
+    /// 裁判权限与录像复核范围。
+    pub officials: OfficialsPolicy,
     /// 赛前名单上限（NBA 15，FIBA 12）。
     pub roster_limit: u32,
     /// 每队每场的教练挑战额度（NBA 1，无挑战的档案为 0）。
@@ -121,14 +125,72 @@ pub struct FoulPolicy {
     pub overtime_fouls_carry_from_fourth: bool,
 }
 
-/// 暂停策略族：额度、末段限制与加时额度。
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// 暂停策略族：额度、末段限制、加时额度、时长与强制暂停。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TimeoutPolicy {
     pub timeouts_per_game: u32,
     pub timeouts_fourth_quarter_max: u32,
     pub timeouts_final_seconds: f32,
     pub timeouts_final_max: u32,
     pub overtime_timeouts: u32,
+    /// 暂停占用的比赛时长，按来源区分。
+    pub timeout_durations: TimeoutDurations,
+    /// 强制暂停的触发点：每到这些时点，下一次死球自动停表。
+    ///
+    /// NBA 2025-26 Rule 5 §VI：第二节与第四节各有一次强制暂停，
+    /// 分别发生在时钟走到 6:59 与 2:59 以下后的第一次死球。FIBA 2026
+    /// Article 18 没有强制暂停，这个表为空。
+    #[serde(default)]
+    pub mandatory_timeouts: Vec<MandatoryTimeout>,
+}
+
+/// 暂停时长按来源区分：完整暂停、短暂停与加时暂停。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TimeoutDurations {
+    pub full_seconds: f32,
+    pub short_seconds: f32,
+    pub overtime_seconds: f32,
+}
+
+/// 一个强制暂停触发点。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MandatoryTimeout {
+    /// 生效的节次。
+    pub period: u32,
+    /// 本节剩余时间不超过该值（秒）后的第一次死球触发。
+    pub remaining_seconds: f32,
+    /// 一次触发给每支球队记几次暂停。
+    pub charge: u32,
+    /// 这次强制暂停占用的时长（秒）。
+    pub duration_seconds: f32,
+}
+
+/// 犯规分类族：该联赛认可哪些犯规种类，以及技术犯规的子类。
+///
+/// 这份表把「犯规叫什么」从代码里抽到档案里：NBA 2025-26 没有破坏性
+/// 犯规这一类，同类行为归入恶意犯规；FIBA 2026 Article 36 把它单独
+/// 成一类，并把技术犯规分成两个等级。判罚与记账都读这张表。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FoulKindPolicy {
+    /// 该联赛认可的犯规种类，按 [`FoulKind`] 的序列化名书写。
+    pub recognized: Vec<String>,
+    /// 技术犯规的子类；空表示不区分等级。
+    #[serde(default)]
+    pub technical_categories: Vec<String>,
+    /// 破坏性犯规是否是与恶意犯规分开的独立种类。
+    pub disruptive_is_separate: bool,
+}
+
+/// 裁判权限与回放复核范围。
+///
+/// 两个档案的差异在数据里：谁有权吹哪类判罚，以及录像复核只能推翻
+/// 哪几类裁决。表为空表示该档案没有这一程序。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OfficialsPolicy {
+    /// 裁判可以单方面作出的判罚类别。
+    pub authorization: Vec<String>,
+    /// 录像复核可以推翻的裁决类别。
+    pub review_scope: Vec<String>,
 }
 
 impl LeagueProfile {
@@ -190,6 +252,27 @@ impl LeagueProfile {
             && period_seconds_left <= f64::from(self.fouls.bonus_final_seconds)
     }
 
+    /// 该档案的犯规分类是否把破坏性犯规当成独立种类。
+    pub fn disruptive_foul_is_separate(&self) -> bool {
+        self.foul_kinds.disruptive_is_separate
+    }
+
+    /// 录像复核是否可以推翻这类裁决。
+    pub fn reviews(&self, scope: &str) -> bool {
+        self.officials
+            .review_scope
+            .iter()
+            .any(|entry| entry == scope)
+    }
+
+    /// 裁判是否有权单方面作出这类判罚。
+    pub fn authorizes(&self, judgement: &str) -> bool {
+        self.officials
+            .authorization
+            .iter()
+            .any(|entry| entry == judgement)
+    }
+
     /// 返回当前节适用的球队犯规罚则序号。
     ///
     /// 顺序：加时节的独立门槛先于末段规则，最后是常规节门槛。
@@ -198,9 +281,7 @@ impl LeagueProfile {
     pub fn bonus_foul_threshold(&self, period: u32, period_seconds_left: f64) -> u32 {
         if self.in_final_window(period, period_seconds_left) {
             self.fouls.bonus_fouls_final
-        } else if period > self.periods.regulation_periods
-            && self.fouls.bonus_fouls_overtime > 0
-        {
+        } else if period > self.periods.regulation_periods && self.fouls.bonus_fouls_overtime > 0 {
             self.fouls.bonus_fouls_overtime
         } else {
             self.fouls.bonus_fouls_per_period

@@ -854,6 +854,8 @@ pub enum Fact {
     Timeout {
         team: TeamSide,
         remaining: [u32; 2],
+        /// 强制暂停（联赛规则在固定时点自动停表）还是主动申请的暂停。
+        mandatory: bool,
     },
     /// 跳球中，一方触球后实际确定控制球权的结果。
     JumpBall {
@@ -904,6 +906,12 @@ pub enum Fact {
     PlacementApplied {
         player: usize,
         reason: &'static str,
+    },
+    /// 伤病事件：对抗负荷或碰撞引发的球员受伤。
+    Injury {
+        team: TeamSide,
+        player: usize,
+        severity: &'static str,
     },
     GameEnd,
 }
@@ -959,6 +967,7 @@ impl Fact {
             Self::Goaltending { .. } => "Goaltending",
             Self::Review { .. } => "Review",
             Self::PlacementApplied { .. } => "PlacementApplied",
+            Self::Injury { .. } => "Injury",
             Self::GameEnd => "GameEnd",
         }
     }

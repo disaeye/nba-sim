@@ -186,6 +186,8 @@ pub struct PlayerState {
     pub fouls: u8,
     /// 犯满离场：置位后不再上场，除非 NBA 名单耗尽规则要求留在场上。
     pub disqualified: bool,
+    /// 受伤状态：置位后不可再上场。
+    pub injured: bool,
     /// NBA 替补全部犯满后，规则要求该球员留在场上。
     pub retained_after_foul_limit: bool,
     pub slot: Slot,
@@ -264,6 +266,7 @@ impl PlayerState {
             stamina: 1.0,
             fouls: 0,
             disqualified: false,
+            injured: false,
             retained_after_foul_limit: false,
             slot,
             offense_job: OffenseJob::Handler,

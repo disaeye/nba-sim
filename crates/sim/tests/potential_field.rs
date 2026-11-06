@@ -247,3 +247,104 @@ fn matchup_holds_while_no_screen_or_beat_happens() {
     let _ = carrier;
     assert_eq!(world.possession.matchup.len(), MAX_ON_COURT);
 }
+
+#[test]
+fn weak_side_high_man_rotates_x_out_to_cover_vacated_shooter_when_low_man_helps_rim() {
+    let mut world = world(13);
+    let carrier = live_holder(&mut world);
+    refresh_matchup(&mut world);
+    let hoop = world.hoop_for(world.possession.team);
+    let forward = if world.attacking_right(world.possession.team) {
+        1.0
+    } else {
+        -1.0
+    };
+    world.players[carrier].pos = hoop + Vec2::new(-25.75 * forward, 0.0);
+    let helper = low_man(&world, carrier).expect("a weak-side low man exists");
+    let defense = world.possession.team.other();
+    let slot = world
+        .on_court(defense)
+        .as_slice()
+        .iter()
+        .position(|handle| *handle == helper)
+        .expect("the helper is on court");
+    let receiver = world.possession.matchup[slot];
+    let receiver_pos = world.players[receiver].pos;
+
+    // 当持球人深入篮下时，弱侧低位人收缩护筐，其他弱侧人员进行 X-Out 补位向 receiver_pos 靠拢
+    world.players[carrier].pos = hoop + Vec2::new(-2.5 * forward, 0.0);
+    let targets = solve_defense_targets(&world);
+    let mut found_x_out = false;
+    for (s, _defender) in world.on_court(defense).as_slice().iter().enumerate() {
+        if s == slot || Some(world.possession.matchup[s]) == Some(carrier) {
+            continue;
+        }
+        let man = world.possession.matchup[s];
+        if man != UNASSIGNED && world.players[man].on_court {
+            let same_side =
+                (world.players[man].pos.y - 25.0) * (world.players[carrier].pos.y - 25.0) > 0.0;
+            if !same_side {
+                let dist_to_vacated = (targets[s] - receiver_pos).length();
+                if dist_to_vacated < 25.0 {
+                    found_x_out = true;
+                    break;
+                }
+            }
+        }
+    }
+    assert!(found_x_out, "弱侧应产生 X-Out 补位轮转");
+}
+
+#[test]
+fn defender_in_bait_is_beaten_by_drive() {
+    let mut world = world(13);
+    let carrier = live_holder(&mut world);
+    refresh_matchup(&mut world);
+    let defense = world.possession.team.other();
+    let carrier_pos = world.players[carrier].pos;
+    let defender = world
+        .on_court(defense)
+        .as_slice()
+        .iter()
+        .copied()
+        .min_by(|a, b| {
+            (world.players[*a].pos - carrier_pos)
+                .length_squared()
+                .partial_cmp(&(world.players[*b].pos - carrier_pos).length_squared())
+                .unwrap()
+        })
+        .expect("defender on court");
+    world.players[defender].bait = Some(nba_sim_core::state::Bait {
+        kind: nba_sim_core::action::FakeKind::Hesitation,
+        until: world.now() + 2.0,
+        displacement_ft: 2.0,
+    });
+    let intent = nba_sim_core::action::ActionIntent {
+        actor: carrier,
+        kind: nba_sim_core::action::ActionKind::Drive(
+            nba_domain::action_window::DriveKind::Straight,
+        ),
+        target: None,
+        from_ft: world.players[carrier].pos,
+        to_ft: world.players[carrier].pos + Vec2::new(5.0, 0.0),
+        start_time: world.now(),
+        duration: 0.8,
+    };
+    let events_before = world.events.len();
+    let outcome = nba_sim_core::resolve::drive::resolve(
+        &mut world,
+        &intent,
+        nba_domain::action_window::DriveKind::Straight,
+    );
+    assert_eq!(outcome.completion, nba_sim_core::Completion::Completed);
+    let beat_fact = world.events[events_before..].iter().any(|e| {
+        matches!(
+            &e.fact,
+            nba_sim_core::action::Fact::Drive {
+                defender_beaten: true,
+                ..
+            }
+        )
+    });
+    assert!(beat_fact, "扑空失衡的防守人必须被突破过掉");
+}

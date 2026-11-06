@@ -42,7 +42,7 @@ pub mod value;
 pub mod views;
 pub mod world;
 
-pub use action::{ActionKind, Fact, ShotKind, TeamSide};
+pub use action::{ActionKind, Completion, Fact, ShotKind, TeamSide};
 pub use boxscore::{BoxScore, PlayerLine, TeamLine};
 pub use params::{Params, RuntimeParams, CALIBRATION_DIR};
 pub use replay::{replay_possession, PossessionFrames};

@@ -1442,7 +1442,14 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     // 变体不改落点——落点一改，出手的区域分布整段跟着变。系数都在策略
     // 表里，因此这个差别对分布的影响是可调的。
     let drive_kind = drive_kind_for(world, state);
-    let p_beat = blow_by_probability(world, state.skill_edge, lane_norm, help_term)
+    let defender_bait = state
+        .primary_defender
+        .and_then(|defender| world.players.get(defender.index))
+        .and_then(|p| p.bait)
+        .is_some_and(|b| b.until > world.now());
+    let bait_boost = if defender_bait { 1.12 } else { 1.0 };
+    let p_beat = (blow_by_probability(world, state.skill_edge, lane_norm, help_term) * bait_boost)
+        .min(0.98)
         * match drive_kind {
             nba_domain::action_window::DriveKind::Straight => 1.0,
             nba_domain::action_window::DriveKind::Crossover => {
@@ -1463,6 +1470,9 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
         contest: weights.b("drive_tight") * tightness,
         ..Default::default()
     };
+    if defender_bait {
+        epv.context += 0.05;
+    }
     epv.tendency = weights.b("drive_tendency")
         * (world.players[state.actor].data.tendencies.drive_frequency - 0.5);
     // 掩护读完（防守人绕上沿）之后就是突破窗口：这一段按策略加成。
@@ -1921,6 +1931,37 @@ fn cut_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     ))
 }
 
+/// 错位单打的低位红利：防守人比进攻人矮得越多，低位要位越值。
+///
+/// 高度差是一个客观存在的对位事实，身高门槛与每厘米的系数都在策略表里，
+/// 因此这一个红利对两队的每一名球员都是同一套计算。
+fn mismatch_bonus(
+    world: &World,
+    state: &DecisionState,
+    weights: &crate::params::PolicyTable,
+) -> f32 {
+    let Some(defender) = state.primary_defender.map(|defender| defender.index) else {
+        return 0.0;
+    };
+    post_mismatch_edge(world, state.actor, defender, weights)
+}
+
+/// 一对具体对位的身高差红利：进攻人比防守人高出门槛以上的部分。
+fn post_mismatch_edge(
+    world: &World,
+    actor: usize,
+    defender: usize,
+    weights: &crate::params::PolicyTable,
+) -> f32 {
+    let edge_cm = f32::from(world.players[actor].data.height_cm)
+        - f32::from(world.players[defender].data.height_cm);
+    let threshold = weights.w("post_mismatch_height_cm");
+    if edge_cm <= threshold {
+        return 0.0;
+    }
+    (edge_cm - threshold) * weights.w("post_mismatch_bonus_per_cm")
+}
+
 fn post_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     if world.possession.ball_phase == crate::state::BallPhase::Post || state.shot_clock < 3.0 {
         return None;
@@ -1944,6 +1985,9 @@ fn post_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     );
     let epv = EpvTerms {
         ability: weights.b("post_base") + net,
+        // 错位单打：防守人明显矮于进攻人时，低位要位是最直接的攻击方式。
+        // 高度差按厘米折算到权重单位，门槛与系数都在策略表里。
+        context: mismatch_bonus(world, state, weights),
         ..Default::default()
     };
     Some((
@@ -2182,5 +2226,34 @@ mod tests {
         let immediate = quality.points * quality.p_make;
         let valued = catch_value(&world, pos, 1, 0.0);
         assert!(valued > immediate);
+    }
+
+    #[test]
+    fn a_shorter_defender_raises_the_post_up_value() {
+        let mut world = World::new(
+            MatchSetup::builtin(nba_domain::GameRules::default()),
+            RuntimeParams::embedded(),
+            11,
+        );
+        for player in world.players.iter_mut() {
+            player.on_court = false;
+        }
+        let actor = 1;
+        let defender = 2;
+        world.players[actor].on_court = true;
+        world.players[defender].on_court = true;
+        world.players[defender].team = world.players[actor].team.other();
+        let weights = &world.params.policy;
+        let threshold = weights.w("post_mismatch_height_cm");
+
+        // 对位身高相同：没有错位红利。
+        world.players[defender].data.height_cm = world.players[actor].data.height_cm;
+        assert_eq!(post_mismatch_edge(&world, actor, defender, weights), 0.0);
+
+        // 防守人矮一个门槛以上：低位要位多出一份按身高差算的红利。
+        world.players[defender].data.height_cm =
+            world.players[actor].data.height_cm - (threshold as u16 + 10);
+        let bonus = post_mismatch_edge(&world, actor, defender, weights);
+        assert!(bonus > 0.0, "防守人矮下门槛以上必须产出低位红利：{bonus}");
     }
 }

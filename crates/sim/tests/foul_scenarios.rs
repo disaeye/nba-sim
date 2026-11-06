@@ -362,3 +362,126 @@ fn a_flagrant_foul_counts_against_the_team_and_the_player() {
         "恶意犯规计入个人犯规累计"
     );
 }
+
+/// 停球后搂抱犯规的累计计数：同一姿势下让防守人贴身 4 秒，返回吹哨次数。
+fn hold_foul_trials(physicality: f32) -> u32 {
+    let mut calls = u32::default();
+    for seed in 0..48u64 {
+        let mut world = live_world(700 + seed);
+        let offense = world.possession.team;
+        let holder = world.holder().expect("live possession has a holder");
+        let defense = offense.other();
+        let defender = world.on_court(defense).as_slice()[0];
+        world.players[holder].vel = glam::Vec2::ZERO;
+        world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
+        world.players[defender].pos = world.players[holder].pos + glam::Vec2::new(1.0, 0.0);
+        world.players[defender].data.tendencies.physicality = physicality;
+        world.players[defender].on_ball_positioning =
+            Some(nba_sim_core::action::OnBallPositioning::Contain);
+        world.ball.pos = world.players[holder].pos;
+
+        let events_before = world.events.len();
+        for _ in 0..80 {
+            world.clock.advance_tick();
+            nba_sim_core::resolve::poke::step(&mut world, 0.05);
+            if world.events[events_before..].iter().any(|event| {
+                matches!(
+                    &event.fact,
+                    Fact::Foul {
+                        fouler: f,
+                        fouled: h,
+                        kind: FoulKind::Personal,
+                        ..
+                    } if *f == defender && *h == holder
+                )
+            }) {
+                calls += 1;
+                break;
+            }
+        }
+    }
+    calls
+}
+
+#[test]
+fn holding_foul_after_ball_stops_triggers_non_shooting_penalty() {
+    let physical = hold_foul_trials(1.0);
+    let passive = hold_foul_trials(0.0);
+    assert!(physical > 0, "停步合球后的贴身搂抱应触发非投篮普通犯规");
+    assert!(
+        physical > passive,
+        "对抗倾向高的防守人搂抱犯规应当更多：{physical} vs {passive}"
+    );
+}
+
+#[test]
+fn rebound_push_foul_awards_penalty_and_terminates_rebound() {
+    let mut world = live_world(713);
+    let offense = world.possession.team;
+    let defense = offense.other();
+    let def_player = world.on_court(defense).as_slice()[0];
+    let off_player = world.on_court(offense).as_slice()[0];
+    world.players[def_player].pos = glam::Vec2::new(45.0, 25.0);
+    world.players[def_player].target = glam::Vec2::new(45.0, 25.0);
+    world.players[off_player].pos = glam::Vec2::new(45.5, 25.0);
+    world.players[off_player].target = glam::Vec2::new(45.5, 25.0);
+    world.players[off_player].data.tendencies.physicality = 1.0;
+    world.players[off_player].data.attributes.strength = 1.0;
+    world.ball.pos = glam::Vec2::new(45.0, 25.0);
+    world.ball.z = 10.0;
+    world.ball.vel = glam::Vec2::ZERO;
+    world.ball.vz = 0.0;
+    world.release_ball(nba_sim_core::state::BallState::Loose {
+        pos: world.ball.pos,
+        vel: glam::Vec2::ZERO,
+    });
+    world.set_phase(Phase::Live);
+
+    let mut box_outs = [usize::MAX; nba_sim_core::state::MAX_ON_COURT];
+    box_outs[0] = def_player;
+    world.pending_rebound = Some(nba_sim_core::resolve::rebound::PendingRebound {
+        offense,
+        zone: "Paint",
+        shot_distance: 5.0,
+        rim_contact: true,
+        started_at: world.now(),
+        turnover: false,
+        poke_by: None,
+        pass_by: None,
+        box_outs,
+        box_out_count: 1,
+    });
+
+    let events_before = world.events.len();
+    let mut push_foul_called = false;
+    for _ in 0..100 {
+        world.players[def_player].pos = glam::Vec2::new(45.0, 25.0);
+        world.players[def_player].vel = glam::Vec2::ZERO;
+        world.players[off_player].pos = glam::Vec2::new(45.5, 25.0);
+        world.players[off_player].vel = glam::Vec2::ZERO;
+        world.ball.pos = glam::Vec2::new(45.0, 25.0);
+        world.ball.vel = glam::Vec2::ZERO;
+        world.ball.z = 10.0;
+        world.ball.vz = 0.0;
+        world.step(TICK_SECONDS);
+        if world.events[events_before..].iter().any(|e| {
+            matches!(
+                &e.fact,
+                Fact::Foul {
+                    fouler,
+                    fouled,
+                    kind: FoulKind::Personal,
+                    ..
+                } if world.players[*fouler].team == offense && *fouled == def_player
+            )
+        }) {
+            push_foul_called = true;
+            break;
+        }
+    }
+    assert!(push_foul_called, "篮板球卡位中的过度推搡应判定推人犯规");
+    assert!(
+        world.pending_rebound.is_none(),
+        "犯规吹罚后篮板争抢状态应立即终结"
+    );
+}
