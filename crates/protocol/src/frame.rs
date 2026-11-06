@@ -67,6 +67,47 @@ pub struct RenderPlayer {
     pub potential_threat_ratio: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub potential_void_ratio: Option<f32>,
+    /// 当前在场球员的所有活动动作（动作动画与观测闭环权威状态投影）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_actions: Vec<RenderAction>,
+}
+
+/// 球员活动动作状态（动作动画与观测闭环权威状态投影）。
+///
+/// 遵循 protocol.md §3 与 full_simulation_plan.md H 阶段约定。
+/// 渲染器消费此权威状态，不再使用距离或站位槽位猜测动作身份与责任人。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RenderAction {
+    /// 动作实例的稳定唯一标识符
+    pub action_id: u64,
+    /// 关联交互的唯一标识符（例如多人配合或对抗），无关联交互时为 None
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interaction_id: Option<u64>,
+    /// 动作事实来源："action_window"（动作窗口）/ "defense_posture"（持续防守姿态）/ "defensive_action"（防守动作）
+    pub source: String,
+    /// 动作族标识符（例如 "dribble", "drive", "shot", "pass", "on_ball_defense" 等）
+    pub family: String,
+    /// 动作类别（例如 "jump_shot", "layup", "chest_pass", "contest" 等）
+    pub kind: String,
+    /// 技术变体（例如 "pull_up", "catch_and_shoot", "floater", "slide" 等）
+    pub variant: String,
+    /// 球员在动作中的角色（例如 "primary", "screener", "defender", "receiver" 等）
+    pub role: String,
+    /// 当前动作阶段（例如 "preparation", "execution", "follow_through", "sustained" 等）
+    pub phase: String,
+    /// 动作开始时间戳（秒）
+    pub started_at: f32,
+    /// 当前阶段开始时间戳（秒）
+    pub phase_started_at: f32,
+    /// 预期结束时间戳（秒），持续姿态为 None
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends_at: Option<f32>,
+    /// 参与该动作的其他球员标识符列表
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub participants: Vec<String>,
+    /// 目标标识符（例如目标球员 ID、篮筐等）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PotentialFieldSample {

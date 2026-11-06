@@ -1,4 +1,4 @@
-use nba_protocol::{DecisionDebug, FrameEvent, RenderBall, RenderPlayer};
+use nba_protocol::{DecisionDebug, FrameEvent, RenderAction, RenderBall, RenderPlayer};
 use serde_json::json;
 
 #[test]
@@ -73,7 +73,10 @@ fn event_geometry_and_contact_time_roundtrip() {
     let event: FrameEvent = serde_json::from_value(value).expect("event decodes");
     assert_eq!(event.contact_time, Some(1.233));
     assert_eq!(event.sub_tick, 2);
-    assert_eq!((event.x, event.y, event.z), (Some(41.0), Some(25.0), Some(4.5)));
+    assert_eq!(
+        (event.x, event.y, event.z),
+        (Some(41.0), Some(25.0), Some(4.5))
+    );
     let text = serde_json::to_string(&event).expect("event encodes");
     let back: FrameEvent = serde_json::from_str(&text).expect("event roundtrips");
     assert_eq!(back.contact_time, event.contact_time);
@@ -110,4 +113,53 @@ fn decision_record_projection_roundtrip() {
     assert_eq!(back.decision_id, debug.decision_id);
     assert_eq!(back.observation_digest, debug.observation_digest);
     assert_eq!(back.revalidation, debug.revalidation);
+}
+
+#[test]
+fn player_active_actions_roundtrip() {
+    let action_json = json!({
+        "action_id": 42,
+        "interaction_id": 101,
+        "source": "action_window",
+        "family": "shot",
+        "kind": "jump_shot",
+        "variant": "pull_up",
+        "role": "primary",
+        "phase": "execution",
+        "started_at": 10.5,
+        "phase_started_at": 10.8,
+        "ends_at": 11.2,
+        "participants": ["defender_9"],
+        "target_id": "hoop_right"
+    });
+    let action: RenderAction = serde_json::from_value(action_json).expect("action decodes");
+    assert_eq!(action.action_id, 42);
+    assert_eq!(action.interaction_id, Some(101));
+    assert_eq!(action.family, "shot");
+    assert_eq!(action.variant, "pull_up");
+    assert_eq!(action.participants, vec!["defender_9".to_string()]);
+
+    let player_json = json!({
+        "id": "p1",
+        "jersey": "23",
+        "team": "home",
+        "x": 0.5,
+        "y": 0.5,
+        "zone": "MidRange",
+        "hasBall": true,
+        "onCourt": true,
+        "action": "Iso",
+        "slot": "Wing",
+        "morale": "steady",
+        "stm": 9.0,
+        "stmMax": 10.0,
+        "active_actions": [action]
+    });
+    let player: RenderPlayer = serde_json::from_value(player_json).expect("player decodes");
+    assert_eq!(player.active_actions.len(), 1);
+    assert_eq!(player.active_actions[0].action_id, 42);
+
+    let text = serde_json::to_string(&player).expect("player encodes");
+    let back: RenderPlayer = serde_json::from_str(&text).expect("player roundtrips");
+    assert_eq!(back.active_actions, player.active_actions);
 }
