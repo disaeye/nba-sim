@@ -28,7 +28,9 @@
 | 一次性动作 | `eventType`、`events[]` | `SHOT`、`PASS`、`REBOUND` 触发对应动画；比分上升时同队球员鼓掌 |
 | 队伍与号码 | `players[].team`、`players[].jersey` | 用于球衣着色与头顶号码牌 |
 
-协议里 `players[].action` 目前填的是站位槽位（`handler`、`wing`、`corner`、`top`、`post`、`dunker`），`action_phase` 在这一路为空。因此动画状态由渲染层推导，而不是读取动作标签：
+当前协议里的 `players[].action` 表示站位槽位（`handler`、`wing`、`corner`、`top`、`post`、`dunker`）；`action_phase` 只在部分动作窗口出现，尚未与动作身份、技术变体和生命周期形成完整帧数据。现有 2.5D 动画范围仅覆盖基础移动、投篮/罚球、传球、篮板与得分庆祝，不能据此判定动作目录已完成动画覆盖。
+
+动画补齐后的协议要求与验收范围见 `docs/dev/current/full_simulation_plan.md` H 和 `docs/protocol.md` 的动作动画数据验收节。完成后，本节需列出正式动作帧字段与动作到骨骼片段、二维表现的覆盖关系；每个动作目录项须对应自动化测试。
 
 - 持续状态按帧间速度选择：低于 1.2 英尺每秒为站立，低于 7.5 为走，其余为跑；步频按速度缩放，减少脚底打滑。
 - 一次性动作由事件触发，只对持球人或离球最近的球员播放；暂停与拖动进度条期间不触发。动画映射：站立 `Man_Idle`、走 `Man_Walk`、跑 `Man_Run`、出手与传球 `Man_Punch`、抢篮板 `Man_Jump`、庆祝 `Man_Clapping`。

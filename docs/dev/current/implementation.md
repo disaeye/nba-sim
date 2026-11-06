@@ -6,12 +6,15 @@
 
 ## 当前目标
 
-按 `full_simulation_plan.md` 的顺序完成 NBA 与 FIBA 完整比赛模拟内核。方案 §12 的 A–G 阶段均已交付，并有直接回归。剩余工作只有一项：干扰球在筐上方与碰板之后的两种情形。
+按 `full_simulation_plan.md` 的顺序完成 NBA 与 FIBA 完整比赛模拟内核。用户已确认增加 H 阶段：补齐两类界面的球员动作动画。
+
+H 阶段方案、接口与代码实现已全部完成。在协议层定义并导出 `RenderAction`，`RenderPlayer` 增加 `active_actions` 字段，完成序列化测试；在模拟引擎 `crates/sim/src/stream.rs` 中接入在场球员活动动作与防守状态，权威投影生成 `active_actions`，通过协议流测试；在 2.5D 球场 `crates/debug-server/static/court3d.js` 中基于 `player.active_actions` 调度 11 个骨骼动画片段与配方，移除全局事件和距离推测执行者的机制；在二维战术板 `crates/debug-server/static/app.js` 中基于 `player.active_actions` 呈现动作姿态、腾空指示与发力标记。端到端测试与文档守卫全部通过。
 
 ## 阶段进度
 
 | 阶段 | 状态 | 当前记录 |
 | --- | --- | --- |
+| H. 动作动画与观测闭环 | 已交付 | 协议定义、引擎权威投影、两套呈现视图驱动改造与自动化测试全部完成。协议新增 `RenderPlayer.active_actions: Vec<RenderAction>`，包含稳定动作标识符、交互标识符、事实来源、动作族、动作细分变体、角色、阶段、时间区间、参与者与目标。2.5D 与二维战术板统一消费该状态，两套呈现视图保持一致，且全套测试与文档守卫均通过。 |
 | 计划文档整理 | 已完成 | `full_simulation_plan.md` 是唯一权威方案；`plan.md` 是入口，本文件仅记录进度。 |
 | 规则与能力目录 | 已完成 | 规则程序目录 22 项全部 `implemented`，没有缺失场景；动作目录 16 个族全部 `verified`，`missing_evidence` 为空。NBA 2025-26 与 FIBA 2026 v1.1 的来源记录在 `docs/dev/evidence/rule_catalog_sources.md`。目录里的每一条证据都指向真实存在的测试：`crates/domain/tests/rule_catalog.rs::every_catalog_evidence_points_at_a_real_test` 逐条去源码里找那个函数。 |
 | 权威状态与计时 | 已完成 | 时钟有 `ClockState`、`ClockDirective`、`ClockController`，所有改钟都经控制器；停表后果统一走 `World::adjudicate`（配 `StoppageCause`、`PenaltyPlan`、`RestartPlan`、`ResumeContext`、`InboundLocation`、`ControlState`）。`Phase` 不含任何飞行变体，球的飞行记在 `BallFlight` 上，飞行不替换比赛程序。`ControlState` 是一个结构体，表达控球者、控制球队、最后触球人与其球队、控制建立时刻、前场控制、飞行与死球标志与本回合是否触筐。`LeagueProfile` 的存储本身就是 `PeriodPolicy`、`ClockPolicy`、`FoulPolicy`、`TimeoutPolicy` 四个策略族（`#[serde(flatten)]` 让磁盘上仍是扁平键），档案少一个键就读不出来。解耦的三条结构要求各有直接回归：`crates/sim/tests/architecture_decoupling.rs` 5 项。 |

@@ -49,11 +49,15 @@
 | 性能预算 | verified | 实测单场 0.03 s、58,936 tick；稳态每 tick 堆分配 0，由 `crates/sim/tests/allocation_budget.rs` 在一千个以上稳态 tick 上逐 tick 计数 | `--stream` 仍逐帧序列化，单场 1.46 s；按回合回放是替代路径 |
 | 观测视图 | verified | 2.5D 正交斜视视图 `crates/debug-server/static/court3d.js` 与二维战术板共用协议帧；`node scripts/test_court3d.mjs` 覆盖十名球员可见、位置与插值坐标误差 0、小人偏航与 facing 误差 0、资产前向对齐误差 0、背向镜头的球员全部显示背面、落地最低点 0.04 英尺与头高 6.12 英尺、卡通渐层材质 60 个、全场四角在镜头内、正交投影下同一高度尺寸一致（比值 1.0000）、平移限制在球场内；二维动效 `scripts/test_court_visuals.py` 以 `?court=2d` 运行通过 | 引擎不下发腾空高度与动作标签，一次性动作由 `eventType` 与 `events` 推导；小人朝向直接取 facing，固定镜头下背面会被遮挡 |
 
-## 3. 历史快照中的未完成工作
+## 3. 当前新增工作
+
+H 阶段“动作动画与观测闭环”处于 `verified`：覆盖动作目录全部 16 个动作族及技术变体。在协议层实现 `RenderAction` 与 `RenderPlayer.active_actions: Vec<RenderAction>`，包含动作身份、交互身份、来源、动作族、变体、角色、阶段、时间区间、参与者与目标；在模拟层 `crates/sim/src/stream.rs` 实现 `player_active_actions` 权威投影并通过流测试；在前端 2.5D 球场 `crates/debug-server/static/court3d.js` 与二维战术板 `crates/debug-server/static/app.js` 统一基于 `active_actions` 驱动骨骼动画片段和动作姿态，移除根据全局事件与距离猜测执行者的机制。端到端测试与文档守卫均通过。
+
+## 4. 历史快照中的未完成工作
 
 此处的历史矩阵和旧未完成工作清单只用于追溯 2026-10-21 快照。最近一次完整工作区运行的失败及其原因记录于 `docs/dev/current/implementation.md`：过时的 `baseline_fingerprint_matches_recorded_artifact`；该运行早于 CloseoutContest 修改。当前 `events_per_game` 上限已按 32 场生产运行的实测范围调整，五维诊断测试 3/3 通过；指纹工件先于目前的内核行为，需要重新审查后才能继续作为基线。当前未完成项和最新校准状态以 `docs/dev/current/implementation.md` 及唯一权威实施方案 `docs/dev/current/full_simulation_plan.md` 为准。进攻 `ActionRuntime` 有部分实现；独立防守 CloseoutContest 已有真实执行路径与定向测试，完整并行动作调度仍未完成。当前完整校准未运行，历史校准数据仅适用于其注明的 2026-10-21 快照。
 
-## 4. 证据入口
+## 5. 证据入口
 
 - 内核设计与缺口清单：[`action_chain_engine.md`](action_chain_engine.md)
 - 跨周期差距与关闭条件：[`gap.md`](gap.md)
@@ -62,7 +66,7 @@
 - 基线指纹工件：`crates/sim/tests/baseline/fingerprint.json`（16 种子，随仓库提交，新 checkout 不依赖本地残留文件；记录方式见测试文件头部注释）
 - 判定批次工件：`validate-core --out <目录>`
 
-## 5. 历史判定批次：2026-10-21
+## 6. 历史判定批次：2026-10-21
 
 下表中的命令与数据来自 2026-10-21 内核快照的历史验证批次，并非当前工作区最新运行。该批次有 1 项分布判定失败：`shooting_fouls_per_game` 为 16.531，目标为 19.597；其余 36 项分布与过程判定通过，几何违规、语境违规及账本失败均为 0。五维诊断通过。40 种子机制实验有 5 项 `insufficient`，认证为 `defects_found`。当前改动后的完整校准仍待重新运行。
 
