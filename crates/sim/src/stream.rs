@@ -5,8 +5,8 @@
 
 use nba_domain::court::Court;
 use nba_protocol::{
-    DebugEpv, DebugUtility, DecisionDebug, DecisionTrace, FrameEvent, FrameRules, RenderBall,
-    RenderFrame, RenderPlayer, RenderScore, RenderTeam, StreamTick, TraceCandidate,
+    DebugEpv, DebugUtility, DecisionDebug, DecisionTrace, FrameEvent, FrameRules, RenderAction,
+    RenderBall, RenderFrame, RenderPlayer, RenderScore, RenderTeam, StreamTick, TraceCandidate,
 };
 use serde_json::json;
 
@@ -587,11 +587,244 @@ impl World {
         }
     }
 
+    fn player_active_actions(
+        &self,
+        player_index: usize,
+        player: &crate::state::PlayerState,
+    ) -> Vec<RenderAction> {
+        let mut actions = Vec::new();
+
+        if let Some(runtime) = &player.action {
+            let (family, kind, variant) = match runtime.intent.kind {
+                crate::action::ActionKind::Dribble(move_kind) => {
+                    let v = match move_kind {
+                        nba_domain::action_window::DribbleMoveKind::DirectDrive => "direct_drive",
+                        nba_domain::action_window::DribbleMoveKind::Crossover => "crossover",
+                        nba_domain::action_window::DribbleMoveKind::BetweenTheLegs => {
+                            "between_the_legs"
+                        }
+                        nba_domain::action_window::DribbleMoveKind::BehindTheBack => {
+                            "behind_the_back"
+                        }
+                        nba_domain::action_window::DribbleMoveKind::SpinMove => "spin_move",
+                        nba_domain::action_window::DribbleMoveKind::Hesitation => "hesitation",
+                        nba_domain::action_window::DribbleMoveKind::Retreat => "retreat",
+                    };
+                    ("ACTION-DRIBBLE", "dribble", v)
+                }
+                crate::action::ActionKind::Drive(drive_kind) => {
+                    ("ACTION-DRIVE", "drive", drive_kind.as_str())
+                }
+                crate::action::ActionKind::Finish => ("ACTION-FINISH", "finish", "rim_finish"),
+                crate::action::ActionKind::Pass(pass_kind) => {
+                    let v = match pass_kind {
+                        crate::action::PassKind::Chest => "chest",
+                        crate::action::PassKind::Bounce => "bounce",
+                        crate::action::PassKind::Lob => "lob",
+                        crate::action::PassKind::Outlet => "outlet",
+                        crate::action::PassKind::Overhead => "overhead",
+                        crate::action::PassKind::OneHand => "one_hand",
+                        crate::action::PassKind::BehindBack => "behind_back",
+                        crate::action::PassKind::Handoff => "handoff",
+                    };
+                    ("ACTION-PASS", "pass", v)
+                }
+                crate::action::ActionKind::Screen(screen_kind) => {
+                    let v = match screen_kind {
+                        crate::action::ScreenKind::OnBall => "on_ball",
+                        crate::action::ScreenKind::OffBall => "off_ball",
+                        crate::action::ScreenKind::HandOff => "handoff",
+                    };
+                    ("ACTION-SCREEN", "screen", v)
+                }
+                crate::action::ActionKind::Cut(cut_kind) => {
+                    ("ACTION-CUT", "cut", cut_kind.as_str())
+                }
+                crate::action::ActionKind::PostUp => ("ACTION-POST", "post_up", "post_up"),
+                crate::action::ActionKind::Shoot(shot_kind) => {
+                    if shot_kind.is_rim_finish() {
+                        ("ACTION-FINISH", "finish", shot_kind.as_str())
+                    } else {
+                        ("ACTION-SHOT", "jump_shot", shot_kind.as_str())
+                    }
+                }
+                crate::action::ActionKind::Relocate => ("ACTION-RELOCATE", "relocate", "relocate"),
+                crate::action::ActionKind::Fake(fake_kind) => {
+                    ("ACTION-FAKE", "fake", fake_kind.as_str())
+                }
+                crate::action::ActionKind::Protect(protect_kind) => {
+                    ("ACTION-BALL-PROTECTION", "protect", protect_kind.as_str())
+                }
+            };
+
+            let role_str = match runtime.role {
+                crate::action::ActionIntentRole::Primary => "primary",
+                crate::action::ActionIntentRole::ScreenPartner => "screen_partner",
+                crate::action::ActionIntentRole::CutPartner => "cut_partner",
+            };
+
+            let phase_str = match runtime.phase {
+                nba_domain::action_window::ActionPhase::Preparation => "preparation",
+                nba_domain::action_window::ActionPhase::Execution => "execution",
+                nba_domain::action_window::ActionPhase::FollowThrough => "follow_through",
+            };
+
+            let phase_started = match runtime.phase {
+                nba_domain::action_window::ActionPhase::Preparation => runtime.intent.start_time,
+                nba_domain::action_window::ActionPhase::Execution => runtime.preparation_ends_at,
+                nba_domain::action_window::ActionPhase::FollowThrough => runtime.execution_ends_at,
+            };
+
+            let mut participants = Vec::new();
+            let mut target_id = None;
+            if let Some(target) = runtime.intent.target {
+                if target < self.players.len() {
+                    let pid = self.player_id(target);
+                    participants.push(pid.clone());
+                    target_id = Some(pid);
+                }
+            }
+
+            actions.push(RenderAction {
+                action_id: runtime.action_id,
+                interaction_id: Some(runtime.interaction_id),
+                source: "action_window".to_string(),
+                family: family.to_string(),
+                kind: kind.to_string(),
+                variant: variant.to_string(),
+                role: role_str.to_string(),
+                phase: phase_str.to_string(),
+                started_at: runtime.intent.start_time as f32,
+                phase_started_at: phase_started as f32,
+                ends_at: Some(runtime.ends_at as f32),
+                participants,
+                target_id,
+            });
+        }
+
+        if let Some(Some(def_action)) = self.defensive_actions.get(player_index) {
+            let (family, kind, variant) = match def_action.kind {
+                crate::action::DefensiveActionKind::CloseoutContest => {
+                    ("ACTION-CLOSEOUT", "closeout_contest", "contest")
+                }
+                crate::action::DefensiveActionKind::BlockJump => {
+                    ("ACTION-CLOSEOUT", "block_jump", "block")
+                }
+                crate::action::DefensiveActionKind::StealAttempt => {
+                    ("ACTION-DEFENSE-ON-BALL", "steal_attempt", "steal")
+                }
+                crate::action::DefensiveActionKind::Slide => {
+                    ("ACTION-DEFENSE-ON-BALL", "slide", "slide")
+                }
+                crate::action::DefensiveActionKind::Contain => {
+                    ("ACTION-DEFENSE-ON-BALL", "contain", "contain")
+                }
+                crate::action::DefensiveActionKind::ChargeTake => {
+                    ("ACTION-DEFENSE-ON-BALL", "charge_take", "charge_take")
+                }
+            };
+
+            let phase_str = match def_action.phase {
+                nba_domain::action_window::ActionPhase::Preparation => "preparation",
+                nba_domain::action_window::ActionPhase::Execution => "execution",
+                nba_domain::action_window::ActionPhase::FollowThrough => "follow_through",
+            };
+
+            let phase_started = match def_action.phase {
+                nba_domain::action_window::ActionPhase::Preparation => {
+                    (def_action.preparation_ends_at - 0.2).max(0.0)
+                }
+                nba_domain::action_window::ActionPhase::Execution => def_action.preparation_ends_at,
+                nba_domain::action_window::ActionPhase::FollowThrough => {
+                    def_action.execution_ends_at
+                }
+            };
+
+            let shooter_id = if def_action.shooter < self.players.len() {
+                Some(self.player_id(def_action.shooter))
+            } else {
+                None
+            };
+            let participants = shooter_id.clone().into_iter().collect();
+
+            actions.push(RenderAction {
+                action_id: def_action.action_id,
+                interaction_id: Some(def_action.interaction_id),
+                source: "defensive_action".to_string(),
+                family: family.to_string(),
+                kind: kind.to_string(),
+                variant: variant.to_string(),
+                role: "defender".to_string(),
+                phase: phase_str.to_string(),
+                started_at: (def_action.preparation_ends_at - 0.2).max(0.0) as f32,
+                phase_started_at: phase_started as f32,
+                ends_at: Some(def_action.ends_at as f32),
+                participants,
+                target_id: shooter_id,
+            });
+        } else if let Some(pos) = player.on_ball_positioning {
+            let (kind, variant) = match pos {
+                crate::action::OnBallPositioning::Slide => ("slide", "slide"),
+                crate::action::OnBallPositioning::Contain => ("contain", "contain"),
+                crate::action::OnBallPositioning::ChargeTake => ("charge_take", "charge_take"),
+            };
+            let holder_id = self.holder().map(|h| self.player_id(h));
+            let participants = holder_id.clone().into_iter().collect();
+            actions.push(RenderAction {
+                action_id: 0x8000_0000_0000_0000 | (player_index as u64),
+                interaction_id: None,
+                source: "defense_posture".to_string(),
+                family: "ACTION-DEFENSE-ON-BALL".to_string(),
+                kind: kind.to_string(),
+                variant: variant.to_string(),
+                role: "on_ball_defender".to_string(),
+                phase: "sustained".to_string(),
+                started_at: player.assignment_since as f32,
+                phase_started_at: player.assignment_since as f32,
+                ends_at: None,
+                participants,
+                target_id: holder_id,
+            });
+        }
+
+        if player.defense_responsibility == crate::state::DefenseResponsibility::BoxOut {
+            let partner_id = if player.target_partner < self.players.len() {
+                Some(self.player_id(player.target_partner))
+            } else {
+                None
+            };
+            let participants = partner_id.clone().into_iter().collect();
+            actions.push(RenderAction {
+                action_id: 0x8100_0000_0000_0000 | (player_index as u64),
+                interaction_id: None,
+                source: "defense_posture".to_string(),
+                family: "ACTION-REBOUND".to_string(),
+                kind: "box_out".to_string(),
+                variant: "box_out".to_string(),
+                role: "rebounder".to_string(),
+                phase: "sustained".to_string(),
+                started_at: player.assignment_since as f32,
+                phase_started_at: player.assignment_since as f32,
+                ends_at: None,
+                participants,
+                target_id: partner_id,
+            });
+        }
+
+        actions
+    }
+
     pub fn stream_tick(&self) -> StreamTick {
         let mut players = Vec::new();
-        for player in self.players.iter().filter(|player| player.on_court) {
+        for (player_index, player) in self
+            .players
+            .iter()
+            .enumerate()
+            .filter(|(_, player)| player.on_court)
+        {
             let norm = Court::ft_to_norm_with_geometry(player.pos, self.rules.court);
             let target = Court::ft_to_norm_with_geometry(player.target, self.rules.court);
+            let active_actions = self.player_active_actions(player_index, player);
             players.push(RenderPlayer {
                 id: player.id.clone(),
                 jersey: player.jersey.clone(),
@@ -630,6 +863,7 @@ impl World {
                 potential_action: None,
                 potential_threat_ratio: None,
                 potential_void_ratio: None,
+                active_actions,
             });
         }
 

@@ -19,6 +19,8 @@ fn frame_stream_satisfies_motion_contact_rules_and_causal_ids() {
     let mut last_possession = 0_u32;
     let mut events: BTreeMap<u64, (String, serde_json::Value)> = BTreeMap::new();
     let mut frames = 0_u32;
+    let mut observed_active_action_families: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
     while !world.finished && frames < 30_000 {
         let tick = world.stream_tick();
         let frame = &tick.frame;
@@ -45,8 +47,7 @@ fn frame_stream_satisfies_motion_contact_rules_and_causal_ids() {
         assert!(frame.ball.z <= frame.rules.ball_z_max_ft + 1.0);
         for player in &frame.players {
             let out_of_bounds_holder = player.has_ball
-                && (!(0.0..=1.0).contains(&player.x)
-                    || !(0.0..=1.0).contains(&player.y));
+                && (!(0.0..=1.0).contains(&player.x) || !(0.0..=1.0).contains(&player.y));
             if !out_of_bounds_holder {
                 assert!(
                     (0.0..=1.0).contains(&player.x),
@@ -64,6 +65,15 @@ fn frame_stream_satisfies_motion_contact_rules_and_causal_ids() {
                 );
             }
             assert!(player.target_x.is_some() && player.target_y.is_some());
+            for action in &player.active_actions {
+                assert!(action.action_id > 0, "active action has zero id");
+                assert!(!action.family.is_empty(), "action family is empty");
+                assert!(!action.kind.is_empty(), "action kind is empty");
+                assert!(!action.variant.is_empty(), "action variant is empty");
+                assert!(!action.phase.is_empty(), "action phase is empty");
+                assert!(!action.source.is_empty(), "action source is empty");
+                observed_active_action_families.insert(action.family.clone());
+            }
         }
         for event in &frame.event_log {
             assert!(event.event_id > 0, "frame event has no stable id");
@@ -81,7 +91,9 @@ fn frame_stream_satisfies_motion_contact_rules_and_causal_ids() {
                 assert!(z >= 0.0 && z <= frame.rules.ball_z_max_ft as f64 + 1.0);
                 let time = data["contact_time"].as_f64().expect("contact time");
                 assert!(time.is_finite());
-                assert!((event.time as f64 - tick_seconds as f64 - 0.01..=event.time as f64 + 0.01).contains(&time));
+                assert!((event.time as f64 - tick_seconds as f64 - 0.01
+                    ..=event.time as f64 + 0.01)
+                    .contains(&time));
             }
             if let Some((old_kind, old_data)) = events.insert(
                 event.event_id,
@@ -105,5 +117,13 @@ fn frame_stream_satisfies_motion_contact_rules_and_causal_ids() {
     assert!(
         events.values().any(|(kind, _)| kind == "BALL_CONTACT"),
         "no contact event reached the frame stream"
+    );
+    assert!(
+        !observed_active_action_families.is_empty(),
+        "frame stream must project real active_actions"
+    );
+    assert!(
+        observed_active_action_families.contains("ACTION-DEFENSE-ON-BALL"),
+        "frame stream must project defensive posture or action"
     );
 }
