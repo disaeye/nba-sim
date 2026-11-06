@@ -23,6 +23,60 @@ pub struct TimeoutBudget {
     pub period: u32,
 }
 
+/// 暂停来源：决定这次停表占用联赛档案里的哪一档时长。
+///
+/// 完整暂停、短暂停与加时暂停是三种不同的程序，时长不同。请求入口按
+/// 上下文推断来源，[`request_with_origin`] 让调用方显式指定。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeoutOrigin {
+    /// 常规的完整暂停。
+    Full,
+    /// 末段死球里的短暂停；档案没有短暂停时回落到完整档。
+    Short,
+    /// 加时节的暂停。
+    Overtime,
+}
+
+/// 按来源与节次读取联赛档案里的暂停时长。
+///
+/// FIBA 2026 Article 18 只给完整暂停（`short_seconds == 0`），短暂停来源
+/// 因此自动回落到完整档。`overtime_seconds` 只在加时节生效。
+pub fn duration_for(rules: &GameRules, period: u32, origin: TimeoutOrigin) -> f64 {
+    let durations = &rules.league.timeouts.timeout_durations;
+    let overtime = period > rules.league.periods.regulation_periods;
+    let seconds = if overtime {
+        durations.overtime_seconds
+    } else {
+        match origin {
+            TimeoutOrigin::Full | TimeoutOrigin::Overtime => durations.full_seconds,
+            TimeoutOrigin::Short if durations.short_seconds > 0.0 => durations.short_seconds,
+            TimeoutOrigin::Short => durations.full_seconds,
+        }
+    };
+    assert!(
+        seconds > 0.0 && seconds.is_finite(),
+        "联赛档案必须给出正的有限暂停时长"
+    );
+    f64::from(seconds)
+}
+
+/// 从当前上下文推断这次请求的暂停来源。
+fn infer_origin(world: &World) -> TimeoutOrigin {
+    let period = world.clock.period();
+    if period > world.rules.league.periods.regulation_periods {
+        return TimeoutOrigin::Overtime;
+    }
+    let dead = !world.phase().is_live_gameplay() || world.holder().is_none();
+    let last_period = period >= world.rules.league.periods.regulation_periods;
+    let in_final_window =
+        world.clock.game_clock() <= f64::from(world.rules.league.timeouts.timeouts_final_seconds);
+    if dead && last_period && in_final_window {
+        TimeoutOrigin::Short
+    } else {
+        TimeoutOrigin::Full
+    }
+}
+
 impl TimeoutBudget {
     pub fn new(rules: &GameRules) -> Self {
         Self {
@@ -82,13 +136,26 @@ pub fn can_request(world: &World, team: TeamSide) -> Result<(), TimeoutRejection
 }
 
 /// 申请并执行暂停。返回是否成功。
+///
+/// 时长按 [`infer_origin`] 推断的来源从联赛档案读取；`request_with_origin`
+/// 让调用方显式指定来源。
 pub fn request(world: &mut World, team: TeamSide) -> bool {
+    let origin = infer_origin(world);
+    request_with_origin(world, team, origin)
+}
+
+/// 指定暂停来源申请并执行暂停。返回是否成功。
+pub fn request_with_origin(
+    world: &mut World,
+    team: TeamSide,
+    origin: TimeoutOrigin,
+) -> bool {
     if can_request(world, team).is_err() {
         return false;
     }
-    let duration = world.rules.tactics.timeout_duration_seconds as f64;
-    let index = World::team_index(team);
     let period = world.clock.period();
+    let duration = duration_for(&world.rules, period, origin);
+    let index = World::team_index(team);
     let previous_phase = world.phase();
     assert!(
         !matches!(previous_phase, Phase::Timeout { .. }),

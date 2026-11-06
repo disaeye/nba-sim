@@ -30,7 +30,7 @@
 | 几何与语境合法性 | verified | 结算期逐动作记录；16 种子批次几何违规 0、语境违规 0 | 不覆盖未建模的动作 |
 | 回合终结 | verified | `PossessionRecord.ended_by` 记录结束原因，`World::end_possession` 是唯一写入口 | 走步率按 `travel_per_game` 进分布判据，带宽由策略表给定 |
 | 账本 | verified | `crates/sim/tests/engine.rs` 断言球员得分合计等于队伍合计、得分与出手账本对平、罚球命中数与事实流一致 | 加时犯规累计未按档案区分 |
-| 分布判定 | partial | `gate::evaluate` 的聚合判据与过程判据共 41 条；16 场批次里 `fta_per_game`、`steals_per_game`、`and_one_per_game` 三项越界，其余全部在带内 | 三项同源：犯规与抢断的抽样流互相耦合，调一个会把另两个推出带外；几何与语境违规为零 |
+| 分布判定 | partial | `gate::evaluate` 的聚合判据与过程判据共 39 条；16 场批次里 `zone_share_near`、`creation_share_putback`、`fta_per_game`、`steals_per_game` 四项越界，其余全部在带内 | 四项分别来自出手分区、补篮来源以及犯规与抢断抽样流的耦合；几何与语境违规为零 |
 | 出手结果 | verified | `shot_make.json` 按出手类型与距离分箱；干扰以 `contest_sensitivity` 与 `contest_center` 两个标量做 logit 位移 | 无 closest-defender 分档数据源 |
 | 球态与阶段 | verified | `BallState` 与 `Phase` 是封闭枚举；阶段推进集中在 `World::advance_phase` | — |
 | 决策策略 | verified | `policy::choose_action` 以 `policy.json` 权重做线性效用，按正权重比例抽样；掩护后首个决策步把候选收敛到路线应答集；`Shoot` 需通过按分区最高可得分的归一化时钟门槛；抽样前按 `truncation_ratio` 剔除劣势候选 | 意向驻留尚未实现 |
@@ -58,9 +58,9 @@ H 阶段“动作动画与观测闭环”处于 `verified`：覆盖动作目录�
 - 教练挑战实质改判：依据复核事实证据改判并翻转球权，成功时不扣除暂停（`crates/sim/tests/challenge.rs::a_successful_challenge_overturns_ruling_and_retains_timeout`）。
 - 防守连续链条与协防高级特性：封盖与抢断动作未成功时赋予失衡失位窗口，突破层感知并提升过人成功率；协防求解器接入滞回双阈值与弱侧 X-Out 补位轮转算法（`crates/sim/tests/potential_field.rs`）。
 - 非投篮犯规生产路径：接入持球停步合球后的抱人犯规与篮板球卡位争夺推人犯规（`crates/sim/tests/foul_scenarios.rs`）。端到端测试与文档守卫均通过。
-- 暂停与规则分类入档：NBA 档案登记强制暂停触发点与三档暂停时长，`program/timeouts.rs::enforce_mandatory` 在死球时停表并给两队记账（`crates/sim/tests/timeout_scenarios.rs`）；`FoulKind::Disruptive` 与联赛档案的 `foul_kinds`、`officials` 两节把犯规分类、裁判权限与录像复核范围变成数据（`crates/domain/tests/league_profiles.rs`）。
+- 暂停与规则分类进生产路径：NBA 档案登记强制暂停触发点与三档暂停时长，`program/timeouts.rs::enforce_mandatory` 在死球时停表并给两队记账，`request_with_origin` 按来源与节次读档案时长（`crates/sim/tests/timeout_scenarios.rs`）。`FoulKind::Disruptive` 与联赛档案的 `foul_kinds`、`officials` 两节由 `challenge.rs::is_reviewable` 接进挑战入口与节末自动回放入口，节钟归零后的进球按出手瞬间记录的比赛钟裁定，钟响后离手的得分取消（`crates/sim/tests/replay_scope.rs`）。FIBA 破坏性犯规经 `apply_disruptive_foul` 按 Article 37 记 `FoulKind::Disruptive`、两罚与前场发球（`crates/sim/tests/foul_scenarios.rs::a_fiba_disruptive_foul_is_booked_separately_from_a_flagrant_foul`）。
 - 封盖起跳后的应对链：滞空防守人面前，进攻方按对抗意愿造接触或按敏捷度侧移，两者都让封盖不可能发生（`crates/sim/tests/closeout_chain.rs`）。
-- 赛前角色一致性：每类进攻角色的最低行为要求写成判据，与角色矛盾的倾向直接失败（`crates/domain/tests/roster_roles.rs`）。
+- 赛前角色一致性：每一类进攻与防守角色的最低行为要求写成判据，并核对 ADR-020 的背身中锋与定点射手产出阈值与策略表一致；引擎对角色字段零读取，行为含义由 `PlayerTendencies` 承载（`crates/domain/tests/roster_roles.rs` 两个测试、`scripts/check_r6_tendency_wiring.py` 十三项生产引用守卫）。
 
 ## 4. 历史快照中的未完成工作
 

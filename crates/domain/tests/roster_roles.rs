@@ -1,10 +1,10 @@
 //! 赛前角色与行为倾向的一致性守卫。
 //!
-//! 角色的行为含义由倾向字段承载，代码不按角色分支（`data.rs` 的
-//! `three_point_preference` 注释）。这条约定只有在「角色写了什么，倾向
-//! 就必须支持什么」成立时才安全：否则角色标签会变成装饰，行为与标签
-//! 各说各话，赛前部署失去意义。这个测试把每一类角色的最低行为要求写死
-//! 成判据，名单里出现不符合角色的倾向就在这里失败。
+//! ADR-020 要求引擎对角色字段零读取：角色的行为含义由倾向字段承载，
+//! 代码不按角色枚举分支；角色与行为的一致性由产出判据保证
+//! （`attributes.md` §2.7b、`decisions.md`）。这里把两层判据都写死：
+//! 名册里每一类角色的最低行为要求，以及 ADR-020 给出的投射区域判据，
+//! 让「角色写了什么，倾向就必须支持什么」成为一条可自动核对的约束。
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -19,6 +19,7 @@ struct Roster {
 struct Player {
     name: String,
     offensive_role: String,
+    defensive_role: String,
     tendencies: Tendencies,
 }
 
@@ -31,6 +32,10 @@ struct Tendencies {
     cut_frequency: f32,
     screen_frequency: f32,
     offensive_rebound_frequency: f32,
+    gamble_steal: f32,
+    block_aggressiveness: f32,
+    help_aggressiveness: f32,
+    physicality: f32,
 }
 
 /// 一侧倾向字段的判据：字段名、最低值或最高值。
@@ -40,7 +45,7 @@ enum Requirement {
 }
 
 /// 每一类进攻角色必须满足的行为要求。
-fn requirements(role: &str) -> Vec<Requirement> {
+fn offensive_requirements(role: &str) -> Vec<Requirement> {
     match role {
         "PrimaryHandler" => vec![
             Requirement::AtLeast("pass_frequency", 0.70),
@@ -64,7 +69,7 @@ fn requirements(role: &str) -> Vec<Requirement> {
             Requirement::AtLeast("shoot_frequency", 0.60),
         ],
         "StationaryShooter" => vec![
-            Requirement::AtLeast("three_point_preference", 0.85),
+            Requirement::AtLeast("three_point_preference", 0.90),
             Requirement::AtLeast("shoot_frequency", 0.80),
             Requirement::AtMost("pass_frequency", 0.50),
         ],
@@ -73,7 +78,7 @@ fn requirements(role: &str) -> Vec<Requirement> {
             Requirement::AtLeast("three_point_preference", 0.40),
         ],
         "PostScorer" => vec![
-            Requirement::AtMost("three_point_preference", 0.20),
+            Requirement::AtMost("three_point_preference", 0.10),
             Requirement::AtLeast("offensive_rebound_frequency", 0.75),
         ],
         "StretchBig" => vec![
@@ -84,7 +89,40 @@ fn requirements(role: &str) -> Vec<Requirement> {
             Requirement::AtLeast("screen_frequency", 0.75),
             Requirement::AtMost("three_point_preference", 0.40),
         ],
-        other => panic!("角色 {other} 没有行为判据，名单新增角色时必须同时补上判据"),
+        other => panic!("进攻角色 {other} 没有行为判据，名单新增角色时必须同时补上判据"),
+    }
+}
+
+/// 每一类防守角色必须满足的行为要求。职责由这四项倾向承载，不进入
+/// 效用、概率或行为分支。
+fn defensive_requirements(role: &str) -> Vec<Requirement> {
+    match role {
+        "PointOfAttack" => vec![
+            Requirement::AtLeast("gamble_steal", 0.60),
+            Requirement::AtMost("help_aggressiveness", 0.56),
+        ],
+        "Chaser" => vec![
+            Requirement::AtMost("help_aggressiveness", 0.56),
+            Requirement::AtLeast("gamble_steal", 0.60),
+        ],
+        "Helper" => vec![Requirement::AtLeast("help_aggressiveness", 0.65)],
+        "WingStopper" => vec![
+            Requirement::AtLeast("physicality", 0.42),
+            Requirement::AtLeast("help_aggressiveness", 0.34),
+        ],
+        "MobileBig" => vec![
+            Requirement::AtLeast("block_aggressiveness", 0.45),
+            Requirement::AtLeast("help_aggressiveness", 0.55),
+        ],
+        "AnchorBig" => vec![
+            Requirement::AtLeast("block_aggressiveness", 0.45),
+            Requirement::AtLeast("physicality", 0.60),
+        ],
+        "LowActivity" => vec![
+            Requirement::AtMost("help_aggressiveness", 0.45),
+            Requirement::AtMost("gamble_steal", 0.45),
+        ],
+        other => panic!("防守角色 {other} 没有行为判据，名单新增角色时必须同时补上判据"),
     }
 }
 
@@ -97,6 +135,10 @@ fn tendency(player: &Player, field: &str) -> f32 {
         "cut_frequency" => player.tendencies.cut_frequency,
         "screen_frequency" => player.tendencies.screen_frequency,
         "offensive_rebound_frequency" => player.tendencies.offensive_rebound_frequency,
+        "gamble_steal" => player.tendencies.gamble_steal,
+        "block_aggressiveness" => player.tendencies.block_aggressiveness,
+        "help_aggressiveness" => player.tendencies.help_aggressiveness,
+        "physicality" => player.tendencies.physicality,
         other => panic!("未知倾向字段 {other}"),
     }
 }
@@ -105,42 +147,112 @@ fn roster(text: &str) -> Roster {
     serde_json::from_str(text).expect("roster parses")
 }
 
+fn check_requirements(player: &Player, team: &str, role: &str, requirements: Vec<Requirement>) {
+    for requirement in requirements {
+        match requirement {
+            Requirement::AtLeast(field, floor) => {
+                let value = tendency(player, field);
+                assert!(
+                    value >= floor,
+                    "{}（{}）的 {field} 是 {value:.2}，低于角色 {role} 的下限 {floor:.2}：角色与倾向不一致",
+                    player.name,
+                    team
+                );
+            }
+            Requirement::AtMost(field, ceiling) => {
+                let value = tendency(player, field);
+                assert!(
+                    value <= ceiling,
+                    "{}（{}）的 {field} 是 {value:.2}，高于角色 {role} 的上限 {ceiling:.2}：角色与倾向不一致",
+                    player.name,
+                    team
+                );
+            }
+        }
+    }
+}
+
 #[test]
-fn every_declared_offensive_role_is_supported_by_its_tendencies() {
+fn every_declared_role_is_supported_by_its_tendencies() {
     let rosters = [
         roster(include_str!("../../../data/roster/home.json")),
         roster(include_str!("../../../data/roster/away.json")),
     ];
-    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut offensive: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut defensive: BTreeMap<&str, usize> = BTreeMap::new();
     for side in &rosters {
         for player in &side.players {
-            *counts.entry(player.offensive_role.as_str()).or_default() += 1;
-            for requirement in requirements(&player.offensive_role) {
-                match requirement {
-                    Requirement::AtLeast(field, floor) => {
-                        let value = tendency(player, field);
-                        assert!(
-                            value >= floor,
-                            "{}（{}）的 {field} 是 {value:.2}，低于 {floor:.2}：角色与倾向不一致",
-                            player.name,
-                            side.team
-                        );
-                    }
-                    Requirement::AtMost(field, ceiling) => {
-                        let value = tendency(player, field);
-                        assert!(
-                            value <= ceiling,
-                            "{}（{}）的 {field} 是 {value:.2}，高于 {ceiling:.2}：角色与倾向不一致",
-                            player.name,
-                            side.team
-                        );
-                    }
-                }
-            }
+            *offensive
+                .entry(player.offensive_role.as_str())
+                .or_default() += 1;
+            *defensive
+                .entry(player.defensive_role.as_str())
+                .or_default() += 1;
+            check_requirements(
+                player,
+                &side.team,
+                &player.offensive_role,
+                offensive_requirements(&player.offensive_role),
+            );
+            check_requirements(
+                player,
+                &side.team,
+                &player.defensive_role,
+                defensive_requirements(&player.defensive_role),
+            );
         }
     }
     assert!(
-        !counts.is_empty(),
+        !offensive.is_empty() && !defensive.is_empty(),
         "名单至少要有一名球员，否则这条一致性守卫没有覆盖对象"
     );
+}
+
+#[test]
+fn adr_020_shot_zone_criteria_are_supported_by_tendencies() {
+    // 产出判据的参数：背身得分手的三分倾向不得超过 0.10，定点射手不得
+    // 低于 0.90。这两个阈值与 gate.rs 的 post_scorer_preference_max /
+    // stationary_shooter_preference_min 相同，因此「倾向 → 效用 → 产出」
+    // 这条链上的两端由同一组数字约束。
+    let rosters = [
+        roster(include_str!("../../../data/roster/home.json")),
+        roster(include_str!("../../../data/roster/away.json")),
+    ];
+    let policy: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../data/calibration/policy.json"
+    ))
+    .expect("policy parses");
+    let process = &policy["process"];
+    let post_ceiling = process["post_scorer_preference_max"]
+        .as_f64()
+        .expect("post ceiling exists") as f32;
+    let shooter_floor = process["stationary_shooter_preference_min"]
+        .as_f64()
+        .expect("shooter floor exists") as f32;
+    let post_cap = process["post_scorer_three_share_max"]
+        .as_f64()
+        .expect("post share cap exists") as f32;
+    let shooter_min = process["stationary_shooter_three_share_min"]
+        .as_f64()
+        .expect("shooter share floor exists") as f32;
+    assert!(post_cap < 0.04 + 1e-6, "背身中锋的三分产出上限必须不超过 4%");
+    assert!(shooter_min >= 0.35, "定点射手的三分产出下限必须不低于 35%");
+    for side in &rosters {
+        for player in &side.players {
+            if player.offensive_role == "PostScorer" {
+                assert!(
+                    player.tendencies.three_point_preference <= post_ceiling,
+                    "{} 的三分倾向高于背身中锋的判据阈值",
+                    player.name
+                );
+            }
+            if player.offensive_role == "StationaryShooter" {
+                assert!(
+                    player.tendencies.three_point_preference >= shooter_floor,
+                    "{} 的三分倾向低于定点射手的判据阈值",
+                    player.name
+                );
+            }
+        }
+    }
 }

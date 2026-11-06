@@ -225,6 +225,7 @@ fn touching_a_descending_shot_inside_the_cylinder_is_goaltending() {
         block_by: None,
         result: None,
         touched_backboard: false,
+        released_game_clock: world.clock.game_clock(),
     });
     let called = nba_sim_core::resolve::shot::check_goaltending(&mut world);
     assert!(called, "下落段里碰到筐上方的球必须判干扰球");
@@ -279,6 +280,7 @@ fn an_ascending_ball_may_be_blocked_without_goaltending() {
         block_by: None,
         result: None,
         touched_backboard: false,
+        released_game_clock: world.clock.game_clock(),
     });
     let called = nba_sim_core::resolve::shot::check_goaltending(&mut world);
     assert!(!called, "上升段的球可以合法封盖，不是干扰球");
@@ -303,6 +305,7 @@ fn pending_shot(world: &mut World, shooter: usize, is_three: bool) {
         block_by: None,
         result: None,
         touched_backboard: false,
+        released_game_clock: world.clock.game_clock(),
     });
 }
 
@@ -421,6 +424,7 @@ fn a_ball_outside_the_cylinder_is_not_goaltending() {
         block_by: None,
         result: None,
         touched_backboard: false,
+        released_game_clock: world.clock.game_clock(),
     });
     let called = nba_sim_core::resolve::shot::check_goaltending(&mut world);
     assert!(!called, "筐柱圆柱段之外的球不算干扰球");

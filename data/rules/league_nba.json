@@ -75,6 +75,8 @@
       "goaltending",
       "basket_interference",
       "flagrant_upgrade",
+      "game_clock_at_period_end",
+      "shot_clock_at_period_end",
       "clock_malfunction",
       "last_touch"
     ]

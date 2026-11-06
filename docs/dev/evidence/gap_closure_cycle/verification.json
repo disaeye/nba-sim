@@ -5,7 +5,7 @@
     "workspace_tests": {
       "command": "cargo test --workspace",
       "exit_code": 0,
-      "test_binaries_ok": 100,
+      "test_binaries_ok": 101,
       "test_binaries_failed": 0
     },
     "documentation_guard": {
@@ -28,11 +28,12 @@
       "geometric_violations": 0,
       "context_violations": 0,
       "criteria_total": 39,
-      "criteria_out_of_band": 3,
+      "criteria_out_of_band": 4,
       "out_of_band": {
-        "fta_per_game": 55.188,
-        "steals_per_game": 13.125,
-        "and_one_per_game": 1.75
+        "zone_share_near": 0.223,
+        "creation_share_putback": 0.054,
+        "fta_per_game": 53.312,
+        "steals_per_game": 13.312
       },
       "artifact": "docs/dev/evidence/gap_closure_cycle/gate.txt"
     }
@@ -62,11 +63,24 @@
         "data/rules/league_fiba.json：无强制暂停，60 秒完整暂停，破坏性犯规与技术犯规分级",
         "crates/domain/src/event.rs：新增 FoulKind::Disruptive",
         "crates/sim/src/program/timeouts.rs::enforce_mandatory：死球时停表、给两队记账、发出一条带 mandatory 标记的暂停事实",
-        "data/rules/rule_catalog.json：已知缺口收敛为规则程序审计一条"
+        "crates/sim/src/program/timeouts.rs::request_with_origin：按来源与节次读联赛档案里的完整、短暂与加时三档暂停时长",
+        "crates/sim/src/challenge.rs::is_reviewable：挑战入口与节末自动回放共同读取 officials.review_scope",
+        "crates/sim/src/resolve/shot.rs::finish：节钟归零的进球按 released_game_clock 复核，钟响后离手的得分取消",
+        "crates/sim/src/resolve/foul.rs::apply_disruptive_foul：FIBA 破坏性犯规按 Article 37 记为 FoulKind::Disruptive、两罚与前场发球",
+        "crates/domain/src/rules/fouls.rs：破坏性犯规与投篮犯规、恶意犯规同样进入直接罚球种类",
+        "data/rules/rule_catalog.json：暂停时长、复核范围、节末自动回放与 FIBA 破坏性犯规都指向真实场景测试"
       ],
       "evidence": [
         "crates/sim/tests/timeout_scenarios.rs::the_nba_mandatory_timeout_fires_at_the_first_dead_ball_under_six_fifty_nine",
         "crates/sim/tests/timeout_scenarios.rs::fiba_has_no_mandatory_timeout",
+        "crates/sim/tests/timeout_scenarios.rs::the_timeout_duration_follows_the_league_profile_and_the_request_origin",
+        "crates/sim/tests/timeout_scenarios.rs::a_live_ball_timeout_uses_the_full_duration",
+        "crates/sim/tests/challenge.rs::a_ruling_outside_the_replay_scope_cannot_be_challenged",
+        "crates/sim/tests/replay_scope.rs::a_shot_released_after_the_horn_is_waved_off",
+        "crates/sim/tests/replay_scope.rs::a_shot_released_before_the_horn_survives_replay",
+        "crates/sim/tests/replay_scope.rs::a_profile_without_period_end_replay_does_not_review",
+        "crates/sim/tests/foul_scenarios.rs::a_fiba_disruptive_foul_is_booked_separately_from_a_flagrant_foul",
+        "crates/sim/tests/foul_scenarios.rs::an_nba_clear_path_foul_stays_a_personal_foul",
         "crates/domain/tests/league_profiles.rs::the_nba_profile_keeps_disruptive_behaviour_inside_the_flagrant_kind",
         "crates/domain/tests/league_profiles.rs::the_fiba_profile_separates_disruptive_fouls_and_technical_categories",
         "crates/domain/tests/league_profiles.rs::both_profiles_declare_referee_authority_and_review_scope",
@@ -93,15 +107,17 @@
     {
       "phase": "角色属性与监控门禁",
       "changes": [
-        "crates/domain/tests/roster_roles.rs：每类进攻角色的最低行为要求写成判据，角色与倾向矛盾即失败",
+        "crates/domain/tests/roster_roles.rs：进攻与防守角色的最低行为要求写成判据，并核对 ADR-020 的投射产出阈值与策略表一致（引擎对角色字段零读取）",
         "crates/sim/src/gate.rs：新增 travel_per_game 分布判据",
         "data/calibration/policy.json：travel_per_game 带宽 [1.5, 6.0]"
       ],
       "measured": {
-        "travel_per_game": 3.312
+        "travel_per_game": 3.0
       },
       "evidence": [
-        "crates/domain/tests/roster_roles.rs::every_declared_offensive_role_is_supported_by_its_tendencies"
+        "crates/domain/tests/roster_roles.rs::every_declared_role_is_supported_by_its_tendencies",
+        "crates/domain/tests/roster_roles.rs::adr_020_shot_zone_criteria_are_supported_by_tendencies",
+        "scripts/check_r6_tendency_wiring.py：13/13 倾向字段进入生产路径"
       ]
     }
   ]

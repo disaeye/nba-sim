@@ -8,6 +8,7 @@
 
 mod common;
 
+use nba_domain::league::LeagueProfile;
 use nba_domain::rules::GameRules;
 use nba_sim_core::action::{Fact, FoulKind};
 use nba_sim_core::params::workspace_calibration_dir;
@@ -19,6 +20,13 @@ use nba_sim_core::{MatchSetup, Params, TeamSide};
 fn world(seed: u64) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     World::new(MatchSetup::builtin(GameRules::default()), params, seed)
+}
+
+fn fiba_world(seed: u64) -> World {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut rules = GameRules::default();
+    rules.league = LeagueProfile::fiba();
+    World::new(MatchSetup::builtin(rules), params, seed)
 }
 
 /// 一个活球有人持球的世界。
@@ -401,6 +409,68 @@ fn hold_foul_trials(physicality: f32) -> u32 {
         }
     }
     calls
+}
+
+#[test]
+fn a_fiba_disruptive_foul_is_booked_separately_from_a_flagrant_foul() {
+    let mut world = fiba_world(720);
+    let offense = world.possession.team;
+    let fouler = world
+        .on_court(offense.other())
+        .as_slice()
+        .first()
+        .copied()
+        .expect("a defender is on the court");
+    let fouled = world
+        .on_court(offense)
+        .as_slice()
+        .first()
+        .copied()
+        .expect("an offensive player is on the court");
+    let personal_before = world.line_mut(fouler).fouls;
+    let team_before = world.fouls[World::team_index(offense.other())].period;
+    nba_sim_core::resolve::foul::apply_disruptive_foul(&mut world, fouler, fouled);
+    let (_, _, kind, free_throws, _) = last_foul(&world).expect("the foul must be recorded");
+    assert_eq!(kind, FoulKind::Disruptive, "FIBA 破坏性犯规必须单独成类");
+    assert_eq!(free_throws, 2, "非投篮破坏性犯规罚两次");
+    assert_eq!(
+        world.line_mut(fouler).fouls,
+        personal_before + 1,
+        "破坏性犯规计入个人犯规累计"
+    );
+    assert_eq!(
+        world.fouls[World::team_index(offense.other())].period,
+        team_before + 1,
+        "破坏性犯规计入球队单节犯规"
+    );
+    assert!(
+        !world.players[fouler].disqualified,
+        "破坏性犯规不触发取消比赛资格"
+    );
+    let (shooter, total, _) =
+        free_throw_program(&world).expect("破坏性犯规之后必须进入罚球程序");
+    assert_eq!(shooter, fouled);
+    assert_eq!(total, 2);
+}
+
+#[test]
+fn an_nba_clear_path_foul_stays_a_personal_foul() {
+    let mut world = live_world(721);
+    let offense = world.possession.team;
+    let fouler = world
+        .on_court(offense.other())
+        .as_slice()
+        .first()
+        .copied()
+        .expect("a defender is on the court");
+    let fouled = world.holder().expect("live possession has a holder");
+    nba_sim_core::resolve::foul::apply_clear_path_foul(&mut world, fouler, fouled);
+    let (_, _, kind, _, _) = last_foul(&world).expect("the foul must be recorded");
+    assert_eq!(
+        kind,
+        FoulKind::Personal,
+        "NBA 档案不把这类行为拆成破坏性犯规"
+    );
 }
 
 #[test]

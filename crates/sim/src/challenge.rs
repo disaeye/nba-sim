@@ -1,11 +1,42 @@
 //! 录像复核与教练挑战：停表期间的裁决更正程序。
 //!
 //! 引擎的裁决来自几何与事件记录本身，复核不会「找到新证据」：它只确认
-//! 原判。程序因此规定挑战失败要付出暂停，而原判一律保留。
+//! 原判，或按已登记的事实证据改判。程序规定挑战失败要付出暂停。
+//!
+//! 哪些裁决可以复核由联赛档案的 `officials.review_scope` 给定：挑战入口
+//! 与裁判自动发起的即时回放都读同一张表。
 
 use crate::action::{Fact, TeamSide};
 use crate::state::Phase;
 use crate::world::World;
+
+/// 裁决名称到档案里的复核范围键。
+///
+/// 未知名称返回空串，`LeagueProfile::reviews` 对空串为假，因此没登记的
+/// 裁决一律不可复核。这张表让裁决名称与复核范围解耦：规则档案只写复核
+/// 的问题，事件流只写裁判当时吹了什么。
+pub fn review_scope(call: &str) -> &'static str {
+    match call {
+        "out_of_bounds" => "out_of_bounds_assignment",
+        "goaltending" => "goaltending",
+        "basket_interference" => "basket_interference",
+        "last_touch" => "last_touch",
+        "flagrant_upgrade" => "flagrant_upgrade",
+        "unsportsmanlike_upgrade" => "unsportsmanlike_upgrade",
+        "disqualifying_upgrade" => "disqualifying_upgrade",
+        "two_versus_three_points" => "two_versus_three_points",
+        "game_clock_at_period_end" => "game_clock_at_period_end",
+        "shot_clock_at_period_end" => "shot_clock_at_period_end",
+        "clock_malfunction" => "clock_malfunction",
+        _ => "",
+    }
+}
+
+/// 该裁决是否在档案的即时回放范围内，且裁判有权发起复核。
+pub fn is_reviewable(world: &World, call: &str) -> bool {
+    world.rules.league.authorizes("replay_review")
+        && world.rules.league.reviews(review_scope(call))
+}
 
 /// 一次可复核的裁决：谁得到球、这条裁决叫什么。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,8 +82,9 @@ impl World {
 
     /// 主教练申请复核。
     ///
-    /// 只有停表期间、并且在联赛规定的复核窗口内、且本方还有挑战额度时才
-    /// 成立；复核结论一律维持原判，挑战方按档案付出一次暂停。
+    /// 停表期间、联赛规定的复核窗口内、本方还有挑战额度、且这条裁决在
+    /// 档案的复核范围内，四个条件同时成立才受理。结论维持原判时按档案
+    /// 付出一次暂停，有事实证据时改判并翻转球权。
     pub fn request_challenge(&mut self, team: TeamSide) -> Result<ChallengeOutcome, &'static str> {
         if !matches!(self.phase(), Phase::DeadBall { .. } | Phase::Inbound { .. }) {
             return Err("challenge requires a stoppage");
@@ -60,6 +92,9 @@ impl World {
         let Some(ruling) = self.last_ruling else {
             return Err("no reviewable ruling on record");
         };
+        if !is_reviewable(self, ruling.call) {
+            return Err("ruling is outside the instant-replay scope");
+        }
         if ruling.possession == team {
             return Err("only the team that lost the ruling may challenge");
         }

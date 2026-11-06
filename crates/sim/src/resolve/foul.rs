@@ -356,9 +356,16 @@ pub fn apply_double_foul(world: &mut World, fouler: usize, fouled: usize) {
 /// 成立条件由调用方判断：球在对方半场且在进攻机会中，防守人从背后
 /// 犯规导致这次进攻机会丢失。
 pub fn apply_clear_path_foul(world: &mut World, fouler: usize, fouled: usize) {
+    // FIBA 2026 Article 37 把同类行为单独成类：破坏性犯规。
+    // NBA 档案没有独立分类，同类行为仍是普通个人犯规。
+    let kind = if world.rules.league.disruptive_foul_is_separate() {
+        FoulKind::Disruptive
+    } else {
+        FoulKind::Personal
+    };
     let team = world.players[fouler].team;
     let beneficiary = world.players[fouled].team;
-    let booking = book(world, fouler, fouled, FoulKind::Personal, 2, false);
+    let booking = book(world, fouler, fouled, kind, 2, false);
     world.pending_rebound = None;
     // 新罚球程序：清空上一轮的禁区记录。
     world.free_throw_lane = Some(crate::world::FreeThrowLane::default());
@@ -384,6 +391,21 @@ pub fn apply_clear_path_foul(world: &mut World, fouler: usize, fouled: usize) {
     world.apply_dead_ball_window();
     world.inbound_spot = Some(spot);
     let _ = team;
+}
+
+/// FIBA 2026 Article 37 破坏性犯规：为打断转换、停表或破坏清晰路径而
+/// 发生的非必要接触。它计入球员个人犯规与球队单节犯规，但不计入取消
+/// 比赛资格（只有恶意犯规与一级技术犯规计入）。
+///
+/// 罚则（37.2.2）：非投篮时两罚，投篮时按出手给罚球；之后由被犯规方
+/// 在前场罚球线延长线发球。NBA 档案没有这一类，调用方须先确认
+/// `disruptive_foul_is_separate()`。
+pub fn apply_disruptive_foul(world: &mut World, fouler: usize, fouled: usize) {
+    assert!(
+        world.rules.league.disruptive_foul_is_separate(),
+        "破坏性犯规只能由把 Disruptive 单独成类的档案判罚"
+    );
+    apply_clear_path_foul(world, fouler, fouled);
 }
 
 /// 恶意犯规（NBA Rule 12B §IV）。

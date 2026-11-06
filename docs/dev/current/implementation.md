@@ -14,7 +14,7 @@ H 阶段方案、接口与代码实现已全部完成。在协议层定义并导
 
 | 阶段 | 状态 | 当前记录 |
 | --- | --- | --- |
-| H. 动作动画与观测闭环 | 已交付 | 协议定义、引擎权威投影、两套呈现视图驱动改造与自动化测试全部完成。协议新增 `RenderPlayer.active_actions: Vec<RenderAction>`，包含稳定动作标识符、交互标识符、事实来源、动作族、动作细分变体、角色、阶段、时间区间、参与者与目标。2.5D 与二维战术板统一消费该状态，两套呈现视图保持一致。建立动作动画覆盖目录 `data/rules/action_animation_catalog.json` 与守卫脚本 `scripts/check_animation_catalog.py`，全量动作测试 `crates/sim/tests/action_animation_coverage.rs` 验证通过。同时闭合伤病替换、挑战实质改判、防守扑空失衡连续链条、协防滞回与 X-Out 轮转以及非投篮犯规生产路径，全套测试与文档守卫均通过。同时补齐封盖起跳之后的进攻应对链（造犯规接触与侧移避让，`crates/sim/tests/closeout_chain.rs`）、NBA 强制暂停与按来源区分的暂停时长（`crates/sim/tests/timeout_scenarios.rs`）、FIBA 破坏性犯规与技术犯规分类、两个联赛档案的裁判权限与录像复核范围（`crates/domain/tests/league_profiles.rs`），以及赛前角色与行为倾向的一致性守卫（`crates/domain/tests/roster_roles.rs`）。 |
+| H. 动作动画与观测闭环 | 已交付 | 协议定义、引擎权威投影、两套呈现视图驱动改造与自动化测试全部完成。协议新增 `RenderPlayer.active_actions: Vec<RenderAction>`，包含稳定动作标识符、交互标识符、事实来源、动作族、动作细分变体、角色、阶段、时间区间、参与者与目标。2.5D 与二维战术板统一消费该状态，两套呈现视图保持一致。建立动作动画覆盖目录 `data/rules/action_animation_catalog.json` 与守卫脚本 `scripts/check_animation_catalog.py`，全量动作测试 `crates/sim/tests/action_animation_coverage.rs` 验证通过。同时闭合伤病替换、挑战实质改判、防守扑空失衡连续链条、协防滞回与 X-Out 轮转以及非投篮犯规生产路径，全套测试与文档守卫均通过。同时补齐封盖起跳之后的进攻应对链（造犯规接触与侧移避让，`crates/sim/tests/closeout_chain.rs`）、NBA 强制暂停与按来源区分的暂停时长（`crates/sim/tests/timeout_scenarios.rs`）、FIBA 破坏性犯规与技术犯规分类、两个联赛档案的裁判权限与录像复核范围（`crates/domain/tests/league_profiles.rs`）、节末压哨自动回放与复核范围门槛（`crates/sim/tests/replay_scope.rs`、`crates/sim/tests/challenge.rs`），以及赛前角色与行为倾向的一致性守卫（`crates/domain/tests/roster_roles.rs`）。 |
 | 计划文档整理 | 已完成 | `full_simulation_plan.md` 是唯一权威方案；`plan.md` 是入口，本文件仅记录进度。 |
 | 规则与能力目录 | 已完成 | 规则程序目录 22 项全部 `implemented`，没有缺失场景；动作目录 16 个族全部 `verified`，`missing_evidence` 为空。NBA 2025-26 与 FIBA 2026 v1.1 的来源记录在 `docs/dev/evidence/rule_catalog_sources.md`。目录里的每一条证据都指向真实存在的测试：`crates/domain/tests/rule_catalog.rs::every_catalog_evidence_points_at_a_real_test` 逐条去源码里找那个函数。 |
 | 权威状态与计时 | 已完成 | 时钟有 `ClockState`、`ClockDirective`、`ClockController`，所有改钟都经控制器；停表后果统一走 `World::adjudicate`（配 `StoppageCause`、`PenaltyPlan`、`RestartPlan`、`ResumeContext`、`InboundLocation`、`ControlState`）。`Phase` 不含任何飞行变体，球的飞行记在 `BallFlight` 上，飞行不替换比赛程序。`ControlState` 是一个结构体，表达控球者、控制球队、最后触球人与其球队、控制建立时刻、前场控制、飞行与死球标志与本回合是否触筐。`LeagueProfile` 的存储本身就是 `PeriodPolicy`、`ClockPolicy`、`FoulPolicy`、`TimeoutPolicy` 四个策略族（`#[serde(flatten)]` 让磁盘上仍是扁平键），档案少一个键就读不出来。解耦的三条结构要求各有直接回归：`crates/sim/tests/architecture_decoupling.rs` 5 项。 |
@@ -32,11 +32,13 @@ H 阶段方案、接口与代码实现已全部完成。在协议层定义并导
 - `crates/sim/tests/illegal_touch.rs` 5 项：一臂之内伸手阻挡成立、合法间隔上的平行贴防不成立、够不到的防守人不成立、退开之后不再成立、活球里记为防守方的个人犯规。
 - `crates/sim/tests/back_to_basket.rs` 5 项：背身运球满五秒判违例、面朝篮筐不违例、越过罚球线延长线不违例、收球终止计时、球被碰开终止计时。
 - `crates/sim/tests/action_animation_coverage.rs` 2 项：目录结构与 16 动作族全量覆盖测试、活动动作协议流权威字段测试。
-- `crates/sim/tests/foul_scenarios.rs` 13 项：两分与三分投篮犯规的罚球数、加罚、进攻方犯规不计入球队单节犯规、双方犯规保留球权、罚则状态下的松球犯规、技术犯规保留球权、清晰路径犯规、两级恶意犯规与被逐、停步合球后的抱人犯规、篮板球争抢推人犯规。
-- `crates/sim/tests/timeout_scenarios.rs` 9 项：整场额度、第四节额度、末段额度、加时额度独立、活球时只有持球方能叫暂停、死球时两方都能叫、暂停之后比赛恢复、NBA 强制暂停在第二节 6:59 以下首次死球触发、FIBA 无强制暂停。
+- `crates/sim/tests/foul_scenarios.rs` 15 项：两分与三分投篮犯规的罚球数、加罚、进攻方犯规不计入球队单节犯规、双方犯规保留球权、罚则状态下的松球犯规、技术犯规保留球权、NBA 清晰路径犯规、两级恶意犯规与被逐、FIBA 破坏性犯规单独分类及两罚一掷、停步合球后的抱人犯规、篮板球争抢推人犯规。
+- `crates/sim/tests/timeout_scenarios.rs` 13 项：整场额度、第四节额度、末段额度、加时额度独立、活球时只有持球方能叫暂停、死球时两方都能叫、暂停之后比赛恢复、NBA 强制暂停在第二节 6:59 以下首次死球触发、FIBA 无强制暂停、按来源与联赛档案读取完整/短暂/加时三档时长、活球请求占用完整档。
+- `crates/sim/tests/replay_scope.rs` 3 项：节钟归零后离手的进球被取消、钟响前离手的进球保留、复核范围之外的档案不产生复核事实。
+- `crates/sim/tests/challenge.rs` 9 项：挑战维持原判、二次挑战拒绝、窗口外拒绝、获利方不得挑战、无裁决拒绝、规则集默认额度、复核保持状态、依据证据改判推翻原判并翻转球权、复核范围之外的裁决不得受理。
 - `crates/sim/tests/closeout_chain.rs` 4 项：滞空防守人面前的两条应对分支都可达、造接触分支只看对抗意愿门槛、侧移比例跟随敏捷度、同一次抽取可重放。
 - `crates/domain/tests/league_profiles.rs` 4 项：NBA 不把破坏性犯规单列且不区分技术犯规等级、FIBA 单列并分级、两个档案都声明裁判权限与录像复核范围、两个档案的复核问题不同。
-- `crates/domain/tests/roster_roles.rs` 1 项：每一类进攻角色的行为要求都被倾向字段满足。
+- `crates/domain/tests/roster_roles.rs` 2 项：每一类进攻与防守角色的行为要求都被倾向字段满足，ADR-020 的背身中锋与定点射手投射判据与策略表一致。
 - `crates/sim/tests/period_start_scenarios.rs` 7 项：NBA 第二节发球、FIBA 后续节次的交替拥有箭头、NBA 加时跳球、箭头逐节推进、节次开始的发球权归属、节间休息停表、第一节的球权记录。
 - `crates/sim/tests/free_throw_scenarios.rs` 5 项：进攻方提前进区、防守方提前进区、禁区外不记、罚球人离场后由队友顶上、罚球出手时限。
 - `crates/sim/tests/substitution_scenarios.rs` 8 项：犯满离场、技术犯规不计入个人与球队累计、活球不换人、换人接管站位、刚下场的人要坐够休息时间、账本记录、伤病产生与人员替换。

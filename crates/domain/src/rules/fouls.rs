@@ -30,5 +30,8 @@ pub fn counts_toward_team_period_fouls(kind: FoulKind) -> bool {
 /// 投篮犯规按出手区域给 2 或 3 罚，这一项由出手方决定，这里只回答
 /// 「是否走上罚球线」。
 pub fn awards_free_throws(kind: FoulKind) -> bool {
-    matches!(kind, FoulKind::Shooting | FoulKind::Flagrant)
+    matches!(
+        kind,
+        FoulKind::Shooting | FoulKind::Flagrant | FoulKind::Disruptive
+    )
 }

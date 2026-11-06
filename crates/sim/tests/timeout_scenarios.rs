@@ -13,7 +13,9 @@ use nba_domain::rules::GameRules;
 use nba_sim_core::action::Fact;
 use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::state::Phase;
-use nba_sim_core::timeouts::{can_request, request, TimeoutRejection};
+use nba_sim_core::timeouts::{
+    can_request, duration_for, request, request_with_origin, TimeoutOrigin, TimeoutRejection,
+};
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params, TeamSide};
 
@@ -263,6 +265,54 @@ fn a_timeout_resumes_play_with_the_ball() {
     assert!(
         !matches!(world.phase(), Phase::Timeout { .. }),
         "暂停结束之后比赛必须恢复"
+    );
+}
+
+#[test]
+fn the_timeout_duration_follows_the_league_profile_and_the_request_origin() {
+    // 三种来源分别取联赛档案里的三档时长；NBA 75 / 20 / 60。
+    let rules = GameRules::default();
+    assert_eq!(duration_for(&rules, 2, TimeoutOrigin::Full), 75.0);
+    assert_eq!(duration_for(&rules, 4, TimeoutOrigin::Short), 20.0);
+    assert_eq!(duration_for(&rules, 5, TimeoutOrigin::Overtime), 60.0);
+
+    let mut world = live_world(820);
+    let team = world.possession.team;
+    let before = world.now();
+    assert!(
+        request_with_origin(&mut world, team, TimeoutOrigin::Short),
+        "末段来源的暂停必须获批"
+    );
+    let short_resume = match world.phase() {
+        Phase::Timeout { resume_at, .. } => resume_at,
+        other => panic!("暂停之后必须进入暂停程序，实际 {other:?}"),
+    };
+    assert_eq!(
+        short_resume - before,
+        duration_for(&world.rules, world.clock.period(), TimeoutOrigin::Short),
+        "请求入口必须用档案里的短暂停时长"
+    );
+
+    // FIBA 只有完整档，短暂停来源回落到 60 秒。
+    let fiba = GameRules::with_league(LeagueProfile::fiba());
+    assert_eq!(duration_for(&fiba, 4, TimeoutOrigin::Short), 60.0);
+    assert_eq!(duration_for(&fiba, 5, TimeoutOrigin::Overtime), 60.0);
+}
+
+#[test]
+fn a_live_ball_timeout_uses_the_full_duration() {
+    let mut world = live_world(821);
+    let team = world.possession.team;
+    let before = world.now();
+    assert!(request(&mut world, team), "活球持球方可以叫完整暂停");
+    let resume = match world.phase() {
+        Phase::Timeout { resume_at, .. } => resume_at,
+        other => panic!("暂停之后必须进入暂停程序，实际 {other:?}"),
+    };
+    assert_eq!(
+        resume - before,
+        duration_for(&world.rules, world.clock.period(), TimeoutOrigin::Full),
+        "活球暂停必须占用完整档时长"
     );
 }
 

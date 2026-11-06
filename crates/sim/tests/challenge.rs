@@ -124,6 +124,16 @@ fn a_review_leaves_the_possession_and_phase_untouched() {
 }
 
 #[test]
+fn a_ruling_outside_the_replay_scope_cannot_be_challenged() {
+    let mut world = late_world(417);
+    world.record_ruling(TeamSide::Home, "back_to_basket");
+    let error = world
+        .request_challenge(TeamSide::Away)
+        .expect_err("复核范围之外的裁决不得受理");
+    assert!(error.contains("instant-replay scope"), "{error}");
+}
+
+#[test]
 fn a_successful_challenge_overturns_ruling_and_retains_timeout() {
     let mut world = late_world(415);
     world.record_ruling_with_evidence(TeamSide::Home, "out_of_bounds", true);

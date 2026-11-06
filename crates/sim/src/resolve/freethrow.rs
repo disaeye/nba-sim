@@ -157,6 +157,7 @@ fn shoot_with_retained_team(
         block_by: None,
         result: None,
         touched_backboard: false,
+        released_game_clock: world.clock.game_clock(),
     });
     let rules = world.rules.clone();
     world.ball.release_shot(crate::ball::ShotRelease {

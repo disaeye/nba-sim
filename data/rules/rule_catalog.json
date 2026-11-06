@@ -641,7 +641,7 @@
         "RULE-FLAGRANT-2-EJECTION": "nba_sim_core::foul_scenarios::a_flagrant_penalty_two_ejects_the_fouler",
         "RULE-CLEAR-PATH-FREE-THROWS-AND-POSSESSION": "nba_sim_core::foul_scenarios::a_clear_path_foul_awards_two_free_throws_and_the_ball",
         "RULE-AWAY-FROM-PLAY-ONE-AND-POSSESSION": "nba_sim_core::rules_flow::an_away_from_play_foul_in_the_last_two_minutes_is_one_free_throw_and_the_ball",
-        "RULE-FIBA-DISRUPTIVE-FOUL": "nba_sim_core::foul_scenarios::a_technical_foul_awards_one_free_throw_and_the_offence_keeps_the_ball",
+        "RULE-FIBA-DISRUPTIVE-FOUL": "nba_sim_core::foul_scenarios::a_fiba_disruptive_foul_is_booked_separately_from_a_flagrant_foul",
         "RULE-FIBA-FLAGRANT-FOUL-DISQUALIFICATION": "nba_sim_core::foul_scenarios::a_flagrant_penalty_two_ejects_the_fouler"
       },
       "missing_scenarios": [],
@@ -707,7 +707,8 @@
         "RULE-TIMEOUT-NBA-OVERTIME-BUDGET",
         "RULE-TIMEOUT-FIBA-HALF-BUDGET",
         "RULE-TIMEOUT-FIBA-FOURTH-QUARTER-CAP",
-        "RULE-TIMEOUT-RESUME-SAVED-PROGRAM"
+        "RULE-TIMEOUT-RESUME-SAVED-PROGRAM",
+        "RULE-TIMEOUT-DURATION-BY-SOURCE"
       ],
       "implementation": "implemented",
       "existing_test": "nba_sim_core::rules_flow::only_the_team_in_control_may_stop_the_clock_and_the_budget_is_capped",
@@ -718,7 +719,8 @@
         "RULE-TIMEOUT-FIBA-FOURTH-QUARTER-CAP": "nba_sim_core::timeout_scenarios::the_fiba_fourth_quarter_budget_is_capped_at_three",
         "RULE-TIMEOUT-NBA-FOURTH-QUARTER-CAP": "nba_sim_core::timeout_scenarios::the_nba_fourth_quarter_budget_is_capped_at_four",
         "RULE-TIMEOUT-NBA-REGULATION-BUDGET": "nba_sim_core::timeout_scenarios::a_timeout_costs_one_from_the_game_budget",
-        "RULE-TIMEOUT-RESUME-SAVED-PROGRAM": "nba_sim_core::timeout_scenarios::a_timeout_resumes_play_with_the_ball"
+        "RULE-TIMEOUT-RESUME-SAVED-PROGRAM": "nba_sim_core::timeout_scenarios::a_timeout_resumes_play_with_the_ball",
+        "RULE-TIMEOUT-DURATION-BY-SOURCE": "nba_sim_core::timeout_scenarios::the_timeout_duration_follows_the_league_profile_and_the_request_origin"
       },
       "missing_scenarios": [],
       "passing_scenarios": [
@@ -728,7 +730,8 @@
         "RULE-TIMEOUT-NBA-MANDATORY",
         "RULE-TIMEOUT-NBA-OVERTIME-BUDGET",
         "RULE-TIMEOUT-NBA-REGULATION-BUDGET",
-        "RULE-TIMEOUT-RESUME-SAVED-PROGRAM"
+        "RULE-TIMEOUT-RESUME-SAVED-PROGRAM",
+        "RULE-TIMEOUT-DURATION-BY-SOURCE"
       ]
     },
     {
@@ -778,21 +781,27 @@
         "RULE-REVIEW-ELIGIBLE-CLOCK-EXPIRATION",
         "RULE-REVIEW-NBA-CHALLENGE-COST",
         "RULE-REVIEW-FIBA-IRS-CLEAR-EVIDENCE",
-        "RULE-REVIEW-PRESERVE-ORIGINAL-RULING"
+        "RULE-REVIEW-PRESERVE-ORIGINAL-RULING",
+        "RULE-REVIEW-SCOPE-GATE",
+        "RULE-REVIEW-PERIOD-END-AUTOMATIC"
       ],
       "implementation": "implemented",
       "passing_scenarios": [
         "RULE-REVIEW-ELIGIBLE-CLOCK-EXPIRATION",
         "RULE-REVIEW-NBA-CHALLENGE-COST",
         "RULE-REVIEW-FIBA-IRS-CLEAR-EVIDENCE",
-        "RULE-REVIEW-PRESERVE-ORIGINAL-RULING"
+        "RULE-REVIEW-PRESERVE-ORIGINAL-RULING",
+        "RULE-REVIEW-SCOPE-GATE",
+        "RULE-REVIEW-PERIOD-END-AUTOMATIC"
       ],
       "missing_scenarios": [],
       "scenario_tests": {
         "RULE-REVIEW-ELIGIBLE-CLOCK-EXPIRATION": "nba_sim_core::challenge::a_challenge_outside_the_window_is_rejected",
         "RULE-REVIEW-NBA-CHALLENGE-COST": "nba_sim_core::challenge::a_failed_challenge_keeps_the_ruling_and_costs_a_timeout",
         "RULE-REVIEW-FIBA-IRS-CLEAR-EVIDENCE": "nba_sim_core::challenge::a_ruling_free_stoppage_has_nothing_to_review",
-        "RULE-REVIEW-PRESERVE-ORIGINAL-RULING": "nba_sim_core::challenge::a_review_leaves_the_possession_and_phase_untouched"
+        "RULE-REVIEW-PRESERVE-ORIGINAL-RULING": "nba_sim_core::challenge::a_review_leaves_the_possession_and_phase_untouched",
+        "RULE-REVIEW-SCOPE-GATE": "nba_sim_core::challenge::a_ruling_outside_the_replay_scope_cannot_be_challenged",
+        "RULE-REVIEW-PERIOD-END-AUTOMATIC": "nba_sim_core::replay_scope::a_shot_released_after_the_horn_is_waved_off"
       }
     },
     {

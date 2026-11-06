@@ -118,6 +118,9 @@ pub struct PendingShot {
     /// 这一次出手有没有碰过篮板：碰过之后防守人再碰球就是干扰
     /// （NBA Rule 11 §I.3）。
     pub touched_backboard: bool,
+    /// 球离手那一刻的本节剩余比赛时间：节末即时回放在结算时用它与
+    /// 当前钟值比对，判定这次出手是否在钟响之前离手。
+    pub released_game_clock: f64,
 }
 
 pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> ActionOutcome {
@@ -394,6 +397,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         // 模型判定的封盖必须算作封盖：球在出手点就被拍掉，而不是先飞出去再赌接触。
         result: block_by.map(|by| ShotResult::Blocked { by }),
         touched_backboard: false,
+        released_game_clock: world.clock.game_clock(),
     });
     let now = world.now();
     world.players[shooter].facing = (hoop - pos).normalize_or_zero();
@@ -466,7 +470,24 @@ pub fn finish(world: &mut World) {
         .expect("shot flight must resolve before settlement");
     let made_ball = result == ShotResult::Made;
     let waived = pending.fouled && !pending.and_one;
-    let made = made_ball && !waived;
+    // 节末压哨：裁判按联赛档案的即时回放范围自动复核「球是否在钟响前
+    // 离手」。复核有实质后果：钟响后离手的出手，得分被取消。
+    let buzzer_review = world.clock.game_clock() <= 0.0
+        && made_ball
+        && !waived
+        && crate::challenge::is_reviewable(world, "game_clock_at_period_end");
+    let released_before_horn = pending.released_game_clock > 0.0;
+    let waved_off = buzzer_review && !released_before_horn;
+    if buzzer_review {
+        world.emit(crate::action::Fact::Review {
+            team,
+            call: "game_clock_at_period_end",
+            overturned: waved_off,
+            cost_timeout: false,
+            time: world.now(),
+        });
+    }
+    let made = made_ball && !waived && !waved_off;
     let blocked_by = match result {
         ShotResult::Blocked { by } => Some(by),
         _ => None,
@@ -474,7 +495,7 @@ pub fn finish(world: &mut World) {
     let rim_contact = matches!(result, ShotResult::Missed { rim_contact: true });
     let points = if made { pending.points } else { 0 };
     let free_throws = if pending.fouled {
-        if pending.and_one && made_ball {
+        if pending.and_one && made {
             1
         } else if pending.is_three {
             3
