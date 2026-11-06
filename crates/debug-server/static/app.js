@@ -3650,27 +3650,61 @@
       const contactRadius = rules.bodyContactRadius * 10;
       let radius = rules.playerRadius * 10;
 
-      // 提取动作意图与动作窗口阶段。
-      // action_phase 是引擎动作窗口的权威信号：球员在 JumpShot/Block/
-      // ReboundJump 等窗口内时才有值，无窗口时字段缺失。腾空/封盖等
-      // 动力学渲染只允许由它触发——用 action 字符串猜测会把
-      // SPOT_UP_3PT（含 "3PT"）误判成干拔跳投、把 HELP_SIDE_SHELL
-      // （含 "HELP"）误判成封盖，无球站位球员被画成腾空 + 错误标签
-      // （seed42 Q1 11:34 实测）。
-      const actionRaw = String(player.action || "").toUpperCase();
-      const hasActionWindow = player.action_phase !== undefined && player.action_phase !== null;
-      const actionPhase = String(player.action_phase || "");
+      // 提取权威动作状态与动作阶段 (H 阶段动作闭环)
+      const activeActions = Array.isArray(player.active_actions) ? player.active_actions : [];
+      let primaryAction = null;
+      if (activeActions.length > 0) {
+        const actionPriority = (act) => {
+          switch (act.family) {
+            case "ACTION-SHOT": return 100;
+            case "ACTION-FINISH": return 95;
+            case "ACTION-CLOSEOUT": return 90;
+            case "ACTION-PASS": return 85;
+            case "ACTION-REBOUND": return 80;
+            case "ACTION-DEFENSE-ON-BALL":
+              if (act.kind === "steal_attempt") return 88;
+              if (act.kind === "charge_take") return 50;
+              return 30;
+            case "ACTION-SCREEN": return 40;
+            default: return 10;
+          }
+        };
+        primaryAction = [...activeActions].sort((a, b) => actionPriority(b) - actionPriority(a))[0];
+      }
 
-      // 投篮姿态（朝向锁定、瞄准线）同样只由动作窗口触发；
-      // 含 "3PT" 的站位动作（SPOT_UP_3PT）不是投篮。
-      const isShooting = hasActionWindow && (actionRaw.endsWith("SHOT") || actionRaw.includes("LAYUP"));
-      const isCrossover = actionRaw.includes("CROSSOVER") || actionRaw.includes("BETWEENTHELEGS");
-      const isDribbleDrive = isCrossover || actionRaw.includes("DRIVE") || actionRaw.includes("ADVANCE") || actionRaw.includes("INITIATE") || actionRaw.includes("DRIBBLE");
-      const isScreen = hasActionWindow && actionRaw.includes("SCREEN");
-      // 干扰罩只在真实干扰窗口（CloseoutContest / 封堵）内绘制；
-      // HELP_SIDE_SHELL、DROP_CONTAIN 是常驻协防站位，逐帧画弧
-      // 只是视觉噪音（防守人两侧的「横线」来源）。
-      const isContest = hasActionWindow && (actionRaw.includes("CONTEST") || actionRaw.includes("CLOSEOUT") || actionRaw.includes("DROP_CONTAIN"));
+      const actionRaw = String(player.action || "").toUpperCase();
+      const hasActionWindow = primaryAction
+        ? (primaryAction.phase && primaryAction.phase !== "sustained")
+        : (player.action_phase !== undefined && player.action_phase !== null);
+
+      const rawPhase = primaryAction ? primaryAction.phase : String(player.action_phase || "");
+      const normalizedPhase = rawPhase.toLowerCase();
+      const actionPhase = normalizedPhase === "preparation"
+        ? "Preparation"
+        : normalizedPhase === "execution"
+          ? "Execution"
+          : normalizedPhase === "follow_through" || normalizedPhase === "followthrough"
+            ? "FollowThrough"
+            : rawPhase;
+
+      const isShooting = primaryAction
+        ? (primaryAction.family === "ACTION-SHOT" || primaryAction.family === "ACTION-FINISH")
+        : (hasActionWindow && (actionRaw.endsWith("SHOT") || actionRaw.includes("LAYUP")));
+      const isCrossover = primaryAction
+        ? (primaryAction.family === "ACTION-DRIBBLE" && (String(primaryAction.variant || "").includes("crossover") || String(primaryAction.variant || "").includes("between_the_legs")))
+        : (actionRaw.includes("CROSSOVER") || actionRaw.includes("BETWEENTHELEGS"));
+      const isDribbleDrive = primaryAction
+        ? (primaryAction.family === "ACTION-DRIBBLE" || primaryAction.family === "ACTION-DRIVE")
+        : (isCrossover || actionRaw.includes("DRIVE") || actionRaw.includes("ADVANCE") || actionRaw.includes("INITIATE") || actionRaw.includes("DRIBBLE"));
+      const isScreen = primaryAction
+        ? (primaryAction.family === "ACTION-SCREEN")
+        : (hasActionWindow && actionRaw.includes("SCREEN"));
+      const isContest = primaryAction
+        ? (primaryAction.family === "ACTION-CLOSEOUT" || (primaryAction.family === "ACTION-DEFENSE-ON-BALL" && (primaryAction.kind === "contain" || primaryAction.kind === "slide")))
+        : (hasActionWindow && (actionRaw.includes("CONTEST") || actionRaw.includes("CLOSEOUT") || actionRaw.includes("DROP_CONTAIN")));
+      const isBoxOut = primaryAction
+        ? (primaryAction.family === "ACTION-REBOUND" && primaryAction.kind === "box_out")
+        : actionRaw.includes("BOXOUT");
       // 步频周期震荡（运球触地脉冲的节奏源）
       const gaitCycle = curSpeed > 0.4 ? (state.idx * 0.45 + (Number(player.jersey ?? player.number) || 1) * 1.5) : 0;
       const gaitPulse = Math.sin(gaitCycle);
@@ -3731,15 +3765,24 @@
       // 真实三维起跳腾空动力学系统 (Aerial Elevation & Jump Kinetics)
       // 覆盖投篮、上篮、扣篮、抢篮板、盖帽、抢断突扑等核心发力动作
       // ========================================================
-      const isDunk = hasActionWindow && actionRaw.includes("DUNK");
-      const isLayup = hasActionWindow && (actionRaw.includes("LAYUP") || actionRaw.includes("FLOATER") || actionRaw.includes("HOOK"));
-      // 跳投窗口期的动作名都以 Shot 结尾（JumpShot/ThreePointShot/
-      // StepBackShot/PullUpShot/TurnaroundFadeaway），与引擎自身的
-      // 窗口分类口径一致（action_windows.rs 的 ends_with("Shot")）。
-      const isJumpShot = hasActionWindow && actionRaw.endsWith("SHOT");
-      const isBlock = hasActionWindow && actionRaw.includes("BLOCK");
-      const isReboundJump = hasActionWindow && (actionRaw.includes("REBOUND") || actionRaw.includes("CRASH"));
-      const isStealLunge = hasActionWindow && (actionRaw.includes("STEAL") || actionRaw.includes("POKE") || actionRaw.includes("LOOSE"));
+      const isDunk = primaryAction
+        ? (primaryAction.family === "ACTION-FINISH" && (String(primaryAction.variant || "").includes("dunk") || String(primaryAction.variant || "").includes("running")))
+        : (hasActionWindow && actionRaw.includes("DUNK"));
+      const isLayup = primaryAction
+        ? (primaryAction.family === "ACTION-FINISH" && !isDunk)
+        : (hasActionWindow && (actionRaw.includes("LAYUP") || actionRaw.includes("FLOATER") || actionRaw.includes("HOOK")));
+      const isJumpShot = primaryAction
+        ? (primaryAction.family === "ACTION-SHOT")
+        : (hasActionWindow && actionRaw.endsWith("SHOT"));
+      const isBlock = primaryAction
+        ? (primaryAction.family === "ACTION-CLOSEOUT" && primaryAction.kind === "block_jump")
+        : (hasActionWindow && actionRaw.includes("BLOCK"));
+      const isReboundJump = primaryAction
+        ? (primaryAction.family === "ACTION-REBOUND" && primaryAction.kind !== "box_out")
+        : (hasActionWindow && (actionRaw.includes("REBOUND") || actionRaw.includes("CRASH")));
+      const isStealLunge = primaryAction
+        ? (primaryAction.family === "ACTION-DEFENSE-ON-BALL" && primaryAction.kind === "steal_attempt")
+        : (hasActionWindow && (actionRaw.includes("STEAL") || actionRaw.includes("POKE") || actionRaw.includes("LOOSE")));
       const isJumpAction = isDunk || isLayup || isJumpShot || isBlock || isReboundJump || isStealLunge;
 
       let jumpHeight = 0; // 0.0 ~ 1.0 相对腾空高度
@@ -3861,7 +3904,7 @@
       }
 
       // 5. 篮板卡位阻隔弧动作 (Box-Out Wall Barrier)
-      if (actionRaw.includes("BOXOUT")) {
+      if (isBoxOut || actionRaw.includes("BOXOUT")) {
         ctx.save();
         ctx.translate(renderPx, renderPy);
         ctx.rotate(facingAngle + Math.PI); // 朝向后方阻隔
@@ -4187,6 +4230,12 @@
         else if (isJumpShot) jumpActionZh = "干拔跳投";
         else if (isLayup) jumpActionZh = "飞身上篮";
         else if (isStealLunge) jumpActionZh = "飞身抢断";
+      } else if (primaryAction && primaryAction.phase !== "sustained") {
+        if (primaryAction.family === "ACTION-PASS") jumpActionZh = "精准出球";
+        else if (isScreen) jumpActionZh = "掩护挡拆";
+        else if (isBoxOut) jumpActionZh = "卡位护板";
+        else if (isStealLunge) jumpActionZh = "伸手切球";
+        else if (isCrossover) jumpActionZh = "变向突破";
       }
       const isDynamicAction =
         Boolean(jumpActionZh) ||

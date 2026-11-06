@@ -44,7 +44,49 @@ const CLIP_NAMES = {
   pass: "Man_Punch",
   jump: "Man_Jump",
   celebrate: "Man_Clapping",
+  steal: "Man_SwordSlash",
+  dunk: "Man_RunningJump",
+  stand: "Man_Standing",
 };
+
+function resolveActionRecipe(family, kind, variant, phase) {
+  switch (family) {
+    case "ACTION-SHOT":
+      if (phase === "preparation") {
+        return { clip: CLIP_NAMES.idle, speed: 1.0, loop: false, fadeDuration: 0.05 };
+      }
+      return { clip: CLIP_NAMES.shot, speed: 1.0, loop: false, fadeDuration: 0.08 };
+    case "ACTION-FINISH":
+      if (variant && (variant.includes("dunk") || variant.includes("running"))) {
+        return { clip: CLIP_NAMES.dunk, speed: 1.1, loop: false, fadeDuration: 0.08 };
+      }
+      return { clip: CLIP_NAMES.jump, speed: 1.1, loop: false, fadeDuration: 0.08 };
+    case "ACTION-PASS":
+      return { clip: CLIP_NAMES.pass, speed: 1.35, loop: false, fadeDuration: 0.06 };
+    case "ACTION-CLOSEOUT":
+      if (kind === "block_jump") {
+        return { clip: CLIP_NAMES.jump, speed: 1.2, loop: false, fadeDuration: 0.06 };
+      }
+      return { clip: CLIP_NAMES.jump, speed: 1.0, loop: false, fadeDuration: 0.08 };
+    case "ACTION-DEFENSE-ON-BALL":
+      if (kind === "steal_attempt") {
+        return { clip: CLIP_NAMES.steal, speed: 1.3, loop: false, fadeDuration: 0.06 };
+      }
+      if (kind === "charge_take") {
+        return { clip: CLIP_NAMES.stand, speed: 1.0, loop: true, fadeDuration: 0.1 };
+      }
+      return null;
+    case "ACTION-REBOUND":
+      if (kind === "box_out") {
+        return { clip: CLIP_NAMES.stand, speed: 1.0, loop: true, fadeDuration: 0.1 };
+      }
+      return { clip: CLIP_NAMES.jump, speed: 1.0, loop: false, fadeDuration: 0.08 };
+    case "ACTION-SCREEN":
+      return { clip: CLIP_NAMES.stand, speed: 1.0, loop: true, fadeDuration: 0.1 };
+    default:
+      return null;
+  }
+}
 
 const GESTURES = {
   shot: { clip: CLIP_NAMES.shot, speed: 1.0 },
@@ -392,6 +434,9 @@ class PlayerFigure {
     this.current = null;
     this.gesture = null;
     this.gestureUntil = 0;
+    this.currentActionId = null;
+    this.currentRecipeClip = null;
+    this.actionUntil = 0;
     this.yaw = 0;
     this.targetYaw = 0;
     this.speed = 0;
@@ -437,7 +482,64 @@ class PlayerFigure {
     this.gestureUntil = performance.now() + (action.getClip().duration / spec.speed) * 1000;
   }
 
+  applyActiveActions(actions, now) {
+    if (!actions || !actions.length) {
+      this.currentActionId = null;
+      return false;
+    }
+    const actionPriority = (act) => {
+      switch (act.family) {
+        case "ACTION-SHOT": return 100;
+        case "ACTION-FINISH": return 95;
+        case "ACTION-CLOSEOUT": return 90;
+        case "ACTION-PASS": return 85;
+        case "ACTION-REBOUND": return 80;
+        case "ACTION-DEFENSE-ON-BALL":
+          if (act.kind === "steal_attempt") return 88;
+          if (act.kind === "charge_take") return 50;
+          return 30;
+        case "ACTION-SCREEN": return 40;
+        default: return 10;
+      }
+    };
+    const sorted = [...actions].sort((a, b) => actionPriority(b) - actionPriority(a));
+    for (const item of sorted) {
+      const recipe = resolveActionRecipe(item.family, item.kind, item.variant, item.phase);
+      if (!recipe) continue;
+      const clipAction = this.resolveClip(recipe.clip);
+      if (!clipAction) continue;
+
+      if (this.currentActionId === item.action_id && this.currentRecipeClip === recipe.clip) {
+        return true;
+      }
+      this.gesture = null;
+      clipAction.reset();
+      if (recipe.loop) {
+        clipAction.setLoop(THREE.LoopRepeat, Infinity);
+        clipAction.clampWhenFinished = false;
+      } else {
+        clipAction.setLoop(THREE.LoopOnce, 1);
+        clipAction.clampWhenFinished = true;
+      }
+      clipAction.setEffectiveWeight(1);
+      clipAction.setEffectiveTimeScale(recipe.speed || 1.0);
+      clipAction.play();
+      if (this.current && this.current !== clipAction) {
+        this.current.crossFadeTo(clipAction, recipe.fadeDuration || 0.08, false);
+      }
+      this.current = clipAction;
+      this.currentActionId = item.action_id;
+      this.currentRecipeClip = recipe.clip;
+      this.actionUntil = recipe.loop ? Infinity : now + (clipAction.getClip().duration / (recipe.speed || 1.0)) * 1000;
+      return true;
+    }
+    this.currentActionId = null;
+    return false;
+  }
+
   applyLocomotion(now) {
+    if (this.currentActionId && now < this.actionUntil) return;
+    this.currentActionId = null;
     if (this.gesture && now < this.gestureUntil) return;
     this.gesture = null;
     const action =
@@ -982,6 +1084,7 @@ export class Court3D {
         yaw = Math.atan2(directionX, directionY);
       }
       view.place(worldX, worldZ, yaw, delta);
+      view.applyActiveActions(player.active_actions, performance.now());
       view.root.visible = true;
     }
     for (const [id, view] of this.players) {
@@ -1056,25 +1159,8 @@ export class Court3D {
     this.trailLine.visible = this.ballTrail.length > 1;
   }
 
-  triggerEvents(frame) {
-    if (!this.state?.playing) return;
-    if (!frame) return;
-    const events = new Set();
-    if (frame.eventType) events.add(String(frame.eventType));
-    for (const event of frame.events ?? []) events.add(String(event));
-    if (!events.size) return;
-
-    const holderId = frame.ball?.holderId ?? null;
-    const nearest = this.nearestPlayerToBall(frame);
-
-    if (events.has("SHOT") || events.has("FREE_THROW")) {
-      const shooter = holderId ?? nearest;
-      if (shooter) this.players.get(shooter)?.playGesture("shot");
-    } else if (events.has("PASS")) {
-      if (holderId) this.players.get(holderId)?.playGesture("pass");
-    } else if (events.has("REBOUND")) {
-      if (nearest) this.players.get(nearest)?.playGesture("rebound");
-    }
+  triggerEvents() {
+    // 权威动作状态由 player.active_actions 直接驱动，不从全局事件与距离推测执行者
   }
 
   detectScore(frame) {
@@ -1092,22 +1178,6 @@ export class Court3D {
       }
     }
     this.scoreSeen = { home, away };
-  }
-
-  nearestPlayerToBall(frame) {
-    const ball = frame.ball;
-    if (!ball) return null;
-    let best = null;
-    let bestDistance = Infinity;
-    for (const player of frame.players ?? []) {
-      if (player.onCourt === false) continue;
-      const distance = Math.hypot(finite(player.x, 0.5) - finite(ball.x, 0.5), finite(player.y, 0.5) - finite(ball.y, 0.5));
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        best = player.id;
-      }
-    }
-    return best;
   }
 
   sync(delta, now) {
