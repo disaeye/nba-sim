@@ -8,12 +8,12 @@
 mod common;
 
 use glam::Vec2;
+use nba_domain::rules::GameRules;
 use nba_sim_core::action::{Fact, ShotKind};
 use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::state::Phase;
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params, TeamSide};
-use nba_domain::rules::GameRules;
 
 fn world(seed: u64) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
@@ -77,9 +77,7 @@ fn a_shot_from_inside_the_arc_is_worth_two_points() {
         .events
         .iter()
         .find_map(|event| match &event.fact {
-            Fact::Shot {
-                is_three, zone, ..
-            } => Some((*is_three, *zone)),
+            Fact::Shot { is_three, zone, .. } => Some((*is_three, *zone)),
             _ => None,
         })
         .expect("the shot must be recorded");
@@ -97,9 +95,7 @@ fn a_shot_from_behind_the_arc_is_worth_three_points() {
         .events
         .iter()
         .find_map(|event| match &event.fact {
-            Fact::Shot {
-                is_three, zone, ..
-            } => Some((*is_three, *zone)),
+            Fact::Shot { is_three, zone, .. } => Some((*is_three, *zone)),
             _ => None,
         })
         .expect("the shot must be recorded");
@@ -117,9 +113,7 @@ fn a_corner_shot_behind_the_arc_is_worth_three_points() {
         .events
         .iter()
         .find_map(|event| match &event.fact {
-            Fact::Shot {
-                is_three, zone, ..
-            } => Some((*is_three, *zone)),
+            Fact::Shot { is_three, zone, .. } => Some((*is_three, *zone)),
             _ => None,
         })
         .expect("the shot must be recorded");
@@ -145,9 +139,10 @@ fn a_blocked_shot_leaves_the_ball_loose() {
     world.players[defender].data.attributes.block = 1.0;
     shoot_from(&mut world, shooter, ShotKind::CatchShoot);
     // 结算之后球要么被盖成活球，要么被防守人控下：两种都不是得分。
-    let made = world.events.iter().any(|event| {
-        matches!(&event.fact, Fact::Shot { made: true, .. })
-    });
+    let made = world
+        .events
+        .iter()
+        .any(|event| matches!(&event.fact, Fact::Shot { made: true, .. }));
     assert!(!made || world.possession.had_shot, "被盖的球不记得分");
 }
 
@@ -174,9 +169,7 @@ fn a_fouled_shooter_gets_free_throws() {
         .rev()
         .find_map(|event| match &event.fact {
             Fact::Foul {
-                kind,
-                free_throws,
-                ..
+                kind, free_throws, ..
             } => Some((*kind, *free_throws)),
             _ => None,
         })
@@ -203,10 +196,7 @@ fn touching_a_descending_shot_inside_the_cylinder_is_goaltending() {
     world.ball.vz = -3.0;
     world.players[defender].pos = hoop;
     world.players[defender].target = hoop;
-    world.set_flight(
-        nba_sim_core::state::FlightKind::Shot,
-        world.now() + 2.0,
-    );
+    world.set_flight(nba_sim_core::state::FlightKind::Shot, world.now() + 2.0);
     // 建立一笔待结算的出手：干扰球的判定读它。
     world.pending_shot = Some(nba_sim_core::resolve::shot::PendingShot {
         shooter,
@@ -226,6 +216,7 @@ fn touching_a_descending_shot_inside_the_cylinder_is_goaltending() {
         result: None,
         touched_backboard: false,
         released_game_clock: world.clock.game_clock(),
+        released_clock_checkpoint: None,
     });
     let called = nba_sim_core::resolve::shot::check_goaltending(&mut world);
     assert!(called, "下落段里碰到筐上方的球必须判干扰球");
@@ -259,10 +250,7 @@ fn an_ascending_ball_may_be_blocked_without_goaltending() {
     world.ball.vz = 3.0;
     world.players[defender].pos = hoop;
     world.players[defender].target = hoop;
-    world.set_flight(
-        nba_sim_core::state::FlightKind::Shot,
-        world.now() + 2.0,
-    );
+    world.set_flight(nba_sim_core::state::FlightKind::Shot, world.now() + 2.0);
     world.pending_shot = Some(nba_sim_core::resolve::shot::PendingShot {
         shooter,
         kind: ShotKind::CatchShoot,
@@ -281,6 +269,7 @@ fn an_ascending_ball_may_be_blocked_without_goaltending() {
         result: None,
         touched_backboard: false,
         released_game_clock: world.clock.game_clock(),
+        released_clock_checkpoint: None,
     });
     let called = nba_sim_core::resolve::shot::check_goaltending(&mut world);
     assert!(!called, "上升段的球可以合法封盖，不是干扰球");
@@ -306,6 +295,7 @@ fn pending_shot(world: &mut World, shooter: usize, is_three: bool) {
         result: None,
         touched_backboard: false,
         released_game_clock: world.clock.game_clock(),
+        released_clock_checkpoint: None,
     });
 }
 
@@ -330,10 +320,7 @@ fn touching_a_ball_that_touched_the_backboard_is_goaltending() {
     world.ball.vz = 3.0;
     world.players[defender].pos = hoop;
     world.players[defender].target = hoop;
-    world.set_flight(
-        nba_sim_core::state::FlightKind::Shot,
-        world.now() + 2.0,
-    );
+    world.set_flight(nba_sim_core::state::FlightKind::Shot, world.now() + 2.0);
     pending_shot(&mut world, shooter, false);
     // 还没有碰过篮板：上升段的球可以合法封盖。
     assert!(
@@ -373,10 +360,7 @@ fn touching_a_ball_that_is_sitting_on_the_ring_is_goaltending() {
     world.ball.vz = -0.5;
     world.players[defender].pos = hoop;
     world.players[defender].target = hoop;
-    world.set_flight(
-        nba_sim_core::state::FlightKind::Shot,
-        world.now() + 2.0,
-    );
+    world.set_flight(nba_sim_core::state::FlightKind::Shot, world.now() + 2.0);
     pending_shot(&mut world, shooter, false);
     assert!(
         nba_sim_core::resolve::shot::check_goaltending(&mut world),
@@ -403,10 +387,7 @@ fn a_ball_outside_the_cylinder_is_not_goaltending() {
     world.ball.vz = -3.0;
     world.players[defender].pos = hoop;
     world.players[defender].target = hoop;
-    world.set_flight(
-        nba_sim_core::state::FlightKind::Shot,
-        world.now() + 2.0,
-    );
+    world.set_flight(nba_sim_core::state::FlightKind::Shot, world.now() + 2.0);
     world.pending_shot = Some(nba_sim_core::resolve::shot::PendingShot {
         shooter,
         kind: ShotKind::CatchShoot,
@@ -425,6 +406,7 @@ fn a_ball_outside_the_cylinder_is_not_goaltending() {
         result: None,
         touched_backboard: false,
         released_game_clock: world.clock.game_clock(),
+        released_clock_checkpoint: None,
     });
     let called = nba_sim_core::resolve::shot::check_goaltending(&mut world);
     assert!(!called, "筐柱圆柱段之外的球不算干扰球");

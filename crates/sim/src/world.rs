@@ -6,7 +6,9 @@
 
 use glam::Vec2;
 use nba_domain::event::PossessionEndCause;
-use nba_domain::{GameRules, TeamData};
+use nba_domain::{
+    ControlSequenceId, EventId, GameRules, IdAllocator, NextId, ProgramId, TeamData,
+};
 use std::collections::BTreeMap;
 
 use crate::action::{
@@ -103,6 +105,14 @@ pub struct TimedFact {
     pub tick_index: u64,
     pub sequence: u64,
     pub event_id: u64,
+    /// 直接触发本事件的上一条事件。
+    pub parent_event_id: Option<u64>,
+    /// 当前比赛程序身份。
+    pub program_id: u64,
+    /// 当前控制序列身份。
+    pub control_sequence_id: Option<u64>,
+    /// 多来源裁决引用的来源事件。
+    pub source_event_ids: Vec<u64>,
     pub fact: Fact,
     /// 直接产生这条事实的那次决策（指向 `World::decision_traces`）。
     pub trace: Option<u32>,
@@ -183,9 +193,10 @@ pub struct World {
     pub ball_flight: Option<crate::state::BallFlight>,
     pub pass_result: Option<crate::ball::PassResult>,
     pub pass_in_flight: Option<crate::ball::PassInFlight>,
-    /// 最后触球的球员。出界判定按最后触球方决定球权，所以每次持球与
-    /// 碰球都要更新它。
-    pub last_touch: Option<usize>,
+    /// 权威控制状态：控球人、控制方、最后触球人与其球队、控制建立时刻、
+    /// 前场控制、触筐与触板身份、控制序列身份。
+    pub control: crate::officiating::ControlState,
+    pub control_transitions: Vec<crate::officiating::ControlTransition>,
     pub players: Vec<PlayerState>,
     pub possession: PossessionState,
     pub score: [u32; 2],
@@ -279,6 +290,10 @@ pub struct World {
     /// 当前生效的决策快照下标：本次决策产生的事实都带着它。
     pub active_trace: Option<u32>,
     pub next_event_id: u64,
+    pub identities: IdAllocator,
+    pub last_event_id: u64,
+    pub current_program_id: u64,
+    pub pending_review_source_events: Option<Vec<u64>>,
     pub last_event_tick: u64,
     pub next_event_sequence: u64,
     pub shot_zone_counts: [[u32; 4]; 2],
@@ -337,34 +352,14 @@ impl World {
             "phase and match stage disagree"
         );
         let current_stage = self.match_stage();
-        let stage_transition_is_allowed = stage == current_stage
-            || (current_stage == crate::state::MatchStage::Pregame
-                && stage == crate::state::MatchStage::Regulation)
-            || (current_stage == crate::state::MatchStage::Intermission
-                && matches!(
-                    stage,
-                    crate::state::MatchStage::Intermission
-                        | crate::state::MatchStage::Regulation
-                        | crate::state::MatchStage::Overtime
-                ))
-            || (current_stage == crate::state::MatchStage::Regulation
-                && matches!(
-                    stage,
-                    crate::state::MatchStage::Intermission
-                        | crate::state::MatchStage::Overtime
-                        | crate::state::MatchStage::Finished
-                ))
-            || (current_stage == crate::state::MatchStage::Overtime
-                && matches!(
-                    stage,
-                    crate::state::MatchStage::Intermission
-                        | crate::state::MatchStage::Regulation
-                        | crate::state::MatchStage::Finished
-                ));
+        let stage_transition_is_allowed = current_stage.can_transition_to(stage);
         assert!(
             stage_transition_is_allowed,
             "match stage transition {current_stage:?} -> {stage:?} through {phase:?} is not permitted"
         );
+        if self.phase.program() != program {
+            self.current_program_id = ProgramId::next(&mut self.identities).raw();
+        }
         self.phase = phase;
     }
 
@@ -405,6 +400,7 @@ impl World {
             phase.program(),
             crate::state::MatchProgram::PeriodSettlement
         );
+        self.current_program_id = ProgramId::next(&mut self.identities).raw();
         self.phase = phase;
     }
 
@@ -894,11 +890,23 @@ impl World {
         // 球落到人手里，飞行结束。
         self.clear_flight();
         self.ball.set_held(holder);
-        self.last_touch = Some(holder);
+        self.note_last_touch(holder);
+        self.commit_control_transition("control_established");
+    }
+
+    /// 记录最后一次触球。
+    ///
+    /// 最后触球是控制状态的一部分：出界归属、八秒「踢球」判定与回场
+    /// 判定都读它。
+    pub(crate) fn note_last_touch(&mut self, handle: usize) {
+        self.control.last_touch = Some(handle);
+        self.control.last_touch_team = Some(self.players[handle].team);
+        self.control.last_touch_at = Some(self.now());
     }
 
     pub fn release_ball(&mut self, state: crate::state::BallState) {
         self.ball.release(state);
+        self.commit_control_transition("control_released");
     }
 
     pub(crate) fn set_timeout_phase(
@@ -954,14 +962,15 @@ impl World {
         };
         if matches!(phase, Phase::PeriodBreak { .. }) {
             self.set_period_phase(phase);
-            return;
+        } else {
+            let stage = phase.stage(
+                self.clock.period(),
+                self.rules.league.periods.regulation_periods,
+            );
+            let program = phase.program();
+            self.set_program_phase(stage, program, phase);
         }
-        let stage = phase.stage(
-            self.clock.period(),
-            self.rules.league.periods.regulation_periods,
-        );
-        let program = phase.program();
-        self.set_program_phase(stage, program, phase);
+        self.commit_control_transition("program_transition");
     }
 
     /// 开始一次飞行：记下种类与结算时刻。
@@ -1069,13 +1078,14 @@ impl World {
         let mut world = Self {
             params,
             rules,
-            clock: Clock::new(period_seconds, shot_clock),
+            clock: Clock::with_player_count(player_count, period_seconds, shot_clock),
             phase: Phase::Pregame,
             ball: BallBody::loose(center, Vec2::ZERO),
             ball_flight: None,
             pass_result: None,
             pass_in_flight: None,
-            last_touch: None,
+            control: crate::officiating::ControlState::dead_ball(),
+            control_transitions: Vec::new(),
             players,
             possession: PossessionState::new(
                 TeamSide::Home,
@@ -1156,6 +1166,10 @@ impl World {
             decision_records: Vec::new(),
             active_trace: None,
             next_event_id: 0,
+            identities: IdAllocator::new(),
+            last_event_id: 0,
+            current_program_id: 1,
+            pending_review_source_events: None,
             last_event_tick: 0,
             next_event_sequence: 0,
             shot_zone_counts: [[0; 4]; 2],
@@ -1189,6 +1203,7 @@ impl World {
             crate::body::place(&mut world, handle, spot);
         }
         world.reset_positions(TeamSide::Home);
+        world.commit_clock_directives();
         world.begin_opening_jump_ball(home_jumper, away_jumper);
         world
     }
@@ -1652,44 +1667,9 @@ impl World {
         self.ball.holder()
     }
 
-    /// 当前球权控制状态：控球人、控制方、最后触球、控制建立时刻、前场控制、
-    /// 飞行与死球标志、本回合是否触筐。
+    /// 当前球权控制状态：权威状态的内部只读投影。
     pub fn control_state(&self) -> crate::adjudicate::ControlState {
-        use crate::adjudicate::ControlState;
-        // 罚球球已离手时不算死球：旧模型的罚球飞行阶段不在死球之列。
-        let dead = matches!(
-            self.phase(),
-            Phase::Pregame
-                | Phase::DeadBall { .. }
-                | Phase::Inbound { .. }
-                | Phase::PeriodBreak { .. }
-                | Phase::Finished
-        ) || self.free_throw_pending();
-        let mut state = ControlState {
-            holder: None,
-            team: Some(self.possession.team),
-            last_touch: self.last_touch,
-            last_touch_team: self.last_touch.map(|handle| self.players[handle].team),
-            control_since: Some(self.possession.started_at),
-            frontcourt: self.possession.frontcourt_established,
-            in_flight: false,
-            dead,
-            rim_contact: self.possession.rim_contact,
-        };
-        if dead {
-            return state;
-        }
-        match self.ball.state() {
-            crate::state::BallState::Held { holder } => {
-                state.holder = Some(holder);
-                state.team = Some(self.players[holder].team);
-            }
-            crate::state::BallState::Pass { .. } | crate::state::BallState::Shot { .. } => {
-                state.in_flight = true;
-            }
-            crate::state::BallState::Loose { .. } => {}
-        }
-        state
+        self.authoritative_control_state()
     }
 
     /// 持球人是否被包夹：两名以上对手挤在包夹半径内。
@@ -1750,6 +1730,9 @@ impl World {
         fork.draws = DrawSource::new(base_seed);
         fork.events.clear();
         fork.next_event_id = 0;
+        fork.last_event_id = 0;
+        fork.identities.reset::<EventId>();
+        fork.pending_review_source_events = None;
         fork.last_event_tick = fork.clock.tick();
         fork.next_event_sequence = 0;
         fork.shot_samples.clear();
@@ -1786,18 +1769,251 @@ impl World {
             self.last_event_tick = tick_index;
             self.next_event_sequence = 0;
         }
-        self.next_event_id += 1;
+        let event_id = EventId::next(&mut self.identities);
+        self.next_event_id = event_id.raw();
         let sequence = self.next_event_sequence;
         self.next_event_sequence += 1;
+        let parent_event_id = Some(self.last_event_id);
+        let control_sequence_id = self.control.sequence_id;
+        let source_event_ids = self.pending_review_source_events.take().unwrap_or_else(|| {
+            parent_event_id.into_iter().collect()
+        });
         self.events.push(TimedFact {
             time: self.now(),
             period: self.clock.period(),
             tick_index,
             sequence,
-            event_id: self.next_event_id,
+            event_id: event_id.raw(),
+            parent_event_id,
+            program_id: self.current_program_id,
+            control_sequence_id,
+            source_event_ids,
             fact,
             trace: self.active_trace,
         });
+        self.last_event_id = event_id.raw();
+    }
+
+    pub(crate) fn commit_clock_directives(&mut self) {
+        let commits = self.clock.take_commits();
+        if commits.is_empty() {
+            return;
+        }
+        self.emit(Fact::ClockDirectivesCommitted { commits });
+    }
+
+    /// 结算并发布全部时钟提交记录，包括最后一段连续推进。
+    pub(crate) fn flush_clock_directives(&mut self) {
+        let commits = self.clock.drain_commits();
+        if commits.is_empty() {
+            return;
+        }
+        self.emit(Fact::ClockDirectivesCommitted { commits });
+    }
+
+    /// 记录当前比赛钟的检查点。
+    ///
+    /// 检查点给出比赛钟的整数微秒值。节末即时回放改判时，比赛钟从它
+    /// 恢复：改判纠正的是「钟响前还是钟响后离手」，比赛钟必须回到出手
+    /// 那一刻的读数。
+    pub fn snapshot_clock_checkpoint(&mut self) -> Option<nba_domain::CheckpointId> {
+        let checkpoint_id = nba_domain::CheckpointId::next(&mut self.identities);
+        let context = self.clock_context();
+        self.clock.controller().save_checkpoint(checkpoint_id);
+        self.commit_clock_directives();
+        Some(checkpoint_id)
+    }
+
+    /// 把比赛钟恢复到指定检查点。
+    ///
+    /// 这是「纠正」指令：它只改比赛钟的读数，不动其它计时器。
+    pub fn restore_clock_checkpoint(
+        &mut self,
+        checkpoint_id: nba_domain::CheckpointId,
+    ) {
+        let context = self.clock_context();
+        self.clock.apply_directives_with_context(
+            vec![crate::clock::ClockDirective::Restore {
+                timer: crate::clock::TimerId::GameClock,
+                checkpoint_id,
+            }],
+            context,
+        );
+        self.commit_clock_directives();
+    }
+
+    pub(crate) fn clock_context(&self) -> crate::clock::ClockDirectiveContext {
+        self.clock.context_for(
+            ProgramId::from_raw(self.current_program_id),
+            EventId::from_raw(self.next_event_id),
+        )
+    }
+
+    /// 按时钟策略写入运行标志。
+    ///
+    /// 策略到指令的转换在时钟模块里：那里是运行标志的唯一写入口。
+    fn apply_clock_policy(
+        &mut self,
+        policy: crate::state::ClockAdvance,
+        context: crate::clock::ClockDirectiveContext,
+    ) {
+        self.clock.apply_policy(policy, context);
+    }
+
+    pub(crate) fn commit_control_transition(&mut self, source: &'static str) {
+        let previous = self.control;
+        let mut current = self.authoritative_control_state();
+        current.established_by_event_id = previous.established_by_event_id;
+        current.ended_by_event_id = previous.ended_by_event_id;
+        // 最后触球是控制状态的一部分：世界不再另存一份。
+        current.last_touch = previous.last_touch;
+        current.last_touch_team = previous.last_touch_team;
+        current.last_touch_at = previous.last_touch_at;
+        current.frontcourt = previous.frontcourt;
+        current.rim_contact = previous.rim_contact;
+        current.backboard_contact = previous.backboard_contact;
+        current.rim_shot_id = previous.rim_shot_id;
+        let previous_sequence = previous.sequence_id;
+        // 控制序列是「控制权归属」的序列：它按控制球队划分。
+        // 同一队的传球只是控制人换手，序列不变；控制球队变了就是一次
+        // 交接：上一段序列结束，新的一段开始。
+        //
+        // 死球期间控制方仍然存在（球权属于某一方，只是球不在手里），因此
+        // 停表不会结束控制序列。
+        let team_changed = current.team != previous.team
+            && current.team.is_some()
+            && previous.team.is_some();
+        let team_lost = previous.team.is_some() && current.team.is_none();
+        let team = current.team;
+        let holder = current.holder;
+        let ball_state = current.ball_state;
+        let sequence_id = current.sequence_id.unwrap_or(0);
+        if team_changed {
+            let sequence = ControlSequenceId::next(&mut self.identities);
+            current.sequence_id = Some(sequence.raw());
+            current.established_by_event_id = Some(self.next_event_id + 1);
+            current.ended_by_event_id = previous_sequence.map(|_| self.next_event_id + 1);
+            self.control = current;
+            let handover = crate::officiating::ControlHandover {
+                previous_sequence_id: previous_sequence,
+                previous_team: previous.team,
+                sequence_id: sequence.raw(),
+                team,
+                holder,
+                ball_state,
+                source,
+                at: self.now(),
+            };
+            self.control_transitions.push(crate::officiating::ControlTransition {
+                boundary: crate::officiating::ControlBoundary::Established,
+                sequence_id: handover.sequence_id,
+                team,
+                holder,
+                ball_state,
+                source,
+                at: handover.at,
+            });
+            self.emit(Fact::ControlHandoverCommitted {
+                handover,
+                state: current,
+            });
+            return;
+        }
+        // 控制方暂时没有（球在空中或松球）时，控制序列仍然有效：球权属于
+        // 某一方，只是此刻没有人在手里。因此只有控制方彻底改变才切换序列。
+        current.sequence_id = previous_sequence;
+        self.control = current;
+    }
+
+    /// 关闭当前仍然有效的控制序列。
+    ///
+    /// 比赛结束时调用：控制权在终场那一刻不存在，因此最后一段序列要有
+    /// 明确的结束事件，而不是悬在那里。
+    pub(crate) fn close_control_sequence(&mut self, source: &'static str) {
+        let Some(sequence_id) = self.control.sequence_id else {
+            return;
+        };
+        let mut current = self.control;
+        current.ended_by_event_id = Some(self.next_event_id + 1);
+        current.sequence_id = Some(sequence_id);
+        self.control = current;
+        let transition = crate::officiating::ControlTransition {
+            boundary: crate::officiating::ControlBoundary::Ended,
+            sequence_id,
+            team: current.team,
+            holder: current.holder,
+            ball_state: current.ball_state,
+            source,
+            at: self.now(),
+        };
+        self.control_transitions.push(transition);
+        self.emit(Fact::ControlStateCommitted {
+            transition,
+            state: current,
+        });
+    }
+
+    fn authoritative_control_state(&self) -> crate::officiating::ControlState {
+        use crate::officiating::ControlState;
+        let dead = matches!(
+            self.phase(),
+            Phase::Pregame
+                | Phase::DeadBall { .. }
+                | Phase::Inbound { .. }
+                | Phase::PeriodBreak { .. }
+                | Phase::Finished
+        ) || self.free_throw_pending();
+        let mut state = ControlState {
+            holder: None,
+            team: None,
+            last_touch: self.control.last_touch,
+            last_touch_team: self.control.last_touch_team,
+            last_touch_at: self.control.last_touch_at,
+            control_since: Some(self.possession.started_at),
+            frontcourt: self.control.frontcourt,
+            in_flight: self.ball.state().is_in_flight(),
+            dead,
+            rim_contact: self.control.rim_contact,
+            backboard_contact: self.control.backboard_contact,
+            rim_shot_id: self.control.rim_shot_id,
+            sequence_id: self.control.sequence_id,
+            established_by_event_id: self.control.established_by_event_id,
+            ended_by_event_id: self.control.ended_by_event_id,
+            ball_state: self.ball.state().name(),
+        };
+        match self.ball.state() {
+            crate::state::BallState::Held { holder }
+            | crate::state::BallState::DribbleFlight { holder, .. } => {
+                state.holder = Some(holder);
+                state.team = Some(self.players[holder].team);
+            }
+            crate::state::BallState::ControlledByOfficial { holder, .. } => {
+                state.holder = Some(holder);
+                state.team = Some(self.players[holder].team);
+            }
+            // 传球与投篮飞行期间球权不转移：进攻方仍然控制球。飞行结束
+            // 之后由接球或篮板决定控制方是否改变。
+            crate::state::BallState::PassFlight { from, .. } => {
+                state.in_flight = true;
+                state.team = Some(self.players[from].team);
+            }
+            crate::state::BallState::ShotFlight { shooter, .. } => {
+                state.in_flight = true;
+                state.team = Some(self.players[shooter].team);
+            }
+            // 松球没有控制方：双方都要争。
+            crate::state::BallState::Loose { .. } => {}
+            crate::state::BallState::OutOfPlay { .. } => {
+                state.dead = true;
+            }
+        }
+        if dead {
+            state.holder = None;
+            state.in_flight = false;
+            // 死球期间球权仍然属于某一方：控制序列因此不会因为停表而中断。
+            state.team = Some(self.possession.team);
+        }
+        state
     }
 
     pub fn line(&self, player: usize) -> &PlayerLine {
@@ -2028,6 +2244,12 @@ impl World {
                 self.clock.game_clock(),
             );
             self.possession_points = 0;
+            // 前场控制与触筐属于本回合：换回合时清零，否则上一个回合
+            // 建立的前场控制会让新回合一进场就带回场违例。
+            self.control.frontcourt = false;
+            self.control.rim_contact = false;
+            self.control.backboard_contact = false;
+            self.control.rim_shot_id = None;
         }
         // 发球也是一次传球：接球人接到发球后直接出手是合法的进攻选择，
         // 不应该被判成「没有接球就投」。传球链统计也按官方口径把发球
@@ -2225,9 +2447,14 @@ impl World {
         if self.finished {
             return;
         }
+        let clock_context = self.clock_context();
         self.clock.advance_tick();
         let phase_before_step = self.phase;
         let flight_before_step = self.ball_flight;
+        // 运行标志由类型化指令写入：比赛钟与进攻钟在什么时刻开或停，
+        // 有一条可重建的依据，而不是隐含在推进里。
+        let clock_policy = crate::clock::clocks_for(phase_before_step, flight_before_step);
+        self.apply_clock_policy(clock_policy, clock_context);
         let momentum_phase = if matches!(phase_before_step, Phase::Timeout { .. }) {
             match phase_before_step {
                 Phase::Timeout { resume_phase, .. } => resume_phase.phase(),
@@ -2242,8 +2469,20 @@ impl World {
             crate::motion::decay_momentum(self, dt);
         }
         let game_clock_before_advance = self.clock.game_clock();
-        let clock_advance =
-            crate::clock::advance(phase_before_step, flight_before_step, &mut self.clock, dt);
+        let mut on_court = [0usize; crate::state::MAX_ON_COURT * 2];
+        let mut player_count = 0usize;
+        for handle in self.on_court_home.as_slice().iter().chain(self.on_court_away.as_slice()) {
+            on_court[player_count] = *handle;
+            player_count += 1;
+        }
+        let (clock_advance, _) = crate::clock::advance_with_context(
+            phase_before_step,
+            flight_before_step,
+            &mut self.clock,
+            dt,
+            &on_court[..player_count],
+            clock_context,
+        );
         let player_time_seconds = if clock_advance.player_time {
             dt.min(game_clock_before_advance)
         } else {
@@ -2296,6 +2535,7 @@ impl World {
         self.check_free_throw_lane();
         crate::timeouts::enforce_mandatory(self);
         self.check_period_end();
+        self.commit_clock_directives();
     }
 
     /// 接球阶段只在接到球后的短暂窗口内成立。
@@ -2445,6 +2685,7 @@ impl World {
         // 三个终止条件：收球、越过罚球线延长线、球被碰开。
         let gathered = self.possession.dribble_state == crate::state::DribbleState::Gathered;
         let deflected = self
+            .control
             .last_touch
             .is_some_and(|touched| self.players[touched].team != team);
         if !(below_line && in_frontcourt && back_to_basket) || gathered || deflected {
@@ -2514,10 +2755,11 @@ impl World {
         };
         // 防守人碰过球后球回到后场是合法的：那段控制不算进攻方建立的前场控制。
         if self
+            .control
             .last_touch
             .is_some_and(|touched| self.players[touched].team != team)
         {
-            self.possession.frontcourt_established = false;
+            self.control.frontcourt = false;
         }
         if past_mid {
             // 过中线就停八秒计时；只有推进到前场深处才算建立前场控制。
@@ -2525,14 +2767,14 @@ impl World {
             self.possession.backcourt_started_last_touch = None;
         }
         if frontcourt_deep {
-            self.possession.frontcourt_established = true;
+            self.control.frontcourt = true;
         }
         if !in_backcourt {
             return;
         }
         // 已经在前场建立控制又把球带回后场：回场违例。
-        if self.possession.frontcourt_established {
-            self.possession.frontcourt_established = false;
+        if self.control.frontcourt {
+            self.control.frontcourt = false;
             self.possession.backcourt_started_game_clock = None;
             self.possession.backcourt_started_last_touch = None;
             self.line_mut(holder).turnovers += 1;
@@ -2559,18 +2801,19 @@ impl World {
         // 的而不是递出去的，因此这里看的是最后触球的一方。
         if let Some(started_touch) = self.possession.backcourt_started_last_touch {
             let touched_by_defence = self
+                .control
                 .last_touch
                 .is_some_and(|touched| self.players[touched].team != team)
-                && self.last_touch != Some(started_touch);
+                && self.control.last_touch != Some(started_touch);
             if touched_by_defence {
                 self.possession.backcourt_started_game_clock = Some(game_clock);
-                self.possession.backcourt_started_last_touch = self.last_touch;
+                self.possession.backcourt_started_last_touch = self.control.last_touch;
             }
         }
         match self.possession.backcourt_started_game_clock {
             None => {
                 self.possession.backcourt_started_game_clock = Some(game_clock);
-                self.possession.backcourt_started_last_touch = self.last_touch;
+                self.possession.backcourt_started_last_touch = self.control.last_touch;
             }
             Some(start) if start - game_clock >= limit => {
                 self.possession.backcourt_started_game_clock = None;
@@ -4023,7 +4266,10 @@ impl World {
             crate::state::MatchProgram::Complete,
             Phase::Finished,
         );
+        // 终场关闭最后一段控制序列：比赛结束时没有仍然有效的控制权。
+        self.close_control_sequence("game_end");
         self.emit(Fact::GameEnd);
+        self.flush_clock_directives();
     }
 }
 

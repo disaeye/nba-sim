@@ -65,25 +65,71 @@ impl ViolationKind {
 }
 
 /// 时钟调整：只记录与默认推进不同的部分。
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ClockAdjustment {
     /// 进攻时钟要设定的值；`None` 表示不改。
     pub shot_clock: Option<f64>,
     /// 比赛钟要设定的值；`None` 表示不改。
     pub game_clock: Option<f64>,
+    /// 要启动的计时器。
+    pub start: Vec<crate::clock::TimerId>,
+    /// 要停止的计时器。
+    pub stop: Vec<crate::clock::TimerId>,
+    /// 要恢复到检查点的计时器与检查点身份。
+    pub restore: Vec<(crate::clock::TimerId, nba_domain::CheckpointId)>,
 }
 
 impl ClockAdjustment {
     /// 展开成时钟要求：裁决只描述要什么，改钟由 `ClockController` 执行。
     pub fn directives(&self) -> Vec<crate::clock::ClockDirective> {
         let mut directives = Vec::new();
+        for timer in &self.stop {
+            directives.push(crate::clock::ClockDirective::Stop { timer: *timer });
+        }
+        for timer in &self.start {
+            directives.push(crate::clock::ClockDirective::Start { timer: *timer });
+        }
         if let Some(seconds) = self.shot_clock {
-            directives.push(crate::clock::ClockDirective::ShotClock(seconds));
+            directives.push(crate::clock::ClockDirective::Set {
+                timer: crate::clock::TimerId::ShotClock,
+                micros: crate::clock::micros_from_seconds(seconds),
+            });
         }
         if let Some(seconds) = self.game_clock {
-            directives.push(crate::clock::ClockDirective::GameClock(seconds));
+            directives.push(crate::clock::ClockDirective::Set {
+                timer: crate::clock::TimerId::GameClock,
+                micros: crate::clock::micros_from_seconds(seconds),
+            });
+        }
+        for (timer, checkpoint_id) in &self.restore {
+            directives.push(crate::clock::ClockDirective::Restore {
+                timer: *timer,
+                checkpoint_id: *checkpoint_id,
+            });
         }
         directives
+    }
+
+    /// 启动一个计时器。
+    pub fn starting(mut self, timer: crate::clock::TimerId) -> Self {
+        self.start.push(timer);
+        self
+    }
+
+    /// 停止一个计时器。
+    pub fn stopping(mut self, timer: crate::clock::TimerId) -> Self {
+        self.stop.push(timer);
+        self
+    }
+
+    /// 把一个计时器恢复到检查点。
+    pub fn restoring(
+        mut self,
+        timer: crate::clock::TimerId,
+        checkpoint_id: nba_domain::CheckpointId,
+    ) -> Self {
+        self.restore.push((timer, checkpoint_id));
+        self
     }
 }
 
@@ -98,6 +144,8 @@ pub struct ControlState {
     /// 最后触球的球员与他的球队。
     pub last_touch: Option<usize>,
     pub last_touch_team: Option<TeamSide>,
+    /// 最后触球发生的时刻。
+    pub last_touch_at: Option<f64>,
     /// 当前这次控制建立的时刻。
     pub control_since: Option<f64>,
     /// 是否已经建立前场控制。
@@ -108,6 +156,51 @@ pub struct ControlState {
     pub dead: bool,
     /// 本回合球是否已经触过筐。
     pub rim_contact: bool,
+    /// 本回合球是否已经触板。
+    pub backboard_contact: bool,
+    /// 最近一次触筐或触板关联的出手身份。
+    pub rim_shot_id: Option<u64>,
+    /// 本次控制序列身份；没有控制时为 `None`。
+    pub sequence_id: Option<u64>,
+    /// 建立本次控制序列的事件身份。
+    pub established_by_event_id: Option<u64>,
+    /// 结束上一控制序列的事件身份。
+    pub ended_by_event_id: Option<u64>,
+    /// 当前球态身份。
+    pub ball_state: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlBoundary {
+    Established,
+    Ended,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ControlTransition {
+    pub boundary: ControlBoundary,
+    pub sequence_id: u64,
+    pub team: Option<TeamSide>,
+    pub holder: Option<usize>,
+    pub ball_state: &'static str,
+    pub source: &'static str,
+    pub at: f64,
+}
+
+/// 一次控制权交接：上一段控制序列结束，新的一段开始。
+///
+/// 交接是一个原子事件：它同时包含上一段的结束与新一段的开始，因此
+/// 验证器按它重建时，建立与结束永远成对。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ControlHandover {
+    pub previous_sequence_id: Option<u64>,
+    pub previous_team: Option<TeamSide>,
+    pub sequence_id: u64,
+    pub team: Option<TeamSide>,
+    pub holder: Option<usize>,
+    pub ball_state: &'static str,
+    pub source: &'static str,
+    pub at: f64,
 }
 
 impl ControlState {
@@ -118,11 +211,18 @@ impl ControlState {
             team: None,
             last_touch: None,
             last_touch_team: None,
+            last_touch_at: None,
             control_since: None,
             frontcourt: false,
             in_flight: false,
             dead: true,
             rim_contact: false,
+            backboard_contact: false,
+            rim_shot_id: None,
+            sequence_id: None,
+            established_by_event_id: None,
+            ended_by_event_id: None,
+            ball_state: "out_of_play",
         }
     }
 
@@ -220,7 +320,7 @@ pub enum RestartPlan {
 }
 
 /// 一次裁决。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Adjudication {
     pub cause: StoppageCause,
     /// 需要结束当前统计回合时给出原因与明细。
@@ -274,11 +374,10 @@ impl World {
         if let Some((cause, detail)) = adjudication.possession_end {
             self.end_possession(cause, detail, adjudication.points);
         }
-        if !adjudication.clock.directives().is_empty() {
-            let mut controller = crate::clock::ClockController::new(&mut self.clock);
-            for directive in adjudication.clock.directives() {
-                controller.apply(directive);
-            }
+        let directives = adjudication.clock.directives();
+        if !directives.is_empty() {
+            let context = self.clock_context();
+            self.clock.apply_directives_with_context(directives, context);
         }
         match adjudication.restart {
             RestartPlan::Inbound {

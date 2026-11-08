@@ -5,10 +5,15 @@
 //! 下一次决策看不到它们。
 
 use glam::Vec2;
-use nba_domain::PlayerData;
+use nba_domain::{EventId, PlayerData, ProgramId};
 
 pub use crate::action::TeamSide;
 use crate::action::{ActionRuntime, DefenderRoute};
+use crate::clock::{
+    micros_from_seconds, root_context, seconds_from_micros, ClockCommit, ClockCommitLog,
+    ClockController, ClockDirectiveContext, ClockSegmentApplied, ClockState, ClockDirective,
+    TimerId,
+};
 use crate::params::PolicyTable;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -385,156 +390,212 @@ impl ClockAdvance {
 
 #[derive(Debug, Clone)]
 pub struct Clock {
-    period: u32,
-    game_clock: f64,
-    shot_clock: f64,
-    elapsed: f64,
-    simulation_time: f64,
-    tick: u64,
-    period_seconds: f64,
+    pub state: ClockState,
+    commits: ClockCommitLog,
 }
 
 impl Clock {
     pub fn new(period_seconds: f64, shot_clock: f64) -> Self {
-        Self {
-            period: 1,
-            game_clock: period_seconds,
-            shot_clock,
-            elapsed: 0.0,
-            simulation_time: 0.0,
-            tick: 0,
-            period_seconds,
+        Self::with_player_count(0, period_seconds, shot_clock)
+    }
+
+    pub fn with_player_count(
+        player_count: usize,
+        period_seconds: f64,
+        shot_clock: f64,
+    ) -> Self {
+        let state = ClockState::new(
+            player_count,
+            micros_from_seconds(period_seconds),
+            micros_from_seconds(shot_clock),
+            1,
+        );
+        state.validate().expect("clock state initializes every timer");
+        let mut clock = Self {
+            state,
+            commits: ClockCommitLog::new(),
+        };
+        let applied = clock.controller().initialize(root_context());
+        assert!(
+            applied.len() == TimerId::all(player_count).len(),
+            "clock initialization must publish every timer value"
+        );
+        clock
+    }
+
+    pub(crate) fn controller(&mut self) -> ClockController<'_> {
+        ClockController::new(&mut self.state, &mut self.commits)
+    }
+
+    /// 取出已经完成的提交记录。
+    ///
+    /// 正在积累的推进段要等下一次指令打断它才算完成，因此不在这里。
+    pub fn take_commits(&mut self) -> Vec<ClockCommit> {
+        self.commits.take_ready()
+    }
+
+    /// 结算并取出全部提交记录，包括正在积累的推进段。
+    pub fn drain_commits(&mut self) -> Vec<ClockCommit> {
+        self.commits.drain()
+    }
+
+    pub fn apply_directives_with_context(
+        &mut self,
+        directives: Vec<ClockDirective>,
+        context: ClockDirectiveContext,
+    ) {
+        let mut controller = self.controller();
+        for directive in directives {
+            controller.apply(directive, context);
         }
     }
 
-    pub(crate) fn advance(&mut self, seconds: f64, clocks: ClockAdvance) {
-        assert!(
-            seconds.is_finite() && seconds >= 0.0,
-            "clock interval must be finite and non-negative"
-        );
+    /// 按时钟策略写入运行标志。
+    pub fn apply_policy(
+        &mut self,
+        policy: crate::state::ClockAdvance,
+        context: ClockDirectiveContext,
+    ) {
+        self.controller().apply_policy(policy, context);
+    }
+
+    pub(crate) fn advance_seconds(
+        &mut self,
+        seconds: f64,
+        clocks: ClockAdvance,
+        player_handles: &[usize],
+    ) -> crate::clock::ClockSegmentApplied {
+        self.advance_seconds_with_context(seconds, clocks, player_handles, root_context())
+    }
+
+    pub(crate) fn advance_seconds_with_context(
+        &mut self,
+        seconds: f64,
+        clocks: ClockAdvance,
+        player_handles: &[usize],
+        context: ClockDirectiveContext,
+    ) -> crate::clock::ClockSegmentApplied {
         clocks.validate();
-        self.advance_simulation_time(seconds);
-        if clocks.game_clock {
-            self.game_clock = (self.game_clock - seconds).max(0.0);
-        }
-        if clocks.shot_clock {
-            self.shot_clock = (self.shot_clock - seconds).max(0.0);
-        }
-        if clocks.elapsed {
-            self.elapsed += seconds;
-        }
-    }
-
-    pub fn shot_clock(&self) -> f64 {
-        self.shot_clock
-    }
-
-    /// 时钟快照：账本与验证只读这三个数，不碰计时器的其余内部状态。
-    pub fn state(&self) -> crate::clock::ClockState {
-        crate::clock::ClockState {
-            period: self.period,
-            game_clock: self.game_clock,
-            shot_clock: self.shot_clock,
-        }
-    }
-
-    pub fn set_shot_clock(&mut self, seconds: f64) {
-        assert!(
-            seconds.is_finite() && seconds >= 0.0,
-            "shot clock must be finite and non-negative"
-        );
-        self.shot_clock = seconds;
-    }
-
-    pub fn game_clock(&self) -> f64 {
-        self.game_clock
-    }
-
-    pub fn set_game_clock(&mut self, seconds: f64) {
-        assert!(
-            seconds.is_finite() && seconds >= 0.0,
-            "game clock must be finite and non-negative"
-        );
-        self.game_clock = seconds;
-    }
-
-    pub fn period(&self) -> u32 {
-        self.period
-    }
-
-    pub fn set_regulation_clock(&mut self, period: u32, seconds: f64, shot_clock_seconds: f64) {
-        assert!(period > 0, "period number must be positive");
-        assert!(
-            seconds.is_finite() && seconds >= 0.0,
-            "game clock must be finite and non-negative"
-        );
-        assert!(
-            shot_clock_seconds.is_finite() && shot_clock_seconds >= 0.0,
-            "shot clock must be finite and non-negative"
-        );
-        self.period = period;
-        self.period_seconds = seconds;
-        self.game_clock = seconds;
-        self.shot_clock = shot_clock_seconds;
-    }
-
-    pub fn period_seconds(&self) -> f64 {
-        self.period_seconds
-    }
-
-    pub fn elapsed(&self) -> f64 {
-        self.elapsed
-    }
-
-    pub fn simulation_time(&self) -> f64 {
-        self.simulation_time
-    }
-
-    pub fn advance_simulation_time(&mut self, seconds: f64) {
-        assert!(
-            seconds.is_finite() && seconds >= 0.0,
-            "simulation interval must be finite and non-negative"
-        );
-        self.simulation_time += seconds;
-    }
-
-    pub fn tick(&self) -> u64 {
-        self.tick
+        let micros = micros_from_seconds(seconds);
+        self.controller()
+            .advance(micros, clocks, player_handles, context)
     }
 
     pub fn advance_tick(&mut self) {
-        self.tick += 1;
+        self.controller().advance_tick();
+    }
+
+    pub fn state(&self) -> ClockState {
+        self.state.clone()
+    }
+
+    pub fn shot_clock(&self) -> f64 {
+        seconds_from_micros(self.state.shot_clock_micros())
+    }
+
+    pub fn set_shot_clock(&mut self, seconds: f64) {
+        self.controller().apply(
+            ClockDirective::Set {
+                timer: TimerId::ShotClock,
+                micros: micros_from_seconds(seconds),
+            },
+            root_context(),
+        );
+    }
+
+    pub fn game_clock(&self) -> f64 {
+        seconds_from_micros(self.state.game_clock_micros())
+    }
+
+    pub fn set_game_clock(&mut self, seconds: f64) {
+        self.controller().apply(
+            ClockDirective::Set {
+                timer: TimerId::GameClock,
+                micros: micros_from_seconds(seconds),
+            },
+            root_context(),
+        );
+    }
+
+    pub fn period(&self) -> u32 {
+        self.state.period()
+    }
+
+    pub fn set_regulation_clock(&mut self, period: u32, seconds: f64, shot_clock_seconds: f64) {
+        self.controller().set_program_period(
+            period,
+            micros_from_seconds(seconds),
+            micros_from_seconds(seconds),
+            micros_from_seconds(shot_clock_seconds),
+            root_context(),
+        );
+    }
+
+    pub fn period_seconds(&self) -> f64 {
+        seconds_from_micros(self.state.timer_micros(TimerId::PeriodDuration))
+    }
+
+    pub fn elapsed(&self) -> f64 {
+        seconds_from_micros(self.state.elapsed_micros())
+    }
+
+    pub fn simulation_time(&self) -> f64 {
+        seconds_from_micros(self.state.simulation_micros())
+    }
+
+    pub fn advance_simulation_time(&mut self, seconds: f64) {
+        let micros = micros_from_seconds(seconds);
+        let after = self
+            .state
+            .simulation_micros()
+            .checked_add(micros)
+            .expect("simulation clock overflowed");
+        self.controller().apply(
+            ClockDirective::Set {
+                timer: TimerId::Simulation,
+                micros: after,
+            },
+            root_context(),
+        );
+    }
+
+    pub fn tick(&self) -> u64 {
+        self.state.tick()
     }
 
     pub(crate) fn set_shot_clock_at_least(&mut self, seconds: f64) {
-        assert!(
-            seconds.is_finite() && seconds >= 0.0,
-            "shot-clock reset must be finite and non-negative"
-        );
-        self.shot_clock = self.shot_clock.max(seconds);
+        let micros = micros_from_seconds(seconds);
+        if micros > self.state.shot_clock_micros() {
+            self.set_shot_clock(seconds);
+        }
     }
 
     pub(crate) fn set_period_duration(&mut self, seconds: f64) {
-        assert!(
-            seconds.is_finite() && seconds > 0.0,
-            "period duration must be finite and positive"
+        self.controller().apply(
+            ClockDirective::Set {
+                timer: TimerId::PeriodDuration,
+                micros: micros_from_seconds(seconds),
+            },
+            root_context(),
         );
-        self.period_seconds = seconds;
     }
 
     pub(crate) fn start_next_period(&mut self, seconds: f64, shot_clock_seconds: f64) {
-        assert!(
-            seconds.is_finite() && seconds > 0.0,
-            "period duration must be finite and positive"
+        let period = self.state.period() + 1;
+        self.controller().set_program_period(
+            period,
+            micros_from_seconds(seconds),
+            micros_from_seconds(seconds),
+            micros_from_seconds(shot_clock_seconds),
+            root_context(),
         );
-        assert!(
-            shot_clock_seconds.is_finite() && shot_clock_seconds >= 0.0,
-            "shot clock must be finite and non-negative"
-        );
-        self.period += 1;
-        self.period_seconds = seconds;
-        self.game_clock = seconds;
-        self.shot_clock = shot_clock_seconds;
+    }
+
+    pub(crate) fn context_for(&self, program_id: ProgramId, cause_event_id: EventId) -> ClockDirectiveContext {
+        ClockDirectiveContext {
+            cause_event_id,
+            program_id,
+        }
     }
 }
 
@@ -589,39 +650,11 @@ impl FlightKind {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum BallState {
-    Held {
-        holder: usize,
-    },
-    Pass {
-        pass_id: u64,
-        from: usize,
-        to: usize,
-        kind: crate::action::PassKind,
-        from_pos: Vec2,
-        to_pos: Vec2,
-        start: f64,
-        duration: f64,
-    },
-    Shot {
-        shot_id: u64,
-        shooter: usize,
-        from_pos: Vec2,
-        target: Vec2,
-        start: f64,
-        /// 出手时算出的有效筐口：价值层与执行层共用同一个值。
-        aperture_ft: f32,
-        /// 碰到筐沿之后仍能补进的概率。
-        rim_in_probability: f32,
-        /// 球心在筐平面上的落点偏移（瞄准误差）。
-        aim_offset: Vec2,
-    },
-    Loose {
-        pos: Vec2,
-        vel: Vec2,
-    },
-}
+/// 投篮飞行语义：运动积分与罚球程序由同一个球态表达。
+pub use nba_domain::ShotContext;
+
+/// 权威球的宏观归属状态。
+pub use nba_domain::BallState;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Phase {
@@ -877,30 +910,11 @@ impl Phase {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MatchStage {
-    Pregame,
-    Regulation,
-    Intermission,
-    Overtime,
-    Finalizing,
-    Finished,
-}
+/// 权威的比赛阶段。
+pub use nba_domain::MatchStage;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MatchProgram {
-    OpenPlay,
-    JumpBall,
-    Inbound,
-    FreeThrows,
-    Timeout,
-    Review,
-    PeriodSettlement,
-    PenaltyAdministration,
-    Intermission,
-    Pregame,
-    Complete,
-}
+/// 权威的比赛程序。
+pub use nba_domain::MatchProgram;
 
 impl Phase {
     pub const fn clock_advance(self) -> ClockAdvance {
@@ -1093,10 +1107,6 @@ pub struct PossessionState {
     /// 八秒计时开始时球最后被谁碰过：防守人之后碰球就是「踢球」，
     /// 计时重新开始（NBA Rule 10 §VIII.1）。
     pub backcourt_started_last_touch: Option<usize>,
-    /// 本回合是否已经在前场建立控制：已建立后不能再把球带回后场。
-    pub frontcourt_established: bool,
-    /// 本回合球是否已经触过筐。
-    pub rim_contact: bool,
 }
 
 impl PossessionState {
@@ -1157,8 +1167,6 @@ impl PossessionState {
             holder_back_to_basket: false,
             backcourt_started_game_clock: None,
             backcourt_started_last_touch: None,
-            frontcourt_established: false,
-            rim_contact: false,
         }
     }
 }

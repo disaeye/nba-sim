@@ -85,7 +85,7 @@ fn a_defensive_kick_restarts_the_eight_second_count() {
         .backcourt_started_game_clock
         .expect("八秒计时必须已经开始");
     // 防守人踢球：球被碰出去，进攻方重新得到完整的八秒（Rule 10 §VIII.1）。
-    world.last_touch = Some(defender);
+    world.control.last_touch = Some(defender);
     world.check_backcourt();
     let restarted = world
         .possession

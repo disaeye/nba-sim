@@ -145,7 +145,7 @@ fn a_deflection_ends_the_count() {
     let (mut world, holder, defender) = post_fixture(505);
     world.players[holder].facing = Vec2::NEG_X;
     // 防守人碰了球：规则说球被碰开时计时终止。
-    world.last_touch = Some(defender);
+    world.control.last_touch = Some(defender);
     for _ in 0..600 {
         world.check_back_to_basket(TICK_SECONDS);
     }

@@ -9,12 +9,12 @@
 mod common;
 
 use glam::Vec2;
+use nba_domain::rules::GameRules;
 use nba_sim_core::action::{Fact, TurnoverKind};
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::state::{DribbleState, PossessionKind, Phase};
+use nba_sim_core::state::{DribbleState, Phase, PossessionKind};
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params, TeamSide};
-use nba_domain::rules::GameRules;
 
 fn world(seed: u64) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
@@ -103,16 +103,19 @@ fn a_ball_out_of_bounds_goes_to_the_opponent_of_the_last_touch() {
     let holder = world.holder().expect("live possession has a holder");
     // 把球放到边线外：球必须先脱手，出界判定才在活球争抢这一层，而且
     // 外向速度要超过慢球阈值，否则球会被判成停在边线上。
-    world.ball = nba_sim_core::ball::BallBody::loose(
-        Vec2::new(2.0, 25.0),
-        Vec2::new(-30.0, 0.0),
-    );
-    world.last_touch = Some(holder);
+    world.ball = nba_sim_core::ball::BallBody::loose(Vec2::new(2.0, 25.0), Vec2::new(-30.0, 0.0));
+    world.control.last_touch = Some(holder);
     let mut recorded = false;
     for _ in 0..40 {
         world.step(TICK_SECONDS);
         if world.events.iter().any(|event| {
-            matches!(&event.fact, Fact::BallContact { kind: "out_of_bounds", .. })
+            matches!(
+                &event.fact,
+                Fact::BallContact {
+                    kind: "out_of_bounds",
+                    ..
+                }
+            )
         }) {
             recorded = true;
             break;
@@ -121,11 +124,9 @@ fn a_ball_out_of_bounds_goes_to_the_opponent_of_the_last_touch() {
     assert!(recorded, "球出界必须留下出界事实");
     // 最后触球的是进攻方：球权给防守方。
     match world.phase() {
-        Phase::DeadBall { team, .. } => assert_eq!(
-            team,
-            offense.other(),
-            "进攻方碰出界，球权给对方"
-        ),
+        Phase::DeadBall { team, .. } => {
+            assert_eq!(team, offense.other(), "进攻方碰出界，球权给对方")
+        }
         other => panic!("出界之后必须停表，实际 {other:?}"),
     }
 }
@@ -140,16 +141,19 @@ fn a_ball_touched_by_the_defence_out_of_bounds_keeps_the_offence_in_possession()
         .first()
         .copied()
         .expect("a defender is on the court");
-    world.ball = nba_sim_core::ball::BallBody::loose(
-        Vec2::new(2.0, 25.0),
-        Vec2::new(-30.0, 0.0),
-    );
-    world.last_touch = Some(defender);
+    world.ball = nba_sim_core::ball::BallBody::loose(Vec2::new(2.0, 25.0), Vec2::new(-30.0, 0.0));
+    world.control.last_touch = Some(defender);
     let mut recorded = false;
     for _ in 0..40 {
         world.step(TICK_SECONDS);
         if world.events.iter().any(|event| {
-            matches!(&event.fact, Fact::BallContact { kind: "out_of_bounds", .. })
+            matches!(
+                &event.fact,
+                Fact::BallContact {
+                    kind: "out_of_bounds",
+                    ..
+                }
+            )
         }) {
             recorded = true;
             break;
@@ -157,10 +161,7 @@ fn a_ball_touched_by_the_defence_out_of_bounds_keeps_the_offence_in_possession()
     }
     assert!(recorded, "球出界必须留下出界事实");
     match world.phase() {
-        Phase::DeadBall { team, .. } => assert_eq!(
-            team, offense,
-            "防守方碰出界，进攻方保留球权"
-        ),
+        Phase::DeadBall { team, .. } => assert_eq!(team, offense, "防守方碰出界，进攻方保留球权"),
         other => panic!("出界之后必须停表，实际 {other:?}"),
     }
 }
@@ -174,7 +175,7 @@ fn a_shot_that_leaves_the_court_is_not_a_turnover() {
     world.ball.pos = Vec2::new(40.0, -1.0);
     world.ball.vel = Vec2::new(0.0, -5.0);
     world.ball.vz = 0.0;
-    world.last_touch = Some(holder);
+    world.control.last_touch = Some(holder);
     // 建一笔待结算的出手：出手中的球飞出界不是违例。
     world.pending_shot = Some(nba_sim_core::resolve::shot::PendingShot {
         shooter: holder,
@@ -194,11 +195,18 @@ fn a_shot_that_leaves_the_court_is_not_a_turnover() {
         result: None,
         touched_backboard: false,
         released_game_clock: world.clock.game_clock(),
+        released_clock_checkpoint: None,
     });
     for _ in 0..40 {
         world.step(TICK_SECONDS);
         if world.events.iter().any(|event| {
-            matches!(&event.fact, Fact::BallContact { kind: "out_of_bounds", .. })
+            matches!(
+                &event.fact,
+                Fact::BallContact {
+                    kind: "out_of_bounds",
+                    ..
+                }
+            )
         }) {
             break;
         }
@@ -226,10 +234,7 @@ fn a_second_dribble_after_a_gather_is_a_turnover() {
     // 收球之后再运球：规则禁止（NBA Rule 10 §II.3）。
     world.possession.dribble_state = DribbleState::Dribbling;
     let dribbled = nba_sim_core::footwork::dribble_after_gather(&world, holder);
-    assert!(
-        !dribbled,
-        "收球之后再次运球必须被脚步层判出来"
-    );
+    assert!(!dribbled, "收球之后再次运球必须被脚步层判出来");
 }
 
 #[test]
@@ -240,10 +245,7 @@ fn a_legal_recovery_after_a_loose_ball_is_not_a_dribble_violation() {
     world.possession.dribble_state = DribbleState::Dribbling;
     world.possession.pivot = None;
     let dribbled = nba_sim_core::footwork::dribble_after_gather(&world, holder);
-    assert!(
-        !dribbled,
-        "没有收球的运球是合法运球"
-    );
+    assert!(!dribbled, "没有收球的运球是合法运球");
 }
 
 #[test]

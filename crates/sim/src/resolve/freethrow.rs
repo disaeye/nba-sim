@@ -158,8 +158,13 @@ fn shoot_with_retained_team(
         result: None,
         touched_backboard: false,
         released_game_clock: world.clock.game_clock(),
+        // 罚球不适用节末压哨复核：没有检查点需要恢复。
+        released_clock_checkpoint: None,
     });
     let rules = world.rules.clone();
+    // 罚球人先把球拿到手里，再出手：球态的归属变化必须先于飞行开始，
+    // 否则「松球直接变成投篮飞行」这条迁移会被迁移表拒绝。
+    world.set_ball_held(shooter);
     world.ball.release_shot(crate::ball::ShotRelease {
         rules: &rules,
         now: world.now(),
@@ -172,6 +177,7 @@ fn shoot_with_retained_team(
         origin: model.origin,
         plan: model.plan,
         aim_offset,
+        context: crate::state::ShotContext::FreeThrow,
     });
     world.set_flight(
         crate::state::FlightKind::FreeThrow,

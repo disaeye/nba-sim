@@ -246,7 +246,7 @@
 | 干扰 | 触筐后仍限制触球 | 球触筐后结束干扰限制 |
 | 暂停 | 常规时间 7 次，受单节和末段限制；加时 2 次 | 上半场 2 次，下半场 3 次且末两分钟最多 2 次；加时 1 次 |
 
-`LeagueProfile` 因此必须带程序字段，而不是只有时长和距离。字段包括罚则形式、暂停配额、交替拥有、防守三秒、转换路径犯规、贴身五秒、干扰触筐规则和进攻时钟重置表。
+`LeagueProfile` 按 `full_simulation_plan.md` §3.2 保存 11 个版本化策略族：`PeriodPolicy`、`ClockPolicy`、`ShotClockPolicy`、`FoulPolicy`、`FreeThrowPolicy`、`InboundPolicy`、`JumpBallPolicy`、`TimeoutPolicy`、`SubstitutionPolicy`、`ViolationPolicy` 与 `ReviewPolicy`。加载时检查条件互斥、限额、程序完整性、几何、版本与引用；缺少必要字段直接返回配置错误，禁止静默补全。
 
 ## 7. 回合与账本
 

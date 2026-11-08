@@ -27,6 +27,10 @@ pub struct LedgerCheck {
     pub fouls_reconcile: bool,
     pub possessions_reconcile: bool,
     pub player_stats_reconcile: bool,
+    /// 时钟可由事件流独立重建。
+    pub clock_reconcile: bool,
+    /// 控制序列可由事件流独立重建，且建立与结束成对。
+    pub control_reconcile: bool,
     pub detail: String,
 }
 
@@ -224,6 +228,8 @@ pub fn run_core_validation_scoped_with_dir(
                 || !result.ledger.fouls_reconcile
                 || !result.ledger.possessions_reconcile
                 || !result.ledger.player_stats_reconcile
+                || !result.ledger.clock_reconcile
+                || !result.ledger.control_reconcile
         })
         .count();
     let geometry_violations = gate.geometric_violations;
@@ -295,9 +301,46 @@ fn check_ledger_scoped(seed: u64, report: &GameReport, require_closed: bool) -> 
     let mut fouls_reconcile = true;
     let mut possessions_reconcile = true;
     let mut player_stats_reconcile = true;
+    let mut clock_reconcile = true;
+    let mut control_reconcile = true;
     let mut detail = String::new();
 
     let reconstructed = reconstruct(report);
+    // 时钟与控制序列必须能从事件流独立重建：重建失败就是账本缺口。
+    match crate::reconstruct::reconstruct_clock(report) {
+        Ok(clock) => {
+            if clock.tick != report.ticks {
+                clock_reconcile = false;
+                detail.push_str(&format!(
+                    "reconstructed clock tick {} != report ticks {}; ",
+                    clock.tick, report.ticks
+                ));
+            }
+            if clock.period != report.periods {
+                clock_reconcile = false;
+                detail.push_str(&format!(
+                    "reconstructed clock period {} != report periods {}; ",
+                    clock.period, report.periods
+                ));
+            }
+        }
+        Err(error) => {
+            clock_reconcile = false;
+            detail.push_str(&format!("clock reconstruction: {error}; "));
+        }
+    }
+    match crate::reconstruct::check_control_sequences(report) {
+        Ok(control) => {
+            if control.active_sequence.is_some() {
+                control_reconcile = false;
+                detail.push_str("control sequence still active at the end of the report; ");
+            }
+        }
+        Err(error) => {
+            control_reconcile = false;
+            detail.push_str(&format!("control reconstruction: {error}; "));
+        }
+    }
     if !report.events.is_empty() || !report.possessions.is_empty() {
         if let Err(error) = audit_possession_events(report, require_closed) {
             possessions_reconcile = false;
@@ -517,6 +560,8 @@ fn check_ledger_scoped(seed: u64, report: &GameReport, require_closed: bool) -> 
         fouls_reconcile,
         possessions_reconcile,
         player_stats_reconcile,
+        clock_reconcile,
+        control_reconcile,
         detail,
     }
 }

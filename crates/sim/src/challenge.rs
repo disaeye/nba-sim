@@ -34,8 +34,7 @@ pub fn review_scope(call: &str) -> &'static str {
 
 /// 该裁决是否在档案的即时回放范围内，且裁判有权发起复核。
 pub fn is_reviewable(world: &World, call: &str) -> bool {
-    world.rules.league.authorizes("replay_review")
-        && world.rules.league.reviews(review_scope(call))
+    world.rules.league.authorizes("replay_review") && world.rules.league.reviews(review_scope(call))
 }
 
 /// 一次可复核的裁决：谁得到球、这条裁决叫什么。
@@ -58,12 +57,16 @@ pub enum ChallengeOutcome {
 
 impl World {
     /// 登记一条可复核的裁决。发球类裁决在写阶段时调用。
+    ///
+    /// 裁决来源事件就是这次登记时的事件流末尾：复核结论引用它，
+    /// 因此复核事实的 `source_event_ids` 指回原判。
     pub fn record_ruling(&mut self, possession: TeamSide, call: &'static str) {
         self.last_ruling = Some(Ruling {
             possession,
             call,
             overturnable: false,
         });
+        self.pending_review_source_events = Some(vec![self.last_event_id]);
     }
 
     /// 登记一条附带证据状态的可复核裁决。
@@ -78,6 +81,7 @@ impl World {
             call,
             overturnable,
         });
+        self.pending_review_source_events = Some(vec![self.last_event_id]);
     }
 
     /// 主教练申请复核。

@@ -1633,7 +1633,7 @@ fn pass_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
     let mut best: Option<(usize, Vec2, Utility, f32)> = None;
     for teammate in &state.teammates {
         // 已建立前场控制后不把球传回后场：那是回场违例。
-        if world.possession.frontcourt_established {
+        if world.control.frontcourt {
             let mid = world.rules.court.width_ft * 0.5;
             let backcourt = if state.attacking_right {
                 teammate.pos.x < mid

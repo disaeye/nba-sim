@@ -81,6 +81,9 @@ fn fact_kind(fact: &Fact) -> &'static str {
         Fact::Goaltending { .. } => "goaltending",
         Fact::Review { .. } => "review",
         Fact::Injury { .. } => "injury",
+        Fact::ClockDirectivesCommitted { .. } => "clock_directives_committed",
+        Fact::ControlStateCommitted { .. } => "control_state_committed",
+        Fact::ControlHandoverCommitted { .. } => "control_handover_committed",
     }
 }
 

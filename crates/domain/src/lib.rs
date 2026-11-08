@@ -12,7 +12,9 @@ pub mod data;
 pub mod event;
 pub mod flow;
 pub mod footwork;
+pub mod identity;
 pub mod league;
+pub mod match_model;
 pub mod play;
 pub mod possession;
 pub mod projectile;
@@ -21,6 +23,11 @@ pub mod rules;
 pub mod tactics;
 pub use action_window::Foot;
 pub use footwork::{step_length_ft, FootContact, PivotState, SupportFoot};
+pub use identity::{
+    ActionId, CheckpointId, ContactId, ControlSequenceId, EventId, IdAllocator, IdAllocatorError,
+    IdParseError, InteractionId, NextId, PassId, PenaltyId, PendingAdjudicationId, PossessionId,
+    ProgramId, ReviewId, ShotId, StableId,
+};
 pub use capability::{
     drive_finishing_delta, effective_catch_radius, effective_defensive_boxout_bonus,
     effective_help_awareness, effective_max_accel, effective_max_speed,
@@ -40,16 +47,18 @@ pub use event::{
     GameEvent, PossessionEndCause, PossessionSummary, ShotCreationSource, TimedGameEvent,
     TransitionOrigin,
 };
-pub use flow::{
-    transition_ball_state, BallPhase, BallState, DribbleControlState, GameFlowState, PhaseType,
-};
+pub use flow::{DribbleControlState, GameFlowState, PhaseType};
 pub use league::{LeagueId, LeagueProfile};
+pub use match_model::{
+    ball_state_transition_allowed, transition_ball_state, BallState, BallStateKind,
+    IllegalBallTransition, MatchProgram, MatchStage, PassKind, ShotContext,
+};
 pub use play::{
     DecisionActionFamily, PlayAction, PlayCarrierPreference, PlayCourtSide, PlayInhibition,
     PlayInhibitionMode, PlayKind, PlayPredicate, PlayRule, PlaySpec, PlaySpecError, PlayTrigger,
     PlayVerb,
 };
-pub use possession::{BallOwnership, Possession, SubPhase};
+pub use possession::{Possession, SubPhase};
 pub use resolve::{
     BallSecurityPolicy, BaseRates, BlockPolicy, ContactPolicy, DriveGeometryPolicy, DrivePolicy,
     PassPolicy, ReboundPolicy, ResolveConfig, ShotTypeBlockBias, ShotTypeRates,

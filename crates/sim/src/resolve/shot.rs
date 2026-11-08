@@ -121,6 +121,11 @@ pub struct PendingShot {
     /// 球离手那一刻的本节剩余比赛时间：节末即时回放在结算时用它与
     /// 当前钟值比对，判定这次出手是否在钟响之前离手。
     pub released_game_clock: f64,
+    /// 出手那一刻的比赛钟检查点：节末即时回放改判时，比赛钟从它恢复。
+    ///
+    /// 复核纠正的是「钟响前还是钟响后离手」，纠正之后比赛钟必须回到
+    /// 出手那一刻的读数，否则这一节剩下的时间凭空少了。
+    pub released_clock_checkpoint: Option<nba_domain::CheckpointId>,
 }
 
 pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> ActionOutcome {
@@ -379,6 +384,8 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         _ => 6,
     };
     world.creation_counts[creation_index] += 1;
+    // 出手那一刻记下比赛钟检查点：节末即时回放改判时，比赛钟从它恢复。
+    let released_clock_checkpoint = world.snapshot_clock_checkpoint();
     world.pending_shot = Some(PendingShot {
         shooter,
         kind,
@@ -398,6 +405,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         result: block_by.map(|by| ShotResult::Blocked { by }),
         touched_backboard: false,
         released_game_clock: world.clock.game_clock(),
+        released_clock_checkpoint,
     });
     let now = world.now();
     world.players[shooter].facing = (hoop - pos).normalize_or_zero();
@@ -433,6 +441,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
             origin: model.origin,
             plan: model.plan,
             aim_offset,
+            context: crate::state::ShotContext::FieldGoal,
         });
     }
     world.set_flight(
@@ -486,6 +495,15 @@ pub fn finish(world: &mut World) {
             cost_timeout: false,
             time: world.now(),
         });
+    }
+    // 改判成立（球在钟响前离手，得分保留）时，比赛钟回到出手那一刻的
+    // 读数：复核否定了「钟响后离手」这个认定，本节剩余时间因此要恢复。
+    if !waved_off && pending.released_clock_checkpoint.is_some() {
+        world.restore_clock_checkpoint(
+            pending
+                .released_clock_checkpoint
+                .expect("the checkpoint identity is present"),
+        );
     }
     let made = made_ball && !waived && !waved_off;
     let blocked_by = match result {

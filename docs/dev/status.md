@@ -1,10 +1,10 @@
 # NBA-Sim · 当前实现状态
 
-> 状态类型：当前快照，不是执行日志。
+> 状态类型：当前快照。
 > 动作链内核（`crates/sim`）的设计与缺口清单见 `docs/dev/action_chain_engine.md`。
 > 证据原则：本文件只写当前工作区可以由代码、测试或守卫复核的结论。旧引擎的记录保留在 `docs/dev/cycles/`、`docs/dev/evidence/` 与 `docs/decisions.md`，本文件不再复述。
-> 复核日期：2026-11-04。
-> 校准正在按 `full_simulation_plan.md` §12 G 进行；残差记录在 `docs/dev/current/implementation.md` 的校准一节。
+> 复核日期：2026-11-08。
+> 当前实施按 `docs/dev/current/full_simulation_plan.md` 的 A-H 工作包推进；最终状态与证据在行为冻结后统一记录。
 
 ## 1. 当前工作区状态
 
@@ -12,11 +12,11 @@
 
 全局单动作 `World::active` 已移除：`World::advance_parallel_actions` 逐人推进每名球员自己的 `ActionRuntime`，多人配合由交互编号结算，防守动作另有 `CloseoutContest`、`StealAttempt`、`BlockJump` 三种运行时。并发性由 `crates/sim/tests/parallel_actions.rs` 4 项直接验证（多人运行时同一 tick 共存且种类不同、出手期间防守并行、每个 `ActionStarted` 恰有一个终态、死球终态不起手）。
 
-动作目录的 16 个族全部有生产路径与通过测试，状态是 `verified`，`missing_evidence` 为空；传球八种技术、切入六种路线、突破三种变体（直接、变向、转身）、背身步法、跳步违例、欧洲步、后撤步、包夹与护球、挤过与绕过、回位均已接入候选与后果消费者。规则程序目录的 22 项程序全部是 `implemented`，没有缺失场景；新接入的有进攻三秒、防守三秒、背身五秒、发球五秒、非法触球、双方犯规、恶意犯规、清晰路径犯规、后场八秒的「踢球」重置，以及暂停配额、罚球禁区与罚球人替换、换人、节次开始与交替拥有箭头。
+动作目录登记 16 个族与 111 个动作条目；当前运行时动作类型、协议投影与两类渲染器按 `ActionSpecTable` 逐项接入，最终覆盖证据在行为冻结后生成。规则程序目录的 22 项程序按版本、条款、场景矩阵与生产消费者审计；`known_current_gaps` 在审计通过后清空。当前已接入的程序包括进攻三秒、防守三秒、背身五秒、发球五秒、非法触球、强制暂停、节末出手计时复核、后场八秒的「踢球」重置、暂停配额、罚球禁区与罚球人替换、换人、节次开始与交替拥有箭头。
 
-裁决已收拢到 `World::adjudicate` 一个提交入口（`PenaltyPlan`、`RestartPlan`、`ResumeContext`、`InboundLocation`、`ControlState`）；时钟有 `ClockState`、`ClockDirective`、`ClockController`；内核按职责分到 `clock/`、`program/`、`officiating/`、`actions/`、`control/`、`ledger/` 六个目录，旧路径经 crate 根重导出保持可用；`LeagueProfile` 的存储本身就是 `PeriodPolicy`、`ClockPolicy`、`FoulPolicy`、`TimeoutPolicy` 四个策略族（`#[serde(flatten)]` 让磁盘上仍是扁平键）。球的飞行是 `World.ball_flight`（种类 + 结算时刻）：四种飞行与比赛程序分存，`clock::advance` 按飞行种类决定哪个钟走。
+裁决按 `docs/dev/current/full_simulation_plan.md` §5.3 收拢到 `World::commit`：`World::step` 收集 `RawIncident`，`AdjudicationBatch` 生成完整计划，提交入口原子写入球态、控制、程序、时钟、罚则、动作运行时与账本。`ClockState` 使用整数微秒，`ClockController` 是时钟写入口；内核按职责分到 `clock/`、`program/`、`officiating/`、`actions/`、`control/`、`ledger/` 六个目录。`LeagueProfile` 按 11 个策略族保存，加载时缺字段直接失败。`BallState` 与 `BallFlight` 分存，`clock::advance` 按飞行种类决定计时器推进。
 
-完整工作区测试（99 个二进制）在最近一次运行中全部通过，基线指纹已按当前行为重记；32 场 `validate-core` 的 38 条分布判据全部在带内，认证 `pass`。权威状态与档案结构已解耦：`Phase` 不含飞行变体，`ControlState` 是一个结构体，`LeagueProfile` 按四个策略族存储且没有未声明的默认值（`crates/sim/tests/architecture_decoupling.rs` 5 项）。机制实验的 13 项属性全部判定为 `pass`（每一项按自己的效应量定样本量，`defensive_rebound` 跑 640 个种子），认证工件是 `pass`，`known_insufficient.json` 的登记表清空。未闭合项见 `docs/dev/evidence/stage_gate_map.md`。
+最近一次完整工作区测试在 `.pi/tasks/review-tests.log` 记录 101 个测试二进制、零失败。`docs/dev/evidence/action_chain_validation/run.json` 的 32 场工件由 `63c04b99f533defb49742ce3d1f43ccefcc48f63` 生成，当前 `HEAD` 为 `264b2eed9c264ffde9a4d3146d441a3bf25c3cde`；最终校准工件在行为冻结后生成。`crates/sim/tests/architecture_decoupling.rs` 覆盖当前已实现结构；11 个策略族、完整回放清单和事件因果字段按 `docs/dev/current/full_simulation_plan.md` 实施。
 
 ## 2. 历史门矩阵：2026-10-21
 
@@ -51,7 +51,7 @@
 
 ## 3. 当前新增工作
 
-H 阶段“动作动画与观测闭环”处于 `verified`：覆盖动作目录全部 16 个动作族及技术变体。在协议层实现 `RenderAction` 与 `RenderPlayer.active_actions: Vec<RenderAction>`，包含动作身份、交互身份、来源、动作族、变体、角色、阶段、时间区间、参与者与目标；在模拟层 `crates/sim/src/stream.rs` 实现 `player_active_actions` 权威投影并通过流测试；在前端 2.5D 球场 `crates/debug-server/static/court3d.js` 与二维战术板 `crates/debug-server/static/app.js` 统一基于 `active_actions` 驱动骨骼动画片段和动作姿态，移除根据全局事件与距离猜测执行者的机制。已建立规范动作动画覆盖目录 `data/rules/action_animation_catalog.json` 与守卫脚本 `scripts/check_animation_catalog.py`，全量动作测试 `crates/sim/tests/action_animation_coverage.rs` 验证通过。
+H 阶段按 `docs/dev/current/full_simulation_plan.md` 的验收条件实施。协议层定义 `RenderAction` 与 `RenderPlayer.active_actions`；`crates/sim/src/stream.rs` 投影权威动作状态；`crates/debug-server/static/court3d.js` 与 `app.js` 读取同一 `ActionSpecTable`。`data/rules/action_animation_catalog.json` 与目录守卫登记 16 个动作族的动作变体；111 个条目的独立测试、两类渲染器同帧断言、未知值负面对照与回放定位在行为冻结后验证。
 
 同时关闭了物理机制与规则层面的关键缺口：
 - 伤病替换：`World::trigger_injury` 建立对抗伤病事件，并在活球中自动停表换人（`crates/sim/tests/substitution_scenarios.rs::an_injured_player_is_removed_and_replaced_by_bench`）。
@@ -64,7 +64,7 @@ H 阶段“动作动画与观测闭环”处于 `verified`：覆盖动作目录�
 
 ## 4. 历史快照中的未完成工作
 
-此处的历史矩阵和旧未完成工作清单只用于追溯 2026-10-21 快照。最近一次完整工作区运行的失败及其原因记录于 `docs/dev/current/implementation.md`：过时的 `baseline_fingerprint_matches_recorded_artifact`；该运行早于 CloseoutContest 修改。当前 `events_per_game` 上限已按 32 场生产运行的实测范围调整，五维诊断测试 3/3 通过；指纹工件先于目前的内核行为，需要重新审查后才能继续作为基线。当前未完成项和最新校准状态以 `docs/dev/current/implementation.md` 及唯一权威实施方案 `docs/dev/current/full_simulation_plan.md` 为准。进攻 `ActionRuntime` 有部分实现；独立防守 CloseoutContest 已有真实执行路径与定向测试，完整并行动作调度仍未完成。当前完整校准未运行，历史校准数据仅适用于其注明的 2026-10-21 快照。
+此处的历史矩阵和旧清单只用于追溯 2026-10-21 快照。当前工作树按 `docs/dev/current/full_simulation_plan.md` 的 A-H 工作包推进，稳定规格冲突已同步修订；最终状态、测试数量、门禁判据和校准工件在行为冻结后统一记录。
 
 ## 5. 证据入口
 
@@ -78,7 +78,7 @@ H 阶段“动作动画与观测闭环”处于 `verified`：覆盖动作目录�
 
 ## 6. 历史判定批次：2026-10-21
 
-下表中的命令与数据来自 2026-10-21 内核快照的历史验证批次，并非当前工作区最新运行。该批次有 1 项分布判定失败：`shooting_fouls_per_game` 为 16.531，目标为 19.597；其余 36 项分布与过程判定通过，几何违规、语境违规及账本失败均为 0。五维诊断通过。40 种子机制实验有 5 项 `insufficient`，认证为 `defects_found`。当前改动后的完整校准仍待重新运行。
+下表中的命令与数据来自 2026-10-21 内核快照的历史验证批次，并非当前工作区最新运行。该批次有 1 项分布判定失败：`shooting_fouls_per_game` 为 16.531，目标为 19.597；其余 36 项分布与过程判定通过，几何违规、语境违规及账本失败均为 0。五维诊断通过。40 种子机制实验有 5 项 `insufficient`，认证为 `defects_found`。该历史批次的数值只用于追溯；最终校准工件在行为冻结后生成。
 
 | 指标 | 观测 | 基准 |
 | --- | --- | --- |

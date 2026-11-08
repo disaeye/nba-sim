@@ -412,6 +412,15 @@ pub struct FrameEvent {
     pub movement_intent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub play_instance_id: Option<String>,
+    /// 本事件所属比赛程序的稳定身份。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_id: Option<String>,
+    /// 本事件关联的控制序列身份。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_sequence_id: Option<String>,
+    /// 多来源裁决引用的来源事件身份。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_event_ids: Vec<u64>,
     /// 结构化关系（validation.md §3.2）：`parent_event_id` 保留直接触发语义，
     /// `relations` 表达 `CausedBy` 等带类型的附加关系；触发原因指向更早
     /// 的事件，禁止回写开始事件造成环。
@@ -494,6 +503,9 @@ impl FrameEvent {
             responsibility_id: None,
             movement_intent_id: None,
             play_instance_id: None,
+            program_id: None,
+            control_sequence_id: None,
+            source_event_ids: Vec::new(),
             relations: Vec::new(),
             decision_trace: None,
         }

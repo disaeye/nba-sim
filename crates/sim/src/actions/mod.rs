@@ -6,6 +6,8 @@
 
 use glam::Vec2;
 
+use crate::clock::ClockCommit;
+use crate::officiating::{ControlHandover, ControlState, ControlTransition};
 use crate::state::PossessionKind;
 pub use nba_domain::event::FoulKind;
 
@@ -143,21 +145,8 @@ impl CutKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum PassKind {
-    Chest,
-    Bounce,
-    Lob,
-    Outlet,
-    /// 头顶传球：出手点高，从防守人的手上方过去。
-    Overhead,
-    /// 单手推传：长距离推进，速度快但路线直。
-    OneHand,
-    /// 背后传球：出手隐蔽但路线难以控制。
-    BehindBack,
-    /// 手递手：两人贴近交接，几乎没有飞行距离。
-    Handoff,
-}
+/// 传球技术细分：权威定义在领域层。
+pub use nba_domain::PassKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum JumpBallKind {
@@ -913,6 +902,23 @@ pub enum Fact {
         player: usize,
         severity: &'static str,
     },
+    /// 一个提交批次内的全部时钟写入。指令、检查点与固定步推进按提交顺序记录。
+    ClockDirectivesCommitted {
+        commits: Vec<ClockCommit>,
+    },
+    /// 权威控制状态发生变化：验证器用它独立重建控制序列。
+    ControlStateCommitted {
+        transition: ControlTransition,
+        state: ControlState,
+    },
+    /// 一次控制权交接：上一段控制序列结束，新的一段开始。
+    ///
+    /// 交接是原子的：它同时包含上一段的结束与新一段的开始，因此重建时
+    /// 建立与结束永远成对。
+    ControlHandoverCommitted {
+        handover: ControlHandover,
+        state: ControlState,
+    },
     GameEnd,
 }
 
@@ -968,6 +974,9 @@ impl Fact {
             Self::Review { .. } => "Review",
             Self::PlacementApplied { .. } => "PlacementApplied",
             Self::Injury { .. } => "Injury",
+            Self::ClockDirectivesCommitted { .. } => "ClockDirectivesCommitted",
+            Self::ControlStateCommitted { .. } => "ControlStateCommitted",
+            Self::ControlHandoverCommitted { .. } => "ControlHandoverCommitted",
             Self::GameEnd => "GameEnd",
         }
     }

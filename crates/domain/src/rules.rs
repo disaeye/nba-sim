@@ -17,8 +17,29 @@ pub use policies::{
     SemanticRules, TacticalRules,
 };
 
-/// 固定步长。所有图与推演都以这个值为唯一时间源。
-pub const TICK_SECONDS: f64 = 0.05;
+/// 固定步长的整数微秒值。所有时钟推进都以这个值为唯一时间源。
+pub const MICROS_PER_SECOND: u64 = 1_000_000;
+pub const TICK_MICROS: u64 = 50_000;
+pub const TICK_SECONDS: f64 = TICK_MICROS as f64 / MICROS_PER_SECOND as f64;
+
+/// 将秒转换为整数微秒。非有限值与负值就地失败。
+pub fn seconds_to_micros(seconds: f64) -> u64 {
+    assert!(
+        seconds.is_finite() && seconds >= 0.0,
+        "时间区间必须有限且非负"
+    );
+    let scaled = seconds * MICROS_PER_SECOND as f64;
+    assert!(
+        scaled <= u64::MAX as f64,
+        "时间区间超过 u64 微秒量程"
+    );
+    scaled.round() as u64
+}
+
+/// 将整数微秒转换为秒，供公开只读视图使用。
+pub fn micros_to_seconds(micros: u64) -> f64 {
+    micros as f64 / MICROS_PER_SECOND as f64
+}
 
 /// Match rules and timing policy shared by the simulation subsystems.
 ///

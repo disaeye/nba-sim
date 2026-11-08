@@ -73,6 +73,9 @@ impl Fact {
             Self::Review { .. } => "REVIEW",
             Self::PlacementApplied { .. } => "PLACEMENT_APPLIED",
             Self::Injury { .. } => "INJURY",
+            Self::ClockDirectivesCommitted { .. } => "CLOCK_DIRECTIVES_COMMITTED",
+            Self::ControlStateCommitted { .. } => "CONTROL_STATE_COMMITTED",
+            Self::ControlHandoverCommitted { .. } => "CONTROL_HANDOVER_COMMITTED",
             Self::GameEnd => "GAME_END",
         }
     }
@@ -574,6 +577,62 @@ impl World {
                 "player_id": self.player_id(*player),
                 "severity": severity,
             }),
+            Fact::ClockDirectivesCommitted { commits } => json!({
+                "commits": commits,
+            }),
+            Fact::ControlStateCommitted { transition, state } => json!({
+                "boundary": format!("{:?}", transition.boundary),
+                "sequence_id": transition.sequence_id,
+                "team": transition.team.map(|team| team.as_str()),
+                "holder": transition.holder.map(|handle| self.player_id(handle)),
+                "ball_state": transition.ball_state,
+                "source": transition.source,
+                "at": transition.at,
+                "control_state": {
+                    "holder": state.holder.map(|handle| self.player_id(handle)),
+                    "team": state.team.map(|team| team.as_str()),
+                    "last_touch": state.last_touch.map(|handle| self.player_id(handle)),
+                    "last_touch_team": state.last_touch_team.map(|team| team.as_str()),
+                    "control_since": state.control_since,
+                    "frontcourt": state.frontcourt,
+                    "in_flight": state.in_flight,
+                    "dead": state.dead,
+                    "rim_contact": state.rim_contact,
+                    "backboard_contact": state.backboard_contact,
+                    "rim_shot_id": state.rim_shot_id.map(|id| format!("shot-{id:06}")),
+                    "sequence_id": state.sequence_id.map(|id| format!("control_sequence-{id:06}")),
+                    "established_by_event_id": state.established_by_event_id,
+                    "ended_by_event_id": state.ended_by_event_id,
+                    "ball_state": state.ball_state,
+                },
+            }),
+            Fact::ControlHandoverCommitted { handover, state } => json!({
+                "previous_sequence_id": handover.previous_sequence_id,
+                "previous_team": handover.previous_team.map(|team| team.as_str()),
+                "sequence_id": handover.sequence_id,
+                "team": handover.team.map(|team| team.as_str()),
+                "holder": handover.holder.map(|handle| self.player_id(handle)),
+                "ball_state": handover.ball_state,
+                "source": handover.source,
+                "at": handover.at,
+                "control_state": {
+                    "holder": state.holder.map(|handle| self.player_id(handle)),
+                    "team": state.team.map(|team| team.as_str()),
+                    "last_touch": state.last_touch.map(|handle| self.player_id(handle)),
+                    "last_touch_team": state.last_touch_team.map(|team| team.as_str()),
+                    "control_since": state.control_since,
+                    "frontcourt": state.frontcourt,
+                    "in_flight": state.in_flight,
+                    "dead": state.dead,
+                    "rim_contact": state.rim_contact,
+                    "backboard_contact": state.backboard_contact,
+                    "rim_shot_id": state.rim_shot_id.map(|id| format!("shot-{id:06}")),
+                    "sequence_id": state.sequence_id.map(|id| format!("control_sequence-{id:06}")),
+                    "established_by_event_id": state.established_by_event_id,
+                    "ended_by_event_id": state.ended_by_event_id,
+                    "ball_state": state.ball_state,
+                },
+            }),
             Fact::GameEnd => json!({}),
             Fact::Goaltending {
                 defender,
@@ -886,9 +945,23 @@ impl World {
         let state = self.ball.state();
         let (ball_pos, ball_z, ball_status) = match &state {
             BallState::Held { holder } => (self.players[*holder].pos, 4.0, "held"),
-            BallState::Pass { .. } => (self.ball.pos, self.ball.z, "pass"),
-            BallState::Shot { .. } => (self.ball.pos, self.ball.z, "shot"),
+            BallState::DribbleFlight { .. } => (self.ball.pos, self.ball.z.max(0.5), "dribble_flight"),
+            BallState::PassFlight { .. } => (self.ball.pos, self.ball.z, "pass"),
+            BallState::ShotFlight { context, .. } => (
+                self.ball.pos,
+                self.ball.z,
+                match context {
+                    crate::state::ShotContext::FieldGoal => "shot",
+                    crate::state::ShotContext::FreeThrow => "free_throw",
+                },
+            ),
             BallState::Loose { .. } => (self.ball.pos, self.ball.z.max(0.5), "loose"),
+            BallState::ControlledByOfficial { .. } => (
+                self.ball.pos,
+                self.ball.z,
+                "controlled_by_official",
+            ),
+            BallState::OutOfPlay { .. } => (self.ball.pos, self.ball.z.max(0.5), "out_of_play"),
         };
         let ball_norm = Court::ft_to_norm_with_geometry(ball_pos, self.rules.court);
 
@@ -986,11 +1059,41 @@ impl World {
     }
 
     pub(crate) fn frame_event(&self, event: &TimedFact) -> FrameEvent {
-        let (shot_id, pass_id) = match &event.fact {
-            Fact::Shot { shot_id, .. } => (Some(format!("shot-{shot_id:06}")), None),
-            Fact::Pass { pass_id, .. } => (None, Some(format!("pass-{pass_id:06}"))),
-            _ => (None, None),
+        let (shot_id, pass_id, action_id, foul_program_id, play_instance_id) = match &event.fact {
+            Fact::Shot { shot_id, .. } => (Some(format!("shot-{shot_id:06}")), None, None, None, None),
+            Fact::Pass { pass_id, .. } => (None, Some(format!("pass-{pass_id:06}")), None, None, None),
+            Fact::ActionStarted { action_id, .. }
+            | Fact::ActionPhaseChanged { action_id, .. }
+            | Fact::ActionCompleted { action_id, .. }
+            | Fact::ActionFailed { action_id, .. }
+            | Fact::ActionCancelled { action_id, .. }
+            | Fact::DefensiveActionStarted { action_id, .. }
+            | Fact::DefensiveActionPhaseChanged { action_id, .. }
+            | Fact::DefensiveActionCompleted { action_id, .. }
+            | Fact::DefensiveActionCancelled { action_id, .. } => {
+                (None, None, Some(format!("action-{action_id:06}")), None, None)
+            }
+            Fact::Foul { foul_id, .. }
+            | Fact::FreeThrow { foul_id, .. }
+            | Fact::FoulOutRetention { foul_id, .. }
+            | Fact::TeamTechnicalFoul { foul_id, .. } => {
+                (None, None, None, Some(format!("penalty-{foul_id:06}")), None)
+            }
+            Fact::PlayActivated { play, possession }
+            | Fact::PlayWindowEnded { play, possession } => (
+                None,
+                None,
+                None,
+                None,
+                Some(format!("play-{play:02}-{possession:06}")),
+            ),
+            _ => (None, None, None, None, None),
         };
+        let program_id = Some(format!("program-{:06}", event.program_id));
+        let control_sequence_id = event
+            .control_sequence_id
+            .map(|id| format!("control_sequence-{id:06}"));
+        let source_event_ids = event.source_event_ids.clone();
         let contact = contact_geometry(&event.fact);
         FrameEvent {
             sequence: event.sequence,
@@ -1003,16 +1106,19 @@ impl World {
             contact_time: contact.map(|geometry| geometry.4 as f32),
             data: Some(self.fact_payload(&event.fact)),
             event_id: event.event_id,
-            parent_event_id: None,
+            parent_event_id: event.parent_event_id,
             tick_index: event.tick_index,
-            action_id: None,
+            action_id,
             shot_id,
             pass_id,
             loose_ball_id: None,
-            foul_program_id: None,
+            foul_program_id,
             responsibility_id: None,
             movement_intent_id: None,
-            play_instance_id: None,
+            play_instance_id,
+            program_id,
+            control_sequence_id,
+            source_event_ids,
             relations: Vec::new(),
             decision_trace: self.event_decision_trace(event),
         }

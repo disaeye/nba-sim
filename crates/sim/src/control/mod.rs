@@ -56,6 +56,7 @@ pub struct ShotRelease<'a> {
     pub origin: Vec2,
     pub plan: crate::shot_quality::ShotPlan,
     pub aim_offset: Vec2,
+    pub context: crate::state::ShotContext,
     pub rules: &'a nba_domain::GameRules,
 }
 
@@ -71,6 +72,7 @@ pub struct PassRelease<'a> {
     pub flight: Option<f64>,
     pub from_player: &'a crate::state::PlayerState,
     pub to_player: &'a crate::state::PlayerState,
+    pub inbound: bool,
     pub rules: &'a nba_domain::GameRules,
 }
 
@@ -85,6 +87,30 @@ impl BallBody {
         }
     }
 
+    pub fn out_of_play(pos: Vec2, reason: &'static str) -> Self {
+        Self {
+            state: BallState::OutOfPlay { pos, reason },
+            pos,
+            z: 0.5,
+            vel: Vec2::ZERO,
+            vz: 0.0,
+        }
+    }
+
+    pub fn controlled_by_official(holder: usize, inbound_spot: Vec2, authorized_at: f64) -> Self {
+        Self {
+            state: BallState::ControlledByOfficial {
+                holder,
+                inbound_spot,
+                authorized_at,
+            },
+            pos: inbound_spot,
+            z: 5.0,
+            vel: Vec2::ZERO,
+            vz: 0.0,
+        }
+    }
+
     pub fn held(handle: usize) -> Self {
         Self {
             state: BallState::Held { holder: handle },
@@ -95,14 +121,41 @@ impl BallBody {
         }
     }
 
+    /// 球落到某人手里。
+    ///
+    /// 球在空中时这一步代表飞行已经结束：先成为死球（松球），再交给
+    /// 持球人。投篮犯规后的罚球就是这样——飞行结束，球变成死球，
+    /// 裁判把它交给罚球人。
     pub fn set_held(&mut self, handle: usize) {
-        self.state = BallState::Held { holder: handle };
+        if self.state.is_in_flight() {
+            let pos = self.pos;
+            let vel = self.vel;
+            self.transition(BallState::Loose { pos, vel });
+        }
+        self.transition(BallState::Held { holder: handle });
         self.vel = Vec2::ZERO;
         self.vz = 0.0;
     }
 
+    /// 球态的唯一写入口：按领域层的迁移表检查，非法边就地失败。
+    pub fn transition(&mut self, next: BallState) {
+        let next = nba_domain::match_model::transition_ball_state(&self.state, next)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "illegal ball-state transition {} -> {}",
+                    error.from.as_str(),
+                    error.to.as_str()
+                )
+            });
+        self.state = next;
+    }
+
+    /// 持球状态下放球：传球、投篮与松球都从这里进入飞行或松球状态。
+    ///
+    /// 持球人放球属于归属变化，合法；飞行中的球被直接改写为另一种飞行
+    /// 属于非法跃迁，就地失败。
     pub fn release(&mut self, state: BallState) {
-        self.state = state;
+        self.transition(state);
     }
 
     pub fn state(&self) -> BallState {
@@ -110,10 +163,7 @@ impl BallBody {
     }
 
     pub fn holder(&self) -> Option<usize> {
-        match self.state {
-            BallState::Held { holder } => Some(holder),
-            BallState::Pass { .. } | BallState::Shot { .. } | BallState::Loose { .. } => None,
-        }
+        self.state.holder()
     }
 
     pub(crate) fn release_shot(&mut self, release: ShotRelease<'_>) {
@@ -128,16 +178,17 @@ impl BallBody {
         let from = release.origin;
         let z0 = release.release_z.max(release.rules.ball_radius_ft);
         let duration = release.plan.duration;
-        self.state = BallState::Shot {
+        self.transition(BallState::ShotFlight {
             shot_id: release.shot_id,
             shooter: release.shooter,
+            context: release.context,
             from_pos: from,
             target: landing,
             start: release.now,
             aperture_ft: release.aperture_ft,
             rim_in_probability: release.rim_in_probability,
             aim_offset: release.aim_offset,
-        };
+        });
         self.pos = from;
         self.z = z0;
         // 水平方向飞向落点，竖直方向按同一次飞行解算：球心必须在落点
@@ -174,7 +225,7 @@ impl BallBody {
         // 一条更高的弧线：球从防守人头顶飞过，落点仍是接球人够得到的
         // 胸口高度。
         let arc = ProjectileArc::solve(z0, z1, duration as f32, rules.ball_gravity_ftps2);
-        self.state = BallState::Pass {
+        self.transition(BallState::PassFlight {
             pass_id: release.pass_id,
             from: release.from,
             to: release.to,
@@ -183,7 +234,8 @@ impl BallBody {
             to_pos: target,
             start: release.now,
             duration,
-        };
+            inbound: release.inbound,
+        });
         self.pos = origin;
         self.z = z0;
         self.vel = (target - origin) / duration as f32;
@@ -204,9 +256,12 @@ pub fn step(world: &mut World, dt: f64) {
         return;
     }
     match world.ball.state() {
-        BallState::Held { .. } => sync_held(world),
+        BallState::Held { .. }
+        | BallState::DribbleFlight { .. }
+        | BallState::ControlledByOfficial { .. } => sync_held(world),
         BallState::Loose { .. } => step_loose(world, dt),
-        BallState::Pass { .. } | BallState::Shot { .. } => step_flight(world, dt),
+        BallState::PassFlight { .. } | BallState::ShotFlight { .. } => step_flight(world, dt),
+        BallState::OutOfPlay { .. } => {}
     }
 }
 
@@ -314,7 +369,7 @@ fn step_loose(world: &mut World, dt: f64) {
 /// 控制地飞出界是投篮不中，不记失误；持球人或后场球员碰出界才是
 /// 违例。
 fn out_of_bounds(world: &mut World, spot: Vec2) {
-    let touched = world.last_touch;
+    let touched = world.control.last_touch;
     let offense = world.possession.team;
     // 发球地点就是出界点：球从哪条线出去，就从哪里发回来。
     world.inbound_spot = Some(spot);
@@ -699,7 +754,7 @@ fn step_flight(world: &mut World, dt: f64) {
         // 穿过筐口：球心连续穿越筐平面时与筐心的距离不超过有效筐口。
         // 有效筐口由出手时的 ShotModel 给出，与价值层预测用的是同一个值；
         // 球飞向本次抽样的落点，因此落点就是球心穿过筐平面的位置。
-        if let BallState::Shot {
+        if let BallState::ShotFlight {
             shot_id: _,
             shooter,
             aperture_ft,
@@ -728,10 +783,10 @@ fn step_flight(world: &mut World, dt: f64) {
                     ball.z = rules.rim_height_ft;
                     ball.vel *= 0.2;
                     ball.vz = -3.0;
-                    ball.state = BallState::Loose {
+                    ball.transition(BallState::Loose {
                         pos: crossing,
                         vel: ball.vel,
-                    };
+                    });
                     world.ball = ball;
                     return;
                 }
@@ -760,7 +815,7 @@ fn step_flight(world: &mut World, dt: f64) {
                 ball.z = radius;
                 let bounces_now = matches!(
                     &ball.state,
-                    BallState::Pass {
+                    BallState::PassFlight {
                         kind: PassKind::Bounce,
                         ..
                     }
@@ -822,6 +877,11 @@ fn step_flight(world: &mut World, dt: f64) {
                 z,
                 sub_tick,
             });
+            // 触板身份属于控制状态：本回合球碰过板，且碰的是哪一次出手。
+            world.control.backboard_contact = true;
+            if let Some(pending) = world.pending_shot.as_ref() {
+                world.control.rim_shot_id = Some(pending.shot_id);
+            }
             elapsed += t;
             remaining -= t;
             sub_tick += 1;
@@ -840,11 +900,11 @@ fn step_flight(world: &mut World, dt: f64) {
             let near_plane = dz.abs() <= radius;
             // 已经穿过筐口的球不再与筐沿接触；其余球按球心到环管的距离判定。
             let aperture = match &ball.state {
-                BallState::Shot { aperture_ft, .. } => *aperture_ft,
+                BallState::ShotFlight { aperture_ft, .. } => *aperture_ft,
                 _ => f32::INFINITY,
             };
             let rim_in = match &ball.state {
-                BallState::Shot {
+                BallState::ShotFlight {
                     rim_in_probability, ..
                 } => *rim_in_probability,
                 _ => 0.0,
@@ -873,7 +933,7 @@ fn step_flight(world: &mut World, dt: f64) {
                 // 筐心正上方竖直下落，下一个子步穿筐平面时距筐心为 0，按
                 // 穿筐结算。
                 let shooter = match &ball.state {
-                    BallState::Shot { shooter, .. } => *shooter,
+                    BallState::ShotFlight { shooter, .. } => *shooter,
                     _ => usize::MAX,
                 };
                 let bounce_in = rim_in > 0.0
@@ -901,7 +961,10 @@ fn step_flight(world: &mut World, dt: f64) {
                 ball.vel *= -rules.rim_contact_restitution_graze;
                 ball.vz = -ball.vz * rules.rim_contact_vertical_restitution;
                 // 本回合已经触筐：控制状态与篮板结算都读这个标志。
-                world.possession.rim_contact = true;
+                world.control.rim_contact = true;
+                if let Some(pending) = world.pending_shot.as_ref() {
+                    world.control.rim_shot_id = Some(pending.shot_id);
+                }
                 world.emit(Fact::BallContact {
                     kind: "rim",
                     entity: None,
@@ -917,10 +980,10 @@ fn step_flight(world: &mut World, dt: f64) {
                             Some(crate::resolve::shot::ShotResult::Missed { rim_contact: true });
                     }
                 }
-                ball.state = BallState::Loose {
+                ball.transition(BallState::Loose {
                     pos: contact,
                     vel: ball.vel,
-                };
+                });
                 world.ball = ball;
                 return;
             }
@@ -962,18 +1025,18 @@ fn step_flight(world: &mut World, dt: f64) {
 
 fn finish_flight(world: &mut World, ball: &mut BallBody, rim_contact: bool) {
     match ball.state {
-        BallState::Shot { .. } => {
+        BallState::ShotFlight { .. } => {
             if let Some(pending) = world.pending_shot.as_mut() {
                 if pending.result.is_none() {
                     pending.result = Some(crate::resolve::shot::ShotResult::Missed { rim_contact });
                 }
             }
-            ball.state = BallState::Loose {
+            ball.transition(BallState::Loose {
                 pos: ball.pos,
                 vel: ball.vel,
-            };
+            });
         }
-        BallState::Pass { .. } => {
+        BallState::PassFlight { .. } => {
             if std::env::var("NBA_TRACE_MISS").is_ok() {
                 if let Some(info) = world.pass_in_flight {
                     let spot = crate::resolve::pass::cut_target(world, info.to);
@@ -998,10 +1061,10 @@ fn finish_flight(world: &mut World, ball: &mut BallBody, rim_contact: bool) {
                 }
             }
             world.pass_result = Some(PassResult::Incomplete);
-            ball.state = BallState::Loose {
+            ball.transition(BallState::Loose {
                 pos: ball.pos,
                 vel: ball.vel,
-            };
+            });
         }
         _ => {}
     }
@@ -1013,9 +1076,9 @@ fn handle_player_contact(
     handle: usize,
     kind: &'static str,
 ) {
-    world.last_touch = Some(handle);
+    world.note_last_touch(handle);
     match ball.state {
-        BallState::Shot { .. } => {
+        BallState::ShotFlight { .. } => {
             if let Some(pending) = world.pending_shot.as_mut() {
                 if pending.result.is_none() {
                     pending.result = Some(if kind == "hand" {
@@ -1027,12 +1090,12 @@ fn handle_player_contact(
             }
             ball.vel *= -world.rules.loose_ball_player_restitution;
             ball.vz = -ball.vz * world.rules.loose_ball_player_restitution;
-            ball.state = BallState::Loose {
+            ball.transition(BallState::Loose {
                 pos: ball.pos,
                 vel: ball.vel,
-            };
+            });
         }
-        BallState::Pass { to, .. } => {
+        BallState::PassFlight { to, .. } => {
             if kind == "player" && handle != to {
                 // 防守球员拍到传球：手是横着扫过来的，球被抽离原来的线路，
                 // 带着一部分前进速度斜着飞出去。沿法线镜像会把球原速打回
@@ -1055,10 +1118,10 @@ fn handle_player_contact(
                     ball.vel = deflected * retained;
                 }
                 ball.vz = -ball.vz * world.rules.loose_ball_player_restitution;
-                ball.state = BallState::Loose {
+                ball.transition(BallState::Loose {
                     pos: ball.pos,
                     vel: ball.vel,
-                };
+                });
                 return;
             }
             let teammate = world
@@ -1069,23 +1132,26 @@ fn handle_player_contact(
             } else {
                 PassResult::Intercepted { by: handle }
             });
-            ball.state = BallState::Loose {
+            ball.transition(BallState::Loose {
                 pos: ball.pos,
                 vel: ball.vel,
-            };
+            });
         }
         BallState::Loose { .. } => {
             ball.vel *= -world.rules.loose_ball_player_restitution;
             ball.vz = -ball.vz * world.rules.loose_ball_player_restitution;
         }
-        BallState::Held { .. } => {}
+        BallState::Held { .. }
+        | BallState::DribbleFlight { .. }
+        | BallState::ControlledByOfficial { .. }
+        | BallState::OutOfPlay { .. } => {}
     }
     let _ = kind;
 }
 
 fn shot_hoop(world: &World, ball: &BallBody) -> Option<Vec2> {
     match &ball.state {
-        BallState::Shot { shooter, .. } => Some(world.hoop_for(world.players[*shooter].team)),
+        BallState::ShotFlight { shooter, .. } => Some(world.hoop_for(world.players[*shooter].team)),
         _ => None,
     }
 }

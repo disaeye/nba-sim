@@ -44,6 +44,7 @@ fn made_shot(world: &mut World, released_game_clock: f64) {
         result: Some(ShotResult::Made),
         touched_backboard: false,
         released_game_clock,
+        released_clock_checkpoint: None,
     });
 }
 
@@ -120,5 +121,65 @@ fn a_profile_without_period_end_replay_does_not_review() {
         world.score[World::team_index(team)],
         score_before + 2,
         "没有复核程序时按原出手机制结算"
+    );
+}
+
+#[test]
+fn the_overturned_period_end_ruling_restores_the_game_clock() {
+    // 复核否定了「钟响后离手」这个认定，本节剩余时间因此必须恢复：
+    // 比赛钟从出手那一刻的检查点恢复，而不是停在零。
+    let mut world = common::short_world(904);
+    let team = world.players[0].team;
+    world.possession.team = team;
+    let shooter = world
+        .holder()
+        .or_else(|| {
+            world
+                .players
+                .iter()
+                .position(|player| player.on_court && player.team == team)
+        })
+        .expect("the roster has an offensive player");
+    world.set_ball_held(shooter);
+    // 出手那一刻的比赛钟是 0.4 秒。
+    world.clock.set_game_clock(0.4);
+    // 走生产出手路径：检查点由出手结算自己建立。
+    let intent = nba_sim_core::action::ActionIntent {
+        actor: shooter,
+        kind: nba_sim_core::action::ActionKind::Shoot(ShotKind::CatchShoot),
+        target: None,
+        from_ft: world.players[shooter].pos,
+        to_ft: world.players[shooter].pos,
+        start_time: world.now(),
+        duration: 0.4,
+    };
+    nba_sim_core::resolve::shot::resolve(
+        &mut world,
+        &intent,
+        ShotKind::CatchShoot,
+    );
+    let checkpoint = world
+        .pending_shot
+        .as_ref()
+        .and_then(|pending| pending.released_clock_checkpoint);
+    assert!(checkpoint.is_some(), "出手必须留下比赛钟检查点");
+    // 球飞到篮筐时比赛钟已经归零。
+    world.clock.set_game_clock(0.0);
+    let mut pending = world
+        .pending_shot
+        .take()
+        .expect("the shot is pending settlement");
+    pending.result = Some(ShotResult::Made);
+    world.pending_shot = Some(pending);
+    nba_sim_core::resolve::shot::finish(&mut world);
+    assert_eq!(
+        reviews(&world),
+        vec![(false, "game_clock_at_period_end")],
+        "钟响前离手的进球必须经过复核并维持原判"
+    );
+    assert!(
+        world.clock.game_clock() > 0.0,
+        "改判成立时比赛钟必须恢复：实际 {:.3}",
+        world.clock.game_clock()
     );
 }

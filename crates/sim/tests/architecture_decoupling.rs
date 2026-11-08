@@ -1,4 +1,4 @@
-//! 权威状态与档案结构的解耦：三条结构要求各有直接回归。
+//! 权威状态与档案结构的解耦：结构要求各有直接回归。
 //!
 //! 方案 §3.2 与 §4.1-§4.2 要求：
 //!
@@ -8,10 +8,14 @@
 //!    与球队、控制建立时刻与前场控制状态。
 //! 3. 联赛档案按策略族存储：节次、时钟、犯规、暂停各自成族，档案里
 //!    没有未声明的默认值——少一个键就是读不出来的档案。
+//!
+//! 工作包 A 追加四条：七种球态、单一改钟入口、事件因果字段与控制序列。
 
 use std::collections::BTreeSet;
 
 use nba_domain::league::LeagueProfile;
+use nba_domain::match_model::{BallState, BallStateKind};
+use nba_sim_core::clock::{ClockDirective, TimerId};
 use nba_sim_core::state::{FlightKind, MatchProgram, Phase};
 
 /// 比赛阶段的名字：用来核对 `Phase` 里没有飞行变体。
@@ -151,5 +155,122 @@ fn a_league_profile_missing_a_declared_field_is_rejected() {
     assert!(
         error.to_string().contains("bonus_fouls_overtime"),
         "错误必须指出缺的那个字段：{error}"
+    );
+}
+
+#[test]
+fn the_ball_state_holds_seven_kinds_and_nothing_else() {
+    // 七种球态：持球、运球飞行、传球飞行、投篮飞行、松球、裁判控球与比赛
+    // 用球离场。少一种就有一段比赛没有归属表达，多一种就是重复的表。
+    assert_eq!(BallStateKind::ALL.len(), 7);
+    for kind in BallStateKind::ALL {
+        assert!(!kind.as_str().is_empty(), "每种球态都必须有名字");
+    }
+    let mut names: Vec<&str> = BallStateKind::ALL.iter().map(|kind| kind.as_str()).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), 7, "球态的名字必须互不相同");
+    // 投篮飞行携带投篮语义：罚球飞行期间比赛程序仍然是罚球。
+    let shot = BallState::ShotFlight {
+        shot_id: 1,
+        shooter: 0,
+        context: nba_domain::match_model::ShotContext::FreeThrow,
+        from_pos: glam::Vec2::ZERO,
+        target: glam::Vec2::ONE,
+        start: 0.0,
+        aperture_ft: 0.75,
+        rim_in_probability: 0.0,
+        aim_offset: glam::Vec2::ZERO,
+    };
+    assert!(shot.is_in_flight());
+    assert_eq!(shot.holder(), None, "飞行中的球没有持球人");
+}
+
+#[test]
+fn the_clock_has_exactly_four_directive_shapes() {
+    // 四类指令：启动、停止、设定与恢复。缺一类就有一种改钟方式没有依据，
+    // 多一类就有两种写法表达同一件事。
+    let checkpoint = nba_domain::CheckpointId::from_raw(1);
+    let shapes = [
+        ClockDirective::Start {
+            timer: TimerId::GameClock,
+        },
+        ClockDirective::Stop {
+            timer: TimerId::GameClock,
+        },
+        ClockDirective::Set {
+            timer: TimerId::GameClock,
+            micros: 0,
+        },
+        ClockDirective::Restore {
+            timer: TimerId::GameClock,
+            checkpoint_id: checkpoint,
+        },
+    ];
+    assert_eq!(shapes.len(), 4);
+    let mut names: Vec<&str> = shapes.iter().map(|shape| shape.as_str()).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), 4, "四类指令必须各有名字");
+    for shape in shapes {
+        assert_eq!(shape.timer(), TimerId::GameClock);
+    }
+}
+
+#[test]
+fn the_clock_writes_through_one_entry_only() {
+    // 计时器值只能由控制器写：其他模块读到的是秒数投影或者微秒读数，
+    // 写入口只有一处。
+    let mut clock = nba_sim_core::state::Clock::new(720.0, 24.0);
+    clock.take_commits();
+    clock.set_shot_clock(14.0);
+    clock.set_game_clock(600.0);
+    assert_eq!(clock.shot_clock(), 14.0);
+    assert_eq!(clock.game_clock(), 600.0);
+    let commits = clock.drain_commits();
+    assert!(!commits.is_empty(), "改钟必须留下提交记录");
+    for commit in &commits {
+        assert!(
+            matches!(
+                commit,
+                nba_sim_core::clock::ClockCommit::Directive(_)
+                    | nba_sim_core::clock::ClockCommit::Segment(_)
+                    | nba_sim_core::clock::ClockCommit::CheckpointSaved(_, _)
+            ),
+            "提交记录只能是指令、连续推进段或检查点"
+        );
+    }
+}
+
+#[test]
+fn every_event_carries_its_causal_identity() {
+    // 事件的因果字段不许为空：程序身份、控制序列身份与来源事件都写进
+    // 事件信封，验证器据此重建。
+    let params = nba_sim_core::params::workspace_calibration_dir();
+    let mut world = nba_sim_core::World::new(
+        nba_sim_core::MatchSetup::builtin(nba_domain::GameRules::default()),
+        nba_sim_core::Params::load(&params).expect("calibration tables load"),
+        5,
+    );
+    for _ in 0..400 {
+        world.step(0.05);
+    }
+    assert!(!world.events.is_empty(), "比赛必须产出事件");
+    let mut program_ids = std::collections::BTreeSet::new();
+    for event in &world.events {
+        assert!(event.program_id > 0, "每条事件都必须带程序身份");
+        program_ids.insert(event.program_id);
+        assert!(
+            event.parent_event_id.is_some(),
+            "每条事件都必须指回直接触发它的事件"
+        );
+        assert!(
+            !event.source_event_ids.is_empty(),
+            "每条事件都必须带来源事件"
+        );
+    }
+    assert!(
+        program_ids.len() > 1,
+        "比赛过程中必须切换过比赛程序：程序身份要随之变化"
     );
 }

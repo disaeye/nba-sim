@@ -38,6 +38,10 @@ fn report_with_events(events: Vec<Fact>) -> GameReport {
             tick_index: 1,
             sequence: index as u64,
             event_id: index as u64 + 1,
+            parent_event_id: (index != 0).then_some(index as u64),
+            program_id: 1,
+            control_sequence_id: None,
+            source_event_ids: Vec::new(),
             fact,
             trace: None,
         })
@@ -275,6 +279,8 @@ fn check_ledger_reconciles_a_production_game_report() {
     assert!(ledger.fouls_reconcile, "{}", ledger.detail);
     assert!(ledger.player_stats_reconcile, "{}", ledger.detail);
     assert!(ledger.possessions_reconcile, "{}", ledger.detail);
+    assert!(ledger.clock_reconcile, "{}", ledger.detail);
+    assert!(ledger.control_reconcile, "{}", ledger.detail);
     assert!(ledger.minutes_reconcile, "{}", ledger.detail);
 }
 
@@ -295,7 +301,40 @@ fn check_ledger_reconciles_a_fiba_game_report() {
     assert!(ledger.fouls_reconcile, "{}", ledger.detail);
     assert!(ledger.player_stats_reconcile, "{}", ledger.detail);
     assert!(ledger.possessions_reconcile, "{}", ledger.detail);
+    assert!(ledger.clock_reconcile, "{}", ledger.detail);
+    assert!(ledger.control_reconcile, "{}", ledger.detail);
     assert!(ledger.minutes_reconcile, "{}", ledger.detail);
+}
+
+#[test]
+fn the_clock_is_rebuilt_from_the_event_stream_alone() {
+    // 验证器只读事件流：时钟提交记录按提交顺序重放，得到终局读数。
+    let report = nba_sim_core::run_game(3, &workspace_calibration_dir());
+    let clock = nba_validation::reconstruct::reconstruct_clock(&report)
+        .expect("the clock must be rebuildable from the event stream");
+    assert_eq!(clock.tick, report.ticks, "重建的 tick 必须等于比赛 tick 数");
+    assert_eq!(clock.period, report.periods, "重建的节次必须等于比赛节次");
+    assert!(clock.commits > 0, "时钟提交记录必须存在");
+    assert!(
+        clock.game_clock_seconds <= report.period_duration_seconds as f64 + 1.0,
+        "重建的比赛钟不能超过节时长"
+    );
+}
+
+#[test]
+fn the_control_sequences_are_rebuilt_from_the_event_stream_alone() {
+    let report = nba_sim_core::run_game(3, &workspace_calibration_dir());
+    let control = nba_validation::reconstruct::check_control_sequences(&report)
+        .expect("control sequences must be rebuildable from the event stream");
+    assert!(control.established > 0, "比赛里必须有控制建立");
+    assert_eq!(
+        control.established, control.ended,
+        "每个控制建立都必须有对应的控制结束"
+    );
+    assert!(
+        control.active_sequence.is_none(),
+        "比赛结束时不能还有未结束的控制序列"
+    );
 }
 
 #[test]

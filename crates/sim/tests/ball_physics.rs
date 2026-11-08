@@ -104,6 +104,8 @@ fn pass_is_caught_or_intercepted_by_swept_contact() {
         bounced: false,
     });
     let rules = world.rules.clone();
+    // 传球必须从持球状态出发：球先进入发球人的手里，再被释放。
+    world.set_ball_held(from);
     world.ball.release_pass(crate::ball::PassRelease {
         rules: &rules,
         from_player: &world.players[from].clone(),
@@ -115,6 +117,7 @@ fn pass_is_caught_or_intercepted_by_swept_contact() {
         kind: PassKind::Chest,
         landing: None,
         flight: None,
+        inbound: false,
     });
     for _ in 0..200 {
         world.clock.advance_simulation_time(TICK_SECONDS);
@@ -296,11 +299,12 @@ fn a_fast_ball_does_not_tunnel_through_a_defender() {
     // 传球只允许手部接触；把手放到球路上，才能验证高速球不会穿过手。
     world.players[defender].pos = Vec2::new(19.6, 25.0);
     world.players[defender].facing = Vec2::X;
+    world.set_ball_held(from);
     world.ball.pos = Vec2::new(20.0, 25.0);
     world.ball.z = 4.5;
     world.ball.vel = Vec2::new(85.0, 0.0);
     world.ball.vz = 0.0;
-    world.ball.release(BallState::Pass {
+    world.ball.release(BallState::PassFlight {
         pass_id: 2,
         from,
         to,
@@ -309,6 +313,7 @@ fn a_fast_ball_does_not_tunnel_through_a_defender() {
         to_pos: Vec2::new(70.0, 25.0),
         start: world.now(),
         duration: 0.8,
+        inbound: false,
     });
     world.pass_in_flight = Some(PassInFlight {
         pass_id: 2,
@@ -351,11 +356,12 @@ fn floor_rim_and_backboard_contacts_are_distinct() {
     );
 
     let backboard_start = world.events.len();
+    world.set_ball_held(0);
     world.ball.pos = Vec2::new(2.0, 25.0);
     world.ball.z = 11.0;
     world.ball.vel = Vec2::new(60.0, 0.0);
     world.ball.vz = 0.0;
-    world.ball.release(BallState::Pass {
+    world.ball.release(BallState::PassFlight {
         pass_id: 3,
         from: 0,
         to: 1,
@@ -364,6 +370,7 @@ fn floor_rim_and_backboard_contacts_are_distinct() {
         to_pos: Vec2::new(70.0, 25.0),
         start: world.now(),
         duration: 0.8,
+        inbound: false,
     });
     world.pass_in_flight = None;
     world.step(0.1);
@@ -377,13 +384,15 @@ fn floor_rim_and_backboard_contacts_are_distinct() {
 
     let rim_start = world.events.len();
     let hoop = world.hoop_for(world.players[0].team);
+    world.set_ball_held(0);
     world.ball.pos = hoop + Vec2::new(0.85, 0.0);
     world.ball.z = 10.1;
     world.ball.vel = Vec2::new(-2.0, 0.0);
     world.ball.vz = -1.0;
-    world.ball.release(BallState::Shot {
+    world.ball.release(BallState::ShotFlight {
         shot_id: 9,
         shooter: 0,
+        context: nba_sim_core::state::ShotContext::FieldGoal,
         from_pos: world.ball.pos,
         target: hoop,
         start: world.now(),

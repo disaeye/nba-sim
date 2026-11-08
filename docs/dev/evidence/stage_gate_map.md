@@ -32,8 +32,8 @@
   - 限制区计时：`crates/sim/tests/lane_clock.rs` 5 项（进攻三秒违例、及时离开不违例、防守三秒技术犯规、主动盯防不判罚、进攻方进入前场前不计时）。
   - 非法触球：`crates/sim/tests/illegal_touch.rs` 5 项（一臂之内伸手阻挡成立、合法间隔上的平行贴防不成立、够不到不成立、退开之后不再成立、活球里记为个人犯规）。
   - 背身五秒：`crates/sim/tests/back_to_basket.rs` 5 项（背身运球满五秒违例、面朝篮筐不违例、越过罚球线延长线不违例、收球终止计时、球被碰开终止计时）。
-  - 双方犯规、恶意犯规与清晰路径：`crates/sim/tests/foul_scenarios.rs` 11 项。
-  - 暂停配额：`crates/sim/tests/timeout_scenarios.rs` 9 项（NBA 整场与第四节与末段额度、FIBA 整场与第四节额度、加时额度独立、活球只有持球方能叫、恢复比赛）。
+  - 双方犯规、恶意犯规与清晰路径：`crates/sim/tests/foul_scenarios.rs` 15 项；FIBA 破坏性犯规与 NBA 清晰路径犯规分别登记。
+  - 暂停配额：`crates/sim/tests/timeout_scenarios.rs` 13 项（NBA 整场与第四节与末段额度、FIBA 整场与第四节额度、加时额度独立、活球只有持球方能叫、恢复比赛、按来源区分的暂停时长与活球请求占用完整档）。
   - 节次开始与交替拥有箭头：`crates/sim/tests/period_start_scenarios.rs` 7 项。
   - 罚球禁区与罚球人替换：`crates/sim/tests/free_throw_scenarios.rs` 5 项。
   - 换人：`crates/sim/tests/substitution_scenarios.rs` 7 项。
@@ -76,11 +76,11 @@
 - 交付物：参数校准、统计参考与来源更新、机制实验、独立验证、文档刷新。
 - 代码与数据：`scripts/calibrate/fit_policy.py`、`scripts/calibrate/fit_tables.py`、`scripts/calibrate/freeze.py`、`data/calibration/*.json`。
 - 证据：`crates/sim/tests/runtime_tables.rs`（运行时表加载与来源校验）、`python3 scripts/calibrate/freeze.py --check`（三张冻结表哈希）、`nba-sim validate-core`（四层判定、批次统计、分支覆盖与认证工件）、`nba-sim validate-core --mechanism`（属性机制实验写入 `mechanism_core.json`）。
-- 状态：校准已执行。参数已从写死系数搬入表中（封盖手部半径、投篮犯规率、篮板伸手折减与加成、包夹权重、回场判定带宽、抛投区价值、突破落点偏移）；机制实验 `--mechanism` 逐项输出结论，当前通过项与未通过项记在 `docs/dev/current/implementation.md` 的机制实验一节；32 场 `validate-core` 上 38 条分布判据全部在带内（得分 232.5、回合 200.2、几何违规 0、语境违规 0、账本失败 0），认证为 `pass`；残差与已试杠杆记在 `docs/dev/current/implementation.md` 的校准一节。
+- 状态：参数校准按 `docs/dev/current/full_simulation_plan.md` 的 G 阶段执行。历史 32 场工件由 `63c04b99f533defb49742ce3d1f43ccefcc48f63` 生成，含 38 条判据；当前 `HEAD` 为 `264b2eed9c264ffde9a4d3146d441a3bf25c3cde`。最终参数搜索、`baseline/fingerprint.json`、NBA/FIBA `validate-core` 工件与认证状态在行为冻结后统一生成。
 
 ## 未闭合项汇总
 
 1. 动作目录的技术细分已补齐（收球步法与轴心脚、突破的三种变体、跳步收球与离散脚步、掩护由掩护人自主发起、`ReboundJump` 的仿真层消费者），16 个动作族的状态全部是 `verified`，`missing_evidence` 为空。
-2. 权威状态与档案结构已解耦：`Phase` 不含飞行变体，`ControlState` 是结构体，`LeagueProfile` 按四个策略族存储且没有未声明的默认值（`crates/sim/tests/architecture_decoupling.rs` 5 项）。
-3. 干扰球的三种情形（下落段、碰过篮板之后、球在筐沿上）都已接入生产路径并各有场景测试（`crates/sim/tests/shot_scenarios.rs` 10 项），`PROC-GOALTENDING` 的场景清单没有缺失项。
+2. 权威状态与档案结构按 `docs/dev/current/full_simulation_plan.md` §3.2、§4 与 §5 实施：11 个策略族、整数时间、七种 `BallState`、`ControlState` 内部权威、`World::commit` 单一写入口；最终结构回归在行为冻结后生成。
+3. 干扰球的下行段、触板后与筐沿阶段各有场景测试（`crates/sim/tests/shot_scenarios.rs` 10 项），`PROC-GOALTENDING` 的场景清单没有缺失项。
 4. 机制实验的 13 项属性全部判定为 `pass`：每一项按它自己的效应量定样本量（`REQUIRED_SEEDS`），`defensive_rebound` 跑 640 个种子，相对变化 +0.0198、配对区间 [+0.0090, +0.0307] 整段在零的一侧，`known_insufficient.json` 的登记表因此清空。

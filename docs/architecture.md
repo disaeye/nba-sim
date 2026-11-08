@@ -66,12 +66,14 @@ flowchart TD
 
 | 目录 | 职责 | 具体模块 |
 | --- | --- | --- |
-| `clock/` | 独立计时器、运行条件与时间指令 | `ClockState`、`ClockDirective`、`ClockController` |
+| `clock/` | 独立计时器、运行条件与时间指令 | `ClockState`、`ClockDirective`、`ClockController`、`ClockCommitLog`、`ClockCheckpoint` |
 | `program/` | 暂停、换人与轮换 | `timeouts`、`rotation` |
-| `officiating/` | 违例、犯规、罚则与恢复计划 | `StoppageCause`、`PenaltyPlan`、`RestartPlan`、`ResumeContext`、`InboundLocation`、`ControlState` |
+| `officiating/` | 违例、犯规、罚则与恢复计划 | `StoppageCause`、`PenaltyPlan`、`RestartPlan`、`ResumeContext`、`InboundLocation`、`ControlState`、`ControlHandover` |
 | `actions/` | 动作生命周期、并行调度与技术细分 | `ActionKind`、`Fact`、`DefensiveActionKind` |
 | `control/` | 球员控制、最后触球与回合边界 | `BallBody`、`BallState`、球权争抢 |
 | `ledger/` | 比分、时间与统计投影 | `boxscore`、`report` |
+
+`crates/domain/src/match_model.rs` 保存权威的比赛阶段、比赛程序、球态与迁移表；`crates/domain/src/identity.rs` 保存稳定身份类型与分配器；`crates/domain/src/flow.rs` 保存由权威阶段与程序派生的兼容投影 `GameFlowState`。
 
 跳球、发球、罚球与节末程序的结算在 `world` 与 `resolve` 中，教练复核在 `challenge`。
 
@@ -94,148 +96,111 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["World::step(dt)"] --> B["[1] 时钟推进<br/>clock::advance（按 Phase 的时钟表）"]
-    B --> C["[2] 动量衰减与轮转意图<br/>note_intents"]
-    C --> D["[3] 动作运行时推进<br/>advance_action_phases · advance_defensive_actions · advance_steal_attempts · advance_on_ball_positioning · advance_block_jumps"]
-    D --> E["[4] 移动与身体积分<br/>advance_movement（跳球飞行走专用路径）"]
-    E --> F["[5] 球的飞行与地面接触<br/>poke::step · offball::step · check_hand_check · ball::step"]
-    F --> G["[6] 交互结算<br/>resolve_due_interactions"]
-    G --> H["[7] 阶段推进与结算<br/>advance_phase · resolve::{shot,pass,rebound,foul,freethrow}"]
-    H --> I["[8] 停表裁决提交<br/>World::adjudicate（违例、得分、犯规、罚球）"]
-    I --> J["[9] 决策<br/>policy::tick 与 policy::off_ball_tick（仅 Live 且有持球人）"]
-    J --> K["[10] 规则计时器与节末<br/>check_closely_guarded · check_back_to_basket · check_backcourt · check_free_throw_lane · check_period_end"]
+    A["World::step"] --> B["clock.advance_tick"]
+    B --> C["advance_action_phases"]
+    C --> D["advance_movement"]
+    D --> E["ball::step"]
+    E --> F["collect_raw_incidents"]
+    F --> G["build_adjudication_batch"]
+    G --> H["World::commit"]
+    H --> I["resolve_due_interactions"]
+    I --> J["maybe_decide"]
+    J --> K["rule_program_scan"]
+    K --> L["check_period_end"]
+    L --> M["stream_tick"]
 ```
 
-> **写入路径**：事件一律经 `World::emit` 进入事实流；停表的比分、球权、时钟与阶段后果一律经 `World::adjudicate(Adjudication)` 提交（见 `adjudication_design.md`）；动作生命周期由运行时推进发布 `ActionStarted` / `ActionPhaseChanged` / 终态事实。回放与验证只读事实流，不读引擎内部累加值。
+> **写入路径**：物理与程序发布 `RawIncident`，裁决层按 `(time_micros, sub_tick, event_id)` 排序后生成 `AdjudicationBatch`，`World::commit` 原子写入球态、控制、程序、时钟、罚则、动作运行时、账本与事件。动作生命周期使用同一 `action_id` 发布开始、阶段变化和唯一终态。协议、回放与验证只读事实流。
 
 ---
 
 ## 3. 球权状态机设计（P1 · 单一事实源）
 
-### 3.1 设计：分离"归属"与"轨迹"，位置是派生量
+### 3.1 设计：分离归属、程序与轨迹
 
-```
-BallState (归属 · 唯一事实源 · crates/sim)
-├── Held { holder: PlayerId }                        // 突破中的持球亦是 Held，
-│                                                    // 突破由动作窗口（§4.2）描述
-├── Pass { pass_id, from, to, kind,                  // 传球飞行：起点、落点与
-│          from_pos, to_pos, start, duration }       // 起飞时刻，可闭式采样
-├── Shot { shot_id, shooter, from_pos, target,       // 投篮飞行：出手点、落点、
-│           start, aperture_ft,                      // 有效筐口与补进概率
-│           rim_in_probability, aim_offset }
-└── Loose { pos, vel }                               // 松球与篮板弹跳
-
-World::ball_flight (飞行的第二个维度 · crates/sim)
-  kind = FlightKind = Pass | Shot | FreeThrow | JumpBall
-  resolve_at = 飞行结束、该结算的时刻
-  飞行是球的第二个维度：它不替换比赛程序（MatchProgram），只决定走哪个钟
-  与由哪一层结算（§4.1）
-
-BallTrajectoryKind (运动学采样参数 · crates/physics · 私有于执行)
-  退化为采样函数的参数载体，不再承载归属语义
+```mermaid
+flowchart LR
+    A[WorldState] --> B[BallState]
+    A --> C[MatchProgram]
+    A --> D[BallFlight]
+    B --> B1[Held]
+    B --> B2[DribbleFlight]
+    B --> B3[PassFlight]
+    B --> B4[ShotFlight]
+    B --> B5[Loose]
+    B --> B6[ControlledByOfficial]
+    B --> B7[OutOfPlay]
+    B4 --> S1[ShotContext.FieldGoal]
+    B4 --> S2[ShotContext.FreeThrow]
+    D --> D1[kind]
+    D --> D2[resolve_at]
 ```
 
-**位置是派生量**：`BallState` 不保存逐 tick 的位置/速度。任意时刻的球位置由飞行/松球参数**闭式采样**得出（时间的纯函数；`physics.step` 不触碰球）。因此：
+`BallState` 保存球的宏观归属，七种状态覆盖持球、运球飞行、传球飞行、投篮飞行、松球、裁判控球与比赛用球离场。`ShotFlight` 携带 `ShotContext::{FieldGoal, FreeThrow}`，罚球飞行期间 `MatchProgram` 保持 `FreeThrows`。`BallFlight` 保存飞行种类与结算时刻，飞行不替换比赛程序。
 
-- 每 tick 运动学**不写** `BallState`，`transition_ball_state` 只处理离散的归属/路由事件——"单一写入口"与物理步进不冲突；
-- `InFlight{flight}` 与 `Loose{params}` 中的参数在飞行期间不可变；需要改变落点（如被抢断、打铁改弹）即是一次状态转移，不是参数改写。
-- **垂直分量服从重力**（ADR-017，第一步飞行抛体化）：传球、投篮、篮板飞行的 z(t) 由
-  `crates/domain/src/projectile.rs` 的 `ProjectileArc` 产生（`z = z0 + vz0·t − g/2·t²`，
-  `g = ball_gravity_ftps2` 真实值 32.17）；出手/触筐时刻的 vz0 由两端高度与飞行时长
-  闭式反解，弧顶由抛物线自然产生。飞行时长由「请求弧顶 + 两端高度」解出，
-  受球速包络（`ball_max_speed_ftps`）与动作窗口区间双重约束。
+`BallState::Held` 携带持球人身份。其他球态由 `ControlState` 给出控制球队、最后触球人与其球队、控制建立时刻、前场控制、触筐与触板身份。位置与速度由 `crates/sim/src/control/mod.rs` 的运动学参数按时间求值；`crates/sim/src/body.rs`、`motion.rs`、`physical.rs` 提供身体、手部、脚步、跳跃与接触证据。垂直分量由 `crates/domain/src/projectile.rs` 的 `ProjectileArc` 产生，弧顶由抛物线自然产生，出手与触筐时刻的初速由两端高度和飞行时长闭式反解，飞行时长受球速包络与动作窗口区间共同约束。
 
-### 3.2 派生视图（全部只读）
+### 3.2 派生视图与写入边界
 
-| 派生 | 实现 | 说明 |
-| ------ | ------ | ------ |
-| `carrier() -> Option<&PlayerId>` | 从 `BallState::Held` 派生 | 取代 `carrier_idx` 的读取方 |
-| `has_ball(player) -> bool` | `carrier() == Some(player)` | 物理层不再持有独立标志 |
-| `possession_team()` | Held→持球人队；InFlight/Loose→最后触球队 | 取代 `Possession` 字段的读取方 |
-| `is_live() / is_dead()` | 从 BallState 变体派生 | 取代 `is_dead_ball` 布尔 |
+`holder`、`has_ball`、`team_control`、`frontcourt`、`in_flight`、`rim_contact` 与 `backboard_contact` 都由 `ControlState` 派生。公开投影只读，消费方不得持有第二份比赛真相。
 
-**写入纪律（字段私有化 + 唯一 mutator + grep 守卫）**：
+控制序列按控制球队划分：同一队的传球只是控制人换手，序列不变；控制球队变了就是一次交接，交接是原子事件（上一段结束、新一段开始）。比赛结束时最后一段序列被明确关闭，因此「建立次数」与「结束次数」必然相等，独立验证器据此核对。
 
-- `BallState` 只能被**一个函数** `MatchEngine::transition_ball_state(event) -> Vec<GameEvent>` 修改；
-- 该函数是纯函数风格：`(当前 BallState, 物理/裁决事实) -> (新 BallState, 产出事件)`；
-- 所有弹道到达、抢断、篮板、得分、出界都转化为对这个函数的调用；
-- **强制机制**：状态字段必须私有化，杜绝外部直接赋值；不变量检查输出，不能替代写入边界。写入纪律由类型封装、唯一 mutator、结构守卫和测试专用构造器共同保证。
+`World::step` 收集 `RawIncident`，按 `(time_micros, sub_tick, event_id)` 排序，交给 `AdjudicationBatch` 生成完整计划。`World::commit` 按固定顺序原子提交球态、控制、程序、时钟、罚则、动作运行时、账本与事件。所有物理到达、抢断、篮板、得分、出界与发球都经同一提交入口；字段私有化、调用图守卫和穷举测试阻止旁路写入。`ControlTransition` 的类型化前置条件在提交前检查，非法转换直接失败。
 
-### 3.3 状态转换表（节选）
+### 3.3 时钟的唯一写入口
 
-| 状态 | 触发事实 | 下一状态 | 副作用事件 |
-| --------- | --------- | --------- | ----------- |
-| Held(c) | 决策 Pass 执行 | InFlight{Pass} | PassReleased（不含接球结果） |
-| InFlight{Pass} | 到达并被接住 | Held(receiver) | PassCompleted |
-| InFlight{Pass} | 到达但未接住 | Loose | PassDropped |
-| InFlight{Pass} | 防守者触球未控制 | Loose | PassTipped |
-| InFlight{Pass} | 防守者完成控制 | Held(defender) + 球权翻转 | PassIntercepted + PossessionChange |
-| InFlight{Pass} | 出界 | Dead{OutOfBounds} | Turnover |
-| InFlight{Shot} | 合法封盖 | Loose | BlockedShot |
-| InFlight{Shot} | 触筐后入筐 | Dead{MadeBasket} | Score(n) |
-| InFlight{Shot} | 触筐后弹出 | Loose (RimRebound) | ReboundAvailable |
-| InFlight{FreeThrow} | 命中（非末罚） | Dead{FreeThrowMade} | Score(1)，准备下一罚 |
-| InFlight{FreeThrow} | 命中（末罚） | Dead{MadeBasket} | Score(1) |
-| InFlight{FreeThrow} | 不中触筐 | Loose (罚球篮板) | ReboundAvailable |
-| Loose | 最近球员拿到 | Held(p) | Rebound/LooseBall secured |
-| Held(c) | 24秒到 | Dead{ShotClockViolation} | Violation + PossessionChange |
-| Dead{Foul} | 罚球程序开始 | Held(罚球者) | FreeThrowAttempt(i/n) |
-| Dead{*} | 发球准备完成 | InboundSetup | InboundReady |
-| InboundSetup | 发球传出 | InFlight{InboundPass} | InboundPass |
-| （比赛开始） | 裁判抛球 | Loose (跳球) | TipOff |
-| Loose (跳球) | 拨球控制 | Held(p) | Possession 确立 |
-| Dead / Loose（节间遗留） | 节间结束（PERIOD_START） | InboundSetup（球权按节末归属延续） | InboundSetup |
+`ClockState` 以整数微秒保存全部计时器与运行标志。`ClockDirective` 只有四种形态：`Start`、`Stop`、`Set` 与 `Restore`。`ClockController` 是唯一改钟入口：推进只读运行标志，标志本身只由 `Start` 与 `Stop` 写入，因此「哪些钟在走」永远有一条可重建的指令依据。
 
-节间开场规则（ADR-018）：球已由在场球员持有时原样保留；停球/松球等
-不可取状态必须经显式发球程序重建可取性，不得以「流程活球、球不可取」
-进入新的一节（seed 14 实测缺陷：停球跨节 201 tick 后被伪判后场违例）。
+提交记录有三种形态：指令、连续推进段与检查点。连续推进合并成一段——段内没有任何指令写入，整段可以用「起点读数 + 推进时长」表达，因此逐 tick 推进不会让事件数膨胀。`Restore` 用于纠正：节末即时回放改判时，比赛钟从出手那一刻的检查点恢复。
 
-> 完整转换表作为 `domain` 的状态机数据，配合穷举测试（每个非法边都必须被拒绝）。
+独立验证器只读事件流：按提交顺序重放时钟得到终局读数，按交接事实重建控制序列。
+
+### 3.3 球态与程序转换
+
+```mermaid
+stateDiagram-v2
+    [*] --> Held
+    Held --> DribbleFlight : DribbleRelease
+    Held --> PassFlight : PassRelease
+    PassFlight --> Held : ControlEstablished
+    PassFlight --> Loose : PassDropped
+    PassFlight --> Loose : Deflection
+    PassFlight --> OutOfPlay : Boundary
+    ShotFlight --> Loose : RimRebound
+    ShotFlight --> OutOfPlay : MadeBasket
+    ShotFlight --> Loose : BlockedShot
+    Loose --> Held : ControlEstablished
+    ControlledByOfficial --> Held : InboundAuthorized
+    OutOfPlay --> ControlledByOfficial : InboundSetup
+```
+
+`BallState` 转换只描述归属变化；程序变化由 `MatchProgram::{OpenPlay, JumpBall, Inbound, FreeThrows, Timeout, Review, PenaltyAdministration, PeriodSettlement, Intermission, Pregame, Complete}` 单独发布。节次切换时，已由在场球员持有的球保持原归属；停表球与松球经 `Inbound` 程序重建可取性。完整转换集合由 `nba_domain::match_model` 的迁移表给出，`BallBody::transition` 是唯一写入口，穷举测试拒绝每个非法边。
 
 ---
 
 ## 4. 主循环阶段化设计（P3 · 显式管线）
 
-### 4.1 设计：阶段管线
+### 4.1 设计：固定因果管线
 
-`step()` 是**显式阶段序列的顺序调度**。每个阶段是独立方法，只接收它需要的状态组 `&mut`，整个 `&mut MatchEngine` 不出现在签名里：
+`World::step` 按固定次序推进：权威状态先产生原始事实，裁决层生成批次，`World::commit` 原子提交，投影层只读输出。
 
-```rust
-pub(crate) enum PhaseOutcome {
-    Continue,     // 进入下一阶段
-    ShortCircuit, // 本 tick 提前结束（跳球/节末/死球重置/终场），由调度器补齐帧输出
-}
-
-// 阶段签名只声明它确实写入的状态组。状态组定义见 §4.3。
-fn clock_advance_phase(&mut self, dt: f32, was_tip_off: bool);
-fn tip_off_phase(&mut self, dt: f32) -> PhaseOutcome;
-fn dead_flow_phase(&mut self, dt: f32, was_period_break: bool) -> PhaseOutcome;
+```mermaid
+flowchart LR
+    A[clock.advance_tick] --> B[advance_action_phases]
+    B --> C[advance_movement]
+    C --> D[ball::step]
+    D --> E[collect_raw_incidents]
+    E --> F[build_adjudication_batch]
+    F --> G[World::commit]
+    G --> H[resolve_due_interactions]
+    H --> I[maybe_decide]
+    I --> J[rule_program_scan]
+    J --> K[check_period_end]
+    K --> L[stream_tick]
 ```
 
-> 阶段必须保持窄写权限：实现可以采用静态分发或其他等价机制，但不能把整个可变世界交给任意阶段。若改变阶段编排机制，必须在 `docs/decisions.md` 登记其借用隔离取舍（当前编排机制见 ADR-014）。
-
-**写权限的可核验形式**：阶段签名列出它写入的状态组名，`&mut self` 的全部状态不出现在签名里。多数含写入的阶段函数只写单一状态组，跨组函数必须在签名中逐一列出所写的每个组名，跨组写入因此从隐式变为显式（当前分布的实测数据属决策面，见 ADR-014）。
-
-阶段序列（对应 §2 的 12 步；条件激活的分支未出现在 §2 主数据流图中）。以下为调度器顺序调用的阶段函数，与代码一一对应：
-
-```
-clock_advance_phase          // 时间轴、子阶段计时、后场计时、进攻钟
-runtime_constraint_phase     // 24 秒/出界/死球等运行时约束；可短路
-advance_action_windows       // 动作窗口推进与运动学锁同步
-free_throw_and_period_phase  // 罚球结算与节末；可短路（条件激活）
-tip_off_phase / dead_flow_phase  // 跳球、节间、暂停、终场；可短路（条件激活）
-decision_phase               // 候选生成→约束→效用→采样（条件激活：到达决策间隔）
-apply_decision_output        // 执行重校验与应用动作
-physics.step                 // 刚体运动、碰撞、弹道采样
-resolve_ball_flight          // 弹道裁决（含封盖判定）
-apply_ball_flight_outcome    // 结果消费：出界/抢断/松球/新球态；可短路
-plan_tactics_and_navigation  // 战术目标生成与移动导航
-collect_tick_facts           // 语义接触归集与事实抽取
-publish_events               // 事件裁决与因果发布
-build_tick                   // 快照输出（无副作用）
-```
-
-阶段顺序有三条不变式：时钟与生命周期在约束求值之前；不变量校验在 `step()` 包装器里、任何短路路径都不能绕过（见 §2 时序不变式）；`build_tick` 无副作用。
+阶段函数只接收完成职责所需的窄参数，物理模块发布原始事实，动作模块发布动作状态，裁决模块生成计划，提交模块按完整计划更新比赛状态，协议层读取投影。`World::commit` 是唯一写入口。`RawIncident` 按 `(time_micros, sub_tick, event_id)` 排序；同刻事件的结果不依赖容器插入顺序。短路路径由 `PhaseOutcome` 表示，输出帧由调度器补齐，不变量校验在 `step()` 包装器中执行，任何路径都经过它。
 
 ### 4.2 收益
 
@@ -244,56 +209,11 @@ build_tick                   // 快照输出（无副作用）
 - **InvariantPhase 不可绕过**：它是调度序列固定最后一环，任何路径都经过它；
 - **ShortCircuit 显式化**：取代分散的提前 `return` 出口。
 
-### 4.3 状态组划分
+### 4.3 权威状态分组
 
-`MatchEngine` 的字段收敛为十个具名状态组（ADR-014 时的 82 字段）。这套分组属于已删除的旧引擎，当前内核的状态见 `crates/sim/src/state.rs`。分组依据是**写入点的同现关系**（同一函数同时写入的字段归入同组）：
+`WorldState` 按职责保存 `ClockState`、`ControlState`、`BallState`、`MatchProgram`、`ActionRuntime`、`InteractionRegistry`、`PenaltyQueue`、`PendingAdjudications`、`Ledger` 与 `EventJournal`。每个分组声明写入来源与读取视图。`ClockController` 是时钟写入口，`World::commit` 是跨分组写入口，`stream_tick` 只读投影。
 
-```rust
-pub struct MatchEngine {
-    clock: state::MatchClock,                      // 11 字段：tick_index, game_clock, shot_clock,
-                                                   //   current_time, period, sub_phase(_timer),
-                                                   //   inbound/backcourt/period_break elapsed,
-                                                   //   last_decision_time
-    flow: state::GameFlow,                         // 10：game_flow, possession(_id), possession_arrow,
-                                                   //   scope_active/boundary, target/completed_possessions,
-                                                   //   simulation_complete, inbound_baseline
-    ball: state::BallRuntime,                      // 11：ball_pos_3d, ball_state, last_passer_id,
-                                                   //   pending_pass_receiver, receiver_estimate,
-                                                   //   pending_loose_ball_terminal, pending_pass_inbound,
-                                                   //   prev_observed_ball_pos, beaten_defender_id,
-                                                   //   loose_contact_resolved, pass_contact_states
-    config: state::TeamConfig,                     // 13：rules, tactical_set, home/away_team, team_traits,
-                                                   //   home/away_roster_order, home/away_offense_tactic,
-                                                   //   home/away_offense_spec, home/away_defensive_tactic
-    systems: state::Systems,                       //  4：physics, decision, coach, rng
-                                                   //   （原 world 字段已随 shadow world
-                                                   //   移除，见 ADR-015 修订注记）
-    observations: state::RuntimeObservations,     // 11：active_windows, last_decision_trace,
-                                                   //   latest_spacing, potential_field,
-                                                   //   latest_contacts, beaten_recovery_until,
-                                                   //   advancing_player, modulation,
-                                                   //   rotation_clock, substitutions_this_window,
-                                                   //   rotation_window_done
-    journal: state::EventJournal,                  // 10：pending_events, current_event, current_event_types,
-                                                   //   current_enforcements, event_id_counter, causal_links,
-                                                   //   current_event_log, event_sequence, current_callout,
-                                                   //   current_intensity
-    ledger: state::ScoreLedger,                    //  8：home/away_score, team_fouls_home/away,
-                                                   //   free_throws_remaining, free_throw_attempt/shooter, box_score
-    possession_ctx: state::PossessionContext,      //  7：current_possession start_clock/start_time/passes/
-                                                   //   shooter/contest/turnover_player,
-                                                   //   last_possession_summary_index
-    audit: state::AuditTrail,                      //  2：invariant_checker, last_tick_violations
-}
-```
-
-**分组定义访问路径**。状态组的字段以 `pub(crate)` 对同 crate 的模块可见，模块通过
-`self.clock.game_clock` 这样的具名路径访问；一个阶段拿不到它没有在签名里声明的组。
-字段归错组从「无代价」变为类型不匹配。组定义与对应的守卫都已随旧引擎删除；当前内核按 `crates/sim/src/world.rs` 的单一路径推进。
-
-**空间量的单一事实源（ADR-015，旧引擎）**：球员级空间事实由旧引擎的几何层统一提供，全场弱侧拓扑由防守势场求解器在求解时从在场进攻球员位置即时涌现。这两个实现随旧引擎一起删除；当前内核的空间量见 `crates/sim/src/state.rs` 与 `crates/domain/src/court.rs`。
-
-**未采用的形式**：不把 `MatchEngine` 换成纯数据 `World` 加无状态 System 管线。大量字段存在多写入点、单个阶段函数跨多个状态组、弹道裁决块引用大量状态字段并调用多个引擎方法；在该形态下把字段按 `&mut` 解构传给窄签名函数需要重写这些函数体，行为等价性无法由黄金哈希证明。具体分布数据与代价收益比较见 ADR-014。
+空间量由 `crates/sim/src/state.rs` 与 `crates/domain/src/court.rs` 给出。防守势场求解器在求解时从在场进攻球员位置生成弱侧拓扑。分组定义与守卫共同阻止跨职责旁路写入。
 
 ---
 
@@ -354,13 +274,7 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 
 **单向数据流**：physics → semantics → officiating，禁止反向。
 
-**物理模块内部边界**（D29）：`crates/physics/src/movement/` 分为
-`mod.rs`（对外值类型、`SpatialPhysics` 接口、门面 `PhysicsWorld`、
-两个具体后端 `RapierSpatialPhysics` / `SimpleCirclePhysics`）与
-`kinematics.rs`（两个后端共用的规则化运动学：速度提案、碰撞求解、
-端点投影与边界事实发射）。边界依据是「能否被两个后端共用」——
-后端只负责积分与接触检测，规则化的运动学约束全部在 `kinematics`，
-否则两个后端会互相反向依赖。
+**物理模块内部边界**：`crates/sim/src/body.rs` 定义身体与手部状态，`motion.rs` 负责积分、速度提案与碰撞求解，`physical.rs` 负责接触证据，`control/mod.rs` 负责球态与边界事实。物理层发布原始事实，语义层消费 `RawIncident`，裁决层消费类型化计划；单向数据流由调用图守卫核对。
 
 ### 6.2 裁决的确定性
 
@@ -385,7 +299,7 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 | 三分线 | ~23.75 ft（底角 22） | 6.75 m（等半径，无底角特例） |
 | 交替拥有 | 跳球 | 交替拥有箭头 |
 
-**验收原则**：切换联赛 = 切换一份规则档案（数据），计时、几何、犯规政策和罚球程序随之生效；引擎代码路径不因联赛而分叉。具体阶段顺序和证据要求见 `docs/protocol.md`。
+**验收原则**：切换联赛等于切换一份版本化规则档案，计时、几何、犯规政策、罚球、发球、跳球、换人、违例、复核与暂停程序随之生效；引擎代码路径不因联赛而分叉。`LeagueProfile` 按 `full_simulation_plan.md` §3.2 的 11 个策略族保存字段，加载时检查条件互斥、限额、程序完整性、几何、版本与引用；缺少必要字段直接返回配置错误，禁止静默补全。具体阶段顺序和证据要求见 `docs/protocol.md`。
 
 ---
 
@@ -403,13 +317,13 @@ FinalUtility = (BaseValue + SkillBonus + TendencyBonus + ContextBonus + Preferen
 | `GameRules` | 全部可调参数（时钟、物理上限、权重、阈值） | `validate()` 在 setup 时强制执行 |
 | `DecisionRules` | 决策子系统参数（效用权重、约束阈值、采样个性化） | 独立 `validate()`，由 `decision` 消费；作为 `GameRules` 嵌套组注入 |
 | `PlayerData` 系（`data.rs`） | `PlayerAttributes` 能力向量 + `PlayerTendencies` + 球队级 `TeamTraits` | 能力是行为差异的唯一合法来源（P7）；被 decision/physics/officiating 消费；**本体规格（分类学/值语义/锚点/迁移路线）以 `docs/attributes.md` 为单一事实源**；涌现要求见 quality.md §6 |
-| `LeagueProfile` | 联赛规则档案：计时、进攻时钟、犯规与罚则、违例开关、暂停、几何 | 程序见 `docs/basketball.md` §6，不进入引擎联赛分支 |
-| `GameFlowState` | 宏观生命周期（TipOff/LiveBall/DeadBall/FreeThrow/QuarterEnd/Halftime/Overtime/GameEnd） | 转换由 `engine` 驱动，此处仅定义 |
-| `SubPhase` | 回合内子阶段（Initiation/ActionExecution/ShotAttempt/FlightAndRebound/DeadBallReset） | 与 GameFlowState 正交 |
-| `BallState`（见 §3） | 球的宏观归属状态 | **唯一事实源** |
-| `GameEvent` | 领域事实（得分/犯规/违例/接触/阶段转换） | 值对象，不可变 |
-| `ActionTimeWindow` | 一个动作从发起到结束的时间窗口 | 驱动运动学锁定 |
-| `FixedDt` | 固定步长 | 全引擎唯一时间推进单位 |
+| `LeagueProfile` | 11 个版本化策略族：节次、时钟、进攻钟、犯规、罚球、发球、跳球、暂停、换人、违例、复核 | 程序见 `docs/basketball.md` §6；缺字段直接失败，不进入引擎联赛分支 |
+| `GameFlowState` | 由 `MatchStage` 与 `MatchProgram` 派生的兼容投影 | 只读，转换由 `World::commit` 发布 |
+| `SubPhase` | 程序内阶段：准备、授权、执行、完成 | 与 `MatchStage` 正交，由 `MatchProgram` 持有 |
+| `BallState`（见 §3） | 七种球的宏观归属状态 | `ControlState` 与 `BallFlight` 共同给出完整球态 |
+| `GameEvent` | 领域事实（得分/犯规/违例/接触/程序/时钟/控制/结算） | 值对象，不可变 |
+| `ActionTimeWindow` | 一个动作从发起到结束的时间窗口 | 驱动运动学约束 |
+| `FixedDt` | 固定步长与整数微秒时间单位 | 全引擎唯一时间推进单位 |
 
 ### 7.3 设计要点
 

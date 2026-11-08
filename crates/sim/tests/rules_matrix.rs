@@ -298,7 +298,7 @@ fn the_control_state_carries_who_holds_and_what_was_touched() {
     world.start_possession(TeamSide::Home, PossessionKind::Live);
     world.set_phase(Phase::Live);
     world.ball.set_held(holder);
-    world.last_touch = Some(holder);
+    world.control.last_touch = Some(holder);
     let state = world.control_state();
     assert_eq!(state.holder, Some(holder), "控制状态必须给出控球人");
     assert_eq!(state.team, Some(TeamSide::Home), "控制状态必须给出控制方");

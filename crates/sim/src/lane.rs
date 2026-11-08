@@ -493,6 +493,9 @@ pub fn book_defense_three_second(world: &mut World, actor: usize) {
         1,
         false,
     );
+    // 哨响即停表：场上正在进行的动作全部作废。技术犯规发生在活球
+    // 中途，不中止动作的话，原动作稍后结算时会把球从罚球程序里抢走。
+    world.cancel_actions("defensive_three_second");
     // 罚则位置：罚球线延长线上的边线（NBA Rule 10 §VII.1）。
     let spot = world
         .rules

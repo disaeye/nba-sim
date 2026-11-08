@@ -77,7 +77,7 @@ fn a_loose_ball_over_the_sideline_hands_possession_to_the_opponent() {
     world.players[handler].pos = Vec2::new(10.0, 25.0);
     world.players[handler].target = world.players[handler].pos;
     // 进攻人把球碰出边线：最后触球是进攻方，按违例交出球权。
-    world.last_touch = Some(handler);
+    world.control.last_touch = Some(handler);
     world.ball = nba_sim_core::ball::BallBody::loose(Vec2::new(2.0, 25.0), Vec2::new(-30.0, 0.0));
 
     let mut contact = false;
@@ -156,7 +156,7 @@ fn carrying_the_ball_back_over_half_court_is_a_backcourt_violation() {
         world.step(TICK_SECONDS);
     }
     assert!(
-        world.possession.frontcourt_established,
+        world.control.frontcourt,
         "过中线之后必须记下前场控制"
     );
     // 再把球带回后场。
@@ -740,7 +740,7 @@ fn a_ball_leaving_behind_the_baseline_inbounds_from_that_baseline() {
     world.set_phase(Phase::Live);
     world.players[handler].pos = Vec2::new(10.0, 25.0);
     world.players[handler].target = world.players[handler].pos;
-    world.last_touch = Some(handler);
+    world.control.last_touch = Some(handler);
     // 球从底线出界：发球点必须是这条底线上的点。
     world.ball = nba_sim_core::ball::BallBody::loose(Vec2::new(1.0, 25.0), Vec2::new(-30.0, 0.0));
     let mut contact = false;

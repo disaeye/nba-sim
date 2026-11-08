@@ -1,8 +1,8 @@
 # NBA-Sim · 比赛过程与真实性验证设计
 
-> 状态：本文描述旧引擎的五层验证（`crates/validation` 的 `runner`/`mech` 与 `crates/evaluator`）。动作链内核的验收规格见 `docs/dev/action_chain_engine.md`；随旧引擎删除，本文退为历史文档。
+> 状态：本文保存旧引擎五层验证设计的可追溯定义。动作链内核的验收以 `docs/dev/current/full_simulation_plan.md` §13 与 §15 为准；当前判定见 `docs/dev/action_chain_engine.md`，当前状态见 `docs/dev/status.md`。
 
-> 本文档是五层验证的实施规格。比赛规则与统计记账语义归属 `docs/basketball.md`，战术输入归属 `docs/tactics.md`，质量通用要求归属 `docs/quality.md`。下文标记“新增”的类型和字段均为实施要求，不表示当前代码已经提供。实现状态记录在 `docs/dev/status.md`，实施队列记录在 `docs/dev/current/plan.md`。
+> 本文列出的类型、事件、场景与工件要求，在动作链内核中以权威方案的命名、字段和证据工件为准。比赛规则与统计记账语义归属 `docs/basketball.md`，战术输入归属 `docs/tactics.md`，质量通用要求归属 `docs/quality.md`。下文标记“新增”的类型和字段均为历史实施要求，不表示当前代码已提供。
 
 ## 1. 验证目标与结论
 

@@ -86,6 +86,7 @@ pub fn resolve(
         kind,
         landing,
         flight,
+        inbound: world.inbound_passer == Some(from),
     });
     world.pass_in_flight = Some(crate::ball::PassInFlight {
         pass_id,
@@ -94,7 +95,7 @@ pub fn resolve(
         kind,
         bounced: false,
     });
-    if let crate::state::BallState::Pass { to_pos, .. } = world.ball.state() {
+    if let crate::state::BallState::PassFlight { to_pos, .. } = world.ball.state() {
         world.players[to].target = to_pos;
         world.players[to].target_kind = crate::state::TargetKind::Window;
         world.players[to].target_partner = to;

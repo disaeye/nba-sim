@@ -1,4 +1,6 @@
-# S8 最终验收与发布说明
+# S8 历史验收记录
+
+> 本文记录 S8 周期验收。当前验收以 `docs/dev/current/full_simulation_plan.md` §13、§15 与 `docs/dev/evidence/action_chain_validation/` 的最终工件为准；本文内的数量、样本量与认证结论只用于追溯 S8 批次。
 
 ## 一、概述
 
@@ -57,7 +59,7 @@ NBA-Sim 模拟引擎在 S0-S8 全周期重构中完成了从第一性原理出�
 4. `distribution` 维度：四区分布与七大进攻方式全部与 NBA 真实数据对齐。
 5. `emergence` 维度：比赛分差与时间产生合规的逆转、压时间与战术博弈行为。
 
-### 4. 当前机制实验（13 个属性 × 40 个种子）
+### 4. 历史机制实验（13 个属性 × 40 个种子）
 
 最新 `validate-core --seed 1 --games 32 --mechanism` 报告：分布门禁 `defects_found`，机制不足 5 项，结构上不适用 1 项，通过 7 项。
 

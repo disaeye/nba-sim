@@ -96,7 +96,7 @@ fn cut_pass_aims_at_the_cutters_planned_catch_point() {
         duration: 1.0,
     };
     nba_sim_core::resolve::pass::resolve_cut(&mut world, &intent);
-    let nba_sim_core::state::BallState::Pass { to_pos, .. } = world.ball.state() else {
+    let nba_sim_core::state::BallState::PassFlight { to_pos, .. } = world.ball.state() else {
         panic!("空切必须真的把球送出去");
     };
     assert!(

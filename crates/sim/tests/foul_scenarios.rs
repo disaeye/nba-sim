@@ -447,8 +447,7 @@ fn a_fiba_disruptive_foul_is_booked_separately_from_a_flagrant_foul() {
         !world.players[fouler].disqualified,
         "破坏性犯规不触发取消比赛资格"
     );
-    let (shooter, total, _) =
-        free_throw_program(&world).expect("破坏性犯规之后必须进入罚球程序");
+    let (shooter, total, _) = free_throw_program(&world).expect("破坏性犯规之后必须进入罚球程序");
     assert_eq!(shooter, fouled);
     assert_eq!(total, 2);
 }

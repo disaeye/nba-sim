@@ -144,17 +144,19 @@
 
 检测体系没有工具链就是空话。以下为可执行验收的组成部分：
 
-### 3.1 批量跑批 CLI
+### 3.1 完整输入清单与批量跑批 CLI
 
 目标形态：
 
 ```
-nba-sim --rules rules.json --seeds 0..20 batch --out stats.jsonl
+nba-sim sim-core --league nba|fiba --setup <MatchSetup.json> --replay-manifest <manifest.json> --seed N --games M --gate
+nba-sim validate-core --league nba|fiba --setup <MatchSetup.json> --out <证据目录>
 ```
 
-- `--rules`：部分 JSON 覆盖 `GameRules`（依赖 `#[serde(default)]`），**校准的唯一入口**（P6）；
-- `batch`：种子矩阵批量跑、每场输出一行统计 JSON；
-- 跑批必须 release 模式（见 §4 性能预算）。
+- `--setup` 与 `--replay-manifest` 给出完整 `MatchSetup`、规则版本、校准版本、种子、引擎模型版本、名单哈希与参数表来源；版本不符或缺少字段直接返回配置错误；
+- 参数校准入口由版本化策略表与参数搜索工件给定；冻结三表通过哈希校验，部分字段覆盖不进入正式认证；
+- `sim-core` 与 `validate-core` 从 CLI、WASM、debug-server 与检查点恢复读取同一份完整输入清单；
+- 批次逐场流式写出事件与统计，逐场释放世界，跑批使用 release 模式。
 
 ### 3.2 评判器（回合/阶段评判与归因）
 
@@ -178,21 +180,16 @@ nba-sim --rules rules.json --seeds 0..20 batch --out stats.jsonl
 
 ## 4. 性能预算
 
-性能是验收项，不是事后优化。
+性能是验收项。每个长测试与批次进程受固定地址空间上限约束，峰值常驻内存、运行时间、tick 数、事件数、动作数、加时数与每 tick 分配写入 `performance.json`。
 
-### 4.1 预算表
+验收范围：
 
-| 指标 | 预算 | 验证方式 |
-| --- | --- | --- |
-| 判定批次运行时间 | `validate-core --games 32 --mechanism` 在 4 核机器上不超过 3 分钟 | `time ./target/release/nba-sim validate-core` |
-| 单场模拟运行时间 | 整场 48 分钟不超过 5 秒（release） | `sim-core --games N` 计时 |
-| 单节运行时间 | 由已批准的基准冻结 | 分层 benchmark 工具 |
-| 每 tick 堆分配 | 稳态为 0（复用缓冲；`build_tick` 的 Vec/String 复用） | 分配计数器或 heaptrack 抽查 |
-| `String` clone / tick | 消除（球员 id/jersey 预分配 Arc/静态） | 代码审查 + 分配计数 |
-| 批量跑批 | 由资源预算 fixture 冻结 | batch 资源报告 |
-| 常驻内存占用 | 所有测试和运行过程必须控制常驻内存，单场模拟峰值低于 10 MB，32 场判定批次峰值低于 50 MB，防止内存耗尽崩溃 | 进程采样或内存剖析工具 |
-| 测试套件执行 | tier1 ≤ 2 分钟；tier2 ≤ 6 分钟；tier2+3 ≤ 15 分钟；全量 ≤ 20 分钟（4 核 3.7GB 参考机，`scripts/run-tests.sh` 分层实测：tier1 62s、全量 945s）；单目标不得无界挂起（`par_test.py --timeout` 600s 硬上限） | `scripts/run-tests.sh` 分层计时 |
-| 测试并行调度 | 两级并行：目标间（`par_test.py --jobs`）× 目标内种子间（rayon `par_iter`，在 `fingerprint_for_setup` 与各测试的多 seed 循环）；内存大户 `stats_baseline` 串行独占 | `par_test.py --serial` 默认值 |
+- 常规比赛、连续加时、频繁犯规、密集传球、多次暂停、录像复核、FIBA 档案；
+- `sim-core --gate` 与 `validate-core` 的 NBA、FIBA 批次；
+- 全量工作区测试与浏览器端到端脚本；
+- 稳态逐 tick 分配计数与逐场释放后的常驻内存监控。
+
+`performance.json` 与 CI 资源守卫给出每个进程的实测值、上限与判定。进程超过上限直接终止，测量缺失、输出文件截断或工件版本不符直接返回失败。
 
 ### 4.2 纪律
 
