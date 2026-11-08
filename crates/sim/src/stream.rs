@@ -5,8 +5,9 @@
 
 use nba_domain::court::Court;
 use nba_protocol::{
-    DebugEpv, DebugUtility, DecisionDebug, DecisionTrace, FrameEvent, FrameRules, RenderAction,
-    RenderBall, RenderFrame, RenderPlayer, RenderScore, RenderTeam, StreamTick, TraceCandidate,
+    DebugEpv, DebugUtility, DecisionDebug, DecisionTrace, FrameEvent, FrameRules, PlayerTimerFlag,
+    RenderAction, RenderBall, RenderFrame, RenderPlayer, RenderScore, RenderTeam, StreamTick,
+    TimerFlag, TimerFlags, TimerKind, TraceCandidate, ENGINE_MODEL_VERSION,
 };
 use serde_json::json;
 
@@ -14,6 +15,36 @@ use crate::action::Fact;
 use crate::state::{BallState, Phase};
 use crate::tactics::PLAY_SOURCES;
 use crate::world::{TimedFact, World};
+
+impl World {
+    /// 计时器运行标志：此刻哪些计时器在走。
+    ///
+    /// 标志直接读权威时钟状态，不从比赛阶段反推。
+    pub fn timer_flags(&self) -> TimerFlags {
+        let running = self.clock.state().running_flags();
+        let mut timers = Vec::new();
+        let mut player_timers = Vec::new();
+        for timer in crate::clock::directives::TimerId::all(self.players.len()) {
+            let flag = running.get(timer);
+            match timer {
+                crate::clock::directives::TimerId::PlayerTime(handle) => {
+                    player_timers.push(PlayerTimerFlag {
+                        player: handle,
+                        running: flag,
+                    });
+                }
+                other => timers.push(TimerFlag {
+                    timer: timer_kind(other),
+                    running: flag,
+                }),
+            }
+        }
+        TimerFlags {
+            timers,
+            player_timers,
+        }
+    }
+}
 
 impl World {
     pub fn project_event(&self, event: &TimedFact) -> FrameEvent {
@@ -1044,9 +1075,10 @@ impl World {
                             .map(|trace| (index, trace))
                     })
                     .map(|(index, trace)| Box::new(self.decision_debug(index, trace))),
-                rules: frame_rules(&self.rules),
+                rules: frame_rules(&self.rules, &self.params.calibration_version),
                 stream_projection: "facts".to_string(),
                 potential_field: Vec::new(),
+                timers: self.timer_flags(),
             },
             tactical_set: String::new(),
             game_clock: self.clock.game_clock() as f32,
@@ -1251,8 +1283,44 @@ impl World {
     }
 }
 
-pub fn frame_rules(rules: &nba_domain::GameRules) -> FrameRules {
+/// 引擎计时器身份到协议计时器类别的对应。
+///
+/// 协议层不认识的计时器在这里失败：一个引擎里存在而协议里不存在的计时
+/// 类别，会让消费方看不懂这条帧。
+fn timer_kind(timer: crate::clock::directives::TimerId) -> TimerKind {
+    use crate::clock::directives::TimerId;
+    match timer {
+        TimerId::Simulation => TimerKind::Simulation,
+        TimerId::GameClock => TimerKind::GameClock,
+        TimerId::ShotClock => TimerKind::ShotClock,
+        TimerId::Elapsed => TimerKind::Elapsed,
+        TimerId::PlayerTimeTotal => TimerKind::PlayerTimeTotal,
+        TimerId::Backcourt => TimerKind::Backcourt,
+        TimerId::Lane => TimerKind::Lane,
+        TimerId::Inbound => TimerKind::Inbound,
+        TimerId::BackToBasket => TimerKind::BackToBasket,
+        TimerId::FreeThrow => TimerKind::FreeThrow,
+        TimerId::Review => TimerKind::Review,
+        TimerId::Timeout => TimerKind::Timeout,
+        TimerId::ProgramPrep => TimerKind::ProgramPrep,
+        TimerId::Period => TimerKind::Period,
+        TimerId::PeriodDuration => TimerKind::PeriodDuration,
+        TimerId::Tick => TimerKind::Tick,
+        TimerId::PlayerTime(handle) => panic!(
+            "球员计时器 {handle} 不是计时器类别：它走球员计时器字段"
+        ),
+    }
+}
+
+/// 帧规则投影。
+///
+/// 三个版本字段回答「这次运行是什么」：规则版本来自联赛档案，校准版本
+/// 来自参与模拟的配置文件摘要，引擎模型版本是行为模型的身份。
+pub fn frame_rules(rules: &nba_domain::GameRules, calibration_version: &str) -> FrameRules {
     FrameRules {
+        ruleset_version: rules.league.ruleset_version.clone(),
+        calibration_version: calibration_version.to_string(),
+        engine_model_version: ENGINE_MODEL_VERSION.to_string(),
         tick_seconds: rules.tick_seconds,
         court_width_ft: rules.court.width_ft,
         court_height_ft: rules.court.height_ft,
@@ -1269,9 +1337,9 @@ pub fn frame_rules(rules: &nba_domain::GameRules) -> FrameRules {
         three_point_distance_ft: rules.league.three_point_distance_ft,
         shot_clock_seconds: rules
             .league
-            .clocks
+            .shot_clock
             .shot_clock_seconds
-            .max(rules.league.clocks.offensive_rebound_shot_clock_seconds),
+            .max(rules.league.shot_clock.offensive_rebound_shot_clock_seconds),
         holder_leash_ft: rules.invariant_holder_leash_ft,
         speed_tolerance_ftps: rules.invariant_speed_tolerance_ftps,
         ball_z_max_ft: rules.ball_z_max_ft,

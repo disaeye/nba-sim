@@ -614,7 +614,7 @@ pub fn choose_action(world: &mut World) -> Decision {
     if in_backcourt {
         if let Some(start) = world.possession.backcourt_started_game_clock {
             let elapsed = (start - world.clock.game_clock()).max(0.0);
-            let limit = f64::from(world.rules.backcourt_seconds);
+            let limit = f64::from(world.rules.backcourt_seconds());
             if elapsed >= limit * 0.5 {
                 let bonus = world.params.policy.b("advance_pressure_bonus");
                 for candidate in &mut candidates {
@@ -1061,7 +1061,7 @@ fn variance_of(p: f32, magnitude: f32) -> f32 {
 fn clock_slack(world: &World, state: &DecisionState) -> f32 {
     let weights = &world.params.policy;
     let end = weights.g("shot_slack_end_seconds");
-    let full = world.rules.league.clocks.shot_clock_seconds;
+    let full = world.rules.league.shot_clock.shot_clock_seconds;
     let span = (full - end).max(f32::MIN_POSITIVE);
     ((state.shot_clock as f32 - end) / span).clamp(f32::default(), f32::from(1u8))
 }
@@ -1099,7 +1099,7 @@ fn early_shot_cost(
 /// 其它候选的结果，而不是写死的规则。
 fn clock_cost(world: &World, shot_clock: f64) -> f32 {
     let weights = &world.params.policy;
-    let full = f64::from(world.rules.league.clocks.shot_clock_seconds);
+    let full = f64::from(world.rules.league.shot_clock.shot_clock_seconds);
     let remaining = (shot_clock / full).clamp(0.0, 1.0);
     let possession_seconds = weights.w("seconds_per_possession").max(1.0) as f64;
     let per_second = weights.w("possession_value") as f64 / possession_seconds;

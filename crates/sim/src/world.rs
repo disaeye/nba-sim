@@ -6,6 +6,7 @@
 
 use glam::Vec2;
 use nba_domain::event::PossessionEndCause;
+use serde::{Deserialize, Serialize};
 use nba_domain::{
     ControlSequenceId, EventId, GameRules, IdAllocator, NextId, ProgramId, TeamData,
 };
@@ -32,7 +33,11 @@ const MAX_TICKS: u64 = 400_000;
 /// 单场比赛的事件上限：越过它意味着内核在原地打转，不再往下记。
 const EVENT_LOG_LIMIT: usize = 500_000;
 
-#[derive(Debug, Clone)]
+/// 一场比赛的完整设置：两队名单、首发与规则档案。
+///
+/// 它可以被序列化并从磁盘恢复：检查点带着这份设置一起走，恢复时用的
+/// 就是当初那一份名单与档案。
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatchSetup {
     pub home: TeamData,
     pub away: TeamData,
@@ -68,11 +73,11 @@ impl MatchSetup {
                     team.players.len()
                 ));
             }
-            if team.players.len() > league.roster_limit as usize {
+            if team.players.len() > league.substitutions.roster_limit as usize {
                 return Err(format!(
                     "{side} roster has {} players, limit is {}",
                     team.players.len(),
-                    league.roster_limit
+                    league.substitutions.roster_limit
                 ));
             }
             let mut starters = std::collections::BTreeSet::new();
@@ -186,6 +191,10 @@ pub struct FreeThrowLane {
 pub struct World {
     pub params: RuntimeParams,
     pub rules: GameRules,
+    /// 本场比赛的完整设置（名单、首发与规则档案）。
+    ///
+    /// 它是检查点的一部分：磁盘检查点恢复时用的就是这一份设置。
+    pub setup: MatchSetup,
     pub clock: Clock,
     phase: Phase,
     pub ball: BallBody,
@@ -499,7 +508,7 @@ impl World {
         // 把它当成这一轮已经在飞的球，永远等不到撮球。
         self.clear_flight();
         let center = self.rules.court.center();
-        let radius = self.rules.league.center_circle_radius_ft * 0.5;
+        let radius = self.rules.league.jump_ball.center_circle_radius_ft * 0.5;
         let home_spot = center - Vec2::new(radius, 0.0);
         let away_spot = center + Vec2::new(radius, 0.0);
         self.jump_ball_spots.push((home_jumper, home_spot));
@@ -555,11 +564,11 @@ impl World {
             // 与点球档位，否则接应人够不到球。
             let distance = self.rules.tip_off_tap_distance_ft;
             assert!(
-                distance >= self.rules.league.jump_ball_receiver_distance_ft,
+                distance >= self.rules.league.jump_ball.jump_ball_receiver_distance_ft,
                 "jump-ball tap distance must place the receiver outside the center circle"
             );
             assert!(
-                distance >= self.rules.league.center_circle_radius_ft,
+                distance >= self.rules.league.jump_ball.center_circle_radius_ft,
                 "jump-ball receiver must stand outside the center circle"
             );
             let target = center + direction * distance;
@@ -618,7 +627,7 @@ impl World {
         // 停表跳球同样是一次新的掷球：清掉上一轮的飞行记录。
         self.clear_flight();
         let center = self.rules.court.center();
-        let radius = self.rules.league.center_circle_radius_ft * 0.5;
+        let radius = self.rules.league.jump_ball.center_circle_radius_ft * 0.5;
         let distance = self.rules.tip_off_tap_distance_ft;
         let mut spots: Vec<(usize, Vec2)> = Vec::with_capacity(4);
         let mut receivers: [Option<usize>; 2] = [None; 2];
@@ -828,7 +837,7 @@ impl World {
         });
         if matches!(kind, crate::action::JumpBallKind::Opening) {
             self.first_possession = Some(tapped_team);
-            if self.rules.league.use_alternate_possession_arrow {
+            if self.rules.league.jump_ball.use_alternate_possession_arrow {
                 self.alternate_possession_next = tapped_team.other();
             }
         }
@@ -874,15 +883,24 @@ impl World {
     /// 换人窗口：死球、发球、跳球准备、罚球准备、暂停与节间。
     ///
     /// 球在空中时没有窗口：飞行是球的维度，球飞在空中时换人等于在活球
-    /// 中换人。
+    /// 中换人。开放换人的程序由联赛档案的换人策略族给出。
     pub fn substitution_window(&self) -> bool {
+        let program = match self.phase() {
+            Phase::DeadBall { .. } => "dead_ball",
+            Phase::Inbound { .. } => "inbound",
+            Phase::PeriodBreak { .. } => "period_break",
+            Phase::Timeout { .. } => "timeout",
+            Phase::JumpBall { .. } => "jump_ball",
+            Phase::FreeThrows { .. } => "free_throws",
+            _ => return false,
+        };
+        if !self.rules.league.allows_substitution_in(program) {
+            return false;
+        }
+        // 球在空中时没有窗口：飞行是球的维度。
         match self.phase() {
-            Phase::DeadBall { .. }
-            | Phase::Inbound { .. }
-            | Phase::PeriodBreak { .. }
-            | Phase::Timeout { .. } => true,
             Phase::JumpBall { .. } | Phase::FreeThrows { .. } => self.ball_flight.is_none(),
-            _ => false,
+            _ => true,
         }
     }
 
@@ -1002,6 +1020,7 @@ impl World {
         setup.validate().expect("pregame roster check");
         let params = params.into();
         let rules = setup.rules.clone();
+        let setup_snapshot = setup.clone();
         // 读球历史按秒数上限预分配：稳态每帧只做写入与裁剪，不再扩容。
         let history_capacity =
             ((params.policy.g("ball_history_seconds") as f64 / TICK_SECONDS).ceil() as usize) + 64;
@@ -1066,7 +1085,7 @@ impl World {
             })
             .collect();
         let period_seconds = rules.league.periods.period_duration_seconds as f64;
-        let shot_clock = rules.league.clocks.shot_clock_seconds as f64;
+        let shot_clock = rules.league.shot_clock.shot_clock_seconds as f64;
         let rules_capture = rules.clone();
         let draws = DrawSource::new(seed);
         let (home_jumper, away_jumper) = Self::opening_tip_setup(&players, &params.policy);
@@ -1078,6 +1097,7 @@ impl World {
         let mut world = Self {
             params,
             rules,
+            setup: setup_snapshot,
             clock: Clock::with_player_count(player_count, period_seconds, shot_clock),
             phase: Phase::Pregame,
             ball: BallBody::loose(center, Vec2::ZERO),
@@ -1120,8 +1140,8 @@ impl World {
             mandatory_timeouts_fired: u32::default(),
             last_ruling: None,
             challenges_left: [
-                rules_capture.league.challenges_per_game.min(u8::MAX as u32) as u8,
-                rules_capture.league.challenges_per_game.min(u8::MAX as u32) as u8,
+                rules_capture.league.review.challenges_per_game.min(u8::MAX as u32) as u8,
+                rules_capture.league.review.challenges_per_game.min(u8::MAX as u32) as u8,
             ],
             free_throw_started: None,
             last_scoring: None,
@@ -1849,17 +1869,6 @@ impl World {
         )
     }
 
-    /// 按时钟策略写入运行标志。
-    ///
-    /// 策略到指令的转换在时钟模块里：那里是运行标志的唯一写入口。
-    fn apply_clock_policy(
-        &mut self,
-        policy: crate::state::ClockAdvance,
-        context: crate::clock::ClockDirectiveContext,
-    ) {
-        self.clock.apply_policy(policy, context);
-    }
-
     pub(crate) fn commit_control_transition(&mut self, source: &'static str) {
         let previous = self.control;
         let mut current = self.authoritative_control_state();
@@ -2219,7 +2228,7 @@ impl World {
             self.possession_count + 1
         };
         self.alternate_spacing = next_possession_id.is_multiple_of(2);
-        let full_shot_clock = self.rules.league.clocks.shot_clock_seconds as f64;
+        let full_shot_clock = self.rules.league.shot_clock.shot_clock_seconds as f64;
         let shot_clock = if continuing_possession {
             self.clock.shot_clock()
         } else {
@@ -2451,10 +2460,6 @@ impl World {
         self.clock.advance_tick();
         let phase_before_step = self.phase;
         let flight_before_step = self.ball_flight;
-        // 运行标志由类型化指令写入：比赛钟与进攻钟在什么时刻开或停，
-        // 有一条可重建的依据，而不是隐含在推进里。
-        let clock_policy = crate::clock::clocks_for(phase_before_step, flight_before_step);
-        self.apply_clock_policy(clock_policy, clock_context);
         let momentum_phase = if matches!(phase_before_step, Phase::Timeout { .. }) {
             match phase_before_step {
                 Phase::Timeout { resume_phase, .. } => resume_phase.phase(),
@@ -2645,8 +2650,8 @@ impl World {
     /// 在三种情况下终止（规则的「count ends when」）：持球人收球、运球
     /// 越过罚球线延长线、或者防守人把球碰开。
     pub fn check_back_to_basket(&mut self, dt: f64) {
-        if !self.rules.back_to_basket_seconds.is_finite()
-            || self.rules.back_to_basket_seconds <= 0.0
+        if !self.rules.back_to_basket_seconds().is_finite()
+            || self.rules.back_to_basket_seconds() <= 0.0
         {
             self.possession.back_to_basket_seconds = 0.0;
             self.possession.holder_back_to_basket = false;
@@ -2695,7 +2700,7 @@ impl World {
         }
         self.possession.holder_back_to_basket = true;
         self.possession.back_to_basket_seconds += dt as f32;
-        if self.possession.back_to_basket_seconds + f32::EPSILON < self.rules.back_to_basket_seconds
+        if self.possession.back_to_basket_seconds + f32::EPSILON < self.rules.back_to_basket_seconds()
         {
             return;
         }
@@ -2795,7 +2800,7 @@ impl World {
         }
         // 八秒按比赛时钟计：死球停表期间不消耗后场推进时间。
         let game_clock = self.clock.game_clock();
-        let limit = f64::from(self.rules.backcourt_seconds);
+        let limit = f64::from(self.rules.backcourt_seconds());
         // 「踢球」：防守人在八秒计时开始之后碰到球，计时重新开始
         // （NBA Rule 10 §VIII.1 的例外一）。踢与传的区别在于球是碰出去
         // 的而不是递出去的，因此这里看的是最后触球的一方。
@@ -3742,7 +3747,7 @@ impl World {
                 // 违例的成立事实是「发球程序走了超过五秒仍未把球交出去」，
                 // 因此判据读的是发球程序的开始时刻，而不是球员的走位。
                 let started = self.inbound_started_at.unwrap_or(now);
-                let limit = f64::from(self.rules.inbound_seconds);
+                let limit = f64::from(self.rules.inbound_seconds());
                 if now - started > limit {
                     self.inbound_started_at = None;
                     let opponent = self.players[self.primary_handler(team)].team.other();
@@ -3827,7 +3832,7 @@ impl World {
                 }
                 // 罚球人有出手时限：超时判违例，球权交给对方。
                 if let Some(started) = self.free_throw_started {
-                    let limit = f64::from(self.rules.league.free_throw_time_limit_seconds);
+                    let limit = f64::from(self.rules.league.free_throws.free_throw_time_limit_seconds);
                     if now - started > limit {
                         self.free_throw_started = None;
                         let opponent = self.players[shooter].team.other();
@@ -3887,7 +3892,7 @@ impl World {
                         };
                     self.clock.start_next_period(
                         next_period_duration,
-                        self.rules.league.clocks.shot_clock_seconds as f64,
+                        self.rules.league.shot_clock.shot_clock_seconds as f64,
                     );
                     self.fouls[0].period = 0;
                     self.fouls[1].period = 0;

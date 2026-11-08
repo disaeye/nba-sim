@@ -37,7 +37,7 @@ fn a_backcourt_possession_that_never_advances_is_an_eight_second_violation() {
     world.players[holder].schedule.next_redecide_at = world.now() + 1_000.0;
 
     let mut violation = None;
-    for _ in 0..(f64::from(world.rules.backcourt_seconds) / TICK_SECONDS) as usize + 40 {
+    for _ in 0..(f64::from(world.rules.backcourt_seconds()) / TICK_SECONDS) as usize + 40 {
         let before = world.events.len();
         world.step(TICK_SECONDS);
         for event in &world.events[before..] {

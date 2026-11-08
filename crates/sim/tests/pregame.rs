@@ -14,7 +14,7 @@ fn a_duplicated_starter_is_rejected() {
 #[test]
 fn a_roster_over_the_league_limit_is_rejected() {
     let mut setup = MatchSetup::builtin(GameRules::default());
-    let limit = setup.rules.league.roster_limit as usize;
+    let limit = setup.rules.league.substitutions.roster_limit as usize;
     while setup.home.players.len() <= limit {
         let mut extra = setup.home.players[0].clone();
         extra.jersey = format!("{}", setup.home.players.len() + 20);

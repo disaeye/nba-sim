@@ -104,8 +104,8 @@ fn a_ruling_free_stoppage_has_nothing_to_review() {
 #[test]
 fn the_ruleset_defaults_carry_one_challenge() {
     let rules = GameRules::default();
-    assert_eq!(rules.league.challenges_per_game, 1);
-    assert!(rules.league.challenge_final_seconds > 0.0);
+    assert_eq!(rules.league.review.challenges_per_game, 1);
+    assert!(rules.league.review.challenge_final_seconds > 0.0);
     let setup = MatchSetup::builtin(rules);
     assert!(setup.validate().is_ok());
 }

@@ -371,6 +371,15 @@ impl Adjudication {
 impl World {
     /// 唯一写入入口：比分之外的停表后果都在这里落。
     pub fn adjudicate(&mut self, adjudication: Adjudication) {
+        // 违例必须在这个联赛的档案里：未登记的违例在这个档案下不成立，
+        // 就地失败，不让一条没有规则依据的判罚进入比赛。
+        if let StoppageCause::Violation(kind) = adjudication.cause {
+            assert!(
+                self.rules.league.recognizes_violation(kind.as_str()),
+                "违规种类 {} 不在联赛档案的违例策略族里",
+                kind.as_str()
+            );
+        }
         if let Some((cause, detail)) = adjudication.possession_end {
             self.end_possession(cause, detail, adjudication.points);
         }
@@ -407,7 +416,7 @@ impl World {
                     team,
                     inbound: location,
                     ready_at: self.now()
-                        + ready_after.unwrap_or(f64::from(self.rules.inbound_setup_seconds)),
+                        + ready_after.unwrap_or(f64::from(self.rules.inbound_setup_seconds())),
                 };
                 self.cancel_actions(reason);
                 self.set_phase(Phase::DeadBall {
@@ -452,7 +461,7 @@ impl World {
                     total,
                     remaining,
                     made,
-                    next_at: self.now() + f64::from(self.rules.free_throw_interval_seconds),
+                    next_at: self.now() + f64::from(self.rules.free_throw_interval_seconds()),
                     and_one,
                     retain_possession,
                     foul_id,

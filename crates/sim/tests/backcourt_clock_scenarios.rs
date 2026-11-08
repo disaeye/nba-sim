@@ -52,7 +52,7 @@ fn backcourt_fixture(seed: u64) -> (World, usize, usize) {
 fn a_backcourt_possession_that_never_advances_is_an_eight_second_violation() {
     let (mut world, _, _) = backcourt_fixture(1501);
     let mut violation = false;
-    for _ in 0..(f64::from(world.rules.backcourt_seconds) / TICK_SECONDS) as usize + 40 {
+    for _ in 0..(f64::from(world.rules.backcourt_seconds()) / TICK_SECONDS) as usize + 40 {
         world.step(TICK_SECONDS);
         if world.events.iter().any(|event| {
             matches!(
@@ -97,7 +97,7 @@ fn a_defensive_kick_restarts_the_eight_second_count() {
         "防守人踢球之后八秒计时必须重新开始"
     );
     // 重新开始之后，八秒计时从头走：刚踢完球之后的那几秒不得判违例。
-    let limit = f64::from(world.rules.backcourt_seconds);
+    let limit = f64::from(world.rules.backcourt_seconds());
     let mut violation = false;
     // 只走一半的时限：这段时间里不得判违例。
     for _ in 0..((limit / 2.0) / TICK_SECONDS as f64) as usize {

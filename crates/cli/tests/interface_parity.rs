@@ -72,3 +72,52 @@ fn full_game_cli_and_wasm_summaries_match() {
     assert_eq!(cli_summaries.as_slice(), &[wasm_summary]);
     assert_json_equivalent(&wasm_events, cli_events, "event_history");
 }
+
+/// FIBA 档案从 CLI 与 WASM 进入同一内核：两边跑出同一场比赛。
+#[test]
+fn fiba_full_game_cli_and_wasm_summaries_match() {
+    let seed = 307u64;
+    let mut wasm = WasmMatchService::with_seed(seed);
+    wasm.setup_match_json("{\"league\":\"fiba\"}")
+        .expect("WASM FIBA match setup");
+    wasm.start().expect("WASM match starts");
+    wasm.fast_forward_ms(8_000_000.0)
+        .expect("WASM match advances to completion");
+    assert_eq!(wasm.session_state(), "Finished");
+    let wasm_summary: CompletionSummary = serde_json::from_str(
+        &wasm
+            .completion_summary_json()
+            .expect("WASM completion summary"),
+    )
+    .expect("WASM summary JSON");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nba-sim"))
+        .args(["sim-core", "--seed", "307", "--json", "--league", "fiba"])
+        .output()
+        .expect("CLI FIBA full-game command starts");
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli_output: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("CLI JSON");
+    let cli_summaries: Vec<CompletionSummary> =
+        serde_json::from_value(cli_output["games"].clone()).expect("CLI game summaries");
+    assert_eq!(cli_summaries.as_slice(), &[wasm_summary]);
+}
+
+/// 未知的联赛标识就地失败，不静默回落到默认档案。
+#[test]
+fn an_unknown_league_selector_is_rejected() {
+    let output = Command::new(env!("CARGO_BIN_EXE_nba-sim"))
+        .args(["sim-core", "--seed", "1", "--league", "euroleague"])
+        .output()
+        .expect("CLI command starts");
+    assert!(!output.status.success(), "未知的联赛标识必须失败");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown league"),
+        "错误必须指出未知联赛：{stderr}"
+    );
+}

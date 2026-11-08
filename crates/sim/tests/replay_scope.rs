@@ -107,7 +107,7 @@ fn a_profile_without_period_end_replay_does_not_review() {
     world
         .rules
         .league
-        .officials
+        .review
         .review_scope
         .retain(|scope| scope != "game_clock_at_period_end");
     world.clock.set_game_clock(0.0);

@@ -76,24 +76,59 @@ pub(crate) fn api_core_events(req: &Request, core: &SharedCore) -> Response {
 }
 
 pub(crate) fn api_core_setup(req: &Request, core: &SharedCore) -> Response {
-    let seed = if req.body.is_empty() {
-        None
+    let body = if req.body.is_empty() {
+        serde_json::Value::Null
     } else {
-        let value: serde_json::Value = match serde_json::from_slice(&req.body) {
+        match serde_json::from_slice(&req.body) {
             Ok(value) => value,
             Err(error) => return bad_request(format!("setup body must be JSON: {error}")),
-        };
-        value.get("seed").and_then(|seed| seed.as_u64())
+        }
+    };
+    let seed = body.get("seed").and_then(|seed| seed.as_u64());
+    let league = match body.get("league").and_then(|league| league.as_str()) {
+        Some(name) => match name.parse::<nba_domain::league::LeagueId>() {
+            Ok(league) => league,
+            Err(error) => return bad_request(error),
+        },
+        None => nba_domain::league::LeagueId::Nba,
+    };
+    let match_setup = match read_match_setup(&body) {
+        Ok(setup) => setup,
+        Err(error) => return bad_request(error),
     };
     let mut service = match lock(core) {
         Ok(service) => service,
         Err(response) => return response,
     };
     let seed = seed.unwrap_or_else(|| service.seed());
-    match service.setup_from_calibration(&workspace_calibration_dir(), seed) {
+    let params = match nba_sim_core::params::RuntimeParams::load(&workspace_calibration_dir()) {
+        Ok(params) => params,
+        Err(error) => return internal_error(error),
+    };
+    match service.setup_with(match_setup, params, seed) {
         Ok(info) => json_response(&info),
         Err(error) => internal_error(error),
     }
+}
+
+/// 从 setup 请求体里读出比赛设置。
+///
+/// 请求体可以带 `league`（只换档案）或 `setup`（完整的名单与档案）。
+fn read_match_setup(body: &serde_json::Value) -> Result<nba_sim_core::MatchSetup, String> {
+    let source = body.get("setup").unwrap_or(body);
+    if source.get("home").is_some() && source.get("away").is_some() {
+        return serde_json::from_str::<nba_sim_core::MatchSetup>(&source.to_string())
+            .map_err(|error| format!("match setup invalid: {error}"));
+    }
+    let league = match body.get("league").and_then(|league| league.as_str()) {
+        Some(name) => name
+            .parse::<nba_domain::league::LeagueId>()
+            .map_err(|error| format!("league selector invalid: {error}"))?,
+        None => nba_domain::league::LeagueId::Nba,
+    };
+    Ok(nba_sim_core::MatchSetup::builtin(
+        nba_domain::GameRules::for_league(league),
+    ))
 }
 
 pub(crate) fn api_core_command(core: &SharedCore, command: &str, req: &Request) -> Response {

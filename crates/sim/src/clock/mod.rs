@@ -620,7 +620,15 @@ impl<'a> ClockController<'a> {
     }
 }
 
+/// 当前阶段该走哪些钟。
+///
+/// 只有活球阶段的飞行才改变走钟：死球程序（暂停、罚球、发球、节间）
+/// 期间无论球是否还在空中，比赛钟都停着。一场死球程序结束后球可能还在
+/// 空中（裁判吹停时的飞行），那段时间属于停表时间，不属于飞行时间。
 pub fn clocks_for(phase: Phase, flight: Option<crate::state::BallFlight>) -> ClockAdvance {
+    if !matches!(phase, Phase::Live) {
+        return phase.clocks();
+    }
     match flight {
         Some(flight) => flight.kind.clocks(),
         None => phase.clocks(),
@@ -628,6 +636,9 @@ pub fn clocks_for(phase: Phase, flight: Option<crate::state::BallFlight>) -> Clo
 }
 
 /// 根据当前比赛阶段推进对应时钟。
+///
+/// 推进前先按阶段策略写入运行标志：运行标志是权威状态，推进只读它。
+/// 少这一步就会用上一段的标志推进当前这一段，死球期间比赛钟照走。
 pub fn advance(
     phase: Phase,
     flight: Option<crate::state::BallFlight>,
@@ -635,6 +646,7 @@ pub fn advance(
     seconds: f64,
 ) -> ClockAdvance {
     let clocks = clocks_for(phase, flight);
+    clock.apply_policy(clocks, root_context());
     clock.advance_seconds(seconds, clocks, &[]);
     clocks
 }
@@ -649,6 +661,7 @@ pub fn advance_with_context(
     context: ClockDirectiveContext,
 ) -> (ClockAdvance, ClockSegmentApplied) {
     let clocks = clocks_for(phase, flight);
+    clock.apply_policy(clocks, context);
     let applied = clock.advance_seconds_with_context(seconds, clocks, player_handles, context);
     (clocks, applied)
 }

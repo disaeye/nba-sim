@@ -498,7 +498,14 @@ pub fn finish(world: &mut World) {
     }
     // 改判成立（球在钟响前离手，得分保留）时，比赛钟回到出手那一刻的
     // 读数：复核否定了「钟响后离手」这个认定，本节剩余时间因此要恢复。
-    if !waved_off && pending.released_clock_checkpoint.is_some() {
+    //
+    // 恢复只在节末即时回放成立时发生。普通进球不恢复比赛钟：出手到
+    // 结算之间消耗的比赛时间是真实消耗，恢复它会让比赛钟在每一次进球
+    // 后倒退。
+    if buzzer_review
+        && !waved_off
+        && pending.released_clock_checkpoint.is_some()
+    {
         world.restore_clock_checkpoint(
             pending
                 .released_clock_checkpoint

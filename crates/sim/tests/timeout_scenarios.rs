@@ -199,6 +199,43 @@ fn the_fiba_fourth_quarter_budget_is_capped_at_three() {
 }
 
 #[test]
+fn fiba_has_no_final_window_timeout_limit() {
+    // FIBA Article 18 没有末段暂停限制：末段窗口里照常可以叫暂停。
+    let mut world = fiba_world(819);
+    let team = TeamSide::Home;
+    assert_eq!(
+        world.rules.league.timeouts.timeouts_final_period, 0,
+        "FIBA 档案不启用末段暂停限制"
+    );
+    world
+        .clock
+        .set_regulation_clock(4, 60.0, world.clock.shot_clock());
+    let budget = &mut world.timeouts[World::team_index(team)];
+    budget.remaining = 10;
+    budget.used_in_fourth = 0;
+    let mut used = 0;
+    for _ in 0..6 {
+        world.set_phase(Phase::DeadBall {
+            team,
+            ready_at: world.now() + 60.0,
+        });
+        if request(&mut world, team) {
+            used += 1;
+            world.set_phase(Phase::DeadBall {
+                team,
+                ready_at: world.now() + 60.0,
+            });
+        } else {
+            break;
+        }
+    }
+    assert_eq!(
+        used, 3,
+        "FIBA 第四节最后两分钟里暂停不受末段限制，只有第四节的额度在约束"
+    );
+}
+
+#[test]
 fn the_fiba_game_budget_is_five() {
     let mut world = fiba_world(807);
     let team = TeamSide::Home;

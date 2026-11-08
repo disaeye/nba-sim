@@ -55,9 +55,8 @@ fn disk_checkpoint_resumes_the_same_game() {
     assert!(descriptor.tick > 0, "checkpoint must be taken mid-game");
 
     let mut restored = SessionService::new(seed);
-    let setup = MatchSetup::builtin(GameRules::default().shortened(120.0, 60.0));
     let reloaded = restored
-        .restore_from_descriptor(&path, setup, params().into())
+        .restore_from_descriptor(&path, params().into())
         .expect("checkpoint restores");
     assert_eq!(reloaded.tick, descriptor.tick);
     assert_eq!(reloaded.latest_event_id, descriptor.latest_event_id);
@@ -83,9 +82,8 @@ fn diverged_checkpoint_is_rejected() {
     std::fs::write(&path, text).expect("write tampered checkpoint");
 
     let mut restored = SessionService::new(seed);
-    let setup = MatchSetup::builtin(GameRules::default().shortened(120.0, 60.0));
     let error = restored
-        .restore_from_descriptor(&path, setup, params().into())
+        .restore_from_descriptor(&path, params().into())
         .expect_err("diverged checkpoint must be rejected");
     assert!(
         error.contains("diverged"),
@@ -102,17 +100,16 @@ fn unsupported_checkpoint_version_is_rejected() {
     let descriptor = partial.save_descriptor(&path).expect("checkpoint writes");
 
     let mut future = descriptor;
-    future.version = 2;
+    future.manifest.version = 99;
     let text = serde_json::to_string_pretty(&future).expect("serialize");
     std::fs::write(&path, text).expect("write future checkpoint");
 
     let mut restored = SessionService::new(seed);
-    let setup = MatchSetup::builtin(GameRules::default().shortened(120.0, 60.0));
     let error = restored
-        .restore_from_descriptor(&path, setup, params().into())
+        .restore_from_descriptor(&path, params().into())
         .expect_err("unknown version must be rejected");
     assert!(
-        error.contains("unsupported checkpoint version"),
+        error.contains("unsupported manifest version"),
         "错误必须指出不支持的版本：{error}"
     );
 }

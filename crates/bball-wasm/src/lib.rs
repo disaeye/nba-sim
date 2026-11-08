@@ -3,8 +3,9 @@
 //! JavaScript 只能观察快照与事实，不能改写比分、球权、球员位置或出手结果。
 //! 校准表通过编译期内嵌加载，因此 WASM 目标不需要文件系统。
 
+use nba_domain::league::LeagueId;
 use nba_sim_core::params::RuntimeParams;
-use nba_sim_core::SessionService;
+use nba_sim_core::{MatchSetup, SessionService};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -12,9 +13,39 @@ pub struct WasmMatchService {
     inner: SessionService,
 }
 
-fn setup(service: &mut SessionService, seed: u64) -> Result<String, JsError> {
+/// 从 setup JSON 里读出比赛设置。
+///
+/// JSON 有三种形态：
+/// - `{"setup": {...}}`：完整的 `MatchSetup`（自定义名单与规则档案）。
+/// - 直接给 `MatchSetup` 的字段：同样按 `MatchSetup` 读。
+/// - `{"league": "fiba"}`：只换联赛档案，名册用内建的。
+///
+/// 三种形态都读不出设置时用内建名册与 NBA 档案。
+fn read_setup(value: &serde_json::Value) -> Result<MatchSetup, String> {
+    let source = value.get("setup").unwrap_or(value);
+    if source.get("home").is_some() && source.get("away").is_some() {
+        return serde_json::from_str::<MatchSetup>(&source.to_string())
+            .map_err(|error| format!("match setup JSON invalid: {error}"));
+    }
+    let league = read_league(value)?;
+    Ok(MatchSetup::builtin(nba_domain::GameRules::for_league(
+        league,
+    )))
+}
+
+/// 读出联赛档案标识；缺省为 NBA。
+fn read_league(value: &serde_json::Value) -> Result<LeagueId, String> {
+    match value.get("league").and_then(|league| league.as_str()) {
+        Some(name) => name
+            .parse::<LeagueId>()
+            .map_err(|error| format!("league selector invalid: {error}")),
+        None => Ok(LeagueId::Nba),
+    }
+}
+
+fn setup(service: &mut SessionService, seed: u64, match_setup: MatchSetup) -> Result<String, JsError> {
     let info = service
-        .setup(RuntimeParams::embedded(), seed)
+        .setup_with(match_setup, RuntimeParams::embedded(), seed)
         .map_err(|error| JsError::new(&error))?;
     serde_json::to_string(&info).map_err(|error| JsError::new(&error.to_string()))
 }
@@ -45,17 +76,24 @@ impl WasmMatchService {
         }
     }
 
-    /// 接受任意 setup JSON，只取其中的 `seed`：动作链内核使用内建名册。
+    /// 接受 setup JSON：可以给种子、联赛档案或完整的比赛设置。
     pub fn setup_match_json(&mut self, json: &str) -> Result<String, JsError> {
-        let seed = if json.trim().is_empty() {
-            self.inner.seed()
-        } else {
-            serde_json::from_str::<serde_json::Value>(json)
-                .ok()
-                .and_then(|value| value.get("seed").and_then(|seed| seed.as_u64()))
-                .unwrap_or_else(|| self.inner.seed())
-        };
-        setup(&mut self.inner, seed)
+        if json.trim().is_empty() {
+            let seed = self.inner.seed();
+            return setup(
+                &mut self.inner,
+                seed,
+                MatchSetup::builtin(nba_domain::GameRules::default()),
+            );
+        }
+        let value: serde_json::Value = serde_json::from_str(json)
+            .map_err(|error| JsError::new(&format!("setup body must be JSON: {error}")))?;
+        let seed = value
+            .get("seed")
+            .and_then(|seed| seed.as_u64())
+            .unwrap_or_else(|| self.inner.seed());
+        let match_setup = read_setup(&value).map_err(|error| JsError::new(&error))?;
+        setup(&mut self.inner, seed, match_setup)
     }
 
     pub fn start(&mut self) -> Result<(), JsError> {

@@ -4,7 +4,8 @@
 //! `--gate` 输出四层判定结果。
 
 use nba_sim_core::{
-    gate, run_game, summarize, CompletionSummary, MatchSetup, Params, RuntimeParams, TeamSide, World,
+    gate, run_game_for_league, summarize, CompletionSummary, MatchSetup, Params, RuntimeParams,
+    TeamSide, World,
 };
 use std::io::Write;
 use std::path::Path;
@@ -15,6 +16,7 @@ pub(crate) fn run_sim_core(
     gate: bool,
     json: bool,
     stream: Option<&str>,
+    league: nba_domain::league::LeagueId,
 ) -> std::io::Result<()> {
     let calibration = nba_sim_core::params::workspace_calibration_dir();
     let params = RuntimeParams::load(&calibration)
@@ -25,15 +27,15 @@ pub(crate) fn run_sim_core(
     for offset in 0..games.max(1) {
         let report = match stream {
             Some(path) if offset == 0 => {
-                export_stream(seed, &calibration, params.clone(), path)?
+                export_stream(seed, &calibration, params.clone(), path, league)?
             }
-            _ => run_game(seed + offset, &calibration),
+            _ => run_game_for_league(seed + offset, &calibration, league),
         };
         if !json {
             print_game(&report);
         } else {
             let mut projection_world = World::new(
-                MatchSetup::builtin(nba_domain::GameRules::default()),
+                MatchSetup::builtin(nba_domain::GameRules::for_league(league)),
                 params.clone(),
                 seed + offset,
             );
@@ -106,7 +108,7 @@ pub(crate) fn run_sim_core(
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
         let mut batch = Vec::new();
         for batch_seed in 1..=16u64 {
-            batch.push(run_game(batch_seed, &calibration));
+            batch.push(run_game_for_league(batch_seed, &calibration, league));
         }
         let report = gate::evaluate_batch(&batch, &validation);
         println!();
@@ -137,8 +139,9 @@ fn export_stream(
     _calibration: &Path,
     params: RuntimeParams,
     path: &str,
+    league: nba_domain::league::LeagueId,
 ) -> std::io::Result<nba_sim_core::GameReport> {
-    let rules = nba_domain::GameRules::default();
+    let rules = nba_domain::GameRules::for_league(league);
     let setup = MatchSetup::builtin(rules);
     let mut world = World::new(setup, params, seed);
     let file = std::fs::File::create(path)?;

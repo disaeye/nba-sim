@@ -249,7 +249,7 @@ fn a_double_violation_repeats_the_jump_with_the_same_jumpers() {
 fn the_alternate_possession_arrow_starts_with_the_opponent_of_the_first_possession() {
     let mut world = fiba_world(905);
     assert!(
-        world.rules.league.use_alternate_possession_arrow,
+        world.rules.league.jump_ball.use_alternate_possession_arrow,
         "FIBA 使用交替拥有箭头"
     );
     advance_to_first_possession(&mut world);
@@ -265,7 +265,7 @@ fn the_alternate_possession_arrow_starts_with_the_opponent_of_the_first_possessi
 fn the_nba_alternate_possession_starts_with_the_opponent_of_the_first_possession() {
     let mut world = nba_world(906);
     assert!(
-        !world.rules.league.use_alternate_possession_arrow,
+        !world.rules.league.jump_ball.use_alternate_possession_arrow,
         "NBA 不使用交替拥有箭头"
     );
     advance_to_first_possession(&mut world);

@@ -380,4 +380,36 @@ mod tests {
             "simulate must cache the game for the validation entry"
         );
     }
+
+    /// 会话入口接受联赛档案：FIBA 档案进入同一内核，未知的档案就地失败。
+    #[test]
+    fn session_setup_accepts_a_league_profile() {
+        let core: SharedCore = Arc::new(Mutex::new(SessionService::new(42)));
+        let (status, _, body) = core_api::api_core_setup(
+            &request("POST", "/api/core/setup", br#"{"league":"fiba"}"#.to_vec()),
+            &core,
+        );
+        assert_eq!(status, "200 OK");
+        let info: Value = serde_json::from_slice(&body).expect("setup response is JSON");
+        assert_eq!(info["league"], "fiba");
+        assert_eq!(info["ruleset_version"], "2026-v1.1");
+
+        let (status, _, body) = core_api::api_core_setup(
+            &request(
+                "POST",
+                "/api/core/setup",
+                br#"{"league":"euroleague"}"#.to_vec(),
+            ),
+            &core,
+        );
+        assert_eq!(status, "400 Bad Request");
+        let error: Value = serde_json::from_slice(&body).expect("error response is JSON");
+        assert!(
+            error["error"]
+                .as_str()
+                .expect("error message")
+                .contains("unknown league"),
+            "错误必须指出未知联赛：{error}"
+        );
+    }
 }

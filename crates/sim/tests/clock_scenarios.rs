@@ -90,7 +90,7 @@ fn a_new_control_starts_the_shot_clock_at_twenty_four_seconds() {
     ));
     assert_eq!(
         world.clock.shot_clock(),
-        f64::from(world.rules.league.clocks.shot_clock_seconds),
+        f64::from(world.rules.league.shot_clock.shot_clock_seconds),
         "新的控制权必须把进攻钟设回二十四秒"
     );
 }
@@ -173,6 +173,84 @@ fn a_whistle_stops_the_game_clock() {
         clock.game_clock(),
         before,
         "死球期间比赛钟不得走动"
+    );
+}
+
+#[test]
+fn a_dead_ball_program_stops_the_game_clock_even_while_the_ball_is_in_flight() {
+    // 停表的判据是比赛程序，不是球在不在空中：裁判吹停时球可能还在飞，
+    // 那段时间属于停表时间。
+    let mut clock = Clock::new(300.0, 24.0);
+    let before = clock.game_clock();
+    let flight = nba_sim_core::state::BallFlight {
+        kind: nba_sim_core::state::FlightKind::Pass,
+        resolve_at: 1.0,
+    };
+    let advance = nba_sim_core::clock::advance(
+        nba_sim_core::state::Phase::DeadBall {
+            team: TeamSide::Home,
+            ready_at: 0.0,
+        },
+        Some(flight),
+        &mut clock,
+        5.0,
+    );
+    assert!(!advance.game_clock, "死球程序期间比赛钟不得走动");
+    assert_eq!(
+        clock.game_clock(),
+        before,
+        "球在空中不能让死球程序期间的比赛钟走动"
+    );
+}
+
+#[test]
+fn a_timeout_stops_the_game_clock_even_while_the_ball_is_in_flight() {
+    // 暂停是停表程序：暂停期间球可能还在空中，比赛钟仍然停着。
+    let mut clock = Clock::new(300.0, 24.0);
+    let before = clock.game_clock();
+    let flight = nba_sim_core::state::BallFlight {
+        kind: nba_sim_core::state::FlightKind::Shot,
+        resolve_at: 1.0,
+    };
+    let advance = nba_sim_core::clock::advance(
+        nba_sim_core::state::Phase::Timeout {
+            team: TeamSide::Home,
+            started_at: 0.0,
+            resume_at: 75.0,
+            resume_phase: nba_sim_core::state::ResumePhase::capture(
+                nba_sim_core::state::Phase::Live,
+            ),
+        },
+        Some(flight),
+        &mut clock,
+        5.0,
+    );
+    assert!(!advance.game_clock, "暂停期间比赛钟不得走动");
+    assert_eq!(clock.game_clock(), before, "暂停期间比赛钟不得走动");
+}
+
+#[test]
+fn a_full_match_consumes_exactly_the_four_periods_of_game_clock() {
+    // 一场比赛消耗的比赛钟等于四节时长之和：不多不少。
+    //
+    // 这条测试钉住的是「比赛钟只在活球期间走」这条规则：任何一段停表
+    // 程序期间多走一秒或者少走一秒，这里都会看到。
+    let mut world = common::short_world(11);
+    let expected = f64::from(world.rules.league.periods.regulation_periods)
+        * f64::from(world.rules.league.periods.period_duration_seconds);
+    let mut consumed = 0.0f64;
+    let mut previous = world.clock.game_clock();
+    while !world.finished {
+        world.step(TICK_SECONDS);
+        let current = world.clock.game_clock();
+        if current < previous {
+            consumed += previous - current;
+        }
+        previous = current;
+    }
+    assert!(
+        (consumed - expected).abs() < 1.0,
+        "比赛钟必须消耗四节时长之和 {expected}s，实际消耗 {consumed}s"
     );
 }
 

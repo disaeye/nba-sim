@@ -33,15 +33,22 @@ fn print_usage() {
          用法：nba-sim <子命令> [选项]\n\
          \n\
          子命令：\n\
-           sim-core --seed N [--games M] [--gate] [--json] [--stream PATH]\n\
+           sim-core --seed N [--games M] [--gate] [--json] [--stream PATH] [--league nba|fiba]\n\
                     跑一场或多场比赛；--gate 打印四层判定，--json 输出摘要\n\
-           validate-core --seed N --games M [--mechanism] [--out DIR]\n\
+           validate-core --seed N --games M [--mechanism] [--out DIR] [--league nba|fiba]\n\
                     跑判定批次并写工件；退出码 0 通过、1 缺陷、2 执行错误、3 已知不足\n\
-           review --seed N [--possessions M] [--out DIR]\n\
+           review --seed N [--possessions M] [--out DIR] [--league nba|fiba]\n\
                     选出过程清单覆盖的回合，写 review.json 与 review.html\n\
          \n\
          -h, --help  本说明"
     );
+}
+
+/// 解析 `--league` 的取值。
+fn parse_league(value: &str) -> std::io::Result<nba_domain::league::LeagueId> {
+    value
+        .parse::<nba_domain::league::LeagueId>()
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))
 }
 
 fn main() -> std::io::Result<()> {
@@ -57,6 +64,7 @@ fn main() -> std::io::Result<()> {
         let mut games = 16u64;
         let mut json = false;
         let mut mechanism = false;
+        let mut league = nba_domain::league::LeagueId::Nba;
         let mut out: Option<std::path::PathBuf> = None;
         let mut i = 2;
         while i < args.len() {
@@ -71,6 +79,10 @@ fn main() -> std::io::Result<()> {
                     games = parse_option_value(&args, i + 1, "--games <n>")?
                         .parse()
                         .map_err(|_| std::io::Error::other("games must be a number"))?;
+                    i += 2;
+                }
+                "--league" => {
+                    league = parse_league(parse_option_value(&args, i + 1, "--league <nba|fiba>")?)?;
                     i += 2;
                 }
                 "--json" => {
@@ -97,7 +109,7 @@ fn main() -> std::io::Result<()> {
                 }
             }
         }
-        return match run_validate_core(seed_start, games, json, mechanism, out) {
+        return match run_validate_core(seed_start, games, json, mechanism, out, league) {
             Ok(0) => Ok(()),
             Ok(code) => std::process::exit(code as i32),
             Err(error) => {
@@ -110,6 +122,7 @@ fn main() -> std::io::Result<()> {
     if args.len() > 1 && args[1] == "review" {
         let mut seed = 1u64;
         let mut possessions = 20usize;
+        let mut league = nba_domain::league::LeagueId::Nba;
         let mut out: Option<std::path::PathBuf> = None;
         let mut i = 2;
         while i < args.len() {
@@ -124,6 +137,10 @@ fn main() -> std::io::Result<()> {
                     possessions = parse_option_value(&args, i + 1, "--possessions <n>")?
                         .parse()
                         .map_err(|_| std::io::Error::other("possessions must be a number"))?;
+                    i += 2;
+                }
+                "--league" => {
+                    league = parse_league(parse_option_value(&args, i + 1, "--league <nba|fiba>")?)?;
                     i += 2;
                 }
                 "--out" => {
@@ -142,7 +159,7 @@ fn main() -> std::io::Result<()> {
                 }
             }
         }
-        return run_review(seed, possessions, out);
+        return run_review(seed, possessions, out, league);
     }
 
     if args.len() > 1 && args[1] == "sim-core" {
@@ -150,6 +167,7 @@ fn main() -> std::io::Result<()> {
         let mut games = 1u64;
         let mut gate = false;
         let mut json = false;
+        let mut league = nba_domain::league::LeagueId::Nba;
         let mut stream: Option<String> = None;
         let mut i = 2;
         while i < args.len() {
@@ -164,6 +182,10 @@ fn main() -> std::io::Result<()> {
                     games = parse_option_value(&args, i + 1, "--games <n>")?
                         .parse()
                         .map_err(|_| std::io::Error::other("games must be a number"))?;
+                    i += 2;
+                }
+                "--league" => {
+                    league = parse_league(parse_option_value(&args, i + 1, "--league <nba|fiba>")?)?;
                     i += 2;
                 }
                 "--gate" => {
@@ -186,7 +208,7 @@ fn main() -> std::io::Result<()> {
                 }
             }
         }
-        return run_sim_core(seed, games, gate, json, stream.as_deref());
+        return run_sim_core(seed, games, gate, json, stream.as_deref(), league);
     }
 
     print_usage();

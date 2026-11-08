@@ -631,7 +631,7 @@ fn mutating_the_league_profile_changes_the_called_rule() {
     );
 
     let mut rules = GameRules::default();
-    rules.league.clocks.offensive_rebound_shot_clock_seconds = 6.0;
+    rules.league.shot_clock.offensive_rebound_shot_clock_seconds = 6.0;
     let mut world = live_world_with_rules(31, rules);
     let offense = world.possession.team;
     let rebounder = world.holder().expect("live possession has a holder");

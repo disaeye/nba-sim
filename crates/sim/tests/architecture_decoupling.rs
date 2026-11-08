@@ -115,7 +115,7 @@ fn the_league_profile_is_stored_as_policy_families() {
     let fiba = LeagueProfile::fiba();
     // 四个策略族各自独立：节次、时钟、犯规、暂停。
     assert!(nba.periods.regulation_periods == 4);
-    assert!(nba.clocks.shot_clock_seconds == 24.0);
+    assert!(nba.shot_clock.shot_clock_seconds == 24.0);
     assert!(nba.fouls.max_personal_fouls == 6);
     assert!(nba.timeouts.timeouts_per_game == 7);
     assert!(fiba.timeouts.timeouts_per_game == 5);

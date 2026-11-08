@@ -106,7 +106,7 @@ impl World {
         if self.challenges_left[index] == 0 {
             return Err("no challenge remaining");
         }
-        let window = self.rules.league.challenge_final_seconds;
+        let window = self.rules.league.review.challenge_final_seconds;
         let final_period = self.clock.period() >= self.rules.league.periods.regulation_periods;
         // 复核窗口在末节最后两分钟：节次与剩余时间两个条件同时成立。
         let late = final_period && self.clock.game_clock() <= f64::from(window);

@@ -72,7 +72,7 @@ fn a_handler_dribbling_with_his_back_to_the_basket_for_five_seconds_is_a_violati
     let (mut world, holder, _) = post_fixture(501);
     // 背对篮筐：面朝 -X。
     world.players[holder].facing = Vec2::NEG_X;
-    let limit = world.rules.back_to_basket_seconds;
+    let limit = world.rules.back_to_basket_seconds();
     let mut violation = false;
     for _ in 0..(limit / TICK_SECONDS as f32) as usize + 20 {
         world.check_back_to_basket(TICK_SECONDS);

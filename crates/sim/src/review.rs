@@ -153,11 +153,21 @@ pub fn build_review(
     calibration_dir: &Path,
     count: usize,
 ) -> Result<ReviewReport, String> {
+    build_review_for_league(seed, calibration_dir, count, nba_domain::league::LeagueId::Nba)
+}
+
+/// 用指定联赛档案生成过程清单。
+pub fn build_review_for_league(
+    seed: u64,
+    calibration_dir: &Path,
+    count: usize,
+    league: nba_domain::league::LeagueId,
+) -> Result<ReviewReport, String> {
     if count == 0 {
         return Err("review requires at least one possession".to_string());
     }
     let params = RuntimeParams::load(calibration_dir)?;
-    let setup = MatchSetup::builtin(nba_domain::GameRules::default());
+    let setup = MatchSetup::builtin(nba_domain::GameRules::for_league(league));
     let mut world = World::new(setup.clone(), params, seed);
     let mut possession_evidence = BTreeMap::new();
     let mut inbound_pending = false;

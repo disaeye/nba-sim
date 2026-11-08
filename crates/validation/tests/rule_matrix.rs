@@ -23,8 +23,8 @@ fn nba_and_fiba_period_boundaries_match_their_rule_profiles() {
     assert_eq!(fiba.periods.period_duration_seconds, 600.0);
     assert_eq!(nba.periods.overtime_duration_seconds, 300.0);
     assert_eq!(fiba.periods.overtime_duration_seconds, 300.0);
-    assert_eq!(nba.clocks.shot_clock_seconds, 24.0);
-    assert_eq!(fiba.clocks.shot_clock_seconds, 24.0);
+    assert_eq!(nba.shot_clock.shot_clock_seconds, 24.0);
+    assert_eq!(fiba.shot_clock.shot_clock_seconds, 24.0);
     assert_eq!(nba.periods.regulation_periods, 4);
     assert_eq!(fiba.periods.regulation_periods, 4);
 }
@@ -48,7 +48,7 @@ fn period_start_procedure_follows_the_league_arrow_policy() {
         // FIBA 记 true。档案值本身就是这条规则的裁决输入。
         let expected_arrow = name == "fiba";
         assert_eq!(
-            profile.use_alternate_possession_arrow, expected_arrow,
+            profile.jump_ball.use_alternate_possession_arrow, expected_arrow,
             "{name}: the recorded arrow policy must match the league file"
         );
     }

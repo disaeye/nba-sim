@@ -23,8 +23,8 @@ fn engine_and_validator_share_the_same_rule_profile() {
         world
             .rules
             .league
-            .clocks
+            .shot_clock
             .offensive_rebound_shot_clock_seconds,
-        profile.league.clocks.offensive_rebound_shot_clock_seconds
+        profile.league.shot_clock.offensive_rebound_shot_clock_seconds
     );
 }

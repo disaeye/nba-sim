@@ -11,8 +11,9 @@ pub mod validation_stream;
 pub use event::{DecisionTrace, TraceCandidate};
 pub use frame::{
     DebugEpv, DebugFlag, DebugPlayAdjustment, DebugProb, DebugUtility, DecisionDebug,
-    EventRelation, EventRelationKind, FrameEvent, FrameRules, PotentialFieldSample, RenderAction,
-    RenderBall, RenderFrame, RenderPlayer, RenderScore, RenderTeam, StreamTick,
+    EventRelation, EventRelationKind, FrameEvent, FrameRules, PlayerTimerFlag, PotentialFieldSample,
+    RenderAction, RenderBall, RenderFrame, RenderPlayer, RenderScore, RenderTeam, StreamTick,
+    TimerFlag, TimerFlags, TimerKind, ENGINE_MODEL_VERSION,
 };
 pub use validation_stream::{
     EvidenceLevel, StreamCapabilities, UnitDeclaration, ValidationStreamHeader,

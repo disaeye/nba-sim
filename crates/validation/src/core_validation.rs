@@ -135,12 +135,35 @@ pub fn rule_profile() -> nba_domain::GameRules {
     nba_domain::GameRules::default()
 }
 
+/// 验证器与引擎共用指定联赛的规则档案。
+pub fn rule_profile_for_league(league: nba_domain::league::LeagueId) -> nba_domain::GameRules {
+    nba_domain::GameRules::for_league(league)
+}
+
 /// 跑一组种子并产出判定报告。
 pub fn run_core_validation(seed_start: u64, games: u64) -> Result<CoreValidationReport, String> {
     if games == 0 {
         return Err("core validation requires at least one game".to_string());
     }
     run_core_validation_with_dir(seed_start, games, &workspace_calibration_dir())
+}
+
+/// 用指定联赛档案跑一组种子并产出判定报告。
+pub fn run_core_validation_for_league(
+    seed_start: u64,
+    games: u64,
+    league: nba_domain::league::LeagueId,
+) -> Result<CoreValidationReport, String> {
+    if games == 0 {
+        return Err("core validation requires at least one game".to_string());
+    }
+    run_core_validation_scoped_for_league_with_dir(
+        seed_start,
+        games,
+        ValidationScope::Full,
+        &workspace_calibration_dir(),
+        league,
+    )
 }
 
 /// 以指定比赛范围运行核心验证。
@@ -158,7 +181,13 @@ pub fn run_core_validation_with_dir(
     games: u64,
     calibration_dir: &Path,
 ) -> Result<CoreValidationReport, String> {
-    run_core_validation_scoped_with_dir(seed_start, games, ValidationScope::Full, calibration_dir)
+    run_core_validation_scoped_for_league_with_dir(
+        seed_start,
+        games,
+        ValidationScope::Full,
+        calibration_dir,
+        nba_domain::league::LeagueId::Nba,
+    )
 }
 
 /// 在指定校准目录与比赛范围运行核心验证。
@@ -168,17 +197,35 @@ pub fn run_core_validation_scoped_with_dir(
     scope: ValidationScope,
     calibration_dir: &Path,
 ) -> Result<CoreValidationReport, String> {
+    run_core_validation_scoped_for_league_with_dir(
+        seed_start,
+        games,
+        scope,
+        calibration_dir,
+        nba_domain::league::LeagueId::Nba,
+    )
+}
+
+/// 在指定校准目录、比赛范围与联赛档案下运行核心验证。
+pub fn run_core_validation_scoped_for_league_with_dir(
+    seed_start: u64,
+    games: u64,
+    scope: ValidationScope,
+    calibration_dir: &Path,
+    league: nba_domain::league::LeagueId,
+) -> Result<CoreValidationReport, String> {
     if games == 0 {
         return Err("core validation requires at least one game".to_string());
     }
     let params = Params::load(calibration_dir)?;
+    let rules = rule_profile_for_league(league);
     let mut results = Vec::new();
     let mut merged = GameReport::empty();
     let mut geometric_violations = 0;
     let mut context_violations = 0;
     for offset in 0..games {
         let seed = seed_start + offset;
-        let mut report = run_scoped_game(seed, &params, scope);
+        let mut report = run_scoped_game(seed, &params, scope, &rules);
         let ledger = check_ledger_scoped(seed, &report, scope.is_full());
         results.push(CoreGameResult {
             seed,
@@ -256,8 +303,13 @@ pub fn run_core_validation_scoped_with_dir(
     })
 }
 
-fn run_scoped_game(seed: u64, params: &Params, scope: ValidationScope) -> GameReport {
-    let setup = MatchSetup::builtin(rule_profile());
+fn run_scoped_game(
+    seed: u64,
+    params: &Params,
+    scope: ValidationScope,
+    rules: &nba_domain::GameRules,
+) -> GameReport {
+    let setup = MatchSetup::builtin(rules.clone());
     let mut world = World::new(setup, params.clone(), seed);
     match scope {
         ValidationScope::Full => world.run(),

@@ -17,16 +17,23 @@ H 阶段按 `docs/dev/current/full_simulation_plan.md` 的验收条件实施。�
 | H. 动作动画与观测闭环 | 实施中 | `docs/dev/current/full_simulation_plan.md` H 规定权威动作状态、16 个动作族与 111 个动作条目的生产链、协议投影、两类渲染器和逐项自动验证。当前协议层已有 `RenderAction` 与 `RenderPlayer.active_actions`，`crates/sim/src/stream.rs` 已有活动动作投影；最终证据在行为冻结后写入目录守卫、浏览器脚本与 CI 工件。 |
 | 计划文档整理 | 已完成 | `full_simulation_plan.md` 是唯一权威方案；`plan.md` 是入口，本文件仅记录进度。 |
 | 规则与能力目录 | 实施中 | 规则程序目录 22 项按版本、条款、场景矩阵与生产消费者审计；动作目录 16 个族与 111 个动作条目按 `ActionSpecTable` 逐项接入，最终覆盖证据在行为冻结后生成。NBA 2025-26 与 FIBA 2026 v1.1 的来源记录在 `docs/dev/evidence/rule_catalog_sources.md`。目录里的每一条证据指向真实测试：`crates/domain/tests/rule_catalog.rs::every_catalog_evidence_points_at_a_real_test` 逐条核对测试函数。 |
-| 权威状态与计时 | 已完成 | 时钟以整数微秒为唯一单位：`ClockState` 保存全部计时器与运行标志，`ClockDirective` 只有 `Start`、`Stop`、`Set`、`Restore` 四种形态，`ClockController` 是唯一改钟入口（其余模块读到的是秒数投影或微秒读数）。七种球态（持球、运球飞行、传球飞行、投篮飞行、松球、裁判控球、比赛用球离场）在 `nba_domain::match_model` 里给出，迁移表由 `BallBody::transition` 强制执行，非法边就地失败。`ControlState` 是控制权的唯一权威：控球人、控制球队、最后触球人与其球队、控制建立时刻、前场控制、触筐与触板身份、控制序列身份都在这一个结构体里，世界不再另存旁路字段。控制序列按控制球队划分，交接是原子事件。事件信封带程序身份、控制序列身份与来源事件。独立验证器只读事件流即可重建时钟与控制序列。 |
-| 比赛程序与规则裁决 | 实施中 | 22 项规则程序按方案补齐生产消费路径与场景矩阵；当前已接入的有：开场与加时跳球、NBA 常规节交替发球与 FIBA 交替拥有箭头、发球五秒、进攻三秒、防守三秒、背身五秒、非法触球、双方犯规、恶意犯规、清晰路径犯规、后场八秒与回场、后场八秒的「踢球」重置、跳步违例、紧逼五秒、出界归属与发球地点分类、罚球禁区违例与罚球人替换、暂停配额三层、换人与犯满离场、教练复核与挑战、干扰球、赛前名单检查、加时与换边、最后一罚命中后的底线发球。 |
+| 权威状态与计时 | 已完成 | 时钟以整数微秒为唯一单位：`ClockState` 保存全部计时器与运行标志，`ClockDirective` 只有 `Start`、`Stop`、`Set`、`Restore` 四种形态，`ClockController` 是唯一改钟入口（其余模块读到的是秒数投影或微秒读数）。七种球态（持球、运球飞行、传球飞行、投篮飞行、松球、裁判控球、比赛用球离场）在 `nba_domain::match_model` 里给出，迁移表由 `BallBody::transition` 强制执行，非法边就地失败。`ControlState` 是控制权的唯一权威：控球人、控制球队、最后触球人与其球队、控制建立时刻、前场控制、触筐与触板身份、控制序列身份都在这一个结构体里，世界不再另存旁路字段。控制序列按控制球队划分，交接是原子事件。事件信封带程序身份、控制序列身份与来源事件。独立验证器只读事件流即可重建时钟与控制序列。走钟策略的唯一判定是比赛程序：死球程序（暂停、罚球、发球、节间）期间无论球是否还在空中，比赛钟都停着；只有活球阶段的飞行才改变走钟方式。推进前先按策略写入运行标志，推进只读运行标志。`crates/sim/tests/clock_scenarios.rs` 的三项回归钉住这三条。 |
+| 比赛程序与规则裁决 | 实施中 | 22 项规则程序按方案补齐生产消费路径与场景矩阵；当前已接入的有：开场与加时跳球、NBA 常规节交替发球与 FIBA 交替拥有箭头、发球五秒、进攻三秒、防守三秒、背身五秒、非法触球、双方犯规、恶意犯规、清晰路径犯规、后场八秒与回场、后场八秒的「踢球」重置、跳步违例、紧逼五秒、出界归属与发球地点分类、罚球禁区违例与罚球人替换、暂停配额三层、换人与犯满离场、教练复核与挑战、干扰球、赛前名单检查、加时与换边、最后一罚命中后的底线发球。联赛档案按 11 个策略族组织：节次、时钟、进攻钟、犯规、罚球、发球、跳球、暂停、换人、违例与复核；每个族的字段都在档案里，缺字段读不进来。发球时限与发球准备时长、罚球出手时限与罚球间隔、进攻三秒与守方三秒、背身五秒、后场八秒都从档案读，引擎不再另存一份副本。未登记的违例在该档案下不成立，裁决入口就地失败；换人窗口由换人策略族给出。 |
 | 并行动作系统 | 实施中 | 全局单动作 `World::active` 已彻底移除：`World::advance_parallel_actions` 逐人推进每名球员自己的 `ActionRuntime`，多人配合由 `World::interactions` 按交互编号结算，`DefensiveActionRuntime` 另有 `CloseoutContest`、`StealAttempt` 与 `BlockJump` 三种防守动作。持球人、无球进攻球员与防守人各自持有调度与候选集。并发性由 `parallel_actions` 4 项直接验证。 |
 | 决策、战术与能力 | 实施中 | 16 个动作族与 111 个动作条目按 `ActionSpecTable` 逐项接入；当前技术选择覆盖运球七种技术、突破三种变体、传球八种技术、切入六种路线、背身步法、跳步违例、欧洲步、后撤步、包夹与护球、挤过与绕过、回位，以及收球后贴身持球五秒判违例。能力、倾向、战术与实时几何共同驱动候选、执行与后果。 |
-| 事件、回放与完整验证 | 实施中 | 事件派生球员与球队统计账本、稳定事件序号、带历史缺口检测的游标接口、SessionService 内存检查点恢复与磁盘检查点按方案保存完整 `MatchSetup`、`WorldSnapshot` 与回放清单，恢复时校验版本与状态指纹。完整比赛入口测试比较 CLI 与 WASM 的整场摘要和全部投影事件（seed 211）。最近一次完整工作区测试日志在 `.pi/tasks/review-tests.log`；最终测试数量在行为冻结后记录。 |
+| 事件、回放与完整验证 | 实施中 | 事件派生球员与球队统计账本、稳定事件序号、带历史缺口检测的游标接口、SessionService 内存检查点恢复与磁盘检查点按方案保存完整 `MatchSetup`、`WorldSnapshot` 与回放清单，恢复时校验版本与状态指纹。回放清单 `MatchManifest` 带着名单、首发、规则档案、种子与三个版本号（规则版本、校准版本、引擎模型版本），写到磁盘再读回来仍然是同一份输入。NBA 与 FIBA 档案从 CLI、WASM、debug-server 与会话检查点进入同一内核：CLI 的 `--league`、WASM 的 `setup_match_json`、debug-server 的 `POST /api/core/setup` 接受联赛档案与完整比赛设置。`FrameRules` 与 `StreamTick` 带规则版本、校准版本与引擎模型版本；`StreamTick.timers` 给出每个计时器的运行标志。完整比赛入口测试比较 CLI 与 WASM 的整场摘要和全部投影事件（seed 211，NBA；seed 307，FIBA）。最近一次完整工作区测试日志在 `.pi/tasks/review-tests.log`；最终测试数量在行为冻结后记录。 |
 | 校准与文档验收 | 待最终验证 | 历史 32 场工件有 38 条判据并通过认证；当前门禁按 `docs/dev/evidence/gap_closure_cycle/gate.txt` 记录 39 条判据与 4 项越界，最终校准工件在行为冻结后生成。机制实验默认 160 个种子，`defensive_rebound` 按 640 个种子判定；冻结三表哈希与文档守卫按最终工件复核。 |
 
 ## 本轮新增验证证据
 
 定向测试按工作包运行；行为冻结后运行一次完整工作区测试，测试数量、峰值常驻内存与退出码写入 `.pi/tasks/final-workspace-tests.log`。每个测试进程受固定地址空间上限约束。
+
+- `crates/validation/tests/league_profiles.rs` 5 项：两个档案的 11 个策略族都填满内容、扁平策略族缺任一字段读不进来、嵌套策略族缺成员读不进来、缺策略族对象读不进来、未知字段读不进来。
+- `crates/sim/tests/league_entry_points.rs` 6 项：NBA 与 FIBA 各跑完一整场、帧带三个版本号、帧带计时器运行标志、磁盘版与内嵌版校准版本一致、清单恢复自定义名单与联赛档案、校准版本不一致的清单被拒绝。
+- `crates/cli/tests/interface_parity.rs` 3 项：NBA 整场 CLI 与 WASM 摘要一致、FIBA 整场 CLI 与 WASM 摘要一致、未知联赛标识就地失败。
+- `crates/debug-server` 的 `session_setup_accepts_a_league_profile`：debug-server 接受 FIBA 档案，未知档案返回 400。
+- `crates/sim/tests/checkpoint_disk.rs` 3 项：磁盘检查点恢复后跑出同一场比赛、分叉的检查点被拒绝、不支持的清单版本被拒绝。
+- `crates/sim/tests/clock_scenarios.rs` 13 项：死球程序期间球在空中比赛钟仍然停、暂停期间球在空中比赛钟仍然停、一整场比赛消耗的比赛钟恰好等于四节时长之和，加上原有的十项走钟与重置场景。
 
 - `crates/sim/tests/lane_clock.rs` 5 项：进攻三秒违例、及时离开限制区不违例、防守三秒技术犯规、主动盯防的防守人不判罚、进攻方进入前场前不开始计时。
 - `crates/sim/tests/illegal_touch.rs` 5 项：一臂之内伸手阻挡成立、合法间隔上的平行贴防不成立、够不到的防守人不成立、退开之后不再成立、活球里记为防守方的个人犯规。

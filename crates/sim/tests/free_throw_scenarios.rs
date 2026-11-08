@@ -167,7 +167,7 @@ fn the_free_throw_time_limit_expires_into_a_turnover() {
     let shooter = world.holder().expect("live possession has a holder");
     free_throw_program(&mut world, shooter, 2);
     // 把罚球时限推到过去：罚球人没有在限时内出手。
-    let limit = f64::from(world.rules.league.free_throw_time_limit_seconds);
+    let limit = f64::from(world.rules.league.free_throws.free_throw_time_limit_seconds);
     world.free_throw_started = Some(world.now() - limit - 1.0);
     world.step(TICK_SECONDS);
     let expired = world.events.iter().any(|event| {

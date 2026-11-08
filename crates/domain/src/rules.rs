@@ -55,32 +55,15 @@ pub struct GameRules {
     /// 联赛规则档案（M10）：切换联赛 = 替换该档案，引擎零联赛分支。
     pub league: crate::league::LeagueProfile,
     pub estimated_possessions_per_period: u32,
-    pub inbound_seconds: f32,
-    pub inbound_setup_seconds: f32,
     /// 发球接应人落位点距发球员的距离（ft）：无接应位时发球只能
     /// 选择 20-60ft 高风险长传。0 关闭接应机制。
     pub inbound_safety_distance_ft: f32,
-    pub backcourt_seconds: f32,
-    /// 攻方三秒时限（charter §6.2）：前场控制时进攻人在限制区连续停留超过
-    /// 该时限判违例。NBA 与 FIBA 同为 3 秒。
-    pub three_second_lane_seconds: f32,
-    /// 守方三秒时限：防守人在限制区连续停留超过该时限判违例。
-    ///
-    /// NBA Rule 10 §VII：违例判技术犯规，对方罚一次并保留球权。
-    /// FIBA Article 26：FIBA 没有守方三秒规则，因此该值为零表示不启用。
-    pub defensive_three_second_seconds: f32,
-    /// 守方三秒违例是否判技术犯规（NBA 是，FIBA 无此规则）。
-    pub defensive_three_second_is_technical: bool,
-    /// 背身五秒时限（NBA Rule 10 §XVI）：进攻人在前场罚球线延长线以下
-    /// 背身或侧身运球超过该时限即违例。零值表示不启用（FIBA 无此规则）。
-    pub back_to_basket_seconds: f32,
     pub period_break_seconds: f32,
     pub tactical_initiation_seconds: f32,
     /// 无事件触发时的最小重决策间隔（秒）。决策由动作完成、球权变化、
     /// 接球、掩护接触、协防承诺等事件触发；没有事件时，持球人至少
     /// 隔这么久才重新评估。
     pub redecide_interval_seconds: f32,
-    pub free_throw_interval_seconds: f32,
     pub ball_max_speed_ftps: f32,
     pub min_pass_duration_seconds: f32,
     pub max_pass_duration_seconds: f32,
@@ -442,23 +425,25 @@ fn default_backboard_vertical_restitution() -> f32 {
 
 impl Default for GameRules {
     fn default() -> Self {
+        Self::for_league(crate::league::LeagueId::Nba)
+    }
+}
+
+impl GameRules {
+    /// 使用指定联赛档案的规则集。
+    ///
+    /// 换联赛 = 换一份档案：其余参数是模拟参数，与联赛无关，因此两个
+    /// 档案共用同一组取值。
+    pub fn for_league(id: crate::league::LeagueId) -> Self {
         Self {
             tick_seconds: TICK_SECONDS as f32,
             travel_enforcement: true,
-            league: crate::league::LeagueProfile::nba(),
+            league: crate::league::LeagueProfile::for_id(id),
             estimated_possessions_per_period: 35,
-            inbound_seconds: 5.0,
-            inbound_setup_seconds: 2.2,
             inbound_safety_distance_ft: 8.0,
-            backcourt_seconds: 8.0,
-            three_second_lane_seconds: 3.0,
-            defensive_three_second_seconds: 3.0,
-            defensive_three_second_is_technical: true,
-            back_to_basket_seconds: 5.0,
             period_break_seconds: 15.0,
             tactical_initiation_seconds: 6.5,
             redecide_interval_seconds: 0.5,
-            free_throw_interval_seconds: 2.2,
             ball_max_speed_ftps: 85.0,
             min_pass_duration_seconds: 0.45,
             max_pass_duration_seconds: 1.4,
@@ -640,11 +625,11 @@ impl GameRules {
     /// （末段秒数、罚则次数、暂停额度等）保持不变。
     pub fn shortened(&self, period_seconds: f32, overtime_seconds: f32) -> Self {
         assert!(
-            period_seconds >= self.league.clocks.shot_clock_seconds,
+            period_seconds >= self.league.shot_clock.shot_clock_seconds,
             "shortened period must be at least one shot clock"
         );
         assert!(
-            overtime_seconds >= self.league.clocks.shot_clock_seconds,
+            overtime_seconds >= self.league.shot_clock.shot_clock_seconds,
             "shortened overtime must be at least one shot clock"
         );
         let mut rules = self.clone();
@@ -655,6 +640,48 @@ impl GameRules {
             ((self.estimated_possessions_per_period as f32 * scale).ceil() as u32).max(1);
         rules.validate().expect("shortened rules must stay valid");
         rules
+    }
+
+    /// 发球时限：发球人必须在这么多秒内把球传入场内。
+    ///
+    /// 时限属于发球程序，因此它住在联赛档案的发球策略族里。
+    pub fn inbound_seconds(&self) -> f32 {
+        self.league.inbound.inbound_seconds
+    }
+
+    /// 发球程序从开始到发球人可以传球的准备时长。
+    pub fn inbound_setup_seconds(&self) -> f32 {
+        self.league.inbound.inbound_setup_seconds
+    }
+
+    /// 两次罚球之间与第一次罚球前的准备间隔。
+    pub fn free_throw_interval_seconds(&self) -> f32 {
+        self.league.free_throws.free_throw_interval_seconds
+    }
+
+    /// 攻方三秒时限：进攻人在限制区连续停留超过该时限即违例。
+    pub fn three_second_lane_seconds(&self) -> f32 {
+        self.league.violations.limits.offensive_three_second_seconds
+    }
+
+    /// 守方三秒时限；零值表示该联赛没有守方三秒规则。
+    pub fn defensive_three_second_seconds(&self) -> f32 {
+        self.league.violations.limits.defensive_three_second_seconds
+    }
+
+    /// 守方三秒违例是否判技术犯规。
+    pub fn defensive_three_second_is_technical(&self) -> bool {
+        self.league.violations.limits.defensive_three_second_is_technical
+    }
+
+    /// 背身五秒时限；零值表示该联赛没有这条规则。
+    pub fn back_to_basket_seconds(&self) -> f32 {
+        self.league.violations.limits.back_to_basket_seconds
+    }
+
+    /// 八秒运球时限：控球方在后场停留超过该时限即违例。
+    pub fn backcourt_seconds(&self) -> f32 {
+        self.league.violations.limits.backcourt_seconds
     }
 
     pub fn period_duration(&self, period: u32) -> f32 {
@@ -721,7 +748,7 @@ impl GameRules {
     }
 
     pub fn inbound_expired(&self, elapsed: f32) -> bool {
-        elapsed >= self.inbound_seconds
+        elapsed >= self.league.inbound.inbound_seconds
     }
 
     pub fn period_expired(&self, clock: f32) -> bool {

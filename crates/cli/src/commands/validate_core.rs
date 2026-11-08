@@ -10,7 +10,7 @@ use nba_sim_core::params::workspace_validation_dir;
 use nba_sim_core::Params;
 use nba_validation::core_validation::{
     batch_statistical_artifact, certification_artifact, load_known_insufficient,
-    run_core_validation, CoreValidationReport,
+    run_core_validation_for_league, CoreValidationReport,
 };
 use nba_validation::mechanism_core::{run_mechanism_experiments, MechanismConfig, MechanismReport};
 
@@ -20,8 +20,9 @@ pub(crate) fn run_validate_core(
     json: bool,
     mechanism: bool,
     out: Option<PathBuf>,
+    league: nba_domain::league::LeagueId,
 ) -> std::io::Result<u8> {
-    let report = run_core_validation(seed_start, games)
+    let report = run_core_validation_for_league(seed_start, games, league)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     if json {
         let body = serde_json::to_string_pretty(&report)
@@ -66,7 +67,7 @@ pub(crate) fn run_validate_core(
     let five = nba_validation::five_dimension::run_five_dimension(
         seed_start,
         games,
-        nba_domain::rules::GameRules::default(),
+        nba_domain::rules::GameRules::for_league(league),
     )
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     nba_validation::five_dimension::write_five_dimension(&five, &out_dir)?;

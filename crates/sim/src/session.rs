@@ -8,6 +8,7 @@ use std::path::Path;
 use nba_protocol::{FrameEvent, StreamTick};
 use serde::{Deserialize, Serialize};
 
+use crate::manifest::MatchManifest;
 use crate::params::RuntimeParams;
 use crate::world::{GameReport, MatchSetup, World, TICK_SECONDS};
 
@@ -44,6 +45,14 @@ pub struct MatchInfo {
     pub away_team_name: String,
     pub seed: u64,
     pub tick_seconds: f64,
+    /// 联赛档案标识。
+    pub league: String,
+    /// 规则版本：联赛档案记录的规则集版本。
+    pub ruleset_version: String,
+    /// 校准版本：参与模拟的配置内容摘要。
+    pub calibration_version: String,
+    /// 引擎模型版本：行为模型的身份。
+    pub engine_model_version: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -92,10 +101,13 @@ pub struct EventBatch {
 }
 
 /// 磁盘检查点描述符。
+///
+/// 描述符带着回放清单（完整比赛设置与三个版本号）与比赛位置：恢复时
+/// 用的就是当初那一份输入，而不是重新造一份默认的。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDescriptor {
-    pub version: u32,
-    pub seed: u64,
+    /// 这次运行的完整输入。
+    pub manifest: MatchManifest,
     pub tick: u64,
     pub latest_event_id: u64,
     pub state: SessionState,
@@ -155,7 +167,20 @@ impl SessionService {
         seed: u64,
     ) -> Result<MatchInfo, String> {
         let rules = nba_domain::GameRules::default();
-        let setup = MatchSetup::builtin(rules);
+        self.setup_with(MatchSetup::builtin(rules), params, seed)
+    }
+
+    /// 用指定的完整设置开局：名单、首发与规则档案都由此决定。
+    pub fn setup_with<P: Into<RuntimeParams>>(
+        &mut self,
+        setup: MatchSetup,
+        params: P,
+        seed: u64,
+    ) -> Result<MatchInfo, String> {
+        let params: RuntimeParams = params.into();
+        setup
+            .validate()
+            .map_err(|error| format!("match setup rejected: {error}"))?;
         let info = MatchInfo {
             home_team_id: setup.home.id.clone(),
             away_team_id: setup.away.id.clone(),
@@ -163,6 +188,10 @@ impl SessionService {
             away_team_name: setup.away.name.clone(),
             seed,
             tick_seconds: TICK_SECONDS,
+            league: setup.rules.league.id.as_str().to_string(),
+            ruleset_version: setup.rules.league.ruleset_version.clone(),
+            calibration_version: params.calibration_version.clone(),
+            engine_model_version: nba_protocol::ENGINE_MODEL_VERSION.to_string(),
         };
         self.world = Some(World::new(setup, params, seed));
         self.seed = seed;
@@ -172,6 +201,17 @@ impl SessionService {
         self.latest_event_id = 0;
         self.collect_events();
         Ok(info)
+    }
+
+    /// 用指定联赛档案的内建名册开局。
+    pub fn setup_for_league<P: Into<RuntimeParams>>(
+        &mut self,
+        league: nba_domain::league::LeagueId,
+        params: P,
+        seed: u64,
+    ) -> Result<MatchInfo, String> {
+        let rules = nba_domain::GameRules::for_league(league);
+        self.setup_with(MatchSetup::builtin(rules), params, seed)
     }
 
     pub fn setup_from_calibration(
@@ -420,9 +460,13 @@ impl SessionService {
             .world
             .as_ref()
             .ok_or_else(|| "cannot checkpoint before match setup".to_string())?;
+        let manifest = crate::manifest::MatchManifest::new(
+            world.setup.clone(),
+            self.seed,
+            &world.params.calibration_version,
+        );
         Ok(SessionDescriptor {
-            version: 1,
-            seed: self.seed,
+            manifest,
             tick: world.clock.tick(),
             latest_event_id: world.next_event_id,
             state: self.state(),
@@ -446,24 +490,26 @@ impl SessionService {
         Ok(descriptor)
     }
 
-    /// 从磁盘检查点恢复：按同一份设置重放到检查点所在的 tick，再校验指纹。
+    /// 从磁盘检查点恢复：按检查点里那份清单重放到检查点所在的 tick，再校验指纹。
+    ///
+    /// 名单、首发与规则档案就是当初那一份：清单从检查点读，不再另造一份
+    /// 默认的。校准版本与引擎模型版本不一致就地失败——用另一份校准重放
+    /// 出来的比赛不是同一场比赛。
     pub fn restore_from_descriptor(
         &mut self,
         path: &Path,
-        _setup: MatchSetup,
         params: RuntimeParams,
     ) -> Result<SessionDescriptor, String> {
         let text = std::fs::read_to_string(path)
             .map_err(|error| format!("read checkpoint {}: {error}", path.display()))?;
         let descriptor: SessionDescriptor = serde_json::from_str(&text)
             .map_err(|error| format!("parse checkpoint {}: {error}", path.display()))?;
-        if descriptor.version != 1 {
-            return Err(format!(
-                "unsupported checkpoint version {}",
-                descriptor.version
-            ));
-        }
-        self.setup(params, descriptor.seed)?;
+        descriptor.manifest.check_against(&params)?;
+        self.setup_with(
+            descriptor.manifest.setup.clone(),
+            params,
+            descriptor.manifest.seed,
+        )?;
         self.start()?;
         for _ in 0..descriptor.tick {
             if self.state() != SessionState::Running {

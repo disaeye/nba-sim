@@ -354,10 +354,63 @@ pub struct RenderFrame {
     /// Sparse samples of the authoritative defensive potential field.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub potential_field: Vec<PotentialFieldSample>,
+    /// 计时器运行标志：此刻哪些计时器在走。
+    #[serde(default)]
+    pub timers: TimerFlags,
 }
 
 fn default_stream_projection() -> String {
     "full".to_string()
+}
+
+/// 计时器身份。协议层认识引擎的全部计时器类别。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TimerKind {
+    Simulation,
+    GameClock,
+    ShotClock,
+    Elapsed,
+    PlayerTimeTotal,
+    Backcourt,
+    Lane,
+    Inbound,
+    BackToBasket,
+    FreeThrow,
+    Review,
+    Timeout,
+    ProgramPrep,
+    Period,
+    PeriodDuration,
+    Tick,
+}
+
+/// 一个非球员计时器的运行标志。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimerFlag {
+    pub timer: TimerKind,
+    /// 该计时器当前是否在走。
+    pub running: bool,
+}
+
+/// 一个球员计时器的运行标志。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlayerTimerFlag {
+    /// 全场球员句柄。
+    pub player: usize,
+    /// 该球员的计时器当前是否在走。
+    pub running: bool,
+}
+
+/// 帧里的计时器运行标志。
+///
+/// 消费方据此知道此刻哪些计时器在走，不必从比赛阶段反推。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimerFlags {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub timers: Vec<TimerFlag>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub player_timers: Vec<PlayerTimerFlag>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -514,6 +567,24 @@ impl FrameEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrameRules {
+    /// 规则版本：联赛档案记录的规则集版本（如 `2025-26`）。
+    ///
+    /// 换一份规则档案就是换一份规则版本，回放据此判定规则输入是否一致。
+    #[serde(default)]
+    pub ruleset_version: String,
+    /// 校准版本：进入模拟的校准表内容摘要。
+    ///
+    /// 摘要覆盖实际参与模拟的校准表（policy、formations、tactics、
+    /// shot_distance），因此两次运行的校准版本相同当且仅当它们用的是
+    /// 同一份校准内容。
+    #[serde(default)]
+    pub calibration_version: String,
+    /// 引擎模型版本：行为模型的身份。
+    ///
+    /// 行为模型改动时这个值随之改动：它与规则版本、校准版本一起构成
+    /// 「这次运行是什么」的完整身份。
+    #[serde(default)]
+    pub engine_model_version: String,
     pub tick_seconds: f32,
     pub court_width_ft: f32,
     pub court_height_ft: f32,
@@ -551,6 +622,13 @@ pub struct FrameRules {
     #[serde(default = "default_bonus_fouls_per_period")]
     pub bonus_fouls_per_period: u32,
 }
+
+/// 引擎模型版本：行为模型的身份。
+///
+/// 行为模型（决策、动作、裁决规则）改动时这个值随之改动。规则版本说
+/// 明「按哪套规则判」，校准版本说明「按哪份校准算」，引擎模型版本说明
+/// 「按哪套行为模型选」。
+pub const ENGINE_MODEL_VERSION: &str = "action-chain-1";
 
 fn default_body_contact_radius() -> f32 {
     1.0
@@ -611,6 +689,9 @@ impl Default for FrameRules {
             ball_z_max_ft: default_ball_z_max(),
             max_personal_fouls: default_max_personal_fouls(),
             bonus_fouls_per_period: default_bonus_fouls_per_period(),
+            ruleset_version: String::new(),
+            calibration_version: String::new(),
+            engine_model_version: String::new(),
         }
     }
 }

@@ -431,6 +431,10 @@ pub struct Params {
     pub policy: PolicyTable,
     pub formations: Formations,
     pub tactics: TacticsTable,
+    /// 出手类型 × 距离的实测命中率。
+    pub shot_distance: ShotDistanceTable,
+    /// 校准版本：参与模拟的配置内容的字节摘要。
+    pub calibration_version: String,
 }
 
 /// 表的用途分类。运行时只允许加载机制、程序、策略三类。
@@ -512,6 +516,10 @@ pub struct RuntimeParams {
     pub tactics: TacticsTable,
     /// 出手类型 × 距离的实测命中率。
     pub shot_distance: ShotDistanceTable,
+    /// 校准版本：参与模拟的配置内容的字节摘要。
+    ///
+    /// 回放据此判定两次运行用的是不是同一份校准。
+    pub calibration_version: String,
 }
 
 impl RuntimeParams {
@@ -521,6 +529,7 @@ impl RuntimeParams {
             formations: embedded("formations"),
             tactics: TacticsTable::embedded(),
             shot_distance: ShotDistanceTable::embedded(),
+            calibration_version: embedded_simulation_config_version(),
         };
         params
             .validate()
@@ -534,6 +543,7 @@ impl RuntimeParams {
             formations: read(dir, "formations")?,
             tactics: TacticsTable::load(dir)?,
             shot_distance: ShotDistanceTable::load(dir)?,
+            calibration_version: simulation_config_version(dir)?,
         };
         params.validate()?;
         Ok(params)
@@ -567,7 +577,8 @@ impl From<Params> for RuntimeParams {
             policy: params.policy,
             formations: params.formations,
             tactics: params.tactics,
-            shot_distance: ShotDistanceTable::embedded(),
+            shot_distance: params.shot_distance,
+            calibration_version: params.calibration_version,
         }
     }
 }
@@ -578,7 +589,8 @@ impl From<&Params> for RuntimeParams {
             policy: params.policy.clone(),
             formations: params.formations.clone(),
             tactics: params.tactics.clone(),
-            shot_distance: ShotDistanceTable::embedded(),
+            shot_distance: params.shot_distance.clone(),
+            calibration_version: params.calibration_version.clone(),
         }
     }
 }
@@ -665,6 +677,8 @@ impl Params {
             policy: embedded("policy"),
             formations: embedded("formations"),
             tactics: TacticsTable::embedded(),
+            shot_distance: ShotDistanceTable::embedded(),
+            calibration_version: embedded_simulation_config_version(),
         };
         params
             .validate()
@@ -682,6 +696,8 @@ impl Params {
             policy: read(dir, "policy")?,
             formations: read(dir, "formations")?,
             tactics: TacticsTable::load(dir)?,
+            shot_distance: ShotDistanceTable::load(dir)?,
+            calibration_version: simulation_config_version(dir)?,
         };
         params.validate()?;
         Ok(params)
@@ -748,6 +764,132 @@ fn read<T: serde::de::DeserializeOwned>(dir: &Path, name: &str) -> Result<T, Str
         .map_err(|error| format!("calibration table {} unreadable: {error}", path.display()))?;
     serde_json::from_str(&text)
         .map_err(|error| format!("calibration table {} invalid: {error}", path.display()))
+}
+
+/// 参与模拟的配置文件清单：摘要标签与相对 `data/` 目录的路径。
+///
+/// 顺序固定：摘要依赖顺序。清单同时供磁盘版与内嵌版使用，两条路径因此
+/// 覆盖同一批文件。
+fn simulation_config_entries() -> Vec<(String, String)> {
+    let mut entries = vec![
+        (
+            "calibration/policy.json".to_string(),
+            "calibration/policy.json".to_string(),
+        ),
+        (
+            "calibration/formations.json".to_string(),
+            "calibration/formations.json".to_string(),
+        ),
+        (
+            "calibration/shot_distance.json".to_string(),
+            "calibration/shot_distance.json".to_string(),
+        ),
+    ];
+    for (name, _) in crate::tactics::SYSTEM_SOURCES {
+        let label = format!("tactics/{name}.json");
+        entries.push((label.clone(), label));
+    }
+    for (name, _) in crate::tactics::PLAY_SOURCES {
+        let label = format!("tactics/plays/{name}.json");
+        entries.push((label.clone(), label));
+    }
+    entries
+}
+
+/// 摘要标签对应的实际文件路径。
+///
+/// 校准表在 `dir` 里；战术档案在 `dir` 的平级 `tactics` 目录里，与
+/// `TacticsTable::load` 的目录约定一致。
+fn resolve_config_path(dir: &Path, label: &str) -> std::path::PathBuf {
+    match label.strip_prefix("calibration/") {
+        Some(name) => dir.join(name),
+        None => dir.parent().unwrap_or(dir).join(label),
+    }
+}
+
+/// 配置内容的字节摘要（FNV-1a 64 位）。
+///
+/// 它的用途是给「这次运行用的是哪份配置」一个稳定身份：摘要相同当且
+/// 仅当参与模拟的配置文件逐字节相同。它不承担安全用途，因此不需要
+/// 密码学强度。
+fn digest_config(parts: &[(String, Vec<u8>)]) -> String {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x100_0000_01b3;
+    let mut hash = OFFSET_BASIS;
+    for (label, bytes) in parts {
+        for byte in label
+            .as_bytes()
+            .iter()
+            .chain(std::iter::once(&0u8))
+            .chain(bytes.iter())
+        {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(PRIME);
+        }
+    }
+    format!("{hash:016x}")
+}
+
+/// 磁盘配置的校准版本。
+///
+/// 摘要覆盖参与模拟的全部配置文件：四张校准表与战术剧本/体系档案。
+pub fn simulation_config_version(dir: &Path) -> Result<String, String> {
+    let mut parts = Vec::new();
+    for (label, relative) in simulation_config_entries() {
+        let path = resolve_config_path(dir, &relative);
+        let bytes = std::fs::read(&path).map_err(|error| {
+            format!("simulation config {} unreadable: {error}", path.display())
+        })?;
+        parts.push((label, bytes));
+    }
+    Ok(digest_config(&parts))
+}
+
+/// 内嵌配置的校准版本（浏览器目标没有文件系统）。
+///
+/// 它覆盖的文件与 `simulation_config_version` 相同，因此同一份仓库内容
+/// 在两种加载方式下得到同一个校准版本。
+pub fn embedded_simulation_config_version() -> String {
+    let mut parts: Vec<(String, Vec<u8>)> = Vec::new();
+    for (label, relative) in simulation_config_entries() {
+        let text = embedded_config_text(&relative);
+        parts.push((label, text.as_bytes().to_vec()));
+    }
+    digest_config(&parts)
+}
+
+/// 内嵌配置文件的原文。
+fn embedded_config_text(relative: &str) -> &'static str {
+    match relative {
+        "calibration/policy.json" => include_str!("../../../data/calibration/policy.json"),
+        "calibration/formations.json" => include_str!("../../../data/calibration/formations.json"),
+        "calibration/shot_distance.json" => {
+            include_str!("../../../data/calibration/shot_distance.json")
+        }
+        other => {
+            if let Some(name) = other
+                .strip_prefix("tactics/plays/")
+                .and_then(|rest| rest.strip_suffix(".json"))
+            {
+                crate::tactics::PLAY_SOURCES
+                    .iter()
+                    .find(|(play, _)| *play == name)
+                    .map(|(_, text)| *text)
+                    .expect("play spec listed in the config manifest must exist")
+            } else if let Some(name) = other
+                .strip_prefix("tactics/")
+                .and_then(|rest| rest.strip_suffix(".json"))
+            {
+                crate::tactics::SYSTEM_SOURCES
+                    .iter()
+                    .find(|(system, _)| *system == name)
+                    .map(|(_, text)| *text)
+                    .expect("tactical set listed in the config manifest must exist")
+            } else {
+                panic!("unknown embedded simulation config `{other}`")
+            }
+        }
+    }
 }
 
 fn embedded<T: serde::de::DeserializeOwned>(name: &str) -> T {

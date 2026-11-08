@@ -25,17 +25,17 @@ impl GameRules {
             self.tick_seconds,
             self.league.periods.period_duration_seconds,
             self.league.periods.overtime_duration_seconds,
-            self.league.clocks.shot_clock_seconds,
-            self.league.clocks.offensive_rebound_shot_clock_seconds,
+            self.league.shot_clock.shot_clock_seconds,
+            self.league.shot_clock.offensive_rebound_shot_clock_seconds,
             self.league.fouls.bonus_final_seconds,
             self.league.timeouts.timeouts_final_seconds,
-            self.inbound_seconds,
-            self.inbound_setup_seconds,
-            self.backcourt_seconds,
+            self.league.inbound.inbound_seconds,
+            self.league.inbound.inbound_setup_seconds,
+            self.league.violations.limits.backcourt_seconds,
             self.period_break_seconds,
             self.tactical_initiation_seconds,
             self.redecide_interval_seconds,
-            self.free_throw_interval_seconds,
+            self.league.free_throws.free_throw_interval_seconds,
             self.min_pass_duration_seconds,
             self.max_pass_duration_seconds,
             self.min_shot_duration_seconds,
@@ -74,8 +74,8 @@ impl GameRules {
             self.free_throw_distance_ft,
             self.shot_pct_floor,
             self.shot_pct_ceiling,
-            self.league.center_circle_radius_ft,
-            self.league.jump_ball_receiver_distance_ft,
+            self.league.jump_ball.center_circle_radius_ft,
+            self.league.jump_ball.jump_ball_receiver_distance_ft,
             self.tip_off_duration_seconds,
             self.ball_bounce_base_ft,
             self.ball_bounce_amplitude_ft,
@@ -165,35 +165,23 @@ impl GameRules {
         if self.tick_seconds <= 0.0
             || self.league.periods.period_duration_seconds <= 0.0
             || self.league.periods.overtime_duration_seconds <= 0.0
-            || self.league.clocks.shot_clock_seconds <= 0.0
-            || self.league.clocks.offensive_rebound_shot_clock_seconds <= 0.0
-            || self.inbound_seconds <= 0.0
             || self.tip_off_tap_speed_ftps <= 0.0
             || self.tip_off_tap_distance_ft <= 0.0
             || self.tip_off_tap_height_ft <= 0.0
             || self.tip_off_tap_height_ft > self.ball_z_max_ft
             || self.tip_off_tap_vel_z_ftps <= 0.0
-            || self.inbound_setup_seconds < 0.0
-            || self.backcourt_seconds <= 0.0
-            || self.three_second_lane_seconds <= 0.0
-            || self.defensive_three_second_seconds < 0.0
-            || (self.defensive_three_second_seconds > 0.0
-                && !self.defensive_three_second_is_technical)
             || self.period_break_seconds < 0.0
             || self.tactical_initiation_seconds < 0.0
             || self.redecide_interval_seconds <= 0.0
             || self.redecide_interval_seconds > 5.0
-            || self.free_throw_interval_seconds <= 0.0
             || self.league.periods.regulation_periods == 0
-            || self.league.center_circle_radius_ft <= 0.0
-            || self.league.jump_ball_receiver_distance_ft <= self.league.center_circle_radius_ft
-            || self.league.jump_ball_receiver_distance_ft >= self.court.width_ft * 0.5
-            || self.league.center_circle_radius_ft >= self.court.width_ft * 0.25
             || self.league.fouls.bonus_final_seconds < f32::default()
             || (self.league.fouls.bonus_fouls_final != 0
                 && self.league.fouls.bonus_fouls_final > self.league.fouls.bonus_fouls_per_period)
             || self.league.fouls.bonus_final_period > self.league.periods.regulation_periods
             || self.league.timeouts.timeouts_final_seconds < f32::default()
+            || self.league.timeouts.timeouts_final_period
+                > self.league.periods.regulation_periods
             || self.league.timeouts.timeouts_final_max
                 > self.league.timeouts.timeouts_fourth_quarter_max
             || self.league.timeouts.timeouts_fourth_quarter_max

@@ -521,8 +521,8 @@ pub fn book_defense_three_second(world: &mut World, actor: usize) {
 /// 条件，因此「谁在计时」与「谁要往外走」永远是同一个判定。分成两个
 /// 步骤时，两者的状态可能在一个 tick 之间变掉，球员被留在区里。
 pub fn step(world: &mut World, dt: f64) {
-    let offense_limit = world.rules.three_second_lane_seconds;
-    let defense_limit = world.rules.defensive_three_second_seconds;
+    let offense_limit = world.rules.three_second_lane_seconds();
+    let defense_limit = world.rules.defensive_three_second_seconds();
 
     // 计时中的人不在计时条件里时，计时归零。
     let offense_holder = offense_timer_holder(world);

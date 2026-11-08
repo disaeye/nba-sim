@@ -12,22 +12,32 @@
   "regulation_periods": 4,
   "period_duration_seconds": 600.0,
   "overtime_duration_seconds": 300.0,
+  "closely_guarded_seconds": 5.0,
+  "closely_guarded_distance_ft": 3.28,
   "shot_clock_seconds": 24.0,
   "offensive_rebound_shot_clock_seconds": 14.0,
   "max_personal_fouls": 5,
-  "shooting_foul_free_throws": 2,
   "bonus_free_throws": 2,
   "bonus_fouls_per_period": 5,
   "bonus_final_period": 0,
   "bonus_final_seconds": 0.0,
   "bonus_fouls_final": 0,
+  "away_from_play_free_throws": 0,
   "bonus_fouls_overtime": 0,
   "overtime_fouls_carry_from_fourth": true,
-  "away_from_play_free_throws": 0,
+  "shooting_foul_free_throws": 2,
+  "free_throw_time_limit_seconds": 10.0,
+  "free_throw_interval_seconds": 2.2,
+  "inbound_seconds": 5.0,
+  "inbound_setup_seconds": 2.2,
+  "center_circle_radius_ft": 6.0,
+  "jump_ball_receiver_distance_ft": 8.0,
+  "use_alternate_possession_arrow": true,
   "timeouts_per_game": 5,
   "timeouts_fourth_quarter_max": 3,
+  "timeouts_final_period": 0,
   "timeouts_final_seconds": 120.0,
-  "timeouts_final_max": 2,
+  "timeouts_final_max": 0,
   "overtime_timeouts": 1,
   "timeout_durations": {
     "full_seconds": 60.0,
@@ -35,23 +45,37 @@
     "overtime_seconds": 60.0
   },
   "mandatory_timeouts": [],
-  "foul_kinds": {
+  "roster_limit": 12,
+  "dead_ball_windows": [
+    "dead_ball",
+    "inbound",
+    "period_break",
+    "timeout",
+    "jump_ball",
+    "free_throws"
+  ],
+  "violations": {
     "recognized": [
-      "personal",
-      "shooting",
-      "offensive",
-      "loose_ball",
-      "double",
-      "technical_category_1",
-      "technical_category_2",
-      "disruptive",
-      "flagrant",
-      "disqualifying"
+      "out_of_bounds",
+      "eight_second",
+      "backcourt",
+      "closely_guarded",
+      "offensive_three_second",
+      "shot_clock",
+      "travel",
+      "double_dribble",
+      "free_throw_timeout",
+      "inbound_timeout"
     ],
-    "technical_categories": ["technical_category_1", "technical_category_2"],
-    "disruptive_is_separate": true
+    "limits": {
+      "offensive_three_second_seconds": 3.0,
+      "defensive_three_second_seconds": 0.0,
+      "defensive_three_second_is_technical": false,
+      "back_to_basket_seconds": 0.0,
+      "backcourt_seconds": 8.0
+    }
   },
-  "officials": {
+  "review": {
     "authorization": [
       "foul_judgement",
       "violation_judgement",
@@ -68,19 +92,31 @@
       "disqualifying_upgrade",
       "clock_malfunction",
       "last_touch"
-    ]
+    ],
+    "challenges_per_game": 0,
+    "challenge_final_seconds": 120.0
+  },
+  "foul_kinds": {
+    "recognized": [
+      "personal",
+      "shooting",
+      "offensive",
+      "loose_ball",
+      "double",
+      "technical_category_1",
+      "technical_category_2",
+      "disruptive",
+      "flagrant",
+      "disqualifying"
+    ],
+    "technical_categories": [
+      "technical_category_1",
+      "technical_category_2"
+    ],
+    "disruptive_is_separate": true
   },
   "three_point_distance_ft": 22.15,
   "corner_three_distance_ft": 0.0,
-  "use_alternate_possession_arrow": true,
-  "closely_guarded_seconds": 5.0,
-  "closely_guarded_distance_ft": 3.28,
-  "roster_limit": 12,
-  "challenges_per_game": 0,
-  "challenge_final_seconds": 120.0,
-  "free_throw_time_limit_seconds": 10.0,
-  "center_circle_radius_ft": 6.0,
-  "jump_ball_receiver_distance_ft": 8.0,
   "court": {
     "width_ft": 91.86,
     "height_ft": 49.21,

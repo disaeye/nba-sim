@@ -311,7 +311,7 @@ fn enforce_disqualification(world: &mut World) {
         crate::adjudicate::StoppageCause::Foul,
         crate::adjudicate::RestartPlan::Stoppage {
             team,
-            ready_after: f64::from(world.rules.inbound_setup_seconds),
+            ready_after: f64::from(world.rules.inbound_setup_seconds()),
         },
     ));
 }
@@ -437,7 +437,7 @@ impl World {
                     crate::adjudicate::StoppageCause::Injury,
                     crate::adjudicate::RestartPlan::Stoppage {
                         team: self.possession.team,
-                        ready_after: f64::from(self.rules.inbound_setup_seconds),
+                        ready_after: f64::from(self.rules.inbound_setup_seconds()),
                     },
                 ));
             }

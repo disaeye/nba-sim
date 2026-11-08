@@ -21,6 +21,7 @@ pub mod formation;
 pub mod gate;
 pub mod illegal_touch;
 pub mod lane;
+pub mod manifest;
 pub mod motion;
 pub mod officiating;
 pub use officiating as adjudicate;
@@ -44,10 +45,11 @@ pub mod world;
 
 pub use action::{ActionKind, Completion, Fact, ShotKind, TeamSide};
 pub use boxscore::{BoxScore, PlayerLine, TeamLine};
+pub use manifest::{builtin_manifest, MatchManifest, MANIFEST_VERSION};
 pub use params::{Params, RuntimeParams, CALIBRATION_DIR};
 pub use replay::{replay_possession, PossessionFrames};
 pub use report::GameReport;
-pub use review::{build_review, write_review, ReviewReport};
+pub use review::{build_review, build_review_for_league, write_review, ReviewReport};
 pub use session::{
     CompletionSummary, EventBatch, MatchInfo, SessionCheckpoint, SessionService, SessionState,
 };
@@ -58,6 +60,19 @@ use std::path::Path;
 pub fn run_game(seed: u64, calibration_dir: &Path) -> GameReport {
     let params = RuntimeParams::load(calibration_dir).expect("runtime tables must load");
     let setup = MatchSetup::builtin(nba_domain::GameRules::default());
+    run_game_with_setup(seed, params, setup)
+}
+
+/// 用指定联赛档案跑一场。
+///
+/// 换档案就是换一份规则：引擎代码不变。
+pub fn run_game_for_league(
+    seed: u64,
+    calibration_dir: &Path,
+    league: nba_domain::league::LeagueId,
+) -> GameReport {
+    let params = RuntimeParams::load(calibration_dir).expect("runtime tables must load");
+    let setup = MatchSetup::builtin(nba_domain::GameRules::for_league(league));
     run_game_with_setup(seed, params, setup)
 }
 

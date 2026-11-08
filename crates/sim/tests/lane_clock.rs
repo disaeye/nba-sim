@@ -74,7 +74,7 @@ fn an_offensive_player_who_stays_in_the_lane_for_three_seconds_is_a_violation() 
         Some(stuck),
         "进攻方控制前场时，禁区里的进攻人开始计时"
     );
-    let limit = world.rules.three_second_lane_seconds;
+    let limit = world.rules.three_second_lane_seconds();
     let mut violation = false;
     for _ in 0..(limit / TICK_SECONDS as f32) as usize + 10 {
         nba_sim_core::lane::step(&mut world, TICK_SECONDS);
@@ -105,7 +105,7 @@ fn an_offensive_player_who_leaves_the_lane_in_time_is_not_a_violation() {
     }
     world.players[stuck].pos = Vec2::new(60.0, 25.0);
     world.players[stuck].target = Vec2::new(60.0, 25.0);
-    let limit = world.rules.three_second_lane_seconds;
+    let limit = world.rules.three_second_lane_seconds();
     let mut violation = false;
     for _ in 0..(limit / TICK_SECONDS as f32) as usize + 20 {
         nba_sim_core::lane::step(&mut world, TICK_SECONDS);
@@ -156,7 +156,7 @@ fn a_defender_who_stays_in_the_lane_without_guarding_is_a_technical_foul() {
         Some(defender),
         "进攻方控制前场时，不盯人的防守人开始计时"
     );
-    let limit = world.rules.defensive_three_second_seconds;
+    let limit = world.rules.defensive_three_second_seconds();
     let mut foul = false;
     for _ in 0..(limit / TICK_SECONDS as f32) as usize + 10 {
         nba_sim_core::lane::step(&mut world, TICK_SECONDS);
@@ -195,7 +195,7 @@ fn a_defender_who_is_actively_guarding_is_not_called_for_three_seconds() {
         None,
         "正在积极盯防的防守人不进入计时"
     );
-    let limit = world.rules.defensive_three_second_seconds;
+    let limit = world.rules.defensive_three_second_seconds();
     let mut foul = false;
     for _ in 0..(limit / TICK_SECONDS as f32) as usize + 10 {
         nba_sim_core::lane::step(&mut world, TICK_SECONDS);
@@ -228,7 +228,7 @@ fn the_three_second_count_does_not_start_before_the_offense_reaches_the_frontcou
         None,
         "球在后场时进攻三秒不计时"
     );
-    let limit = world.rules.three_second_lane_seconds;
+    let limit = world.rules.three_second_lane_seconds();
     for _ in 0..(limit / TICK_SECONDS as f32) as usize + 10 {
         nba_sim_core::lane::step(&mut world, TICK_SECONDS);
     }

@@ -194,7 +194,7 @@ fn a_late_deficit_produces_an_intentional_foul_within_seconds() {
         // 场景是一次新回合：进攻方才拿到球，进攻时钟是满的。
         world
             .clock
-            .set_shot_clock(world.rules.league.clocks.shot_clock_seconds as f64);
+            .set_shot_clock(world.rules.league.shot_clock.shot_clock_seconds as f64);
         let before = world.events.len();
         let deadline = world.now() + 5.0;
         let mut committed = false;
@@ -351,7 +351,7 @@ fn a_blown_out_team_uses_its_bench_at_the_next_dead_ball() {
     world.clock.set_regulation_clock(
         4,
         240.0,
-        world.rules.league.clocks.shot_clock_seconds as f64,
+        world.rules.league.shot_clock.shot_clock_seconds as f64,
     );
     set_margin(&mut world, TeamSide::Home, 24);
     let core: Vec<usize> = world

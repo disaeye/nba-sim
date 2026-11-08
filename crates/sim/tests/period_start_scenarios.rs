@@ -73,7 +73,7 @@ fn the_fiba_opens_later_periods_with_the_alternate_possession_arrow() {
         );
     }
     assert!(
-        world.rules.league.use_alternate_possession_arrow,
+        world.rules.league.jump_ball.use_alternate_possession_arrow,
         "FIBA 使用交替拥有箭头"
     );
 }

@@ -1,16 +1,26 @@
 use std::path::PathBuf;
 
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::{build_review, write_review};
+use nba_sim_core::{build_review_for_league, write_review};
 
-pub fn run_review(seed: u64, possessions: usize, out: Option<PathBuf>) -> std::io::Result<()> {
+pub fn run_review(
+    seed: u64,
+    possessions: usize,
+    out: Option<PathBuf>,
+    league: nba_domain::league::LeagueId,
+) -> std::io::Result<()> {
     let dir = out.unwrap_or_else(|| {
         PathBuf::from("output")
             .join("review")
             .join(format!("seed-{seed}"))
     });
-    let report = build_review(seed, &workspace_calibration_dir(), possessions)
-        .map_err(std::io::Error::other)?;
+    let report = build_review_for_league(
+        seed,
+        &workspace_calibration_dir(),
+        possessions,
+        league,
+    )
+    .map_err(std::io::Error::other)?;
     let (json, html) = write_review(&report, &dir)?;
     println!(
         "review seed {seed}: {} 回合，{} / {} 清单项通过",
