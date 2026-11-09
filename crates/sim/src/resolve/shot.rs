@@ -600,7 +600,9 @@ pub fn finish(world: &mut World) {
             })
             .map(|(index, _)| index)
             .expect("a shooting foul requires a defender");
-        crate::resolve::foul::apply_shooting_foul(world, fouler, shooter, free_throws, made);
+        let incident =
+            crate::detect::detect_shooting_foul(world, fouler, shooter, free_throws, made);
+        crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
         return;
     }
     if made {

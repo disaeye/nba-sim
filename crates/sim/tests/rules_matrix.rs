@@ -172,7 +172,8 @@ fn a_defensive_foul_restarts_the_eight_second_count() {
     );
     // 防守犯规：被犯规方重新从后场发球，八秒从新时刻算起。
     world.players[fouler].pos = world.players[holder].pos + Vec2::new(0.8, 0.0);
-    nba_sim_core::resolve::foul::apply_non_shooting_foul(&mut world, fouler, holder);
+    let incident = nba_sim_core::detect::detect_personal_foul(&mut world, fouler, holder);
+    world.submit_incident(incident);
     assert!(
         world.possession.backcourt_started_game_clock.is_none(),
         "防守犯规之后八秒计时必须重新开始"

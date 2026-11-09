@@ -75,6 +75,7 @@ pub fn resolve(
     };
     let duration =
         flight.unwrap_or_else(|| f64::from(rules.pass_duration(distance, false)) * kind_flight);
+    let is_inbound_pass = world.inbound_passer == Some(from);
     world.ball.release_pass(crate::ball::PassRelease {
         rules: &rules,
         from_player: &from_player,
@@ -86,8 +87,12 @@ pub fn resolve(
         kind,
         landing,
         flight,
-        inbound: world.inbound_passer == Some(from),
+        inbound: is_inbound_pass,
     });
+    if is_inbound_pass {
+        // 球被传入场内：发球五秒的计时到此结束。
+        world.inbound_started_at = None;
+    }
     world.pass_in_flight = Some(crate::ball::PassInFlight {
         pass_id,
         from,

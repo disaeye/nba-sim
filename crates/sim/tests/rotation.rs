@@ -1,6 +1,6 @@
 use nba_domain::rules::GameRules;
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::resolve::foul::book;
+
 use nba_sim_core::rotation::{apply_dead_ball_window, note_intents, record_foul, update_stamina};
 use nba_sim_core::state::Phase;
 use nba_sim_core::world::TICK_SECONDS;
@@ -103,15 +103,17 @@ fn nba_team_keeps_five_players_when_all_substitutes_are_disqualified() {
     });
 
     let fouled = world.on_court(TeamSide::Away).as_slice()[0];
-    let booking = book(
-        &mut world,
-        fouled_out,
-        fouled,
-        nba_sim_core::action::FoulKind::Personal,
-        0,
-        false,
-    );
-    assert!(booking.team_technical_id.is_some());
+    // 注入的是事实：一名背满犯规的球员再犯一次个人犯规。球队技术犯规
+    // 的罚则由裁决层按档案给出。
+    let incident = nba_sim_core::detect::detect_personal_foul(&mut world, fouled_out, fouled);
+    world.submit_incident(incident);
+    let technical_recorded = world.events.iter().any(|event| {
+        matches!(
+            event.fact,
+            nba_sim_core::action::Fact::TeamTechnicalFoul { .. }
+        )
+    });
+    assert!(technical_recorded, "球队技术犯规必须被记录");
     apply_dead_ball_window(&mut world);
     world.set_phase(Phase::Live);
     note_intents(&mut world);
@@ -155,7 +157,8 @@ fn nba_foul_out_with_empty_bench_assesses_team_technical_and_resumes_foul_proced
     world.players[fouler].fouls = world.rules.league.fouls.max_personal_fouls - 1;
     world.ball.set_held(fouled);
 
-    nba_sim_core::resolve::foul::apply_non_shooting_foul(&mut world, fouler, fouled);
+    let incident = nba_sim_core::detect::detect_personal_foul(&mut world, fouler, fouled);
+    world.submit_incident(incident);
     let technical_id = world
         .events
         .iter()

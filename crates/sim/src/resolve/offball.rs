@@ -60,7 +60,8 @@ pub fn step(world: &mut World, dt: f64) {
         }
     }
     if let Some((fouler, fouled)) = called {
-        crate::resolve::foul::apply_non_shooting_foul(world, fouler, fouled);
+        let incident = crate::detect::detect_personal_foul(world, fouler, fouled);
+        crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
     }
 }
 

@@ -17,6 +17,17 @@ pub fn resolve(
     let team = world.players[driver].team;
     let hoop = world.hoop_for(team);
     let pos = world.players[driver].pos;
+    // 进攻人可能在这套动作结算之前就被换下场：换人窗口在死球期间开着，
+    // 而一次动作的结算发生在它开始之后。离场的人不参与这次判罚。
+    if !world.players[driver].on_court {
+        return ActionOutcome {
+            actor: driver,
+            kind: ActionKind::Drive(kind),
+            completion: Completion::Interrupted,
+            delta: StateDelta::default(),
+            facts: Vec::new(),
+        };
+    }
     let nearest = world
         .players
         .iter()
@@ -49,7 +60,8 @@ pub fn resolve(
             * (policy.w("reach_in_help_base") + help)
             * discipline;
         if world.draw(Stream::Foul, defender, purpose::REACH_IN_FOUL, 0) < rate {
-            crate::resolve::foul::apply_non_shooting_foul(world, defender, driver);
+        let incident = crate::detect::detect_personal_foul(world, defender, driver);
+        crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
             if free_throws == 0 {
                 // 非 bonus：死球后进攻方继续本次回合，只是把下一次决策
                 // 推后；不重建回合，否则每吹一次犯规就多算一个回合。
@@ -115,7 +127,8 @@ pub fn resolve(
                 rate
             };
             if planted && world.draw(Stream::Foul, driver, purpose::DRIVE_CHARGE, 0) < rate {
-                crate::resolve::foul::apply_offensive_foul(world, driver, defender);
+                let incident = crate::detect::detect_offensive_foul(world, driver, defender);
+                crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
                 return ActionOutcome {
                     actor: driver,
                     kind: ActionKind::Drive(kind),

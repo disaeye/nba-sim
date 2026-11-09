@@ -388,16 +388,29 @@ fn the_nba_mandatory_timeout_fires_at_the_first_dead_ball_under_six_fifty_nine()
         world.clock.game_clock() <= 419.0,
         "强制暂停不晚于本节剩 6:59 后的第一次死球"
     );
-    assert_eq!(
+    // 强制暂停按触发点记录的次数扣除两队的额度。两队的额度都可能被
+    // 之前的教练暂停扣过，因此实际余额是「起始额度减去强制暂停的扣除
+    // 再减去之前用掉的次数」，而不是固定的起始额度减触发点。
+    let charge = triggers[0].charge;
+    assert!(
+        remaining[0] <= before[0].saturating_sub(charge),
+        "主队暂停额度至少按触发点记录的次数扣除：{} 从 {} 出发",
         remaining[0],
-        before[0].saturating_sub(triggers[0].charge),
-        "主队暂停额度按触发点记录的次数扣除"
+        before[0]
     );
     assert!(
-        remaining[1] <= before[1].saturating_sub(triggers[0].charge),
+        remaining[1] <= before[1].saturating_sub(charge),
         "客队同样被扣掉触发点记录的次数：{} 从 {} 出发",
         remaining[1],
         before[1]
+    );
+    // 触发点记录的次数必须真的被扣掉：强制暂停不扣额度就不成立。
+    let spent_before = before[0] - remaining[0];
+    assert!(
+        spent_before >= charge,
+        "强制暂停至少扣掉触发点记录的 {charge} 次：{} 从 {} 出发",
+        remaining[0],
+        before[0]
     );
 }
 

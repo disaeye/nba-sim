@@ -71,16 +71,9 @@ fn resolve_dribble(
         DribbleMoveKind::Retreat => (1.0, 0.40),
     };
     if crate::footwork::dribble_after_gather(world, actor) {
-        world.line_mut(actor).turnovers += 1;
-        world.emit(Fact::Turnover {
-            player: actor,
-            kind: TurnoverKind::DoubleDribble,
-        });
-        let team = world.players[actor].team;
-        world.adjudicate(crate::adjudicate::Adjudication::violation(
-            crate::adjudicate::ViolationKind::DoubleDribble,
-            crate::adjudicate::RestartPlan::Live { team: team.other() },
-        ));
+        // 二次运球：判定层给出事实，裁决层给后果。
+        let incident = crate::detect::detect_double_dribble(world, actor);
+        crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
         return ActionOutcome {
             actor,
             kind: ActionKind::Dribble(kind),

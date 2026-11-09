@@ -238,6 +238,15 @@ pub struct World {
     /// 最近一次得分方（队下标，0 主 1 客）与这一方的连续得分。
     pub last_scoring: Option<usize>,
     pub scoring_run: u32,
+    /// 教练抗议热度：连续的不利判罚累积到阈值时吹一次球队技术犯规。
+    ///
+    /// 这份热度是球队的账：抗议的主体是教练与替补席，不是场上球员。
+    pub team_technical_protest: f32,
+    /// 各类原始事件的检出计数，按类别名索引。
+    ///
+    /// 它是审计用的账：验收要看每类事件都由完整比赛自发产生，因此
+    /// 计数必须来自主循环的检出路径，不来自测试注入。
+    pub incident_counts: std::collections::BTreeMap<String, u64>,
     pub possession_count: u64,
     pub period_started_with: TeamSide,
     pub alternate_possession_next: TeamSide,
@@ -303,6 +312,10 @@ pub struct World {
     pub last_event_id: u64,
     pub current_program_id: u64,
     pub pending_review_source_events: Option<Vec<u64>>,
+    /// 本 tick 检出的回场违例责任方：检测层只判事实，裁决层给后果。
+    pub pending_backcourt_violation: Option<usize>,
+    /// 本 tick 检出的八秒违例责任方。
+    pub pending_eight_second_violation: Option<usize>,
     pub last_event_tick: u64,
     pub next_event_sequence: u64,
     pub shot_zone_counts: [[u32; 4]; 2],
@@ -1146,6 +1159,8 @@ impl World {
             free_throw_started: None,
             last_scoring: None,
             scoring_run: 0,
+            team_technical_protest: 0.0,
+            incident_counts: std::collections::BTreeMap::new(),
             possession_count: 0,
             period_started_with: TeamSide::Home,
             alternate_possession_next: TeamSide::Away,
@@ -1190,6 +1205,8 @@ impl World {
             last_event_id: 0,
             current_program_id: 1,
             pending_review_source_events: None,
+            pending_backcourt_violation: None,
+            pending_eight_second_violation: None,
             last_event_tick: 0,
             next_event_sequence: 0,
             shot_zone_counts: [[0; 4]; 2],
@@ -1257,6 +1274,49 @@ impl World {
     pub fn new_foul_id(&mut self) -> u64 {
         self.next_foul_id += 1;
         self.next_foul_id
+    }
+
+    /// 最近一次分配的犯规身份。
+    ///
+    /// 裁决层在判罚之后用它把罚则条目与这次犯规对应起来。
+    pub fn last_foul_id(&self) -> u64 {
+        self.next_foul_id
+    }
+
+    /// 记下一条被检出的原始事件。
+    ///
+    /// 计数是审计账：验收要证明每类事件都由主循环自发产生，因此这份
+    /// 计数只从检出路径写入。
+    pub(crate) fn record_incident_kind(&mut self, kind: crate::incident::IncidentKind) {
+        *self
+            .incident_counts
+            .entry(kind.as_str().to_string())
+            .or_default() += 1;
+    }
+
+    /// 提交一条已检出的原始事件。
+    ///
+    /// 事件测试由此注入**事实**：它给的是「发生了什么」，后果由裁决层按
+    /// 档案给出。直接注入判罚结果会绕过裁决层，因此不作为入口存在。
+    pub fn submit_incident(&mut self, incident: crate::incident::RawIncident) {
+        crate::adjudicate_incidents::adjudicate(self, std::slice::from_ref(&incident));
+    }
+
+    /// 找出与某名球员相关的事件身份。
+    ///
+    /// 原始事件用它指回自己读到的事实：一条判罚要能说清它依据的是哪
+    /// 几次接触、哪几次动作。事件按时间倒序找，因此返回的也是倒序。
+    pub fn causal_events_for(&self, player: usize, limit: usize) -> Vec<u64> {
+        let mut ids = Vec::new();
+        for event in self.events.iter().rev() {
+            if ids.len() >= limit {
+                break;
+            }
+            if event.fact.mentions_player(player) {
+                ids.push(event.event_id);
+            }
+        }
+        ids
     }
 
     pub fn start_action(
@@ -2188,7 +2248,11 @@ impl World {
             reason: "inbound",
         });
 
-        // 发球时间要足够发球队员走到发球点，但不能把进攻时钟耗在走位上。
+        // 发球程序持续到发球队员把球传入场内。走位只是其中一段：五秒
+        // 计时覆盖整段发球程序（NBA Rule 8 §III）。
+        //
+        // 因此发球程序分两段：先走到发球点（`ready_at`），再把球传入
+        // 场内。第二段由传球动作完成，传球落地时发球程序结束。
         let walk = (self.players[handler].pos - inbound_spot).length()
             / self.rules.max_player_speed_ftps.max(f32::MIN_POSITIVE);
         let ready_at = self.now() + 0.5 + f64::from(walk.clamp(0.0, 1.5));
@@ -2198,6 +2262,9 @@ impl World {
     pub fn start_possession(&mut self, team: TeamSide, kind: PossessionKind) {
         let inbound_passer = self.inbound_passer;
         self.inbound_passer = None;
+        // 发球程序结束：五秒计时随之结束。下一次发球重新开始计时，
+        // 不留上一次的时间戳。
+        self.inbound_started_at = None;
         let continuing_possession = kind == PossessionKind::Dead && self.possession.id != 0;
         if self.period_start_inbound_pending {
             assert_eq!(
@@ -2278,6 +2345,7 @@ impl World {
         if kind == PossessionKind::Dead {
             self.apply_dead_ball_window();
         }
+        // 发球程序交给进攻方之后，由进攻方决定下一步。
         let handler = self.primary_handler(team);
         self.set_ball_held(handler);
         self.set_phase(Phase::Live);
@@ -2536,9 +2604,19 @@ impl World {
         self.check_closely_guarded(dt);
         self.check_back_to_basket(dt);
         self.check_backcourt();
+        // 发球五秒：发球队员必须在五秒内把球传入场内（NBA Rule 8 §III）。
+        // 计时到球被传入场内为止，因此判定在每个 tick 都做一次。
+        let inbound_incident = crate::detect::detect_inbound_timeout(self);
+        if inbound_incident.is_some() {
+            crate::adjudicate_incidents::adjudicate_one(self, inbound_incident);
+        }
         crate::lane::step(self, dt);
         self.check_free_throw_lane();
         crate::timeouts::enforce_mandatory(self);
+        // 原始事实 → 裁决批次 → 原子提交：检测层只判事实，裁决层按档案
+        // 给后果，两者都经统一提交入口落下。抽样类事件在 tick 末尾检测。
+        let incidents = crate::detect::detect_sampled(self);
+        crate::adjudicate_incidents::adjudicate(self, &incidents);
         self.check_period_end();
         self.commit_clock_directives();
     }
@@ -2618,18 +2696,11 @@ impl World {
         {
             return;
         }
-        self.possession.closely_guarded_seconds = 0.0;
-        self.line_mut(holder).turnovers += 1;
-        self.emit(Fact::Turnover {
-            player: holder,
-            kind: TurnoverKind::CloselyGuarded,
-        });
-        self.adjudicate(crate::adjudicate::Adjudication::violation(
-            crate::adjudicate::ViolationKind::CloselyGuarded,
-            crate::adjudicate::RestartPlan::Live { team: team.other() },
-        ));
+        // 计时到期的那一刻就是违例成立的那一刻：检测与裁决在这里发生。
+        // 计时归零由判定函数自己写：它先读出已累计的秒数再清零。
+        let incident = crate::detect::detect_closely_guarded(self);
+        crate::adjudicate_incidents::adjudicate_one(self, incident);
     }
-
     /// 非法触球：防守人对持球人伸手阻挡（NBA Rule 12B §I.1-§I.2）。
     ///
     /// 判定在 `illegal_touch` 模块里，这里只负责把它接到裁判流程上：
@@ -2641,7 +2712,8 @@ impl World {
         let Some(holder) = self.holder() else {
             return;
         };
-        crate::resolve::foul::apply_non_shooting_foul(self, defender, holder);
+        let incident = crate::detect::detect_personal_foul(self, defender, holder);
+        crate::adjudicate_incidents::adjudicate_one(self, Some(incident));
     }
 
     /// 背身五秒违例（NBA Rule 10 §XVI）。
@@ -2700,28 +2772,10 @@ impl World {
         }
         self.possession.holder_back_to_basket = true;
         self.possession.back_to_basket_seconds += dt as f32;
-        if self.possession.back_to_basket_seconds + f32::EPSILON < self.rules.back_to_basket_seconds()
-        {
-            return;
-        }
-        self.possession.back_to_basket_seconds = 0.0;
-        self.line_mut(holder).turnovers += 1;
-        self.emit(Fact::Turnover {
-            player: holder,
-            kind: TurnoverKind::BackToBasket,
-        });
-        let spot = self
-            .rules
-            .court
-            .sideline_at_free_throw_line_extended(pos, attacking_right);
-        self.adjudicate(crate::adjudicate::Adjudication::violation(
-            crate::adjudicate::ViolationKind::BackToBasket,
-            crate::adjudicate::RestartPlan::Inbound {
-                team: team.other(),
-                location: crate::adjudicate::InboundLocation::Spot(spot),
-                ready_after: None,
-            },
-        ));
+        // 计时到期的那一刻就是违例成立的那一刻：检测与裁决在这里发生，
+        // 不推迟到 tick 末尾。
+        let incidents = crate::detect::detect_back_to_basket(self);
+        crate::adjudicate_incidents::adjudicate_one(self, incidents);
     }
 
     /// 后场八秒：控球方在后场停留超过规则秒数即违例。
@@ -2782,20 +2836,9 @@ impl World {
             self.control.frontcourt = false;
             self.possession.backcourt_started_game_clock = None;
             self.possession.backcourt_started_last_touch = None;
-            self.line_mut(holder).turnovers += 1;
-            self.emit(Fact::Turnover {
-                player: holder,
-                kind: TurnoverKind::Backcourt,
-            });
-            let spot = self.inbound_point_of_interruption();
-            self.adjudicate(crate::adjudicate::Adjudication::violation(
-                crate::adjudicate::ViolationKind::Backcourt,
-                crate::adjudicate::RestartPlan::Inbound {
-                    team: team.other(),
-                    location: crate::adjudicate::InboundLocation::Spot(spot),
-                    ready_after: None,
-                },
-            ));
+            self.pending_backcourt_violation = Some(holder);
+            let incidents = crate::detect::detect_backcourt_violation(self);
+            crate::adjudicate_incidents::adjudicate_one(self, incidents);
             return;
         }
         // 八秒按比赛时钟计：死球停表期间不消耗后场推进时间。
@@ -2823,23 +2866,16 @@ impl World {
             Some(start) if start - game_clock >= limit => {
                 self.possession.backcourt_started_game_clock = None;
                 self.possession.backcourt_started_last_touch = None;
-                self.line_mut(holder).turnovers += 1;
-                self.emit(Fact::Turnover {
-                    player: holder,
-                    kind: TurnoverKind::EightSecond,
-                });
-                let spot = self.inbound_point_of_interruption();
-                self.adjudicate(crate::adjudicate::Adjudication::violation(
-                    crate::adjudicate::ViolationKind::EightSecond,
-                    crate::adjudicate::RestartPlan::Inbound {
-                        team: team.other(),
-                        location: crate::adjudicate::InboundLocation::Spot(spot),
-                        ready_after: None,
-                    },
-                ));
+                self.pending_eight_second_violation = Some(holder);
             }
             Some(_) => {}
         }
+        // 两个后场违例在各自成立的那一刻检测并裁决。
+        let mut incidents = crate::detect::detect_backcourt_violation(self)
+            .into_iter()
+            .collect::<Vec<_>>();
+        incidents.extend(crate::detect::detect_eight_second_violation(self));
+        crate::adjudicate_incidents::adjudicate(self, &incidents);
     }
 
     /// 快攻窗口关闭：跑向前场的球员回到各自的阵型站位。
@@ -3740,35 +3776,10 @@ impl World {
                 }
             }
             Phase::Inbound { team, ready_at } => {
-                // 发球五秒：发球队员必须在五秒内把球传入场内（NBA Rule 8
-                // §III）。超时是发球违例，球权交给对方，对方在原来的发球
-                // 点发球。
+                // 发球程序本身等发球队员走到发球点。
                 //
-                // 违例的成立事实是「发球程序走了超过五秒仍未把球交出去」，
-                // 因此判据读的是发球程序的开始时刻，而不是球员的走位。
-                let started = self.inbound_started_at.unwrap_or(now);
-                let limit = f64::from(self.rules.inbound_seconds());
-                if now - started > limit {
-                    self.inbound_started_at = None;
-                    let opponent = self.players[self.primary_handler(team)].team.other();
-                    self.adjudicate(
-                        crate::adjudicate::Adjudication::new(
-                            crate::adjudicate::StoppageCause::Violation(
-                                crate::adjudicate::ViolationKind::InboundTimeout,
-                            ),
-                            crate::adjudicate::RestartPlan::Inbound {
-                                team: opponent,
-                                location: crate::adjudicate::InboundLocation::OwnBaseline,
-                                ready_after: None,
-                            },
-                        )
-                        .ending(
-                            nba_domain::event::PossessionEndCause::TurnoverViolation,
-                            "inbound_timeout",
-                        ),
-                    );
-                    return;
-                }
+                // 五秒计时由检测层负责：它覆盖整段发球程序，到球被传入
+                // 场内为止（NBA Rule 8 §III）。
                 if now >= ready_at {
                     self.start_possession(team, PossessionKind::Dead);
                 }
@@ -3831,29 +3842,10 @@ impl World {
                     return;
                 }
                 // 罚球人有出手时限：超时判违例，球权交给对方。
-                if let Some(started) = self.free_throw_started {
-                    let limit = f64::from(self.rules.league.free_throws.free_throw_time_limit_seconds);
-                    if now - started > limit {
-                        self.free_throw_started = None;
-                        let opponent = self.players[shooter].team.other();
-                        self.adjudicate(
-                            crate::adjudicate::Adjudication::new(
-                                crate::adjudicate::StoppageCause::Violation(
-                                    crate::adjudicate::ViolationKind::FreeThrowTimeout,
-                                ),
-                                crate::adjudicate::RestartPlan::Inbound {
-                                    team: opponent,
-                                    location: crate::adjudicate::InboundLocation::OwnBaseline,
-                                    ready_after: None,
-                                },
-                            )
-                            .ending(
-                                nba_domain::event::PossessionEndCause::TurnoverViolation,
-                                "free_throw_timeout",
-                            ),
-                        );
-                        return;
-                    }
+                let incident = crate::detect::detect_free_throw_timeout(self);
+                if incident.is_some() {
+                    crate::adjudicate_incidents::adjudicate_one(self, incident);
+                    return;
                 }
                 // 球已经在空中就不再重复出手：结算会打开下一次罚球。
                 if now >= next_at && self.ball_flight.is_none() {
@@ -3944,45 +3936,10 @@ impl World {
                 if !matches!(self.phase, Phase::Live) {
                     return;
                 }
-                // 球在空中时时钟走完不是违例：那一球会自己解出进与不进，
-                // 违例只在计时归零时球还在某个球员手里成立。
-                let shooting =
-                    self.any_interaction(|intent| matches!(&intent.kind, ActionKind::Shoot(_)));
-                if self.clock.shot_clock() <= 0.0
-                    && self.pending_rebound.is_none()
-                    && self.ball_flight.is_none()
-                    && !shooting
-                {
-                    if std::env::var("NBA_TRACE_CLOCK").is_ok() {
-                        eprintln!(
-                            "CLOCK VIOLATION now={:.2} started={:.2} elapsed={:.2} phase={:?} holder={:?} next_decide={:.2} pending={:?} active={:?} play={:?}",
-                            self.now(),
-                            self.possession.started_at,
-                            self.now() - self.possession.started_at,
-                            self.possession.ball_phase,
-                            self.holder(),
-                            self.holder()
-                                .map(|handle| self.players[handle].schedule.next_redecide_at)
-                                .unwrap_or(f64::NAN),
-                            self.holder()
-                                .map(|handle| self.players[handle].schedule.pending)
-                                .unwrap_or(None),
-                            self.interactions.keys().copied().collect::<Vec<_>>(),
-                            self.possession.play,
-                        );
-                    }
-                    let team = self.possession.team;
-                    let actor = self.holder().unwrap_or_else(|| self.primary_handler(team));
-                    self.line_mut(actor).turnovers += 1;
-                    self.emit(Fact::Turnover {
-                        player: actor,
-                        kind: crate::action::TurnoverKind::ShotClock,
-                    });
-                    self.adjudicate(crate::adjudicate::Adjudication::violation(
-                        crate::adjudicate::ViolationKind::ShotClock,
-                        crate::adjudicate::RestartPlan::Live { team: team.other() },
-                    ));
-                }
+                // 进攻钟走完的那一刻就是违例成立的那一刻：检测与裁决在这
+                // 里发生，因此它看到的是推进之后、决策之前的状态。
+                let incidents = crate::detect::detect_shot_clock(self);
+                crate::adjudicate_incidents::adjudicate_one(self, incidents);
             }
             Phase::Pregame | Phase::Finished => {}
         }

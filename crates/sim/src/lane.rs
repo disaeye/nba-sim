@@ -446,72 +446,6 @@ pub fn defense_lane_exit(world: &World, defender: usize) -> Option<Vec2> {
     Some(exit_target(world, defender))
 }
 
-/// 进攻三秒的裁决：违例判失误，球权交给防守方。
-///
-/// 罚则位置是罚球线延长线上的边线（NBA Rule 10 §VI.3）。
-pub fn book_offense_three_second(world: &mut World, actor: usize) {
-    let team = world.players[actor].team;
-    let opponent = team.other();
-    world.line_mut(actor).turnovers += 1;
-    world.emit(Fact::Turnover {
-        player: actor,
-        kind: crate::action::TurnoverKind::LaneViolation,
-    });
-    let spot = world
-        .rules
-        .court
-        .sideline_at_free_throw_line_extended(world.ball.pos, world.attacking_right(team));
-    world.adjudicate(
-        crate::adjudicate::Adjudication::violation(
-            crate::adjudicate::ViolationKind::OffensiveThreeSecond,
-            crate::adjudicate::RestartPlan::Inbound {
-                team: opponent,
-                location: crate::adjudicate::InboundLocation::Spot(spot),
-                ready_after: None,
-            },
-        )
-        .ending(
-            nba_domain::event::PossessionEndCause::TurnoverViolation,
-            "offensive_three_second",
-        ),
-    );
-}
-
-/// 防守三秒的裁决：违例判技术犯规，对手罚一次并保留球权。
-///
-/// NBA Rule 10 §VII.1：违例判技术犯规，对方罚一次，罚完仍由对方持球。
-/// 技术犯规走既有的技术犯规罚球程序（`shoot_team_technical`），因此
-/// 罚球与球权处理跟其他技术犯规完全一致。
-pub fn book_defense_three_second(world: &mut World, actor: usize) {
-    let team = world.players[actor].team;
-    let opponent = team.other();
-    let booking = crate::resolve::foul::book(
-        world,
-        actor,
-        actor,
-        crate::action::FoulKind::Technical,
-        1,
-        false,
-    );
-    // 哨响即停表：场上正在进行的动作全部作废。技术犯规发生在活球
-    // 中途，不中止动作的话，原动作稍后结算时会把球从罚球程序里抢走。
-    world.cancel_actions("defensive_three_second");
-    // 罚则位置：罚球线延长线上的边线（NBA Rule 10 §VII.1）。
-    let spot = world
-        .rules
-        .court
-        .sideline_at_free_throw_line_extended(world.ball.pos, world.attacking_right(team));
-    world.inbound_spot = Some(spot);
-    // 罚球之后仍由对方持球：技术犯规不改变球权。
-    crate::resolve::freethrow::shoot_team_technical(
-        world,
-        opponent,
-        opponent,
-        booking.foul_id,
-        crate::resolve::freethrow::FreeThrowFollowUp::DeadBall { team: opponent },
-    );
-}
-
 /// 推进两条限制区计时。
 ///
 /// 计时记在球员身上：条件成立时累加，条件不成立时归零——规则按连续
@@ -520,6 +454,8 @@ pub fn book_defense_three_second(world: &mut World, actor: usize) {
 /// 清空限制区的落点修正也在这一步里做：它读的就是这一次计时用的
 /// 条件，因此「谁在计时」与「谁要往外走」永远是同一个判定。分成两个
 /// 步骤时，两者的状态可能在一个 tick 之间变掉，球员被留在区里。
+///
+/// 时限到了就产出原始事件，判罚由裁决层给出。
 pub fn step(world: &mut World, dt: f64) {
     let offense_limit = world.rules.three_second_lane_seconds();
     let defense_limit = world.rules.defensive_three_second_seconds();
@@ -547,8 +483,8 @@ pub fn step(world: &mut World, dt: f64) {
         let exit = exit_target(world, actor);
         crate::assignment::commit_target_forced(world, actor, exit);
         if world.players[actor].lane_seconds > offense_limit {
-            world.players[actor].lane_seconds = 0.0;
-            book_offense_three_second(world, actor);
+            let incident = crate::detect::detect_offensive_three_second(world);
+            crate::adjudicate_incidents::adjudicate_one(world, incident);
             return;
         }
     }
@@ -558,8 +494,8 @@ pub fn step(world: &mut World, dt: f64) {
     }
     if let Some(actor) = defense_holder {
         if world.players[actor].lane_seconds > defense_limit {
-            world.players[actor].lane_seconds = 0.0;
-            book_defense_three_second(world, actor);
+            let incident = crate::detect::detect_defensive_three_second(world);
+            crate::adjudicate_incidents::adjudicate_one(world, incident);
         }
     }
 }

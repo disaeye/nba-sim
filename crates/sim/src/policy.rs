@@ -56,7 +56,8 @@ pub fn tick(world: &mut World) {
         return;
     }
     if let Some(plan) = crate::endgame::intentional_foul(world) {
-        crate::resolve::foul::apply_non_shooting_foul(world, plan.fouler, plan.target);
+        let incident = crate::detect::detect_personal_foul(world, plan.fouler, plan.target);
+        crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
         return;
     }
     let decision = choose_action(world);

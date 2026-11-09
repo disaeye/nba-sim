@@ -5,6 +5,7 @@
 
 pub mod actions;
 pub use actions as action;
+pub mod adjudicate_incidents;
 pub mod assignment;
 pub mod control;
 pub use control as ball;
@@ -18,8 +19,10 @@ pub mod draw;
 pub mod endgame;
 pub mod footwork;
 pub mod formation;
+pub mod detect;
 pub mod gate;
 pub mod illegal_touch;
+pub mod incident;
 pub mod lane;
 pub mod manifest;
 pub mod motion;
@@ -45,6 +48,9 @@ pub mod world;
 
 pub use action::{ActionKind, Completion, Fact, ShotKind, TeamSide};
 pub use boxscore::{BoxScore, PlayerLine, TeamLine};
+pub use incident::{
+    AdjudicationBatch, IncidentKind, PenaltyAfter, PenaltyEntry, PenaltyQueue, RawIncident,
+};
 pub use manifest::{builtin_manifest, MatchManifest, MANIFEST_VERSION};
 pub use params::{Params, RuntimeParams, CALIBRATION_DIR};
 pub use replay::{replay_possession, PossessionFrames};

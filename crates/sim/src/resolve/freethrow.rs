@@ -269,33 +269,36 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
             !meta.retain_possession && matches!(result, ShotResult::Missed { rim_contact: true });
         if eligible_rebound {
             // 罚球禁区违例：球碰筐之前不得有人提前进区。
-            let lane = world.free_throw_lane.take().unwrap_or_default();
-            if lane.offense_early {
-                world.emit(Fact::FreeThrowLaneViolation { side: "offense" });
-                let enemy = team.other();
-                world.possession.shot_clock_start = world.clock.shot_clock();
-                world.adjudicate(
-                    crate::adjudicate::Adjudication::new(
-                        crate::adjudicate::StoppageCause::FreeThrow,
-                        crate::adjudicate::RestartPlan::Stoppage {
-                            team: enemy,
-                            ready_after: 1.0,
-                        },
-                    )
-                    .ending(
-                        nba_domain::event::PossessionEndCause::TurnoverViolation,
-                        "free_throw_lane_violation",
-                    ),
-                );
-                world.release_ball(BallState::Loose {
-                    pos: world.hoop_for(enemy),
-                    vel: Vec2::ZERO,
-                });
-                return;
-            }
-            if lane.defense_early {
+            //
+            // 判定层给出事实（谁提前进了区），裁决层发布事实，调用方给出
+            // 后果：进攻方提前进区判失误，防守方提前进区重罚一次。
+            let lane_incident = crate::detect::detect_free_throw_lane_violation(world);
+            if let Some(incident) = lane_incident {
+                let offense_early = incident.offense_early;
+                crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
+                if offense_early {
+                    let enemy = team.other();
+                    world.possession.shot_clock_start = world.clock.shot_clock();
+                    world.adjudicate(
+                        crate::adjudicate::Adjudication::new(
+                            crate::adjudicate::StoppageCause::FreeThrow,
+                            crate::adjudicate::RestartPlan::Stoppage {
+                                team: enemy,
+                                ready_after: 1.0,
+                            },
+                        )
+                        .ending(
+                            nba_domain::event::PossessionEndCause::TurnoverViolation,
+                            "free_throw_lane_violation",
+                        ),
+                    );
+                    world.release_ball(BallState::Loose {
+                        pos: world.hoop_for(enemy),
+                        vel: Vec2::ZERO,
+                    });
+                    return;
+                }
                 // 防守方提前进区：重罚一次。
-                world.emit(Fact::FreeThrowLaneViolation { side: "defense" });
                 world.free_throw_lane = Some(crate::world::FreeThrowLane::default());
                 world.adjudicate(crate::adjudicate::Adjudication::new(
                     crate::adjudicate::StoppageCause::FreeThrow,

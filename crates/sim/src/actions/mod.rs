@@ -980,4 +980,53 @@ impl Fact {
             Self::GameEnd => "GameEnd",
         }
     }
+
+    /// 这条事实是否与这名球员有关。
+    ///
+    /// 原始事件用它指回自己读到的事实：一条判罚要能说清它依据的是哪几次
+    /// 接触、哪几次动作。
+    pub fn mentions_player(&self, player: usize) -> bool {
+        match self {
+            Self::ActionStarted { player: p, .. }
+            | Self::ActionIntentRejected { player: p, .. }
+            | Self::ActionPhaseChanged { player: p, .. }
+            | Self::ActionCompleted { player: p, .. }
+            | Self::ActionFailed { player: p, .. }
+            | Self::ActionCancelled { player: p, .. }
+            | Self::Pass { from: p, .. }
+            | Self::Screen { screener: p, .. }
+            | Self::Drive { driver: p, .. }
+            | Self::PostUp { player: p, .. }
+            | Self::Shot { shooter: p, .. }
+            | Self::Foul { fouler: p, .. }
+            | Self::Foul { fouled: p, .. }
+            | Self::FreeThrow { shooter: p, .. }
+            | Self::Rebound { player: p, .. }
+            | Self::LooseBallRecovered { player: p, .. }
+            | Self::SecondChanceStarted { rebounder: p, .. } => *p == player,
+            | Self::Cut { cutter: p, .. } => *p == player,
+            | Self::DribbleMove { player: p, .. }
+            | Self::FakeAction { player: p, .. }
+            | Self::BallProtection { player: p, .. }
+            | Self::PokePrevented { player: p, .. }
+            | Self::BoxOut { player: p, .. }
+            | Self::Turnover { player: p, .. }
+            | Self::Steal { player: p, .. }
+            | Self::Substitution { incoming: p, .. } => *p == player,
+            | Self::Substitution { outgoing: p, .. } => *p == player,
+            | Self::FoulOutRetention { player: p, .. }
+            | Self::OnBallPositioningChanged { defender: p, .. } => *p == player,
+            | Self::PlacementApplied { player: p, .. }
+            | Self::Injury { player: p, .. } => *p == player,
+            Self::BallContact { entity: Some(p), .. } => *p == player,
+            Self::DefensiveActionStarted { defender: p, .. }
+            | Self::DefensiveActionPhaseChanged { defender: p, .. }
+            | Self::DefensiveActionCompleted { defender: p, .. }
+            | Self::DefensiveActionCancelled { defender: p, .. } => *p == player,
+            Self::Goaltending { defender: p, .. } | Self::Goaltending { shooter: p, .. } => {
+                *p == player
+            }
+            _ => false,
+        }
+    }
 }

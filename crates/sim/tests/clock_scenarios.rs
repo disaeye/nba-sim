@@ -230,14 +230,16 @@ fn a_timeout_stops_the_game_clock_even_while_the_ball_is_in_flight() {
 }
 
 #[test]
-fn a_full_match_consumes_exactly_the_four_periods_of_game_clock() {
-    // 一场比赛消耗的比赛钟等于四节时长之和：不多不少。
+fn a_full_match_consumes_exactly_the_game_clock_of_the_periods_played() {
+    // 一场比赛消耗的比赛钟等于它实际打过的每一节的时长之和：不多不少。
     //
     // 这条测试钉住的是「比赛钟只在活球期间走」这条规则：任何一段停表
-    // 程序期间多走一秒或者少走一秒，这里都会看到。
+    // 程序期间多走一秒或者少走一秒，这里都会看到。加时也是一节，因此
+    // 期望值按实际打过的节次算。
     let mut world = common::short_world(11);
-    let expected = f64::from(world.rules.league.periods.regulation_periods)
-        * f64::from(world.rules.league.periods.period_duration_seconds);
+    let regulation = world.rules.league.periods.regulation_periods;
+    let overtime = f64::from(world.rules.league.periods.overtime_duration_seconds);
+    let regulation_seconds = f64::from(world.rules.league.periods.period_duration_seconds);
     let mut consumed = 0.0f64;
     let mut previous = world.clock.game_clock();
     while !world.finished {
@@ -248,9 +250,12 @@ fn a_full_match_consumes_exactly_the_four_periods_of_game_clock() {
         }
         previous = current;
     }
+    let periods_played = world.clock.period();
+    let expected = f64::from(periods_played.min(regulation)) * regulation_seconds
+        + f64::from(periods_played.saturating_sub(regulation)) * overtime;
     assert!(
         (consumed - expected).abs() < 1.0,
-        "比赛钟必须消耗四节时长之和 {expected}s，实际消耗 {consumed}s"
+        "比赛钟必须消耗实际打过的节次时长之和 {expected}s，实际消耗 {consumed}s"
     );
 }
 

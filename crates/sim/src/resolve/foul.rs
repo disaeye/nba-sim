@@ -22,7 +22,7 @@ pub struct FoulBooking {
     pub retained_team: TeamSide,
 }
 
-pub fn book(
+pub(crate) fn book(
     world: &mut World,
     fouler: usize,
     fouled: usize,
@@ -97,6 +97,11 @@ pub fn book(
         and_one,
         foul_id,
     });
+    // 教练抗议热度：被犯规方的教练对这次判罚不满。不利判罚累积到
+    // 阈值时吹一次球队技术犯规，抗议的主体是教练与替补席。
+    if fouled != fouler && world.players[fouled].team != team {
+        world.team_technical_protest += world.params.policy.w("team_technical_protest_gain");
+    }
     if let Some(technical_id) = team_technical_id {
         if !was_disqualified {
             world.emit(Fact::BenchDepleted {
@@ -165,7 +170,7 @@ fn is_away_from_play(world: &World, fouled: usize) -> bool {
         && world.holder() != Some(fouled)
 }
 
-pub fn apply_shooting_foul(
+pub(crate) fn apply_shooting_foul(
     world: &mut World,
     fouler: usize,
     shooter: usize,
@@ -230,7 +235,7 @@ pub fn apply_shooting_foul(
 
 /// 非投篮普通犯规：bonus 之内两罚，最后时段对无球人犯规，
 /// 其余情况由被犯规方发边线球。
-pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) {
+pub(crate) fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) {
     let away_from_play = is_away_from_play(world, fouled);
     let award = if away_from_play {
         world.rules.league.fouls.away_from_play_free_throws
@@ -317,7 +322,7 @@ pub fn apply_non_shooting_foul(world: &mut World, fouler: usize, fouled: usize) 
 /// 球权按规则留给当时持球的一方（NBA Rule 12B §VI.3）：双方犯规时球权
 /// 留在进攻方，从靠近中断点的边线发球；进攻钟在前场发球时保持不变或
 /// 补到十四秒，在后场发球时回到二十四秒。
-pub fn apply_double_foul(world: &mut World, fouler: usize, fouled: usize) {
+pub(crate) fn apply_double_foul(world: &mut World, fouler: usize, fouled: usize) {
     let team = world.players[fouler].team;
     let other = world.players[fouled].team;
     // 双方各记一次个人犯规：两边都进个人累计。
@@ -355,7 +360,7 @@ pub fn apply_double_foul(world: &mut World, fouler: usize, fouled: usize) {
 ///
 /// 成立条件由调用方判断：球在对方半场且在进攻机会中，防守人从背后
 /// 犯规导致这次进攻机会丢失。
-pub fn apply_clear_path_foul(world: &mut World, fouler: usize, fouled: usize) {
+pub(crate) fn apply_clear_path_foul(world: &mut World, fouler: usize, fouled: usize) {
     // FIBA 2026 Article 37 把同类行为单独成类：破坏性犯规。
     // NBA 档案没有独立分类，同类行为仍是普通个人犯规。
     let kind = if world.rules.league.disruptive_foul_is_separate() {
@@ -367,6 +372,10 @@ pub fn apply_clear_path_foul(world: &mut World, fouler: usize, fouled: usize) {
     let beneficiary = world.players[fouled].team;
     let booking = book(world, fouler, fouled, kind, 2, false);
     world.pending_rebound = None;
+    // 哨响即停表：场上正在进行的动作全部作废。不作废的话，那些动作
+    // 稍后结算时会把球从罚球程序里抢走，或者在球已经是飞行状态时
+    // 再放一次球，造成非法的球态跃迁。
+    world.cancel_actions("clear_path_foul");
     // 新罚球程序：清空上一轮的禁区记录。
     world.free_throw_lane = Some(crate::world::FreeThrowLane::default());
     // 罚球之后由被犯规方在罚球线延长线发球（Rule 12B §I.5.f.6）。
@@ -400,12 +409,77 @@ pub fn apply_clear_path_foul(world: &mut World, fouler: usize, fouled: usize) {
 /// 罚则（37.2.2）：非投篮时两罚，投篮时按出手给罚球；之后由被犯规方
 /// 在前场罚球线延长线发球。NBA 档案没有这一类，调用方须先确认
 /// `disruptive_foul_is_separate()`。
-pub fn apply_disruptive_foul(world: &mut World, fouler: usize, fouled: usize) {
+pub(crate) fn apply_disruptive_foul(world: &mut World, fouler: usize, fouled: usize) {
     assert!(
         world.rules.league.disruptive_foul_is_separate(),
         "破坏性犯规只能由把 Disruptive 单独成类的档案判罚"
     );
     apply_clear_path_foul(world, fouler, fouled);
+}
+
+/// 守方三秒的判罚：违例判技术犯规，对手罚一次并保留球权。
+///
+/// NBA Rule 10 §VII.1：违例判技术犯规，对方罚一次，罚完仍由对方持球。
+/// 技术犯规走既有的技术犯规罚球程序（`shoot_team_technical`），因此
+/// 罚球与球权处理跟其他技术犯规完全一致。
+pub(crate) fn apply_defensive_three_second(world: &mut World, actor: usize) {
+    let team = world.players[actor].team;
+    let opponent = team.other();
+    let booking = book(
+        world,
+        actor,
+        actor,
+        crate::action::FoulKind::Technical,
+        1,
+        false,
+    );
+    // 哨响即停表：场上正在进行的动作全部作废。技术犯规发生在活球
+    // 中途，不中止动作的话，原动作稍后结算时会把球从罚球程序里抢走。
+    world.cancel_actions("defensive_three_second");
+    // 罚则位置：罚球线延长线上的边线（NBA Rule 10 §VII.1）。
+    let spot = world
+        .rules
+        .court
+        .sideline_at_free_throw_line_extended(world.ball.pos, world.attacking_right(team));
+    world.inbound_spot = Some(spot);
+    // 罚球之后仍由对方持球：技术犯规不改变球权。
+    crate::resolve::freethrow::shoot_team_technical(
+        world,
+        opponent,
+        opponent,
+        booking.foul_id,
+        crate::resolve::freethrow::FreeThrowFollowUp::DeadBall { team: opponent },
+    );
+}
+
+/// 技术犯规：责任主体是球队或教练，不计入任何场上球员的个人累计。
+///
+/// NBA Rule 12A §II 与 FIBA 2026 Article 38：技术犯规不是个人犯规，
+/// 也不计入球队单节犯规。对方罚一次罚球，罚完球权不变。
+pub(crate) fn apply_technical_foul(world: &mut World, actor: usize) {
+    let team = world.players[actor].team;
+    let opponent = team.other();
+    let booking = book(
+        world,
+        actor,
+        actor,
+        crate::action::FoulKind::Technical,
+        1,
+        false,
+    );
+    world.cancel_actions("technical_foul");
+    let spot = world
+        .rules
+        .court
+        .sideline_at_free_throw_line_extended(world.ball.pos, world.attacking_right(team));
+    world.inbound_spot = Some(spot);
+    crate::resolve::freethrow::shoot_team_technical(
+        world,
+        opponent,
+        opponent,
+        booking.foul_id,
+        crate::resolve::freethrow::FreeThrowFollowUp::DeadBall { team: opponent },
+    );
 }
 
 /// 恶意犯规（NBA Rule 12B §IV）。
@@ -418,7 +492,7 @@ pub fn apply_disruptive_foul(world: &mut World, fouler: usize, fouled: usize) {
 ///   §IV.2）。
 ///
 /// 恶意犯规计入个人犯规累计与球队单节犯规：它是一���个人犯规。
-pub fn apply_flagrant_foul(world: &mut World, fouler: usize, fouled: usize, excessive: bool) {
+pub(crate) fn apply_flagrant_foul(world: &mut World, fouler: usize, fouled: usize, excessive: bool) {
     let team = world.players[fouler].team;
     let beneficiary = world.players[fouled].team;
     let booking = book(world, fouler, fouled, FoulKind::Flagrant, 2, false);
@@ -461,7 +535,7 @@ pub fn apply_flagrant_foul(world: &mut World, fouler: usize, fouled: usize, exce
 
 /// 进攻犯规：计入个人累计与球队全场犯规，不计入球队单节犯规，
 /// 不判给对手罚球，只把球权交给对方。
-pub fn apply_offensive_foul(world: &mut World, fouler: usize, fouled: usize) {
+pub(crate) fn apply_offensive_foul(world: &mut World, fouler: usize, fouled: usize) {
     let team = world.players[fouler].team;
     let booking = book(world, fouler, fouled, FoulKind::Offensive, 0, false);
     // 进攻犯规停表换边：取消动作、结束回合与恢复方式都经同一个提交入口，

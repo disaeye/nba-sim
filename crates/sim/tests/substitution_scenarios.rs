@@ -190,7 +190,8 @@ fn the_foul_ledger_records_the_personal_and_team_counts() {
     let team_period_before = world.fouls[World::team_index(team)].period;
     let personal_before = world.line(player).fouls;
     let fouled = world.holder().expect("live possession has a holder");
-    nba_sim_core::resolve::foul::apply_non_shooting_foul(&mut world, player, fouled);
+    let incident = nba_sim_core::detect::detect_personal_foul(&mut world, player, fouled);
+    world.submit_incident(incident);
     assert_eq!(
         world.fouls[World::team_index(team)].period,
         team_period_before + 1,
@@ -221,7 +222,8 @@ fn an_injured_player_is_removed_and_replaced_by_bench() {
     assert!(world.players[player].on_court);
     assert!(!world.players[player].injured);
 
-    world.trigger_injury(player, "sprained_ankle");
+    let incident = nba_sim_core::detect::injury_fact(&world, player);
+    world.submit_incident(incident);
     assert!(world.players[player].injured, "受伤球员必须标记为 injured");
     assert!(world.players[player].disqualified, "受伤球员必须离场");
     assert!(!world.players[player].on_court, "受伤球员必须被换下");

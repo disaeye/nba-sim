@@ -193,35 +193,14 @@ pub fn judge_gather(
 ///
 /// 跳步与走步是两条不同的违例：走步是脚步用尽或移动了轴心脚，跳步是
 /// 连续两次用同一只脚触地。罚则相同：球权交给对方。
-pub fn book_hop(world: &mut World, actor: usize, team: crate::TeamSide) {
-    world.line_mut(actor).turnovers += 1;
-    world.emit(Fact::Turnover {
-        player: actor,
-        kind: TurnoverKind::Travel,
-    });
-    world.adjudicate(
-        crate::adjudicate::Adjudication::new(
-            crate::adjudicate::StoppageCause::Violation(crate::adjudicate::ViolationKind::Travel),
-            crate::adjudicate::RestartPlan::Live { team: team.other() },
-        )
-        .ending(nba_domain::event::PossessionEndCause::TurnoverTravel, "hop"),
-    );
+pub fn book_hop(world: &mut World, actor: usize, _team: crate::TeamSide) {
+    // 跳步与走步是同一条违例（NBA Rule 10 §XIII.8）：区别只在判定依据，
+    // 罚则相同。判定层给出「走步」这个事实，裁决层给后果。
+    let incident = crate::detect::detect_travel(world, actor);
+    crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
 }
 
-pub fn book_travel(world: &mut World, actor: usize, team: crate::TeamSide) {
-    world.line_mut(actor).turnovers += 1;
-    world.emit(Fact::Turnover {
-        player: actor,
-        kind: TurnoverKind::Travel,
-    });
-    world.adjudicate(
-        crate::adjudicate::Adjudication::new(
-            crate::adjudicate::StoppageCause::Violation(crate::adjudicate::ViolationKind::Travel),
-            crate::adjudicate::RestartPlan::Live { team: team.other() },
-        )
-        .ending(
-            nba_domain::event::PossessionEndCause::TurnoverTravel,
-            "travel",
-        ),
-    );
+pub fn book_travel(world: &mut World, actor: usize, _team: crate::TeamSide) {
+    let incident = crate::detect::detect_travel(world, actor);
+    crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
 }

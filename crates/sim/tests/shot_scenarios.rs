@@ -158,7 +158,9 @@ fn a_fouled_shooter_gets_free_throws() {
         .copied()
         .expect("a defender is on the court");
     // 直接吹一次投篮犯规：判罚路径是确定的，不靠抽样。
-    nba_sim_core::resolve::foul::apply_shooting_foul(&mut world, defender, shooter, 2, false);
+    let incident =
+        nba_sim_core::detect::detect_shooting_foul(&mut world, defender, shooter, 2, false);
+    world.submit_incident(incident);
     assert!(
         matches!(world.phase(), Phase::FreeThrows { .. }),
         "投篮犯规之后必须进入罚球程序"

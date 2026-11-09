@@ -116,7 +116,8 @@ pub fn step(world: &mut World, dt: f64) {
         let annual_rate = (0.001 + 0.010 * physicality) * (if contain { 1.5 } else { 1.0 });
         let hold_rate = 1.0 - (-annual_rate as f64 * dt).exp();
         if f64::from(world.draw(Stream::Foul, thief, purpose::HOLD_DEFENDER, 0)) < hold_rate {
-            crate::resolve::foul::apply_non_shooting_foul(world, thief, holder);
+            let incident = crate::detect::detect_personal_foul(world, thief, holder);
+            crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
             return;
         }
     }

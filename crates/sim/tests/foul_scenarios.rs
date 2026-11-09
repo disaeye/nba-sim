@@ -12,7 +12,7 @@ use nba_domain::league::LeagueProfile;
 use nba_domain::rules::GameRules;
 use nba_sim_core::action::{Fact, FoulKind};
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::resolve::foul::{apply_offensive_foul, apply_shooting_foul};
+use nba_sim_core::detect;
 use nba_sim_core::state::{Phase, PossessionKind};
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params, TeamSide};
@@ -39,6 +39,44 @@ fn live_world(seed: u64) -> World {
         }
     }
     panic!("the engine never reached a live ball state");
+}
+
+/// 注入一条已检出的投篮犯规事实。
+///
+/// 注入的是事实（谁在投篮时碰到了谁），后果由裁决层按档案给出。
+fn inject_shooting_foul(world: &mut World, fouler: usize, shooter: usize, free_throws: u8, made: bool) {
+    let incident = detect::detect_shooting_foul(world, fouler, shooter, free_throws, made);
+    world.submit_incident(incident);
+}
+
+/// 注入一条已检出的进攻犯规事实。
+fn inject_offensive_foul(world: &mut World, fouler: usize, fouled: usize) {
+    let incident = detect::detect_offensive_foul(world, fouler, fouled);
+    world.submit_incident(incident);
+}
+
+/// 注入一条已检出的普通个人犯规事实。
+fn inject_personal_foul(world: &mut World, fouler: usize, fouled: usize) {
+    let incident = detect::detect_personal_foul(world, fouler, fouled);
+    world.submit_incident(incident);
+}
+
+/// 注入一条已检出的双方犯规事实。
+fn inject_double_foul(world: &mut World, fouler: usize, fouled: usize) {
+    let incident = detect::detect_double_foul(world, fouler, fouled);
+    world.submit_incident(incident);
+}
+
+/// 注入一条已检出的清晰路径犯规事实。
+fn inject_clear_path_foul(world: &mut World, fouler: usize, fouled: usize) {
+    let incident = detect::clear_path_fact(world, fouler, fouled, false);
+    world.submit_incident(incident);
+}
+
+/// 注入一条已检出的恶意犯规事实，并指明它的等级。
+fn inject_flagrant_foul(world: &mut World, fouler: usize, fouled: usize, excessive: bool) {
+    let incident = detect::flagrant_fact(world, fouler, fouled, excessive);
+    world.submit_incident(incident);
 }
 
 /// 最近一次犯规的事实。
@@ -84,7 +122,7 @@ fn a_shooting_foul_on_a_two_point_shot_awards_two_free_throws() {
         .first()
         .copied()
         .expect("a defender is on the court");
-    apply_shooting_foul(&mut world, defender, shooter, 2, false);
+    inject_shooting_foul(&mut world, defender, shooter, 2, false);
     let (fouler, fouled, kind, free_throws, and_one) =
         last_foul(&world).expect("the foul must be recorded");
     assert_eq!(fouler, defender);
@@ -110,7 +148,7 @@ fn a_shooting_foul_on_a_three_point_shot_awards_three_free_throws() {
         .first()
         .copied()
         .expect("a defender is on the court");
-    apply_shooting_foul(&mut world, defender, shooter, 3, false);
+    inject_shooting_foul(&mut world, defender, shooter, 3, false);
     let (_, _, _, free_throws, _) = last_foul(&world).expect("the foul must be recorded");
     assert_eq!(free_throws, 3, "三分投篮犯规必须罚三次");
     let (_, total, remaining) = free_throw_program(&world).expect("投篮犯规之后必须进入罚球程序");
@@ -130,7 +168,7 @@ fn a_shooting_foul_on_a_made_shot_awards_one_extra_free_throw() {
         .copied()
         .expect("a defender is on the court");
     // 打进之后的犯规：罚一次，并且进攻方继续持有球权。
-    apply_shooting_foul(&mut world, defender, shooter, 1, true);
+    inject_shooting_foul(&mut world, defender, shooter, 1, true);
     let (_, _, _, free_throws, and_one) = last_foul(&world).expect("the foul must be recorded");
     assert_eq!(free_throws, 1, "打进的投篮犯规只补罚一次");
     assert!(and_one, "打进的投篮犯规必须记作加罚");
@@ -151,7 +189,7 @@ fn an_offensive_foul_counts_personally_but_not_against_the_team() {
         .expect("a defender is on the court");
     let team_fouls_before = world.fouls[World::team_index(offense)].period;
     let personal_before = world.line_mut(fouler).fouls;
-    apply_offensive_foul(&mut world, fouler, fouled);
+    inject_offensive_foul(&mut world, fouler, fouled);
     let (_, _, kind, free_throws, _) = last_foul(&world).expect("the foul must be recorded");
     assert_eq!(kind, FoulKind::Offensive);
     assert_eq!(free_throws, 0, "进攻犯规不罚球");
@@ -186,7 +224,7 @@ fn a_double_foul_leaves_the_offence_in_possession() {
         .expect("a defender is on the court");
     // 双方犯规：双方各记一次个人犯规，但球权留在进攻方（NBA Rule 12B
     // §VI.3）。
-    nba_sim_core::resolve::foul::apply_double_foul(&mut world, fouler, fouled);
+    inject_double_foul(&mut world, fouler, fouled);
     let (_, _, kind, free_throws, _) = last_foul(&world).expect("the foul must be recorded");
     assert_eq!(kind, FoulKind::Double);
     assert_eq!(free_throws, 0, "双方犯规不罚球");
@@ -228,7 +266,7 @@ fn a_loose_ball_foul_counts_against_the_team_and_awards_one_free_throw_in_the_bo
     // 防守方单节犯规已经到第五犯：进入罚则。
     world.fouls[World::team_index(offense.other())].period = 4;
     let team_fouls_before = world.fouls[World::team_index(offense.other())].period;
-    nba_sim_core::resolve::foul::apply_non_shooting_foul(&mut world, fouler, fouled);
+    inject_personal_foul(&mut world, fouler, fouled);
     let (_, _, kind, free_throws, _) = last_foul(&world).expect("the foul must be recorded");
     assert_eq!(kind, FoulKind::Personal);
     assert_eq!(
@@ -277,7 +315,7 @@ fn a_clear_path_foul_awards_two_free_throws_and_the_ball() {
         .expect("a defender is on the court");
     let fouled = world.holder().expect("live possession has a holder");
     // 清晰路径犯规：两次罚球加球权（NBA Rule 12B §I.5.f.6）。
-    nba_sim_core::resolve::foul::apply_clear_path_foul(&mut world, fouler, fouled);
+    inject_clear_path_foul(&mut world, fouler, fouled);
     let (_, _, kind, free_throws, _) = last_foul(&world).expect("the foul must be recorded");
     assert_eq!(kind, FoulKind::Personal);
     assert_eq!(free_throws, 2, "清晰路径犯规罚两次");
@@ -303,7 +341,7 @@ fn a_flagrant_foul_awards_two_free_throws() {
         .expect("a defender is on the court");
     let fouled = world.holder().expect("live possession has a holder");
     // 一级恶意犯规：两次罚球，不被逐（NBA Rule 12B §IV.1）。
-    nba_sim_core::resolve::foul::apply_flagrant_foul(&mut world, fouler, fouled, false);
+    inject_flagrant_foul(&mut world, fouler, fouled, false);
     let (_, _, kind, free_throws, _) = last_foul(&world).expect("the foul must be recorded");
     assert_eq!(kind, FoulKind::Flagrant);
     assert_eq!(free_throws, 2, "一级恶意犯规罚两次");
@@ -325,7 +363,7 @@ fn a_flagrant_penalty_two_ejects_the_fouler() {
         .expect("a defender is on the court");
     let fouled = world.holder().expect("live possession has a holder");
     // 二级恶意犯规：两次罚球加球权，犯规者被逐（NBA Rule 12B §IV.2）。
-    nba_sim_core::resolve::foul::apply_flagrant_foul(&mut world, fouler, fouled, true);
+    inject_flagrant_foul(&mut world, fouler, fouled, true);
     assert!(
         world.players[fouler].disqualified,
         "二级恶意犯规的犯规者必须被逐"
@@ -358,7 +396,7 @@ fn a_flagrant_foul_counts_against_the_team_and_the_player() {
     let fouled = world.holder().expect("live possession has a holder");
     let team_fouls_before = world.fouls[World::team_index(offense.other())].period;
     let personal_before = world.line_mut(fouler).fouls;
-    nba_sim_core::resolve::foul::apply_flagrant_foul(&mut world, fouler, fouled, false);
+    inject_flagrant_foul(&mut world, fouler, fouled, false);
     assert_eq!(
         world.fouls[World::team_index(offense.other())].period,
         team_fouls_before + 1,
@@ -429,7 +467,7 @@ fn a_fiba_disruptive_foul_is_booked_separately_from_a_flagrant_foul() {
         .expect("an offensive player is on the court");
     let personal_before = world.line_mut(fouler).fouls;
     let team_before = world.fouls[World::team_index(offense.other())].period;
-    nba_sim_core::resolve::foul::apply_disruptive_foul(&mut world, fouler, fouled);
+    inject_clear_path_foul(&mut world, fouler, fouled);
     let (_, _, kind, free_throws, _) = last_foul(&world).expect("the foul must be recorded");
     assert_eq!(kind, FoulKind::Disruptive, "FIBA 破坏性犯规必须单独成类");
     assert_eq!(free_throws, 2, "非投篮破坏性犯规罚两次");
@@ -463,7 +501,7 @@ fn an_nba_clear_path_foul_stays_a_personal_foul() {
         .copied()
         .expect("a defender is on the court");
     let fouled = world.holder().expect("live possession has a holder");
-    nba_sim_core::resolve::foul::apply_clear_path_foul(&mut world, fouler, fouled);
+    inject_clear_path_foul(&mut world, fouler, fouled);
     let (_, _, kind, _, _) = last_foul(&world).expect("the foul must be recorded");
     assert_eq!(
         kind,

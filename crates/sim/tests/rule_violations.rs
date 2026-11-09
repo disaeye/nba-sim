@@ -341,7 +341,8 @@ fn a_frontcourt_foul_inbounds_from_the_nearest_sideline() {
     let ball_before = world.ball.pos;
     let radius = world.rules.player_radius_ft;
     let height = world.rules.court.height_ft;
-    nba_sim_core::resolve::foul::apply_non_shooting_foul(&mut world, defender, carrier);
+    let incident = nba_sim_core::detect::detect_personal_foul(&mut world, defender, carrier);
+    world.submit_incident(incident);
     let inbound = world.inbound_spot.expect("犯规后必须记录发球位置");
     assert!(
         (inbound.y - radius).abs() <= 0.5 || (inbound.y - (height - radius)).abs() <= 0.5,
@@ -488,7 +489,9 @@ fn a_foul_before_the_horn_still_produces_free_throws() {
     );
     // 球还在空中时比赛钟归零，此时防守人犯规。
     world.clock.set_game_clock(0.0);
-    nba_sim_core::resolve::foul::apply_shooting_foul(&mut world, fouler, shooter, 2, false);
+    let incident =
+        nba_sim_core::detect::detect_shooting_foul(&mut world, fouler, shooter, 2, false);
+    world.submit_incident(incident);
     assert!(
         matches!(world.phase(), Phase::FreeThrows { .. }),
         "投篮犯规必须先进入罚球程序，实际 {:?}",

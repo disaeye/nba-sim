@@ -382,34 +382,13 @@ fn out_of_bounds(world: &mut World, spot: Vec2) {
         z: world.rules.ball_radius_ft,
         sub_tick: 0,
     });
-    let touched_team = touched.map(|handle| world.players[handle].team);
-    let recipient = match touched_team {
+    // 出界的判罚由裁决层按档案给出：球权给最后触球方的对手。
+    let incident = crate::detect::detect_out_of_bounds(world, spot);
+    crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
+    let recipient = match touched.map(|handle| world.players[handle].team) {
         Some(team) => team.other(),
         None => offense.other(),
     };
-    // 最后触球的是进攻方就是进攻方违例；防守方碰出界则进攻方保留球权。
-    let violation = touched_team.is_none_or(|team| team == offense);
-    let shot_in_air = world.pending_shot.is_some();
-    if violation && !shot_in_air {
-        if let Some(handle) = touched {
-            world.line_mut(handle).turnovers += 1;
-            world.emit(Fact::Turnover {
-                player: handle,
-                kind: TurnoverKind::OutOfBounds,
-            });
-        }
-    }
-    // 停表后果统一走裁决提交入口：结束回合、记录发球地点与恢复方式。
-    // 这条裁定可复核：丢球一方在复核窗口内可以申请教练挑战。
-    world.record_ruling(recipient, "out_of_bounds");
-    world.adjudicate(crate::adjudicate::Adjudication::violation(
-        crate::adjudicate::ViolationKind::OutOfBounds,
-        crate::adjudicate::RestartPlan::Inbound {
-            team: recipient,
-            location: crate::adjudicate::InboundLocation::Spot(spot),
-            ready_after: None,
-        },
-    ));
     // 球必须在死球期间离手：否则下一 tick 的活球争抢会在回合已关闭
     //（possession.id == 0）的情况下接管球。发球流程稍后自己把球交给发球人。
     let handler = world
@@ -598,7 +577,9 @@ fn try_control_loose(world: &mut World) {
                     );
                     if roll < push_rate {
                         world.pending_rebound = None;
-                        crate::resolve::foul::apply_non_shooting_foul(world, crasher, box_defender);
+                        let incident =
+                            crate::detect::detect_personal_foul(world, crasher, box_defender);
+                        crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
                         return;
                     }
                 }

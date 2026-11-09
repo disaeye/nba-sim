@@ -8,7 +8,6 @@ mod common;
 use nba_domain::rules::GameRules;
 use nba_sim_core::action::Fact;
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::resolve::foul::{apply_non_shooting_foul, apply_offensive_foul};
 use nba_sim_core::state::Phase;
 use nba_sim_core::timeouts::{can_request, request, TimeoutRejection};
 use nba_sim_core::world::TICK_SECONDS;
@@ -145,7 +144,8 @@ fn the_fifth_team_foul_awards_free_throws_while_the_fourth_only_restarts_play() 
     let fouled = world.holder().expect("live possession has a holder");
 
     for expected in 1..=5u8 {
-        apply_non_shooting_foul(&mut world, fouler, fouled);
+        let incident = nba_sim_core::detect::detect_personal_foul(&mut world, fouler, fouled);
+    world.submit_incident(incident);
         let team_fouls = world.fouls[World::team_index(offense.other())].period;
         assert_eq!(
             team_fouls, expected,
@@ -186,7 +186,8 @@ fn the_second_team_foul_in_the_last_two_minutes_awards_free_throws() {
         .expect("a defender is on the court");
     let fouled = world.holder().expect("live possession has a holder");
 
-    apply_non_shooting_foul(&mut world, fouler, fouled);
+    let incident = nba_sim_core::detect::detect_personal_foul(&mut world, fouler, fouled);
+    world.submit_incident(incident);
     assert_eq!(
         last_foul(&world).0,
         0,
@@ -194,7 +195,8 @@ fn the_second_team_foul_in_the_last_two_minutes_awards_free_throws() {
     );
     assert!(matches!(world.phase(), Phase::DeadBall { .. }));
 
-    apply_non_shooting_foul(&mut world, fouler, fouled);
+    let incident = nba_sim_core::detect::detect_personal_foul(&mut world, fouler, fouled);
+    world.submit_incident(incident);
     assert_eq!(
         last_foul(&world).0,
         2,
@@ -214,7 +216,8 @@ fn an_offensive_foul_counts_personally_but_never_sends_the_other_team_to_the_lin
     let period_before = world.fouls[index].period;
     let personal_before = world.players[fouler].fouls;
 
-    apply_offensive_foul(&mut world, fouler, 0);
+    let incident = nba_sim_core::detect::detect_offensive_foul(&mut world, fouler, 0);
+    world.submit_incident(incident);
 
     assert_eq!(
         world.fouls[index].period, period_before,
@@ -402,7 +405,8 @@ fn a_non_bonus_personal_foul_restart_preserves_the_live_possession_id() {
     let fouler = world.on_court(offense.other()).as_slice()[0];
     let fouled = world.holder().expect("live possession has a holder");
 
-    apply_non_shooting_foul(&mut world, fouler, fouled);
+    let incident = nba_sim_core::detect::detect_personal_foul(&mut world, fouler, fouled);
+    world.submit_incident(incident);
 
     assert_eq!(last_foul(&world).0, 0);
     assert_eq!(world.possession.id, possession_id);
@@ -462,7 +466,8 @@ fn an_away_from_play_foul_in_the_last_two_minutes_is_one_free_throw_and_the_ball
         .find(|handle| *handle != holder)
         .expect("the offence has an off-ball player");
 
-    apply_non_shooting_foul(&mut world, fouler, off_ball);
+    let incident = nba_sim_core::detect::detect_personal_foul(&mut world, fouler, off_ball);
+    world.submit_incident(incident);
     assert_eq!(
         last_foul(&world).0,
         1,
@@ -623,7 +628,8 @@ fn mutating_the_league_profile_changes_the_called_rule() {
         .next()
         .expect("a defender is on the court");
     let fouled = world.holder().expect("live possession has a holder");
-    apply_non_shooting_foul(&mut world, fouler, fouled);
+    let incident = nba_sim_core::detect::detect_personal_foul(&mut world, fouler, fouled);
+    world.submit_incident(incident);
     assert_eq!(
         last_foul(&world).0,
         2,
@@ -655,7 +661,8 @@ fn mutating_the_league_profile_changes_the_called_rule() {
         .next()
         .expect("a defender is on the court");
     let fouled = world.holder().expect("live possession has a holder");
-    apply_non_shooting_foul(&mut world, fouler, fouled);
+    let incident = nba_sim_core::detect::detect_personal_foul(&mut world, fouler, fouled);
+    world.submit_incident(incident);
     assert!(
         world.players[fouler].disqualified,
         "mutating the personal foul limit must disqualify the fouler"

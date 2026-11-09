@@ -111,7 +111,9 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
             player: screener,
             kind: TurnoverKind::OffensiveFoul,
         });
-        crate::resolve::foul::apply_offensive_foul(world, screener, defender);
+        // 非法掩护：判定层给出事实，裁决层给后果。
+        let incident = crate::detect::detect_illegal_screen(world, screener, defender);
+        crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
         return ActionOutcome {
             actor: intent.actor,
             kind: ActionKind::Screen(kind),

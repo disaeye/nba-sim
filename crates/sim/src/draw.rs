@@ -117,4 +117,5 @@ pub mod purpose {
     pub const REBOUND_PUSH: u16 = 33;
     pub const CLOSEOUT_DRAW_CONTACT: u16 = 34;
     pub const CLOSEOUT_SIDESTEP: u16 = 35;
+    pub const INJURY_CONTACT: u16 = 36;
 }
