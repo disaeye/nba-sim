@@ -69,7 +69,7 @@ pub(crate) fn run_validate_core(
         games,
         nba_domain::rules::GameRules::for_league(league),
     )
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     nba_validation::five_dimension::write_five_dimension(&five, &out_dir)?;
     let root = nba_sim_core::params::workspace_root();
     nba_validation::five_dimension::write_five_dimension(
@@ -91,7 +91,10 @@ pub(crate) fn run_validate_core(
         "  五维诊断：{}（{} 场，{} 个指标）",
         if five.passed { "通过" } else { "未通过" },
         five.seeds.len(),
-        five.dimensions.iter().map(|d| d.metrics.len()).sum::<usize>()
+        five.dimensions
+            .iter()
+            .map(|d| d.metrics.len())
+            .sum::<usize>()
     );
     write_run_record(
         &out_dir,
@@ -316,8 +319,29 @@ fn print_mechanism(report: &MechanismReport) {
     );
 }
 
-/// 提交与工作区状态。工件目录本身不计入 dirty：它是本次运行的输出，
-/// 每次重跑都会带上新的提交哈希，把它算进去会让记录永远无法变干净。
+const GENERATED_OUTPUT_PREFIXES: &[&str] = &[
+    "docs/dev/evidence/action_chain_validation/",
+    "docs/dev/evidence/fiba_validation/",
+];
+
+const GENERATED_OUTPUT_PATHS: &[&str] = &[
+    "docs/dev/evidence/gap_closure_cycle/gate.txt",
+    "docs/dev/evidence/gap_closure_cycle/verification.json",
+    "docs/dev/evidence/performance.json",
+    "data/diagnostics/five_dimension.json",
+    "crates/sim/tests/baseline/fingerprint.json",
+];
+
+fn is_generated_output(path: &str, out_dir: Option<&str>) -> bool {
+    out_dir.is_some_and(|prefix| path.starts_with(prefix))
+        || GENERATED_OUTPUT_PREFIXES
+            .iter()
+            .any(|prefix| path.starts_with(prefix))
+        || GENERATED_OUTPUT_PATHS.contains(&path)
+}
+
+/// 提交与工作区状态。认证输出不计入 dirty：它们由本次运行写出，
+/// 随后统一提交，工作区状态应当只反映代码与输入数据的改动。
 fn git_state(out_dir: &Path) -> (String, bool) {
     let commit = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
@@ -334,25 +358,55 @@ fn git_state(out_dir: &Path) -> (String, bool) {
             .unwrap_or_else(|_| root.clone())
             .join(out_dir)
     };
-    let relative = absolute
-        .strip_prefix(&root)
-        .ok()
-        .map(|path| path.to_string_lossy().replace('\\', "/"));
+    let out_dir_prefix = absolute.strip_prefix(&root).ok().map(|path| {
+        format!(
+            "{}/",
+            path.to_string_lossy()
+                .replace('\\', "/")
+                .trim_end_matches('/')
+        )
+    });
     let dirty = std::process::Command::new("git")
         .args(["status", "--porcelain"])
         .output()
         .ok()
         .filter(|output| output.status.success())
         .map(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .any(|line| {
-                    let path = line.get(3..).unwrap_or("").trim();
-                    !relative
-                        .as_deref()
-                        .is_some_and(|prefix| path.starts_with(prefix))
-                })
+            String::from_utf8_lossy(&output.stdout).lines().any(|line| {
+                let path = line.get(3..).unwrap_or("").trim();
+                !is_generated_output(path, out_dir_prefix.as_deref())
+            })
         })
         .unwrap_or(true);
     (commit, dirty)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_generated_output;
+
+    #[test]
+    fn generated_artifacts_do_not_mark_workspace_dirty() {
+        assert!(is_generated_output(
+            "docs/dev/evidence/action_chain_validation/run.json",
+            None
+        ));
+        assert!(is_generated_output(
+            "docs/dev/evidence/fiba_validation/run.json",
+            None
+        ));
+        assert!(is_generated_output(
+            "docs/dev/evidence/gap_closure_cycle/gate.txt",
+            None
+        ));
+        assert!(is_generated_output(
+            "data/diagnostics/five_dimension.json",
+            None
+        ));
+        assert!(is_generated_output(
+            "crates/sim/tests/baseline/fingerprint.json",
+            None
+        ));
+        assert!(!is_generated_output("crates/cli/src/main.rs", None));
+    }
 }
