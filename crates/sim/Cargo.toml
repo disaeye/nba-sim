@@ -3,6 +3,9 @@ name = "nba-sim-core"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 nba-domain = { workspace = true }
 nba-protocol = { workspace = true }
@@ -11,6 +14,7 @@ rand = { workspace = true }
 rand_chacha = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+rayon = { workspace = true }
 
 [dev-dependencies]
 glam = { workspace = true }

@@ -3,6 +3,9 @@ name = "nba-debug-server"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 nba-domain.workspace = true
 nba-sim-core.workspace = true

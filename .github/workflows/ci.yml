@@ -147,11 +147,21 @@ jobs:
           set -e
           python3 scripts/check_inline_constants.py
           python3 scripts/check_inline_constants.py --self-test
+          python3 scripts/check_runtime_tables.py
+          python3 scripts/check_result_fields.py
+          python3 scripts/check_tick_source.py
+          python3 scripts/check_position_writes.py
+          python3 scripts/test_guards.py
           python3 scripts/check_no_index_identity.py
           python3 scripts/check_no_index_identity.py --self-test
           python3 scripts/check_threshold_integrity.py
           python3 scripts/check_threshold_integrity.py --self-test
           python3 scripts/check_r6_tendency_wiring.py
+          python3 scripts/check_animation_catalog.py
+          python3 scripts/check_action_runtime_catalog.py
+          python3 scripts/check_production_incidents.py
+          python3 scripts/audit_rule_programs.py
+          python3 scripts/measure_resources.py --check
           python3 scripts/calibrate/freeze.py --check
           python3 scripts/check_docs.py
           python3 scripts/check_max_source_lines.py
@@ -273,6 +283,38 @@ jobs:
             exit "$CODE"
           fi
 
+  browser_tests:
+    needs: [change_detection]
+    if: |
+      needs.change_detection.outputs.is_full == 'true' ||
+      needs.change_detection.outputs.core_changed == 'true'
+    name: browser (3D court)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Chrome
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser
+      - name: Start debug server
+        run: |
+          cargo build -p nba-debug-server
+          ./target/debug/nba-debug-server 31100 &
+          for _ in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:31100/api/action-animation-catalog" > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS "http://127.0.0.1:31100/api/action-animation-catalog" > /dev/null
+      - name: Run 3D court browser test
+        run: node scripts/test_court3d.mjs
+      - name: Run 2D court browser test
+        run: python3 scripts/test_court_visuals.py
+
   full_gate:
     name: full-gate
     needs:
@@ -282,6 +324,7 @@ jobs:
       - fast_test
       - tier2_tests
       - tier3_tests
+      - browser_tests
     if: |
       always() &&
       (needs.change_detection.outputs.is_full == 'true' ||
@@ -295,6 +338,7 @@ jobs:
           FAST_TEST_RESULT: ${{ needs.fast_test.result }}
           TIER2_RESULT: ${{ needs.tier2_tests.result }}
           TIER3_RESULT: ${{ needs.tier3_tests.result }}
+          BROWSER_RESULT: ${{ needs.browser_tests.result }}
         run: |
           for result in "$LINT_RESULT" "$CLIPPY_RESULT" "$FAST_TEST_RESULT"; do
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then
@@ -303,10 +347,11 @@ jobs:
             fi
           done
           if [[ "$TIER2_RESULT" != "success" ]] ||
-             [[ "$TIER3_RESULT" != "success" ]]; then
+             [[ "$TIER3_RESULT" != "success" ]] ||
+             [[ "$BROWSER_RESULT" != "success" ]]; then
             printf 'Full-gate jobs did not all pass:\n'
-            printf 'Tier 2=%s, Tier 3=%s\n' \
-              "$TIER2_RESULT" "$TIER3_RESULT"
+            printf 'Tier 2=%s, Tier 3=%s, Browser=%s\n' \
+              "$TIER2_RESULT" "$TIER3_RESULT" "$BROWSER_RESULT"
             exit 1
           fi
           echo "All parallel full-gate jobs passed."

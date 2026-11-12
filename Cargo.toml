@@ -13,6 +13,24 @@ members = [
 version = "0.1.0"
 edition = "2021"
 
+[workspace.lints.clippy]
+assign_op_pattern = "allow"
+bool_assert_comparison = "allow"
+clone_on_copy = "allow"
+field_reassign_with_default = "allow"
+let_and_return = "allow"
+map_flatten = "allow"
+needless_range_loop = "allow"
+should_implement_trait = "allow"
+single_match = "allow"
+too_many_arguments = "allow"
+type_complexity = "allow"
+unnecessary_cast = "allow"
+unnecessary_get_then_check = "allow"
+unnecessary_lazy_evaluations = "allow"
+unnecessary_unwrap = "allow"
+useless_conversion = "allow"
+
 [workspace.dependencies]
 glam = { version = "0.24", features = ["serde"] }
 rand = "0.8"
