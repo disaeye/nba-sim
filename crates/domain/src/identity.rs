@@ -179,7 +179,7 @@ define_stable_id!(InteractionId, "interaction");
 define_stable_id!(ReviewId, "review");
 define_stable_id!(CheckpointId, "checkpoint");
 
-pub const ID_PREFIXES: [&'static str; 13] = [
+pub const ID_PREFIXES: [&str; 13] = [
     ActionId::PREFIX,
     ShotId::PREFIX,
     PassId::PREFIX,

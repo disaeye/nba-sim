@@ -93,6 +93,42 @@ impl CourtGeometry {
         CORNER_ZONE_DEPTH_FT * scale_y
     }
 
+    /// 出手点与三分线的距离：线内为负，线外为正。
+    ///
+    /// 弧顶与底角是两条不同的线：出手点落在底角区域时按更近的底角线量，
+    /// 其余位置按弧线量。二分与三分的判定落在这条距离的门槛附近时，
+    /// 裁判的观察误差足以改变这次判罚。
+    pub fn three_point_margin_ft(
+        self,
+        pos: Vec2,
+        attacking_right: bool,
+        three_point_distance_ft: f32,
+        corner_three_distance_ft: f32,
+    ) -> f32 {
+        let hoop = self.hoop_pos(attacking_right);
+        let distance = (pos - hoop).length();
+        let arc_margin = distance - three_point_distance_ft;
+        if corner_three_distance_ft <= 0.0 {
+            return arc_margin;
+        }
+        let corner_depth = self.corner_zone_depth_ft();
+        let near_sideline = pos.y <= corner_depth || pos.y >= self.height_ft - corner_depth;
+        let in_attacking_half = if attacking_right {
+            pos.x >= self.width_ft / f32::from(2u8)
+        } else {
+            pos.x <= self.width_ft / f32::from(2u8)
+        };
+        if !near_sideline || !in_attacking_half {
+            return arc_margin;
+        }
+        let corner_margin = distance - corner_three_distance_ft;
+        if corner_margin.abs() < arc_margin.abs() {
+            corner_margin
+        } else {
+            arc_margin
+        }
+    }
+
     /// 球场几何中心（placement 搜索、站位对称计算使用）。
     pub fn center(self) -> Vec2 {
         let half = f32::from(2u8);

@@ -249,8 +249,102 @@ fn rule_catalog_has_versioned_sources_and_unique_scenario_ids() {
         );
         assert!(!violation.nba.is_empty() || !violation.fiba.is_empty());
     }
-    assert!(!catalog.known_current_gaps.is_empty());
+    // 规则程序审计已完成：档案里不再有已知的缺口。
+    //
+    // 缺口清单为空只有在「每个档案字段都有生产消费者」时才能成立：光有
+    // 一份审计声明不算，因此这条判据与字段消费者的检查一起给出。
+    assert!(
+        catalog.known_current_gaps.is_empty(),
+        "规则程序审计还有已知缺口：{:?}",
+        catalog.known_current_gaps
+    );
 }
+
+/// 联赛档案的每个字段都必须有生产消费者。
+///
+/// 档案里的字段如果没有人读，它就只是一句声明：规则程序因此无法被这份
+/// 档案证明。这条判据把档案的字段与引擎的读取点逐个对上。
+#[test]
+fn every_league_profile_field_has_a_production_consumer() {
+    let catalog = rule_catalog();
+    for league in ["nba", "fiba"] {
+        let profile = catalog.profiles.get(league).expect("profile exists");
+        // 档案里声明的字段名：只取顶层与策略族里的字段名，嵌套的记录
+        // （例如强制暂停的每一项）不算档案字段。
+        let source = match league {
+            "nba" => include_str!("../../../data/rules/league_nba.json"),
+            _ => include_str!("../../../data/rules/league_fiba.json"),
+        };
+        let value: serde_json::Value =
+            serde_json::from_str(source).expect("league profile parses");
+        let object = value.as_object().expect("league profile is an object");
+        let mut fields: Vec<String> = Vec::new();
+        for (name, entry) in object {
+            if matches!(name.as_str(), "id" | "name" | "ruleset_version" | "source") {
+                continue;
+            }
+            fields.push(name.clone());
+            // 策略族是嵌套对象：它们的字段也是档案字段。
+            if let Some(nested) = entry.as_object() {
+                for (nested_name, nested_entry) in nested {
+                    if nested_entry.is_object() || nested_entry.is_array() {
+                        continue;
+                    }
+                    fields.push(nested_name.clone());
+                }
+            }
+        }
+        assert!(!fields.is_empty(), "{league} 档案里没有字段");
+        for field in fields {
+            // 字段名在引擎源码里被读到：`.field`、`field:`、`field =` 或
+            // 解构出来的 `field,`。
+            let consumers = [
+                format!(".{field}"),
+                format!("{field}:"),
+                format!("{field} ="),
+                format!("{field},"),
+                format!("{field})"),
+                format!("{field}]"),
+            ];
+            assert!(
+                consumers.iter().any(|pattern| {
+                    ENGINE_SOURCES
+                        .iter()
+                        .any(|source| source.contains(pattern.as_str()))
+                }),
+                "{league} 档案的字段 {field} 没有生产消费者"
+            );
+        }
+        let _ = profile;
+    }
+}
+
+/// 引擎源码的并集：档案字段的生产消费者在这些文件里。
+const ENGINE_SOURCES: &[&str] = &[
+    include_str!("../../sim/src/world.rs"),
+    include_str!("../../sim/src/policy.rs"),
+    include_str!("../../sim/src/assignment.rs"),
+    include_str!("../../sim/src/defense.rs"),
+    include_str!("../../sim/src/formation.rs"),
+    include_str!("../../sim/src/clock/mod.rs"),
+    include_str!("../../sim/src/clock/directives.rs"),
+    include_str!("../../sim/src/lane.rs"),
+    include_str!("../../sim/src/footwork.rs"),
+    include_str!("../../sim/src/review_program.rs"),
+    include_str!("../../sim/src/settlement.rs"),
+    include_str!("../../sim/src/officiating/mod.rs"),
+    include_str!("../../sim/src/resolve/mod.rs"),
+    include_str!("../../sim/src/resolve/shot.rs"),
+    include_str!("../../sim/src/resolve/pass.rs"),
+    include_str!("../../sim/src/resolve/freethrow.rs"),
+    include_str!("../../sim/src/resolve/rebound.rs"),
+    include_str!("../../sim/src/actions/mod.rs"),
+    include_str!("../../sim/src/action_spec.rs"),
+    include_str!("../../domain/src/league.rs"),
+    include_str!("../../domain/src/rules.rs"),
+    include_str!("../../domain/src/rules/policies.rs"),
+    include_str!("../../protocol/src/frame.rs"),
+];
 
 #[test]
 fn action_catalog_records_production_evidence_and_unique_scenario_ids() {

@@ -55,6 +55,8 @@ impl Foot {
 pub enum DribbleMoveKind {
     /// 原地或推进运球：不改变球与防守人的相对位置。
     DirectDrive,
+    /// 推进运球：向篮筐方向运球，与原地运球的技术后果相同。
+    Advance,
     Crossover,
     BetweenTheLegs,
     BehindTheBack,
@@ -63,6 +65,22 @@ pub enum DribbleMoveKind {
     Hesitation,
     /// 后撤步运球：把球拉回远离防守人的一侧。
     Retreat,
+}
+
+impl DribbleMoveKind {
+    /// 技术变体的档案键。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DirectDrive => "direct_drive",
+            Self::Advance => "advance",
+            Self::Crossover => "crossover",
+            Self::BetweenTheLegs => "between_the_legs",
+            Self::BehindTheBack => "behind_the_back",
+            Self::SpinMove => "spin_move",
+            Self::Hesitation => "hesitation",
+            Self::Retreat => "retreat",
+        }
+    }
 }
 /// 突破的技术变体（NBA Rule 10 §XIII 的走步条款与 NBA Rule 12B §II 的
 /// 身体接触条款）。
@@ -77,14 +95,23 @@ pub enum DriveKind {
     Crossover,
     /// 转身突破：以轴心脚为轴背对防守人再突进。
     Spin,
+    /// 急停：突破到一半停住，改成投篮或传球。
+    PullUpStop,
+    /// 后撤步：突进中向后撤开一步，重新获得空间。
+    StepBack,
+    /// 突破分球：突进后把球分给队友。
+    DriveKick,
 }
 
 impl DriveKind {
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Straight => "straight",
             Self::Crossover => "crossover",
             Self::Spin => "spin",
+            Self::PullUpStop => "pull_up_stop",
+            Self::StepBack => "step_back",
+            Self::DriveKick => "drive_kick",
         }
     }
 }

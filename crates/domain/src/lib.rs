@@ -5,6 +5,7 @@
 //! 本 crate 是依赖图的最内层：除 glam 数学类型与 serde 派生外零依赖。
 use serde::{Deserialize, Serialize};
 
+pub mod action_spec;
 pub mod action_window;
 pub mod capability;
 pub mod court;
@@ -21,6 +22,7 @@ pub mod projectile;
 pub mod resolve;
 pub mod rules;
 pub mod tactics;
+pub use action_spec::{ActionFamily, ActionRole, ActionSpec, ActionSpecTable};
 pub use action_window::Foot;
 pub use footwork::{step_length_ft, FootContact, PivotState, SupportFoot};
 pub use identity::{

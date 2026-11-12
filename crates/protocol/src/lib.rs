@@ -4,9 +4,15 @@
 //! 只依赖 serde —— 任何消费者（前端/回放器/训练管道）按此格式解码，
 //! 与引擎内部结构完全解耦。
 
+pub mod action_recipe;
 pub mod event;
 pub mod frame;
 pub mod validation_stream;
+
+pub use action_recipe::{
+    ActionAnimationCatalog, ActionRecipe, ActionRecipeEntry, AnimationFamily, Recipe2d, Recipe3d,
+    RenderActionValidator,
+};
 
 pub use event::{DecisionTrace, TraceCandidate};
 pub use frame::{

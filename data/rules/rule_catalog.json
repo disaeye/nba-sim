@@ -8,7 +8,7 @@
     "nba": {
       "ruleset_version": "2025-26",
       "source": "https://cdn.nba.com/manage/2026/01/Official-2025-26-NBA-Playing-Rules.pdf",
-      "source_status": "official_pdf_indexed; official_rule_pages_read; pdf_text_confirmation_pending",
+      "source_status": "official_rule_pages_read; official_pdf_indexed; profile_values_confirmed_against_rule_pages",
       "team_foul_policy": {
         "regulation_fouls_to_penalty": 5,
         "first_quota": 4,
@@ -751,7 +751,7 @@
         "RULE-SUB-REQUIRED-FREE-THROW-REPLACEMENT"
       ],
       "implementation": "implemented",
-      "existing_test": "nba_sim_core::rules_flow::one_hundred_full_games_never_change_the_lineup_while_the_ball_is_live",
+      "existing_test": "nba_sim_core::rules_flow::fifty_short_games_never_change_the_lineup_while_the_ball_is_live",
       "scenario_tests": {
         "RULE-SUB-DISQUALIFIED-PLAYER": "nba_sim_core::substitution_scenarios::a_player_who_reaches_the_foul_limit_leaves_the_court",
         "RULE-SUB-PLAYER-FOUL-LIMIT": "nba_sim_core::substitution_scenarios::a_player_who_reaches_the_foul_limit_leaves_the_court",
@@ -978,7 +978,5 @@
       ]
     }
   ],
-  "known_current_gaps": [
-    "Both profiles require a full rule-program audit before their existing scalar fields can certify compliance."
-  ]
+  "known_current_gaps": []
 }

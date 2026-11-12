@@ -37,18 +37,24 @@ impl MatchStage {
 
     /// 阶段之间的合法迁移。
     ///
-    /// 阶段只按比赛本身的顺序推进：赛前进入常规赛，节间进入加时或下一节，
-    /// 最后一节结束后进入结算，然后到比赛结束。
+    /// 阶段只按比赛本身的顺序推进：赛前进入常规赛，时钟归零后进入结算，
+    /// 结算完成后进入休息、下一节、加时或比赛结束。
+    ///
+    /// 结算期间比赛钟可能被复核恢复到出手那一刻的读数，本节因此继续：
+    /// 结算退回活球阶段是合法迁移。
     pub fn can_transition_to(self, next: MatchStage) -> bool {
         if self == next {
             return true;
         }
         match self {
             Self::Pregame => matches!(next, Self::Regulation),
-            Self::Regulation => matches!(next, Self::Intermission | Self::Overtime | Self::Finished),
+            Self::Regulation => matches!(next, Self::Finalizing),
             Self::Intermission => matches!(next, Self::Regulation | Self::Overtime),
-            Self::Overtime => matches!(next, Self::Intermission | Self::Regulation | Self::Finished),
-            Self::Finalizing => matches!(next, Self::Finished),
+            Self::Overtime => matches!(next, Self::Finalizing),
+            Self::Finalizing => matches!(
+                next,
+                Self::Regulation | Self::Overtime | Self::Intermission | Self::Finished
+            ),
             Self::Finished => false,
         }
     }
@@ -122,6 +128,8 @@ pub enum PassKind {
     BehindBack,
     /// 手递手：两人贴近交接，几乎没有飞行距离。
     Handoff,
+    /// 空中接力：球送到篮筐上空，接球人在空中完成。
+    AlleyOop,
 }
 
 impl PassKind {
@@ -135,6 +143,7 @@ impl PassKind {
             Self::OneHand => "one_hand",
             Self::BehindBack => "behind_back",
             Self::Handoff => "handoff",
+            Self::AlleyOop => "alley_oop",
         }
     }
 }
@@ -362,7 +371,14 @@ mod tests {
         assert!(MatchStage::Pregame.can_transition_to(MatchStage::Regulation));
         assert!(!MatchStage::Regulation.can_transition_to(MatchStage::Pregame));
         assert!(!MatchStage::Finished.can_transition_to(MatchStage::Regulation));
-        assert!(MatchStage::Regulation.can_transition_to(MatchStage::Overtime));
-        assert!(MatchStage::Overtime.can_transition_to(MatchStage::Finished));
+        assert!(MatchStage::Regulation.can_transition_to(MatchStage::Finalizing));
+        assert!(MatchStage::Overtime.can_transition_to(MatchStage::Finalizing));
+        assert!(MatchStage::Finalizing.can_transition_to(MatchStage::Intermission));
+        assert!(MatchStage::Finalizing.can_transition_to(MatchStage::Overtime));
+        assert!(MatchStage::Finalizing.can_transition_to(MatchStage::Finished));
+        assert!(MatchStage::Finalizing.can_transition_to(MatchStage::Regulation));
+        assert!(!MatchStage::Finalizing.can_transition_to(MatchStage::Pregame));
+        assert!(!MatchStage::Regulation.can_transition_to(MatchStage::Intermission));
+        assert!(!MatchStage::Overtime.can_transition_to(MatchStage::Finished));
     }
 }

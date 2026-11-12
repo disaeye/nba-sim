@@ -44,7 +44,7 @@
         {
           "name": "推进运球",
           "kind": "dribble",
-          "variant": "direct_drive",
+          "variant": "advance",
           "role": "primary",
           "phases": [
             "preparation",
