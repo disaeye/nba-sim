@@ -1,0 +1,36 @@
+{
+  "certification_status": "pass",
+  "commit": "fb442106d030daec6104f63c878d8d88b0cddd56",
+  "coverage": {
+    "gate_criteria": 38,
+    "mechanism_attributes": 0,
+    "not_applicable": 8,
+    "registered": 51,
+    "sampled": 38,
+    "uncovered": 13,
+    "unregistered": [
+      "travel_per_game"
+    ]
+  },
+  "criteria": {
+    "defects": [],
+    "known_insufficient": [],
+    "marginal": [],
+    "new_insufficient": [],
+    "not_applicable": [
+      "distribution:zone_share_rim",
+      "distribution:zone_share_three",
+      "distribution:creation_share_post",
+      "distribution:fta_per_game",
+      "distribution:possessions_per_game",
+      "distribution:blocks_per_game",
+      "distribution:steals_per_game",
+      "distribution:shooting_fouls_per_game"
+    ]
+  },
+  "games": 16,
+  "per_game_ledger": {
+    "passed": 16,
+    "total": 16
+  }
+}

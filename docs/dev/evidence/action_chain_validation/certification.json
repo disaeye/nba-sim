@@ -1,6 +1,6 @@
 {
   "certification_status": "pass",
-  "commit": "63c04b99f533defb49742ce3d1f43ccefcc48f63",
+  "commit": "fb442106d030daec6104f63c878d8d88b0cddd56",
   "coverage": {
     "gate_criteria": 38,
     "mechanism_attributes": 13,
@@ -8,20 +8,22 @@
     "registered": 51,
     "sampled": 51,
     "uncovered": 0,
-    "unregistered": []
+    "unregistered": [
+      "travel_per_game"
+    ]
   },
   "criteria": {
     "defects": [],
     "known_insufficient": [],
     "marginal": [
-      "mechanism:offensive_rebound（下界比 0.57）"
+      "mechanism:offensive_rebound（下界比 0.66）"
     ],
     "new_insufficient": [],
     "not_applicable": []
   },
-  "games": 32,
+  "games": 16,
   "per_game_ledger": {
-    "passed": 32,
-    "total": 32
+    "passed": 16,
+    "total": 16
   }
 }

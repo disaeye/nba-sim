@@ -1,0 +1,68 @@
+{
+  "calibration": {
+    "formations": {
+      "contest": "",
+      "method": "三外线两内线半场站位（英尺，进攻向右）：弧顶持球 24.45 ft、两侧翼 26.05 ft，三个外线点全部在三分线外，接球投篮因此来自外线；低位点站篮下 8.80 ft、顺下点站篮下 8.05 ft，两个内线点都站在三秒区边缘而不是篮下，站定出手因此不会直接变成扣篮",
+      "sample": 0,
+      "script": "hand-authored formation geometry, reviewed against the shot zone shares",
+      "season": "2024-25",
+      "source": "modern four-out one-in half-court spacing; four perimeter slots and one interior slot"
+    },
+    "freethrow": {
+      "contest": "",
+      "method": "回合事件文本里的 Free Throw 行逐次计数",
+      "sample": 53301,
+      "script": "scripts/calibrate/fit_tables.py",
+      "season": "2024-25",
+      "source": "shufinskiy/nba_data pbpstats possession event text"
+    },
+    "policy": {
+      "contest": "",
+      "method": "coordinate descent on the induced shot and possession distributions; parameter groups are declared in scripts/calibrate/fit_policy.py and each group owns its own bounds",
+      "sample": 0,
+      "script": "scripts/calibrate/fit_policy.py",
+      "season": "2024-25",
+      "source": "restored from the pre-failure-fit snapshot (scripts/calibrate/fit_policy.py --group all, 2026-10-26)"
+    },
+    "possession": {
+      "contest": "",
+      "method": "按回合起始语境分组统计结局速率与时长分位；封盖与抢断按事件文本上的（比赛、球员、计数）去重后逐场计数；封盖写作 `X BLOCK (n BLK)`，抢断写作 `X STEAL (n STL)`，两种词序都计入；and-1 取联盟场均参考值，事件文本里没有 and-1 标记",
+      "sample": 243782,
+      "script": "scripts/calibrate/fit_tables.py",
+      "season": "2024-25",
+      "source": "shufinskiy/nba_data pbpstats (pbpstats.com possession data)"
+    },
+    "rebound": {
+      "contest": "",
+      "method": "分区相对差异来自事件文本的首次投失归组；总水平取 possession 表的 oreb_per_miss 后按分区投失占比等比缩放",
+      "sample": 96692,
+      "script": "scripts/calibrate/fit_tables.py",
+      "season": "2024-25",
+      "source": "shufinskiy/nba_data pbpstats possession table + event text"
+    },
+    "shot_make": {
+      "contest": "modeled: centred at 0.5 so the fitted mean is preserved; sensitivity documented in table",
+      "method": "empirical make rate per (shot kind, distance bin, two/three), sparse cells smoothed toward the same-distance-band rate and forced monotone decreasing in distance",
+      "sample": 219527,
+      "script": "scripts/calibrate/fit_tables.py",
+      "season": "2024-25",
+      "source": "shufinskiy/nba_data shotdetail (stats.nba.com ShotChartDetail)"
+    },
+    "shot_profile": {
+      "contest": "",
+      "method": "投篮档案逐球统计出手类型、区域与来源份额，按样本数归一",
+      "sample": 219527,
+      "script": "scripts/calibrate/fit_tables.py",
+      "season": "2024-25",
+      "source": "shufinskiy/nba_data shotdetail"
+    }
+  },
+  "calibration_version": "33469931017d3ffb",
+  "commit": "fb442106d030daec6104f63c878d8d88b0cddd56",
+  "engine_model_version": "action-chain-1",
+  "games": 16,
+  "mechanism": null,
+  "ruleset_version": "2026-v1.1",
+  "seed_start": 1,
+  "working_tree_dirty": true
+}

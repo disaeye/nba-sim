@@ -5,5 +5,7 @@
   "registered": 51,
   "sampled": 51,
   "uncovered": 0,
-  "unregistered": []
+  "unregistered": [
+    "travel_per_game"
+  ]
 }

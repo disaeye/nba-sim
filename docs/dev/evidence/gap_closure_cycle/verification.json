@@ -24,17 +24,12 @@
       "result": "clean"
     },
     "gate": {
-      "command": "cargo run --release --bin nba-sim -- sim-core --gate --seed 1 --games 16",
+      "command": "nba-sim sim-core --seed 1 --gate",
       "geometric_violations": 0,
       "context_violations": 0,
       "criteria_total": 39,
-      "criteria_out_of_band": 4,
-      "out_of_band": {
-        "zone_share_near": 0.223,
-        "creation_share_putback": 0.054,
-        "fta_per_game": 53.312,
-        "steals_per_game": 13.312
-      },
+      "criteria_out_of_band": 0,
+      "out_of_band": {},
       "artifact": "docs/dev/evidence/gap_closure_cycle/gate.txt"
     }
   },
@@ -48,7 +43,10 @@
       ],
       "measured": {
         "play_activation_rate": 0.795,
-        "band": [0.65, 0.85]
+        "band": [
+          0.65,
+          0.85
+        ]
       },
       "evidence": [
         "crates/sim/tests/baseline_fingerprint.rs::baseline_fingerprint_matches_recorded_artifact",

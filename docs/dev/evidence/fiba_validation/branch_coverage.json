@@ -1,0 +1,11 @@
+{
+  "gate_criteria": 38,
+  "mechanism_attributes": 0,
+  "not_applicable": 8,
+  "registered": 51,
+  "sampled": 38,
+  "uncovered": 13,
+  "unregistered": [
+    "travel_per_game"
+  ]
+}

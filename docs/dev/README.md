@@ -4,7 +4,7 @@
 
 ## 0. 当前入口
 
-- **当前状态**：[`status.md`](status.md)（简要当前结论；历史验证矩阵另有日期标记）
+- **当前状态**：[`status.md`](status.md)（当前代码、验证范围与证据入口）
 - **当前实施入口**：[`current/plan.md`](current/plan.md)
 - **唯一权威实施方案**：[`current/full_simulation_plan.md`](current/full_simulation_plan.md)
 - **当前执行进度**：[`current/implementation.md`](current/implementation.md)
@@ -21,10 +21,10 @@
 
 | 文件 | 唯一职责 |
 | --- | --- |
-| `status.md` | 当前代码状态、验证范围、失败与未完成事项 |
+| `status.md` | 当前代码状态、验证范围与证据入口 |
 | `current/plan.md` | 当前方案入口，不复制完整设计与任务正文 |
 | `current/full_simulation_plan.md` | 唯一权威实施方案：目标范围、结构、依赖、实施次序与最终验收要求 |
-| `current/implementation.md` | 执行阶段、已完成证据、未完成事项与下一步 |
+| `current/implementation.md` | 阶段状态、验证证据与当前残差 |
 | `gap.md` | 跨周期差距与依赖关系 |
 | `roadmap.md` | 项目里程碑及其顺序 |
 | `evidence/` | 可重现的命令、输入、原始输出与分析 |
@@ -34,29 +34,13 @@
 
 ## 2. 当前状态与证据
 
-`status.md` 记录当前工作区能够核验的状态；其中标注日期的历史矩阵仅用于追溯，不代表当前验证：
+`status.md` 记录当前工作区能够核验的状态，每条状态指向代码、测试、守卫或最终验收工件。`docs/dev/evidence/` 保存门禁、认证、机制实验、性能与阶段证据；`.work/evidence/final-validation.summary` 保存验收链的逐项退出码。
 
-- **implemented**：存在相应代码路径和测试或守卫；
-- **verified**：指定范围、输入与命令均已通过；
-- **partial**：部分路径已实现或核验，剩余范围有明确记录；
-- **blocked**：存在已确认的失败或外部依赖；
-- **unknown**：没有足够证据作出判断。
-
-实现存在不代表已经验证；单个种子通过不代表完整场景通过；历史周期的结果不代表当前工作区的结果。每条状态应记录范围与证据。
-
-`evidence/` 保存原始结果，允许记录命令、随机种子、输出和失败信息。证据支持状态判定，不能替代当前状态，也不能覆盖较新的验证结果。
+`evidence/` 允许保存命令、输入、原始输出与分析。历史周期归档放在 `cycles/`，当前结论以 `status.md` 与最终工件为准。
 
 ## 3. 当前实施进度
 
-`implementation.md` 按 `full_simulation_plan.md` 的依赖阶段更新。每项进度记录：
-
-1. 阶段状态；
-2. 修改过的代码与数据路径；
-3. 测试身份、输入范围和结果；
-4. 尚未覆盖的条件；
-5. 下一项工作或关闭条件。
-
-用户确认目标范围或核心结构变化时，更新 `full_simulation_plan.md`，并检查目录入口、验收任务和实现进度。日常实现进度不复制完整方案。
+`implementation.md` 按 `full_simulation_plan.md` 的依赖阶段记录阶段状态、代码与数据路径、测试身份、验证证据和当前残差。用户确认目标范围或核心结构变化时，更新 `full_simulation_plan.md`，并检查目录入口、验收任务和实现进度。进度页不复制完整方案。
 
 ## 4. 编号范围
 
@@ -79,16 +63,16 @@
 每次实现变更至少更新一处相关记录：
 
 - 当前已验证状态变化时更新 `status.md`；
-- 阶段、证据或下一步变化时更新 `current/implementation.md`；
+- 阶段、证据或当前残差变化时更新 `current/implementation.md`；
 - 用户确认方案范围或结构变化时更新 `current/full_simulation_plan.md`；
 - 新增原始验证时保存至 `evidence/`。
 
 一个周期满足以下条件后才能归档：
 
-- 当前阶段已验证完成，或未完成部分已明确交给后续阶段；
-- `status.md` 已记录周期结果与尚未关闭的事项；
+- 当前阶段已验证完成；
+- `status.md` 已记录当前结果与证据入口；
 - 原始证据与执行记录已归入 `evidence/` 或对应周期目录；
-- 当前入口及新的实施进度已更新。
+- 当前入口及实施进度已更新。
 
 归档目录使用 `YYYYMMDD_theme`。归档文件注明历史周期属性和当前状态入口。
 

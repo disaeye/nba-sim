@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "address_space_limit_bytes": 2147483648,
+  "batch_size": 24,
+  "scenarios": [
+    {
+      "name": "regular",
+      "selection": "NBA 完整比赛的批次中位数",
+      "sample": {
+        "seed": 24,
+        "league": "nba",
+        "scenario": "regular",
+        "ticks": 76772,
+        "events": 13586,
+        "actions": 2114,
+        "overtimes": 0,
+        "fouls": 49,
+        "passes": 607,
+        "timeouts": 4,
+        "reviews": 0,
+        "finished": true,
+        "allocations": 642573,
+        "allocations_per_tick": 8.369887458969416
+      },
+      "process": {
+        "command": "--scan 1..25 --league nba",
+        "elapsed_seconds": 30.675,
+        "peak_rss_kb": 19800,
+        "peak_rss_bytes": 20275200,
+        "exit_code": 0,
+        "address_space_limit_bytes": 2147483648,
+        "samples": 24
+      }
+    },
+    {
+      "name": "frequent_fouls",
+      "selection": "犯规事件最多的一场",
+      "sample": {
+        "seed": 23,
+        "league": "nba",
+        "scenario": "regular",
+        "ticks": 90491,
+        "events": 15395,
+        "actions": 2357,
+        "overtimes": 1,
+        "fouls": 53,
+        "passes": 692,
+        "timeouts": 8,
+        "reviews": 0,
+        "finished": true,
+        "allocations": 739245,
+        "allocations_per_tick": 8.169265451812887
+      },
+      "process": {
+        "command": "--scan 1..25 --league nba",
+        "elapsed_seconds": 30.675,
+        "peak_rss_kb": 19800,
+        "peak_rss_bytes": 20275200,
+        "exit_code": 0,
+        "address_space_limit_bytes": 2147483648,
+        "samples": 24
+      }
+    },
+    {
+      "name": "dense_pass",
+      "selection": "传球事件最多的一场",
+      "sample": {
+        "seed": 7,
+        "league": "nba",
+        "scenario": "regular",
+        "ticks": 73761,
+        "events": 14204,
+        "actions": 2239,
+        "overtimes": 0,
+        "fouls": 22,
+        "passes": 765,
+        "timeouts": 5,
+        "reviews": 2,
+        "finished": true,
+        "allocations": 623666,
+        "allocations_per_tick": 8.455227016987298
+      },
+      "process": {
+        "command": "--scan 1..25 --league nba",
+        "elapsed_seconds": 30.675,
+        "peak_rss_kb": 19800,
+        "peak_rss_bytes": 20275200,
+        "exit_code": 0,
+        "address_space_limit_bytes": 2147483648,
+        "samples": 24
+      }
+    },
+    {
+      "name": "many_timeouts",
+      "selection": "暂停事件最多的一场",
+      "sample": {
+        "seed": 9,
+        "league": "nba",
+        "scenario": "regular",
+        "ticks": 80143,
+        "events": 13160,
+        "actions": 2033,
+        "overtimes": 0,
+        "fouls": 25,
+        "passes": 611,
+        "timeouts": 8,
+        "reviews": 0,
+        "finished": true,
+        "allocations": 589751,
+        "allocations_per_tick": 7.358733763397926
+      },
+      "process": {
+        "command": "--scan 1..25 --league nba",
+        "elapsed_seconds": 30.675,
+        "peak_rss_kb": 19800,
+        "peak_rss_bytes": 20275200,
+        "exit_code": 0,
+        "address_space_limit_bytes": 2147483648,
+        "samples": 24
+      }
+    },
+    {
+      "name": "replay_review",
+      "selection": "复核事件最多的一场",
+      "sample": {
+        "seed": 7,
+        "league": "nba",
+        "scenario": "regular",
+        "ticks": 73761,
+        "events": 14204,
+        "actions": 2239,
+        "overtimes": 0,
+        "fouls": 22,
+        "passes": 765,
+        "timeouts": 5,
+        "reviews": 2,
+        "finished": true,
+        "allocations": 623666,
+        "allocations_per_tick": 8.455227016987298
+      },
+      "process": {
+        "command": "--scan 1..25 --league nba",
+        "elapsed_seconds": 30.675,
+        "peak_rss_kb": 19800,
+        "peak_rss_bytes": 20275200,
+        "exit_code": 0,
+        "address_space_limit_bytes": 2147483648,
+        "samples": 24
+      }
+    },
+    {
+      "name": "consecutive_overtime",
+      "selection": "连续加时场景里加时数最多的一场",
+      "sample": {
+        "seed": 1,
+        "league": "nba",
+        "scenario": "overtime",
+        "ticks": 10492,
+        "events": 1147,
+        "actions": 164,
+        "overtimes": 5,
+        "fouls": 11,
+        "passes": 16,
+        "timeouts": 2,
+        "reviews": 0,
+        "finished": true,
+        "allocations": 31621,
+        "allocations_per_tick": 3.0138200533739994
+      },
+      "process": {
+        "command": "--scan 1..5 --league nba --scenario overtime",
+        "elapsed_seconds": 0.484,
+        "peak_rss_kb": 13180,
+        "peak_rss_bytes": 13496320,
+        "exit_code": 0,
+        "address_space_limit_bytes": 2147483648,
+        "samples": 4
+      }
+    },
+    {
+      "name": "fiba_profile",
+      "selection": "FIBA 完整比赛的批次中位数",
+      "sample": {
+        "seed": 10,
+        "league": "fiba",
+        "scenario": "regular",
+        "ticks": 60981,
+        "events": 11380,
+        "actions": 1813,
+        "overtimes": 0,
+        "fouls": 32,
+        "passes": 516,
+        "timeouts": 3,
+        "reviews": 5,
+        "finished": true,
+        "allocations": 535469,
+        "allocations_per_tick": 8.78091536708155
+      },
+      "process": {
+        "command": "--scan 1..25 --league fiba",
+        "elapsed_seconds": 25.151,
+        "peak_rss_kb": 16088,
+        "peak_rss_bytes": 16474112,
+        "exit_code": 0,
+        "address_space_limit_bytes": 2147483648,
+        "samples": 24
+      }
+    }
+  ],
+  "failures": [],
+  "passed": true
+}
