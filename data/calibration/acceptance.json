@@ -19,13 +19,13 @@
       "rebound": 8.0,
       "roll": 8.0,
       "screen": 6.0,
-      "spot_up": 5.0
+      "spot_up": 7.0
     },
     "on_ball_follow_ratio": 1.8,
     "on_ball_paired_min_ft": 5.0,
     "recovery_path_extra_ft": 22.62,
     "max_continuous_yielding_seconds": 1.0,
-    "rationale": "修复后 32 种子稳定段最大值为 box_out 1.95、deny 2.74、handler 8.85、help 4.31、post_up 5.87、rebound 1.81、roll 3.70、screen 1.02、spot_up 4.95；on_ball 稳定跟随最大 0.67，恢复段超出 D0+2π×min_separation 的计数为 0（handler 持球动作段单独按角色路径判定），连续 Yielding 最大 0.50 s。阈值按最大值向上取整并保留约 1% 到 15% 余量。",
-    "set_at": "2026-10-23"
+    "rationale": "修复后 32 种子稳定段最大值为 box_out 1.98、deny 2.17、handler 6.32、help 1.86、post_up 3.03、rebound 1.89、roll 3.98、screen 2.25、spot_up 5.98；on_ball 稳定跟随最大 0.75，恢复段超出 D0+2π×min_separation 的计数为 0（handler 持球动作段单独按角色路径判定），连续 Yielding 最大 0.50 s。阈值按最大值向上取整并保留余量。",
+    "set_at": "2026-11-10"
   }
 }

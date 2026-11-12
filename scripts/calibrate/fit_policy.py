@@ -136,12 +136,30 @@ GROUPS = [
             "drive_base": (0.0, 12.0),
             "post_base": (0.0, 12.0),
             "cut_tendency": (0.0, 12.0),
+            "cut_positional_bonus": (0.0, 12.0),
             "pass_base": (0.0, 12.0),
             "pass_open": (0.0, 12.0),
             "epv_bonus_scale": (0.01, 1.0),
         },
         unit="dimensionless",
         description="行为偏好：各候选动作的偏好权重",
+    ),
+    Group(
+        name="contact",
+        bounds={
+            "off_ball_hold_rate": (0.0, 0.05),
+            "hand_check_rate": (0.0, 0.05),
+            "reach_in_foul_rate": (0.0, 0.12),
+            "gather_travel_rate": (0.0, 0.08),
+            "steal_gamble_base": (0.1, 1.2),
+            "steal_skill_base": (0.2, 1.2),
+            "shooting_foul_rate_two_point": (0.0, 0.5),
+            "shooting_foul_rate_three_point": (0.0, 0.3),
+            "closeout_draw_contact_rate": (0.0, 1.2),
+            "closeout_draw_contact_foul_chance": (0.0, 1.0),
+        },
+        unit="dimensionless",
+        description="接触与失误：拉拽、手部接触、切入犯规、走步、抢断与投篮犯规的底频",
     ),
 ]
 
@@ -173,6 +191,11 @@ def targets():
         "turnover_per_possession": league["turnover_per_possession"],
         "fta_per_game": league["fta_per_game"],
         "points_per_game": league["points_per_game"],
+        "oreb_per_possession": league["oreb_per_possession"],
+        "steals_per_game": league["steals_per_game"],
+        "blocks_per_game": league["blocks_per_game"],
+        "shooting_fouls_per_game": league["shooting_fouls_per_game"],
+        "and_one_per_game": league["and_one_per_game"],
     }
 
 
@@ -218,6 +241,16 @@ def loss(metrics, goal):
     )
     terms.append((metrics["fta_per_game"] / goal["fta_per_game"] - 1.0) ** 2)
     terms.append((metrics["points_per_game"] / goal["points_per_game"] - 1.0) ** 2)
+    # 篮板、抢断、封盖、投篮犯规与 and-one 各自有门禁：它们不进入损失
+    # 函数时，参数搜索就会漏掉这几项，搜索结束后它们仍然越界。
+    for key in (
+        "steals_per_game",
+        "blocks_per_game",
+        "shooting_fouls_per_game",
+        "and_one_per_game",
+    ):
+        if key in metrics and key in goal:
+            terms.append((metrics[key] / goal[key] - 1.0) ** 2)
     return math.sqrt(sum(terms) / len(terms))
 
 
@@ -311,6 +344,45 @@ def adjust_group(group, weights, metrics, goal):
                 w["cut_tendency"],
                 ratio(goal["creation"]["cut"], creation["cut"]),
             ),
+        )
+        # 位置性切入的加成：它让切入动作与跑位动作竞争。切入份额偏高时
+        # 加成要降下来，让位置调整回到跑位。
+        w["cut_positional_bonus"] = group.clamp(
+            "cut_positional_bonus",
+            damp(
+                w["cut_positional_bonus"],
+                ratio(goal["creation"]["cut"], creation["cut"]),
+            ),
+        )
+    elif group.name == "contact":
+        # 罚球数由犯规数决定：犯规太多时接触类底频要降下来。
+        #
+        # 罚球数离目标有一半的差距时，阻尼一次只走两成：这时需要的步长
+        # 更大，否则搜索在局部极值里出不来。
+        fta = metrics.get("fta_per_game", 0.0)
+        expected_fta = goal.get("fta_per_game", fta)
+        factor = ratio(expected_fta, fta) if fta > 1e-9 else 1.0
+        power = 1.0 if factor < 0.85 else 0.5
+        for key in (
+            "off_ball_hold_rate",
+            "hand_check_rate",
+            "reach_in_foul_rate",
+            "gather_travel_rate",
+            "shooting_foul_rate_two_point",
+            "shooting_foul_rate_three_point",
+            "closeout_draw_contact_rate",
+            "closeout_draw_contact_foul_chance",
+        ):
+            w[key] = group.clamp(key, damp(w[key], factor, power))
+        # 抢断数与失误数：抢断太少时提高抢断的底频。
+        steals = metrics.get("steals_per_game", 0.0)
+        expected_steals = goal.get("steals_per_game", steals)
+        steal_factor = ratio(expected_steals, steals) if steals > 1e-9 else 1.0
+        w["steal_gamble_base"] = group.clamp(
+            "steal_gamble_base", damp(w["steal_gamble_base"], steal_factor)
+        )
+        w["steal_skill_base"] = group.clamp(
+            "steal_skill_base", damp(w["steal_skill_base"], steal_factor)
         )
     for key in group.keys:
         w[key] = group.clamp(key, w[key])
