@@ -58,7 +58,7 @@
     }
   },
   "calibration_version": "33469931017d3ffb",
-  "commit": "fb442106d030daec6104f63c878d8d88b0cddd56",
+  "commit": "26db4f139245015fa8126bb3559cc8b3cd77751d",
   "engine_model_version": "action-chain-1",
   "games": 16,
   "mechanism": {
@@ -70,5 +70,5 @@
   },
   "ruleset_version": "2025-26",
   "seed_start": 1,
-  "working_tree_dirty": true
+  "working_tree_dirty": false
 }

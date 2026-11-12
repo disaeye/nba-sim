@@ -1,23 +1,21 @@
 /* tslint:disable */
 /* eslint-disable */
 
-/**
- * JavaScript-facing facade for the authoritative Rust match service.
- *
- * The bridge deliberately exposes JSON strings rather than internal domain
- * structs: JavaScript can observe snapshots and events, but cannot mutate
- * score, possession, player positions, or ball outcomes directly.
- */
 export class WasmMatchService {
     free(): void;
     [Symbol.dispose](): void;
+    completionSummaryJson(): string;
     events_since_json(sequence: bigint): string;
     fastForwardMs(duration_ms: number): string;
+    fullEventHistoryJson(): string;
     constructor();
     next_possession_json(): string;
     pause(): void;
     resume(): void;
     sessionState(): string;
+    /**
+     * 接受 setup JSON：可以给种子、联赛档案或完整的比赛设置。
+     */
     setup_match_json(json: string): string;
     snapshot_json(): string;
     start(): void;
@@ -26,15 +24,14 @@ export class WasmMatchService {
 }
 
 /**
- * 返回默认 GameRules 的 JSON 字符串（供前端直接初始化规则编辑器）。
+ * 返回默认 GameRules 的 JSON 字符串（供前端规则编辑器初始化）。
  */
 export function getDefaultRulesJson(): string;
 
 /**
- * 在浏览器内存中直接运行指定 scope 的模拟，输出 NDJSON 字符串。
- * 完全无需后端服务器参与，0 磁盘消耗。
+ * 在浏览器内存中推演并输出 NDJSON 帧流，末尾附一条 `run_summary`。
  */
-export function simulateToNdjson(seed: bigint, scope: string, rules_json?: string | null, setup_json?: string | null): string;
+export function simulateToNdjson(seed: bigint, scope: string, _rules_json?: string | null, _setup_json?: string | null): string;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -43,8 +40,10 @@ export interface InitOutput {
     readonly __wbg_wasmmatchservice_free: (a: number, b: number) => void;
     readonly getDefaultRulesJson: () => [number, number, number, number];
     readonly simulateToNdjson: (a: bigint, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
+    readonly wasmmatchservice_completionSummaryJson: (a: number) => [number, number, number, number];
     readonly wasmmatchservice_events_since_json: (a: number, b: bigint) => [number, number, number, number];
     readonly wasmmatchservice_fastForwardMs: (a: number, b: number) => [number, number, number, number];
+    readonly wasmmatchservice_fullEventHistoryJson: (a: number) => [number, number, number, number];
     readonly wasmmatchservice_new: () => number;
     readonly wasmmatchservice_next_possession_json: (a: number) => [number, number, number, number];
     readonly wasmmatchservice_pause: (a: number) => void;

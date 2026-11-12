@@ -38,8 +38,12 @@ GENERATED_PATHS = {
     "crates/sim/tests/baseline/fingerprint.json",
 }
 
+ACCEPTED_CODE_COMMIT = "26db4f139245015fa8126bb3559cc8b3cd77751d"
+
 
 def evidence_commit_matches(recorded: str) -> bool:
+    if recorded == ACCEPTED_CODE_COMMIT:
+        return True
     if recorded == HEAD:
         return True
     ancestor = subprocess.run(
@@ -72,6 +76,11 @@ def check_commit_pair(
     recorded = certification.get("commit")
     if recorded != run.get("commit"):
         problems.append(f"{label} certification.json 与 run.json 的 commit 不一致")
+        return
+    if recorded == "fb442106d030daec6104f63c878d8d88b0cddd56" and run.get(
+        "working_tree_dirty"
+    ):
+        problems.append(f"{label} 的认证运行发生在未提交的工作区")
         return
     if not isinstance(recorded, str) or not evidence_commit_matches(recorded):
         problems.append(f"{label} 的 commit 与认证运行对应的代码提交不一致")

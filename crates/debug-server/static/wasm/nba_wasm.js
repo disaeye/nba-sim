@@ -1,12 +1,5 @@
 /* @ts-self-types="./nba_wasm.d.ts" */
 
-/**
- * JavaScript-facing facade for the authoritative Rust match service.
- *
- * The bridge deliberately exposes JSON strings rather than internal domain
- * structs: JavaScript can observe snapshots and events, but cannot mutate
- * score, possession, player positions, or ball outcomes directly.
- */
 export class WasmMatchService {
     static __wrap(ptr) {
         const obj = Object.create(WasmMatchService.prototype);
@@ -23,6 +16,27 @@ export class WasmMatchService {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_wasmmatchservice_free(ptr, 0);
+    }
+    /**
+     * @returns {string}
+     */
+    completionSummaryJson() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.wasmmatchservice_completionSummaryJson(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
     }
     /**
      * @param {bigint} sequence
@@ -55,6 +69,27 @@ export class WasmMatchService {
         let deferred2_1;
         try {
             const ret = wasm.wasmmatchservice_fastForwardMs(this.__wbg_ptr, duration_ms);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * @returns {string}
+     */
+    fullEventHistoryJson() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.wasmmatchservice_fullEventHistoryJson(this.__wbg_ptr);
             var ptr1 = ret[0];
             var len1 = ret[1];
             if (ret[3]) {
@@ -120,6 +155,7 @@ export class WasmMatchService {
         }
     }
     /**
+     * 接受 setup JSON：可以给种子、联赛档案或完整的比赛设置。
      * @param {string} json
      * @returns {string}
      */
@@ -204,7 +240,7 @@ export class WasmMatchService {
 if (Symbol.dispose) WasmMatchService.prototype[Symbol.dispose] = WasmMatchService.prototype.free;
 
 /**
- * 返回默认 GameRules 的 JSON 字符串（供前端直接初始化规则编辑器）。
+ * 返回默认 GameRules 的 JSON 字符串（供前端规则编辑器初始化）。
  * @returns {string}
  */
 export function getDefaultRulesJson() {
@@ -227,23 +263,22 @@ export function getDefaultRulesJson() {
 }
 
 /**
- * 在浏览器内存中直接运行指定 scope 的模拟，输出 NDJSON 字符串。
- * 完全无需后端服务器参与，0 磁盘消耗。
+ * 在浏览器内存中推演并输出 NDJSON 帧流，末尾附一条 `run_summary`。
  * @param {bigint} seed
  * @param {string} scope
- * @param {string | null} [rules_json]
- * @param {string | null} [setup_json]
+ * @param {string | null} [_rules_json]
+ * @param {string | null} [_setup_json]
  * @returns {string}
  */
-export function simulateToNdjson(seed, scope, rules_json, setup_json) {
+export function simulateToNdjson(seed, scope, _rules_json, _setup_json) {
     let deferred5_0;
     let deferred5_1;
     try {
         const ptr0 = passStringToWasm0(scope, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        var ptr1 = isLikeNone(rules_json) ? 0 : passStringToWasm0(rules_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var ptr1 = isLikeNone(_rules_json) ? 0 : passStringToWasm0(_rules_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         var len1 = WASM_VECTOR_LEN;
-        var ptr2 = isLikeNone(setup_json) ? 0 : passStringToWasm0(setup_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var ptr2 = isLikeNone(_setup_json) ? 0 : passStringToWasm0(_setup_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         var len2 = WASM_VECTOR_LEN;
         const ret = wasm.simulateToNdjson(seed, ptr0, len0, ptr1, len1, ptr2, len2);
         var ptr4 = ret[0];
