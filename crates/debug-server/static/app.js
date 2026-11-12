@@ -53,6 +53,41 @@
     foulRate: [0.06, 0.32],
   };
 
+  // 动画目录：2D 与 3D 渲染器读同一份配方，因此两个视图对同一帧显示
+  // 相同的动作身份与相同的中文标签。目录由服务器提供，缺失时直接失败。
+  const ACTION_RECIPE_INDEX = new Map();
+
+  async function loadActionRecipes() {
+    const response = await fetch("/api/action-animation-catalog");
+    if (!response.ok) {
+      throw new Error(`动画目录读取失败：${response.status}`);
+    }
+    const catalog = await response.json();
+    if (!catalog || !Array.isArray(catalog.families)) {
+      throw new Error("动画目录缺少动作族");
+    }
+    ACTION_RECIPE_INDEX.clear();
+    for (const family of catalog.families) {
+      for (const action of family.actions) {
+        const key = [family.id, action.kind, action.variant, action.role].join("|");
+        if (ACTION_RECIPE_INDEX.has(key)) {
+          throw new Error(`动画目录里有重复条目：${key}`);
+        }
+        ACTION_RECIPE_INDEX.set(key, action);
+      }
+    }
+    return catalog;
+  }
+
+  function actionRecipeEntry(family, kind, variant, role) {
+    const key = [family, kind, variant, role].join("|");
+    const entry = ACTION_RECIPE_INDEX.get(key);
+    if (!entry) {
+      throw new Error(`动作身份没有登记的动画配方：${key}`);
+    }
+    return entry;
+  }
+
   function runtimeRules(tick) {
     const rules = tick?.rules || state?.rules || DEFAULT_RULES;
     const court = courtFromRules(rules);
@@ -131,6 +166,8 @@
     lastFrameJson: -1,
     courtFX: null,
     fxRafId: null,
+    // 动画目录索引：浏览器验证读它，因此两个渲染器读的是同一份目录。
+    actionRecipeIndex: ACTION_RECIPE_INDEX,
   };
 
   window.__nbaDebug = state;
@@ -4236,6 +4273,17 @@
         else if (isBoxOut) jumpActionZh = "卡位护板";
         else if (isStealLunge) jumpActionZh = "伸手切球";
         else if (isCrossover) jumpActionZh = "变向突破";
+        // 目录给出的中文标签与技术变体一起给出：2D 视图显示的动作名称
+        // 与 3D 视图播放的配方来自同一条目录条目。
+        if (!jumpActionZh && primaryAction) {
+          const entry = actionRecipeEntry(
+            primaryAction.family,
+            primaryAction.kind,
+            primaryAction.variant,
+            primaryAction.role
+          );
+          if (entry) jumpActionZh = entry.recipe_2d.label_zh;
+        }
       }
       const isDynamicAction =
         Boolean(jumpActionZh) ||
@@ -5623,6 +5671,8 @@
   async function boot() {
     wire();
     await loadDefaultRules();
+    // 动画配方先加载：目录缺失时直接失败，两个渲染器不会各自猜一个动画。
+    await loadActionRecipes();
     await runSimulation();
     await initCourt3d();
     const requestedView = new URLSearchParams(window.location.search).get("court");

@@ -49,43 +49,51 @@ const CLIP_NAMES = {
   stand: "Man_Standing",
 };
 
-function resolveActionRecipe(family, kind, variant, phase) {
-  switch (family) {
-    case "ACTION-SHOT":
-      if (phase === "preparation") {
-        return { clip: CLIP_NAMES.idle, speed: 1.0, loop: false, fadeDuration: 0.05 };
-      }
-      return { clip: CLIP_NAMES.shot, speed: 1.0, loop: false, fadeDuration: 0.08 };
-    case "ACTION-FINISH":
-      if (variant && (variant.includes("dunk") || variant.includes("running"))) {
-        return { clip: CLIP_NAMES.dunk, speed: 1.1, loop: false, fadeDuration: 0.08 };
-      }
-      return { clip: CLIP_NAMES.jump, speed: 1.1, loop: false, fadeDuration: 0.08 };
-    case "ACTION-PASS":
-      return { clip: CLIP_NAMES.pass, speed: 1.35, loop: false, fadeDuration: 0.06 };
-    case "ACTION-CLOSEOUT":
-      if (kind === "block_jump") {
-        return { clip: CLIP_NAMES.jump, speed: 1.2, loop: false, fadeDuration: 0.06 };
-      }
-      return { clip: CLIP_NAMES.jump, speed: 1.0, loop: false, fadeDuration: 0.08 };
-    case "ACTION-DEFENSE-ON-BALL":
-      if (kind === "steal_attempt") {
-        return { clip: CLIP_NAMES.steal, speed: 1.3, loop: false, fadeDuration: 0.06 };
-      }
-      if (kind === "charge_take") {
-        return { clip: CLIP_NAMES.stand, speed: 1.0, loop: true, fadeDuration: 0.1 };
-      }
-      return null;
-    case "ACTION-REBOUND":
-      if (kind === "box_out") {
-        return { clip: CLIP_NAMES.stand, speed: 1.0, loop: true, fadeDuration: 0.1 };
-      }
-      return { clip: CLIP_NAMES.jump, speed: 1.0, loop: false, fadeDuration: 0.08 };
-    case "ACTION-SCREEN":
-      return { clip: CLIP_NAMES.stand, speed: 1.0, loop: true, fadeDuration: 0.1 };
-    default:
-      return null;
+// 动画目录：3D 与 2D 渲染器读同一份配方，因此两个视图对同一帧显示
+// 相同的动作身份与相同的动画。目录由服务器提供，缺失或条目不合法时
+// 直接失败，不猜一个动画出来。
+const ACTION_RECIPE_INDEX = new Map();
+
+function indexActionRecipes(catalog) {
+  if (!catalog || !Array.isArray(catalog.families)) {
+    throw new Error("动画目录缺少动作族");
   }
+  ACTION_RECIPE_INDEX.clear();
+  for (const family of catalog.families) {
+    for (const action of family.actions) {
+      const key = [family.id, action.kind, action.variant, action.role].join("|");
+      if (ACTION_RECIPE_INDEX.has(key)) {
+        throw new Error(`动画目录里有重复条目：${key}`);
+      }
+      ACTION_RECIPE_INDEX.set(key, action);
+    }
+  }
+  return ACTION_RECIPE_INDEX;
+}
+
+async function loadActionRecipes() {
+  const response = await fetch("/api/action-animation-catalog");
+  if (!response.ok) {
+    throw new Error(`动画目录读取失败：${response.status}`);
+  }
+  const catalog = await response.json();
+  indexActionRecipes(catalog);
+  return catalog;
+}
+
+function resolveActionRecipe(family, kind, variant, role) {
+  const key = [family, kind, variant, role].join("|");
+  const entry = ACTION_RECIPE_INDEX.get(key);
+  if (!entry) {
+    throw new Error(`动作身份没有登记的动画配方：${key}`);
+  }
+  return {
+    clip: entry.recipe_3d.clip,
+    speed: entry.recipe_3d.speed,
+    loop: entry.recipe_3d.loop,
+    fadeDuration: 0.08,
+    phases: entry.phases,
+  };
 }
 
 const GESTURES = {
@@ -504,8 +512,12 @@ class PlayerFigure {
     };
     const sorted = [...actions].sort((a, b) => actionPriority(b) - actionPriority(a));
     for (const item of sorted) {
-      const recipe = resolveActionRecipe(item.family, item.kind, item.variant, item.phase);
-      if (!recipe) continue;
+      const recipe = resolveActionRecipe(item.family, item.kind, item.variant, item.role);
+      if (!recipe.phases.includes(item.phase)) {
+        throw new Error(
+          `动作 ${item.family} ${item.kind} ${item.variant} 没有阶段 ${item.phase} 的配方`
+        );
+      }
       const clipAction = this.resolveClip(recipe.clip);
       if (!clipAction) continue;
 
@@ -1282,9 +1294,14 @@ export class Court3D {
 }
 
 export async function mountCourt3d({ canvas, state, statusEl, overlayEl, assetUrl }) {
+  // 动画配方先加载：目录缺失或条目不合法时直接失败，渲染器不能猜一个
+  // 动画出来。
+  await loadActionRecipes();
   const court = new Court3D({ canvas, state, statusEl, overlayEl });
   await court.loadPlayers(assetUrl);
   court.setVisible(true);
   court.start();
   return court;
 }
+
+export { resolveActionRecipe, loadActionRecipes };

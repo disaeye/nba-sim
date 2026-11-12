@@ -147,6 +147,11 @@ fn route(req: &Request, core: &SharedCore, validation: &SharedValidation) -> Res
             Ok(json) => ("200 OK", "application/json; charset=utf-8", json),
             Err(e) => internal_error(e.to_string()),
         },
+        // 动画目录：两类渲染器读同一份配方，因此它由服务器提供唯一一份。
+        ("GET", "/api/action-animation-catalog") => match static_files::animation_catalog() {
+            Some(body) => ("200 OK", "application/json; charset=utf-8", body),
+            None => internal_error("动画目录读取失败".to_string()),
+        },
         ("GET", "/api/simulate") | ("POST", "/api/simulate") => api_simulate(req, validation),
         ("POST", "/api/session/setup") => core_api::api_core_setup(req, core),
         ("GET", "/api/session") | ("GET", "/api/session/state") => core_api::api_core_state(core),

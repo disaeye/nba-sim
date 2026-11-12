@@ -85,7 +85,8 @@ pub(crate) fn api_core_setup(req: &Request, core: &SharedCore) -> Response {
         }
     };
     let seed = body.get("seed").and_then(|seed| seed.as_u64());
-    let league = match body.get("league").and_then(|league| league.as_str()) {
+    // 联赛标识在本入口先校验一次：未知标识就地失败，完整 setup 不绕过这道校验。
+    let _league = match body.get("league").and_then(|league| league.as_str()) {
         Some(name) => match name.parse::<nba_domain::league::LeagueId>() {
             Ok(league) => league,
             Err(error) => return bad_request(error),

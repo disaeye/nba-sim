@@ -8,6 +8,18 @@ use std::path::{Component, Path, PathBuf};
 use crate::Response;
 
 const STATIC_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static");
+/// 动画目录的位置：两类渲染器读同一份配方，因此它必须从唯一的事实源
+/// 读，而不是各自带一份。
+const ANIMATION_CATALOG_PATH: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/rules/action_animation_catalog.json");
+
+/// 动画目录的内容。
+///
+/// 目录是渲染器唯一的配方来源：目录缺失或读不出来，渲染器就没有动画可
+/// 播，因此这里直接失败而不是返回空目录。
+pub fn animation_catalog() -> Option<Vec<u8>> {
+    std::fs::read(ANIMATION_CATALOG_PATH).ok()
+}
 
 pub fn serve(request_path: &str) -> Option<Response> {
     let relative = request_path_to_relative(request_path)?;
