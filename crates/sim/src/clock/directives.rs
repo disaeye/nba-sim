@@ -351,7 +351,9 @@ impl ClockCommitLog {
     /// 把正在积累的推进段变成一条提交记录。
     pub fn flush_segment(&mut self) {
         if let Some(mut segment) = self.pending.take() {
-            segment.player_handles = std::mem::take(&mut self.pending_handles);
+            // 队员集合随段记录离开内核，因此这里给它一份自己的副本。
+            // 日志里的复用缓冲留在原处：下一段推进继续用它，不再分配。
+            segment.player_handles = self.pending_handles.clone();
             self.commits.push(ClockCommit::Segment(segment));
         }
     }

@@ -13,7 +13,6 @@
 use glam::Vec2;
 use nba_domain::footwork::PivotState;
 
-use crate::action::{Fact, TurnoverKind};
 use crate::world::World;
 
 /// 脚步接触的距离容差（英尺）。

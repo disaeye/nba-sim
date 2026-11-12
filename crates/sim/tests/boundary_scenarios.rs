@@ -169,7 +169,6 @@ fn a_ball_touched_by_the_defence_out_of_bounds_keeps_the_offence_in_possession()
 #[test]
 fn a_shot_that_leaves_the_court_is_not_a_turnover() {
     let mut world = live_world(1105);
-    let offense = world.possession.team;
     let holder = world.holder().expect("live possession has a holder");
     // 投篮出手之后球飞出界：这是投篮不中，不记失误。
     world.ball.pos = Vec2::new(40.0, -1.0);
@@ -196,6 +195,8 @@ fn a_shot_that_leaves_the_court_is_not_a_turnover() {
         touched_backboard: false,
         released_game_clock: world.clock.game_clock(),
         released_clock_checkpoint: None,
+        released_event_id: 0,
+        released_shot_clock: world.clock.shot_clock(),
     });
     for _ in 0..40 {
         world.step(TICK_SECONDS);

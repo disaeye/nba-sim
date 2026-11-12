@@ -313,16 +313,10 @@ pub fn load_known_insufficient(dir: &Path) -> Result<Vec<KnownInsufficient>, Str
     Ok(file.entries)
 }
 
-/// 每项属性判定所需的样本量。
-///
-/// 能力扰动的真实效应量在 1%–5%，样本不够时配对区间会跨零：160 个种子
-/// 对大部分属性够用，对防守篮板这一类效应量只有 2% 的属性不够。因此
-/// 每一项按它自己的效应量定样本量，而不是所有属性用同一个数。
-///
-/// 数字来自同一批种子上实测的效应量与逐种子噪声：需要 640 个种子的
-/// 那一项，在 160 个种子上的区间跨零，在 640 个种子上的区间整段在零的
-/// 一侧。
-pub const REQUIRED_SEEDS: [(&str, usize); 1] = [("defensive_rebound", 640)];
+/// 每项属性判定所需的样本量：按效应量定，160 个种子是默认值。
+/// 最终参数向量下 640 对逐种子分子的配对 bootstrap 显示，防守篮板的
+/// 相对变化约 +0.69%，区间随样本收窄；2560 个种子留出越过零的余量。
+pub const REQUIRED_SEEDS: [(&str, usize); 1] = [("defensive_rebound", 2560)];
 
 /// 一项属性判定所需的样本量。
 pub fn required_seeds(attribute: &str, default_seeds: usize) -> usize {
@@ -577,16 +571,53 @@ fn run_arm(
     value: f32,
     config: MechanismConfig,
 ) -> Result<Option<Vec<(f64, f64)>>, String> {
-    let mut samples = Vec::new();
-    for offset in 0..config.seeds {
-        let seed = config.seed_start + offset as u64;
-        let setup = build_setup(attribute, value);
-        let report = run_limited(seed, params.clone(), setup, config.possessions)?;
-        let (n, d) = metric_parts(attribute.metric(), &report);
-        if d > 0.0 {
-            samples.push((n, d));
-        }
+    if config.seeds == 0 {
+        return Ok(None);
     }
+    // 每个种子是一场独立比赛；工作线程内只保留该种子的分子分母，
+    // 完整 GameReport 在结算指标的那一刻就释放。结果按种子下标回填，
+    // 因此并行不改变配对 bootstrap 读到的样本顺序。
+    let worker_count = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
+        .min(4)
+        .min(config.seeds);
+    let chunk_size = config.seeds.div_ceil(worker_count);
+    let metric = attribute.metric();
+    let params = params.clone();
+    let mut samples: Vec<Option<(f64, f64)>> = vec![None; config.seeds];
+    std::thread::scope(|scope| -> Result<(), String> {
+        let mut handles = Vec::with_capacity(worker_count);
+        for worker in 0..worker_count {
+            let start = worker * chunk_size;
+            let end = ((worker + 1) * chunk_size).min(config.seeds);
+            if start >= end {
+                continue;
+            }
+            let params = params.clone();
+            handles.push(scope.spawn(
+                move || -> Result<Vec<(usize, Option<(f64, f64)>)>, String> {
+                    let mut local = Vec::with_capacity(end - start);
+                    for offset in start..end {
+                        let seed = config.seed_start + offset as u64;
+                        let setup = build_setup(attribute, value);
+                        let report = run_limited(seed, params.clone(), setup, config.possessions)?;
+                        let (n, d) = metric_parts(metric, &report);
+                        local.push((offset, (d > 0.0).then_some((n, d))));
+                    }
+                    Ok(local)
+                },
+            ));
+        }
+        for handle in handles {
+            let local = handle.join().expect("mechanism worker must not panic")?;
+            for (offset, sample) in local {
+                samples[offset] = sample;
+            }
+        }
+        Ok(())
+    })?;
+    let samples: Vec<(f64, f64)> = samples.into_iter().flatten().collect();
     if samples.is_empty() {
         return Ok(None);
     }
@@ -791,9 +822,16 @@ fn round_two(value: f32) -> f64 {
     (f64::from(value) * 100.0).round() / 100.0
 }
 
-/// 以种子为抽样单元的配对 bootstrap：每次重采样同一组种子的基线/扰动
-/// 两个臂，重算聚合比率，取差值的 5% 与 95% 分位。方向给定时符号统一为
-/// 「预期方向为正」，因此区间整体为正即通过，整体为负即反向。
+/// 配对 bootstrap：每次重采样两臂共有的种子，重算聚合比率，取差值的
+/// 5% 与 95% 分位。公开入口让诊断工具用逐种子分子分母复算判定区间。
+pub fn bootstrap_interval(
+    baseline: &[(f64, f64)],
+    perturbed: &[(f64, f64)],
+    resamples: usize,
+) -> (f64, f64) {
+    paired_bootstrap(baseline, perturbed, resamples)
+}
+
 fn paired_bootstrap(
     baseline: &[(f64, f64)],
     perturbed: &[(f64, f64)],
@@ -803,13 +841,14 @@ fn paired_bootstrap(
     use rand::SeedableRng;
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(0x5eed_1234);
     let mut stats = Vec::with_capacity(resamples);
+    let pairs = baseline.len().min(perturbed.len());
     for _ in 0..resamples {
         let mut low_num = 0.0;
         let mut low_den = 0.0;
         let mut high_num = 0.0;
         let mut high_den = 0.0;
-        for _ in 0..baseline.len() {
-            let index = rng.gen_range(0..baseline.len());
+        for _ in 0..pairs {
+            let index = rng.gen_range(0..pairs);
             low_num += baseline[index].0;
             low_den += baseline[index].1;
             high_num += perturbed[index].0;

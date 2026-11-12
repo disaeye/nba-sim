@@ -94,8 +94,10 @@ pub fn evaluate(report: &GameReport, params: &Params) -> GateReport {
     let bands = &params.policy;
     let mut push = |criterion: &str, observed: f64, target: f64| {
         let band = bands.band(criterion);
+        // 先减基准再除基准：observed == target 的边界上，
+        // observed / target - 1.0 会因为浮点抵消落到带宽之外。
         let error = if target > 0.0 {
-            observed / target - 1.0
+            (observed - target) / target
         } else {
             0.0
         };

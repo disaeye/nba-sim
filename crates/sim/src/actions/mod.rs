@@ -53,6 +53,14 @@ pub enum ShotKind {
     AlleyOop,
     Putback,
     RunningJump,
+    /// 跳步收球：收球后用跳步把步数用完。
+    ProHop,
+    /// 欧洲步：收球步往侧面绕开挡路防守人。
+    EuroStep,
+    /// 挑篮：单手挑球上篮。
+    FingerRoll,
+    /// 拉杆上篮：篮下二次打板。
+    DoubleClutchLayup,
 }
 
 impl ShotKind {
@@ -76,6 +84,10 @@ impl ShotKind {
             Self::AlleyOop => "alley_oop",
             Self::Putback => "putback",
             Self::RunningJump => "running_jump",
+            Self::ProHop => "pro_hop",
+            Self::EuroStep => "euro_step",
+            Self::FingerRoll => "finger_roll",
+            Self::DoubleClutchLayup => "double_clutch_layup",
         }
     }
 
@@ -95,6 +107,7 @@ impl ShotKind {
             Self::RunningLayup | Self::RunningDunk | Self::RunningJump | Self::AlleyOop => {
                 "transition"
             }
+            Self::ProHop | Self::EuroStep | Self::FingerRoll | Self::DoubleClutchLayup => "drive",
             Self::Putback => "putback",
         }
     }
@@ -113,7 +126,78 @@ impl ShotKind {
                 | Self::RunningDunk
                 | Self::AlleyOop
                 | Self::Putback
+                | Self::ProHop
+                | Self::EuroStep
+                | Self::FingerRoll
+                | Self::DoubleClutchLayup
         )
+    }
+}
+
+/// 转换动作的技术变体。
+///
+/// 转换是攻防两端同时发生的一段：进攻方有人推进、有人跟进，防守方有人
+/// 退防、有人落位形成阵地防守。四个变体因此分属两方。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransitionKind {
+    /// 快攻推进：带球的人往前场推进。
+    Push,
+    /// 快攻跟进：不带球的跑者跟上第二波。
+    Trail,
+    /// 退防：防守人回防。
+    Retreat,
+    /// 快速形成阵地防守：防守人先落位。
+    Wall,
+}
+
+impl TransitionKind {
+    /// 变体的档案键。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Push => "transition_push",
+            Self::Trail => "transition_trail",
+            Self::Retreat => "transition_retreat",
+            Self::Wall => "transition_wall",
+        }
+    }
+}
+
+/// 篮板动作的技术变体。
+///
+/// 篮板不是一件事：起跳争抢、控制篮板、点球、点传与补篮各有各的
+/// 后果。变体决定这次篮板动作的结束方式与后续。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReboundKind {
+    /// 起跳争抢：跳起来够到球。
+    JumpRebound,
+    /// 控制篮板：把球控制在手里。
+    SecureRebound,
+    /// 点球：碰一下球，球还没被控制。
+    Tap,
+    /// 点传：把球拨给队友。
+    TipPass,
+    /// 补篮：点球之后直接进攻。
+    TipIn,
+    /// 地板球争抢：两人都趴下抢。
+    LooseBallDive,
+    /// 双方同时控制：裁判抛球重新开始。
+    HeldBall,
+}
+
+impl ReboundKind {
+    /// 变体的档案键。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::JumpRebound => "jump_rebound",
+            Self::SecureRebound => "secure_rebound",
+            Self::Tap => "tap",
+            Self::TipPass => "tip_pass",
+            Self::TipIn => "tip_in",
+            Self::LooseBallDive => "loose_ball_dive",
+            Self::HeldBall => "held_ball",
+        }
     }
 }
 
@@ -130,6 +214,14 @@ pub enum CutKind {
     VCut,
     Curl,
     PopUp,
+    /// 闪切：短距离变向切入，在防守人换防之前到位。
+    Flash,
+    /// 拉开站位：向外线移动，把防守人带出禁区。
+    SpotUp,
+    /// 底角转移：沿底线到对侧底角。
+    CornerRelocate,
+    /// 手递手接球：切入人贴着持球人接球，两人手递手交接。
+    Handoff,
 }
 
 impl CutKind {
@@ -141,6 +233,162 @@ impl CutKind {
             Self::VCut => "v_cut",
             Self::Curl => "curl",
             Self::PopUp => "pop_up",
+            Self::Flash => "flash",
+            Self::SpotUp => "spot_up",
+            Self::CornerRelocate => "corner_relocate",
+            Self::Handoff => "handoff",
+        }
+    }
+}
+
+/// 背身步法：低位进攻的技术变体。
+///
+/// 步法决定进攻人怎么移动与防守人被推到哪一侧。档案里的八个步法与
+/// 生产路径里的三种判定分开：步法名是事实里的技术细分，判定层按它
+/// 选空间效果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PostStepKind {
+    /// 背身要位：先占住低位。
+    PostUp,
+    /// 背身挤打：朝防守人反方向挤开。
+    Backdown,
+    /// 撤步转身：往底线一侧绕过去。
+    DropStep,
+    /// 前转身：以轴心脚为轴向底线转身。
+    FrontTurn,
+    /// 后转身：以轴心脚为轴向中路转身。
+    ReverseTurn,
+    /// 上下步：往底线方向顶，防守人被挤到身后。
+    UpAndUnder,
+    /// 勾手：背身勾手。
+    Hook,
+    /// 背身后仰：转身后仰跳投。
+    TurnaroundFadeaway,
+}
+
+impl PostStepKind {
+    /// 步法的档案键。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PostUp => "post_up",
+            Self::Backdown => "backdown",
+            Self::DropStep => "drop_step",
+            Self::FrontTurn => "front_turn",
+            Self::ReverseTurn => "reverse_turn",
+            Self::UpAndUnder => "up_and_under",
+            Self::Hook => "hook",
+            Self::TurnaroundFadeaway => "turnaround_fadeaway",
+        }
+    }
+
+    /// 从档案键读回步法。
+    pub fn from_str(key: &str) -> Option<Self> {
+        Some(match key {
+            "post_up" => Self::PostUp,
+            "backdown" => Self::Backdown,
+            "drop_step" => Self::DropStep,
+            "front_turn" => Self::FrontTurn,
+            "reverse_turn" => Self::ReverseTurn,
+            "up_and_under" => Self::UpAndUnder,
+            "hook" => Self::Hook,
+            "turnaround_fadeaway" => Self::TurnaroundFadeaway,
+            _ => return None,
+        })
+    }
+}
+
+/// 收球终结的技术变体。
+///
+/// 收球之后的那一步有多种做法：普通上篮、反手上篮、拉杆上篮、挑篮、
+/// 抛投、扣篮与补篮。收球步的动作本身（跳步、欧洲步）也是这一类。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinishKind {
+    /// 普通上篮。
+    Layup,
+    /// 反手上篮。
+    ReverseLayup,
+    /// 拉杆上篮：篮下二次打板。
+    DoubleClutchLayup,
+    /// 挑篮：单手挑球上篮。
+    FingerRoll,
+    /// 抛投。
+    Floater,
+    /// 扣篮。
+    Dunk,
+    /// 补篮。
+    Putback,
+    /// 跳步收球。
+    ProHop,
+    /// 欧洲步。
+    EuroStep,
+}
+
+impl FinishKind {
+    /// 变体的档案键。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Layup => "layup",
+            Self::ReverseLayup => "reverse_layup",
+            Self::DoubleClutchLayup => "double_clutch_layup",
+            Self::FingerRoll => "finger_roll",
+            Self::Floater => "floater",
+            Self::Dunk => "dunk",
+            Self::Putback => "putback",
+            Self::ProHop => "pro_hop",
+            Self::EuroStep => "euro_step",
+        }
+    }
+
+    /// 从出手类型读出收球终结的变体。
+    pub fn from_shot(kind: ShotKind) -> Option<Self> {
+        Some(match kind {
+            ShotKind::Layup
+            | ShotKind::DrivingLayup
+            | ShotKind::CuttingLayup
+            | ShotKind::RunningLayup => Self::Layup,
+            ShotKind::ReverseLayup => Self::ReverseLayup,
+            ShotKind::DoubleClutchLayup => Self::DoubleClutchLayup,
+            ShotKind::FingerRoll => Self::FingerRoll,
+            ShotKind::Floater => Self::Floater,
+            ShotKind::Dunk
+            | ShotKind::DrivingDunk
+            | ShotKind::CuttingDunk
+            | ShotKind::RunningDunk => Self::Dunk,
+            ShotKind::Putback => Self::Putback,
+            ShotKind::ProHop => Self::ProHop,
+            ShotKind::EuroStep => Self::EuroStep,
+            _ => return None,
+        })
+    }
+}
+
+/// 跑位的技术变体。
+///
+/// 跑位不是一件事：接球点调整、外线定点、无球绕行与错位后要位各有各的
+/// 落点与防守反应。变体决定这一次跑位去哪里。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelocateKind {
+    /// 接球点调整：按编队空位移动。
+    Adjust,
+    /// 外线定点：留在三分线外的定点位置。
+    SpotUp,
+    /// 无球绕行：绕到球的另一侧。
+    Flare,
+    /// 错位后要位：错位时占住对手的防守位。
+    MismatchSeal,
+}
+
+impl RelocateKind {
+    /// 变体的档案键。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Adjust => "adjust",
+            Self::SpotUp => "spot_up",
+            Self::Flare => "flare",
+            Self::MismatchSeal => "mismatch_seal",
         }
     }
 }
@@ -160,6 +408,25 @@ pub enum ScreenKind {
     OnBall,
     OffBall,
     HandOff,
+    /// 顺下：掩护之后向篮下滚动。
+    Roll,
+    /// 外弹：掩护之后向外线弹开。
+    Pop,
+    /// 提前滑出：掩护者在接触之前先离开。
+    Slip,
+}
+
+impl ScreenKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OnBall => "on_ball",
+            Self::OffBall => "off_ball",
+            Self::HandOff => "handoff",
+            Self::Roll => "roll",
+            Self::Pop => "pop",
+            Self::Slip => "slip",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -193,6 +460,8 @@ pub enum ProtectKind {
     Post,
     /// 转身护球：转体把球带到远离防守的一侧。
     Spin,
+    /// 被包夹护球：两名防守人夹击时护住球。
+    Trap,
 }
 
 impl ProtectKind {
@@ -201,6 +470,7 @@ impl ProtectKind {
             Self::FaceUp => "face_up_protect",
             Self::Post => "post_protect",
             Self::Spin => "spin_protect",
+            Self::Trap => "trap_protect",
         }
     }
 }
@@ -209,15 +479,19 @@ impl ProtectKind {
 pub enum ActionKind {
     Dribble(nba_domain::action_window::DribbleMoveKind),
     Drive(nba_domain::action_window::DriveKind),
-    Finish,
+    Finish(FinishKind),
     Pass(PassKind),
     Screen(ScreenKind),
     Cut(CutKind),
-    PostUp,
+    PostUp(PostStepKind),
     Shoot(ShotKind),
-    Relocate,
+    /// 罚球：罚球程序里的出手。它不是一种统计上的出手类型，而是另一套
+    /// 程序里的动作，因此它在动作族里占一个自己的位置。
+    FreeThrow,
+    Relocate(RelocateKind),
     Fake(FakeKind),
     Protect(ProtectKind),
+    Rebound(ReboundKind),
 }
 
 impl ActionKind {
@@ -225,15 +499,17 @@ impl ActionKind {
         match self {
             Self::Dribble(_) => "Dribble",
             Self::Drive(_) => "Drive",
-            Self::Finish => "Finish",
+            Self::Finish(_) => "Finish",
             Self::Pass(_) => "Pass",
             Self::Screen(_) => "Screen",
             Self::Cut(_) => "Cut",
-            Self::PostUp => "PostUp",
+            Self::PostUp(_) => "PostUp",
             Self::Shoot(_) => "Shoot",
-            Self::Relocate => "Relocate",
+            Self::FreeThrow => "FreeThrow",
+            Self::Relocate(_) => "Relocate",
             Self::Fake(_) => "Fake",
             Self::Protect(_) => "Protect",
+            Self::Rebound(_) => "Rebound",
         }
     }
 
@@ -241,16 +517,18 @@ impl ActionKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Shoot(_) => "shoot",
+            Self::FreeThrow => "free_throw",
             Self::Drive(_) => "drive",
             Self::Pass(_) => "pass",
             Self::Screen(_) => "screen",
             Self::Cut(_) => "cut",
-            Self::PostUp => "post_up",
+            Self::PostUp(_) => "post_up",
             Self::Dribble(_) => "hold",
-            Self::Finish => "finish",
-            Self::Relocate => "relocate",
+            Self::Finish(_) => "finish",
+            Self::Relocate(_) => "relocate",
             Self::Fake(_) => "fake",
             Self::Protect(_) => "protect",
+            Self::Rebound(_) => "rebound",
         }
     }
 
@@ -262,18 +540,20 @@ impl ActionKind {
             Self::Pass(_) => 2,
             Self::Screen(_) => 3,
             Self::Cut(_) => 4,
-            Self::PostUp => 5,
+            Self::PostUp(_) => 5,
             Self::Dribble(_) => 6,
-            Self::Finish => 7,
-            Self::Relocate => 8,
+            Self::Finish(_) => 7,
+            Self::Relocate(_) => 8,
             Self::Fake(_) => 9,
             Self::Protect(_) => 10,
+            Self::Rebound(_) => 11,
+            Self::FreeThrow => 12,
         }
     }
 }
 
 /// 动作族总数：族编号直接用作按族索引的数组长度。
-pub const FAMILY_COUNT: usize = 11;
+pub const FAMILY_COUNT: usize = 13;
 
 #[derive(Debug, Clone)]
 pub struct ActionIntent {
@@ -395,8 +675,17 @@ pub enum DefensiveActionKind {
     CloseoutContest,
     /// 伸手切球：主动赌一次抄截，执行窗口内成功率提高，收势窗口内失去干扰。
     StealAttempt,
+    /// 掏球：贴着球去摸，不赌抢断那么狠。
+    Poke,
+    /// 追防：持球人甩开之后追上去。
+    Chase,
     /// 垂直起跳封盖：执行窗口内摸高增加，跳起的人无法卡位抢篮板。
     BlockJump,
+    /// 垂直起跳扑防：防守人已经站到投篮人面前，他垂直跳起伸手而不
+    /// 是向前扑。
+    Verticality,
+    /// 追身封盖：从投篮人身后扑上去盖。
+    ChaseDownBlock,
     /// 滑步跟防：横向移动保持一个身位的间隔，不越过持球人的合法
     /// 防守位置（NBA Rule 12B §II.5）。
     Slide,
@@ -420,6 +709,8 @@ pub enum OnBallPositioning {
     Contain,
     /// 站位吃犯规：面对突破时站定占住位置。
     ChargeTake,
+    /// 追防：被持球人甩开之后追上去。
+    Chase,
 }
 
 impl OnBallPositioning {
@@ -429,6 +720,7 @@ impl OnBallPositioning {
             Self::Slide => DefensiveActionKind::Slide,
             Self::Contain => DefensiveActionKind::Contain,
             Self::ChargeTake => DefensiveActionKind::ChargeTake,
+            Self::Chase => DefensiveActionKind::Chase,
         }
     }
 }
@@ -454,6 +746,9 @@ pub fn on_ball_pressure(world: &crate::World, defender: usize) -> Option<f32> {
         OnBallPositioning::ChargeTake => {
             Some(world.params.policy.g("charge_take_pressure_multiplier"))
         }
+        // 追防：追回来的人重新建立压力，压力与滑步跟防一样：追的过程
+        // 里他没有压迫持球人。
+        OnBallPositioning::Chase => None,
     }
 }
 
@@ -462,7 +757,11 @@ impl DefensiveActionKind {
         match self {
             Self::CloseoutContest => "closeout_contest",
             Self::StealAttempt => "steal_attempt",
+            Self::Poke => "poke",
+            Self::Chase => "chase",
             Self::BlockJump => "block_jump",
+            Self::Verticality => "verticality",
+            Self::ChaseDownBlock => "chase_down_block",
             Self::Slide => "slide",
             Self::Contain => "contain",
             Self::ChargeTake => "charge_take",
@@ -585,6 +884,26 @@ pub enum Fact {
         player: usize,
         kind: &'static str,
         target: Option<usize>,
+    },
+    /// 持续姿态开始。
+    ///
+    /// 持续姿态不是带窗口的动作：它没有准备、执行与收势三段，因此它
+    /// 不借用动作生命周期的事实。它自己登记开始时刻与身份，事件流因此
+    /// 能重建姿态的起止，而渲染器能从姿态身份认出「同一个姿态」。
+    PostureStarted {
+        action_id: u64,
+        player: usize,
+        /// 姿态槽位名：无球职责、持球站位、转换与扑防应答。
+        slot: &'static str,
+        /// 技术变体：职责名、站位名、转换变体与应答名。
+        variant: &'static str,
+    },
+    /// 持续姿态结束：它与开始事实配对。
+    PostureEnded {
+        action_id: u64,
+        player: usize,
+        slot: &'static str,
+        variant: &'static str,
     },
     ActionIntentRejected {
         player: usize,
@@ -793,10 +1112,17 @@ pub enum Fact {
         player: usize,
         distance_ft: f32,
     },
+    /// 防守职责变了。
+    ///
+    /// 这一条事实既是职责变化，也是无球姿态的生命周期：职责就是姿态，
+    /// 因此它的身份与时间边界在这一条里一起给出。渲染器从职责读出当前
+    /// 姿态，事件流从这一条重建姿态的起止。
     DefenseResponsibilityChanged {
         player: usize,
         from: &'static str,
         to: &'static str,
+        /// 这一段职责的动作身份：姿态与动作共用同一套身份空间。
+        action_id: u64,
     },
     Turnover {
         player: usize,
@@ -829,9 +1155,15 @@ pub enum Fact {
     ///
     /// 姿态不是带窗口的动作，因此它只发布一次变化事实，不发布阶段变化
     /// 与完成事实：那三类事实是给「有准备、执行、收势三段」的动作用的。
+    /// 对位防守人的站位姿态变了。
+    ///
+    /// 这一条事实既是站位变化，也是持球站位姿态的生命周期：站位就是
+    /// 姿态，因此它的身份与时间边界在这一条里一起给出。
     OnBallPositioningChanged {
         defender: usize,
         kind: &'static str,
+        /// 这一段站位的动作身份：姿态与动作共用同一套身份空间。
+        action_id: u64,
     },
     /// 球员被逐：犯规升级到恶意犯规时使用（NBA Rule 12B §IV）。
     Ejected {
@@ -856,6 +1188,16 @@ pub enum Fact {
     },
     PeriodEnd {
         period: u32,
+    },
+    /// 节末结算完成：全部待决事项关闭，本节比分与球权就此确定。
+    PeriodSettlementCompleted {
+        period: u32,
+        home_score: u32,
+        away_score: u32,
+        /// 本节关闭的待决出手数。
+        pending_shots_resolved: u32,
+        /// 本节执行的罚球次数。
+        free_throws_resolved: u32,
     },
     /// 选板激活：阵地回合进入某份剧本的行为窗口。
     PlayActivated {
@@ -890,6 +1232,10 @@ pub enum Fact {
         call: &'static str,
         overturned: bool,
         cost_timeout: bool,
+        /// 改判带来的分值变化：正数补分，负数扣分。
+        points_delta: i32,
+        /// 改判涉及的球员：统计归属靠它。
+        player: Option<usize>,
         time: f64,
     },
     PlacementApplied {
@@ -926,6 +1272,8 @@ impl Fact {
     pub fn name(&self) -> &'static str {
         match self {
             Self::ActionStarted { .. } => "ActionStarted",
+            Self::PostureStarted { .. } => "PostureStarted",
+            Self::PostureEnded { .. } => "PostureEnded",
             Self::ActionIntentRejected { .. } => "ActionIntentRejected",
             Self::ActionPhaseChanged { .. } => "ActionPhaseChanged",
             Self::ActionCompleted { .. } => "ActionCompleted",
@@ -967,6 +1315,7 @@ impl Fact {
             Self::Timeout { .. } => "Timeout",
             Self::JumpBall { .. } => "JumpBall",
             Self::PeriodEnd { .. } => "PeriodEnd",
+            Self::PeriodSettlementCompleted { .. } => "PeriodSettlementCompleted",
             Self::PlayActivated { .. } => "PlayActivated",
             Self::PlayWindowEnded { .. } => "PlayWindowEnded",
             Self::BallContact { kind, .. } => kind,
@@ -999,11 +1348,10 @@ impl Fact {
             | Self::PostUp { player: p, .. }
             | Self::Shot { shooter: p, .. }
             | Self::Foul { fouler: p, .. }
-            | Self::Foul { fouled: p, .. }
             | Self::FreeThrow { shooter: p, .. }
             | Self::Rebound { player: p, .. }
             | Self::LooseBallRecovered { player: p, .. }
-            | Self::SecondChanceStarted { rebounder: p, .. } => *p == player,
+            | Self::SecondChanceStarted { rebounder: p, .. }
             | Self::Cut { cutter: p, .. } => *p == player,
             | Self::DribbleMove { player: p, .. }
             | Self::FakeAction { player: p, .. }
@@ -1012,10 +1360,9 @@ impl Fact {
             | Self::BoxOut { player: p, .. }
             | Self::Turnover { player: p, .. }
             | Self::Steal { player: p, .. }
-            | Self::Substitution { incoming: p, .. } => *p == player,
-            | Self::Substitution { outgoing: p, .. } => *p == player,
+            | Self::Substitution { incoming: p, .. }
             | Self::FoulOutRetention { player: p, .. }
-            | Self::OnBallPositioningChanged { defender: p, .. } => *p == player,
+            | Self::OnBallPositioningChanged { defender: p, .. }
             | Self::PlacementApplied { player: p, .. }
             | Self::Injury { player: p, .. } => *p == player,
             Self::BallContact { entity: Some(p), .. } => *p == player,
@@ -1023,9 +1370,7 @@ impl Fact {
             | Self::DefensiveActionPhaseChanged { defender: p, .. }
             | Self::DefensiveActionCompleted { defender: p, .. }
             | Self::DefensiveActionCancelled { defender: p, .. } => *p == player,
-            Self::Goaltending { defender: p, .. } | Self::Goaltending { shooter: p, .. } => {
-                *p == player
-            }
+            Self::Goaltending { defender: p, .. } => *p == player,
             _ => false,
         }
     }

@@ -104,23 +104,25 @@ pub fn tick(world: &mut World) {
     // 阶段写在这里，出手结算读到的阶段与刚选定的动作一致。
     world.possession.ball_phase = match intent.kind {
         ActionKind::Drive(_) => crate::state::BallPhase::Drive,
-        ActionKind::Finish => crate::state::BallPhase::Gather,
-        ActionKind::PostUp => crate::state::BallPhase::Post,
+        ActionKind::Finish(_) => crate::state::BallPhase::Gather,
+        ActionKind::PostUp(_) => crate::state::BallPhase::Post,
         ActionKind::Dribble(_)
         | ActionKind::Pass(_)
         | ActionKind::Cut(_)
         | ActionKind::Screen(_)
         | ActionKind::Fake(_)
         | ActionKind::Protect(_)
-        | ActionKind::Relocate => crate::state::BallPhase::Dribble,
-        ActionKind::Shoot(_) => world.possession.ball_phase,
+        | ActionKind::Relocate(_)
+        | ActionKind::Rebound(_) => crate::state::BallPhase::Dribble,
+        // 罚球有自己的程序，它的持球阶段不参与这层映射。
+        ActionKind::Shoot(_) | ActionKind::FreeThrow => world.possession.ball_phase,
     };
     match intent.kind {
         ActionKind::Drive(_)
-        | ActionKind::Finish
+        | ActionKind::Finish(_)
         | ActionKind::Dribble(_)
-        | ActionKind::PostUp
-        | ActionKind::Relocate => {
+        | ActionKind::PostUp(_)
+        | ActionKind::Relocate(_) => {
             world.players[actor].target = intent.to_ft;
             world.players[actor].target_kind = crate::state::TargetKind::Window;
             world.players[actor].target_partner = actor;
@@ -131,6 +133,14 @@ pub fn tick(world: &mut World) {
                 world.players[cutter].target_kind = crate::state::TargetKind::Window;
                 world.players[cutter].target_partner = cutter;
             }
+        }
+        ActionKind::Shoot(crate::action::ShotKind::StepBack) => {
+            // 后撤步跳投：出手的落点是退开之后的那个点。投篮人在准备窗口里
+            // 走过去，位移因此由运动层逐 tick 完成，而不是瞬移。
+            let target = crate::resolve::shot::step_back_target(world, actor);
+            world.players[actor].target = target;
+            world.players[actor].target_kind = crate::state::TargetKind::Window;
+            world.players[actor].target_partner = actor;
         }
         _ => {}
     }
@@ -154,9 +164,34 @@ pub fn tick(world: &mut World) {
             world.players[screener].target_kind = crate::state::TargetKind::Contact;
             world.players[screener].target_partner = defender;
         }
-        ActionKind::Cut(_) => {
-            let cutter = intent.target.expect("cut action requires a cutter");
-            participants.push((cutter, crate::action::ActionIntentRole::CutPartner));
+        ActionKind::Cut(kind) => {
+            // 切入人自己发起的空切：执行人就是切入人。持球人点名的空切
+            // 才有第二个参与者。
+            let cutter = intent.target.unwrap_or(intent.actor);
+            if intent.target.is_some() {
+                participants.push((cutter, crate::action::ActionIntentRole::CutPartner));
+            }
+            // 绕掩护接球与手递手接球：切入人自己走完这段路线，掩护人
+            // 是他的配合方。两个角色因此是两个人，不是同一个动作。
+            let screen_kind = match kind {
+                crate::action::CutKind::Curl => Some(crate::action::ScreenKind::HandOff),
+                crate::action::CutKind::Handoff => Some(crate::action::ScreenKind::HandOff),
+                _ => None,
+            };
+            if let Some(screen_kind) = screen_kind {
+                // 切入人接球时贴着持球人走：手递手要求两人贴近。
+                let holder = world.holder();
+                if let Some(holder) = holder {
+                    let toward = (world.players[holder].pos - world.players[cutter].pos)
+                        .normalize_or_zero();
+                    let contact = world.players[cutter].pos
+                        + toward * (world.rules.min_player_separation_ft + 0.2);
+                    world.players[cutter].target = contact;
+                    world.players[cutter].target_kind = crate::state::TargetKind::Contact;
+                    world.players[cutter].target_partner = holder;
+                }
+                let _ = screen_kind;
+            }
         }
         _ => {}
     }
@@ -205,7 +240,20 @@ pub fn off_ball_tick(world: &mut World) {
             continue;
         }
         // 每个回合只允许一次无球自主动作：无球跑位是补充，不是主循环。
-        if world.possession.off_ball_actions > 0 {
+        // 掩护之后的绕掩护接球是例外：它必须跟在掩护之后，因此允许再来
+        // 一次。例外只给刚被掩护的那个人：其余无球球员的额外动作会把
+        // 生命周期事实翻几倍，事件流因此膨胀。
+        let screened_player = world
+            .possession
+            .last_screen
+            .is_some_and(|read| now - read.at < 2.0);
+        let may_follow_screen = screened_player
+            && world
+                .players[actor]
+                .screened_at
+                .is_finite()
+            && now - world.players[actor].screened_at < 2.0;
+        if world.possession.off_ball_actions > 0 && !may_follow_screen {
             continue;
         }
         // 回合开头的几秒属于战术发动：无球球员等剧本窗口有了结论再动，
@@ -289,9 +337,32 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
     {
         spot = crate::lane::exit_target(world, actor);
     }
+    // 跑位变体由处境决定：错位时占住对手的防守位，弱侧有空间时绕到球的
+    // 另一侧，三分线附近定点，外线没机会时按编队空位调整。
+    let holder_pos = world.holder().map(|handle| world.players[handle].pos);
+    let marker = world
+        .players
+        .iter()
+        .filter(|player| player.on_court && player.team != team)
+        .map(|player| (player.pos - pos).length())
+        .fold(f32::INFINITY, f32::min);
+    let mismatch = off_ball_mismatch(world, actor);
+    let relocate_kind = if mismatch >= weights.g("relocate_mismatch_seal_threshold") {
+        crate::action::RelocateKind::MismatchSeal
+    } else if marker >= weights.g("relocate_flare_marker_ft")
+        && holder_pos.is_some_and(|ball| {
+            (ball - pos).length() > weights.g("relocate_flare_ball_distance_ft")
+        })
+    {
+        crate::action::RelocateKind::Flare
+    } else if (pos - hoop).length() >= weights.g("relocate_spot_up_distance_ft") {
+        crate::action::RelocateKind::SpotUp
+    } else {
+        crate::action::RelocateKind::Adjust
+    };
     let travel = (spot - pos).length();
     let relocate: Candidate = (
-        ActionKind::Relocate,
+        ActionKind::Relocate(relocate_kind),
         None,
         spot,
         Utility {
@@ -317,6 +388,20 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
         .map(|player| (player.pos - pos).length())
         .fold(f32::INFINITY, f32::min);
     let openness = (marker / weights.g("cut_open_distance_ft").max(f32::EPSILON)).clamp(0.0, 1.0);
+    // V 字跑位：切入人从两名防守人中间穿过。因此它的前提是第二近的
+    // 防守人也在身边，而不是只有一个贴得很近的防守人。
+    let mut nearest_two: [f32; 2] = [f32::INFINITY, f32::INFINITY];
+    for player in world.players.iter().filter(|player| {
+        player.on_court && player.team != team
+    }) {
+        let distance = (player.pos - pos).length();
+        if distance < nearest_two[0] {
+            nearest_two[1] = nearest_two[0];
+            nearest_two[0] = distance;
+        } else if distance < nearest_two[1] {
+            nearest_two[1] = distance;
+        }
+    }
     let holder_pos = world.holder().map(|handle| world.players[handle].pos);
     // 防守人卡在持球人与自己之间：转身从背后切。
     let denied = holder_pos.is_some_and(|ball| {
@@ -335,22 +420,63 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
                 (player.pos - (pos + segment * t)).length() < 1.5 && (0.15..=0.85).contains(&t)
             })
     });
+    // 绕掩护接球只在掩护刚发生的那段窗口里成立：掩护之后切入人要马上
+    // 动，掩护再久一点它就只是普通的空位。
     let near_screen = world
         .possession
         .last_screen
-        .map(|read| (world.players[read.screener].pos - pos).length())
-        .unwrap_or(f32::INFINITY)
-        < 8.0;
+        .map(|read| {
+            now - read.at < 4.0 && (world.players[read.screener].pos - pos).length() < 14.0
+        })
+        .unwrap_or(false);
+    // 切入人与持球人的距离：手递手要求两人贴近。
+    let gap_to_holder = holder_pos
+        .map(|ball| (ball - pos).length())
+        .unwrap_or(f32::INFINITY);
+    // 底角空着：底角对侧没有防守人时，底角转移才有意义。
+    let corner_open = {
+        let corner = Vec2::new(
+            if world.attacking_right(team) {
+                world.rules.court.width_ft - 3.0
+            } else {
+                3.0
+            },
+            if pos.y < world.rules.court.height_ft * 0.5 {
+                3.0
+            } else {
+                world.rules.court.height_ft - 3.0
+            },
+        );
+        world
+            .players
+            .iter()
+            .filter(|player| player.on_court && player.team != team)
+            .all(|player| (player.pos - corner).length() > 8.0)
+    };
     let kind = if denied {
         crate::action::CutKind::Backdoor
     } else if world.possession.last_pass_from == Some(actor) {
         crate::action::CutKind::GiveAndGo
+    } else if near_screen && gap_to_holder < 6.0 {
+        // 手递手接球：切入人贴着持球人接球，两人手递手交接。
+        crate::action::CutKind::Handoff
     } else if near_screen {
+        // 绕掩护接球：切入人就在掩护人身侧，他要绕着掩护人接球。
         crate::action::CutKind::Curl
-    } else if marker < 3.0 {
+    } else if nearest_two[1] < 10.0 && (pos - hoop).length() <= 15.0 {
+        // 第二名防守人也在身边：中间有一条缝可以穿过去。
         crate::action::CutKind::VCut
     } else if (pos - hoop).length() > 22.0 {
         crate::action::CutKind::PopUp
+    } else if marker < 6.0 && (pos - hoop).length() <= 15.0 {
+        // 防守人还贴着：闪切靠变向甩开他。
+        crate::action::CutKind::Flash
+    } else if (pos - hoop).length() > 15.0 {
+        // 在中距离但没有空位：拉开站位把防守人带出禁区。
+        crate::action::CutKind::SpotUp
+    } else if corner_open {
+        // 底角空着：底角转移把球换到对侧底角，弱侧防守人轮转补位。
+        crate::action::CutKind::CornerRelocate
     } else {
         crate::action::CutKind::Basket
     };
@@ -359,7 +485,9 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
             hoop - to_rim * weights.g("finish_min_distance_ft")
         }
         crate::action::CutKind::Backdoor => hoop - to_rim * 3.0 + lateral * 4.0,
-        crate::action::CutKind::VCut => pos - to_rim * 2.0,
+        // V 字跑位：切入人从两名防守人中间穿过，往篮下走。因此它的落点
+        // 在篮筐方向，不在切入人身后。
+        crate::action::CutKind::VCut => pos + to_rim * 6.0,
         crate::action::CutKind::Curl => world
             .possession
             .last_screen
@@ -368,15 +496,37 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
                 spot + (hoop - spot).normalize_or_zero() * 4.0
             })
             .unwrap_or(hoop - to_rim * weights.g("finish_min_distance_ft")),
+        // 手递手接球：切入人走到持球人身边接球，落点就在持球人旁边。
+        crate::action::CutKind::Handoff => holder_pos
+            .map(|ball| ball + (pos - ball).normalize_or_zero() * 2.0)
+            .unwrap_or(pos - to_rim * 2.0),
         crate::action::CutKind::PopUp => holder_pos
             .map(|ball| pos + (ball - pos).normalize_or_zero() * 6.0)
             .unwrap_or(pos - to_rim * 3.0),
+        crate::action::CutKind::Flash => pos + to_rim * 4.0 + lateral * 2.0,
+        crate::action::CutKind::SpotUp => pos + to_rim * 6.0,
+        crate::action::CutKind::CornerRelocate => {
+            let corner = Vec2::new(
+                if world.attacking_right(team) {
+                    world.rules.court.width_ft - 3.0
+                } else {
+                    3.0
+                },
+                if pos.y < world.rules.court.height_ft * 0.5 {
+                    3.0
+                } else {
+                    world.rules.court.height_ft - 3.0
+                },
+            );
+            corner
+        }
     };
     let rim_attack = matches!(
         kind,
         crate::action::CutKind::Basket
             | crate::action::CutKind::Backdoor
             | crate::action::CutKind::GiveAndGo
+            | crate::action::CutKind::Flash
     );
     // 空切是机会动作，不是常规站位：只有对位人确实跟丢、且篮下接球
     // 比留在自己的位置更值时才是候选；V 字与上提是拿球动作，不要求篮下机会。
@@ -397,9 +547,29 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
         cut_value > spot_value
     };
     let mut cut_available = if rim_attack {
-        cut_open && cut_pays && travel > 3.0
+        // 闪切：防守人还贴着时变向甩开他。闪切不要求对位人跟丢，它
+        // 靠的是变向本身，因此它的成立判据是防守人贴得够近。
+        if kind == crate::action::CutKind::Flash {
+            marker < 6.0 && travel > 2.0
+        } else {
+            cut_open && cut_pays && travel > 3.0
+        }
     } else {
-        cut_pays && travel > 2.0
+        // 拉开站位、底角转移与上提接球不是抢机会的动作，它们是位置
+        // 动作：只要当前位置比目标位置差，它们就成立。因此它们的判据是
+        // “走过去有收益”，而不是“比原来的位置更值”。
+        let positional = matches!(
+            kind,
+            crate::action::CutKind::SpotUp
+                | crate::action::CutKind::CornerRelocate
+                | crate::action::CutKind::PopUp
+                | crate::action::CutKind::VCut
+        );
+        if positional {
+            cut_value > spot_value * 0.6 && travel > 2.0
+        } else {
+            cut_pays && travel > 2.0
+        }
     };
     let mut relocate = relocate;
     let mut cut: Candidate = (
@@ -408,7 +578,18 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
         cut_spot,
         Utility {
             epv: EpvTerms {
-                ability: cut_value * openness,
+                // 闪切靠变向甩开贴着的防守人，V 字跑位靠穿过两名防守人之间的
+                // 缝：两者都不靠空位，因此它们按接球质量算，不按空位程度算。
+                ability: match kind {
+                    crate::action::CutKind::Flash => {
+                        crate::value::catch_value(world, cut_spot, actor, 0.0)
+                            * (1.0 - openness * 0.5)
+                    }
+                    crate::action::CutKind::VCut => {
+                        crate::value::catch_value(world, cut_spot, actor, 0.0) * 0.9
+                    }
+                    _ => cut_value * openness,
+                },
                 tendency: weights.b("cut_tendency")
                     * (world.players[actor].data.tendencies.cut_frequency - 0.5),
                 ..Default::default()
@@ -416,7 +597,20 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
             variance: f32::default(),
             clock_cost: clock_cost(world, shot_clock) * 0.5,
             foul_cost: f32::default(),
-            tactical_bonus: f32::default(),
+            // 位置性切入（拉开站位、底角转移、上提、底角与V字）不抢机会，
+            // 它们只换位置：因此它们的价值不与接球价值直接比，而是
+            // 给自己一个战术加成，让位置调整真的会被选中。
+            tactical_bonus: if matches!(
+                kind,
+                crate::action::CutKind::SpotUp
+                    | crate::action::CutKind::CornerRelocate
+                    | crate::action::CutKind::PopUp
+                    | crate::action::CutKind::VCut
+            ) {
+                weights.w("cut_positional_bonus")
+            } else {
+                f32::default()
+            },
         },
     );
 
@@ -517,7 +711,7 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
     let kind = candidate.0;
     let to_ft = candidate.2;
     // 已经站在该站的位置上就不必再跑一趟：没有位移的跑位不产生动作。
-    if matches!(kind, ActionKind::Relocate) && travel < 4.0 {
+    if matches!(kind, ActionKind::Relocate(_)) && travel < 4.0 {
         return None;
     }
     let speed = world.players[actor]
@@ -788,6 +982,9 @@ fn action_duration(
     to_ft: Vec2,
 ) -> f64 {
     match kind {
+        // 篮板动作的时长就是落地收势的时间：抢到球的人要等落地才能
+        // 再动作，这个等待就是这次动作的时长。
+        ActionKind::Rebound(_) => f64::from(world.rules.rebound_follow_seconds),
         ActionKind::Pass(_) => {
             let distance = (to_ft - state.actor_pos).length();
             (distance / 28.0).clamp(0.35, 1.4) as f64
@@ -829,16 +1026,18 @@ fn action_duration(
                 .max(1.0);
             (distance / speed * 1.25).max(0.6) as f64
         }
-        ActionKind::Finish => 0.9,
+        ActionKind::Finish(_) => 0.9,
         ActionKind::Cut(_) => {
             let cutter = target.expect("cut requires a cutter");
             let distance = (state.hoop - world.players[cutter].pos).length();
             (distance / MAX_SPEED_FT_PER_SEC * 1.8).clamp(1.5, 3.2) as f64
         }
-        ActionKind::PostUp => 1.6,
+        ActionKind::PostUp(_) => 1.6,
         ActionKind::Shoot(_) => 0.55,
+        // 罚球的出手时长由跳投规则给出，与普通跳投一致。
+        ActionKind::FreeThrow => 0.55,
         ActionKind::Dribble(_) => 1.4,
-        ActionKind::Relocate => 1.4,
+        ActionKind::Relocate(_) => 1.4,
         // 假动作与护球都是短技术动作，时长由规则档案的战术下限决定。
         ActionKind::Fake(_) => 0.45,
         ActionKind::Protect(_) => 0.35,
@@ -894,7 +1093,7 @@ pub fn candidate_utilities(world: &World, state: &DecisionState) -> Vec<Candidat
                 DefenderRoute::Over => |kind| {
                     matches!(
                         kind,
-                        ActionKind::Drive(_) | ActionKind::Finish | ActionKind::Pass(_)
+                        ActionKind::Drive(_) | ActionKind::Finish(_) | ActionKind::Pass(_)
                     )
                 },
                 DefenderRoute::Switch | DefenderRoute::Trapped => |_| true,
@@ -906,7 +1105,7 @@ pub fn candidate_utilities(world: &World, state: &DecisionState) -> Vec<Candidat
             if read == DefenderRoute::Over {
                 let bonus = world.params.policy.w("screen_over_drive_bonus");
                 for candidate in &mut candidates {
-                    if matches!(candidate.0, ActionKind::Drive(_) | ActionKind::Finish) {
+                    if matches!(candidate.0, ActionKind::Drive(_) | ActionKind::Finish(_)) {
                         candidate.3.tactical_bonus += bonus;
                     }
                 }
@@ -1395,7 +1594,22 @@ pub fn drive_kind_for(
     let Some(defender) = state.primary_defender else {
         return DriveKind::Straight;
     };
+    // 急停：已经进入投篮距离而防守人还贴得��。停住的那一下把球带到
+    // 投篮距离，但不给出手额外空间。
+    if state.distance_to_hoop() <= world.params.policy.g("drive_pull_up_stop_ft")
+        && defender.distance_ft <= tight_ft
+    {
+        return DriveKind::PullUpStop;
+    }
+    // 分球：突破走廊里有队友在弱侧空位，把球交出去比硬突更值。
+    if drive_kick_target(world, state).is_some() {
+        return DriveKind::DriveKick;
+    }
     if defender.distance_ft > tight_ft {
+        // 防守人不在身边：后撤步重新拉开距离，或者直接直线突进。
+        if state.shot_clock < f64::from(world.params.policy.g("drive_step_back_shot_clock")) {
+            return DriveKind::StepBack;
+        }
         return DriveKind::Straight;
     }
     // 防守人站在球与篮筐之间：他挡在路上，只能绕。
@@ -1404,6 +1618,27 @@ pub fn drive_kind_for(
     }
     // 防守人在球的另一侧：可以背对他再突。
     DriveKind::Spin
+}
+
+/// 突破分球的目标：弱侧空位队友。
+///
+/// 空位的判据是防守人离他足够远：分球给有人看着的队友等于白传。
+fn drive_kick_target(world: &World, state: &DecisionState) -> Option<usize> {
+    let open_ft = world.params.policy.g("drive_kick_open_defender_ft");
+    let best = state
+        .teammates
+        .iter()
+        .filter(|view| view.index != state.actor)
+        .filter(|view| {
+            view.defender_distance_ft >= open_ft && view.lane_clearance >= 2.0
+        })
+        .max_by(|left, right| {
+            left.openness
+                .total_cmp(&right.openness)
+                .then_with(|| right.defender_distance_ft.total_cmp(&left.defender_distance_ft))
+        })
+        .map(|view| view.index)?;
+    Some(best)
 }
 
 fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
@@ -1457,6 +1692,18 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
                 weights.g("drive_variant_crossover_beat")
             }
             nba_domain::action_window::DriveKind::Spin => weights.g("drive_variant_spin_beat"),
+            // 急停：停住的那一下没有突破的成功，只是把球带到投篮距离。
+            nba_domain::action_window::DriveKind::PullUpStop => {
+                weights.g("drive_variant_pull_up_stop_beat")
+            }
+            // 后撤步：向后撤开重新获得空间，过掉防守人的机会最低。
+            nba_domain::action_window::DriveKind::StepBack => {
+                weights.g("drive_variant_step_back_beat")
+            }
+            // 分球：突破本身不直接得分，价值在把球送到空位队友手里。
+            nba_domain::action_window::DriveKind::DriveKick => {
+                weights.g("drive_variant_drive_kick_beat")
+            }
         };
     let possession_value = weights.w("possession_value");
     // 突破价值按「推进成功后自己终结或急停」一条链计算；传球是决策点上的
@@ -1488,6 +1735,15 @@ fn drive_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
             weights.g("drive_variant_crossover_turnover")
         }
         nba_domain::action_window::DriveKind::Spin => weights.g("drive_variant_spin_turnover"),
+        nba_domain::action_window::DriveKind::PullUpStop => {
+            weights.g("drive_variant_pull_up_stop_turnover")
+        }
+        nba_domain::action_window::DriveKind::StepBack => {
+            weights.g("drive_variant_step_back_turnover")
+        }
+        nba_domain::action_window::DriveKind::DriveKick => {
+            weights.g("drive_variant_drive_kick_turnover")
+        }
     };
     epv.turnover = -weights.w("epv_turnover_cost")
         * possession_value
@@ -1580,6 +1836,48 @@ fn finish_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<
             }
         }
     };
+    // 收球步的技术变体：挡路防守人在路线上就绕一步（欧洲步），防守人
+    // 已经贴上来则用跳步收球把步数用完。两者都在收球步之内，因此不
+    // 额外增加脚步额度。
+    //
+    // 欧洲步在决策时定下：球员在那一步已经决定了绕开，结算层照办。
+    // 结算时再重新判定会让运行时、事件流与协议投影各说各话。
+    let finish_kind = if matches!(finish_kind, crate::action::ShotKind::DrivingLayup) {
+        let blocker = world
+            .players
+            .iter()
+            .filter(|player| player.on_court && player.team != world.players[actor].team)
+            .map(|player| {
+                let segment = state.hoop - state.actor_pos;
+                let length_squared = segment.length_squared();
+                // 投影点不在 [0,1] 里的防守人也在路线上：站在进攻人旁边的
+                // 防守人就是挡路的那一个，因此区间判断用未截断的投影值。
+                let raw_t = if length_squared > f32::MIN_POSITIVE {
+                    (player.pos - state.actor_pos).dot(segment) / length_squared
+                } else {
+                    0.0
+                };
+                let t = raw_t.clamp(0.0, 1.0);
+                let closest = state.actor_pos + segment * t;
+                ((player.pos - closest).length(), raw_t)
+            })
+            .filter(|(distance, t)| {
+                *distance <= world.params.policy.g("euro_step_defender_ft")
+                    && (-0.25..=1.25).contains(t)
+            })
+            .min_by(|left, right| left.0.total_cmp(&right.0));
+        match blocker {
+            Some(_) => crate::action::ShotKind::EuroStep,
+            None if state.shot_clock
+                < f64::from(world.params.policy.g("finish_pro_hop_shot_clock")) =>
+            {
+                crate::action::ShotKind::ProHop
+            }
+            None => finish_kind,
+        }
+    } else {
+        finish_kind
+    };
     let quality = shot_quality(world, state.actor_pos, actor, finish_kind, phase);
     let p_make = quality.p_make;
     let points = quality.points;
@@ -1596,8 +1894,34 @@ fn finish_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<
         _ => weights.g("finish_min_distance_ft"),
     };
     let to_ft = state.hoop + (state.actor_pos - state.hoop).normalize_or_zero() * finish_dist;
+    // 收球步的技术变体：这一篮用哪种方式完成，由收球步的处境决定。
+    let finish_variant = match finish_kind {
+        crate::action::ShotKind::ProHop => crate::action::FinishKind::ProHop,
+        crate::action::ShotKind::EuroStep => crate::action::FinishKind::EuroStep,
+        crate::action::ShotKind::Floater => crate::action::FinishKind::Floater,
+        crate::action::ShotKind::ReverseLayup => crate::action::FinishKind::ReverseLayup,
+        crate::action::ShotKind::Putback => crate::action::FinishKind::Putback,
+        _ => {
+            // 挡路防守人在路线一侧就反手上篮；否则按终结能力在普通上篮、
+            // 挑篮与拉杆之间选。
+            let finishing = world.players[actor].data.attributes.finishing;
+            let contest = state.primary_defender.map_or(0.0, |defender| {
+                1.0 - (defender.distance_ft / 6.0).clamp(0.0, 1.0)
+            });
+            if contest > 0.5 {
+                // 防守人贴得紧：反手上篮从另一侧绕开他的手。
+                crate::action::FinishKind::ReverseLayup
+            } else if finishing > 0.7 {
+                crate::action::FinishKind::DoubleClutchLayup
+            } else if finishing > 0.45 {
+                crate::action::FinishKind::FingerRoll
+            } else {
+                crate::action::FinishKind::Layup
+            }
+        }
+    };
     Some((
-        ActionKind::Finish,
+        ActionKind::Finish(finish_variant),
         None,
         to_ft,
         Utility {
@@ -1721,10 +2045,27 @@ fn pass_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
             PassKind::Bounce
         } else if defender_gap <= 3.0 && advancement > 8.0 {
             PassKind::Overhead
+        } else if defender_gap <= 2.4 && advancement.abs() < 5.0 {
+            // 防守人贴得太近、球又要横着走：背后传球从他看不到的那一侧
+            // 送出去。
+            PassKind::BehindBack
+        } else if advancement > 34.0 {
+            // 推进很深的长传：球必须越过整条防线，落点才是快攻。
+            PassKind::Outlet
+        } else if advancement > 20.0 && lane >= 4.0 && defender_gap > 8.0 {
+            // 队友已经跑到篮筐上空等球：空中接力。
+            PassKind::AlleyOop
         } else if advancement > 20.0 {
             PassKind::OneHand
-        } else if defender_gap <= 1.8 && advancement.abs() < 3.0 {
-            PassKind::BehindBack
+        } else if lane >= 3.0
+            && advancement > 14.0
+            && defender_gap > 6.0
+            && (pos - state.hoop).length() < 12.0
+        {
+            // 高吊球：只有真的有人在篮下等球时才送。空位队友在中距离等球
+            // 时，平直传球更快也更高：把它变成高吊球会让每一次推进都多一
+            // 次高吊球与切入。
+            PassKind::Lob
         } else {
             PassKind::Chest
         };
@@ -1799,8 +2140,29 @@ fn screen_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     // 掩护创造的机会也按净得分计。
     epv.tendency = weights.b("screen_tendency")
         * (world.players[state.actor].data.tendencies.screen_frequency - 0.5);
+    // 掩护类型由掩护人的处境决定：他站得离筐多远、有没有投射能力、
+    // 防守人是不是已经站定了。顺下与外弹是掩护之后的走向，因此写进
+    // 这次掩护的技术变体。提前滑出发生在接触之前：防守人已经站定时
+    // 掩护人先离开。
+    let screener_three =
+        shooter_zone(world, world.players[screener].pos, world.players[screener].team) == "three";
+    let screener_distance = (world.players[screener].pos - hoop).length();
+    // 防守人是不是已经站定：站定的时候掩护人提前滑出，接触因此不会发生。
+    let defender_planted = state.primary_defender.is_some_and(|defender| {
+        world.players[defender.index].vel.length() < 3.0
+    });
+    let screen_kind = if defender_planted && screener_distance > weights.g("screen_pop_distance_ft") {
+        // 防守人已经站定：掩护人提前滑出，接触因此不会发生。
+        ScreenKind::Slip
+    } else if screener_three && screener_distance > weights.g("screen_pop_distance_ft") {
+        ScreenKind::Pop
+    } else if screener_distance < weights.g("screen_roll_distance_ft") {
+        ScreenKind::Roll
+    } else {
+        ScreenKind::OnBall
+    };
     Some((
-        ActionKind::Screen(ScreenKind::OnBall),
+        ActionKind::Screen(screen_kind),
         Some(screener),
         state.actor_pos,
         Utility {
@@ -1914,11 +2276,7 @@ fn cut_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
         ..Default::default()
     };
     Some((
-        ActionKind::Cut(if lane_norm < 0.4 {
-            crate::action::CutKind::Backdoor
-        } else {
-            crate::action::CutKind::Basket
-        }),
+        ActionKind::Cut(cut_kind_for(world, state, lane_norm)),
         Some(cutter),
         state.hoop,
         Utility {
@@ -1930,6 +2288,22 @@ fn cut_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
             tactical_bonus: f32::default(),
         },
     ))
+}
+
+/// 持球人点名空切时的路线：按通道宽窄与接球人的防守距离选。
+///
+/// 通道窄时从背后切（防守人被卡在身后），通道宽时直接切篮下。
+fn cut_kind_for(
+    world: &World,
+    _state: &DecisionState,
+    lane_norm: f32,
+) -> crate::action::CutKind {
+    let _ = world;
+    if lane_norm < 0.4 {
+        crate::action::CutKind::Backdoor
+    } else {
+        crate::action::CutKind::Basket
+    }
 }
 
 /// 错位单打的低位红利：防守人比进攻人矮得越多，低位要位越值。
@@ -1945,6 +2319,26 @@ fn mismatch_bonus(
         return 0.0;
     };
     post_mismatch_edge(world, state.actor, defender, weights)
+}
+
+/// 无球球员与对位人的身高差（厘米）。
+///
+/// 错位后要位要的就是这个差：进攻人明显更高时占住对手的防守位更值。
+fn off_ball_mismatch(world: &World, actor: usize) -> f32 {
+    let team = world.players[actor].team;
+    let Some(defender) = world
+        .players
+        .iter()
+        .filter(|player| player.on_court && player.team != team)
+        .min_by(|left, right| {
+            (left.pos - world.players[actor].pos)
+                .length_squared()
+                .total_cmp(&(right.pos - world.players[actor].pos).length_squared())
+        })
+    else {
+        return 0.0;
+    };
+    f32::from(world.players[actor].data.height_cm) - f32::from(defender.data.height_cm)
 }
 
 /// 一对具体对位的身高差红利：进攻人比防守人高出门槛以上的部分。
@@ -1975,7 +2369,55 @@ fn post_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     if distance > weights.g("post_max_distance_ft") {
         return None;
     }
-    let post_pos = state.hoop + (state.actor_pos - state.hoop).normalize_or_zero() * 7.0;
+    // 步法由对位事实决定：每一种步法都对应一件可观察的事。
+    //
+    // 贴身（防守人站得很近）：勾手，球从他的头顶划过去。
+    // 站定但不贴身：上下步，从头顶绕过去。
+    // 靠底线：撤步转身，往底线一侧绕。
+    // 中路有高度差：前转身直接吃身高差。
+    // 其余：后转身往中路转，或背身挤打。
+    let step = post_step_for(world, state, weights);
+    let step = match step {
+        crate::action::PostStepKind::Backdown => {
+            if distance <= 7.5 {
+                // 贴身：勾手。
+                crate::action::PostStepKind::Hook
+            } else if distance > 9.0 {
+                crate::action::PostStepKind::TurnaroundFadeaway
+            } else {
+                crate::action::PostStepKind::Backdown
+            }
+        }
+        // 后转身在稍远的位置也成立：转身之后就是背身后仰。
+        crate::action::PostStepKind::ReverseTurn => {
+            if distance > 10.5 {
+                crate::action::PostStepKind::TurnaroundFadeaway
+            } else {
+                crate::action::PostStepKind::ReverseTurn
+            }
+        }
+        other => other,
+    };
+    // 背身要位：进攻人还没占住低位时，这一步只是走进去占位。占位不产生
+    // 对抗效果，因此它由距离决定：人还在外线时就先要位。
+    let step = if distance > weights.g("post_max_distance_ft") * 0.9 {
+        crate::action::PostStepKind::PostUp
+    } else {
+        step
+    };
+    // 落点跟着步法走：贴身的三种步法在篮下出手，转身类步法在中距离
+    // 出手。后仰因此是一记中距离的跳投，出手点与转身的距离一致。
+    //
+    // 中距离是十四英尺以外：转身后的那一步把进攻人带出篮下，因此出手
+    // 点在中距离区，而不是在近距离区。
+    let post_distance = match step {
+        crate::action::PostStepKind::Hook
+        | crate::action::PostStepKind::Backdown
+        | crate::action::PostStepKind::UpAndUnder
+        | crate::action::PostStepKind::PostUp => 7.0,
+        _ => 15.5,
+    };
+    let post_pos = state.hoop + (state.actor_pos - state.hoop).normalize_or_zero() * post_distance;
     // 低位候选用自己的出手类型与阶段估值，不借用通用两分估值。
     let net = crate::value::shot_value(
         world,
@@ -1991,8 +2433,9 @@ fn post_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
         context: mismatch_bonus(world, state, weights),
         ..Default::default()
     };
+    // 步法由对位事实决定：每一种步法都对应一件可观察的事。
     Some((
-        ActionKind::PostUp,
+        ActionKind::PostUp(step),
         None,
         post_pos,
         Utility {
@@ -2005,6 +2448,53 @@ fn post_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     ))
 }
 
+/// 低位步法：按对位事实选一个步法。
+///
+/// 步法决定进攻人往哪边转、防守人被挤到哪一侧，因此它必须来自可观察
+/// 的事实：防守人站在哪、站没站定、身高差多少。
+fn post_step_for(
+    world: &World,
+    state: &DecisionState,
+    weights: &crate::params::PolicyTable,
+) -> crate::action::PostStepKind {
+    use crate::action::PostStepKind;
+    let defender = state.primary_defender.map(|defender| defender.index);
+    let Some(defender) = defender else {
+        return PostStepKind::Backdown;
+    };
+    let baseline_side = (state.actor_pos.y - state.hoop.y).abs() > 6.0;
+    let planted = world.players[defender].vel.length() < 3.0;
+    let close = state
+        .primary_defender
+        .is_some_and(|view| view.distance_ft < 4.0);
+    let edge_cm = f32::from(world.players[state.actor].data.height_cm)
+        - f32::from(world.players[defender].data.height_cm);
+    let mismatched = edge_cm >= weights.g("post_step_mismatch_cm");
+    if planted && close {
+        // 贴身：勾手，球从他的头顶划过去。
+        return PostStepKind::Hook;
+    }
+    if planted {
+        // 防守人站定但不贴身：上下步从头顶绕过去。
+        return PostStepKind::UpAndUnder;
+    }
+    if baseline_side {
+        // 靠底线：撤步转身往底线一侧绕。
+        return PostStepKind::DropStep;
+    }
+    if mismatched {
+        // 中路有高度差：前转身直接吃身高差，转向防守人的弱侧。
+        return PostStepKind::FrontTurn;
+    }
+    // 防守人往底线一侧偏：进攻人往中路转，也就是后转身。
+    let defender_offset = (world.players[defender].pos.y - state.hoop.y).abs();
+    let actor_offset = (state.actor_pos.y - state.hoop.y).abs();
+    if defender_offset < actor_offset {
+        return PostStepKind::ReverseTurn;
+    }
+    // 防守人就在进攻人正后方：背身挤打，用身体把他顶开。
+    PostStepKind::Backdown
+}
 /// 假动作候选：防守人贴得足够近时，骗一次比硬投或硬突更值。
 ///
 /// 收益来自真实后果：被骗到的防守人在失衡窗口内干扰折减（投篮假动作）
@@ -2057,6 +2547,14 @@ fn fake_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
             crate::action::FakeKind::Pass,
             quality.points * 0.25 * opening * bait,
         )
+    } else if state.primary_defender.is_some_and(|defender| {
+        // 防守人已经站定了：迟疑步冻结他的伸手时机。
+        world.players[defender.index].vel.length() < 3.0
+    }) {
+        (
+            crate::action::FakeKind::Hesitation,
+            quality.p_make * quality.points * fake_share * bait,
+        )
     } else {
         (
             crate::action::FakeKind::JabStep,
@@ -2104,13 +2602,26 @@ fn protect_candidate(world: &World, state: &DecisionState) -> Option<Candidate> 
     let hazard = (attempt_rate * typical * f64::from(policy.protection_seconds)) as f32;
     let avoided =
         hazard * policy.protection_poke_relief * world.params.policy.w("possession_value").max(0.0);
-    // 护球技术选择：低位用背身，防守人在球与筐之间时用转身，其余面框。
-    let kind = if state.distance_to_hoop() < 12.0 {
+    let trapped = world.trapped(state.actor);
+    // 护球技术选择：被包夹时用被包夹护球，低位用背身，防守人在球与筐
+    // 之间时用转身，其余面框。
+    let kind = if trapped {
+        crate::action::ProtectKind::Trap
+    } else if state.distance_to_hoop() < 12.0 {
         crate::action::ProtectKind::Post
     } else if defender.between_ball_and_hoop {
         crate::action::ProtectKind::Spin
     } else {
         crate::action::ProtectKind::FaceUp
+    };
+    // 被包夹时先把球护住是教练战术。执行层的切球成功率读同一个权威包夹
+    // 状态并施加 trap_poke_bonus 与 trap_protection_relief，决策层因此给这
+    // 一下护球一个战术先验，避免持球人在双人夹击下仍按普通贴身局面直接
+    // 运球或突破。
+    let tactical_bonus = if trapped {
+        world.params.policy.b("trap_protection_bonus")
+    } else {
+        f32::default()
     };
     Some((
         ActionKind::Protect(kind),
@@ -2126,7 +2637,7 @@ fn protect_candidate(world: &World, state: &DecisionState) -> Option<Candidate> 
             variance: f32::default(),
             clock_cost: clock_cost(world, state.shot_clock) * 0.5,
             foul_cost: f32::default(),
-            tactical_bonus: f32::default(),
+            tactical_bonus,
         },
     ))
 }
@@ -2162,13 +2673,17 @@ fn hold_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     } else if gap <= 3.2 {
         nba_domain::action_window::DribbleMoveKind::BetweenTheLegs
     } else if gap <= 4.5 {
-        if state.shot_clock < 10.0 {
+        if state.shot_clock < 14.0 {
+            // 迟疑步：进攻钟进入最后一段时顿一下，冻结防守人的伸手时机。
             nba_domain::action_window::DribbleMoveKind::Hesitation
         } else if state.lane_clearance < 3.0 {
             nba_domain::action_window::DribbleMoveKind::BehindTheBack
         } else {
             nba_domain::action_window::DribbleMoveKind::Retreat
         }
+    } else if !world.control.frontcourt {
+        // 还没推进过前场：这一下是推进运球，把球往前场带。
+        nba_domain::action_window::DribbleMoveKind::Advance
     } else if state.lane_clearance >= 3.0 {
         nba_domain::action_window::DribbleMoveKind::SpinMove
     } else {

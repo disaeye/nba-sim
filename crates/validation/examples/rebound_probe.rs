@@ -52,9 +52,7 @@ fn arm(value: f32, seeds: u64) -> (f64, f64, f64, f64, f64) {
                             boxout_facts += 1.0;
                         }
                     }
-                    Fact::Rebound {
-                        player, offensive, ..
-                    } => {
+                    Fact::Rebound { player, .. } => {
                         if let Some(true) = awaiting {
                             contested_total += 1.0;
                             if *player < home_lines {

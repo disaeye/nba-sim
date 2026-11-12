@@ -159,7 +159,7 @@ fn a_manifest_restores_the_custom_roster_and_league_profile() {
     assert_eq!(loaded.setup.away.name, "Ridge Riders");
     assert_eq!(loaded.setup.home.players[0].name, "Custom Starter");
 
-    let mut service = loaded
+    let service = loaded
         .into_session(params())
         .expect("manifest drives a fresh session");
     let info = service.snapshot().expect("snapshot after setup");

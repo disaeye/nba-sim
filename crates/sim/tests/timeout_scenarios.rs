@@ -271,8 +271,7 @@ fn the_fiba_game_budget_is_five() {
 
 #[test]
 fn the_overtime_budget_is_separate_from_the_game_budget() {
-    let mut world = nba_world(808);
-    let team = TeamSide::Home;
+    let world = nba_world(808);
     // 加时节的额度写在档案里：NBA 每次加时两次。
     assert_eq!(world.rules.league.timeouts.overtime_timeouts, 2);
     assert_eq!(

@@ -5,7 +5,7 @@
 //! 声明的终局状态核对。
 
 use nba_sim_core::action::Fact;
-use nba_sim_core::clock::{ClockCommit, ClockState};
+use nba_sim_core::clock::{ClockCommit, ClockState, TimerId};
 use nba_sim_core::GameReport;
 
 /// 独立重建出的时钟终局状态。
@@ -73,19 +73,30 @@ pub fn reconstruct_clock(report: &GameReport) -> Result<ReconstructedClock, Cloc
     if commits.is_empty() {
         return Err(ClockReconstructionError::NoClockCommits);
     }
-    // 球员数由引擎声明的出场时间决定：验证器不读引擎内部计时器，
-    // 只读公开事件，因此球员计时器按事件里出现的句柄集合建立。
-    let mut player_handles: Vec<usize> = Vec::new();
-    for event in &report.events {
-        if let Fact::ClockDirectivesCommitted { commits } = &event.fact {
-            for commit in commits {
-                if let ClockCommit::Segment(applied) = commit {
-                    player_handles.extend(applied.player_handles.iter().copied());
+    // 球员计时器数量由全部公开提交记录给出：推进段带本段上场球员，
+    // 指令可以单独写某个球员计时器，检查点自带人数。只从推进段推断
+    // 会在「某个球员只在指令或检查点里出现」的比赛里少建计时器。
+    let mut player_count = 0usize;
+    for commit in &commits {
+        match commit {
+            ClockCommit::Segment(applied) => {
+                for handle in &applied.player_handles {
+                    player_count = player_count.max(*handle + 1);
                 }
+            }
+            ClockCommit::Directive(applied) => {
+                if let TimerId::PlayerTime(handle) = applied.directive.timer() {
+                    player_count = player_count.max(handle + 1);
+                }
+                if let TimerId::PlayerTime(handle) = applied.timer {
+                    player_count = player_count.max(handle + 1);
+                }
+            }
+            ClockCommit::CheckpointSaved(_, checkpoint) => {
+                player_count = player_count.max(checkpoint.player_count());
             }
         }
     }
-    let player_count = player_handles.iter().max().map_or(0, |handle| handle + 1);
     let mut state = ClockState::for_replay(player_count);
     state
         .replay(&commits)

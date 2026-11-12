@@ -83,8 +83,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
     // 走回对位点。单次顶开有上限，不能一记掩护把人送出几步。
     if displacement_ft > 0.0 {
         let away = (world.players[defender].pos - world.players[screener].pos).normalize_or_zero();
-        let pushed = world.players[defender].pos + away * displacement_ft.min(0.6);
-        world.players[defender].pos = pushed;
+        crate::body::apply_contact_displacement(world, defender, away * displacement_ft.min(0.6));
     }
 
     // 移动掩护：掩护人还没落位就撞上防守人。接触本身是掩护的常态，
@@ -129,6 +128,50 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
     world.possession.screens += 1;
     // 掩护完成后掩护人必须选择顺下或外弹：记下时刻，无球决策读它。
     world.players[screener].screened_at = world.now();
+    // 掩护的技术变体决定掩护人往哪走：顺下滚向篮下，外弹弹向外线，
+    // 提前滑出则在接触之前先离开。变体因此改变防守人追谁。
+    match kind {
+        ScreenKind::Roll => {
+            let hoop = world.hoop_for(team);
+            let direction = (hoop - world.players[screener].pos).normalize_or_zero();
+            let roll = world.players[screener].pos
+                + direction * world.params.policy.g("screen_roll_distance_ft");
+            crate::assignment::force_target_as(
+                world,
+                screener,
+                roll,
+                crate::state::TargetKind::Window,
+                intent.actor,
+            );
+        }
+        ScreenKind::Pop => {
+            let direction = (world.players[screener].pos - world.hoop_for(team)).normalize_or_zero();
+            let pop = world.players[screener].pos
+                + direction * world.params.policy.g("screen_pop_distance_ft");
+            crate::assignment::force_target_as(
+                world,
+                screener,
+                pop,
+                crate::state::TargetKind::Window,
+                intent.actor,
+            );
+        }
+        ScreenKind::Slip => {
+            // 提前滑出：掩护人在接触之前先离开，防守人被晃过。
+            let direction = (world.players[screener].pos - world.players[defender].pos)
+                .normalize_or_zero();
+            let slip = world.players[screener].pos
+                + direction * world.params.policy.g("screen_slip_distance_ft");
+            crate::assignment::force_target_as(
+                world,
+                screener,
+                slip,
+                crate::state::TargetKind::Window,
+                intent.actor,
+            );
+        }
+        ScreenKind::OnBall | ScreenKind::OffBall | ScreenKind::HandOff => {}
+    }
     world.emit(Fact::Screen {
         screener,
         team,

@@ -91,7 +91,9 @@ fn shared_action_runtime_assigns_one_interaction_to_each_participant() {
     ));
     let handler = world.players[0].action.as_ref().expect("handler action");
     let screener = world.players[1].action.as_ref().expect("screener action");
-    assert_eq!(handler.action_id, screener.action_id);
+    // 交互是多人动作的调度单位，行动���是每个参与者自己的：两个人参与
+    // 同一次掩护时，他们有两个动作身份与一个交互身份。
+    assert_ne!(handler.action_id, screener.action_id);
     assert_eq!(handler.interaction_id, screener.interaction_id);
     assert_eq!(handler.player, 0);
     assert_eq!(screener.player, 1);

@@ -14,7 +14,7 @@ use nba_sim_core::action::Fact;
 use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::state::Phase;
 use nba_sim_core::world::{World, TICK_SECONDS};
-use nba_sim_core::{MatchSetup, Params, TeamSide};
+use nba_sim_core::{MatchSetup, Params};
 
 fn world_with_profile(seed: u64, league: LeagueProfile) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
@@ -61,7 +61,7 @@ fn the_nba_opens_the_second_period_with_a_throw_in() {
 
 #[test]
 fn the_fiba_opens_later_periods_with_the_alternate_possession_arrow() {
-    let mut world = fiba_world(1402);
+    let world = fiba_world(1402);
     assert!(
         world.rules.league.period_starts_with_jump_ball(1),
         "FIBA 第一节跳球"
@@ -80,7 +80,7 @@ fn the_fiba_opens_later_periods_with_the_alternate_possession_arrow() {
 
 #[test]
 fn the_nba_overtime_periods_start_with_a_jump_ball() {
-    let mut world = nba_world(1403);
+    let world = nba_world(1403);
     assert!(
         world.rules.league.period_starts_with_jump_ball(5),
         "NBA 加时节跳球"

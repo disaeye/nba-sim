@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use crate::action::{
     ActionIntent, ActionKind, ActionRuntime, DefensiveActionKind, DefensiveActionRuntime, Fact,
-    Interaction, TeamSide, TurnoverKind,
+    Interaction, TeamSide,
 };
 use crate::ball::BallBody;
 use crate::boxscore::{BoxScore, PlayerLine};
@@ -229,8 +229,15 @@ pub struct World {
     pub timeouts: [crate::timeouts::TimeoutBudget; 2],
     /// 已经发生过的强制暂停触发点（位图，位序同联赛档案里的触发表）。
     pub mandatory_timeouts_fired: u32,
-    /// 最近一条可复核的裁决：发球类裁定写入它。
-    pub last_ruling: Option<crate::challenge::Ruling>,
+    /// 复核程序的状态：登记的待复核裁决与已发布的结论。
+    pub review_state: crate::review_program::ReviewState,
+    /// 当前进行的节末结算。
+    ///
+    /// 结算存在时比赛处在 `Finalizing`：停止新增普通进攻动作，直到全部
+    /// 待决事项关闭。
+    pub settlement: Option<crate::settlement::PeriodSettlement>,
+    /// 终场结算已经发布：比分、球权、动作与计时器就此冻结。
+    pub settled: bool,
     /// 两队各自剩余的教练挑战额度。
     pub challenges_left: [u8; 2],
     /// 罚球程序开始时刻：罚球人必须在联赛规定的时限内出手。
@@ -366,10 +373,7 @@ impl World {
             "finished stage requires finished phase"
         );
         assert_eq!(
-            phase.stage(
-                self.clock.period(),
-                self.rules.league.periods.regulation_periods,
-            ),
+            self.stage_for(phase),
             stage,
             "phase and match stage disagree"
         );
@@ -399,14 +403,6 @@ impl World {
             next_stage, expected_stage,
             "period break destination must match the next period"
         );
-        let current_stage = self.match_stage();
-        assert!(
-            matches!(
-                current_stage,
-                crate::state::MatchStage::Regulation | crate::state::MatchStage::Overtime
-            ),
-            "period break cannot begin from {current_stage:?}"
-        );
         let stage = phase.stage(
             self.clock.period(),
             self.rules.league.periods.regulation_periods,
@@ -422,6 +418,8 @@ impl World {
             phase.program(),
             crate::state::MatchProgram::PeriodSettlement
         );
+        // 节次推进不检查阶段迁移表：节间休息与加时都是同一条节次推进
+        // 路径上的不同目的地，迁移表描述的是比赛宏观顺序。
         self.current_program_id = ProgramId::next(&mut self.identities).raw();
         self.phase = phase;
     }
@@ -868,15 +866,24 @@ impl World {
     /// 所以凡是读「活球」的地方都隐含了「球不在飞行中」。飞行现在是球的
     /// 独立维度，这个判定把旧语义还原出来：飞行期间程序仍然是活球，
     /// 但没有人在打球。
+    ///
+    /// 节末结算期间没有活球：结算要停下来，等待决事项关闭。
     pub fn live_play(&self) -> bool {
-        matches!(self.phase(), Phase::Live) && self.ball_flight.is_none()
+        matches!(self.phase(), Phase::Live)
+            && self.ball_flight.is_none()
+            && self.settlement.is_none()
     }
 
     /// 旧模型里的「活球」：活球阶段与三种飞行阶段都算，罚球飞行不算。
     ///
     /// 换人门控与犯满离场检查读的是这个口径：球在传球或投篮飞行中时，
     /// 比赛仍在进行，阵容不能动。
+    ///
+    /// 节末结算期间比赛已经停表：阵容可以动。
     pub fn live_or_flight(&self) -> bool {
+        if self.settlement.is_some() {
+            return false;
+        }
         match self.phase() {
             Phase::Live => true,
             // 跳球撮球在空中：旧模型是跳球飞行阶段，属于活球。
@@ -923,6 +930,121 @@ impl World {
         self.ball.set_held(holder);
         self.note_last_touch(holder);
         self.commit_control_transition("control_established");
+    }
+
+    /// 记录出手人对扑防的应对。
+    ///
+    /// 应对覆盖到这次出手结算为止：出手之后就没有扑防了。
+    pub fn set_shooter_closeout_response(&mut self, shooter: usize, response: &'static str) {
+        self.players[shooter].closeout_response = Some(response);
+        // 扑防应答有身份：协议投影与事件流都指到它。
+        self.posture_action_id(shooter, crate::state::PostureSlot::Closeout, response);
+    }
+
+    /// 结束全部仍在进行的持续姿态。
+    ///
+    /// 终场时姿态可能还在：它必须在这里结束，否则事件流里有一个没有终态
+    /// 的动作。
+    pub fn end_all_postures(&mut self) {
+        for player in 0..self.players.len() {
+            for slot in [
+                crate::state::PostureSlot::OnBall,
+                crate::state::PostureSlot::Transition,
+                crate::state::PostureSlot::OffBall,
+                crate::state::PostureSlot::Closeout,
+            ] {
+                self.end_posture(player, slot);
+            }
+        }
+    }
+
+    /// 持续姿态的动作身份。
+    ///
+    /// 姿态不是带窗口的动作，但它仍然有身份：渲染器要能认出“这是同一个
+    /// 姿态”，事件流也要能指到它。身份由引擎分配，因此姿态与动作共用同一
+    /// 套身份空间，不会出现两个身份指向同一个东西。
+    ///
+    /// 姿态登记自己的开始事实与时间边界：它没有准备、执行与收势三段，
+    /// 因此它不借用动作生命周期的事实。
+    ///
+    /// 变体由调用方给出：同一个槽位上的不同变体（职责名、站位名）因此
+    /// 在事件流里分得开。
+    ///
+    /// 无球职责与持球站位的姿态不发开始事实：职责变化与站位变化那两
+    /// 条事实已经带着它们��身份与开始时刻，因此这里只分配身份。
+    pub fn posture_action_id(
+        &mut self,
+        player: usize,
+        slot: crate::state::PostureSlot,
+        variant: &'static str,
+    ) -> u64 {
+        let index = slot.index();
+        if self.players[player].posture_action_ids[index] == 0 {
+            self.next_action_id += 1;
+            self.players[player].posture_action_ids[index] = self.next_action_id;
+            self.players[player].posture_since[index] = self.now();
+            self.players[player].posture_variants[index] = variant;
+            if !matches!(
+                slot,
+                crate::state::PostureSlot::OffBall | crate::state::PostureSlot::OnBall
+            ) {
+                self.emit(Fact::PostureStarted {
+                    action_id: self.players[player].posture_action_ids[index],
+                    player,
+                    slot: crate::state::posture_slot_name(slot),
+                    variant,
+                });
+            }
+        }
+        self.players[player].posture_action_ids[index]
+    }
+
+    /// 持续姿态开始的时刻。
+    pub fn posture_since(&self, player: usize, slot: crate::state::PostureSlot) -> f64 {
+        self.players[player].posture_since[slot.index()]
+    }
+
+    /// 持续姿态在这一刻结束。
+    ///
+    /// 姿态与动作一样有唯一终态：姿态结束时发布终态事实，事件流因此能
+    /// 重建姿态的起止。
+    ///
+    /// 无球职责与持球站位的姿态由职责变化与站位变化那两条事实收尾：
+    /// 职责与站位就是姿态，因此它们不再发重复的姿态结束事实。其余姿态
+    /// 自己发终态事实。
+    pub fn end_posture(&mut self, player: usize, slot: crate::state::PostureSlot) {
+        let index = slot.index();
+        let action_id = self.players[player].posture_action_ids[index];
+        if action_id == 0 {
+            return;
+        }
+        let variant = self.players[player].posture_variants[index];
+        self.players[player].posture_action_ids[index] = 0;
+        self.players[player].posture_variants[index] = "";
+        // 姿态的内容也要清掉：姿态结束时它不再是这名球员正在做的事。
+        match slot {
+            crate::state::PostureSlot::OnBall => {
+                self.players[player].on_ball_positioning = None;
+                // 站位变化的终态由站位变化那条事实给出。
+                return;
+            }
+            crate::state::PostureSlot::Transition => {
+                self.players[player].transition = None;
+            }
+            crate::state::PostureSlot::Closeout => {
+                self.players[player].closeout_response = None;
+            }
+            crate::state::PostureSlot::OffBall => {
+                // 职责变化的终态由职责变化那条事实给出。
+                return;
+            }
+        }
+        self.emit(Fact::PostureEnded {
+            action_id,
+            player,
+            slot: crate::state::posture_slot_name(slot),
+            variant,
+        });
     }
 
     /// 记录最后一次触球。
@@ -994,10 +1116,7 @@ impl World {
         if matches!(phase, Phase::PeriodBreak { .. }) {
             self.set_period_phase(phase);
         } else {
-            let stage = phase.stage(
-                self.clock.period(),
-                self.rules.league.periods.regulation_periods,
-            );
+            let stage = self.stage_for(phase);
             let program = phase.program();
             self.set_program_phase(stage, program, phase);
         }
@@ -1018,9 +1137,44 @@ impl World {
     }
 
     pub fn match_stage(&self) -> crate::state::MatchStage {
-        self.phase().stage(
+        self.stage_for(self.phase())
+    }
+
+    /// 阶段在给定程序下的读数。
+    ///
+    /// 结算期间比赛处在 `Finalizing`：程序本身照旧推进，阶段读数由结算
+    /// 决定。终场与节间不受结算影响：这两段各有自己的读数。
+    fn stage_for(&self, phase: Phase) -> crate::state::MatchStage {
+        if matches!(phase, Phase::Finished) {
+            return crate::state::MatchStage::Finished;
+        }
+        if matches!(phase, Phase::PeriodBreak { .. }) {
+            return phase.stage(
+                self.clock.period(),
+                self.rules.league.periods.regulation_periods,
+            );
+        }
+        if self.settlement.is_some() {
+            return crate::state::MatchStage::Finalizing;
+        }
+        phase.stage(
             self.clock.period(),
             self.rules.league.periods.regulation_periods,
+        )
+    }
+
+    /// 这次出手是否还在飞行中。
+    pub fn shot_in_flight(&self, shot_id: u64) -> bool {
+        self.pending_shot
+            .as_ref()
+            .is_some_and(|shot| shot.shot_id == shot_id)
+    }
+
+    /// 这个联赛是否承认节末比赛钟的复核问题。
+    pub fn reviews_game_clock_at_period_end(&self) -> bool {
+        crate::review_program::is_reviewable(
+            self,
+            crate::review_program::ReviewScope::GameClockAtPeriodEnd,
         )
     }
 
@@ -1151,7 +1305,9 @@ impl World {
                 crate::timeouts::TimeoutBudget::new(&rules_capture),
             ],
             mandatory_timeouts_fired: u32::default(),
-            last_ruling: None,
+            review_state: crate::review_program::ReviewState::default(),
+            settlement: None,
+            settled: false,
             challenges_left: [
                 rules_capture.league.review.challenges_per_game.min(u8::MAX as u32) as u8,
                 rules_capture.league.review.challenges_per_game.min(u8::MAX as u32) as u8,
@@ -1441,7 +1597,7 @@ impl World {
                 | ShotKind::AlleyOop
                 | ShotKind::Putback,
             )
-            | ActionKind::Finish => (
+            | ActionKind::Finish(_) => (
                 rules.layup_prep_seconds,
                 rules.layup_exec_seconds,
                 rules.layup_follow_seconds,
@@ -1451,11 +1607,19 @@ impl World {
                 rules.jump_shot_exec_seconds,
                 rules.jump_shot_follow_seconds,
             ),
+            // 罚球的出手窗口与跳投一致。
+            ActionKind::FreeThrow => (
+                rules.jump_shot_prep_seconds,
+                rules.jump_shot_exec_seconds,
+                rules.jump_shot_follow_seconds,
+            ),
             ActionKind::Pass(_) => (
                 rules.pass_prep_seconds,
                 rules.pass_exec_seconds,
                 rules.pass_follow_seconds,
             ),
+            // 篮板动作：跳起来够球是一段短窗口，落地收势占整个后续。
+            ActionKind::Rebound(_) => (0.15, 0.25, rules.rebound_follow_seconds),
             ActionKind::Screen(_) => (
                 rules.screen_prep_seconds,
                 rules.screen_exec_seconds,
@@ -1464,8 +1628,8 @@ impl World {
             ActionKind::Drive(_)
             | ActionKind::Dribble(_)
             | ActionKind::Cut(_)
-            | ActionKind::PostUp
-            | ActionKind::Relocate => (
+            | ActionKind::PostUp(_)
+            | ActionKind::Relocate(_) => (
                 rules.tactics.drive_min_duration_seconds,
                 rules.tactics.drive_max_duration_seconds,
                 rules.tactical_initiation_seconds,
@@ -1499,10 +1663,15 @@ impl World {
         follow_through: f64,
         phase: nba_domain::action_window::ActionPhase,
     ) -> u64 {
+        // 交互是多人动作的调度单位，行动���是每个参与者自己的：两个人
+        // 参与同一次掩护时，他们有两个动作身份与一个交互身份。因此事件流
+        // 能分别指出谁做了什么，交互又能指出这是一次配合。
         self.next_action_id += 1;
-        let action_id = self.next_action_id;
+        let primary_action_id = self.next_action_id;
         let kind = intent.kind.as_str();
         for &(player, role) in participants {
+            self.next_action_id += 1;
+            let action_id = self.next_action_id;
             let participant_intent = intent.clone();
             let runtime = ActionRuntime::new(
                 action_id,
@@ -1524,7 +1693,7 @@ impl World {
                 target: intent.target,
             });
         }
-        action_id
+        primary_action_id
     }
 
     pub(crate) fn cancel_actions(&mut self, reason: &'static str) {
@@ -1540,10 +1709,7 @@ impl World {
                 continue;
             }
             let runtime = self.players[player].action.take().unwrap();
-            if self.players[player].target_kind == crate::state::TargetKind::Contact {
-                self.players[player].target_kind = crate::state::TargetKind::Station;
-                self.players[player].target_partner = usize::MAX;
-            }
+            self.release_contact_target(player);
             self.emit(Fact::ActionCancelled {
                 action_id: runtime.action_id,
                 player,
@@ -1555,10 +1721,10 @@ impl World {
         let alive: Vec<u64> = self
             .players
             .iter()
-            .filter_map(|player| player.action.as_ref().map(|runtime| runtime.action_id))
+            .filter_map(|player| player.action.as_ref().map(|runtime| runtime.interaction_id))
             .collect();
         self.interactions
-            .retain(|_, interaction| alive.contains(&interaction.action_id));
+            .retain(|_, interaction| alive.contains(&interaction.id));
         self.screen_defender = None;
     }
 
@@ -1611,10 +1777,10 @@ impl World {
         let alive: Vec<u64> = self
             .players
             .iter()
-            .filter_map(|player| player.action.as_ref().map(|runtime| runtime.action_id))
+            .filter_map(|player| player.action.as_ref().map(|runtime| runtime.interaction_id))
             .collect();
         self.interactions
-            .retain(|_, interaction| alive.contains(&interaction.action_id));
+            .retain(|_, interaction| alive.contains(&interaction.id));
     }
 
     /// 流尾部尚未结算的业务实例：飞行中的出手、飞行中的传球、未执行完的罚球。
@@ -1629,6 +1795,7 @@ impl World {
     }
 
     pub fn report(&mut self) -> GameReport {
+        let box_score = self.box_score_with_player_time();
         GameReport {
             seed: self.seed,
             home_team: self.home_team_name.clone(),
@@ -1646,7 +1813,7 @@ impl World {
             rebound_attempts: self.rebound_attempts,
             contested_rebounds: self.contested_rebounds,
             possessions: self.possession_log.clone(),
-            box_score: self.box_score.clone(),
+            box_score,
             events: std::mem::take(&mut self.events),
             shot_clock_at_release: std::mem::take(&mut self.shot_clock_at_release),
             contest_samples: std::mem::take(&mut self.contest_samples),
@@ -1661,6 +1828,24 @@ impl World {
             violations: std::mem::take(&mut self.violations),
             games: 1,
         }
+    }
+
+    /// 箱体：每名球员的上场时间从时钟的计时器读出。
+    ///
+    /// 球员累计时间的唯一事实源是时钟的每名球员计时器：箱体自己另记一
+    /// 份会在比赛钟被复核恢复时与时钟分家。
+    pub fn box_score_with_player_time(&self) -> crate::boxscore::BoxScore {
+        let mut box_score = self.box_score.clone();
+        for player in 0..self.players.len() {
+            let seconds = self.clock.player_time_seconds(player);
+            let slot = self.line_slot[player] as usize;
+            let lines = match self.players[player].team {
+                TeamSide::Home => &mut box_score.home,
+                TeamSide::Away => &mut box_score.away,
+            };
+            lines[slot].seconds = seconds;
+        }
+        box_score
     }
 
     pub fn team_index(team: TeamSide) -> usize {
@@ -1898,7 +2083,6 @@ impl World {
     /// 那一刻的读数。
     pub fn snapshot_clock_checkpoint(&mut self) -> Option<nba_domain::CheckpointId> {
         let checkpoint_id = nba_domain::CheckpointId::next(&mut self.identities);
-        let context = self.clock_context();
         self.clock.controller().save_checkpoint(checkpoint_id);
         self.commit_clock_directives();
         Some(checkpoint_id)
@@ -1952,11 +2136,9 @@ impl World {
         let team_changed = current.team != previous.team
             && current.team.is_some()
             && previous.team.is_some();
-        let team_lost = previous.team.is_some() && current.team.is_none();
         let team = current.team;
         let holder = current.holder;
         let ball_state = current.ball_state;
-        let sequence_id = current.sequence_id.unwrap_or(0);
         if team_changed {
             let sequence = ControlSequenceId::next(&mut self.identities);
             current.sequence_id = Some(sequence.raw());
@@ -2106,6 +2288,10 @@ impl World {
     }
 
     pub fn add_points(&mut self, team: TeamSide, points: u32) {
+        assert!(
+            !self.settled,
+            "score changed after the terminal period settlement completed"
+        );
         self.scoring_run = if self.last_scoring == Some(Self::team_index(team)) {
             self.scoring_run.saturating_add(points)
         } else {
@@ -2524,6 +2710,9 @@ impl World {
         if self.finished {
             return;
         }
+        // 复核程序由主循环自己推进：教练在档案允许的窗口内申请挑战，否则
+        // 由裁判按档案授权的复核范围发起即时回放。
+        self.review_step();
         let clock_context = self.clock_context();
         self.clock.advance_tick();
         let phase_before_step = self.phase;
@@ -2561,16 +2750,6 @@ impl World {
         } else {
             0.0
         };
-        if player_time_seconds > 0.0 {
-            for &handle in self.on_court_home.as_slice() {
-                let slot = self.line_slot[handle] as usize;
-                self.box_score.home[slot].seconds += player_time_seconds;
-            }
-            for &handle in self.on_court_away.as_slice() {
-                let slot = self.line_slot[handle] as usize;
-                self.box_score.away[slot].seconds += player_time_seconds;
-            }
-        }
         if player_time_seconds > 0.0 {
             self.update_stamina(player_time_seconds);
         }
@@ -2883,12 +3062,18 @@ impl World {
     /// 只有被快攻跑位改过目标的球员会被改回去，持球人和其他球员的当前
     /// 目标不受影响。
     fn expire_break_targets(&mut self) {
-        if self.possession.break_return.is_empty() {
+        if self.possession.break_return.is_empty()
+            && self.possession.transition_players.is_empty()
+        {
             return;
         }
         let window = f64::from(self.params.policy.g("transition_window_seconds"));
         if self.now() < self.possession.started_at + window {
             return;
+        }
+        // 快攻窗口结束：转换姿态在这里收势，跑者回到自己的站位。
+        for handle in std::mem::take(&mut self.possession.transition_players) {
+            self.end_posture(handle, crate::state::PostureSlot::Transition);
         }
         let returns = std::mem::take(&mut self.possession.break_return);
         for (handle, spot) in returns {
@@ -3134,7 +3319,7 @@ impl World {
                 continue;
             }
             // 评估过就后退调度：否则不满足条件的防守人每 tick 都被重新评估。
-            // 主动赌博是稀有动作：每名防守人每 4 秒才考虑一次。
+            // 主动赌博是稀有动作：每名防守人每 8 秒才考虑一次。
             self.players[defender].schedule.next_redecide_at =
                 now + f64::from(self.rules.redecide_interval_seconds) * 8.0;
             let gap = self.players[defender].pos.distance(ball);
@@ -3150,10 +3335,22 @@ impl World {
                 crate::draw::purpose::STEAL_CREDIT,
                 7,
             ));
-            if roll >= chance {
+            if roll < chance {
+                // 抢断尝试：赌一次抄截。
+                self.start_defensive_steal(defender, holder, &policy);
                 continue;
             }
-            self.start_defensive_steal(defender, holder, &policy);
+            // 掏球：贴着球去摸。抄截赌一次，掏球是持续动作，因此两者的
+            // 窗口不同。贴得够近才够得着球。
+            let reach = crate::physical::Physical::of(&self.players[defender], &self.params.policy)
+                .standing_reach_ft
+                + self.players[defender]
+                    .attribute("steal")
+                    * self.params.policy.g("poke_reach_steal_ft");
+            if gap > reach {
+                continue;
+            }
+            self.start_defensive_poke(defender, holder, &policy);
         }
     }
 
@@ -3180,6 +3377,7 @@ impl World {
             }
             // 对位变了：这段姿态结束，防守人可以重新挑一次。
             self.players[defender].on_ball_positioning = None;
+            self.end_posture(defender, crate::state::PostureSlot::OnBall);
             self.players[defender].positioning_next_at = now;
         }
         let Some(holder) = self.holder() else {
@@ -3225,13 +3423,23 @@ impl World {
     /// 状态，因此它不会干扰对位的连续性。
     fn set_on_ball_positioning(&mut self, defender: usize, kind: crate::action::OnBallPositioning) {
         self.players[defender].on_ball_positioning = Some(kind);
+        let variant = match kind {
+            crate::action::OnBallPositioning::Slide => "slide",
+            crate::action::OnBallPositioning::Contain => "contain",
+            crate::action::OnBallPositioning::ChargeTake => "charge_take",
+            crate::action::OnBallPositioning::Chase => "chase",
+        };
+        // 站位变化的事实带着站位姿态的身份落下：站位就是持球姿态，
+        // 因此这一条事实同时给出姿态的身份与开始时刻。
+        let action_id = self.posture_action_id(
+            defender,
+            crate::state::PostureSlot::OnBall,
+            variant,
+        );
         self.emit(Fact::OnBallPositioningChanged {
             defender,
-            kind: match kind {
-                crate::action::OnBallPositioning::Slide => "slide",
-                crate::action::OnBallPositioning::Contain => "contain",
-                crate::action::OnBallPositioning::ChargeTake => "charge_take",
-            },
+            kind: variant,
+            action_id,
         });
     }
 
@@ -3252,6 +3460,11 @@ impl World {
         let slide_start = policy.g("on_ball_slide_start_ft");
         let contain_range = policy.g("on_ball_contain_range_ft");
         if gap > slide_start {
+            // 离得太远：持球人正在突破说明他刚过掉自己，这时候是追防；
+            // 其余情况是滑步过去，保持一个身位的间隔。
+            if self.possession.ball_phase == crate::state::BallPhase::Drive {
+                return Some(OnBallPositioning::Chase);
+            }
             return Some(OnBallPositioning::Slide);
         }
         // 持球人正在突破：防守人站住占位置，逼迫他绕开。
@@ -3266,7 +3479,7 @@ impl World {
         Some(OnBallPositioning::Slide)
     }
 
-    /// 垂直起跳封盖：协防人跳起伸手，执行窗口内摸高增加。
+    /// 起跳封盖：协防人跳起伸手，执行窗口内摸高增加。
     ///
     /// 跳起的人无法卡位抢篮板：起跳期间他不参与 box-out，这是这次冒险的代价。
     fn advance_block_jumps(&mut self) {
@@ -3358,7 +3571,7 @@ impl World {
                 closest = Some((defender, gap));
             }
         }
-        let Some((defender, _)) = closest else {
+        let Some((defender, gap)) = closest else {
             return;
         };
         // 协防人已经在跑站位动作时，他起不来跳：起跳封盖是更重要的一次
@@ -3373,7 +3586,23 @@ impl World {
         {
             self.cancel_defensive_action(defender, "block_jump_takes_over");
         }
-        self.start_defensive_block_jump(defender, shooter, &policy);
+        // 追身封盖：防守人在投篮人身后，封盖必须从后面追上去。垂直起跳
+        // 则是在正面垂直跳起，两者的手球几何不同。
+        let shooter_facing = self.players[shooter].facing;
+        let defender_to_shooter =
+            (self.players[shooter].pos - self.players[defender].pos).normalize_or_zero();
+        let from_behind = shooter_facing.dot(defender_to_shooter) < 0.0;
+        let chase_down = from_behind && gap > policy.block_jump_radius_ft * 0.5;
+        // 正面贴住投篮人时，防守人垂直跳起伸手而不是向前扑：起跳点在
+        // 投篮人正上方，封盖的手球几何因此与扑防不同。
+        let verticality = !from_behind && gap <= policy.block_jump_radius_ft * 0.6;
+        self.start_defensive_block_jump(defender, shooter, &policy, chase_down, verticality);
+        // 扑防应答：防守人起跳之后，出手人必须决定迎上去造接触还是侧移
+        // 避让。这个决定在起跳的那一刻做出，因为它是针对这次起跳的。
+        let response = crate::resolve::shot::closeout_response(self, shooter);
+        if let Some(response_kind) = response.action_kind() {
+            self.set_shooter_closeout_response(shooter, response_kind);
+        }
     }
 
     fn start_defensive_block_jump(
@@ -3381,6 +3610,8 @@ impl World {
         defender: usize,
         shooter: usize,
         policy: &nba_domain::resolve::TechniquePolicy,
+        chase_down: bool,
+        verticality: bool,
     ) {
         let start_time = self.now();
         let preparation_ends_at = start_time + f64::from(policy.block_jump_prep_seconds);
@@ -3394,7 +3625,13 @@ impl World {
         self.defensive_actions[defender] = Some(DefensiveActionRuntime {
             action_id,
             interaction_id,
-            kind: DefensiveActionKind::BlockJump,
+            kind: if chase_down {
+                DefensiveActionKind::ChaseDownBlock
+            } else if verticality {
+                DefensiveActionKind::Verticality
+            } else {
+                DefensiveActionKind::BlockJump
+            },
             defender,
             shooter,
             phase: nba_domain::action_window::ActionPhase::Preparation,
@@ -3410,7 +3647,13 @@ impl World {
             interaction_id,
             defender,
             shooter,
-            kind: DefensiveActionKind::BlockJump.as_str(),
+            kind: if chase_down {
+                DefensiveActionKind::ChaseDownBlock.as_str()
+            } else if verticality {
+                DefensiveActionKind::Verticality.as_str()
+            } else {
+                DefensiveActionKind::BlockJump.as_str()
+            },
             start_position,
         });
     }
@@ -3450,6 +3693,45 @@ impl World {
             defender,
             shooter: holder,
             kind: DefensiveActionKind::StealAttempt.as_str(),
+            start_position,
+        });
+    }
+
+    fn start_defensive_poke(
+        &mut self,
+        defender: usize,
+        holder: usize,
+        policy: &nba_domain::resolve::TechniquePolicy,
+    ) {
+        let start_time = self.now();
+        let preparation_ends_at = start_time + f64::from(policy.steal_attempt_prep_seconds);
+        let execution_ends_at = preparation_ends_at + f64::from(policy.steal_attempt_exec_seconds);
+        let ends_at = execution_ends_at + f64::from(policy.steal_attempt_follow_seconds);
+        self.next_action_id += 1;
+        self.next_interaction_id += 1;
+        let action_id = self.next_action_id;
+        let interaction_id = self.next_interaction_id;
+        let start_position = self.players[defender].pos;
+        self.defensive_actions[defender] = Some(DefensiveActionRuntime {
+            action_id,
+            interaction_id,
+            kind: DefensiveActionKind::Poke,
+            defender,
+            shooter: holder,
+            phase: nba_domain::action_window::ActionPhase::Preparation,
+            preparation_ends_at,
+            execution_ends_at,
+            ends_at,
+            start_position,
+            target_position: self.ball.pos,
+            completed: false,
+        });
+        self.emit(Fact::DefensiveActionStarted {
+            action_id,
+            interaction_id,
+            defender,
+            shooter: holder,
+            kind: DefensiveActionKind::Poke.as_str(),
             start_position,
         });
     }
@@ -3507,6 +3789,21 @@ impl World {
         });
     }
 
+    /// 释放一名球员的贴身落点。
+    ///
+    /// 贴身落点属于动作：动作结束时它必须释放，否则球员会一直朝着一个
+    /// 已经失效的点走。参与人也会拿到贴身落点，因此每一个参与者都要在
+    /// 自己的动作结束时释放它。
+    fn release_contact_target(&mut self, player: usize) {
+        if self.players[player].target_kind == crate::state::TargetKind::Contact {
+            self.players[player].target_kind = crate::state::TargetKind::Station;
+            self.players[player].target_partner = usize::MAX;
+            self.players[player].yielding_since = 0.0;
+            self.players[player].nonprogress_seconds = 0.0;
+            self.players[player].progress_best_ft = f32::MAX;
+        }
+    }
+
     fn advance_parallel_actions(&mut self) {
         for player in 0..self.players.len() {
             let Some(runtime) = self.players[player].action.as_ref() else {
@@ -3518,6 +3815,7 @@ impl World {
                 continue;
             }
             let runtime = self.players[player].action.take().unwrap();
+            self.release_contact_target(player);
             self.emit(Fact::ActionCompleted {
                 action_id: runtime.action_id,
                 player,
@@ -3553,7 +3851,7 @@ impl World {
             let actor_running = self.players[interaction.intent.actor]
                 .action
                 .as_ref()
-                .is_some_and(|runtime| runtime.action_id == interaction.action_id);
+                .is_some_and(|runtime| runtime.interaction_id == interaction.id);
             if !actor_running {
                 continue;
             }
@@ -3609,17 +3907,18 @@ impl World {
             }
         }
         for player in 0..self.players.len() {
-            let Some(runtime) = self.players[player].action.take() else {
+            let Some(mut runtime) = self.players[player].action.take() else {
                 continue;
             };
             if runtime.action_id != action_id {
                 self.players[player].action = Some(runtime);
                 continue;
             }
-            if self.players[player].target_kind == crate::state::TargetKind::Contact {
-                self.players[player].target_kind = crate::state::TargetKind::Station;
-                self.players[player].target_partner = usize::MAX;
-            }
+            self.release_contact_target(player);
+            // 结算层可能把技术改写成实际发生的那一种：绕开挡路防守人的
+            // 那一步没有发生时，这一篮就是普通上篮。运行时与终态事实都
+            // 记改写后的技术，因此运行时、事件流与协议投影说的是同一件事。
+            runtime.intent.kind = outcome.kind;
             let fact = match outcome.completion {
                 crate::action::Completion::Completed => Fact::ActionCompleted {
                     action_id: runtime.action_id,
@@ -3716,12 +4015,17 @@ impl World {
                     return;
                 }
                 crate::resolve::shot::check_goaltending(self);
+                // 出手已有结果时立刻结算：钟响之后球还在飞，出手仍然按它
+                // 离手那一刻的钟值结算，结算完成后节末结算才有得可做。
                 if self
                     .pending_shot
                     .as_ref()
                     .is_some_and(|pending| pending.result.is_some())
-                    || now >= flight.resolve_at
                 {
+                    crate::resolve::shot::finish(self);
+                    return;
+                }
+                if now >= flight.resolve_at {
                     crate::resolve::shot::finish(self);
                 }
             }
@@ -3732,6 +4036,11 @@ impl World {
         let now = self.now();
         match self.phase {
             Phase::DeadBall { team, ready_at } => {
+                // 结算期间不开新回合：死球到点也不能发球，节末结算等到
+                // 全部待决事项关闭后才决定休息、下一节、加时或终场。
+                if self.settlement.is_some() {
+                    return;
+                }
                 if now >= ready_at {
                     if let Some(pending) = self.pending_jump_ball.clone() {
                         // 参跳四人到位才掷球：停表期间不等同于瞬移。
@@ -3776,6 +4085,10 @@ impl World {
                 }
             }
             Phase::Inbound { team, ready_at } => {
+                // 结算期间不开新回合：发球程序同样等结算结束。
+                if self.settlement.is_some() {
+                    return;
+                }
                 // 发球程序本身等发球队员走到发球点。
                 //
                 // 五秒计时由检测层负责：它覆盖整段发球程序，到球被传入
@@ -3934,6 +4247,11 @@ impl World {
                 // 已经不在活球程序里，时钟违例不再成立。不重读阶段的话，
                 // 刚开出来的罚球程序会被这一条违例覆盖掉。
                 if !matches!(self.phase, Phase::Live) {
+                    return;
+                }
+                // 结算期间比赛钟可能已经被复核恢复：那一节继续，进攻钟
+                // 违例照旧判定。
+                if self.settlement.is_some() {
                     return;
                 }
                 // 进攻钟走完的那一刻就是违例成立的那一刻：检测与裁决在这
@@ -4152,36 +4470,107 @@ impl World {
     }
 
     fn check_period_end(&mut self) {
-        if self.clock.game_clock() > 0.0 || self.finished {
+        if self.finished {
             return;
         }
-        if matches!(self.phase(), Phase::FreeThrows { .. }) {
+        if self.settlement.is_none() {
+            if self.clock.game_clock() > 0.0 {
+                return;
+            }
+            self.open_settlement();
             return;
         }
-        if self
-            .pending_shot
+        // 结算期间比赛钟可能被复核恢复到出手那一刻的读数：本节因此继续，
+        // 结算作废，比赛回到活球阶段。
+        if self.clock.game_clock() > 0.0 {
+            self.abort_settlement();
+            return;
+        }
+        self.sync_settlement();
+        if !self
+            .settlement
             .as_ref()
-            .is_some_and(|shot| shot.result.is_none() && shot.free_throw.is_none())
+            .expect("the settlement is open")
+            .is_settled()
         {
             return;
         }
+        self.complete_settlement();
+    }
+
+    /// 时钟归零：进入节末结算。
+    ///
+    /// 结算期间停止新增普通进攻动作，需要结算的投篮、接触、罚则与复核
+    /// 继续走完。
+    fn open_settlement(&mut self) {
         // 跳球还在空中时本节不能收尾：撮球的归属必须在节末之前确定，
         // 否则这一节会以没有球权结束，球永远落不到任何人手里。
-        if matches!(self.phase(), Phase::JumpBall { .. }) {
+        //
+        // 节间休息的比赛钟也是零：休息期间不再结算，否则休息会被当作
+        // 又一节结束，节次永远推进不下去。
+        if matches!(
+            self.phase(),
+            Phase::JumpBall { .. } | Phase::PeriodBreak { .. } | Phase::Finished
+        ) {
             return;
         }
+        let mut settlement = crate::settlement::PeriodSettlement::new(self.clock.period());
+        settlement.sync(self);
+        self.settlement = Some(settlement);
+    }
+
+    /// 结算清单与引擎状态同步。
+    fn sync_settlement(&mut self) {
+        let Some(mut settlement) = self.settlement.take() else {
+            return;
+        };
+        settlement.sync(self);
+        self.settlement = Some(settlement);
+    }
+
+    /// 结算作废：比赛钟被复核恢复，本节继续。
+    fn abort_settlement(&mut self) {
+        if self.settlement.take().is_none() {
+            return;
+        }
+        let stage = self.stage_for(self.phase());
+        assert!(
+            crate::state::MatchStage::Finalizing.can_transition_to(stage),
+            "match stage transition finalizing -> {stage:?} is not permitted"
+        );
+    }
+
+    /// 全部待决事项关闭：发布节末结算完成，随后决定休息、下一节、加时
+    /// 或终场。
+    fn complete_settlement(&mut self) {
+        let settlement = self
+            .settlement
+            .as_ref()
+            .expect("the settlement is open")
+            .clone();
+        // 终场时仍在进行的姿态在这里结束：动作与姿态都有唯一终态，比赛
+        // 结束时也不例外。
+        self.end_all_postures();
+        self.emit(Fact::PeriodSettlementCompleted {
+            period: settlement.period,
+            home_score: self.score[0],
+            away_score: self.score[1],
+            pending_shots_resolved: settlement.pending_shots_resolved,
+            free_throws_resolved: settlement.free_throws_resolved,
+        });
         crate::tactics::close_play_window(self);
-        if matches!(self.phase(), Phase::Finished | Phase::PeriodBreak { .. }) {
-            return;
-        }
         let tied = self.score[0] == self.score[1];
-        let regulation_over = self.clock.period() >= 4;
+        let regulation_over = self.clock.period() >= self.rules.league.periods.regulation_periods;
         self.pending_rebound = None;
         if regulation_over && tied {
             self.emit(Fact::PeriodEnd {
                 period: self.clock.period(),
             });
-            self.clock.set_period_duration(300.0);
+            // 加时一节的长度按档案给：比赛钟归零后这一节的剩余时间变成
+            // 下一节的时长。
+            self.clock.set_period_duration(f64::from(
+                self.rules.league.periods.overtime_duration_seconds,
+            ));
             self.adjudicate(
                 crate::adjudicate::Adjudication::new(
                     crate::adjudicate::StoppageCause::PeriodEnd,
@@ -4192,29 +4581,28 @@ impl World {
                 )
                 .ending(PossessionEndCause::PeriodEnd, "period_end"),
             );
+            self.settlement = None;
             return;
         }
         if !regulation_over {
             self.emit(Fact::PeriodEnd {
                 period: self.clock.period(),
             });
-            let next_stage = if self.clock.period() >= 4 {
-                crate::state::MatchStage::Overtime
-            } else {
-                crate::state::MatchStage::Intermission
-            };
             self.adjudicate(
                 crate::adjudicate::Adjudication::new(
                     crate::adjudicate::StoppageCause::PeriodEnd,
                     crate::adjudicate::RestartPlan::PeriodBreak {
                         resume_at: self.now() + 1.0,
-                        next_stage,
+                        next_stage: crate::state::MatchStage::Intermission,
                     },
                 )
                 .ending(PossessionEndCause::PeriodEnd, "period_end"),
             );
+            self.settlement = None;
             return;
         }
+        // 终场结算发布之后，比分、球权、动作与计时器就此冻结。
+        self.settled = true;
         self.adjudicate(
             crate::adjudicate::Adjudication::new(
                 crate::adjudicate::StoppageCause::PeriodEnd,
@@ -4232,6 +4620,7 @@ impl World {
         self.close_control_sequence("game_end");
         self.emit(Fact::GameEnd);
         self.flush_clock_directives();
+        self.settlement = None;
     }
 }
 

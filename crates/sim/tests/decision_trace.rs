@@ -4,10 +4,8 @@
 //! 是「这次出手当时还考虑过什么、每一项期望得分怎么来的」，所以缺一条
 //! 追踪就等于多一个无法解释的动作。
 
-use nba_domain::rules::GameRules;
-use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::world::TICK_SECONDS;
-use nba_sim_core::{MatchSetup, Params, World};
+use nba_sim_core::World;
 
 const ACTION_KINDS: [&str; 4] = ["SHOT", "PASS", "DRIVE", "POST_UP"];
 

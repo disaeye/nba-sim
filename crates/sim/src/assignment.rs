@@ -396,6 +396,105 @@ pub fn assign_offense_jobs(world: &mut World) {
     }
 }
 
+/// 包夹候选：离持球人最近的两名防守人。
+///
+/// 包夹是两个人的决定：单个人靠上去只是协防。因此候选一定是两个。
+///
+/// 包夹发生在持球人进到低位的时候：那里球权最危险，两个人压上的收益
+/// 才盖得过失位的代价。其他位置压第二个人上去只会破坏对位。
+///
+/// 这个函数在每个 tick 都要跑，因此它不分配：结果直接写进调用方给的
+/// 两个句柄里。
+fn trap_candidates(
+    world: &World,
+    defenders: &[usize],
+    carrier: Option<usize>,
+    hoop: glam::Vec2,
+    out: &mut [usize; 2],
+) {
+    out[0] = usize::MAX;
+    out[1] = usize::MAX;
+    let Some(carrier) = carrier else {
+        return;
+    };
+    // 只有在低位才包夹。
+    let radius = world.params.policy.g("trap_radius_ft");
+    if (world.players[carrier].pos - hoop).length() > world.params.policy.g("paint_radius_ft") {
+        return;
+    }
+    let carrier_pos = world.players[carrier].pos;
+    // 两次线性扫描找出最近的两名防守人：分配预算要求热路径不分配。
+    let mut first = usize::MAX;
+    let mut first_distance = f32::INFINITY;
+    let mut second = usize::MAX;
+    let mut second_distance = f32::INFINITY;
+    for handle in defenders.iter().copied() {
+        let distance = (world.players[handle].pos - carrier_pos).length();
+        if distance < first_distance {
+            second_distance = first_distance;
+            second = first;
+            first_distance = distance;
+            first = handle;
+        } else if distance < second_distance {
+            second_distance = distance;
+            second = handle;
+        }
+    }
+    if first_distance > radius * 1.6 || second == usize::MAX {
+        return;
+    }
+    out[0] = first;
+    out[1] = second;
+}
+
+/// 补位候选：接管另一个位置留下的空当。
+///
+/// 补位发生在有人离开自己的对位人之后：这时防守人去接那个空位，而不是
+/// 回到自己的位置上。
+fn rotate_candidate(
+    world: &World,
+    handle: usize,
+    man: usize,
+    hoop: glam::Vec2,
+) -> bool {
+    // 对位人已经不在场上：这就是一个空当。
+    if man == usize::MAX || !world.players[man].on_court {
+        return true;
+    }
+    // 自己离对位人很远：对位人已经被拖开，去接空位比回到原位更值。
+    let separation = (world.players[man].pos - world.players[handle].pos).length();
+    separation > world.params.policy.g("rotate_separation_ft")
+        && (world.players[handle].pos - hoop).length() > world.params.policy.g("paint_radius_ft")
+}
+
+/// 护框候选：离篮筐最近的那名防守人。
+///
+/// 对位防守人不在候选里：他去守筐，进攻人就没有人守了。护框因此总是
+/// 由已经离开自己对位人的那名防守人承担。
+///
+/// 同样不分配：结果直接写进调用方给的句柄里。
+fn rim_candidate(world: &World, defenders: &[usize], hoop: glam::Vec2) -> usize {
+    let radius = world.params.policy.g("rim_protect_radius_ft");
+    let mut best = usize::MAX;
+    let mut best_distance = f32::INFINITY;
+    for handle in defenders.iter().copied() {
+        if world.players[handle].defense_responsibility
+            == crate::state::DefenseResponsibility::OnBall
+        {
+            continue;
+        }
+        let distance = (world.players[handle].pos - hoop).length();
+        if distance > radius {
+            continue;
+        }
+        if distance < best_distance {
+            best_distance = distance;
+            best = handle;
+        }
+    }
+    best
+}
+
 pub fn assign_defense_responsibilities(world: &mut World, targets: &[Vec2]) {
     let defense = world.possession.team.other();
     let defenders = world.on_court(defense);
@@ -406,6 +505,11 @@ pub fn assign_defense_responsibilities(world: &mut World, targets: &[Vec2]) {
     let now = world.now();
     let dwell = f64::from(world.params.policy.g("assignment_dwell_seconds"));
     let responsibility_dwell = dwell.max(12.0);
+    // 包夹：离持球人最近的第二名防守人与第一名一起压上。
+    let mut traps = [usize::MAX; 2];
+    trap_candidates(world, defenders.as_slice(), carrier, hoop, &mut traps);
+    // 护框：离篮筐最近的防守人守筐。
+    let rim = rim_candidate(world, defenders.as_slice(), hoop);
     for (slot, handle) in defenders.as_slice().iter().enumerate() {
         let man = world.possession.matchup[slot];
         let current = world.players[*handle].defense_responsibility;
@@ -422,13 +526,26 @@ pub fn assign_defense_responsibilities(world: &mut World, targets: &[Vec2]) {
         let responsibility = if Some(man) == carrier {
             // 掩护刚结算完：按那次结算的路线决定怎么过掩护。
             let nav_window = world.params.policy.g("screen_nav_seconds") as f64;
+            // 掩护刚发生的那一瞬间，对位人先碰一下持球人：这是延误，
+            // 他没有时间绕掩护。
+            let hedging = world
+                .possession
+                .last_screen
+                .map(|read| now - read.at < world.params.policy.g("screen_hedge_seconds") as f64)
+                .unwrap_or(false);
             match world.possession.last_screen {
-                Some(read) if now - read.at < nav_window => match read.route {
-                    crate::action::DefenderRoute::Over => DefenseResponsibility::GoOver,
-                    crate::action::DefenderRoute::Under => DefenseResponsibility::GoUnder,
-                    crate::action::DefenderRoute::Switch => DefenseResponsibility::Switch,
-                    crate::action::DefenderRoute::Trapped => DefenseResponsibility::OnBall,
-                },
+                Some(read) if now - read.at < nav_window => {
+                    if hedging && read.route != crate::action::DefenderRoute::Switch {
+                        DefenseResponsibility::Hedge
+                    } else {
+                        match read.route {
+                            crate::action::DefenderRoute::Over => DefenseResponsibility::GoOver,
+                            crate::action::DefenderRoute::Under => DefenseResponsibility::GoUnder,
+                            crate::action::DefenderRoute::Switch => DefenseResponsibility::Switch,
+                            crate::action::DefenderRoute::Trapped => DefenseResponsibility::OnBall,
+                        }
+                    }
+                }
                 _ => DefenseResponsibility::OnBall,
             }
         } else if world
@@ -448,24 +565,52 @@ pub fn assign_defense_responsibilities(world: &mut World, targets: &[Vec2]) {
             // 没有这条职责，防守目标层每 tick 都会把卡位目标改回站位点，
             // 卡位能力因此完全不起作用。
             DefenseResponsibility::BoxOut
-        } else if (targets[slot] - hoop).length_squared() < help_threshold * help_threshold {
-            DefenseResponsibility::Help
+        } else if traps[0] == *handle || traps[1] == *handle {
+            // 包夹：两名防守人同时贴上持球人，其余的人去补位。
+            DefenseResponsibility::DoubleTeam
+        } else if rim == *handle
+            && (targets[slot] - hoop).length_squared() >= help_threshold * help_threshold
+        {
+            // 护框：离篮筐最近且不在协防位置的防守人守筐。
+            DefenseResponsibility::RimProtect
         } else if man != usize::MAX
             && (world.players[man].pos - hoop).length_squared() < sink_threshold * sink_threshold
         {
             DefenseResponsibility::Sink
+        } else if (targets[slot] - hoop).length_squared() < help_threshold * help_threshold {
+            DefenseResponsibility::Help
+        } else if rotate_candidate(world, *handle, man, hoop) {
+            // 补位：接管另一个位置留下的空当。
+            DefenseResponsibility::Rotate
         } else if man != usize::MAX
             && (world.players[man].pos - world.players[*handle].pos).length()
                 > world.params.policy.g("recover_distance_ft")
         {
             // 被过掉或换防后期在人不在：先回到自己的对位人身上。
             DefenseResponsibility::Recover
+        } else if man != usize::MAX
+            && world.holder().is_some_and(|holder| {
+                // 对位人在持球人与自己之间：站在这条线路上就是拦截。
+                let carrier = world.players[holder].pos;
+                let receiver = world.players[man].pos;
+                let segment = receiver - carrier;
+                let length_squared = segment.length_squared();
+                length_squared > f32::MIN_POSITIVE
+                    && (world.players[*handle].pos - carrier).dot(segment) / length_squared
+                        > 0.15
+                        && (world.players[*handle].pos - carrier).dot(segment) / length_squared
+                            < 0.85
+            })
+        {
+            DefenseResponsibility::Intercept
         } else {
             DefenseResponsibility::Deny
         };
         let player = &mut world.players[*handle];
         // 对位刚换人时立刻改职责：对位表刚被重算，负责新持球人的防守人
         // 必须马上接手，否则会出现好几个人同时是「对位防守人」。
+        //
+        // 职责没变时按停留时间改：职责每次都换，事件流因此膨胀。
         let pairing_changed = world.possession.pairing_changed_at > player.assignment_since
             && (responsibility == DefenseResponsibility::OnBall
                 || player.defense_responsibility == DefenseResponsibility::OnBall);
@@ -477,10 +622,39 @@ pub fn assign_defense_responsibilities(world: &mut World, targets: &[Vec2]) {
             player.assignment_since = now;
             player.recovery_since = 0.0;
             player.recovery_d0_ft = 0.0;
+            // 职责换了，上一段职责因此结束。
+            world.end_posture(*handle, crate::state::PostureSlot::OffBall);
+            // 职责变化的事实带着新职责的身份落下：职责就是无球姿态，
+            // 因此这一条事实同时给出姿态的身份与开始时刻。
+            let action_id = world.posture_action_id(
+                *handle,
+                crate::state::PostureSlot::OffBall,
+                responsibility.as_str(),
+            );
             world.emit(crate::action::Fact::DefenseResponsibilityChanged {
                 player: *handle,
                 from,
                 to: responsibility.as_str(),
+                action_id,
+            });
+        } else if player.defense_responsibility == responsibility
+            && player.posture_action_ids[crate::state::PostureSlot::OffBall.index()] == 0
+        {
+            // 职责没变但还没有身份：这是第一次落到这个职责上，身份因此
+            // 在这里分配。职责一开始就是默认值时，走不到上面的分支。
+            //
+            // 身份与职责变化那条事实一起落下：职责就是无球姿态，因此这个
+            // 姿态在事件流里也有起止。
+            let action_id = world.posture_action_id(
+                *handle,
+                crate::state::PostureSlot::OffBall,
+                responsibility.as_str(),
+            );
+            world.emit(crate::action::Fact::DefenseResponsibilityChanged {
+                player: *handle,
+                from: responsibility.as_str(),
+                to: responsibility.as_str(),
+                action_id,
             });
         }
     }

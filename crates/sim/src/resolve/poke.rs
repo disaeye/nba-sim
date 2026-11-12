@@ -69,7 +69,8 @@ pub fn poke_success(world: &World, thief: usize, holder: usize, nearest: f32, no
     {
         success *= f32::from(1u8) + world.rules.resolve.technique.steal_attempt_exec_bonus;
     }
-    success
+    // 抢断技能基线来自校准表：成功率仍收在概率上界内。
+    (success * world.params.policy.w("steal_skill_base")).min(f32::from(1u8))
 }
 
 /// 每个 tick 判定一次：几何筛出最近的贴身防守人，按速率抽样是否伸手，
@@ -129,7 +130,9 @@ pub fn step(world: &mut World, dt: f64) {
     let poke_speed = security.poke_ball_speed_ftps;
     let recovery_seconds = security.poke_recovery_seconds;
     let gamble = world.players[thief].data.tendencies.gamble_steal;
-    let rate = f64::from(attempt_rate * (tendency_floor + gamble * tendency_span));
+    // 赌博倾向基线来自校准表：尝试速率与成功率分开标定。
+    let rate = f64::from(attempt_rate * (tendency_floor + gamble * tendency_span))
+        * f64::from(world.params.policy.w("steal_gamble_base"));
     let attempt = 1.0 - (-rate * dt).exp();
     if f64::from(world.draw(Stream::Decision, thief, purpose::STEAL_CREDIT, 0)) >= attempt {
         return;

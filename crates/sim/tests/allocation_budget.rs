@@ -48,6 +48,8 @@ const TICK: f64 = 0.05;
 
 /// 安静 tick：本 tick 没有球员到期决策、也没有交互到期结算。
 /// 十名球员各自调度，因此只看持球人不够；判据要盖所有在场球员。
+/// 计数全局分配器只在本进程生效，这个谓词保留给单 tick 分配回归使用。
+#[allow(dead_code)]
 fn quiet_tick(world: &World) -> bool {
     let horizon = world.now() + TICK;
     world.live_play()

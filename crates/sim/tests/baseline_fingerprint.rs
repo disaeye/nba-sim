@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use nba_sim_core::action::Fact;
-use nba_sim_core::params::{workspace_calibration_dir, workspace_root};
+use nba_sim_core::params::workspace_root;
 use nba_sim_core::GameReport;
 use serde_json::{json, Map, Value};
 
@@ -32,6 +32,8 @@ fn baseline_path() -> PathBuf {
 fn fact_kind(fact: &Fact) -> &'static str {
     match fact {
         Fact::ActionStarted { .. } => "action_started",
+        Fact::PostureStarted { .. } => "posture_started",
+        Fact::PostureEnded { .. } => "posture_ended",
         Fact::ActionIntentRejected { .. } => "action_intent_rejected",
         Fact::ActionPhaseChanged { .. } => "action_phase_changed",
         Fact::ActionCompleted { .. } => "action_completed",
@@ -73,6 +75,7 @@ fn fact_kind(fact: &Fact) -> &'static str {
         Fact::Timeout { .. } => "timeout",
         Fact::JumpBall { .. } => "jump_ball",
         Fact::PeriodEnd { .. } => "period_end",
+        Fact::PeriodSettlementCompleted { .. } => "period_settlement_completed",
         Fact::BallContact { .. } => "ball_contact",
         Fact::PlacementApplied { .. } => "placement_applied",
         Fact::PlayActivated { .. } => "play_activated",

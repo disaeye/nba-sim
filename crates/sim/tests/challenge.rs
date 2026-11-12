@@ -2,7 +2,9 @@
 
 use nba_domain::rules::GameRules;
 use nba_sim_core::action::{Fact, TeamSide};
-use nba_sim_core::challenge::ChallengeOutcome;
+use nba_sim_core::review_program::{
+    ChallengeOutcome, Observation, ReviewBasis, ReviewCorrection, ReviewTrigger,
+};
 use nba_sim_core::state::Phase;
 use nba_sim_core::world::TICK_SECONDS;
 use nba_sim_core::{MatchSetup, World};
@@ -24,10 +26,25 @@ fn late_world(seed: u64) -> World {
     world
 }
 
+/// 登记一条可复核的裁决：读最后触球，翻转球权。
+fn register_touch_ruling(world: &mut World, misjudged: bool) {
+    let address = world.last_event_id;
+    world.record_ruling_with_observation(
+        TeamSide::Home,
+        "last_touch",
+        None,
+        Observation::Touch(TeamSide::Away),
+        ReviewCorrection::Possession,
+        ReviewBasis::Judgement { misjudged },
+        ReviewTrigger::CoachChallenge,
+        vec![address],
+    );
+}
+
 #[test]
 fn a_failed_challenge_keeps_the_ruling_and_costs_a_timeout() {
     let mut world = late_world(401);
-    world.record_ruling(TeamSide::Home, "out_of_bounds");
+    register_touch_ruling(&mut world, false);
     let away = World::team_index(TeamSide::Away);
     let before = world.timeouts[away].remaining;
     let outcome = world
@@ -55,7 +72,7 @@ fn a_failed_challenge_keeps_the_ruling_and_costs_a_timeout() {
 #[test]
 fn a_second_challenge_is_rejected() {
     let mut world = late_world(403);
-    world.record_ruling(TeamSide::Home, "out_of_bounds");
+    register_touch_ruling(&mut world, false);
     world
         .request_challenge(TeamSide::Away)
         .expect("第一次挑战成立");
@@ -72,7 +89,7 @@ fn a_challenge_outside_the_window_is_rejected() {
         team: TeamSide::Home,
         ready_at: world.now() + 5.0,
     });
-    world.record_ruling(TeamSide::Home, "out_of_bounds");
+    register_touch_ruling(&mut world, false);
     let error = world
         .request_challenge(TeamSide::Away)
         .expect_err("前段比赛不得挑战");
@@ -82,7 +99,7 @@ fn a_challenge_outside_the_window_is_rejected() {
 #[test]
 fn the_team_that_won_the_ruling_cannot_challenge_it() {
     let mut world = late_world(409);
-    world.record_ruling(TeamSide::Home, "out_of_bounds");
+    register_touch_ruling(&mut world, false);
     let error = world
         .request_challenge(TeamSide::Home)
         .expect_err("得利一方不得挑战自己的裁决");
@@ -94,7 +111,7 @@ fn a_ruling_free_stoppage_has_nothing_to_review() {
     let mut world = late_world(411);
     // 这个场景只要一条「没有裁决可复核」的停表：把上一回合留下的
     // 可复核裁定清掉。
-    world.last_ruling = None;
+    world.review_state = nba_sim_core::review_program::ReviewState::default();
     let error = world
         .request_challenge(TeamSide::Away)
         .expect_err("没有裁决记录时不得挑战");
@@ -113,7 +130,7 @@ fn the_ruleset_defaults_carry_one_challenge() {
 #[test]
 fn a_review_leaves_the_possession_and_phase_untouched() {
     let mut world = late_world(413);
-    world.record_ruling(TeamSide::Home, "out_of_bounds");
+    register_touch_ruling(&mut world, false);
     let team_before = world.possession.team;
     let phase_before = world.phase();
     world
@@ -126,7 +143,17 @@ fn a_review_leaves_the_possession_and_phase_untouched() {
 #[test]
 fn a_ruling_outside_the_replay_scope_cannot_be_challenged() {
     let mut world = late_world(417);
-    world.record_ruling(TeamSide::Home, "back_to_basket");
+    let address = world.last_event_id;
+    world.record_ruling_with_observation(
+        TeamSide::Home,
+        "back_to_basket",
+        None,
+        Observation::None,
+        ReviewCorrection::Possession,
+        ReviewBasis::Judgement { misjudged: false },
+        ReviewTrigger::CoachChallenge,
+        vec![address],
+    );
     let error = world
         .request_challenge(TeamSide::Away)
         .expect_err("复核范围之外的裁决不得受理");
@@ -136,7 +163,7 @@ fn a_ruling_outside_the_replay_scope_cannot_be_challenged() {
 #[test]
 fn a_successful_challenge_overturns_ruling_and_retains_timeout() {
     let mut world = late_world(415);
-    world.record_ruling_with_evidence(TeamSide::Home, "out_of_bounds", true);
+    register_touch_ruling(&mut world, true);
     let away = World::team_index(TeamSide::Away);
     let before_timeouts = world.timeouts[away].remaining;
     let outcome = world

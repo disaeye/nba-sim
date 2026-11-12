@@ -435,6 +435,9 @@ impl SessionService {
 
     pub fn completion_summary(&self) -> Option<CompletionSummary> {
         let world = self.world.as_ref()?;
+        // 箱体里的上场时间从时钟的每名球员计时器读出：那是唯一的事实源。
+        // 因此这里读的是与报告同一份箱体，而不是另一份累加值。
+        let box_score = world.box_score_with_player_time();
         Some(CompletionSummary {
             seed: world.seed,
             home_team: world.home_team_name.clone(),
@@ -445,7 +448,7 @@ impl SessionService {
             ticks: world.clock.tick(),
             possessions: world.possession_log.len(),
             event_count: world.next_event_id,
-            box_score: world.box_score.clone(),
+            box_score,
             finished: world.finished,
         })
     }

@@ -470,6 +470,73 @@ pub fn apply_defense_targets(world: &mut World) {
                 };
                 (crate::state::TargetKind::Pressure, man, target)
             }
+            // 拦截：站在持球人与对位人之间的传球路线上。
+            crate::state::DefenseResponsibility::Intercept => {
+                let target = if man != usize::MAX && world.players[man].on_court {
+                    let ball = carrier
+                        .map(|carrier| world.players[carrier].pos)
+                        .unwrap_or(world.players[*handle].pos);
+                    let receiver = world.players[man].pos;
+                    let segment = receiver - ball;
+                    let length_squared = segment.length_squared();
+                    if length_squared > f32::MIN_POSITIVE {
+                        // 站在路线中段：靠持球人一侧，够得着球。
+                        ball + segment * 0.45
+                    } else {
+                        targets[slot]
+                    }
+                } else {
+                    targets[slot]
+                };
+                (crate::state::TargetKind::Station, man, target)
+            }
+            // 补位：接管另一个位置留下的空当，先站到空当的位置。
+            crate::state::DefenseResponsibility::Rotate => {
+                let target = if man != usize::MAX && world.players[man].on_court {
+                    let ball = carrier
+                        .map(|carrier| world.players[carrier].pos)
+                        .unwrap_or(world.players[*handle].pos);
+                    let receiver = world.players[man].pos;
+                    let direction = (receiver - ball).normalize_or_zero();
+                    world.players[man].pos - direction * pressure
+                } else {
+                    targets[slot]
+                };
+                (crate::state::TargetKind::Station, man, target)
+            }
+            // 夹击：贴到持球人身侧，与另一名防守人一起包住他。
+            crate::state::DefenseResponsibility::DoubleTeam => {
+                let target = carrier
+                    .map(|carrier| {
+                        let direction = (hoop - world.players[carrier].pos).normalize_or_zero();
+                        world.players[carrier].pos + direction * (pressure * 0.8)
+                    })
+                    .unwrap_or(targets[slot]);
+                (
+                    crate::state::TargetKind::Pressure,
+                    carrier.unwrap_or(usize::MAX),
+                    target,
+                )
+            }
+            // 延误：抢在掩护完成之前先碰一下持球人，随后回到对位。
+            crate::state::DefenseResponsibility::Hedge => {
+                let target = carrier
+                    .map(|carrier| {
+                        let direction = (hoop - world.players[carrier].pos).normalize_or_zero();
+                        world.players[carrier].pos + direction * pressure
+                    })
+                    .unwrap_or(targets[slot]);
+                (
+                    crate::state::TargetKind::Pressure,
+                    carrier.unwrap_or(usize::MAX),
+                    target,
+                )
+            }
+            // 护框：站在篮筐附近，保护内线。
+            crate::state::DefenseResponsibility::RimProtect => {
+                let target = hoop + (world.players[*handle].pos - hoop).normalize_or_zero() * 5.0;
+                (crate::state::TargetKind::Station, usize::MAX, target)
+            }
         };
         let used_closeout = responsibility == crate::state::DefenseResponsibility::OnBall
             && world.apply_defensive_closeout_target(*handle);

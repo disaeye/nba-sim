@@ -21,7 +21,6 @@
 
 use glam::Vec2;
 
-use crate::action::Fact;
 use crate::world::World;
 
 /// 进攻三秒的宽限：计时到这个秒数之后，球员才开始往外走。
@@ -132,7 +131,7 @@ fn shooting_toward_basket(world: &World, player: usize, attacking_right: bool) -
     }
     let to_basket = matches!(
         runtime.intent.kind,
-        crate::action::ActionKind::Finish | crate::action::ActionKind::Shoot(_)
+        crate::action::ActionKind::Finish(_) | crate::action::ActionKind::Shoot(_)
     );
     if !to_basket {
         return false;
@@ -383,7 +382,7 @@ fn running_own_action(world: &World, player: usize) -> bool {
             runtime.intent.actor == player
                 && matches!(
                     runtime.intent.kind,
-                    crate::action::ActionKind::Relocate | crate::action::ActionKind::Cut(_)
+                    crate::action::ActionKind::Relocate(_) | crate::action::ActionKind::Cut(_)
                 )
         })
 }

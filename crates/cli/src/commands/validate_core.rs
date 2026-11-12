@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use nba_sim_core::params::workspace_validation_dir;
-use nba_sim_core::Params;
+use nba_sim_core::{builtin_manifest, Params};
 use nba_validation::core_validation::{
     batch_statistical_artifact, certification_artifact, load_known_insufficient,
     run_core_validation_for_league, CoreValidationReport,
@@ -100,6 +100,7 @@ pub(crate) fn run_validate_core(
         mechanism_report.as_ref(),
         &commit,
         dirty,
+        league,
     )?;
     println!("  工件目录：{}", out_dir.display());
     let status = certification
@@ -156,14 +157,19 @@ fn write_run_record(
     mechanism: Option<&MechanismReport>,
     commit: &str,
     dirty: bool,
+    league: nba_domain::league::LeagueId,
 ) -> std::io::Result<()> {
     let params = Params::load(&nba_sim_core::params::workspace_calibration_dir())
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let manifest = builtin_manifest(league, seed_start, &params.calibration_version);
     let record = serde_json::json!({
         "commit": commit,
         "working_tree_dirty": dirty,
         "seed_start": seed_start,
         "games": games,
+        "ruleset_version": manifest.ruleset_version,
+        "calibration_version": manifest.calibration_version,
+        "engine_model_version": manifest.engine_model_version,
         "mechanism": mechanism.map(|report| serde_json::json!({
             "seeds": report.config.seeds,
             "possessions": report.config.possessions,
@@ -181,7 +187,16 @@ fn write_run_record(
             "policy": params.policy.provenance,
         },
     });
-    write_json(dir, "run.json", &record)
+    write_json(dir, "run.json", &record)?;
+    let manifest_path = dir.join("match_manifest.json");
+    std::fs::write(
+        manifest_path,
+        format!(
+            "{}\n",
+            serde_json::to_string_pretty(&manifest)
+                .map_err(|error| std::io::Error::other(error.to_string()))?
+        ),
+    )
 }
 
 fn print_report(report: &CoreValidationReport) {

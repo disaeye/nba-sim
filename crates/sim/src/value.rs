@@ -217,6 +217,9 @@ pub fn pass_completion_probability(
             crate::action::PassKind::Overhead => 0.75,
             crate::action::PassKind::BehindBack => 1.2,
             crate::action::PassKind::OneHand => 1.05,
+            // 空中接力：球送到篮筐上空，防守人够不到，但接球人也难
+            // 控住球，因此抄截半径比长传小。
+            crate::action::PassKind::AlleyOop => 0.6,
             _ => 1.0,
         };
         let effective_radius = if lob {

@@ -2,7 +2,7 @@
 
 use glam::Vec2;
 
-use crate::action::{Fact, ShotKind};
+use crate::action::{ActionKind, Fact, ShotKind};
 use crate::draw::{purpose, Stream};
 use crate::resolve::shot::{PendingShot, ShotResult};
 use crate::state::BallState;
@@ -142,6 +142,7 @@ fn shoot_with_retained_team(
     });
     world.pending_shot = Some(PendingShot {
         shooter,
+        // 罚球不走出手统计：它的类型是罚球，统计口径在罚球事实里。
         kind: ShotKind::CatchShoot,
         zone: "free_throw",
         distance_ft: (pos - hoop).length(),
@@ -160,11 +161,16 @@ fn shoot_with_retained_team(
         released_game_clock: world.clock.game_clock(),
         // 罚球不适用节末压哨复核：没有检查点需要恢复。
         released_clock_checkpoint: None,
+        released_event_id: world.last_event_id,
+        released_shot_clock: world.clock.shot_clock(),
     });
     let rules = world.rules.clone();
     // 罚球人先把球拿到手里，再出手：球态的归属变化必须先于飞行开始，
     // 否则「松球直接变成投篮飞行」这条迁移会被迁移表拒绝。
     world.set_ball_held(shooter);
+    // 罚球是一次出手：罚球人有一个真实的动作运行时，因此渲染器能画
+    // 出他在罚球线上出手，事件流里也有一次可查的动作生命周期。
+    start_free_throw_action(world, shooter);
     world.ball.release_shot(crate::ball::ShotRelease {
         rules: &rules,
         now: world.now(),
@@ -183,6 +189,47 @@ fn shoot_with_retained_team(
         crate::state::FlightKind::FreeThrow,
         world.now() + f64::from(rules.max_shot_duration_seconds) + 2.0,
     );
+}
+
+/// 罚球出手的动作运行时。
+///
+/// 罚球程序里的出手有自己的动作身份：它是跳投族里的一种（罚球），
+/// 阶段是准备、执行与收势三段。
+fn start_free_throw_action(world: &mut World, shooter: usize) {
+    world.next_action_id += 1;
+    let action_id = world.next_action_id;
+    world.next_interaction_id += 1;
+    let interaction_id = world.next_interaction_id;
+    let now = world.now();
+    let preparation = f64::from(world.rules.jump_shot_prep_seconds);
+    let execution = f64::from(world.rules.jump_shot_exec_seconds);
+    let follow_through = f64::from(world.rules.jump_shot_follow_seconds);
+    world.players[shooter].action = Some(crate::action::ActionRuntime::new(
+        action_id,
+        interaction_id,
+        crate::action::ActionIntent {
+            actor: shooter,
+            kind: ActionKind::FreeThrow,
+            target: None,
+            from_ft: world.players[shooter].pos,
+            to_ft: world.hoop_for(world.players[shooter].team),
+            start_time: now,
+            duration: preparation + execution + follow_through,
+        },
+        shooter,
+        crate::action::ActionIntentRole::Primary,
+        nba_domain::action_window::ActionPhase::Preparation,
+        preparation,
+        execution,
+        follow_through,
+    ));
+    world.emit(Fact::ActionStarted {
+        action_id,
+        interaction_id,
+        player: shooter,
+        kind: "FreeThrow",
+        target: None,
+    });
 }
 
 pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {

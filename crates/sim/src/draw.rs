@@ -71,6 +71,20 @@ impl DrawSource {
         hash = mix(hash ^ u64::from(key.ordinal));
         hash
     }
+
+    /// 按给定的额外身份取一个 64 位无符号抽样。
+    ///
+    /// 有些决定不按 tick 抽样，而是按事实身份抽样：复核结论只由它复核的
+    /// 那条裁决决定，同一条裁决的结论因此可重复。
+    pub fn u64_at(&self, key: DrawKey, identity: u64) -> u64 {
+        let mut hash = self.base_seed;
+        hash = mix(hash ^ key.stream.tag());
+        hash = mix(hash ^ identity);
+        hash = mix(hash ^ u64::from(key.entity));
+        hash = mix(hash ^ u64::from(key.purpose));
+        hash = mix(hash ^ u64::from(key.ordinal));
+        hash
+    }
 }
 
 fn mix(mut value: u64) -> u64 {
@@ -118,4 +132,7 @@ pub mod purpose {
     pub const CLOSEOUT_DRAW_CONTACT: u16 = 34;
     pub const CLOSEOUT_SIDESTEP: u16 = 35;
     pub const INJURY_CONTACT: u16 = 36;
+    pub const REVIEW_OBSERVATION: u16 = 37;
+    pub const DOUBLE_FOUL: u16 = 38;
+    pub const PLAYER_TECHNICAL: u16 = 39;
 }

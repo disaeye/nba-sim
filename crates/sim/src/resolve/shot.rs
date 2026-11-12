@@ -18,12 +18,15 @@ pub fn check_goaltending(world: &mut World) -> bool {
     {
         return false;
     }
-    let (shooter, shot_id, touched_backboard) = match world.pending_shot.as_ref() {
-        Some(pending) if pending.result.is_none() && pending.free_throw.is_none() => {
-            (pending.shooter, pending.shot_id, pending.touched_backboard)
-        }
-        _ => (0, 0, false),
+    let Some(pending) = world.pending_shot.as_ref() else {
+        return false;
     };
+    // 这次出手已经有结果：不再重复判定，也不重复发布事实。
+    if pending.result.is_some() || pending.free_throw.is_some() {
+        return false;
+    }
+    let (shooter, shot_id, touched_backboard) =
+        (pending.shooter, pending.shot_id, pending.touched_backboard);
     let team = world.players[shooter].team;
     let hoop = world.hoop_for(team);
     let policy = &world.params.policy;
@@ -82,6 +85,31 @@ pub fn check_goaltending(world: &mut World) -> bool {
         shot_id,
         time: world.now(),
     });
+    // 干扰球与篮筐干扰是两个复核问题：球坐在筐沿上被碰到是篮筐干扰，
+    // 球在筐柱内被碰到是干扰球。裁判当时的认定因此可复核。
+    let call = if touching_ring {
+        "basket_interference"
+    } else {
+        "goaltending"
+    };
+    let address = world.last_event_id;
+    let misjudged = world.judge_with_error(defender, address);
+    world.record_ruling_with_observation(
+        team,
+        call,
+        Some(defender),
+        crate::review_program::Observation::Contact,
+        crate::review_program::ReviewCorrection::Possession,
+        crate::review_program::ReviewBasis::Judgement { misjudged },
+        crate::review_program::ReviewTrigger::Immediate,
+        vec![address],
+    );
+    // 干扰球在球还在飞的时候就能看清：裁判当场复核，结论立刻落地。
+    let scope = crate::review_program::ReviewScope::from_call(call)
+        .expect("the goaltending call maps to a review scope");
+    world
+        .conclude_immediate_review(scope)
+        .expect("the goaltending ruling was just registered");
     if let Some(pending) = world.pending_shot.as_mut() {
         pending.result = Some(ShotResult::Made);
     }
@@ -126,6 +154,39 @@ pub struct PendingShot {
     /// 复核纠正的是「钟响前还是钟响后离手」，纠正之后比赛钟必须回到
     /// 出手那一刻的读数，否则这一节剩下的时间凭空少了。
     pub released_clock_checkpoint: Option<nba_domain::CheckpointId>,
+    /// 出手那一刻的事件身份：待决出手与信号前接触都引用它。
+    pub released_event_id: u64,
+    /// 出手那一刻的进攻钟读数：节末进攻钟复核用它判断出手是否在钟响前。
+    pub released_shot_clock: f64,
+}
+
+/// 后撤步的落点：远离最近的防守人。
+///
+/// 落点是位移的目的地，不是位移本身：突破那一步把落点写进目标，位移由
+/// 运动层逐 tick 完成，因此每 tick 的位移仍在速度上限内。
+pub fn step_back_target(world: &World, shooter: usize) -> glam::Vec2 {
+    let team = world.players[shooter].team;
+    let pos = world.players[shooter].pos;
+    let nearest = world
+        .players
+        .iter()
+        .filter(|player| player.on_court && player.team != team)
+        .min_by(|left, right| {
+            (left.pos - pos)
+                .length_squared()
+                .total_cmp(&(right.pos - pos).length_squared())
+        });
+    let away = nearest
+        .map(|player| (pos - player.pos).normalize_or_zero())
+        .unwrap_or(glam::Vec2::ZERO);
+    let radius = world.rules.player_radius_ft;
+    (pos + away * world.params.policy.g("step_back_distance_ft")).clamp(
+        glam::Vec2::new(radius, radius),
+        glam::Vec2::new(
+            world.rules.court.width_ft - radius,
+            world.rules.court.height_ft - radius,
+        ),
+    )
 }
 
 pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> ActionOutcome {
@@ -153,37 +214,49 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         };
     }
     let hoop = world.hoop_for(team);
-    // 后撤步：出手前先把投篮人撤向远离防守人的方向，空间是这一步换来的。
-    let start_pos = world.players[shooter].pos;
-    let pos = if kind == ShotKind::StepBack {
-        let pos = start_pos;
-        let nearest = world
-            .players
-            .iter()
-            .filter(|player| player.on_court && player.team != team)
-            .min_by(|left, right| {
-                (left.pos - pos)
-                    .length_squared()
-                    .total_cmp(&(right.pos - pos).length_squared())
-            });
-        let away = nearest
-            .map(|player| (pos - player.pos).normalize_or_zero())
-            .unwrap_or(Vec2::ZERO);
-        let radius = world.rules.player_radius_ft;
-        let target = (pos + away * world.params.policy.g("step_back_distance_ft")).clamp(
-            Vec2::new(radius, radius),
-            Vec2::new(
-                world.rules.court.width_ft - radius,
-                world.rules.court.height_ft - radius,
-            ),
-        );
-        crate::body::place(world, shooter, target);
-        target
-    } else {
-        start_pos
-    };
+    // 后撤步跳投：撤步是突破那一步的事，随后的出手站在撤开的那个点上。
+    // 出手本身不再改位置：位置由运动层按突破时写下的目标走完。
+    let pos = world.players[shooter].pos;
     let zone = shooter_zone(world, pos, team);
     let is_three = zone == "three";
+    // 二分与三分的判定落在线上时，裁判的观察误差足以改变这次判罚：这个
+    // 联赛承认这类复核问题时，出手点登记一条可复核的裁决。
+    if world.rules.league.reviews("two_versus_three_points") {
+        let margin = world.rules.court.three_point_margin_ft(
+            pos,
+            world.attacking_right(team),
+            world.rules.league.three_point_distance_ft,
+            world.rules.league.corner_three_distance_ft,
+        );
+        if margin.abs() <= world.params.policy.g("three_point_call_tolerance_ft") {
+            // 判定带观察误差：三分线附近的出手可能被裁判量错。复核读到
+            // 冻结的几何时把它纠正，分值随之改判。
+            let judged_three = is_three;
+            let misjudged = world.judge_with_error(shooter, world.last_event_id);
+            let corrected_three = if misjudged { !judged_three } else { judged_three };
+            let delta = if corrected_three && !judged_three {
+                1
+            } else if judged_three && !corrected_three {
+                -1
+            } else {
+                0
+            };
+            world.record_ruling_with_observation(
+                team,
+                "two_versus_three_points",
+                Some(shooter),
+                crate::review_program::Observation::Zone(if judged_three {
+                    "three"
+                } else {
+                    "two"
+                }),
+                crate::review_program::ReviewCorrection::Points { delta },
+                crate::review_program::ReviewBasis::Judgement { misjudged },
+                crate::review_program::ReviewTrigger::AtShotSettlement,
+                vec![world.last_event_id],
+            );
+        }
+    }
     let distance = (pos - hoop).length();
     let phase = world.possession.ball_phase;
     let model = crate::shot_quality::evaluate(world, shooter, kind, phase, pos);
@@ -199,12 +272,17 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     // 防守人已经起跳：滞空的人不能改向，进攻方因此多出两个选择。靠上去
     // 把身体造进对方身上要犯规，或者侧移把出手点从他身侧让开。一旦选
     // 定其中一种，这次出手就不再可能被盖：起跳封盖的手臂已经越过了球。
-    let airborne = airborne_block_jumper(world, team, pos);
-    let response = if airborne.is_some() {
-        closeout_response(world, shooter)
-    } else {
-        CloseoutResponse::None
-    };
+    //
+    // 这个决定在防守人起跳的那一刻就做出了（见 `advance_block_jumps`），
+    // 因此这里读的是已经落定的应答，而不是再抽一次。
+    let response = world
+        .players[shooter]
+        .closeout_response
+        .map(|response| match response {
+            "draw_contact" => CloseoutResponse::DrawContact,
+            _ => CloseoutResponse::Sidestep,
+        })
+        .unwrap_or(CloseoutResponse::None);
     let draw_contact = response == CloseoutResponse::DrawContact;
     let sidestep = response == CloseoutResponse::Sidestep;
     let mut p_make = p_make;
@@ -229,6 +307,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     // 封盖是球飞到手上才发生的事件，不在出手时抽结果。这里只保留封盖
     // 尝试带来的犯规风险；封盖本身由手部接触事实决定。防守人已经起跳时
     // 他不能改向，这次出手不可能被盖。
+    let airborne = airborne_block_jumper(world, team, pos);
     let (block_candidate, _physical_block) = if airborne.is_some() {
         (None, 0.0)
     } else {
@@ -406,6 +485,8 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         touched_backboard: false,
         released_game_clock: world.clock.game_clock(),
         released_clock_checkpoint,
+        released_event_id: world.last_event_id,
+        released_shot_clock: world.clock.shot_clock(),
     });
     let now = world.now();
     world.players[shooter].facing = (hoop - pos).normalize_or_zero();
@@ -468,6 +549,9 @@ pub fn finish(world: &mut World) {
         .pending_shot
         .take()
         .expect("shot flight must carry a pending shot");
+    // 这次出手落地：扑防的应对到此结束。
+    world.players[pending.shooter].closeout_response = None;
+    world.end_posture(pending.shooter, crate::state::PostureSlot::Closeout);
     if let Some(meta) = pending.free_throw {
         crate::resolve::freethrow::finish(world, pending, meta);
         return;
@@ -479,22 +563,63 @@ pub fn finish(world: &mut World) {
         .expect("shot flight must resolve before settlement");
     let made_ball = result == ShotResult::Made;
     let waived = pending.fouled && !pending.and_one;
-    // 节末压哨：裁判按联赛档案的即时回放范围自动复核「球是否在钟响前
-    // 离手」。复核有实质后果：钟响后离手的出手，得分被取消。
-    let buzzer_review = world.clock.game_clock() <= 0.0
-        && made_ball
-        && !waived
-        && crate::challenge::is_reviewable(world, "game_clock_at_period_end");
-    let released_before_horn = pending.released_game_clock > 0.0;
-    let waved_off = buzzer_review && !released_before_horn;
-    if buzzer_review {
-        world.emit(crate::action::Fact::Review {
+    // 节末压哨：裁判按联赛档案的即时回放范围自动复核两个问题——出手在
+    // 比赛钟响前还是响后，出手在进攻钟走完前还是走完后。复核有实质后果：
+    // 钟响后离手或者进攻钟已走完的出手，得分被取消。
+    let game_clock_scope = crate::review_program::ReviewScope::GameClockAtPeriodEnd;
+    let shot_clock_scope = crate::review_program::ReviewScope::ShotClockAtPeriodEnd;
+    let clock_malfunction_scope = crate::review_program::ReviewScope::ClockMalfunction;
+    let at_horn = world.clock.game_clock() <= 0.0 && made_ball && !waived;
+    let mut waved_off = false;
+    if at_horn && crate::review_program::is_reviewable(world, game_clock_scope) {
+        let released_before_horn = pending.released_game_clock > 0.0;
+        waved_off = !released_before_horn;
+        // 复核按程序发布：它登记待复核的裁决，读权威记录，然后发布结论。
+        // 结论与原判都留在事件流里，统计引用更正关系。
+        world.record_record_ruling(
             team,
-            call: "game_clock_at_period_end",
-            overturned: waved_off,
-            cost_timeout: false,
-            time: world.now(),
-        });
+            "game_clock_at_period_end",
+            Some(shooter),
+            crate::review_program::Observation::ReleaseClock {
+                game_clock: pending.released_game_clock,
+                shot_clock: pending.released_shot_clock,
+            },
+            released_before_horn,
+            crate::review_program::ReviewCorrection::Points { delta: 0 },
+            crate::review_program::ReviewTrigger::Immediate,
+            vec![pending.released_event_id],
+        );
+        let conclusion = if waved_off {
+            crate::review_program::ReviewConclusion::Overturned
+        } else {
+            crate::review_program::ReviewConclusion::Upheld
+        };
+        world.conclude_review(game_clock_scope, conclusion)
+            .expect("the period-end ruling was just registered");
+    }
+    if at_horn && crate::review_program::is_reviewable(world, shot_clock_scope) {
+        let shot_clock_violation = pending.released_shot_clock <= 0.0;
+        world.record_record_ruling(
+            team,
+            "shot_clock_at_period_end",
+            Some(shooter),
+            crate::review_program::Observation::ReleaseClock {
+                game_clock: pending.released_game_clock,
+                shot_clock: pending.released_shot_clock,
+            },
+            !shot_clock_violation,
+            crate::review_program::ReviewCorrection::Points { delta: 0 },
+            crate::review_program::ReviewTrigger::Immediate,
+            vec![pending.released_event_id],
+        );
+        let conclusion = if shot_clock_violation {
+            crate::review_program::ReviewConclusion::Overturned
+        } else {
+            crate::review_program::ReviewConclusion::Upheld
+        };
+        world.conclude_review(shot_clock_scope, conclusion)
+            .expect("the shot-clock ruling was just registered");
+        waved_off = waved_off || shot_clock_violation;
     }
     // 改判成立（球在钟响前离手，得分保留）时，比赛钟回到出手那一刻的
     // 读数：复核否定了「钟响后离手」这个认定，本节剩余时间因此要恢复。
@@ -502,15 +627,35 @@ pub fn finish(world: &mut World) {
     // 恢复只在节末即时回放成立时发生。普通进球不恢复比赛钟：出手到
     // 结算之间消耗的比赛时间是真实消耗，恢复它会让比赛钟在每一次进球
     // 后倒退。
-    if buzzer_review
+    if at_horn
         && !waved_off
         && pending.released_clock_checkpoint.is_some()
+        && crate::review_program::is_reviewable(world, game_clock_scope)
     {
         world.restore_clock_checkpoint(
             pending
                 .released_clock_checkpoint
                 .expect("the checkpoint identity is present"),
         );
+        // 时钟读数被更正：这条复核问题读的是时钟读数，只能确认读数，
+        // 不能改判。
+        if crate::review_program::is_reviewable(world, clock_malfunction_scope) {
+            world.record_record_ruling(
+                team,
+                "clock_malfunction",
+                Some(shooter),
+                crate::review_program::Observation::Clock(pending.released_game_clock),
+                true,
+                crate::review_program::ReviewCorrection::Points { delta: 0 },
+                crate::review_program::ReviewTrigger::Immediate,
+                vec![pending.released_event_id],
+            );
+            world.conclude_review(
+                clock_malfunction_scope,
+                crate::review_program::ReviewConclusion::Upheld,
+            )
+            .expect("the clock ruling was just registered");
+        }
     }
     let made = made_ball && !waived && !waved_off;
     let blocked_by = match result {
@@ -518,11 +663,54 @@ pub fn finish(world: &mut World) {
         _ => None,
     };
     let rim_contact = matches!(result, ShotResult::Missed { rim_contact: true });
-    let points = if made { pending.points } else { 0 };
+    // 二分与三分的复核在这次出手结算时落地：分值据此确定。
+    let mut points = if made { pending.points } else { 0 };
+    let mut is_three = pending.is_three;
+    let mut tpa = pending.is_three;
+    if world
+        .review_state()
+        .pending_all()
+        .iter()
+        .any(|ruling| ruling.scope == Some(crate::review_program::ReviewScope::TwoVersusThreePoints))
+    {
+        let scope = crate::review_program::ReviewScope::TwoVersusThreePoints;
+        world
+            .conclude_immediate_review(scope)
+            .expect("the two-versus-three ruling was registered at the release");
+        if let Some((_, conclusion)) = world.review_state().concluded().last() {
+            if matches!(
+                conclusion,
+                crate::review_program::ReviewConclusion::Overturned
+            ) {
+                // 复核把这一球改判成另一档：分值与三分统计一起改。
+                if let Some((ruling, _)) = world
+                    .review_state()
+                    .concluded()
+                    .iter()
+                    .rev()
+                    .find(|(ruling, _)| ruling.scope == Some(scope))
+                {
+                    let delta = match ruling.correction {
+                        crate::review_program::ReviewCorrection::Points { delta } => delta,
+                        _ => 0,
+                    };
+                    if delta > 0 {
+                        points += 1;
+                        is_three = true;
+                        tpa = true;
+                    } else if delta < 0 {
+                        points = points.saturating_sub(1);
+                        is_three = false;
+                        tpa = false;
+                    }
+                }
+            }
+        }
+    }
     let free_throws = if pending.fouled {
         if pending.and_one && made {
             1
-        } else if pending.is_three {
+        } else if is_three {
             3
         } else {
             2
@@ -534,12 +722,12 @@ pub fn finish(world: &mut World) {
     // 被犯规的出手仍然是一次出手：NBA 统计里它计入 FGA，只是得分作废。
     // 把犯规出手排除在 FGA 之外会让出手数与命中率同时失真。
     line.fga += 1;
-    if pending.is_three {
+    if tpa {
         line.tpa += 1;
     }
     if made {
         line.fgm += 1;
-        if pending.is_three {
+        if is_three {
             line.tpm += 1;
         }
         line.points += points as u32;
@@ -575,7 +763,7 @@ pub fn finish(world: &mut World) {
         zone: pending.zone,
         distance_ft: pending.distance_ft,
         contest: pending.contest,
-        is_three: pending.is_three,
+        is_three,
         blocked_by,
         made,
         points,
@@ -673,6 +861,17 @@ pub fn closeout_response(world: &mut World, shooter: usize) -> CloseoutResponse 
         return CloseoutResponse::Sidestep;
     }
     CloseoutResponse::None
+}
+
+impl CloseoutResponse {
+    /// 这个应答在协议里的动作变体。
+    pub fn action_kind(self) -> Option<&'static str> {
+        match self {
+            Self::DrawContact => Some("draw_contact"),
+            Self::Sidestep => Some("sidestep"),
+            Self::None => None,
+        }
+    }
 }
 
 /// 封盖：出手点附近、封盖与弹跳更强的防守人更可能起跳。返回被选中的

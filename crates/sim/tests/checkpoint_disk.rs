@@ -5,9 +5,8 @@
 
 use std::path::PathBuf;
 
-use nba_domain::rules::GameRules;
 use nba_sim_core::params::{workspace_calibration_dir, Params};
-use nba_sim_core::{MatchSetup, SessionService, SessionState};
+use nba_sim_core::{SessionService, SessionState};
 
 mod common;
 

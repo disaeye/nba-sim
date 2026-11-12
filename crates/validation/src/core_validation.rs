@@ -73,11 +73,15 @@ impl CoreValidationReport {
         if self.context_violations > 0 {
             failures.push(format!("context violations: {}", self.context_violations));
         }
-        for layer in self.gate.layers.iter().filter(|layer| !layer.passed) {
-            failures.push(format!(
-                "{}: observed {:.3} target {:.3}",
-                layer.criterion, layer.observed, layer.target
-            ));
+        // 分布层只在存在对应联赛的赛季基准时参与认证。参考分布来自 NBA
+        // 2024-25 赛季；FIBA 没有对应的赛季分布表，分布观测只记录在工件里。
+        if self.distribution_applicable {
+            for layer in self.gate.layers.iter().filter(|layer| !layer.passed) {
+                failures.push(format!(
+                    "{}: observed {:.3} target {:.3}",
+                    layer.criterion, layer.observed, layer.target
+                ));
+            }
         }
         for game in &self.games {
             if !game.ledger.points_reconcile
@@ -281,13 +285,18 @@ pub fn run_core_validation_scoped_for_league_with_dir(
         .count();
     let geometry_violations = gate.geometric_violations;
     let context_violations = gate.context_violations;
+    // 分布层只有存在对应联赛的赛季基准时才参与认证。仓库的参考分布来自
+    // NBA 2024-25 赛季；FIBA 档案没有对应的赛季分布表，它的分布观测只
+    // 记录，不参与缺陷判定。几何、语境与账本对两个档案照常成立。
+    let distribution_applicable =
+        scope.is_full() && league == nba_domain::league::LeagueId::Nba;
     let passed = ledger_failures == 0
         && geometry_violations == 0
         && context_violations == 0
-        && (!scope.is_full() || gate.passed);
+        && (!distribution_applicable || gate.passed);
     Ok(CoreValidationReport {
         scope: scope.as_str(),
-        distribution_applicable: scope.is_full(),
+        distribution_applicable,
         geometry_violations,
         context_violations,
         ledger_failures,
@@ -359,7 +368,8 @@ fn check_ledger_scoped(seed: u64, report: &GameReport, require_closed: bool) -> 
 
     let reconstructed = reconstruct(report);
     // 时钟与控制序列必须能从事件流独立重建：重建失败就是账本缺口。
-    match crate::reconstruct::reconstruct_clock(report) {
+    let reconstructed_clock = crate::reconstruct::reconstruct_clock(report);
+    match &reconstructed_clock {
         Ok(clock) => {
             if clock.tick != report.ticks {
                 clock_reconcile = false;
@@ -380,8 +390,7 @@ fn check_ledger_scoped(seed: u64, report: &GameReport, require_closed: bool) -> 
             clock_reconcile = false;
             detail.push_str(&format!("clock reconstruction: {error}; "));
         }
-    }
-    match crate::reconstruct::check_control_sequences(report) {
+    }    match crate::reconstruct::check_control_sequences(report) {
         Ok(control) => {
             if control.active_sequence.is_some() {
                 control_reconcile = false;
@@ -582,8 +591,16 @@ fn check_ledger_scoped(seed: u64, report: &GameReport, require_closed: bool) -> 
         }
         let regulation_periods = report.periods.min(report.regulation_periods);
         let overtime_periods = report.periods.saturating_sub(report.regulation_periods);
-        let game_seconds = regulation_periods as f64 * report.period_duration_seconds as f64
+        let nominal_game_seconds = regulation_periods as f64 * report.period_duration_seconds as f64
             + overtime_periods as f64 * report.overtime_duration_seconds as f64;
+        // 容量按实际消耗的比赛时间算，不用名义的节长：节末复核把比赛钟
+        // 恢复之后，本节可能比名义时长多走几秒，球员累计时间因此比名义
+        // 容量多。实际消耗由重建出来的时钟给出。
+        let actual_game_seconds = reconstructed_clock
+            .as_ref()
+            .map(|clock| clock.elapsed_seconds)
+            .unwrap_or(0.0);
+        let game_seconds = actual_game_seconds.max(nominal_game_seconds);
         let maximum_ticks = (game_seconds / report.tick_seconds as f64).ceil() as u64 + 1;
         let team_ticks = lines
             .iter()
@@ -913,7 +930,13 @@ pub fn certification_artifact(
     let mut marginal = Vec::new();
     for layer in &report.gate.layers {
         if !layer.passed {
-            defects.push(layer.criterion.clone());
+            if report.distribution_applicable {
+                defects.push(layer.criterion.clone());
+            } else {
+                // 没有对应联赛的赛季分布基准：观测值留在工件里，认证按
+                // 「当前不适用」登记，不把跨联赛比较当成引擎缺陷。
+                not_applicable.push(format!("distribution:{}", layer.criterion));
+            }
         }
     }
     if report.geometry_violations > 0 {

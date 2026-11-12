@@ -23,6 +23,17 @@ pub(crate) fn place(world: &mut World, handle: usize, pos: Vec2) {
     player.home_spot = pos;
 }
 
+/// 掩护接触把防守人顶开一点：位置变化由运动层统一写入。
+pub fn apply_contact_displacement(world: &mut World, handle: usize, delta: Vec2) {
+    let radius = world.rules.player_radius_ft;
+    let court = world.rules.court;
+    let player = &mut world.players[handle];
+    player.pos = (player.pos + delta).clamp(
+        Vec2::splat(radius),
+        Vec2::new(court.width_ft - radius, court.height_ft - radius),
+    );
+}
+
 /// 推进所有在场球员一步。
 pub fn integrate(world: &mut World, dt: f64) {
     let dt = dt as f32;

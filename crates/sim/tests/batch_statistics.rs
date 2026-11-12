@@ -20,10 +20,6 @@ fn play(seed: u64) -> nba_sim_core::GameReport {
     nba_sim_core::run_game(seed, &workspace_calibration_dir())
 }
 
-fn clone_params(params: &Params) -> Params {
-    params.clone()
-}
-
 /// 六十场短比赛批次只跑一次，分类与犯规类断言共用同一批报告；
 /// 断言要求批次贡献超过一百次投篮犯规，样本量不能缩减。
 fn shared_short_batch() -> &'static Vec<nba_sim_core::GameReport> {

@@ -1,7 +1,7 @@
 //! 比赛内核时钟：整数微秒状态、类型化指令与唯一写入入口。
 
 use nba_domain::rules::{micros_to_seconds, seconds_to_micros, MICROS_PER_SECOND, TICK_MICROS};
-use nba_domain::{CheckpointId, EventId, ProgramId};
+use nba_domain::{CheckpointId, ProgramId};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -242,7 +242,10 @@ impl ClockState {
             applied.elapsed_before_micros
         };
         let expected_player_time = if applied.player_time_running {
-            applied.player_time_before_micros.checked_add(delta).ok_or_else(|| {
+            // 球员累计时间跟比赛钟走：这一段比赛钟真正走了多少，累计时间
+            // 就加多少。
+            let played = applied.game_clock_before_micros - expected_game_clock;
+            applied.player_time_before_micros.checked_add(played).ok_or_else(|| {
                 ClockStateError::InvalidAdvance("球员累计时间溢出".to_string())
             })?
         } else {
@@ -273,6 +276,7 @@ impl ClockState {
         self.set_running(TimerId::Elapsed, applied.elapsed_running);
         self.set_running(TimerId::PlayerTimeTotal, applied.player_time_running);
         if applied.player_time_running {
+            let played = applied.game_clock_before_micros - expected_game_clock;
             for handle in &applied.player_handles {
                 if *handle >= self.player_count {
                     return Err(ClockStateError::InvalidAdvance(format!(
@@ -281,7 +285,7 @@ impl ClockState {
                 }
                 let timer = TimerId::PlayerTime(*handle);
                 let before = self.timer_micros(timer);
-                let after = before.checked_add(delta).ok_or_else(|| {
+                let after = before.checked_add(played).ok_or_else(|| {
                     ClockStateError::InvalidAdvance(format!("球员 {handle} 时间溢出"))
                 })?;
                 self.set_timer_micros(timer, after);
@@ -362,16 +366,6 @@ impl<'de> Deserialize<'de> for ClockState {
 pub struct ClockController<'a> {
     state: &'a mut ClockState,
     commits: &'a mut ClockCommitLog,
-}
-
-fn directives_from_commits(commits: &[ClockCommit]) -> Vec<ClockDirectiveApplied> {
-    commits
-        .iter()
-        .filter_map(|commit| match commit {
-            ClockCommit::Directive(applied) => Some(*applied),
-            _ => None,
-        })
-        .collect()
 }
 
 impl<'a> ClockController<'a> {
@@ -567,8 +561,12 @@ impl<'a> ClockController<'a> {
             elapsed_before_micros
         };
         let player_time_after_micros = if player_time_running {
+            // 球员累计时间跟比赛钟走：比赛钟这一 tick 真正走了多少，球员
+            // 累计时间就加多少。比赛钟停在最后一秒以下时，多出来的那个
+            // tick 不算上场时间；死球期间比赛钟不走，累计时间也不走。
+            let played = game_clock_before_micros - game_clock_after_micros;
             player_time_before_micros
-                .checked_add(micros)
+                .checked_add(played)
                 .expect("player time total overflowed")
         } else {
             player_time_before_micros
@@ -584,11 +582,12 @@ impl<'a> ClockController<'a> {
         self.state
             .set_timer_micros(TimerId::PlayerTimeTotal, player_time_after_micros);
         if player_time_running {
+            let played = game_clock_before_micros - game_clock_after_micros;
             for handle in player_handles {
                 let timer = TimerId::PlayerTime(*handle);
                 let before = self.state.timer_micros(timer);
                 let after = before
-                    .checked_add(micros)
+                    .checked_add(played)
                     .expect("player time clock overflowed");
                 self.state.set_timer_micros(timer, after);
             }
@@ -690,6 +689,7 @@ pub fn micros_per_second() -> u64 {
 mod tests {
     use super::*;
     use crate::state::{Clock, TeamSide};
+    use nba_domain::EventId;
 
     fn context() -> ClockDirectiveContext {
         ClockDirectiveContext {

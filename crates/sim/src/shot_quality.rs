@@ -8,8 +8,9 @@
 //!
 //! 参数按职责分组，各组独立拟合、互不串写：
 //!
-//! - 瞄准误差：`shot_quality_base_*`、`shot_quality_skill_*`、
-//!   `shot_aim_sigma_scale`、`shot_aim_movement_sensitivity`
+//! - 瞄准误差：`shot_quality_skill_*`、`shot_aim_sigma_scale`、
+//!   `shot_aim_movement_sensitivity`（目标命中率来自实测距离曲线，
+//!   瞄准误差由筐口与目标命中率反解）
 //! - 距离衰减：`shot_distance_decay_three_scale_ft`、
 //!   `shot_distance_decay_three_power`、`shot_aim_distance_scale`
 //! - 防守干扰：`shot_quality_contest_sensitivity`
@@ -214,9 +215,26 @@ fn reference_zone(kind: ShotKind) -> &'static str {
         | ShotKind::RunningLayup
         | ShotKind::ReverseLayup
         | ShotKind::Putback
-        | ShotKind::AlleyOop => "rim",
+        | ShotKind::AlleyOop
+        | ShotKind::ProHop
+        | ShotKind::EuroStep
+        | ShotKind::FingerRoll
+        | ShotKind::DoubleClutchLayup => "rim",
         ShotKind::Hook | ShotKind::Turnaround | ShotKind::Floater => "near",
         _ => "perimeter",
+    }
+}
+
+/// 实测曲线对应的出手类型。
+///
+/// 校准表按统计口径的出手类型给出曲线：篮下上篮、突破上篮、抛投等。
+/// 收球步的技术变体（跳步收球、欧洲步、挑篮、拉杆上篮）是同一种统计
+/// 出手的不同技术，因此它们读同一条曲线；技术区分由协议变体给出。
+fn calibrated_kind(kind: ShotKind) -> ShotKind {
+    match kind {
+        ShotKind::ProHop | ShotKind::EuroStep => ShotKind::DrivingLayup,
+        ShotKind::FingerRoll | ShotKind::DoubleClutchLayup => ShotKind::Layup,
+        other => other,
     }
 }
 
@@ -312,11 +330,19 @@ fn release_delay(kind: ShotKind, phase: BallPhase) -> f32 {
         | ShotKind::RunningLayup
         | ShotKind::ReverseLayup
         | ShotKind::Putback => 0.18,
+        // 三分出手与罚球不在这里：三分是出手位置给出的协议变体，罚球
+        // 有自己的动作种类。
         ShotKind::CatchShoot => 0.24,
         ShotKind::PullUp | ShotKind::StepBack => 0.32,
         ShotKind::Floater | ShotKind::Hook | ShotKind::Turnaround => 0.34,
         ShotKind::AlleyOop => 0.15,
         ShotKind::RunningJump => 0.26,
+        // 收球步的终结方式与上篮同一量级；跳步收球多一次落地时间，
+        // 拉杆上篮多一次空中调整。
+        ShotKind::ProHop => 0.22,
+        ShotKind::EuroStep => 0.2,
+        ShotKind::FingerRoll => 0.2,
+        ShotKind::DoubleClutchLayup => 0.26,
     };
     kind_delay
         + if phase == BallPhase::Gather {
@@ -594,13 +620,6 @@ pub fn evaluate(
     let origin = release_origin(world, pos, hoop);
     let plan = plan_shot(rules, origin, hoop, release_z);
     let aperture = effective_aperture(rules, plan.incidence);
-    let base = policy.w(match zone {
-        "rim" => "shot_quality_base_rim",
-        "near" => "shot_quality_base_near",
-        "mid" => "shot_quality_base_mid",
-        "three" => "shot_quality_base_three",
-        other => panic!("unknown shot zone `{other}`"),
-    });
     let spread = policy.w(match zone {
         "rim" => "shot_quality_skill_rim",
         "near" => "shot_quality_skill_near",
@@ -609,21 +628,25 @@ pub fn evaluate(
         other => panic!("unknown shot zone `{other}`"),
     });
     let skill = world.players[shooter].shooting_attribute(zone);
-    let reference = (base + (skill - 0.5) * spread).max(0.0);
-    // 目标命中率优先取实测的距离曲线：出手类型在���个距离上真的能投进多少，
-    // 就是这个距离上的目标命中率。没有这一段曲线时用区域基准值兜底。
+    // 目标命中率来自实测的距离曲线：出手类型在每个距离上真的能投进多少，
+    // 就是这个距离上的目标命中率。
     // 实测曲线的距离是出手点到篮筐的距离，也就是释放点的距离；因此查表
     // 用释放点而不是球员站位点，两者相差一个持球偏移。
     let release_distance = (origin - hoop).length();
-    let measured =
-        world
-            .params
-            .shot_distance
-            .rate_at(kind.as_str(), zone == "three", release_distance);
-    let mut target = match measured {
-        Some(rate) => rate + (skill - skill_reference(world, zone)) * spread,
-        None => reference,
-    };
+    let measured = world.params.shot_distance.rate_at(
+        calibrated_kind(kind).as_str(),
+        zone == "three",
+        release_distance,
+    );
+    // 实测曲线必须存在：出手类型没有曲线就是校准表缺了这一类出手，
+    // 就地失败，不让一个凭空的命中率进入比赛。
+    let measured = measured.unwrap_or_else(|| {
+        panic!(
+            "shot distance table has no curve for shot kind `{}`",
+            calibrated_kind(kind).as_str()
+        )
+    });
+    let mut target = measured + (skill - skill_reference(world, zone)) * spread;
     // 三分线外的衰减：实测曲线在最后一个距离档之后不再有数据，超远距离的
     // 命中率必须连续趋近于零，因此这里从最后一个实测档继续衰减。实测曲线
     // 已经包含距离带来的命中率下降，在曲线覆盖的范围内不能再衰减一次，
@@ -645,13 +668,11 @@ pub fn evaluate(
     let target = target.clamp(0.0, 1.0);
     if std::env::var_os("NBA_TRACE_QUAL").is_some() {
         eprintln!(
-            "QUAL kind={} zone={} dist={:.1} measured={} target={:.4} skill={:.3} spread={:.3}",
+            "QUAL kind={} zone={} dist={:.1} measured={:.4} target={:.4} skill={:.3} spread={:.3}",
             kind.as_str(),
             zone,
             release_distance,
-            measured
-                .map(|rate| format!("{rate:.4}"))
-                .unwrap_or_else(|| "none".to_string()),
+            measured,
             target,
             skill,
             spread
@@ -973,6 +994,9 @@ pub fn shot_choice(world: &World, state: &DecisionState) -> Option<(ShotKind, &'
             } else if is_catch_shoot {
                 // 零运球出手：接球或切出后直接起跳，无论防守贴得多紧都算接球投篮。
                 Some((ShotKind::CatchShoot, zone))
+            } else if state.shot_clock < 6.0 {
+                // 进攻钟见底时后撤一步再投：后撤步出手比干拔多一点时间。
+                Some((ShotKind::StepBack, zone))
             } else {
                 Some((ShotKind::PullUp, zone))
             }

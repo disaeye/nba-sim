@@ -106,7 +106,7 @@ fn hard_inhibition_removes_the_family_from_the_candidate_set() {
             nba_sim_core::utility::Utility::default(),
         ),
         (
-            ActionKind::PostUp,
+            ActionKind::PostUp(nba_sim_core::action::PostStepKind::Backdown),
             None,
             glam::Vec2::ZERO,
             nba_sim_core::utility::Utility::default(),

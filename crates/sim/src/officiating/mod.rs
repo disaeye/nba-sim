@@ -394,6 +394,10 @@ impl World {
                 location,
                 ready_after,
             } => {
+                // 开节获派发球的标记只约束那一次发球。任何后续裁决重新
+                // 指派发球方时，它都必须结束：否则新的合法发球队会被
+                // start_possession 当成「必须保留获派球队」的旧球队。
+                self.period_start_inbound_pending = false;
                 self.inbound_spot = match location {
                     InboundLocation::OwnBaseline => None,
                     InboundLocation::Spot(spot) => Some(spot),

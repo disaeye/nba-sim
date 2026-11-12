@@ -13,7 +13,7 @@ use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::program::rotation::{apply_dead_ball_window, note_intents, record_foul};
 use nba_sim_core::state::Phase;
 use nba_sim_core::world::{World, TICK_SECONDS};
-use nba_sim_core::{MatchSetup, Params, TeamSide};
+use nba_sim_core::{MatchSetup, Params};
 
 fn world(seed: u64) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");

@@ -2,7 +2,8 @@
 //!
 //! 复核结论有实质后果：`game_clock_at_period_end` 在档案里时，节钟归零后
 //! 结算的出手由裁判核对「球离手那一刻钟还有没有走完」。钟响后离手的得分
-//! 被取消；钟响前离手的得分保留。范围之外的档案不产生复核事实。
+//! 被取消；钟响前离手的得分保留。`shot_clock_at_period_end` 核对进攻钟，
+//! `clock_malfunction` 确认被更正的时钟读数。范围之外的档案不产生复核事实。
 
 mod common;
 
@@ -45,6 +46,8 @@ fn made_shot(world: &mut World, released_game_clock: f64) {
         touched_backboard: false,
         released_game_clock,
         released_clock_checkpoint: None,
+        released_event_id: 0,
+        released_shot_clock: 5.0,
     });
 }
 
@@ -75,7 +78,10 @@ fn a_shot_released_after_the_horn_is_waved_off() {
     assert_eq!(score_after, score_before, "钟响后离手的进球必须被取消");
     assert_eq!(
         reviews(&world),
-        vec![(true, "game_clock_at_period_end")],
+        vec![
+            (true, "game_clock_at_period_end"),
+            (false, "shot_clock_at_period_end"),
+        ],
         "自动复核必须发出一条推翻原判的事实"
     );
 }
@@ -96,7 +102,10 @@ fn a_shot_released_before_the_horn_survives_replay() {
     );
     assert_eq!(
         reviews(&world),
-        vec![(false, "game_clock_at_period_end")],
+        vec![
+            (false, "game_clock_at_period_end"),
+            (false, "shot_clock_at_period_end"),
+        ],
         "自动复核必须发出一条维持原判的事实"
     );
 }
@@ -109,7 +118,7 @@ fn a_profile_without_period_end_replay_does_not_review() {
         .league
         .review
         .review_scope
-        .retain(|scope| scope != "game_clock_at_period_end");
+        .retain(|scope| scope != "game_clock_at_period_end" && scope != "shot_clock_at_period_end");
     world.clock.set_game_clock(0.0);
     let team = world.players[0].team;
     world.possession.team = team;
@@ -174,7 +183,11 @@ fn the_overturned_period_end_ruling_restores_the_game_clock() {
     nba_sim_core::resolve::shot::finish(&mut world);
     assert_eq!(
         reviews(&world),
-        vec![(false, "game_clock_at_period_end")],
+        vec![
+            (false, "game_clock_at_period_end"),
+            (false, "shot_clock_at_period_end"),
+            (false, "clock_malfunction"),
+        ],
         "钟响前离手的进球必须经过复核并维持原判"
     );
     assert!(

@@ -3,17 +3,9 @@
 //! 判定函数只读权威状态与账本，产出 [`RawIncident`]。它们不改比赛状态：
 //! 后果由裁决层按档案给出，再经统一提交入口落下。
 //!
-//! 判定函数分三类：
-//!
-//! - **持续计时类**（进攻三秒、防守三秒、背身五秒、八秒、进攻钟）：计时
-//!   挂在权威状态上，达到时限时产出事件。
-//! - **程序时限类**（发球五秒、罚球出手时限、罚球禁区）：程序自己带着开始
-//!   时刻，时限到了就成立。
-//! - **接触与行为类**（各类犯规、伤病、球队技术犯规）：判定在接触或行为
-//!   发生的当场成立，事实由接触点或抽样决定。
-//!
-//! 每个函数都在 [`World::step`] 的主循环里被调用，因此它们产出的事件
-//! 由完整比赛自发产生，不依赖测试注入。
+//! 判定函数分三类：持续计时类读权威状态上的计时，程序时限类读程序自带
+//! 的开始时刻，接触与行为类在发生当场成立。每个函数都由 [`World::step`]
+//! 主循环调用，产出的事件来自完整比赛，不依赖测试注入。
 
 use nba_domain::identity::ProgramId;
 
@@ -21,12 +13,14 @@ use crate::action::TeamSide;
 use crate::incident::{IncidentKind, RawIncident};
 use crate::world::World;
 
-/// 检测当前 tick 内成立的全部原始事件。
-///
-/// 抽样类事件（转换阻断、清晰路径、恶意犯规、伤病、球队技术犯规）在每
-/// tick 末尾检测一次。持续计时类与程序时限类的事件在各自的计时点检测：
-/// 它们的到期时刻是规则定义的那一刻，不能等到 tick 末尾。
+/// 检测 tick 末尾成立的抽样事件：它们都在活球里按当场接触或行为判定。
 pub fn detect_sampled(world: &mut World) -> Vec<RawIncident> {
+    // 抽样式接触事实只在活球里成立：死球程序、发球、罚球与节间没有
+    // 对抗动作，读上一回合的球权或球员速度会把不属于这一段的判罚插进
+    // 正在等待的程序。
+    if !world.live_play() {
+        return Vec::new();
+    }
     // 投篮在途时不抽样式犯规：球在空中，犯规的判罚与投篮的结算会同时
     // 落在这一 tick 上，两者互相覆盖会让球态出现非法跃迁。
     if world.pending_shot.is_some() || world.ball_flight.is_some() {
@@ -42,6 +36,8 @@ pub fn detect_sampled(world: &mut World) -> Vec<RawIncident> {
     incidents.extend(detect_flagrant(world));
     incidents.extend(detect_injury(world));
     incidents.extend(detect_team_technical(world));
+    incidents.extend(detect_double_foul_sampled(world));
+    incidents.extend(detect_player_technical(world));
     incidents
 }
 
@@ -174,14 +170,12 @@ pub fn detect_inbound_timeout(world: &mut World) -> Option<RawIncident> {
 
 /// 罚球出手时限：罚球人超过时限没有出手。
 pub fn detect_free_throw_timeout(world: &mut World) -> Option<RawIncident> {
+    // 球在空中属于飞行结算，不属于持球等待出手；旧时间戳此时不能判超时。
+    if world.pending_shot.is_some() || world.ball_flight.is_some() {
+        return None;
+    }
     let started = world.free_throw_started?;
-    let limit = f64::from(
-        world
-            .rules
-            .league
-            .free_throws
-            .free_throw_time_limit_seconds,
-    );
+    let limit = f64::from(world.rules.league.free_throws.free_throw_time_limit_seconds);
     let now = world.now();
     if now - started <= limit {
         return None;
@@ -205,8 +199,6 @@ pub fn detect_free_throw_lane_violation(world: &mut World) -> Option<RawIncident
     if !lane.offense_early && !lane.defense_early {
         return None;
     }
-    let offense_early = lane.offense_early;
-    let defense_early = lane.defense_early;
     Some(
         RawIncident::new(IncidentKind::FreeThrowLaneViolation, world.now())
             .with_team(world.possession.team)
@@ -365,6 +357,102 @@ pub fn detect_technical_foul(world: &mut World, actor: usize) -> RawIncident {
         .with_parties(Some(actor), None)
         .with_team(team)
         .with_program(ProgramId::from_raw(world.current_program_id))
+}
+
+/// 双方犯规的检出：两名对方球员在贴身对抗里同时向对方发力。
+///
+/// 判据是权威状态里的位置与速度：双方都在场上、分属两队、距离不超过
+/// 身体包络，且相对速度达到接触门槛。双方同时发力时相对速度不会特别大，
+/// 因此这条的上界低于球员技术犯规与恶意犯规的门槛；三档接触按不同阈值
+/// 与不同抽样地址分别判定，同一 tick 只产出其中一类。
+pub fn detect_double_foul_sampled(world: &mut World) -> Option<RawIncident> {
+    let radius = world.rules.player_radius_ft
+        * world.params.policy.w("double_foul_contact_radius_multiple");
+    let threshold = world.params.policy.w("double_foul_closing_speed_ftps");
+    let ceiling = world.params.policy.w("player_technical_closing_speed_ftps");
+    let pair = simultaneous_contact_pair(world, radius, threshold, ceiling)?;
+    let (first, second, closing) = pair;
+    let rate = world.params.policy.w("double_foul_rate");
+    if world.draw(
+        crate::draw::Stream::Foul,
+        first,
+        crate::draw::purpose::DOUBLE_FOUL,
+        0,
+    ) >= rate
+    {
+        return None;
+    }
+    Some(
+        detect_double_foul(world, first, second)
+            .with_measurement("closing_speed_ftps", closing)
+            .with_measurement("threshold_ftps", threshold),
+    )
+}
+
+/// 球员技术犯规的检出：高速贴身接触之后的不当行为。
+///
+/// 判据同样是权威状态里的接触与相对速度，门槛高于双方犯规；责任主体是
+/// 当时防守的一方，因为这类接触发生在防守人对持球人的对抗之后。
+pub fn detect_player_technical(world: &mut World) -> Option<RawIncident> {
+    let radius = world.rules.player_radius_ft
+        * world.params.policy.w("player_technical_contact_radius_multiple");
+    let threshold = world.params.policy.w("player_technical_closing_speed_ftps");
+    let ceiling = world.params.policy.w("flagrant_closing_speed_ftps");
+    let pair = simultaneous_contact_pair(world, radius, threshold, ceiling)?;
+    let (first, second, closing) = pair;
+    let defending = world.possession.team.other();
+    let actor = if world.players[first].team == defending {
+        first
+    } else {
+        second
+    };
+    let rate = world.params.policy.w("player_technical_rate");
+    if world.draw(
+        crate::draw::Stream::Foul,
+        actor,
+        crate::draw::purpose::PLAYER_TECHNICAL,
+        0,
+    ) >= rate
+    {
+        return None;
+    }
+    Some(
+        detect_technical_foul(world, actor)
+            .with_measurement("closing_speed_ftps", closing)
+            .with_measurement("threshold_ftps", threshold),
+    )
+}
+
+/// 找出一对符合接触强度区间的对方球员。
+///
+/// 遍历顺序按球员句柄升序固定，同一 tick 的多个候选取第一对；抽样地址
+/// 由这一对的实体身份决定，因此调换事件容器顺序不会改变结果。
+fn simultaneous_contact_pair(
+    world: &World,
+    radius: f32,
+    threshold: f32,
+    ceiling: f32,
+) -> Option<(usize, usize, f32)> {
+    for a in 0..world.players.len() {
+        let left = &world.players[a];
+        if !left.on_court {
+            continue;
+        }
+        for b in (a + 1)..world.players.len() {
+            let right = &world.players[b];
+            if !right.on_court || left.team == right.team {
+                continue;
+            }
+            if (left.pos - right.pos).length() > radius {
+                continue;
+            }
+            let closing = (left.vel - right.vel).length();
+            if closing >= threshold && closing < ceiling {
+                return Some((a, b, closing));
+            }
+        }
+    }
+    None
 }
 
 /// 恶意犯规：防守人在已经失去防守位置的情况下用大力撞人。

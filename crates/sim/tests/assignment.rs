@@ -6,7 +6,7 @@ use nba_sim_core::action::Fact;
 use nba_sim_core::params::{workspace_calibration_dir, AcceptanceTable, ValidationParams};
 use nba_sim_core::state::{DefenseResponsibility, OffenseJob, TargetKind};
 use nba_sim_core::world::TICK_SECONDS;
-use nba_sim_core::{MatchSetup, Params, World};
+use nba_sim_core::World;
 
 /// 恢复段允许的额外路径（ft）：与验收表 `recovery_path_extra_ft` 一致。
 const RECOVERY_PATH_EXTRA_FT: f64 = 22.62;

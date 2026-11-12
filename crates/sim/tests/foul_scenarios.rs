@@ -13,9 +13,9 @@ use nba_domain::rules::GameRules;
 use nba_sim_core::action::{Fact, FoulKind};
 use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::detect;
-use nba_sim_core::state::{Phase, PossessionKind};
+use nba_sim_core::state::Phase;
 use nba_sim_core::world::{World, TICK_SECONDS};
-use nba_sim_core::{MatchSetup, Params, TeamSide};
+use nba_sim_core::{MatchSetup, Params};
 
 fn world(seed: u64) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
@@ -283,12 +283,6 @@ fn a_loose_ball_foul_counts_against_the_team_and_awards_one_free_throw_in_the_bo
 fn a_technical_foul_awards_one_free_throw_and_the_offence_keeps_the_ball() {
     let mut world = live_world(707);
     let offense = world.possession.team;
-    let fouler = world
-        .on_court(offense.other())
-        .as_slice()
-        .first()
-        .copied()
-        .expect("a defender is on the court");
     let foul_id = world.new_foul_id();
     // 技术犯规：对方罚一次，进攻方保留球权（NBA Rule 12A §V.8）。
     nba_sim_core::resolve::freethrow::shoot_team_technical(

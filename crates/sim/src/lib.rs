@@ -3,6 +3,8 @@
 //! 结构：世界状态 → 策略选动作 → 结算产出状态变化 → 下一次决策读新状态。
 //! 出手位置与命中率都是动作链的后果，参数表来自真实赛季数据。
 
+pub mod action_identity;
+pub mod action_spec;
 pub mod actions;
 pub use actions as action;
 pub mod adjudicate_incidents;
@@ -12,7 +14,6 @@ pub use control as ball;
 pub mod body;
 pub mod ledger;
 pub use ledger::{boxscore, report};
-pub mod challenge;
 pub mod clock;
 pub mod defense;
 pub mod draw;
@@ -34,7 +35,9 @@ pub mod policy;
 pub mod program;
 pub use program::{rotation, timeouts};
 pub mod replay;
+pub mod review_program;
 pub mod resolve;
+pub mod settlement;
 pub mod review;
 pub mod session;
 pub mod shot_quality;
@@ -55,7 +58,14 @@ pub use manifest::{builtin_manifest, MatchManifest, MANIFEST_VERSION};
 pub use params::{Params, RuntimeParams, CALIBRATION_DIR};
 pub use replay::{replay_possession, PossessionFrames};
 pub use report::GameReport;
+pub use review_program::{
+    ChallengeOutcome, Observation, ReviewConclusion, ReviewEvidence, ReviewScope, ReviewState,
+    ReviewableRuling,
+};
 pub use review::{build_review, build_review_for_league, write_review, ReviewReport};
+pub use settlement::{
+    CloseCondition, PendingAdjudication, PendingAdjudications, PendingKind, PeriodSettlement,
+};
 pub use session::{
     CompletionSummary, EventBatch, MatchInfo, SessionCheckpoint, SessionService, SessionState,
 };

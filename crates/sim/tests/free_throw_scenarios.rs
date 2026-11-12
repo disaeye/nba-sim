@@ -10,9 +10,9 @@ mod common;
 
 use nba_sim_core::action::Fact;
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::state::{Phase, PossessionKind};
+use nba_sim_core::state::Phase;
 use nba_sim_core::world::{World, TICK_SECONDS};
-use nba_sim_core::{MatchSetup, Params, TeamSide};
+use nba_sim_core::{MatchSetup, Params};
 use nba_domain::rules::GameRules;
 
 fn world(seed: u64) -> World {
@@ -116,7 +116,6 @@ fn an_early_defensive_entry_is_recorded_separately() {
 #[test]
 fn a_player_outside_the_lane_does_not_trigger_a_violation() {
     let mut world = live_world(1203);
-    let offense = world.possession.team;
     let shooter = world.holder().expect("live possession has a holder");
     free_throw_program(&mut world, shooter, 2);
     // 把双方的人都放到禁区之外。
@@ -158,6 +157,50 @@ fn the_shooter_is_replaced_when_his_own_spot_leaves_the_court() {
         }
         other => panic!("罚球人离场之后必须继续罚球程序，实际 {other:?}"),
     }
+}
+
+/// 罚球已经离手时，出手时限不再成立。
+///
+/// 球在空中属于飞行结算，不属于「罚球人持球等待出手」。旧时限戳留下来
+/// 会让飞行被误判为罚球超时，罚球程序因此被切成死球，节末结算永远等不
+/// 到这次待决出手关闭。
+#[test]
+fn a_free_throw_in_flight_is_not_a_shooting_timeout() {
+    let mut world = live_world(1206);
+    let shooter = world.holder().expect("live possession has a holder");
+    free_throw_program(&mut world, shooter, 1);
+    nba_sim_core::resolve::freethrow::shoot(
+        &mut world,
+        shooter,
+        1,
+        1,
+        0,
+        false,
+        false,
+        1,
+    );
+    assert!(
+        world.pending_shot.is_some(),
+        "罚球飞行必须有待结算的出手"
+    );
+    let limit = f64::from(world.rules.league.free_throws.free_throw_time_limit_seconds);
+    world.free_throw_started = Some(world.now() - limit - 1.0);
+    world.step(TICK_SECONDS);
+    let expired = world.events.iter().any(|event| {
+        matches!(
+            &event.fact,
+            Fact::PossessionEnded {
+                termination_detail: "free_throw_timeout",
+                ..
+            }
+        )
+    });
+    assert!(!expired, "球在空中时不得判罚球出手超时");
+    assert!(
+        matches!(world.phase(), Phase::FreeThrows { .. }),
+        "罚球程序必须继续到飞行结算，实际 {:?}",
+        world.phase()
+    );
 }
 
 #[test]

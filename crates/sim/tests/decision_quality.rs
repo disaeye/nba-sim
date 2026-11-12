@@ -1,6 +1,4 @@
-use nba_domain::rules::GameRules;
-use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::{MatchSetup, Params, World};
+use nba_sim_core::World;
 
 mod common;
 

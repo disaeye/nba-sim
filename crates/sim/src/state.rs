@@ -11,7 +11,7 @@ pub use crate::action::TeamSide;
 use crate::action::{ActionRuntime, DefenderRoute};
 use crate::clock::{
     micros_from_seconds, root_context, seconds_from_micros, ClockCommit, ClockCommitLog,
-    ClockController, ClockDirectiveContext, ClockSegmentApplied, ClockState, ClockDirective,
+    ClockController, ClockDirectiveContext, ClockState, ClockDirective,
     TimerId,
 };
 use crate::params::PolicyTable;
@@ -69,6 +69,60 @@ impl TargetKind {
     }
 }
 
+/// 持续姿态的槽位下标对应的动作名。
+///
+/// 姿态有开始事实，因此它在事件流里有一个可读的名字。
+pub fn posture_kind(slot: crate::state::PostureSlot) -> &'static str {
+    match slot {
+        crate::state::PostureSlot::OnBall => "OnBallPosture",
+        crate::state::PostureSlot::Transition => "Transition",
+        crate::state::PostureSlot::OffBall => "OffBallDuty",
+        crate::state::PostureSlot::Closeout => "CloseoutResponse",
+    }
+}
+
+/// 持续姿态的槽位名：事件流用它区分是哪一种姿态。
+pub fn posture_slot_name(slot: crate::state::PostureSlot) -> &'static str {
+    match slot {
+        crate::state::PostureSlot::OnBall => "on_ball",
+        crate::state::PostureSlot::Transition => "transition",
+        crate::state::PostureSlot::OffBall => "off_ball",
+        crate::state::PostureSlot::Closeout => "closeout",
+    }
+}
+
+/// 持续姿态的槽位数：站位、转换、无球职责与扑防应答。
+pub const POSTURE_SLOT_COUNT: usize = 4;
+
+/// 持续姿态的槽位。
+///
+/// 姿态与动作共用同一套动作身份空间，因此姿态也需要身份：渲染器要能认出
+/// “这是同一个姿态”，事件流也要能指到它。槽位把一个球员可以同时拥有的
+/// 几种姿态分开。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostureSlot {
+    /// 对位防守人的站位姿态。
+    OnBall,
+    /// 转换姿态。
+    Transition,
+    /// 无球防守职责。
+    OffBall,
+    /// 扑防应答。
+    Closeout,
+}
+
+impl PostureSlot {
+    /// 槽位下标。
+    pub const fn index(self) -> usize {
+        match self {
+            Self::OnBall => 0,
+            Self::Transition => 1,
+            Self::OffBall => 2,
+            Self::Closeout => 3,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefenseResponsibility {
     OnBall,
@@ -84,6 +138,16 @@ pub enum DefenseResponsibility {
     Switch,
     /// 失去位置后回位：先回到自己的对位人身上。
     Recover,
+    /// 拦截传球路线：站在持球人与接球人之间。
+    Intercept,
+    /// 补位：接管另一个位置留下的空当。
+    Rotate,
+    /// 夹击：两名防守人一起包住持球人。
+    DoubleTeam,
+    /// 延误：抢在掩护完成之前先碰一下持球人。
+    Hedge,
+    /// 护框：站在篮筐附近保护内线。
+    RimProtect,
 }
 
 impl DefenseResponsibility {
@@ -91,13 +155,18 @@ impl DefenseResponsibility {
         match self {
             Self::OnBall => "on_ball",
             Self::Deny => "deny",
-            Self::Sink => "sink",
+            Self::Sink => "drop",
             Self::Help => "help",
             Self::BoxOut => "box_out",
             Self::GoOver => "go_over",
             Self::GoUnder => "go_under",
             Self::Switch => "switch",
             Self::Recover => "recover",
+            Self::Intercept => "intercept",
+            Self::Rotate => "rotate",
+            Self::DoubleTeam => "double_team",
+            Self::Hedge => "hedge",
+            Self::RimProtect => "rim_protect",
         }
     }
 }
@@ -248,8 +317,31 @@ pub struct PlayerState {
     /// 姿态不是带窗口的动作，因此它不带运行时：它只是一条持续到局面
     /// 变了为止的状态，发布一次变化事实就够了。
     pub on_ball_positioning: Option<crate::action::OnBallPositioning>,
+    /// 转换姿态：快攻推进、快攻跟进、退防或快速形成阵地防守。
+    ///
+    /// 转换同样不是带窗口的动作：跑者在快攻窗口里仍然可以切入、传球与
+    /// 出手，因此转换只能是姿态，不能占用他的身体动作。
+    pub transition: Option<crate::action::TransitionKind>,
+    /// 扑防应答：造犯规接触或侧移避让。
+    ///
+    /// 这是出手人对扑防的应对，窗口覆盖到这次出手结算为止。
+    pub closeout_response: Option<&'static str>,
     /// 本球员当前执行的身体动作；多人配合使用相同的 interaction_id。
     pub action: Option<ActionRuntime>,
+    /// 持续姿态的动作身份。
+    ///
+    /// 姿态不是带窗口的动作，但它仍然有身份：渲染器要能认出“这是同一个
+    /// 姿态”，事件流也要能指到它。身份由引擎分配，因此姿态与动作共用同一
+    /// 套身份空间，不会出现两个身份指向同一个东西。
+    ///
+    /// 一个球员可以同时有几种姿态（站位、转换、职责、扑防应答），因此身份
+    /// 按姿态槽位分开。
+    pub posture_action_ids: [u64; POSTURE_SLOT_COUNT],
+    /// 每种姿态开始的时刻。
+    pub posture_since: [f64; POSTURE_SLOT_COUNT],
+    /// 每种姿态当前的技术变体：职责名、站位名、转换变体与应答名。
+    /// 姿态结束时的事实因此能指到它当时是哪一个变体。
+    pub posture_variants: [&'static str; POSTURE_SLOT_COUNT],
     /// 被假动作骗到后的失衡窗口：干扰、抄截半径与切球成功率都读它。
     pub bait: Option<Bait>,
     /// 最近一次完成掩护的时刻：掩护结束后掩护人要顺下或外弹。
@@ -301,7 +393,12 @@ impl PlayerState {
             schedule: DecisionSchedule::default(),
             positioning_next_at: 0.0,
             on_ball_positioning: None,
+            transition: None,
+            closeout_response: None,
             action: None,
+            posture_action_ids: [0; POSTURE_SLOT_COUNT],
+            posture_since: [0.0; POSTURE_SLOT_COUNT],
+            posture_variants: [""; POSTURE_SLOT_COUNT],
             bait: None,
         }
     }
@@ -505,6 +602,14 @@ impl Clock {
 
     pub fn game_clock(&self) -> f64 {
         seconds_from_micros(self.state.game_clock_micros())
+    }
+
+    /// 一名球员的累计上场时间。
+    ///
+    /// 这是球员时间的唯一事实源：计时器随每次推进累加，比赛钟被复核
+    /// 恢复时它也一并回退。箱体的上场时间因此直接读它。
+    pub fn player_time_seconds(&self, player: usize) -> f64 {
+        seconds_from_micros(self.state.timer_micros(TimerId::PlayerTime(player)))
     }
 
     pub fn set_game_clock(&mut self, seconds: f64) {
@@ -1047,6 +1152,8 @@ pub struct PossessionState {
     pub last_offensive_rebound_actor: Option<usize>,
     pub last_drive_at: Option<f64>,
     pub last_post_at: Option<f64>,
+    /// 上一次背身选用的步法：随后的跳投因此能区分转身跳投与后仰跳投。
+    pub last_post_step: Option<&'static str>,
     pub last_drive_actor: Option<usize>,
     pub last_post_actor: Option<usize>,
     pub last_cut_actor: Option<usize>,
@@ -1089,6 +1196,11 @@ pub struct PossessionState {
     pub play_called: bool,
     /// 快攻跑位改过的球员及其原站位：窗口结束时按这里还回去。
     pub break_return: Vec<(usize, Vec2)>,
+    /// 快攻窗口内持有转换姿态的球员：窗口结束时他们的姿态因此结束。
+    ///
+    /// 转换姿态与落点回收是两件事：退防的人有退防姿态，但他的落点没有被
+    /// 快攻改过，因此他不在这份名单里。
+    pub transition_players: Vec<usize>,
     /// 持球人被紧逼盯防的累计秒数：一旦不再紧逼就清零。
     pub closely_guarded_seconds: f32,
     /// 进攻人在限制区里已经连续停留的秒数：进攻三秒的计时。
@@ -1138,6 +1250,7 @@ impl PossessionState {
             last_offensive_rebound_actor: None,
             last_drive_at: None,
             last_post_at: None,
+            last_post_step: None,
             last_drive_actor: None,
             last_post_actor: None,
             last_cut_actor: None,
@@ -1160,6 +1273,7 @@ impl PossessionState {
             play: None,
             play_called: false,
             break_return: Vec::new(),
+            transition_players: Vec::new(),
             closely_guarded_seconds: 0.0,
             offense_lane_seconds: 0.0,
             defense_lane_seconds: 0.0,

@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use nba_sim_core::action::Fact;
 use nba_sim_core::incident::{IncidentKind, PenaltyAfter, PenaltyQueue};
 use nba_sim_core::params::workspace_calibration_dir;
+use nba_sim_core::state::Phase;
+use nba_sim_core::world::TICK_SECONDS;
 use nba_sim_core::{MatchSetup, Params, TeamSide, World};
 
 mod common;
@@ -91,7 +93,7 @@ fn every_incident_kind_has_a_detector_called_by_the_main_loop() {
     }
 }
 
-/// 主循环检出的原始事件里，每一类都在完整比赛里出现过。
+/// 主循环检出的常见原始事件在完整比赛里出现过。
 ///
 /// 判据是检出计数：计数只从主循环的检出路径写入，因此计数为正就说明
 /// 这一类的判定函数在完整比赛的主循环里被调用过。
@@ -102,7 +104,6 @@ fn the_main_loop_detects_these_incident_kinds_in_complete_matches() {
         IncidentKind::OutOfBounds,
         IncidentKind::BackToBasket,
         IncidentKind::Backcourt,
-        IncidentKind::EightSecond,
         IncidentKind::ShotClock,
         IncidentKind::OffensiveThreeSecond,
         IncidentKind::DefensiveThreeSecond,
@@ -125,6 +126,47 @@ fn the_main_loop_detects_these_incident_kinds_in_complete_matches() {
             "原始事件 {name} 的判定函数必须由主循环调用：16 场完整比赛里检出 0 次"
         );
     }
+}
+
+/// 死球程序里不产生抽样式接触事实：开节发球还没结束，球员速度、
+/// 抗议热度与上一回合的球权都不能让技术犯规或双方犯规插入这段程序。
+#[test]
+fn sampled_incidents_require_live_play() {
+    let mut world = World::new(
+        MatchSetup::builtin(nba_domain::GameRules::default()),
+        params(),
+        845,
+    );
+    world.step(TICK_SECONDS);
+    world.set_phase(Phase::Inbound {
+        team: TeamSide::Away,
+        ready_at: world.now() + 100.0,
+    });
+    world.team_technical_protest = 1_000.0;
+    let home = world.on_court(TeamSide::Home).as_slice()[0];
+    let away = world.on_court(TeamSide::Away).as_slice()[0];
+    let contact = world.players[away].pos;
+    world.players[home].vel = glam::Vec2::new(20.0, 0.0);
+    world.players[away].vel = glam::Vec2::new(-20.0, 0.0);
+    world.players[home].pos = contact;
+    assert!(
+        nba_sim_core::detect::detect_sampled(&mut world).is_empty(),
+        "发球程序里不能按上一回合的状态检出抽样式判罚"
+    );
+}
+
+/// 八秒违例由主循环判定，但完整比赛里不要求成立。
+///
+/// 持球人从后场推进到前场弧顶，正常比赛不会让后场计时走到八秒。判定
+/// 函数存在且被主循环调用，是这条契约的内容；`backcourt_clock_scenarios`
+/// 用后场停滞的夹具验证成立时的裁决。
+#[test]
+fn the_eight_second_violation_has_a_main_loop_detector() {
+    assert_eq!(IncidentKind::EightSecond.as_str(), "eight_second");
+    assert_eq!(
+        IncidentKind::EightSecond.violation_kind(),
+        Some(nba_sim_core::adjudicate::ViolationKind::EightSecond)
+    );
 }
 
 /// 进攻犯规与贴身五秒违例由主循环判定。

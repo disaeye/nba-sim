@@ -203,6 +203,33 @@ pub fn resolve(
         separation_ft,
         kind: kind.as_str(),
     });
+    // 急停：球停在投篮距离，防守人跟到位上，下一次决策是投篮或传球。
+    if kind == nba_domain::action_window::DriveKind::PullUpStop {
+        world.possession.ball_phase = crate::state::BallPhase::Gather;
+    }
+    // 突破分球：球交给弱侧空位队友，这次突破本身不直接得分。
+    if kind == nba_domain::action_window::DriveKind::DriveKick {
+        if let Some(target) = drive_kick_target(world, driver) {
+            let mut pass_intent = intent.clone();
+            pass_intent.kind = ActionKind::Pass(crate::action::PassKind::Chest);
+            pass_intent.target = Some(target);
+            pass_intent.to_ft = world.players[target].pos;
+            let outcome = crate::resolve::pass::resolve(
+                world,
+                &pass_intent,
+                crate::action::PassKind::Chest,
+            );
+            return outcome;
+        }
+    }
+    // 后撤步：球手向后撤开，防守人被带出位置。
+    if kind == nba_domain::action_window::DriveKind::StepBack {
+        let away = (pos - hoop).normalize_or_zero();
+        let retreat = world.params.policy.g("drive_step_back_distance_ft");
+        world.players[driver].target = pos + away * retreat;
+        world.players[driver].target_kind = crate::state::TargetKind::Window;
+        world.players[driver].target_partner = driver;
+    }
     ActionOutcome {
         actor: driver,
         kind: ActionKind::Drive(kind),
@@ -215,6 +242,33 @@ pub fn resolve(
     }
 }
 
+/// 突破分球的目标：离防守人最远的队友。
+///
+/// 空位的判据是防守人离他足够远：分球给有人看着的队友等于白传。
+fn drive_kick_target(world: &World, driver: usize) -> Option<usize> {
+    let open_ft = world.params.policy.g("drive_kick_open_defender_ft");
+    let team = world.players[driver].team;
+    let mut best: Option<(usize, f32)> = None;
+    for (index, player) in world.players.iter().enumerate() {
+        if index == driver || !player.on_court || player.team != team {
+            continue;
+        }
+        let defender_distance = world
+            .players
+            .iter()
+            .filter(|other| other.on_court && other.team != team)
+            .map(|other| (other.pos - player.pos).length())
+            .fold(f32::INFINITY, f32::min);
+        if defender_distance < open_ft {
+            continue;
+        }
+        if best.is_none_or(|(_, current)| defender_distance > current) {
+            best = Some((index, defender_distance));
+        }
+    }
+    best.map(|(index, _)| index)
+}
+
 /// 走步的账本与裁决：收球步的两条触发路径共用这里的写入。
 ///
 /// 判定与罚则在 [`crate::footwork`] 里：那里按轴心脚与脚步接触判定，
@@ -223,7 +277,12 @@ fn book_gather_travel(world: &mut World, actor: usize, team: crate::TeamSide) {
     crate::footwork::book_travel(world, actor, team);
 }
 
-pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
+pub fn resolve_finish(
+    world: &mut World,
+    intent: &ActionIntent,
+    kind: crate::action::FinishKind,
+) -> ActionOutcome {
+    let mut kind = kind;
     let actor = intent.actor;
     let team = world.players[actor].team;
     let hoop = world.hoop_for(team);
@@ -250,11 +309,17 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
             ((player.pos - closest).length(), t)
         })
         .filter(|(distance, t)| {
-            *distance <= world.params.policy.g("euro_step_defender_ft") && (0.2..=0.8).contains(t)
+            *distance <= world.params.policy.g("euro_step_defender_ft")
+                && (-0.25..=1.25).contains(t)
         })
         .min_by(|left, right| left.0.total_cmp(&right.0))
         .map(|(_, _)| ())
         .is_some();
+    if kind == crate::action::FinishKind::EuroStep && !blocker {
+        // 决策时定了绕开挡路防守人，结算时那条路上已经没有人：绕的那
+        // 一步因此无处可绕，这一篮退回普通上篮。技术与实际发生的一致。
+        kind = crate::action::FinishKind::Layup;
+    }
     if blocker {
         let lateral = Vec2::new(-direction.y, direction.x);
         let side = world
@@ -278,7 +343,7 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
         book_gather_travel(world, actor, team);
         return ActionOutcome {
             actor,
-            kind: ActionKind::Finish,
+            kind: ActionKind::Finish(kind),
             completion: Completion::Failed,
             delta: StateDelta {
                 turnover: Some(TurnoverKind::Travel),
@@ -323,14 +388,18 @@ pub fn resolve_finish(world: &mut World, intent: &ActionIntent) -> ActionOutcome
     }
     ActionOutcome {
         actor,
-        kind: ActionKind::Finish,
+        kind: ActionKind::Finish(kind),
         completion: Completion::Completed,
         delta: StateDelta::default(),
         facts: Vec::new(),
     }
 }
 
-pub fn resolve_post(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
+pub fn resolve_post(
+    world: &mut World,
+    intent: &ActionIntent,
+    kind: crate::action::PostStepKind,
+) -> ActionOutcome {
     let actor = intent.actor;
     let team = world.players[actor].team;
     let hoop = world.hoop_for(team);
@@ -356,17 +425,31 @@ pub fn resolve_post(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
             offense_strength * world.rules.capability.post_defense_secondary_gain;
         (offense_pressure - defense_resistance).clamp(-1.5, 1.5)
     });
-    // 背身步法由防守人的站位决定：站定的防守人用上下步，靠底线的用撤步转身，
-    // 其余情况用背身挤打。步法写入事实，落点仍由力量对抗与抽样决定。
-    let planted = defender.is_some_and(|handle| world.players[handle].vel.length() < 3.0);
-    let baseline_side = (pos.y - hoop.y).abs() > 6.0;
-    let kind_name = if planted {
-        "up_and_under"
-    } else if baseline_side {
-        "drop_step"
-    } else {
-        "backdown"
+    // 背身步法由防守人的站位决定：站定的防守人用上下步（从头顶绕过去），
+    // 靠底线的用撤步转身，其余情况用背身挤打。进攻人自己选的前转身、
+    // 后转身、勾手与背身后仰是明确的选择，结算层照办。
+    //
+    // 要位是步法之前的准备：它只是占住低位，因此不产生对抗效果。
+    let kind = match kind {
+        crate::action::PostStepKind::FrontTurn
+        | crate::action::PostStepKind::ReverseTurn
+        | crate::action::PostStepKind::Hook
+        | crate::action::PostStepKind::TurnaroundFadeaway => kind,
+        _ => {
+            let planted = defender.is_some_and(|handle| world.players[handle].vel.length() < 3.0);
+            let baseline_side = (pos.y - hoop.y).abs() > 6.0;
+            if planted {
+                crate::action::PostStepKind::UpAndUnder
+            } else if baseline_side {
+                crate::action::PostStepKind::DropStep
+            } else {
+                crate::action::PostStepKind::Backdown
+            }
+        }
     };
+    let kind_name = kind.as_str();
+    // 靠底线与否决定转身的方向：前转身往底线转，后转身往中路转。
+    let baseline_side = (pos.y - hoop.y).abs() > 6.0;
     let base_distance =
         5.5 + world.draw(Stream::Aim, actor, purpose::POST_TARGET, 0) * 4.0 - target_distance;
     // 每种步法都有自己的空间效果，而空间效果作用在防守人身上：上下步把
@@ -379,16 +462,30 @@ pub fn resolve_post(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     let lateral = Vec2::new(-direction.y, direction.x);
     let push_ft = world.params.policy.g("post_step_push_ft");
     if let Some(defender) = defender {
-        let pushed = match kind_name {
+        let pushed = match kind {
             // 上下步：往底线方向顶，防守人被挤到身后。
-            "up_and_under" => {
+            crate::action::PostStepKind::UpAndUnder => {
                 let baseline = if baseline_side { lateral } else { -lateral };
                 baseline * push_ft
             }
             // 撤步转身：往底线一侧绕过去，防守人被挤到另一侧。
-            "drop_step" => -lateral * push_ft,
-            // 背身挤打：朝防守人的反方向挤。
-            _ => {
+            crate::action::PostStepKind::DropStep => -lateral * push_ft,
+            // 前转身：往底线一侧转，防守人被挤到中路。
+            crate::action::PostStepKind::FrontTurn => {
+                let baseline = if baseline_side { -lateral } else { lateral };
+                baseline * push_ft
+            }
+            // 后转身：往中路转，防守人被挤到底线一侧。
+            crate::action::PostStepKind::ReverseTurn => {
+                let baseline = if baseline_side { -lateral } else { lateral };
+                -baseline * push_ft
+            }
+            // 勾手与背身后仰：不挤防守人，转向自己。
+            crate::action::PostStepKind::Hook | crate::action::PostStepKind::TurnaroundFadeaway => {
+                Vec2::ZERO
+            }
+            // 要位与背身挤打：朝防守人的反方向挤。
+            crate::action::PostStepKind::PostUp | crate::action::PostStepKind::Backdown => {
                 let away = (world.players[defender].pos - pos).normalize_or_zero();
                 Vec2::new(-away.y, away.x) * push_ft
             }
@@ -414,6 +511,8 @@ pub fn resolve_post(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     world.possession.drives += 1;
     world.possession.last_post_at = Some(world.now());
     world.possession.last_post_actor = Some(actor);
+    // 步法记进持球状态：随后的跳投因此能区分转身跳投与后仰跳投。
+    world.possession.last_post_step = Some(kind_name);
     world.possession.ball_phase = crate::state::BallPhase::Post;
     world.emit(Fact::PostUp {
         player: actor,
@@ -421,7 +520,7 @@ pub fn resolve_post(world: &mut World, intent: &ActionIntent) -> ActionOutcome {
     });
     ActionOutcome {
         actor,
-        kind: ActionKind::PostUp,
+        kind: ActionKind::PostUp(kind),
         completion: Completion::Completed,
         delta: StateDelta {
             separation_ft: Some(1.0),

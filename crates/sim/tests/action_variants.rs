@@ -187,14 +187,18 @@ fn the_post_footwork_moves_the_player_differently() {
         world.ball.z = world.rules.ball_radius_ft;
         let intent = ActionIntent {
             actor: offense,
-            kind: ActionKind::PostUp,
+            kind: ActionKind::PostUp(nba_sim_core::action::PostStepKind::Backdown),
             target: None,
             from_ft: spot,
             to_ft: spot,
             start_time: world.now(),
             duration: 0.8,
         };
-        nba_sim_core::resolve::drive::resolve_post(&mut world, &intent);
+        nba_sim_core::resolve::drive::resolve_post(
+            &mut world,
+            &intent,
+            nba_sim_core::action::PostStepKind::Backdown,
+        );
         world.players[offense].target
     };
     // 靠底线时是撤步转身，往篮下切。

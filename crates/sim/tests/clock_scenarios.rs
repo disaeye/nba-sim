@@ -11,7 +11,7 @@ mod common;
 
 use nba_sim_core::action::Fact;
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::state::{Clock, Phase, PossessionKind, TeamSide};
+use nba_sim_core::state::{Clock, Phase, TeamSide};
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params};
 use nba_domain::rules::GameRules;
@@ -241,21 +241,31 @@ fn a_full_match_consumes_exactly_the_game_clock_of_the_periods_played() {
     let overtime = f64::from(world.rules.league.periods.overtime_duration_seconds);
     let regulation_seconds = f64::from(world.rules.league.periods.period_duration_seconds);
     let mut consumed = 0.0f64;
+    let mut restored = 0.0f64;
     let mut previous = world.clock.game_clock();
+    let mut previous_period = world.clock.period();
     while !world.finished {
         world.step(TICK_SECONDS);
         let current = world.clock.game_clock();
-        if current < previous {
-            consumed += previous - current;
+        let period = world.clock.period();
+        let delta = previous - current;
+        if delta > 0.0 {
+            consumed += delta;
+        } else if delta < 0.0 && period == previous_period {
+            // 节内正向变化是复核恢复：它把出手前的剩余时间还回来，
+            // 随后重打的这一段要从中扣掉，净消耗才是实际打过的时间。
+            restored -= delta;
         }
+        previous_period = period;
         previous = current;
     }
     let periods_played = world.clock.period();
     let expected = f64::from(periods_played.min(regulation)) * regulation_seconds
         + f64::from(periods_played.saturating_sub(regulation)) * overtime;
     assert!(
-        (consumed - expected).abs() < 1.0,
-        "比赛钟必须消耗实际打过的节次时长之和 {expected}s，实际消耗 {consumed}s"
+        (consumed - restored - expected).abs() < 1.0,
+        "比赛钟必须消耗实际打过的节次时长之和 {expected}s，实际消耗 {}s",
+        consumed - restored
     );
 }
 
@@ -263,7 +273,6 @@ fn a_full_match_consumes_exactly_the_game_clock_of_the_periods_played() {
 fn the_inbound_starts_the_clock_when_the_ball_is_touched_in_play() {
     // 发球程序本身停表：球进入场内并被合法触到之后才启动（NBA Rule 7
     // §II 的例外条款）。
-    let mut world = world(605);
     // 直接检查发球阶段的走钟策略。
     let advance = Phase::Inbound {
         team: TeamSide::Home,

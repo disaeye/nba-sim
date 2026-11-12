@@ -8,7 +8,7 @@
 use glam::Vec2;
 use nba_domain::projectile::ProjectileArc;
 
-use crate::action::{Fact, PassKind, TurnoverKind};
+use crate::action::{Fact, PassKind};
 use crate::draw::{purpose, Stream};
 use crate::state::BallState;
 use crate::world::World;
@@ -679,12 +679,18 @@ fn try_control_loose(world: &mut World) {
                 z,
                 sub_tick: 0,
             });
+            // 双方同时控制：结束回合会取消动作，因此争抢动作在停表之后
+            // 才建立。原判是「球被两人同时控制」，这个事实必须留在事件
+            // 流里，因此动作有一个可查的终态。
             world.end_possession(
                 nba_domain::event::PossessionEndCause::HeldBall,
                 "held_ball",
                 0,
             );
             world.stage_held_ball(home, away);
+            // 停表跳球会重设跳球人的目标，因此争抢动作在跳球站位之后
+            // 建立，否则它会被站位覆盖。
+            crate::resolve::rebound::start_held_ball_actions(world, home, away);
             return;
         }
     }

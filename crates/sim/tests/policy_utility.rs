@@ -3,14 +3,12 @@
 //! 这些测试盯的是「每个动作的效用能不能被逐项读出来」以及「改变一个原因
 //! 是否只在对应那一项上生效」。它们不检查数值是否好看——那是校准表的事。
 
-use nba_domain::rules::GameRules;
 use nba_sim_core::action::ActionKind;
-use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::policy::{candidate_utilities, decision_temperature, variance_appetite};
 use nba_sim_core::state::Phase;
 use nba_sim_core::utility::{softmax_pick, EpvTerms, Utility};
 use nba_sim_core::world::TICK_SECONDS;
-use nba_sim_core::{MatchSetup, Params, TeamSide, World};
+use nba_sim_core::{TeamSide, World};
 use rand::SeedableRng;
 
 mod common;

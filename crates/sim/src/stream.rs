@@ -56,6 +56,8 @@ impl Fact {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::ActionStarted { .. } => "ACTION_STARTED",
+            Self::PostureStarted { .. } => "POSTURE_STARTED",
+            Self::PostureEnded { .. } => "POSTURE_ENDED",
             Self::ActionIntentRejected { .. } => "ACTION_INTENT_REJECTED",
             Self::ActionPhaseChanged { .. } => "ACTION_PHASE_CHANGED",
             Self::ActionCompleted { .. } => "ACTION_COMPLETED",
@@ -97,6 +99,7 @@ impl Fact {
             Self::Timeout { .. } => "TIMEOUT",
             Self::JumpBall { .. } => "JUMP_BALL",
             Self::PeriodEnd { .. } => "PERIOD_END",
+            Self::PeriodSettlementCompleted { .. } => "PERIOD_SETTLEMENT_COMPLETED",
             Self::PlayActivated { .. } => "PLAY_ACTIVATED",
             Self::PlayWindowEnded { .. } => "PLAY_WINDOW_ENDED",
             Self::BallContact { .. } => "BALL_CONTACT",
@@ -152,6 +155,28 @@ impl World {
                 "player_id": self.player_id(*player),
                 "action": kind,
                 "target_id": target.map(|handle| self.player_id(handle)),
+            }),
+            Fact::PostureStarted {
+                action_id,
+                player,
+                slot,
+                variant,
+            } => json!({
+                "action_id": action_id,
+                "player_id": self.player_id(*player),
+                "slot": slot,
+                "variant": variant,
+            }),
+            Fact::PostureEnded {
+                action_id,
+                player,
+                slot,
+                variant,
+            } => json!({
+                "action_id": action_id,
+                "player_id": self.player_id(*player),
+                "slot": slot,
+                "variant": variant,
             }),
             Fact::ActionIntentRejected {
                 player,
@@ -491,7 +516,13 @@ impl World {
                 "player_id": self.player_id(*player),
                 "distance_ft": distance_ft,
             }),
-            Fact::DefenseResponsibilityChanged { player, from, to } => json!({
+            Fact::DefenseResponsibilityChanged {
+                player,
+                from,
+                to,
+                action_id,
+            } => json!({
+                "action_id": action_id,
                 "player_id": self.player_id(*player),
                 "from": from,
                 "to": to,
@@ -544,7 +575,12 @@ impl World {
                 "player_id": self.player_id(*player),
                 "reason": reason,
             }),
-            Fact::OnBallPositioningChanged { defender, kind } => json!({
+            Fact::OnBallPositioningChanged {
+                defender,
+                kind,
+                action_id,
+            } => json!({
+                "action_id": action_id,
                 "defender_id": self.player_id(*defender),
                 "kind": kind,
             }),
@@ -578,6 +614,19 @@ impl World {
                 json!({ "play_id": PLAY_SOURCES[*play].0, "possession": possession })
             }
             Fact::PeriodEnd { period } => json!({ "period": period }),
+            Fact::PeriodSettlementCompleted {
+                period,
+                home_score,
+                away_score,
+                pending_shots_resolved,
+                free_throws_resolved,
+            } => json!({
+                "period": period,
+                "home_score": home_score,
+                "away_score": away_score,
+                "pending_shots_resolved": pending_shots_resolved,
+                "free_throws_resolved": free_throws_resolved,
+            }),
             Fact::BallContact {
                 kind,
                 entity,
@@ -681,12 +730,16 @@ impl World {
                 call,
                 overturned,
                 cost_timeout,
+                points_delta,
+                player,
                 time,
             } => json!({
                 "team": team,
                 "call": call,
                 "overturned": overturned,
                 "cost_timeout": cost_timeout,
+                "points_delta": points_delta,
+                "player_id": player.map(|handle| self.player_id(handle)),
                 "time": time,
             }),
         }
@@ -700,73 +753,41 @@ impl World {
         let mut actions = Vec::new();
 
         if let Some(runtime) = &player.action {
-            let (family, kind, variant) = match runtime.intent.kind {
-                crate::action::ActionKind::Dribble(move_kind) => {
-                    let v = match move_kind {
-                        nba_domain::action_window::DribbleMoveKind::DirectDrive => "direct_drive",
-                        nba_domain::action_window::DribbleMoveKind::Crossover => "crossover",
-                        nba_domain::action_window::DribbleMoveKind::BetweenTheLegs => {
-                            "between_the_legs"
-                        }
-                        nba_domain::action_window::DribbleMoveKind::BehindTheBack => {
-                            "behind_the_back"
-                        }
-                        nba_domain::action_window::DribbleMoveKind::SpinMove => "spin_move",
-                        nba_domain::action_window::DribbleMoveKind::Hesitation => "hesitation",
-                        nba_domain::action_window::DribbleMoveKind::Retreat => "retreat",
-                    };
-                    ("ACTION-DRIBBLE", "dribble", v)
-                }
-                crate::action::ActionKind::Drive(drive_kind) => {
-                    ("ACTION-DRIVE", "drive", drive_kind.as_str())
-                }
-                crate::action::ActionKind::Finish => ("ACTION-FINISH", "finish", "rim_finish"),
-                crate::action::ActionKind::Pass(pass_kind) => {
-                    let v = match pass_kind {
-                        crate::action::PassKind::Chest => "chest",
-                        crate::action::PassKind::Bounce => "bounce",
-                        crate::action::PassKind::Lob => "lob",
-                        crate::action::PassKind::Outlet => "outlet",
-                        crate::action::PassKind::Overhead => "overhead",
-                        crate::action::PassKind::OneHand => "one_hand",
-                        crate::action::PassKind::BehindBack => "behind_back",
-                        crate::action::PassKind::Handoff => "handoff",
-                    };
-                    ("ACTION-PASS", "pass", v)
-                }
-                crate::action::ActionKind::Screen(screen_kind) => {
-                    let v = match screen_kind {
-                        crate::action::ScreenKind::OnBall => "on_ball",
-                        crate::action::ScreenKind::OffBall => "off_ball",
-                        crate::action::ScreenKind::HandOff => "handoff",
-                    };
-                    ("ACTION-SCREEN", "screen", v)
-                }
-                crate::action::ActionKind::Cut(cut_kind) => {
-                    ("ACTION-CUT", "cut", cut_kind.as_str())
-                }
-                crate::action::ActionKind::PostUp => ("ACTION-POST", "post_up", "post_up"),
+            let identity = match runtime.intent.kind {
                 crate::action::ActionKind::Shoot(shot_kind) => {
-                    if shot_kind.is_rim_finish() {
-                        ("ACTION-FINISH", "finish", shot_kind.as_str())
-                    } else {
-                        ("ACTION-SHOT", "jump_shot", shot_kind.as_str())
+                    crate::action_identity::shot_identity(self, player_index, shot_kind)
+                }
+                kind => crate::action_identity::offense_identity(kind),
+            };
+            let family = identity.family.as_str();
+            let kind = identity.kind;
+            let variant = identity.variant;
+            let role_str = match identity.family {
+                // 掩护有两个角色：掩护人自己与借掩护的切入人。掩护的技术
+                // 变体描述的是掩护人往哪走，因此只有掩护人投影成掩护动作；
+                // 绕掩护接球与手递手接球由切入人发起，因此他是切入方。
+                nba_domain::action_spec::ActionFamily::ActionScreen => {
+                    match runtime.role {
+                        crate::action::ActionIntentRole::ScreenPartner => "screener",
+                        crate::action::ActionIntentRole::CutPartner => "cut_partner",
+                        crate::action::ActionIntentRole::Primary => match identity.variant {
+                            // 无球掩护由掩护人自己发起，因此他是掩护人。
+                            "off_ball" => "screener",
+                            // 绕掩护接球与手递手接球由切入人自己发起。
+                            "curl" | "handoff" => "cut_partner",
+                            // 有球掩护的发起者是持球人，他不投影成掩护动作。
+                            _ => "ball_handler",
+                        },
                     }
                 }
-                crate::action::ActionKind::Relocate => ("ACTION-RELOCATE", "relocate", "relocate"),
-                crate::action::ActionKind::Fake(fake_kind) => {
-                    ("ACTION-FAKE", "fake", fake_kind.as_str())
-                }
-                crate::action::ActionKind::Protect(protect_kind) => {
-                    ("ACTION-BALL-PROTECTION", "protect", protect_kind.as_str())
-                }
+                nba_domain::action_spec::ActionFamily::ActionCut => "cut_partner",
+                _ => identity.role.as_str(),
             };
-
-            let role_str = match runtime.role {
-                crate::action::ActionIntentRole::Primary => "primary",
-                crate::action::ActionIntentRole::ScreenPartner => "screen_partner",
-                crate::action::ActionIntentRole::CutPartner => "cut_partner",
-            };
+            // 掩护动作只属于掩护人：持球人点名的掩护他自己走的是切入或
+            // 传球，因此他不带掩护动作。
+            let is_screener_call = identity.family
+                == nba_domain::action_spec::ActionFamily::ActionScreen
+                && role_str == "ball_handler";
 
             let phase_str = match runtime.phase {
                 nba_domain::action_window::ActionPhase::Preparation => "preparation",
@@ -790,44 +811,30 @@ impl World {
                 }
             }
 
-            actions.push(RenderAction {
-                action_id: runtime.action_id,
-                interaction_id: Some(runtime.interaction_id),
-                source: "action_window".to_string(),
-                family: family.to_string(),
-                kind: kind.to_string(),
-                variant: variant.to_string(),
-                role: role_str.to_string(),
-                phase: phase_str.to_string(),
-                started_at: runtime.intent.start_time as f32,
-                phase_started_at: phase_started as f32,
-                ends_at: Some(runtime.ends_at as f32),
-                participants,
-                target_id,
-            });
+            if !is_screener_call {
+                actions.push(RenderAction {
+                    action_id: runtime.action_id,
+                    interaction_id: Some(runtime.interaction_id),
+                    source: "action_window".to_string(),
+                    family: family.to_string(),
+                    kind: kind.to_string(),
+                    variant: variant.to_string(),
+                    role: role_str.to_string(),
+                    phase: phase_str.to_string(),
+                    started_at: runtime.intent.start_time as f32,
+                    phase_started_at: phase_started as f32,
+                    ends_at: Some(runtime.ends_at as f32),
+                    participants,
+                    target_id,
+                });
+            }
         }
 
         if let Some(Some(def_action)) = self.defensive_actions.get(player_index) {
-            let (family, kind, variant) = match def_action.kind {
-                crate::action::DefensiveActionKind::CloseoutContest => {
-                    ("ACTION-CLOSEOUT", "closeout_contest", "contest")
-                }
-                crate::action::DefensiveActionKind::BlockJump => {
-                    ("ACTION-CLOSEOUT", "block_jump", "block")
-                }
-                crate::action::DefensiveActionKind::StealAttempt => {
-                    ("ACTION-DEFENSE-ON-BALL", "steal_attempt", "steal")
-                }
-                crate::action::DefensiveActionKind::Slide => {
-                    ("ACTION-DEFENSE-ON-BALL", "slide", "slide")
-                }
-                crate::action::DefensiveActionKind::Contain => {
-                    ("ACTION-DEFENSE-ON-BALL", "contain", "contain")
-                }
-                crate::action::DefensiveActionKind::ChargeTake => {
-                    ("ACTION-DEFENSE-ON-BALL", "charge_take", "charge_take")
-                }
-            };
+            let identity = crate::action_identity::defense_identity(def_action.kind);
+            let family = identity.family.as_str();
+            let kind = identity.kind;
+            let variant = identity.variant;
 
             let phase_str = match def_action.phase {
                 nba_domain::action_window::ActionPhase::Preparation => "preparation",
@@ -859,7 +866,7 @@ impl World {
                 family: family.to_string(),
                 kind: kind.to_string(),
                 variant: variant.to_string(),
-                role: "defender".to_string(),
+                role: identity.role.as_str().to_string(),
                 phase: phase_str.to_string(),
                 started_at: (def_action.preparation_ends_at - 0.2).max(0.0) as f32,
                 phase_started_at: phase_started as f32,
@@ -868,45 +875,138 @@ impl World {
                 target_id: shooter_id,
             });
         } else if let Some(pos) = player.on_ball_positioning {
-            let (kind, variant) = match pos {
-                crate::action::OnBallPositioning::Slide => ("slide", "slide"),
-                crate::action::OnBallPositioning::Contain => ("contain", "contain"),
-                crate::action::OnBallPositioning::ChargeTake => ("charge_take", "charge_take"),
-            };
+            let identity = crate::action_identity::posture_identity(pos);
+            let kind = identity.kind;
+            let variant = identity.variant;
             let holder_id = self.holder().map(|h| self.player_id(h));
             let participants = holder_id.clone().into_iter().collect();
+            let action_id = player.posture_action_ids[crate::state::PostureSlot::OnBall.index()];
+            if action_id == 0 {
+                // 姿态刚换、身份还没分配：这一帧没有身份可投影。
+                return actions;
+            }
             actions.push(RenderAction {
-                action_id: 0x8000_0000_0000_0000 | (player_index as u64),
+                action_id,
                 interaction_id: None,
                 source: "defense_posture".to_string(),
-                family: "ACTION-DEFENSE-ON-BALL".to_string(),
+                family: identity.family.as_str().to_string(),
                 kind: kind.to_string(),
                 variant: variant.to_string(),
-                role: "on_ball_defender".to_string(),
+                role: identity.role.as_str().to_string(),
                 phase: "sustained".to_string(),
-                started_at: player.assignment_since as f32,
-                phase_started_at: player.assignment_since as f32,
+                started_at: player.posture_since[crate::state::PostureSlot::OnBall.index()] as f32,
+                phase_started_at: player.posture_since[crate::state::PostureSlot::OnBall.index()] as f32,
                 ends_at: None,
                 participants,
                 target_id: holder_id,
             });
         }
 
+        // 扑防应答：造犯规接触或侧移避让。
+        if let Some(response) = player.closeout_response {
+            let action_id = player.posture_action_ids[crate::state::PostureSlot::Closeout.index()];
+            if action_id == 0 {
+                return actions;
+            }
+            actions.push(RenderAction {
+                action_id,
+                interaction_id: None,
+                source: "defense_posture".to_string(),
+                family: "ACTION-CLOSEOUT".to_string(),
+                kind: "closeout_response".to_string(),
+                variant: response.to_string(),
+                role: "shooter".to_string(),
+                phase: "sustained".to_string(),
+                started_at: player.posture_since[crate::state::PostureSlot::Closeout.index()] as f32,
+                phase_started_at: player.posture_since[crate::state::PostureSlot::Closeout.index()]
+                    as f32,
+                ends_at: None,
+                participants: Vec::new(),
+                target_id: None,
+            });
+        }
+
+        // 转换姿态：快攻推进、快攻跟进、退防或快速形成阵地防守。
+        if let Some(kind) = player.transition {
+            let identity = crate::action_identity::transition_identity(kind);
+            let action_id = player.posture_action_ids[crate::state::PostureSlot::Transition.index()];
+            if action_id == 0 {
+                return actions;
+            }
+            actions.push(RenderAction {
+                action_id,
+                interaction_id: None,
+                source: "defense_posture".to_string(),
+                family: identity.family.as_str().to_string(),
+                kind: identity.kind.to_string(),
+                variant: identity.variant.to_string(),
+                role: identity.role.as_str().to_string(),
+                phase: "sustained".to_string(),
+                started_at: player.posture_since[crate::state::PostureSlot::Transition.index()] as f32,
+                phase_started_at: player.posture_since[crate::state::PostureSlot::Transition.index()]
+                    as f32,
+                ends_at: None,
+                participants: Vec::new(),
+                target_id: None,
+            });
+        }
+
+        // 无球防守职责：无窗口的持续姿态，身份由职责给出。
+        if let Some(identity) = crate::action_identity::off_ball_identity(
+            player.defense_responsibility,
+        ) {
+            let action_id = player.posture_action_ids[crate::state::PostureSlot::OffBall.index()];
+            if action_id == 0 {
+                // 职责刚换、身份还没分配：这一帧没有身份可投影，职责变化
+                // 事实仍然在事件流里。
+                return actions;
+            }
+            let target_id = if player.target_partner < self.players.len() {
+                Some(self.player_id(player.target_partner))
+            } else {
+                None
+            };
+            let participants = target_id.clone().into_iter().collect();
+            actions.push(RenderAction {
+                action_id,
+                interaction_id: None,
+                source: "defense_posture".to_string(),
+                family: identity.family.as_str().to_string(),
+                kind: identity.kind.to_string(),
+                variant: identity.variant.to_string(),
+                role: identity.role.as_str().to_string(),
+                phase: "sustained".to_string(),
+                started_at: player.posture_since[crate::state::PostureSlot::OffBall.index()] as f32,
+                phase_started_at: player.posture_since[crate::state::PostureSlot::OffBall.index()]
+                    as f32,
+                ends_at: None,
+                participants,
+                target_id,
+            });
+        }
+
         if player.defense_responsibility == crate::state::DefenseResponsibility::BoxOut {
+            let identity = crate::action_identity::box_out_identity();
             let partner_id = if player.target_partner < self.players.len() {
                 Some(self.player_id(player.target_partner))
             } else {
                 None
             };
             let participants = partner_id.clone().into_iter().collect();
+            // 卡位用的是无球职责那一份身份：职责刚换、身份还没分配时
+            // 这一帧没有身份可投影。
+            let action_id = player.posture_action_ids[crate::state::PostureSlot::OffBall.index()];
+            if action_id == 0 {
+                return actions;
+            }
             actions.push(RenderAction {
-                action_id: 0x8100_0000_0000_0000 | (player_index as u64),
+                action_id,
                 interaction_id: None,
                 source: "defense_posture".to_string(),
-                family: "ACTION-REBOUND".to_string(),
-                kind: "box_out".to_string(),
-                variant: "box_out".to_string(),
-                role: "rebounder".to_string(),
+                family: identity.family.as_str().to_string(),
+                kind: identity.kind.to_string(),
+                variant: identity.variant.to_string(),
+                role: identity.role.as_str().to_string(),
                 phase: "sustained".to_string(),
                 started_at: player.assignment_since as f32,
                 phase_started_at: player.assignment_since as f32,

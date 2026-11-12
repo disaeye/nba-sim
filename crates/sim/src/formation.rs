@@ -154,6 +154,65 @@ pub fn assign_break_targets(world: &mut World, offense: TeamSide, handler: usize
         crate::assignment::force_target(world, handle, target);
         world.players[handle].home_spot = target;
         world.possession.break_return.push((handle, previous));
+        // 跑向前场的球员各自有一个快攻姿态：持球的是推进，不持球的是
+        // 跟进。
+        let kind = if handle == handler {
+            crate::action::TransitionKind::Push
+        } else {
+            crate::action::TransitionKind::Trail
+        };
+        start_transition_action(world, handle, kind, target);
+    }
+    // 持球的人自己也在推进：他不属于跑者名单，但他的姿态是快攻推进。
+    start_transition_action(
+        world,
+        handler,
+        crate::action::TransitionKind::Push,
+        world.players[handler].pos,
+    );
+    // 防守方退防：退防的人先往自己的防守位置跑，位置到了就落成阵地
+    // 防守。退防是一个姿态，落位是它的收势。
+    //
+    // 退防姿态不改动防守人的落点：落点归职责层管。因此退防的人不进
+    // 快攻落点回收名单——那份名单记的是「落点被快攻改过的人」。
+    let defense = offense.other();
+    let defenders = world.on_court(defense);
+    for (index, handle) in defenders.as_slice().iter().enumerate() {
+        if world.players[*handle].action.is_some() {
+            continue;
+        }
+        let spot = defense_spots(&world.params.formations, world.attacking_right(offense));
+        let target = spot.get(index).copied().unwrap_or(world.players[*handle].pos);
+        let kind = if index < 2 {
+            crate::action::TransitionKind::Retreat
+        } else {
+            crate::action::TransitionKind::Wall
+        };
+        start_transition_action(world, *handle, kind, target);
+    }
+}
+
+/// 快攻姿态的写入。
+///
+/// 转换不是带窗口的动作：跑者在快攻窗口里仍然可以切入、传球与出手，
+/// 因此转换只能是姿态，不能占用他的身体动作。姿态的身份让渲染器能画出
+/// 谁在跑快攻。
+fn start_transition_action(
+    world: &mut World,
+    handle: usize,
+    kind: crate::action::TransitionKind,
+    _target: glam::Vec2,
+) {
+    world.players[handle].transition = Some(kind);
+    // 转换姿态有身份：协议投影与事件流都指到它。
+    world.posture_action_id(
+        handle,
+        crate::state::PostureSlot::Transition,
+        kind.as_str(),
+    );
+    // 持有转换姿态的人记进名单：快攻窗口结束时他们的姿态因此收势。
+    if !world.possession.transition_players.contains(&handle) {
+        world.possession.transition_players.push(handle);
     }
 }
 
@@ -365,7 +424,7 @@ pub fn move_toward_targets(world: &mut World) {
             action.intent.actor == handle
                 && matches!(
                     action.intent.kind,
-                    ActionKind::Cut(_) | ActionKind::Relocate
+                    ActionKind::Cut(_) | ActionKind::Relocate(_)
                 )
         }) {
             let mut spot = own.intent.to_ft;
@@ -445,9 +504,9 @@ pub fn move_toward_targets(world: &mut World) {
         .iter()
         .chain(on_court_away.as_slice())
     {
-        // 正在等接球的人不能被绕行路径的里程上限打断：他的目标是球飞
-        // 过去的那个落点，跑到一半被改成原地小步挪动就会把球漏掉。
-        if world.pass_in_flight.is_some_and(|info| info.to == handle) {
+        // 绕行恢复上限只用于无球球员：持球人与等接球的人都不能被改成原地目标。
+        let awaiting_pass = world.pass_in_flight.is_some_and(|info| info.to == handle);
+        if Some(handle) == holder || awaiting_pass {
             continue;
         }
         let player = &world.players[handle];

@@ -29,6 +29,12 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ProtectKind) -> A
                 let axis = away.normalize_or_zero();
                 glam::Vec2::new(-axis.y, axis.x)
             }
+            // 被包夹护球：球护在两名防守人之间，身体背对最近的那个，
+            // 另一侧靠转体避让。
+            ProtectKind::Trap => {
+                let axis = away.normalize_or_zero();
+                glam::Vec2::new(-axis.y, axis.x)
+            }
         };
         world.players[actor].facing = facing;
     }

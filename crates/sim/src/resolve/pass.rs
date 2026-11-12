@@ -71,6 +71,8 @@ pub fn resolve(
         crate::action::PassKind::Handoff => 0.5,
         crate::action::PassKind::Overhead => 1.25,
         crate::action::PassKind::BehindBack => 0.9,
+        // 空中接力：球送到篮筐上空，飞行段比普通长传更短。
+        crate::action::PassKind::AlleyOop => 0.8,
         _ => 1.0,
     };
     let duration =

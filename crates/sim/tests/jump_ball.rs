@@ -18,6 +18,20 @@ fn advance_to_first_possession(world: &mut World) {
     panic!("jump-ball procedure did not produce a controlled possession");
 }
 
+/// 推进到节间休息。
+///
+/// 节末结算是独立的一段程序：比赛钟归零后先进入结算，结算完成才进入
+/// 节间休息。因此推进到休息要走完结算那一段。
+fn advance_to_period_break(world: &mut World) {
+    for _ in 0..20 {
+        world.step(nba_sim_core::world::TICK_SECONDS);
+        if matches!(world.phase(), Phase::PeriodBreak { .. }) {
+            return;
+        }
+    }
+    panic!("the period did not reach the intermission");
+}
+
 #[test]
 fn nba_opening_possession_is_established_by_a_resolved_center_jump_ball() {
     let mut world = world(GameRules::default());
@@ -107,8 +121,7 @@ fn nba_non_overtime_periods_alternate_the_opening_throw_in() {
     world
         .clock
         .set_regulation_clock(1, 0.0, world.clock.shot_clock());
-    world.step(nba_sim_core::world::TICK_SECONDS);
-    assert!(matches!(world.phase(), Phase::PeriodBreak { .. }));
+    advance_to_period_break(&mut world);
 
     for _ in 0..100 {
         world.step(nba_sim_core::world::TICK_SECONDS);
@@ -136,8 +149,7 @@ fn nba_non_overtime_periods_alternate_the_opening_throw_in() {
     world
         .clock
         .set_regulation_clock(2, 0.0, world.clock.shot_clock());
-    world.step(nba_sim_core::world::TICK_SECONDS);
-    assert!(matches!(world.phase(), Phase::PeriodBreak { .. }));
+    advance_to_period_break(&mut world);
     for _ in 0..100 {
         world.step(nba_sim_core::world::TICK_SECONDS);
         if matches!(world.phase(), Phase::Inbound { .. }) {
@@ -160,8 +172,7 @@ fn nba_overtime_starts_with_a_fresh_jump_ball() {
         .clock
         .set_regulation_clock(4, 0.0, world.clock.shot_clock());
     world.score = [88, 88];
-    world.step(nba_sim_core::world::TICK_SECONDS);
-    assert!(matches!(world.phase(), Phase::PeriodBreak { .. }));
+    advance_to_period_break(&mut world);
 
     for _ in 0..100 {
         world.step(nba_sim_core::world::TICK_SECONDS);
@@ -224,8 +235,7 @@ fn fiba_period_starts_follow_the_alternating_possession_arrow() {
     world
         .clock
         .set_regulation_clock(1, 0.0, world.clock.shot_clock());
-    world.step(nba_sim_core::world::TICK_SECONDS);
-    assert!(matches!(world.phase(), Phase::PeriodBreak { .. }));
+    advance_to_period_break(&mut world);
     for _ in 0..100 {
         world.step(nba_sim_core::world::TICK_SECONDS);
         if matches!(world.phase(), Phase::Inbound { .. }) {
@@ -250,8 +260,7 @@ fn fiba_period_starts_follow_the_alternating_possession_arrow() {
     world
         .clock
         .set_regulation_clock(2, 0.0, world.clock.shot_clock());
-    world.step(nba_sim_core::world::TICK_SECONDS);
-    assert!(matches!(world.phase(), Phase::PeriodBreak { .. }));
+    advance_to_period_break(&mut world);
     for _ in 0..100 {
         world.step(nba_sim_core::world::TICK_SECONDS);
         if matches!(world.phase(), Phase::Inbound { .. }) {

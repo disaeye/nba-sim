@@ -238,18 +238,18 @@ fn ball_phase_changes_only_at_actual_resolution_points() {
     world.players[0].pos = world.hoop_for(TeamSide::Home) - Vec2::new(4.0, 0.0);
     world.possession.gather_pos = Some(world.players[0].pos);
     let finish = ActionIntent {
-        kind: ActionKind::Finish,
+        kind: ActionKind::Finish(nba_sim_core::action::FinishKind::Layup),
         ..intent.clone()
     };
-    drive::resolve_finish(&mut world, &finish);
+    drive::resolve_finish(&mut world, &finish, nba_sim_core::action::FinishKind::Layup);
     assert_eq!(world.possession.ball_phase, BallPhase::Gather);
     assert_eq!(world.possession.dribble_state, DribbleState::Gathered);
 
     let post = ActionIntent {
-        kind: ActionKind::PostUp,
+        kind: ActionKind::PostUp(nba_sim_core::action::PostStepKind::Backdown),
         ..intent
     };
-    drive::resolve_post(&mut world, &post);
+    drive::resolve_post(&mut world, &post, nba_sim_core::action::PostStepKind::Backdown);
     assert_eq!(world.possession.ball_phase, BallPhase::Post);
 
     world.start_second_chance(TeamSide::Home, 1, true);
@@ -276,7 +276,7 @@ fn drive_and_finish_do_not_both_carry_the_full_possession_value() {
     let state = world.decision_state();
     let finish = candidate_utilities(&world, &state)
         .into_iter()
-        .find(|candidate| candidate.0 == ActionKind::Finish)
+        .find(|candidate| matches!(candidate.0, ActionKind::Finish(_)))
         .expect("finish candidate at 4 ft");
     assert!((finish.3.epv.ability - old_full_value).abs() > 1e-4);
 }

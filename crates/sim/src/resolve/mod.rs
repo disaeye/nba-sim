@@ -29,16 +29,39 @@ pub fn resolve(world: &mut World, intent: ActionIntent) -> ActionOutcome {
         ActionKind::Pass(kind) => pass::resolve(world, &intent, kind),
         ActionKind::Screen(kind) => screen::resolve(world, &intent, kind),
         ActionKind::Drive(kind) => drive::resolve(world, &intent, kind),
-        ActionKind::Finish => drive::resolve_finish(world, &intent),
+        ActionKind::Finish(kind) => drive::resolve_finish(world, &intent, kind),
         ActionKind::Shoot(kind) => shot::resolve(world, &intent, kind),
-        ActionKind::PostUp => drive::resolve_post(world, &intent),
+        ActionKind::PostUp(kind) => drive::resolve_post(world, &intent, kind),
         // 切入人自己发起的空切只跑路线；持球人发起的空切同时送出高吊球。
-        ActionKind::Cut(_) if intent.target.is_some() => pass::resolve_cut(world, &intent),
+        //
+        // 绕掩护接球（卷曲）总是切入人自己发起的：它发生在掩护之后，
+        // 因此它必须保留自己的动作种类，不能被高吊球改写。
+        ActionKind::Cut(kind)
+            if intent.target.is_some() && !matches!(kind, crate::action::CutKind::Curl) =>
+        {
+            pass::resolve_cut(world, &intent)
+        }
         ActionKind::Cut(kind) => offball::cut_route(world, &intent, kind),
         ActionKind::Dribble(kind) => resolve_dribble(world, &intent, kind),
         ActionKind::Fake(kind) => fake::resolve(world, &intent, kind),
         ActionKind::Protect(kind) => protect::resolve(world, &intent, kind),
-        ActionKind::Relocate => ActionOutcome {
+        ActionKind::Rebound(_) => ActionOutcome {
+            actor: intent.actor,
+            kind: intent.kind,
+            completion: Completion::Completed,
+            delta: StateDelta::default(),
+            facts: Vec::new(),
+        },
+        // 罚球的出手在罚球程序里结算：这里的动作运行时只负责阶段推进，
+        // 球的处理由罚球程序自己完成。
+        ActionKind::FreeThrow => ActionOutcome {
+            actor: intent.actor,
+            kind: intent.kind,
+            completion: Completion::Completed,
+            delta: StateDelta::default(),
+            facts: Vec::new(),
+        },
+        ActionKind::Relocate(_) => ActionOutcome {
             actor: intent.actor,
             kind: intent.kind,
             completion: Completion::Completed,
@@ -63,6 +86,8 @@ fn resolve_dribble(
     let actor = intent.actor;
     let (separation, exposure) = match kind {
         DribbleMoveKind::DirectDrive => (0.0, 1.0),
+        // 推进运球：技术后果与原地运球相同，但落点朝篮筐而不是弧顶。
+        DribbleMoveKind::Advance => (0.0, 1.0),
         DribbleMoveKind::Crossover => (0.9, 0.45),
         DribbleMoveKind::BetweenTheLegs => (0.6, 0.40),
         DribbleMoveKind::BehindTheBack => (0.8, 0.35),
@@ -155,7 +180,7 @@ fn resolve_dribble(
                     displacement_ft: 0.0,
                 });
             }
-            DribbleMoveKind::DirectDrive => {}
+            DribbleMoveKind::DirectDrive | DribbleMoveKind::Advance => {}
         }
     }
     world.emit(Fact::DribbleMove {

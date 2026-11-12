@@ -2,7 +2,7 @@
 
 use glam::Vec2;
 
-use crate::action::{Fact, TeamSide, TurnoverKind};
+use crate::action::{ActionKind, Fact, TeamSide, TurnoverKind};
 use crate::state::{TargetKind, MAX_ON_COURT};
 use crate::world::{Phase, World};
 
@@ -75,9 +75,25 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
                 player: handle,
                 distance_ft: distance,
             });
+            // 职责变了，上一段职责因此结束。
+            world.end_posture(handle, crate::state::PostureSlot::OffBall);
+            let from = world.players[handle].defense_responsibility;
             world.players[handle].defense_responsibility =
                 crate::state::DefenseResponsibility::BoxOut;
             world.players[handle].assignment_since = world.now();
+            // 卡位姿态有身份：协议投影与事件流都指到它。职责变化那条事实
+            // 带着它的身份落下，因此这个姿态在事件流里也有起止。
+            let action_id = world.posture_action_id(
+                handle,
+                crate::state::PostureSlot::OffBall,
+                crate::state::DefenseResponsibility::BoxOut.as_str(),
+            );
+            world.emit(Fact::DefenseResponsibilityChanged {
+                player: handle,
+                from: from.as_str(),
+                to: crate::state::DefenseResponsibility::BoxOut.as_str(),
+                action_id,
+            });
             // 卡位是一件事：好的卡位者往球落点的方向挤，把进攻球员
             // 挤到身后。只有伸手半径一项的话，卡位能力不会真的改变
             // 谁先碰到球，防守篮板属性因此几乎不产生可见效果。
@@ -108,7 +124,15 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
     let skill = world.params.policy.w("loose_ball_catch_skill_ft");
     let mut players = 0u8;
     let mut contestable = 0u8;
-    for player in world.players.iter().filter(|player| player.on_court) {
+    // 争抢篮板的人各自有一个起跳动作：动作运行时因此带着动作身份，
+    // 渲染器能画出谁在抢球。起跳的人不只是够得着球的人：所有冲向球落点
+    // 的人都跳，够得着球的���是最后碰到球的那一个。
+    let mut jumpers: [usize; MAX_ON_COURT] = [usize::MAX; MAX_ON_COURT];
+    let mut jumper_count = 0usize;
+    for (index, player) in world.players.iter().enumerate() {
+        if !player.on_court {
+            continue;
+        }
         players = players.saturating_add(1);
         let attribute = if player.team == offense {
             "offensive_rebound"
@@ -123,11 +147,27 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
         if distance <= reach {
             contestable = contestable.saturating_add(1);
         }
+        // 起跳：冲向球落点的人。冲向球的人就是抢球的人。
+        if distance <= world.params.policy.g("rebound_jump_radius_ft")
+            && jumper_count < jumpers.len()
+        {
+            jumpers[jumper_count] = index;
+            jumper_count += 1;
+        }
     }
     world.emit(Fact::ReboundOpportunity {
         players,
         contestable,
     });
+    // 起跳争抢是一个动作：跳起来的人各自进入执行窗口，抢到球的人的
+    // 动作在控制成立的那一刻结算。
+    for index in 0..jumper_count {
+        let handle = jumpers[index];
+        if handle == usize::MAX || world.players[handle].action.is_some() {
+            continue;
+        }
+        start_rebound_jump(world, handle);
+    }
     world.pending_rebound = Some(PendingRebound {
         offense,
         zone,
@@ -141,6 +181,92 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
         box_out_count,
     });
     world.set_phase(Phase::Live);
+}
+
+/// 起跳争抢：跳起来够球的人进入一个动作运行时。
+///
+/// 动作身份让渲染器能画出谁在抢球，也让这一次的篮板有一个可查的动作
+/// 生命周期：开始、阶段变化与终态都在事件流里。
+fn start_rebound_jump(world: &mut World, handle: usize) {
+    world.next_action_id += 1;
+    world.next_interaction_id += 1;
+    let action_id = world.next_action_id;
+    let interaction_id = world.next_interaction_id;
+    let now = world.now();
+    let preparation = 0.15;
+    let execution = 0.25;
+    let follow_through = f64::from(world.rules.rebound_follow_seconds);
+    let ball_pos = world.ball.pos;
+    world.players[handle].action = Some(crate::action::ActionRuntime::new(
+        action_id,
+        interaction_id,
+        crate::action::ActionIntent {
+            actor: handle,
+            kind: ActionKind::Rebound(crate::action::ReboundKind::JumpRebound),
+            target: None,
+            from_ft: world.players[handle].pos,
+            to_ft: ball_pos,
+            start_time: now,
+            duration: preparation + execution + follow_through,
+        },
+        handle,
+        crate::action::ActionIntentRole::Primary,
+        nba_domain::action_window::ActionPhase::Preparation,
+        preparation,
+        execution,
+        follow_through,
+    ));
+    world.emit(Fact::ActionStarted {
+        action_id,
+        interaction_id,
+        player: handle,
+        kind: "ReboundJump",
+        target: None,
+    });
+}
+
+/// 双方同时控制球：两名球员各自有一个地板球争抢动作。
+///
+/// 争抢动作在跳球程序开始时结算：原判是「球被两人同时控制」，这个事实
+/// 必须留在事件流里，因此动作有一个可查的终态。
+pub fn start_held_ball_actions(world: &mut World, home: usize, away: usize) {
+    for handle in [home, away] {
+        if handle >= world.players.len() || world.players[handle].action.is_some() {
+            continue;
+        }
+        world.next_action_id += 1;
+        let action_id = world.next_action_id;
+        world.next_interaction_id += 1;
+        let interaction_id = world.next_interaction_id;
+        let now = world.now();
+        let duration = f64::from(world.rules.rebound_follow_seconds);
+        world.players[handle].action = Some(crate::action::ActionRuntime::new(
+            action_id,
+            interaction_id,
+            crate::action::ActionIntent {
+                actor: handle,
+                kind: ActionKind::Rebound(crate::action::ReboundKind::HeldBall),
+                target: None,
+                from_ft: world.players[handle].pos,
+                to_ft: world.ball.pos,
+                start_time: now,
+                duration,
+            },
+            handle,
+            crate::action::ActionIntentRole::Primary,
+            nba_domain::action_window::ActionPhase::Preparation,
+            0.0,
+            0.0,
+            duration,
+        ));
+        world.emit(Fact::ActionStarted {
+            action_id,
+            interaction_id,
+            player: handle,
+            kind: "HeldBallDive",
+            target: None,
+        });
+    }
 }
 
 /// 失误造成的松球：球权已经转给接球方，谁先控制谁开始进攻。
@@ -158,6 +284,13 @@ pub fn resolve_turnover(world: &mut World) {
         world.players[handle].target_kind = TargetKind::Window;
         world.players[handle].target_partner = handle;
     }
+    // 地板球争抢：松球在地上，离球最近的两名球员（每队一名）趴下去抢。
+    // 十个人一起扑向球不是地板球争抢，而是十个人一起丢了自己的位置：
+    // 争抢动作因此只给真正够得到球的那两个人。
+    let divers = loose_ball_divers(world, ball_pos);
+    for handle in divers {
+        start_loose_ball_dive(world, handle);
+    }
     world.pending_rebound = Some(PendingRebound {
         offense: world.possession.team,
         zone: "turnover",
@@ -173,11 +306,92 @@ pub fn resolve_turnover(world: &mut World) {
     world.set_phase(Phase::Live);
 }
 
+/// 地板球争抢的人选：每队离球最近的那名在场球员。
+///
+/// 争抢是两个人的事：每队一个。离球最近的人才是真正够得到球的人。
+fn loose_ball_divers(world: &World, ball_pos: glam::Vec2) -> Vec<usize> {
+    let mut divers = Vec::with_capacity(2);
+    for team in [crate::action::TeamSide::Home, crate::action::TeamSide::Away] {
+        let nearest = world
+            .players
+            .iter()
+            .enumerate()
+            .filter(|(_, player)| player.on_court && player.team == team)
+            .min_by(|left, right| {
+                (left.1.pos - ball_pos)
+                    .length_squared()
+                    .total_cmp(&(right.1.pos - ball_pos).length_squared())
+                    .then_with(|| left.0.cmp(&right.0))
+            })
+            .map(|(handle, _)| handle);
+        if let Some(handle) = nearest {
+            if world.players[handle].action.is_none() {
+                divers.push(handle);
+            }
+        }
+    }
+    divers
+}
+
+/// 地板球争抢的动作运行时。
+///
+/// 松球在地上的时候每个人都趴下去抢。这个动作在球被控制的那一刻
+/// 结算。
+fn start_loose_ball_dive(world: &mut World, handle: usize) {
+    world.next_action_id += 1;
+    let action_id = world.next_action_id;
+    world.next_interaction_id += 1;
+    let interaction_id = world.next_interaction_id;
+    let now = world.now();
+    let duration = f64::from(world.rules.rebound_follow_seconds) * 2.0;
+    world.players[handle].action = Some(crate::action::ActionRuntime::new(
+        action_id,
+        interaction_id,
+        crate::action::ActionIntent {
+            actor: handle,
+            kind: ActionKind::Rebound(crate::action::ReboundKind::LooseBallDive),
+            target: None,
+            from_ft: world.players[handle].pos,
+            to_ft: world.ball.pos,
+            start_time: now,
+            duration,
+        },
+        handle,
+        crate::action::ActionIntentRole::Primary,
+        nba_domain::action_window::ActionPhase::Preparation,
+        0.0,
+        0.0,
+        duration,
+    ));
+    world.emit(Fact::ActionStarted {
+        action_id,
+        interaction_id,
+        player: handle,
+        kind: "LooseBallDive",
+        target: None,
+    });
+}
+
 /// 球员接管活球：持球、进入推进段。
 ///
 /// 调度和推进目标由 `World::begin_live_push` 统一写入：活球回合要先把球
 /// 推进到前场再读场面，推进入手位置由实际控球的人决定。
 fn take_live_ball(world: &mut World, handle: usize) {
+    // 球被控制：地板球争抢的动作在此结算。
+    if let Some(runtime) = world.players[handle].action.take() {
+        if matches!(
+            runtime.intent.kind,
+            ActionKind::Rebound(crate::action::ReboundKind::LooseBallDive)
+        ) {
+            world.emit(Fact::ActionCompleted {
+                action_id: runtime.action_id,
+                player: handle,
+                kind: runtime.intent.kind.as_str(),
+            });
+        } else {
+            world.players[handle].action = Some(runtime);
+        }
+    }
     world.set_ball_held(handle);
     world.possession.ball_phase = crate::state::BallPhase::Dribble;
     world.begin_live_push(handle);
@@ -243,24 +457,31 @@ pub fn control(world: &mut World, handle: usize) {
         take_live_ball(world, handle);
         return;
     }
+    // 篮板归属：抢到球的人属于进攻方还是防守方，决定它是不是进攻篮板。
     let offensive = world.players[handle].team == state.offense;
     let defense = state.offense.other();
-    // 抢到篮板是一次起跳争抢：动作账上记一对开始与结束，结束窗口用联赛的
-    // 篮板跟随时长，抢到球的人要等落地收势之后才能再动作。
-    world.next_action_id += 1;
-    let jump_action = world.next_action_id;
-    world.emit(Fact::ActionStarted {
-        action_id: jump_action,
-        interaction_id: 0,
-        player: handle,
-        kind: "ReboundJump",
-        target: None,
-    });
-    world.emit(Fact::ActionCompleted {
-        action_id: jump_action,
-        player: handle,
-        kind: "ReboundJump",
-    });
+    // 点球：球在落点附近被碰了一下但没有被控制。点球之后球仍然是活的，
+    // 双方继续争抢。
+    //
+    // 点球的三种后续：球被往上拨给队友是点传，球直接被拨进是补篮，
+    // 球被平着拨出去、双方继续争抢是点球。判据是球在控制成立那一刻
+    // 的高度与速度：够到篮筐高度但没有往上传，是点球。
+    let ball_z = world.ball.z;
+    let ball_vz = world.ball.vz;
+    let rim_height = world.rules.rim_height_ft;
+    let secure_kind = if ball_z < world.rules.ball_radius_ft + 0.6 {
+        // 球已经落地：控制篮板。
+        crate::action::ReboundKind::SecureRebound
+    } else if ball_vz > 2.0 {
+        // 球被明显往上拨：点传，队友接球。
+        crate::action::ReboundKind::TipPass
+    } else if ball_z < rim_height {
+        // 球还在筐口以下被拨进去：补篮。
+        crate::action::ReboundKind::TipIn
+    } else {
+        // 球被平着拨出去，双方继续争抢：点球。
+        crate::action::ReboundKind::Tap
+    };
     let settle_until = world.now() + f64::from(world.rules.rebound_follow_seconds);
     world.players[handle].schedule.next_redecide_at = settle_until;
     let distance_ft = (world.ball.pos - world.hoop_for(state.offense)).length();
@@ -283,6 +504,13 @@ pub fn control(world: &mut World, handle: usize) {
     if contested {
         world.contested_rebounds[World::team_index(winner_team)] += 1;
     }
+    // 球被两个人同时碰到但谁也没完全控制住：这也是一次点球，球还在
+    // 争抢之中。
+    let secure_kind = if contested {
+        crate::action::ReboundKind::Tap
+    } else {
+        secure_kind
+    };
     if offensive {
         world.line_mut(handle).oreb += 1;
         world.possession.had_offensive_rebound = true;
@@ -301,6 +529,48 @@ pub fn control(world: &mut World, handle: usize) {
         );
         take_live_ball(world, handle);
     }
+    // 抢到篮板的人把起跳动作结算成这次篮板动作：控制成立的那一刻，篮板
+    // 动作有一个唯一的终态。这个动作在裁决之后建立，因此不会被裁决
+    // 的停表取消。
+    if let Some(runtime) = world.players[handle].action.take() {
+        world.emit(Fact::ActionCompleted {
+            action_id: runtime.action_id,
+            player: handle,
+            kind: runtime.intent.kind.as_str(),
+        });
+    }
+    world.next_action_id += 1;
+    let secure_action = world.next_action_id;
+    world.next_interaction_id += 1;
+    let secure_interaction = world.next_interaction_id;
+    let now = world.now();
+    let follow_through = f64::from(world.rules.rebound_follow_seconds);
+    world.players[handle].action = Some(crate::action::ActionRuntime::new(
+        secure_action,
+        secure_interaction,
+        crate::action::ActionIntent {
+            actor: handle,
+            kind: ActionKind::Rebound(secure_kind),
+            target: None,
+            from_ft: world.players[handle].pos,
+            to_ft: world.ball.pos,
+            start_time: now,
+            duration: follow_through,
+        },
+        handle,
+        crate::action::ActionIntentRole::Primary,
+        nba_domain::action_window::ActionPhase::Preparation,
+        0.0,
+        0.0,
+        follow_through,
+    ));
+    world.emit(Fact::ActionStarted {
+        action_id: secure_action,
+        interaction_id: secure_interaction,
+        player: handle,
+        kind: secure_kind.as_str(),
+        target: None,
+    });
 }
 
 pub fn rebound_spot(world: &World) -> Vec2 {

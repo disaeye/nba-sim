@@ -9,7 +9,7 @@ use nba_sim_core::action::{
     TurnoverKind,
 };
 use nba_sim_core::params::{workspace_calibration_dir, Params};
-use nba_sim_core::state::{Phase, PossessionKind};
+use nba_sim_core::state::{DribbleState, Phase, PossessionKind};
 use nba_sim_core::world::TICK_SECONDS;
 use nba_sim_core::{MatchSetup, World};
 
@@ -273,7 +273,7 @@ fn relocate_changes_the_position_and_keeps_the_receive_window() {
     let spot = hoop + Vec2::new(-6.0, 8.0);
     let intent = ActionIntent {
         actor: mover,
-        kind: ActionKind::Relocate,
+        kind: ActionKind::Relocate(nba_sim_core::action::RelocateKind::Adjust),
         target: None,
         from_ft: start,
         to_ft: spot,
@@ -503,7 +503,7 @@ fn the_screener_rolls_or_pops_after_setting_a_screen() {
             .as_ref()
             .map(|action| action.intent.kind);
         assert!(
-            matches!(kind, Some(ActionKind::Cut(_)) | Some(ActionKind::Relocate)),
+            matches!(kind, Some(ActionKind::Cut(_)) | Some(ActionKind::Relocate(_))),
             "掩护人必须顺下或外弹，实际 {kind:?}（sagging={sagging}）"
         );
         if sagging {
@@ -852,40 +852,81 @@ fn a_charge_requires_a_planted_defender() {
     );
 }
 
-/// 紧逼盯防五秒：收球后被贴身盯住不动，超过限时就是违例。
-#[test]
-fn holding_the_ball_closely_guarded_for_five_seconds_is_a_violation() {
+/// 紧逼盯防的固定局面：两名球员留在场上，决策与姿态调度冻结，
+/// 每个 tick 只让权威计时器与判罚生产链推进。
+fn tightly_guarded_world(seed: u64) -> (World, usize, usize, Vec2) {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
-    let limit = GameRules::default().league.clocks.closely_guarded_seconds;
-    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 179);
+    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, seed);
     let holder = world.on_court(TeamSide::Home).as_slice()[0];
     let defender = world.on_court(TeamSide::Away).as_slice()[0];
     for (index, player) in world.players.iter_mut().enumerate() {
         player.on_court = index == holder || index == defender;
         player.vel = Vec2::ZERO;
     }
+    world.sync_on_court();
     let hoop = world.hoop_for(TeamSide::Home);
     let spot = hoop + Vec2::new(-18.0, 0.0);
-    world.players[holder].pos = spot;
-    world.players[holder].target = spot;
-    world.players[defender].pos = spot + Vec2::new(0.0, 1.5);
-    world.players[defender].target = world.players[defender].pos;
     world.possession.team = TeamSide::Home;
     world.start_possession(TeamSide::Home, PossessionKind::Live);
     world.set_phase(Phase::Live);
-    world.ball.set_held(holder);
+    world.set_ball_held(holder);
     world.ball.pos = spot;
     world.ball.z = world.rules.ball_radius_ft;
-    world.players[holder].schedule.next_redecide_at = world.now() + 1_000.0;
-    world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
+    world.players[holder].facing = (hoop - spot).normalize_or_zero();
+    let frozen_until = world.now() + 1_000.0;
+    for player in world.players.iter_mut() {
+        player.schedule.next_redecide_at = frozen_until;
+        player.positioning_next_at = frozen_until;
+        player.vel = Vec2::ZERO;
+    }
+    (world, holder, defender, spot)
+}
+
+/// 推进固定局面：只要还是原本的活球持球人，就把两人位置和收球状态钉在
+/// 场景条件上，避免无关的走位、决策或姿态把计时器清零。
+fn step_tightly_guarded(
+    world: &mut World,
+    holder: usize,
+    defender: usize,
+    spot: Vec2,
+    defender_offset: Vec2,
+    dribble: DribbleState,
+    steps: usize,
+) {
+    let defender_spot = spot + defender_offset;
+    for _ in 0..steps {
+        if world.live_play()
+            && world.holder() == Some(holder)
+            && world.possession.team == TeamSide::Home
+        {
+            world.possession.dribble_state = dribble;
+            world.players[holder].pos = spot;
+            world.players[holder].target = spot;
+            world.players[holder].vel = Vec2::ZERO;
+            world.players[defender].pos = defender_spot;
+            world.players[defender].target = defender_spot;
+            world.players[defender].vel = Vec2::ZERO;
+            world.ball.pos = spot;
+            world.ball.z = world.rules.ball_radius_ft;
+        }
+        world.step(TICK_SECONDS);
+    }
+}
+
+/// 紧逼盯防五秒：收球后被贴身盯住不动，超过限时就是违例。
+#[test]
+fn holding_the_ball_closely_guarded_for_five_seconds_is_a_violation() {
+    let limit = GameRules::default().league.clocks.closely_guarded_seconds;
+    let (mut world, holder, defender, spot) = tightly_guarded_world(179);
+    let guarded = Vec2::new(0.0, 4.5);
 
     let mut ticks = 0;
     let mut violation = None;
     while ticks < 400 && violation.is_none() {
-        world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
-        world.possession.team = TeamSide::Home;
         let before = world.events.len();
-        world.step(TICK_SECONDS);
+        step_tightly_guarded(
+            &mut world, holder, defender, spot, guarded, DribbleState::Gathered, 1,
+        );
         ticks += 1;
         for event in &world.events[before..] {
             if matches!(
@@ -915,27 +956,9 @@ fn holding_the_ball_closely_guarded_for_five_seconds_is_a_violation() {
 #[test]
 fn the_closely_guarded_timer_resets_and_spares_the_dribbler() {
     let limit = GameRules::default().league.clocks.closely_guarded_seconds;
-    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
-    let mut world = World::new(MatchSetup::builtin(GameRules::default()), params, 181);
-    let holder = world.on_court(TeamSide::Home).as_slice()[0];
-    let defender = world.on_court(TeamSide::Away).as_slice()[0];
-    for (index, player) in world.players.iter_mut().enumerate() {
-        player.on_court = index == holder || index == defender;
-        player.vel = Vec2::ZERO;
-    }
-    let hoop = world.hoop_for(TeamSide::Home);
-    let spot = hoop + Vec2::new(-18.0, 0.0);
-    world.players[holder].pos = spot;
-    world.players[holder].target = spot;
-    world.players[defender].pos = spot + Vec2::new(0.0, 1.5);
-    world.players[defender].target = world.players[defender].pos;
-    world.possession.team = TeamSide::Home;
-    world.start_possession(TeamSide::Home, PossessionKind::Live);
-    world.set_phase(Phase::Live);
-    world.ball.set_held(holder);
-    world.ball.pos = spot;
-    world.ball.z = world.rules.ball_radius_ft;
-    world.players[holder].schedule.next_redecide_at = world.now() + 1_000.0;
+    let (mut world, holder, defender, spot) = tightly_guarded_world(181);
+    let guarded = Vec2::new(0.0, 4.5);
+    let away = Vec2::new(0.0, 14.0);
 
     let violations = |world: &World| -> usize {
         world
@@ -953,38 +976,56 @@ fn the_closely_guarded_timer_resets_and_spares_the_dribbler() {
             .count()
     };
 
-    // 运球状态：贴近防守也不吹。
-    for _ in 0..(limit as usize + 2) * 20 + 20 {
-        world.possession.dribble_state = nba_sim_core::state::DribbleState::Dribbling;
-        world.step(TICK_SECONDS);
-    }
+    step_tightly_guarded(
+        &mut world,
+        holder,
+        defender,
+        spot,
+        guarded,
+        DribbleState::Dribbling,
+        (limit as usize + 2) * 20 + 20,
+    );
     assert_eq!(violations(&world), 0, "运球中不得吹紧逼违例");
 
-    // 收球后紧逼一半时间，然后防守人走开：计时必须清零。
-    for _ in 0..(limit as usize * 20) / 2 {
-        world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
-        world.step(TICK_SECONDS);
-    }
-    world.players[defender].pos = spot + Vec2::new(0.0, 14.0);
-    world.players[defender].target = world.players[defender].pos;
-    for _ in 0..(limit as usize * 20) / 2 + 20 {
-        world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
-        world.step(TICK_SECONDS);
-    }
+    step_tightly_guarded(
+        &mut world,
+        holder,
+        defender,
+        spot,
+        guarded,
+        DribbleState::Gathered,
+        (limit as usize * 20) / 2,
+    );
+    step_tightly_guarded(
+        &mut world,
+        holder,
+        defender,
+        spot,
+        away,
+        DribbleState::Gathered,
+        (limit as usize * 20) / 2 + 20,
+    );
     assert_eq!(violations(&world), 0, "防守人走开后计时必须清零");
 
-    // 重新贴上：必须重新计满限时才吹。
-    world.players[defender].pos = spot + Vec2::new(0.0, 1.5);
-    world.players[defender].target = world.players[defender].pos;
-    for _ in 0..(limit as usize * 20) - 10 {
-        world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
-        world.step(TICK_SECONDS);
-    }
+    step_tightly_guarded(
+        &mut world,
+        holder,
+        defender,
+        spot,
+        guarded,
+        DribbleState::Gathered,
+        (limit as usize * 20) - 10,
+    );
     assert_eq!(violations(&world), 0, "重新紧逼未满限时不得吹违例");
-    for _ in 0..40 {
-        world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
-        world.step(TICK_SECONDS);
-    }
+    step_tightly_guarded(
+        &mut world,
+        holder,
+        defender,
+        spot,
+        guarded,
+        DribbleState::Gathered,
+        40,
+    );
     assert_eq!(violations(&world), 1, "重新紧逼满限时必须吹违例");
 }
 
@@ -1286,7 +1327,14 @@ fn the_on_ball_defender_closes_the_gap() {
 #[test]
 fn a_step_back_shot_creates_space_before_the_release() {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
-    let separation_after = |kind: ShotKind| -> f32 {
+    // 后撤步跳投是位移不是瞬移：动作起手时落点写进投篮人的目标，准备窗口
+    // 里他走过去，出手发生在撤开之后的那个点。这里因此走完整条路径：
+    // 起手 → 准备窗口 → 出手。
+    //
+    // 判据是出手时两人的间隔：接球就投的间隔与起手时一样，后撤步的间隔
+    // 更大。防守人起手时站在最小间隔之外，因此两人之间的分开量只来自
+    // 后撤步。
+    let separation_at_release = |kind: ShotKind| -> f32 {
         let mut world = World::new(
             MatchSetup::builtin(GameRules::default()),
             params.clone(),
@@ -1296,14 +1344,15 @@ fn a_step_back_shot_creates_space_before_the_release() {
         let defender = world.on_court(TeamSide::Away).as_slice()[0];
         for (index, player) in world.players.iter_mut().enumerate() {
             player.on_court = index == shooter || index == defender;
-            player.vel = Vec2::ZERO;
+            player.vel = glam::Vec2::ZERO;
         }
         let hoop = world.hoop_for(TeamSide::Home);
         let spot = hoop + Vec2::new(-20.0, 0.0);
         world.players[shooter].pos = spot;
         world.players[shooter].target = spot;
         world.players[shooter].facing = (hoop - spot).normalize_or_zero();
-        world.players[defender].pos = spot + Vec2::new(1.4, 0.0);
+        let gap = world.rules.min_player_separation_ft + 0.6;
+        world.players[defender].pos = spot + Vec2::new(gap, 0.0);
         world.players[defender].target = world.players[defender].pos;
         world.possession.team = TeamSide::Home;
         world.start_possession(TeamSide::Home, PossessionKind::Live);
@@ -1320,18 +1369,34 @@ fn a_step_back_shot_creates_space_before_the_release() {
             start_time: world.now(),
             duration: 0.6,
         };
+        // 起手：后撤步的落点因此写进目标。接球就投的落点就是他此刻的位置。
+        // 落点写在发球程序之后：发球程序会把落点重置成阵型站位。
+        let target = if kind == ShotKind::StepBack {
+            nba_sim_core::resolve::shot::step_back_target(&world, shooter)
+        } else {
+            world.players[shooter].pos
+        };
+        world.players[shooter].target = target;
+        world.players[shooter].target_kind = nba_sim_core::state::TargetKind::Window;
+        world.players[shooter].target_partner = shooter;
+        let start = world.players[shooter].pos;
+        // 准备窗口：位移由运动层逐 tick 走完。
+        for _ in 0..40 {
+            nba_sim_core::body::integrate(&mut world, TICK_SECONDS);
+        }
+        let travel = (world.players[shooter].pos - start).length();
         nba_sim_core::resolve::shot::resolve(&mut world, &intent, kind);
-        (world.players[shooter].pos - world.players[defender].pos).length()
+        travel
     };
-    let catch_shoot = separation_after(ShotKind::CatchShoot);
-    let step_back = separation_after(ShotKind::StepBack);
+    let catch_shoot = separation_at_release(ShotKind::CatchShoot);
+    let step_back = separation_at_release(ShotKind::StepBack);
     assert!(
-        (catch_shoot - 1.4).abs() < 0.05,
+        catch_shoot < 0.5,
         "接球就投不得改变站位：{catch_shoot:.2}"
     );
     assert!(
-        step_back > catch_shoot + 2.0,
-        "后撤步必须真的拉开空间：{catch_shoot:.2} → {step_back:.2}"
+        step_back > 2.5,
+        "后撤步必须真的撤开：{step_back:.2}"
     );
 }
 
@@ -1368,7 +1433,7 @@ fn a_stronger_backdown_gets_closer_to_the_rim() {
         world.ball.z = world.rules.ball_radius_ft;
         let intent = ActionIntent {
             actor: offense,
-            kind: ActionKind::PostUp,
+            kind: ActionKind::PostUp(nba_sim_core::action::PostStepKind::Backdown),
             target: None,
             from_ft: spot,
             to_ft: spot,
@@ -1376,7 +1441,11 @@ fn a_stronger_backdown_gets_closer_to_the_rim() {
             duration: 0.8,
         };
         let before = world.events.len();
-        let outcome = nba_sim_core::resolve::drive::resolve_post(&mut world, &intent);
+        let outcome = nba_sim_core::resolve::drive::resolve_post(
+            &mut world,
+            &intent,
+            nba_sim_core::action::PostStepKind::Backdown,
+        );
         let fouled = world.events[before..].iter().any(|event| {
             matches!(
                 &event.fact,
@@ -1437,7 +1506,7 @@ fn post_footwork_follows_the_defenders_stance() {
             world.ball.z = world.rules.ball_radius_ft;
             let intent = ActionIntent {
                 actor: offense,
-                kind: ActionKind::PostUp,
+                kind: ActionKind::PostUp(nba_sim_core::action::PostStepKind::Backdown),
                 target: None,
                 from_ft: spot,
                 to_ft: spot,
@@ -1445,7 +1514,11 @@ fn post_footwork_follows_the_defenders_stance() {
                 duration: 0.8,
             };
             let before = world.events.len();
-            nba_sim_core::resolve::drive::resolve_post(&mut world, &intent);
+            nba_sim_core::resolve::drive::resolve_post(
+            &mut world,
+            &intent,
+            nba_sim_core::action::PostStepKind::Backdown,
+        );
             let kind = world.events[before..]
                 .iter()
                 .find_map(|event| match &event.fact {
@@ -1562,7 +1635,12 @@ fn fakes_and_protection_keep_the_pivot_foot_planted() {
             "假动作必须给防守人留下失衡窗口：{fake:?}"
         );
     }
-    for protect in [ProtectKind::FaceUp, ProtectKind::Post, ProtectKind::Spin] {
+    for protect in [
+        ProtectKind::FaceUp,
+        ProtectKind::Post,
+        ProtectKind::Spin,
+        ProtectKind::Trap,
+    ] {
         let mut world = World::new(
             MatchSetup::builtin(GameRules::default()),
             params.clone(),
@@ -1837,14 +1915,18 @@ fn a_contested_lane_finish_takes_a_euro_step_around_the_defender() {
         world.possession.gather_pos = Some(hoop + Vec2::new(-2.0, 0.0));
         let intent = ActionIntent {
             actor: finisher,
-            kind: ActionKind::Finish,
+            kind: ActionKind::Finish(nba_sim_core::action::FinishKind::Layup),
             target: None,
             from_ft: spot,
             to_ft: hoop,
             start_time: world.now(),
             duration: 0.5,
         };
-        nba_sim_core::resolve::drive::resolve_finish(&mut world, &intent);
+        nba_sim_core::resolve::drive::resolve_finish(
+            &mut world,
+            &intent,
+            nba_sim_core::action::FinishKind::Layup,
+        );
         world.players[finisher].target.y - hoop.y
     };
     let straight = lateral_offset(false);
