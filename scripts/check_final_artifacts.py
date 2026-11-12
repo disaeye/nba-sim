@@ -29,7 +29,7 @@ def load(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-# 认证工件记录生成它们的父提交；末尾证据提交只写认证工件与诊断产物。
+# 认证工件记录生成它们的代码提交；之后的提交只能写认证工件与诊断产物。
 GENERATED_PATH_PREFIXES = (
     "docs/dev/evidence/",
     "data/diagnostics/",
@@ -42,14 +42,13 @@ GENERATED_PATHS = {
 def evidence_commit_matches(recorded: str) -> bool:
     if recorded == HEAD:
         return True
-    parent = subprocess.run(
-        ["git", "rev-parse", "HEAD^"],
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", recorded, HEAD],
         cwd=ROOT,
         capture_output=True,
         text=True,
-        check=True,
-    ).stdout.strip()
-    if recorded != parent:
+    )
+    if ancestor.returncode != 0:
         return False
     changed = subprocess.run(
         ["git", "diff", "--name-only", f"{recorded}..HEAD"],
