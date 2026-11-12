@@ -11,7 +11,7 @@
 # 没有可用用户级 systemd 的环境（CI 容器等）直接执行原命令。
 set -uo pipefail
 
-MAX="${NBA_TEST_MEMORY_MAX:-8G}"
+MAX="${NBA_TEST_MEMORY_MAX:-2G}"
 
 if command -v systemd-run >/dev/null 2>&1 &&
     timeout 5 systemd-run --user --scope --quiet --collect -p MemoryMax=1G true >/dev/null 2>&1; then

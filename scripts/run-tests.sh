@@ -33,7 +33,7 @@ cd "$DIR"
 # 让内核在这个 scope 内部挑目标终止，scope 之外的进程完全不受影响。
 # 上限可用 NBA_TEST_MEMORY_MAX 调整；
 # 没有可用用户级 systemd 的环境（例如 CI 容器）会跳过这层并提示。
-NBA_TEST_MEMORY_MAX="${NBA_TEST_MEMORY_MAX:-8G}"
+NBA_TEST_MEMORY_MAX="${NBA_TEST_MEMORY_MAX:-2G}"
 if [ -z "${NBA_TEST_SCOPED:-}" ]; then
     if timeout 5 systemd-run --user --scope --quiet --collect true >/dev/null 2>&1; then
         echo "🔒 内存上限：MemoryMax=$NBA_TEST_MEMORY_MAX（scope nba-tests-$$）"
@@ -188,6 +188,15 @@ if [ "$STATUS" -eq 0 ]; then
 fi
 if [ "$STATUS" -eq 0 ]; then
     python3 scripts/check_r6_tendency_wiring.py || STATUS=$?
+fi
+if [ "$STATUS" -eq 0 ]; then
+    python3 scripts/check_action_runtime_catalog.py || STATUS=$?
+fi
+if [ "$STATUS" -eq 0 ]; then
+    python3 scripts/check_production_incidents.py || STATUS=$?
+fi
+if [ "$STATUS" -eq 0 ]; then
+    python3 scripts/audit_rule_programs.py || STATUS=$?
 fi
 if [ "$STATUS" -eq 0 ]; then
     python3 scripts/calibrate/freeze.py --check || STATUS=$?

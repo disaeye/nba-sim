@@ -90,6 +90,8 @@ ACKNOWLEDGED_COUPLED: dict[str, str] = {
     "4258efe": "bootstrap 裁决落地时同步登记新文件基线",
     "f6ac517": "删除旧引擎：棘轮中被测对象整体消失，预算与守卫名单只能随删除同 commit 收缩",
     "9fbbeb6": "重构拆分 world.rs 到 formation.rs 与 views.rs 时同步登记新文件常量预算",
+    "37b670b": "验证器对齐机制响应指标时同步登记新增文件的常量预算",
+    "0ca4cce": "权威状态、整数时间与控制身份首次入场时同步登记新文件常量预算",
 }
 
 ACK_TRAILER = "Threshold-Change:"

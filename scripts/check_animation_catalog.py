@@ -74,4 +74,72 @@ for fam_id, exp_fam in expected_families.items():
                 raise SystemExit(f"读取测试文件失败 {test_file}: {error}") from error
             assert f"fn {fn_part}" in test_content, f"测试函数不存在: {fn_part} 在 {test_file}"
 
-print(f"✅ 动作动画覆盖目录校验通过，共 {len(actual_families)} 个动作族，完整覆盖所有细分动作与测试。")
+# 动作身份是唯一的：同一个 (族, 类别, 变体, 角色) 不能出现两次，否则
+# 两类渲染器对同一帧会给出不同的动画。
+identities = set()
+for fam_id, fam in actual_families.items():
+    for entry in fam["actions"]:
+        identity = (fam_id, entry["kind"], entry["variant"], entry["role"])
+        assert identity not in identities, f"动作身份重复: {identity}"
+        identities.add(identity)
+
+# 动作规格表是引擎与目录之间的桥：它的每个条目都必须在动画目录里有
+# 配方，两份清单因此不可能各说各话。
+spec_source = ROOT / "crates" / "sim" / "src" / "action_spec.rs"
+assert spec_source.is_file(), f"缺少动作规格表: {spec_source}"
+try:
+    spec_text = spec_source.read_text(encoding="utf-8")
+except OSError as error:
+    raise SystemExit(f"读取动作规格表失败 {spec_source}: {error}") from error
+
+import re
+
+pattern = re.compile(
+    r'push\(ActionFamily::(\w+),\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",\s*ActionRole::(\w+),'
+)
+family_keys = {
+    "ActionDribble": "ACTION-DRIBBLE",
+    "ActionDrive": "ACTION-DRIVE",
+    "ActionFinish": "ACTION-FINISH",
+    "ActionShot": "ACTION-SHOT",
+    "ActionPost": "ACTION-POST",
+    "ActionPass": "ACTION-PASS",
+    "ActionFake": "ACTION-FAKE",
+    "ActionBallProtection": "ACTION-BALL-PROTECTION",
+    "ActionScreen": "ACTION-SCREEN",
+    "ActionCut": "ACTION-CUT",
+    "ActionRelocate": "ACTION-RELOCATE",
+    "ActionDefenseOnBall": "ACTION-DEFENSE-ON-BALL",
+    "ActionDefenseOffBall": "ACTION-DEFENSE-OFF-BALL",
+    "ActionCloseout": "ACTION-CLOSEOUT",
+    "ActionRebound": "ACTION-REBOUND",
+    "ActionTransition": "ACTION-TRANSITION",
+}
+role_keys = {
+    "Primary": "primary",
+    "Screener": "screener",
+    "CutPartner": "cut_partner",
+    "OnBallDefender": "on_ball_defender",
+    "Defender": "defender",
+    "Rebounder": "rebounder",
+    "Shooter": "shooter",
+}
+spec_identities = set()
+for match in pattern.finditer(spec_text):
+    family = family_keys.get(match.group(1))
+    assert family, f"动作规格表里有未知的动作族: {match.group(1)}"
+    role = role_keys.get(match.group(5))
+    assert role, f"动作规格表里有未知的角色: {match.group(5)}"
+    spec_identities.add((family, match.group(3), match.group(4), role))
+
+assert spec_identities, "动作规格表里没有条目"
+assert spec_identities == identities, (
+    "动作规格表与动画目录不一致，"
+    f"规格表独有: {sorted(spec_identities - identities)}，"
+    f"目录独有: {sorted(identities - spec_identities)}"
+)
+
+print(
+    f"✅ 动作动画覆盖目录校验通过，共 {len(actual_families)} 个动作族、"
+    f"{len(identities)} 个动作身份，动作规格表与动画目录完全一致。"
+)

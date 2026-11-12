@@ -224,6 +224,57 @@ async function main() {
       check("至少一种动画在播放", stats.clips.length > 0, `clips=${[...new Set(stats.clips)].join(",")}`);
       check("默认使用 2.5D 球场", stats.viewMode === "3d", `mode=${stats.viewMode}`);
 
+      // 动画目录：两个渲染器读同一份，因此同一帧的动作身份在两边解析成
+      // 同一份配方。未登记的身份直接失败，不允许渲染器自己编一个动画。
+      const recipes = await devtools.evaluate(`(() => {
+        const state = window.__nbaDebug;
+        const court = state.court3d;
+        const index = state.actionRecipeIndex;
+        const frame = state.ticks[state.idx];
+        const identities = [];
+        for (const player of frame.players || []) {
+          for (const action of player.active_actions || []) {
+            identities.push({
+              family: action.family,
+              kind: action.kind,
+              variant: action.variant,
+              role: action.role,
+              phase: action.phase,
+            });
+          }
+        }
+        const resolved = identities.map((identity) => {
+          const key = [identity.family, identity.kind, identity.variant, identity.role].join("|");
+          const entry = index.get(key);
+          return entry
+            ? {
+                ...identity,
+                clip: entry.recipe_3d.clip,
+                speed: entry.recipe_3d.speed,
+                label: entry.recipe_2d.label_zh,
+                phases: entry.phases,
+              }
+            : { ...identity, missing: true };
+        });
+        const live = [...(court?.players.values() ?? [])].map((view) => ({
+          actionId: view.currentActionId ?? null,
+          clip: view.currentRecipeClip ?? null,
+        }));
+        return { total: index.size, resolved, live };
+      })()`);
+      check("动画目录已载入渲染器", recipes.total >= 111, `条目=${recipes.total}`);
+      check("帧内动作身份全部有配方",
+        recipes.resolved.length > 0 && recipes.resolved.every((item) => !item.missing),
+        `身份=${recipes.resolved.length} 缺失=${recipes.resolved.filter((item) => item.missing).length}`);
+      check("配方阶段覆盖帧内阶段",
+        recipes.resolved.every((item) => item.phases.includes(item.phase)),
+        JSON.stringify(recipes.resolved
+          .filter((item) => !item.phases.includes(item.phase))
+          .map((item) => `${item.family}/${item.phase}`)));
+      check("3D 播放的剪辑来自目录",
+        recipes.live.every((item) => item.clip === null || recipes.resolved.some((entry) => entry.clip === item.clip)),
+        `播放=${recipes.live.filter((item) => item.clip).length} 目录剪辑=${[...new Set(recipes.resolved.map((entry) => entry.clip))].join(",")}`);
+
       const geometry = await devtools.evaluate(`(() => {
         const court = window.__nbaDebug.court3d;
         const state = window.__nbaDebug;

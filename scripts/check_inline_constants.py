@@ -31,14 +31,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BUDGET_PATH = ROOT / "scripts" / "inline_constant_budget.json"
 
-# 非生产 crate：仅测试使用的支撑代码（`publish = false` 且只被
-# dev-dependencies 引用）。它们不实现任何模拟行为，因此不纳入行为常数
-# 预算。这是**机器可验证**的排除，不是整文件白名单：`--self-test` 会
-# 断言这些 crate 确实声明了 `publish = false`，一旦被生产代码引用就会
-# 因不再满足条件而需要显式评估。
-NON_PRODUCTION_CRATES = {
-    "crates/test-support",
-}
+# 当前工作区没有仅测试使用的支撑 crate；排除名单为空时，自测仍通过
+# 注入一个不存在的 crate 验证「排除必须可核实」这条判据本身仍然生效。
+NON_PRODUCTION_CRATES: set[str] = set()
 
 # 核心行为文件：新增数值常量一律视为回归（除非预算已由 PR 证据更新）。
 #
@@ -438,6 +433,15 @@ def self_test() -> int:
             for problem in problems:
                 print(f"   - {problem}")
             return 1
+        # 负面对照：往排除名单塞一个不存在的 crate 必须被核实步骤挡住。
+        saved = set(NON_PRODUCTION_CRATES)
+        NON_PRODUCTION_CRATES.add("crates/nonexistent-test-support")
+        injected = verify_non_production_crates()
+        NON_PRODUCTION_CRATES.clear()
+        NON_PRODUCTION_CRATES.update(saved)
+        if not any("manifest missing" in problem for problem in injected):
+            print("❌ self-test: unverifiable non-production exclusion was accepted")
+            return 1
         # 核心行为名单必须每条都命中真实源文件；名单指向不存在的位置时必须变红。
         budget_for_selftest = load_budget()
         live = check_core_listing_is_live(budget_for_selftest, sorted(src_files()))
@@ -452,10 +456,16 @@ def self_test() -> int:
         if len(stale_problems) != 1:
             print("❌ self-test: stale-entry negative control did not fire")
             return 1
+        # 核心行为名单的分类必须可读出真实条目，且不接受虚路径。
         if not is_core_behavior(
-            "crates/engine/src/match_engine/ball_flight/write_entry.rs", budget_for_selftest
+            budget_for_selftest["core_behavior"][0], budget_for_selftest
         ):
-            print("❌ self-test: nested core path not recognised")
+            print("❌ self-test: core behaviour entry not recognised")
+            return 1
+        if is_core_behavior(
+            "crates/does-not-exist/src/lib.rs", budget_for_selftest
+        ):
+            print("❌ self-test: unknown path classified as core behaviour")
             return 1
         # 被排除的 crate 必须确实不在被扫描文件列表中。
         scanned = src_files()
