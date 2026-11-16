@@ -705,6 +705,9 @@
           "variant": "post_up",
           "role": "primary",
           "phases": [
+            "preparation",
+            "execution",
+            "follow_through",
             "sustained"
           ],
           "recipe_3d": {
@@ -1165,6 +1168,9 @@
           "variant": "face_up_protect",
           "role": "primary",
           "phases": [
+            "preparation",
+            "execution",
+            "follow_through",
             "sustained"
           ],
           "recipe_3d": {
@@ -1224,6 +1230,9 @@
           "variant": "trap_protect",
           "role": "primary",
           "phases": [
+            "preparation",
+            "execution",
+            "follow_through",
             "sustained"
           ],
           "recipe_3d": {
@@ -1250,8 +1259,10 @@
           "variant": "on_ball",
           "role": "screener",
           "phases": [
+            "preparation",
             "sustained",
-            "execution"
+            "execution",
+            "follow_through"
           ],
           "recipe_3d": {
             "clip": "Man_Standing",
@@ -1270,8 +1281,10 @@
           "variant": "off_ball",
           "role": "screener",
           "phases": [
+            "preparation",
             "sustained",
-            "execution"
+            "execution",
+            "follow_through"
           ],
           "recipe_3d": {
             "clip": "Man_Standing",
@@ -1598,6 +1611,9 @@
           "variant": "spot_up",
           "role": "primary",
           "phases": [
+            "preparation",
+            "execution",
+            "follow_through",
             "sustained"
           ],
           "recipe_3d": {
@@ -1638,6 +1654,9 @@
           "variant": "mismatch_seal",
           "role": "primary",
           "phases": [
+            "preparation",
+            "execution",
+            "follow_through",
             "sustained"
           ],
           "recipe_3d": {
@@ -1810,7 +1829,8 @@
           "phases": [
             "preparation",
             "execution",
-            "follow_through"
+            "follow_through",
+            "sustained"
           ],
           "recipe_3d": {
             "clip": "Man_Run",
@@ -2111,7 +2131,8 @@
           "role": "shooter",
           "phases": [
             "preparation",
-            "execution"
+            "execution",
+            "sustained"
           ],
           "recipe_3d": {
             "clip": "Man_Punch",
@@ -2131,7 +2152,8 @@
           "role": "shooter",
           "phases": [
             "preparation",
-            "execution"
+            "execution",
+            "sustained"
           ],
           "recipe_3d": {
             "clip": "Man_Walk",
@@ -2281,6 +2303,8 @@
           "variant": "loose_ball_dive",
           "role": "primary",
           "phases": [
+            "preparation",
+            "follow_through",
             "sustained"
           ],
           "recipe_3d": {
@@ -2328,7 +2352,8 @@
           "phases": [
             "preparation",
             "execution",
-            "follow_through"
+            "follow_through",
+            "sustained"
           ],
           "recipe_3d": {
             "clip": "Man_Run",
@@ -2349,7 +2374,8 @@
           "phases": [
             "preparation",
             "execution",
-            "follow_through"
+            "follow_through",
+            "sustained"
           ],
           "recipe_3d": {
             "clip": "Man_Run",

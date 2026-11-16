@@ -130,6 +130,45 @@ fn every_engine_action_identity_has_a_recipe() {
 }
 
 #[test]
+fn every_engine_action_phase_is_registered() {
+    // 引擎发出的每个 (身份, 阶段) 组合都必须在目录里登记：渲染器遇到
+    // 未登记的阶段会就地失败，整个画面冻结到该动作结束。这条测试钉住
+    // 目录与运行时投影的契约，缺任何一个组合都在提交前暴露。
+    let validator = RenderActionValidator::new(&catalog()).expect("动画目录自洽");
+    let mut seen: BTreeSet<(String, String, String, String, String)> = BTreeSet::new();
+    for seed in 1..=8u64 {
+        let mut world = common::short_world(seed);
+        for _ in 0..12_000 {
+            world.step(TICK_SECONDS);
+            let tick = world.stream_tick();
+            for player in &tick.frame.players {
+                for action in &player.active_actions {
+                    seen.insert((
+                        action.family.clone(),
+                        action.kind.clone(),
+                        action.variant.clone(),
+                        action.role.clone(),
+                        action.phase.clone(),
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        seen.len() >= 120,
+        "一批比赛必须覆盖大量的身份与阶段组合：{}",
+        seen.len()
+    );
+    for (family, kind, variant, role, phase) in &seen {
+        validator
+            .recipe_3d(family, kind, variant, role, phase)
+            .unwrap_or_else(|error| {
+                panic!("引擎发出的阶段没有登记配方：{family}/{kind}/{variant}/{role}/{phase}: {error}")
+            });
+    }
+}
+
+#[test]
 fn the_two_renderers_read_the_same_recipe() {
     // 同一组动作身份，两个渲染器读出的配方必须一致：3D 的剪辑与 2D 的
     // 运动学都来自同一份目录条目。
