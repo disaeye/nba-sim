@@ -76,6 +76,7 @@
         ACTION_RECIPE_INDEX.set(key, action);
       }
     }
+    state.actionCatalog = catalog;
     return catalog;
   }
 
@@ -160,6 +161,10 @@
     courtMode: "full",
     viewMode: "3d",
     court3d: null,
+    court3dPromise: null,
+    simulating: false,
+    simulationRequestId: 0,
+    actionCatalog: null,
     // 势能场是内部分析图层，默认隐藏：它铺满大半个球场，不透明填充会盖掉
     // 地板与三分线，与「看比赛」的视觉目标冲突。需要时用侧栏开关（P）打开。
     potentialFieldVisible: false,
@@ -1464,6 +1469,8 @@
   }
 
   async function runSimulation(withRules = null, autoPlay = true, startAtLive = true) {
+    const requestId = ++state.simulationRequestId;
+    state.simulating = true;
     stopPlayback();
     // 移动端体验：模拟开始时视口保持在球场核心区域，杜绝下滚遮挡
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1472,6 +1479,7 @@
     const scope = $("scopeInput").value;
     setRunStatus("重新模拟推演中…");
     setControlsBusy(true);
+    updateStageOverlay();
     try {
       if (!withRules) await fetchDefaultRules(false);
       let responseText = null;
@@ -1499,27 +1507,38 @@
         }
       }
 
+      if (requestId !== state.simulationRequestId) return false;
       if (withRules) state.rules = { ...state.rules, ...withRules };
-      loadStream(responseText, `seed ${seed} · ${scope}`);
+      loadStream(responseText, `seed ${seed} · ${scope}`, { startAtLive });
       setRunStatus(`${state.ticks.length.toLocaleString()} 帧 · 模拟推演完成`);
-      if (startAtLive && state.ticks.length) {
-        const liveIdx = state.ticks.findIndex((t) => t.game_flow === "LiveBall" && t.possession_id >= 1);
-        if (liveIdx > 0) seek(liveIdx);
+      if (state.viewMode === "3d" && state.court3dPromise) {
+        await state.court3dPromise;
+        if (requestId !== state.simulationRequestId) return false;
       }
+      state.simulating = false;
+      updateStageOverlay();
+      renderCurrent(true, performance.now(), { forceMetrics: true, resetDelta: true });
+      if (state.viewMode === "3d") state.court3d?.markReady();
       if (autoPlay) {
         startPlayback();
       }
       return true;
     } catch (error) {
-      setRunStatus(`运行失败：${error.message}`, true);
-      console.error(error);
+      if (requestId === state.simulationRequestId) {
+        setRunStatus(`运行失败：${error.message}`, true);
+        console.error(error);
+      }
       return false;
     } finally {
-      setControlsBusy(false);
+      if (requestId === state.simulationRequestId) {
+        state.simulating = false;
+        updateStageOverlay();
+        setControlsBusy(false);
+      }
     }
   }
 
-  function loadStream(text, source = "NDJSON") {
+  function loadStream(text, source = "NDJSON", { startAtLive = false } = {}) {
     const parsed = [];
     let engineViolations = [];
     for (const line of text.split(/\r?\n/)) {
@@ -1551,9 +1570,15 @@
         tick.rules = carriedRules;
       }
     }
+    let initialIdx = 0;
+    if (startAtLive) {
+      const liveIdx = parsed.findIndex((t) => t.game_flow === "LiveBall" && t.possession_id >= 1);
+      if (liveIdx > 0) initialIdx = liveIdx;
+    }
+    courtFX.reset();
     state.engineViolations = engineViolations;
     state.ticks = parsed;
-    state.idx = 0;
+    state.idx = initialIdx;
     state.accumulator = 0;
     state.previousRaf = 0;
     state.lastFrameJson = -1;
@@ -1573,12 +1598,14 @@
     renderMatchOverview();
     updateReadouts(source);
     $("progressInput").max = String(Math.max(0, parsed.length - 1));
-    $("progressInput").value = "0";
+    $("progressInput").value = String(initialIdx);
     $("jumpInput").max = String(Math.max(0, parsed.length - 1));
     $("progressEnd").textContent = timeWithTenths(parsed[parsed.length - 1].t);
-    renderCurrent(true);
     state.playing = false;
     updatePlayButton();
+    if (!state.simulating) {
+      renderCurrent(true, performance.now(), { forceMetrics: true, resetDelta: true });
+    }
   }
 
   function buildAnalytics(ticks) {
@@ -2620,6 +2647,29 @@
     return Boolean(probe.getContext("webgl2") || probe.getContext("webgl"));
   }
 
+  function updateStageOverlay() {
+    const overlay = $("court3dLoading");
+    if (!overlay) return;
+    if (state.viewMode !== "3d") {
+      overlay.hidden = true;
+      return;
+    }
+    const assetsReady = Boolean(state.court3d?.assetsReady);
+    const hasTicks = state.ticks.length > 0;
+    if (assetsReady && !state.simulating && hasTicks) {
+      overlay.hidden = true;
+      return;
+    }
+    overlay.hidden = false;
+    if (!assetsReady && state.simulating) {
+      overlay.textContent = "球场与推演加载中…";
+    } else if (!assetsReady) {
+      overlay.textContent = "球场加载中…";
+    } else {
+      overlay.textContent = "模拟推演中…";
+    }
+  }
+
   function setCourtView(mode) {
     const next = mode === "2d" ? "2d" : "3d";
     state.viewMode = next;
@@ -2632,8 +2682,33 @@
     }
     const label = $("courtViewLabel");
     if (label) label.textContent = next === "3d" ? "2.5D 球场" : "战术板";
-    state.court3d?.setVisible(next === "3d");
-    if (next === "2d" && state.ticks[state.idx]) drawCourt(state.ticks[state.idx]);
+    if (next === "2d") {
+      state.court3d?.setVisible(false);
+      updateStageOverlay();
+      if (state.ticks[state.idx]) drawCourt(state.ticks[state.idx]);
+      return;
+    }
+    if (!state.court3d) {
+      const wasPlaying = state.playing;
+      if (wasPlaying) stopPlayback();
+      updateStageOverlay();
+      initCourt3d().then((court) => {
+        if (!court || state.viewMode !== "3d") return;
+        updateStageOverlay();
+        if (!state.simulating && state.ticks[state.idx]) {
+          renderCurrent(true, performance.now(), { forceMetrics: true, resetDelta: true });
+          court.markReady();
+          if (wasPlaying) startPlayback();
+        }
+      });
+      return;
+    }
+    state.court3d.setVisible(true);
+    updateStageOverlay();
+    if (!state.simulating && state.ticks[state.idx]) {
+      state.court3d.renderFrame(performance.now(), { forceMetrics: true, resetDelta: true });
+      state.court3d.markReady();
+    }
   }
 
   function toggleCourtView() {
@@ -2654,33 +2729,48 @@
   }
 
   async function initCourt3d() {
-    const canvas = $("court3dCanvas");
-    const statusEl = $("court3dStatus");
-    const overlay = $("court3dLoading");
-    if (!canvas || !statusEl) return;
-    if (!supportsWebGL()) {
-      if (overlay) overlay.hidden = true;
-      statusEl.dataset.error = "webgl-unavailable";
-      setCourtView("2d");
-      return;
-    }
-    const module = await import("./court3d.js");
-    const court = await module.mountCourt3d({
-      canvas,
-      state,
-      statusEl,
-      overlayEl: overlay,
-      assetUrl: "/assets/players.glb",
+    if (state.court3d) return state.court3d;
+    if (state.court3dPromise) return state.court3dPromise;
+    state.court3dPromise = (async () => {
+      const canvas = $("court3dCanvas");
+      const statusEl = $("court3dStatus");
+      const overlay = $("court3dLoading");
+      if (!canvas || !statusEl) return null;
+      if (!supportsWebGL()) {
+        if (overlay) overlay.hidden = true;
+        statusEl.dataset.error = "webgl-unavailable";
+        setCourtView("2d");
+        return null;
+      }
+      const module = await import("./court3d.js");
+      const court = await module.mountCourt3d({
+        canvas,
+        state,
+        statusEl,
+        overlayEl: overlay,
+        assetUrl: "/assets/players.glb",
+        actionCatalog: state.actionCatalog,
+        visible: state.viewMode === "3d",
+      });
+      state.court3d = court;
+      return court;
+    })().finally(() => {
+      if (!state.court3d) state.court3dPromise = null;
     });
-    state.court3d = court;
-    setCourtView("3d");
+    return state.court3dPromise;
   }
 
-  function renderCurrent(forceJson = false) {
+  function renderCurrent(forceJson = false, frameNow = performance.now(), renderOptions = {}) {
     const tick = state.ticks[state.idx];
     if (!tick) return;
     updateHud(tick);
-    if (!(state.viewMode === "3d" && state.court3d)) drawCourt(tick);
+    if (state.viewMode === "3d") {
+      if (state.court3d && state.court3d.assetsReady) {
+        state.court3d.renderFrame(frameNow, renderOptions);
+      }
+    } else {
+      drawCourt(tick);
+    }
     updateTimelineCursor();
     updateMatchFlowCursor();
     $("progressInput").value = String(state.idx);
@@ -5139,20 +5229,35 @@
       state.ticks.length - 1,
     );
     state.accumulator = 0;
-    renderCurrent(true);
+    renderCurrent(true, performance.now(), { forceMetrics: true, resetDelta: true });
   }
   function step(delta) {
     stopPlayback();
     seek(state.idx + delta);
   }
   function setControlsBusy(busy) {
-    $("runButton").disabled = busy;
-    $("fileInput").disabled = busy;
+    for (const id of [
+      "runButton",
+      "quickSimBtn",
+      "seedInput",
+      "scopeInput",
+      "randomSeedBtn",
+      "fileInput",
+      "jumpButton",
+      "progressInput",
+      "playButton",
+      "stepBackButton",
+      "stepForwardButton",
+      "prevPossessionButton",
+      "nextPossessionButton",
+      "applyAndRunBtn",
+    ]) {
+      const node = $(id);
+      if (node) node.disabled = busy;
+    }
     for (const button of document.querySelectorAll(".speed-group button")) {
       button.disabled = busy;
     }
-    $("jumpButton").disabled = busy;
-    $("progressInput").disabled = busy;
     if (busy) stopPlayback();
   }
   function possessionJump(direction) {
@@ -5165,18 +5270,28 @@
   }
   function togglePlayback() {
     if (!state.ticks.length) return;
-    state.playing = !state.playing;
-    state.previousRaf = 0;
-    updatePlayButton();
-    if (state.playing && !state.rafId)
-      state.rafId = requestAnimationFrame(playbackFrame);
+    if (state.playing) {
+      stopPlayback();
+    } else {
+      startPlayback();
+    }
   }
   function stopPlayback() {
     state.playing = false;
+    if (state.rafId) {
+      cancelAnimationFrame(state.rafId);
+      state.rafId = null;
+    }
     updatePlayButton();
   }
   function startPlayback() {
-    if (!state.ticks.length) return;
+    if (
+      !state.ticks.length ||
+      state.simulating ||
+      (state.viewMode === "3d" && !state.court3d?.assetsReady)
+    ) {
+      return;
+    }
     state.playing = true;
     state.previousRaf = 0;
     updatePlayButton();
@@ -5187,8 +5302,11 @@
     $("playButton").textContent = state.playing ? "Ⅱ" : "▶";
   }
   function playbackFrame(now) {
+    if (!state.playing || !state.ticks.length) {
+      state.rafId = null;
+      return;
+    }
     state.rafId = requestAnimationFrame(playbackFrame);
-    if (!state.playing || !state.ticks.length) return;
     if (!state.previousRaf) state.previousRaf = now;
     const elapsed = Math.min(0.25, (now - state.previousRaf) / 1000);
     state.previousRaf = now;
@@ -5197,11 +5315,17 @@
       state.idx += 1;
       state.accumulator -= 1;
     }
-    if (state.idx >= state.ticks.length - 1) {
+    const finished = state.idx >= state.ticks.length - 1;
+    if (finished) {
       state.playing = false;
+      state.accumulator = 0;
       updatePlayButton();
     }
-    renderCurrent(false);
+    renderCurrent(finished, now);
+    if (finished && state.rafId) {
+      cancelAnimationFrame(state.rafId);
+      state.rafId = null;
+    }
   }
 
   async function loadDefaultRules() {
@@ -5670,13 +5794,29 @@
 
   async function boot() {
     wire();
-    await loadDefaultRules();
-    // 动画配方先加载：目录缺失时直接失败，两个渲染器不会各自猜一个动画。
-    await loadActionRecipes();
-    await runSimulation();
-    await initCourt3d();
     const requestedView = new URLSearchParams(window.location.search).get("court");
-    if (requestedView === "2d") setCourtView("2d");
+    const initialView = requestedView === "2d" ? "2d" : "3d";
+    setCourtView(initialView);
+
+    // 动画目录与规则表加载后，首场模拟推演与 3D 球场模型加载并行推进，
+    // 在两者同时就绪并完成首帧同步渲染后再统一开启播放。
+    const recipesPromise = loadActionRecipes();
+    const rulesPromise = loadDefaultRules();
+    const courtPromise = initialView === "3d"
+      ? recipesPromise.then(() => initCourt3d())
+      : Promise.resolve(null);
+
+    await Promise.all([recipesPromise, rulesPromise]);
+    const [simOk] = await Promise.all([
+      runSimulation(null, false, true),
+      courtPromise,
+    ]);
+    updateStageOverlay();
+    if (simOk && state.ticks.length) {
+      renderCurrent(true, performance.now(), { forceMetrics: true, resetDelta: true });
+      if (state.viewMode === "3d") state.court3d?.markReady();
+      startPlayback();
+    }
   }
   boot().catch((error) => {
     setRunStatus(`启动失败：${error.message}`, true);

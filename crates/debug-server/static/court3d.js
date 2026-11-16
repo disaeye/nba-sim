@@ -71,7 +71,11 @@ function indexActionRecipes(catalog) {
   return ACTION_RECIPE_INDEX;
 }
 
-async function loadActionRecipes() {
+async function loadActionRecipes(preloadedCatalog = null) {
+  if (preloadedCatalog) {
+    indexActionRecipes(preloadedCatalog);
+    return preloadedCatalog;
+  }
   const response = await fetch("/api/action-animation-catalog");
   if (!response.ok) {
     throw new Error(`动画目录读取失败：${response.status}`);
@@ -107,6 +111,22 @@ const SPEED_IDLE_FTPS = 1.2;
 const SPEED_RUN_FTPS = 7.5;
 const WALK_STRIDE_FT = 5.0;
 const RUN_STRIDE_FT = 14.0;
+
+// 移动类剪辑：这些剪辑的含义由球员的真实速度决定，持续姿态用它门登记时
+// 只提供「优先级与语境」，具体播放交给 applyLocomotion 按速度选型与定速。
+// 否则静止的球员会原地播走路/跑步循环，画面看起来僵硬。
+const LOCOMOTION_CLIPS = new Set(["Man_Walk", "Man_Run", "Man_Idle", "Man_Standing"]);
+
+// 渲染位置与帧数据的一致性：单帧位移在物理包络内（一个 tick 的速度上限）时
+// 精确直通，渲染器与帧数据零误差；主线程丢帧后追赶的多帧位移超出包络，
+// 只对超出部分按指数收敛，把瞬间跳位变成一小段平滑冲刺。重置帧
+// （换流、拖动进度条）以 delta=0 调用，直接吸附。
+const RENDER_SMOOTH_ENGAGE_FT = 1.5;
+const RENDER_SMOOTH_DAMP = 20.0;
+const RENDER_POS_SNAP_FT = 8.0;
+// 球的包络独立：传球球速上限 85 ft/s，单 tick 位移可达 4.25 ft。
+const BALL_SMOOTH_ENGAGE_FT = 5.5;
+const BALL_POS_SNAP_FT = 14.0;
 
 const PRESETS = {
   broadcast: { azimuth: 0, elevation: 34, coverage: 104, target: [0, 1.2, 0] },
@@ -454,6 +474,20 @@ class PlayerFigure {
       null;
   }
 
+  resetState() {
+    this.currentActionId = null;
+    this.currentRecipeClip = null;
+    this.actionUntil = 0;
+    this.gesture = null;
+    this.gestureUntil = 0;
+    this.speed = 0;
+    this.placed = false;
+    this.renderX = undefined;
+    this.renderZ = undefined;
+    this.targetX = 0;
+    this.targetZ = 0;
+  }
+
   resolveClip(suffix) {
     for (const name of this.actions.keys()) {
       if (name === suffix || name.endsWith(`|${suffix}`)) return this.actions.get(name);
@@ -525,6 +559,14 @@ class PlayerFigure {
         return true;
       }
       this.gesture = null;
+      // 持续姿态且剪辑属于移动类：具体播什么由真实速度决定，交给运动学选择。
+      // 记住姿态身份供状态查询，但不占用动作机。
+      if (recipe.loop && LOCOMOTION_CLIPS.has(recipe.clip)) {
+        this.currentActionId = item.action_id;
+        this.currentRecipeClip = null;
+        this.actionUntil = 0;
+        return false;
+      }
       clipAction.reset();
       if (recipe.loop) {
         clipAction.setLoop(THREE.LoopRepeat, Infinity);
@@ -568,13 +610,39 @@ class PlayerFigure {
   }
 
   update(delta, now) {
+    // 渲染位置包络内精确跟随，超包络的追赶位移按指数收敛。
+    if (this.renderX === undefined || delta <= 0) {
+      this.renderX = this.targetX;
+      this.renderZ = this.targetZ;
+    } else {
+      const dist = Math.hypot(this.targetX - this.renderX, this.targetZ - this.renderZ);
+      if (dist > RENDER_POS_SNAP_FT) {
+        this.renderX = this.targetX;
+        this.renderZ = this.targetZ;
+      } else if (dist > RENDER_SMOOTH_ENGAGE_FT) {
+        const blend = 1.0 - Math.exp(-RENDER_SMOOTH_DAMP * Math.max(0, delta));
+        this.renderX += (this.targetX - this.renderX) * blend;
+        this.renderZ += (this.targetZ - this.renderZ) * blend;
+      } else {
+        this.renderX = this.targetX;
+        this.renderZ = this.targetZ;
+      }
+    }
+    this.root.position.set(this.renderX, 0, this.renderZ);
     this.applyLocomotion(now);
     this.mixer.update(delta);
     this.model.updateMatrixWorld(true);
   }
 
   place(x, z, yaw, delta) {
-    this.root.position.set(x, 0, z);
+    this.targetX = x;
+    this.targetZ = z;
+    if (this.renderX === undefined || delta <= 0 ||
+        Math.hypot(x - this.renderX, z - this.renderZ) > RENDER_POS_SNAP_FT) {
+      this.renderX = x;
+      this.renderZ = z;
+      this.root.position.set(x, 0, z);
+    }
     if (!this.placed) {
       this.placed = true;
       this.yaw = yaw;
@@ -605,6 +673,12 @@ export class Court3D {
     this.pixelSignature = 0;
     this.playerPosition = new THREE.Vector3();
     this.hoops = [];
+    this.assetsReady = false;
+    this.ready = false;
+    this.lastRenderStamp = -1;
+    this.lastBallX = 0;
+    this.lastBallY = 0;
+    this.lastBallZ = 0;
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -946,6 +1020,13 @@ export class Court3D {
     const rest = collectRestPose(template);
     this.clips = gltf.animations.map((clip) => completeClip(clip, rest, this.clipCache));
     this.template = template;
+    this.assetsReady = true;
+    this.publishStatus("assets", "true");
+  }
+
+  markReady() {
+    if (!this.assetsReady) return;
+    this.ready = true;
     if (this.overlayEl) this.overlayEl.hidden = true;
     this.publishStatus("ready", "true");
   }
@@ -1132,17 +1213,31 @@ export class Court3D {
     }
     // 协议的高度是离散档位（持球 4 英尺、传球 6 英尺、投篮 12 英尺），
     // 直接跳变会让球在一帧内瞬移；按真实帧间隔平滑逼近目标高度。
-    if (this.state?.playing && this.ballHeight !== undefined) {
+    // 横向位置与球员同一套包络规则：包络内精确直通，追赶位移收敛。
+    if (this.state?.playing && this.ballHeight !== undefined && delta > 0) {
       this.ballHeight = THREE.MathUtils.damp(this.ballHeight, targetY, 9, Math.min(0.1, delta));
+      const dist = Math.hypot(targetX - (this.ballX ?? targetX), targetZ - (this.ballZ ?? targetZ));
+      if (this.ballX === undefined || dist > BALL_POS_SNAP_FT || dist <= BALL_SMOOTH_ENGAGE_FT) {
+        this.ballX = targetX;
+        this.ballZ = targetZ;
+      } else {
+        const blend = 1.0 - Math.exp(-RENDER_SMOOTH_DAMP * Math.max(0, delta));
+        this.ballX += (targetX - this.ballX) * blend;
+        this.ballZ += (targetZ - this.ballZ) * blend;
+      }
     } else {
       this.ballHeight = targetY;
+      this.ballX = targetX;
+      this.ballZ = targetZ;
     }
-    this.ballGroup.position.set(targetX, this.ballHeight, targetZ);
-    const travel = Math.hypot(
-      this.ballGroup.position.x - this.lastBallX,
-      this.ballGroup.position.y - this.lastBallY,
-      this.ballGroup.position.z - this.lastBallZ,
-    );
+    this.ballGroup.position.set(this.ballX, this.ballHeight, this.ballZ);
+    const travel = Number.isFinite(this.lastBallX)
+      ? Math.hypot(
+          this.ballGroup.position.x - this.lastBallX,
+          this.ballGroup.position.y - this.lastBallY,
+          this.ballGroup.position.z - this.lastBallZ,
+        )
+      : 0;
     this.lastBallX = this.ballGroup.position.x;
     this.lastBallY = this.ballGroup.position.y;
     this.lastBallZ = this.ballGroup.position.z;
@@ -1194,34 +1289,48 @@ export class Court3D {
 
   sync(delta, now) {
     const state = this.state;
-    if (!state || !state.ticks || !state.ticks.length) {
+    if (!this.assetsReady || !state || !state.ticks || !state.ticks.length) {
       this.ballGroup.visible = false;
       for (const view of this.players.values()) view.root.visible = false;
       return;
     }
-    if (this.lastTicks !== state.ticks) {
+    const index = Math.min(state.ticks.length - 1, Math.max(0, state.idx | 0));
+    const frame = this.frameAt(index);
+    const streamChanged = this.lastTicks !== state.ticks;
+    const jumped = !streamChanged && this.lastIndex >= 0 && (index < this.lastIndex || index - this.lastIndex > 1);
+    if (streamChanged) {
       this.lastTicks = state.ticks;
       this.lastIndex = -1;
       this.scoreSeen = null;
       this.ballHeight = undefined;
+      this.ballX = undefined;
+      this.ballZ = undefined;
       this.ballTrail.length = 0;
       for (const view of this.players.values()) {
-        view.speed = 0;
-        view.gesture = null;
+        view.resetState();
+      }
+    } else if (jumped) {
+      this.ballHeight = undefined;
+      this.ballX = undefined;
+      this.ballZ = undefined;
+      this.ballTrail.length = 0;
+      const score = frame?.score ?? {};
+      this.scoreSeen = { home: finite(score.home, 0), away: finite(score.away, 0) };
+      for (const view of this.players.values()) {
+        view.resetState();
       }
     }
-    const index = Math.min(state.ticks.length - 1, Math.max(0, state.idx | 0));
-    const frame = this.frameAt(index);
+    const effectiveDelta = streamChanged || jumped ? 0 : delta;
     const nextIndex = Math.min(state.ticks.length - 1, index + 1);
     const nextFrame = this.frameAt(nextIndex);
     const alpha = state.playing ? Math.min(1, Math.max(0, finite(state.accumulator, 0))) : 0;
-    this.syncPlayers(frame, nextFrame, alpha, delta);
+    this.syncPlayers(frame, nextFrame, alpha, effectiveDelta);
     if (state.playing && index === this.lastIndex + 1) this.triggerEvents(frame);
     this.detectScore(frame);
     for (const view of this.players.values()) {
-      if (view.root.visible) view.update(delta, now);
+      if (view.root.visible) view.update(effectiveDelta, now);
     }
-    this.syncBall(frame, nextFrame, alpha, delta);
+    this.syncBall(frame, nextFrame, alpha, effectiveDelta);
     this.lastIndex = index;
     this.publishClipState(frame);
   }
@@ -1266,21 +1375,36 @@ export class Court3D {
     this.statusEl.dataset.pixelMean = String(Math.round(total / (buffer.length / 4) / 3));
   }
 
+  renderFrame(now = performance.now(), { forceMetrics = false, resetDelta = false } = {}) {
+    if (!this.visible) return;
+    const delta = resetDelta ? 0 : Math.min(0.1, Math.max(0, (now - this.lastTime) / 1000));
+    this.lastTime = now;
+    this.lastRenderStamp = now;
+    this.sync(delta, now);
+    if (this.preset === "follow") this.updateFollowCamera(delta);
+    else {
+      this.controls.update();
+      this.clampPan();
+    }
+    this.renderer.render(this.scene, this.camera);
+    this.frames += 1;
+    if (this.assetsReady && this.state?.ticks?.length && !this.ready) {
+      this.markReady();
+    }
+    if (forceMetrics || this.frames === 1 || this.frames === 6 || this.frames % 90 === 0) {
+      this.publishMetrics();
+    }
+  }
+
   start() {
     const loop = (now) => {
       this.rafId = requestAnimationFrame(loop);
-      const delta = Math.min(0.1, (now - this.lastTime) / 1000);
-      this.lastTime = now;
       if (!this.visible) return;
-      this.sync(delta, now);
-      if (this.preset === "follow") this.updateFollowCamera(delta);
-      else {
-        this.controls.update();
-        this.clampPan();
-      }
-      this.renderer.render(this.scene, this.camera);
-      this.frames += 1;
-      if (this.frames === 1 || this.frames === 6 || this.frames % 90 === 0) this.publishMetrics();
+      // 播放期由 app.js 推进逻辑帧后同帧调用 renderFrame，确保 HUD 与 3D 画面零帧差；
+      // 暂停或未开播期由自身循环维持相机阻尼与骨骼待机动画。
+      if (this.state?.playing && this.state?.rafId) return;
+      if (this.lastRenderStamp === now) return;
+      this.renderFrame(now);
     };
     this.rafId = requestAnimationFrame(loop);
   }
@@ -1293,13 +1417,24 @@ export class Court3D {
   }
 }
 
-export async function mountCourt3d({ canvas, state, statusEl, overlayEl, assetUrl }) {
+export async function mountCourt3d({
+  canvas,
+  state,
+  statusEl,
+  overlayEl,
+  assetUrl,
+  actionCatalog = null,
+  visible = true,
+}) {
   // 动画配方先加载：目录缺失或条目不合法时直接失败，渲染器不能猜一个
   // 动画出来。
-  await loadActionRecipes();
+  await loadActionRecipes(actionCatalog);
   const court = new Court3D({ canvas, state, statusEl, overlayEl });
   await court.loadPlayers(assetUrl);
-  court.setVisible(true);
+  court.setVisible(visible);
+  if (visible && state?.ticks?.length && !state.simulating) {
+    court.renderFrame(performance.now(), { forceMetrics: true, resetDelta: true });
+  }
   court.start();
   return court;
 }
