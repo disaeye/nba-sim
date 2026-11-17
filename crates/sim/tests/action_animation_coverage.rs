@@ -16,7 +16,12 @@ mod common;
 
 #[test]
 fn action_animation_catalog_covers_all_families_and_valid_recipes() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf();
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
     let catalog_path = root.join("data/rules/action_animation_catalog.json");
     assert!(catalog_path.is_file(), "动作动画目录文件不存在");
 
@@ -80,7 +85,10 @@ fn action_animation_catalog_covers_all_families_and_valid_recipes() {
             }
         }
     }
-    assert!(total_actions >= 90, "总动作细分数需大于等于 90，实测: {total_actions}");
+    assert!(
+        total_actions >= 90,
+        "总动作细分数需大于等于 90，实测: {total_actions}"
+    );
 }
 
 #[test]

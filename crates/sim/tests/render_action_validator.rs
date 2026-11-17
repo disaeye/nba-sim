@@ -15,9 +15,7 @@ mod common;
 
 use std::collections::BTreeSet;
 
-use nba_protocol::{
-    ActionAnimationCatalog, RenderActionValidator,
-};
+use nba_protocol::{ActionAnimationCatalog, RenderActionValidator};
 use nba_sim_core::action::Fact;
 use nba_sim_core::world::TICK_SECONDS;
 
@@ -45,11 +43,7 @@ fn the_catalog_covers_every_action_entry() {
         validator.allowed_clips().len() >= 10,
         "基础动画剪辑不足 10 个"
     );
-    assert_eq!(
-        validator.families().len(),
-        16,
-        "校验器看到 16 个动作族"
-    );
+    assert_eq!(validator.families().len(), 16, "校验器看到 16 个动作族");
 }
 
 #[test]
@@ -65,9 +59,18 @@ fn an_unregistered_action_identity_fails_immediately() {
     );
     // 未登记的阶段：同样失败。
     let error = validator
-        .recipe_3d("ACTION-DRIBBLE", "dribble", "crossover", "primary", "not_a_phase")
+        .recipe_3d(
+            "ACTION-DRIBBLE",
+            "dribble",
+            "crossover",
+            "primary",
+            "not_a_phase",
+        )
         .expect_err("未登记的阶段必须失败");
-    assert!(error.contains("没有阶段"), "失败信息必须说明阶段缺失：{error}");
+    assert!(
+        error.contains("没有阶段"),
+        "失败信息必须说明阶段缺失：{error}"
+    );
 }
 
 #[test]
@@ -78,7 +81,10 @@ fn a_missing_recipe_in_the_catalog_fails_immediately() {
     let action = first.actions.first_mut().expect("动作族有条目");
     action.recipe_3d.clip = "Not_An_Allowed_Clip".to_string();
     let error = RenderActionValidator::new(&catalog).expect_err("非法剪辑必须失败");
-    assert!(error.contains("允许列表"), "失败信息必须说明剪辑非法：{error}");
+    assert!(
+        error.contains("允许列表"),
+        "失败信息必须说明剪辑非法：{error}"
+    );
 }
 
 #[test]
@@ -163,7 +169,9 @@ fn every_engine_action_phase_is_registered() {
         validator
             .recipe_3d(family, kind, variant, role, phase)
             .unwrap_or_else(|error| {
-                panic!("引擎发出的阶段没有登记配方：{family}/{kind}/{variant}/{role}/{phase}: {error}")
+                panic!(
+                    "引擎发出的阶段没有登记配方：{family}/{kind}/{variant}/{role}/{phase}: {error}"
+                )
             });
     }
 }
@@ -189,7 +197,12 @@ fn the_two_renderers_read_the_same_recipe() {
             let clip = entry.recipe_3d.clip.clone();
             let speed = entry.recipe_3d.speed;
             let (kinetics, label) = validator
-                .recipe_2d(spec.family.as_str(), spec.kind, spec.variant, spec.role.as_str())
+                .recipe_2d(
+                    spec.family.as_str(),
+                    spec.kind,
+                    spec.variant,
+                    spec.role.as_str(),
+                )
                 .unwrap_or_else(|error| panic!("2D 配方缺失：{error}"));
             assert!(!clip.is_empty(), "3D 剪辑不能为空");
             assert!(speed > 0.0, "3D 播放速率必须为正");

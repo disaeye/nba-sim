@@ -537,7 +537,11 @@ impl World {
                 "player_id": self.player_id(*player),
                 "victim_id": self.player_id(*victim),
             }),
-            Fact::Block { defender, shooter, shot_id } => json!({
+            Fact::Block {
+                defender,
+                shooter,
+                shot_id,
+            } => json!({
                 "defender_id": self.player_id(*defender),
                 "shooter_id": self.player_id(*shooter),
                 "shot_id": format!("shot-{shot_id:06}"),
@@ -911,7 +915,8 @@ impl World {
                 role: identity.role.as_str().to_string(),
                 phase: "sustained".to_string(),
                 started_at: player.posture_since[crate::state::PostureSlot::OnBall.index()] as f32,
-                phase_started_at: player.posture_since[crate::state::PostureSlot::OnBall.index()] as f32,
+                phase_started_at: player.posture_since[crate::state::PostureSlot::OnBall.index()]
+                    as f32,
                 ends_at: None,
                 participants,
                 target_id: holder_id,
@@ -933,7 +938,8 @@ impl World {
                 variant: response.to_string(),
                 role: "shooter".to_string(),
                 phase: "sustained".to_string(),
-                started_at: player.posture_since[crate::state::PostureSlot::Closeout.index()] as f32,
+                started_at: player.posture_since[crate::state::PostureSlot::Closeout.index()]
+                    as f32,
                 phase_started_at: player.posture_since[crate::state::PostureSlot::Closeout.index()]
                     as f32,
                 ends_at: None,
@@ -945,7 +951,8 @@ impl World {
         // 转换姿态：快攻推进、快攻跟进、退防或快速形成阵地防守。
         if let Some(kind) = player.transition {
             let identity = crate::action_identity::transition_identity(kind);
-            let action_id = player.posture_action_ids[crate::state::PostureSlot::Transition.index()];
+            let action_id =
+                player.posture_action_ids[crate::state::PostureSlot::Transition.index()];
             if action_id == 0 {
                 return actions;
             }
@@ -958,8 +965,10 @@ impl World {
                 variant: identity.variant.to_string(),
                 role: identity.role.as_str().to_string(),
                 phase: "sustained".to_string(),
-                started_at: player.posture_since[crate::state::PostureSlot::Transition.index()] as f32,
-                phase_started_at: player.posture_since[crate::state::PostureSlot::Transition.index()]
+                started_at: player.posture_since[crate::state::PostureSlot::Transition.index()]
+                    as f32,
+                phase_started_at: player.posture_since
+                    [crate::state::PostureSlot::Transition.index()]
                     as f32,
                 ends_at: None,
                 participants: Vec::new(),
@@ -968,9 +977,9 @@ impl World {
         }
 
         // 无球防守职责：无窗口的持续姿态，身份由职责给出。
-        if let Some(identity) = crate::action_identity::off_ball_identity(
-            player.defense_responsibility,
-        ) {
+        if let Some(identity) =
+            crate::action_identity::off_ball_identity(player.defense_responsibility)
+        {
             let action_id = player.posture_action_ids[crate::state::PostureSlot::OffBall.index()];
             if action_id == 0 {
                 // 职责刚换、身份还没分配：这一帧没有身份可投影，职责变化
@@ -1093,7 +1102,9 @@ impl World {
         let state = self.ball.state();
         let (ball_pos, ball_z, ball_status) = match &state {
             BallState::Held { holder } => (self.players[*holder].pos, 4.0, "held"),
-            BallState::DribbleFlight { .. } => (self.ball.pos, self.ball.z.max(0.5), "dribble_flight"),
+            BallState::DribbleFlight { .. } => {
+                (self.ball.pos, self.ball.z.max(0.5), "dribble_flight")
+            }
             BallState::PassFlight { .. } => (self.ball.pos, self.ball.z, "pass"),
             BallState::ShotFlight { context, .. } => (
                 self.ball.pos,
@@ -1104,11 +1115,9 @@ impl World {
                 },
             ),
             BallState::Loose { .. } => (self.ball.pos, self.ball.z.max(0.5), "loose"),
-            BallState::ControlledByOfficial { .. } => (
-                self.ball.pos,
-                self.ball.z,
-                "controlled_by_official",
-            ),
+            BallState::ControlledByOfficial { .. } => {
+                (self.ball.pos, self.ball.z, "controlled_by_official")
+            }
             BallState::OutOfPlay { .. } => (self.ball.pos, self.ball.z.max(0.5), "out_of_play"),
         };
         let ball_norm = Court::ft_to_norm_with_geometry(ball_pos, self.rules.court);
@@ -1209,8 +1218,12 @@ impl World {
 
     pub(crate) fn frame_event(&self, event: &TimedFact) -> FrameEvent {
         let (shot_id, pass_id, action_id, foul_program_id, play_instance_id) = match &event.fact {
-            Fact::Shot { shot_id, .. } => (Some(format!("shot-{shot_id:06}")), None, None, None, None),
-            Fact::Pass { pass_id, .. } => (None, Some(format!("pass-{pass_id:06}")), None, None, None),
+            Fact::Shot { shot_id, .. } => {
+                (Some(format!("shot-{shot_id:06}")), None, None, None, None)
+            }
+            Fact::Pass { pass_id, .. } => {
+                (None, Some(format!("pass-{pass_id:06}")), None, None, None)
+            }
             Fact::ActionStarted { action_id, .. }
             | Fact::ActionPhaseChanged { action_id, .. }
             | Fact::ActionCompleted { action_id, .. }
@@ -1219,15 +1232,23 @@ impl World {
             | Fact::DefensiveActionStarted { action_id, .. }
             | Fact::DefensiveActionPhaseChanged { action_id, .. }
             | Fact::DefensiveActionCompleted { action_id, .. }
-            | Fact::DefensiveActionCancelled { action_id, .. } => {
-                (None, None, Some(format!("action-{action_id:06}")), None, None)
-            }
+            | Fact::DefensiveActionCancelled { action_id, .. } => (
+                None,
+                None,
+                Some(format!("action-{action_id:06}")),
+                None,
+                None,
+            ),
             Fact::Foul { foul_id, .. }
             | Fact::FreeThrow { foul_id, .. }
             | Fact::FoulOutRetention { foul_id, .. }
-            | Fact::TeamTechnicalFoul { foul_id, .. } => {
-                (None, None, None, Some(format!("penalty-{foul_id:06}")), None)
-            }
+            | Fact::TeamTechnicalFoul { foul_id, .. } => (
+                None,
+                None,
+                None,
+                Some(format!("penalty-{foul_id:06}")),
+                None,
+            ),
             Fact::PlayActivated { play, possession }
             | Fact::PlayWindowEnded { play, possession } => (
                 None,
@@ -1423,9 +1444,9 @@ fn timer_kind(timer: crate::clock::directives::TimerId) -> TimerKind {
         TimerId::Period => TimerKind::Period,
         TimerId::PeriodDuration => TimerKind::PeriodDuration,
         TimerId::Tick => TimerKind::Tick,
-        TimerId::PlayerTime(handle) => panic!(
-            "球员计时器 {handle} 不是计时器类别：它走球员计时器字段"
-        ),
+        TimerId::PlayerTime(handle) => {
+            panic!("球员计时器 {handle} 不是计时器类别：它走球员计时器字段")
+        }
     }
 }
 

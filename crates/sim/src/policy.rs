@@ -182,8 +182,8 @@ pub fn tick(world: &mut World) {
                 // 切入人接球时贴着持球人走：手递手要求两人贴近。
                 let holder = world.holder();
                 if let Some(holder) = holder {
-                    let toward = (world.players[holder].pos - world.players[cutter].pos)
-                        .normalize_or_zero();
+                    let toward =
+                        (world.players[holder].pos - world.players[cutter].pos).normalize_or_zero();
                     let contact = world.players[cutter].pos
                         + toward * (world.rules.min_player_separation_ft + 0.2);
                     world.players[cutter].target = contact;
@@ -248,10 +248,7 @@ pub fn off_ball_tick(world: &mut World) {
             .last_screen
             .is_some_and(|read| now - read.at < 2.0);
         let may_follow_screen = screened_player
-            && world
-                .players[actor]
-                .screened_at
-                .is_finite()
+            && world.players[actor].screened_at.is_finite()
             && now - world.players[actor].screened_at < 2.0;
         if world.possession.off_ball_actions > 0 && !may_follow_screen {
             continue;
@@ -391,9 +388,11 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
     // V 字跑位：切入人从两名防守人中间穿过。因此它的前提是第二近的
     // 防守人也在身边，而不是只有一个贴得很近的防守人。
     let mut nearest_two: [f32; 2] = [f32::INFINITY, f32::INFINITY];
-    for player in world.players.iter().filter(|player| {
-        player.on_court && player.team != team
-    }) {
+    for player in world
+        .players
+        .iter()
+        .filter(|player| player.on_court && player.team != team)
+    {
         let distance = (player.pos - pos).length();
         if distance < nearest_two[0] {
             nearest_two[1] = nearest_two[0];
@@ -425,9 +424,7 @@ fn off_ball_decision(world: &World, actor: usize) -> Option<Decision> {
     let near_screen = world
         .possession
         .last_screen
-        .map(|read| {
-            now - read.at < 4.0 && (world.players[read.screener].pos - pos).length() < 14.0
-        })
+        .map(|read| now - read.at < 4.0 && (world.players[read.screener].pos - pos).length() < 14.0)
         .unwrap_or(false);
     // 切入人与持球人的距离：手递手要求两人贴近。
     let gap_to_holder = holder_pos
@@ -1662,13 +1659,13 @@ fn drive_kick_target(world: &World, state: &DecisionState) -> Option<usize> {
         .teammates
         .iter()
         .filter(|view| view.index != state.actor)
-        .filter(|view| {
-            view.defender_distance_ft >= open_ft && view.lane_clearance >= 2.0
-        })
+        .filter(|view| view.defender_distance_ft >= open_ft && view.lane_clearance >= 2.0)
         .max_by(|left, right| {
-            left.openness
-                .total_cmp(&right.openness)
-                .then_with(|| right.defender_distance_ft.total_cmp(&left.defender_distance_ft))
+            left.openness.total_cmp(&right.openness).then_with(|| {
+                right
+                    .defender_distance_ft
+                    .total_cmp(&left.defender_distance_ft)
+            })
         })
         .map(|view| view.index)?;
     Some(best)
@@ -2199,14 +2196,18 @@ fn screen_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     // 防守人是不是已经站定了。顺下与外弹是掩护之后的走向，因此写进
     // 这次掩护的技术变体。提前滑出发生在接触之前：防守人已经站定时
     // 掩护人先离开。
-    let screener_three =
-        shooter_zone(world, world.players[screener].pos, world.players[screener].team) == "three";
+    let screener_three = shooter_zone(
+        world,
+        world.players[screener].pos,
+        world.players[screener].team,
+    ) == "three";
     let screener_distance = (world.players[screener].pos - hoop).length();
     // 防守人是不是已经站定：站定的时候掩护人提前滑出，接触因此不会发生。
-    let defender_planted = state.primary_defender.is_some_and(|defender| {
-        world.players[defender.index].vel.length() < 3.0
-    });
-    let screen_kind = if defender_planted && screener_distance > weights.g("screen_pop_distance_ft") {
+    let defender_planted = state
+        .primary_defender
+        .is_some_and(|defender| world.players[defender.index].vel.length() < 3.0);
+    let screen_kind = if defender_planted && screener_distance > weights.g("screen_pop_distance_ft")
+    {
         // 防守人已经站定：掩护人提前滑出，接触因此不会发生。
         ScreenKind::Slip
     } else if screener_three && screener_distance > weights.g("screen_pop_distance_ft") {
@@ -2348,11 +2349,7 @@ fn cut_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
 /// 持球人点名空切时的路线：按通道宽窄与接球人的防守距离选。
 ///
 /// 通道窄时从背后切（防守人被卡在身后），通道宽时直接切篮下。
-fn cut_kind_for(
-    world: &World,
-    _state: &DecisionState,
-    lane_norm: f32,
-) -> crate::action::CutKind {
+fn cut_kind_for(world: &World, _state: &DecisionState, lane_norm: f32) -> crate::action::CutKind {
     let _ = world;
     if lane_norm < 0.4 {
         crate::action::CutKind::Backdoor

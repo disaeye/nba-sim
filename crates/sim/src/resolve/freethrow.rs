@@ -342,7 +342,11 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
         let rim_contact = matches!(result, ShotResult::Missed { rim_contact: true });
         // 普通罚球序列的最后一罚必须命中或碰筐。罚球未碰筐是违例；
         // 球未进入活球，球权交给对方在罚球线延长线发球。
-        if !made && !rim_contact && !meta.retain_possession && meta.technical_retained_team.is_none() {
+        if !made
+            && !rim_contact
+            && !meta.retain_possession
+            && meta.technical_retained_team.is_none()
+        {
             world.clear_free_throw_spots();
             world.possession.shot_clock_start = world.clock.shot_clock();
             world.line_mut(pending.shooter).turnovers += 1;
@@ -351,10 +355,10 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
                 kind: crate::action::TurnoverKind::FreeThrowMissNoRim,
             });
             let attacking_right = world.attacking_right(team);
-            let spot = world.rules.court.sideline_at_free_throw_line_extended(
-                world.ball.pos,
-                attacking_right,
-            );
+            let spot = world
+                .rules
+                .court
+                .sideline_at_free_throw_line_extended(world.ball.pos, attacking_right);
             world.adjudicate(crate::adjudicate::Adjudication::violation(
                 crate::adjudicate::ViolationKind::FreeThrowMissNoRim,
                 crate::adjudicate::RestartPlan::Inbound {
@@ -445,10 +449,10 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
                 );
                 return;
             }
-            let spot = world.rules.court.sideline_at_free_throw_line_extended(
-                world.ball.pos,
-                world.attacking_right(team),
-            );
+            let spot = world
+                .rules
+                .court
+                .sideline_at_free_throw_line_extended(world.ball.pos, world.attacking_right(team));
             world.clear_free_throw_spots();
             world.line_mut(pending.shooter).turnovers += 1;
             world.emit(Fact::Turnover {
@@ -473,12 +477,37 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
         world.free_throw_lane = None;
         world.clear_free_throw_spots();
         if meta.technical_retained_team.is_some() {
-            match meta.after_technical.expect("technical free throw has a follow-up") {
-                FreeThrowFollowUp::Attempts { shooter, total, remaining, made, and_one, retain_possession, foul_id } => {
-                    prepare_free_throw(world, shooter, total, remaining, made, and_one, retain_possession, foul_id, None, None, true);
+            match meta
+                .after_technical
+                .expect("technical free throw has a follow-up")
+            {
+                FreeThrowFollowUp::Attempts {
+                    shooter,
+                    total,
+                    remaining,
+                    made,
+                    and_one,
+                    retain_possession,
+                    foul_id,
+                } => {
+                    prepare_free_throw(
+                        world,
+                        shooter,
+                        total,
+                        remaining,
+                        made,
+                        and_one,
+                        retain_possession,
+                        foul_id,
+                        None,
+                        None,
+                        true,
+                    );
                 }
                 FreeThrowFollowUp::DeadBall { team } => {
-                    let spot = world.inbound_spot.unwrap_or_else(|| world.rules.court.hoop_pos(world.attacking_right(team)));
+                    let spot = world
+                        .inbound_spot
+                        .unwrap_or_else(|| world.rules.court.hoop_pos(world.attacking_right(team)));
                     world.adjudicate(crate::adjudicate::Adjudication::new(
                         crate::adjudicate::StoppageCause::FreeThrow,
                         crate::adjudicate::RestartPlan::Inbound {
@@ -487,12 +516,19 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
                             ready_after: Some(1.2),
                         },
                     ));
-                    world.release_ball(BallState::Loose { pos: spot, vel: Vec2::ZERO });
+                    world.release_ball(BallState::Loose {
+                        pos: spot,
+                        vel: Vec2::ZERO,
+                    });
                 }
             }
             return;
         }
-        let restart_team = if meta.retain_possession { team } else { team.other() };
+        let restart_team = if meta.retain_possession {
+            team
+        } else {
+            team.other()
+        };
         let mut adjudication = crate::adjudicate::Adjudication::new(
             crate::adjudicate::StoppageCause::FreeThrow,
             crate::adjudicate::RestartPlan::Inbound {

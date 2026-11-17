@@ -14,15 +14,16 @@ use nba_domain::league::LeagueProfile;
 use nba_sim_core::action::{Fact, ShotKind, TeamSide};
 use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::review_program::{
-    is_reviewable, ChallengeOutcome, Observation, ReviewBasis, ReviewCorrection,
-    ReviewScope, ReviewTrigger,
+    is_reviewable, ChallengeOutcome, Observation, ReviewBasis, ReviewCorrection, ReviewScope,
+    ReviewTrigger,
 };
 use nba_sim_core::settlement::{CloseCondition, PendingKind};
 use nba_sim_core::state::{MatchStage, Phase};
 use nba_sim_core::world::{World, TICK_SECONDS};
 use nba_sim_core::{MatchSetup, Params};
 
-fn nba_world(seed: u64) -> World {    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+fn nba_world(seed: u64) -> World {
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
     World::new(common::short_setup(), params, seed)
 }
 
@@ -131,7 +132,12 @@ fn a_scope_outside_the_profile_is_not_reviewable() {
     assert!(is_reviewable(&world, ReviewScope::GameClockAtPeriodEnd));
     assert!(!is_reviewable(&world, ReviewScope::TwoVersusThreePoints));
     // 裁判没有复核权限时，任何范围都不可复核。
-    world.rules.league.review.authorization.retain(|entry| entry != "replay_review");
+    world
+        .rules
+        .league
+        .review
+        .authorization
+        .retain(|entry| entry != "replay_review");
     assert!(!is_reviewable(&world, ReviewScope::GameClockAtPeriodEnd));
 }
 
@@ -277,11 +283,7 @@ fn the_review_queue_is_driven_by_the_main_loop() {
         games_with_reviews > 0,
         "完整比赛必须自发产生复核结论，当前 0 条"
     );
-    assert_eq!(
-        reviews,
-        rulings,
-        "每条复核结论都必须有对应的事实"
-    );
+    assert_eq!(reviews, rulings, "每条复核结论都必须有对应的事实");
 }
 
 #[test]
@@ -373,7 +375,10 @@ fn the_terminal_settlement_freezes_score_possession_and_clocks() {
         world.step(TICK_SECONDS);
     }
     assert_eq!(world.score, score, "终场结算之后比分不许变化");
-    assert_eq!(world.possession.team, possession, "终场结算之后球权不许变化");
+    assert_eq!(
+        world.possession.team, possession,
+        "终场结算之后球权不许变化"
+    );
     assert_eq!(world.clock.game_clock(), game_clock, "终场之后比赛钟不许走");
     assert_eq!(world.clock.shot_clock(), shot_clock, "终场之后进攻钟不许走");
     assert_eq!(world.clock.tick(), tick, "终场之后模拟不再推进");
@@ -384,7 +389,10 @@ fn the_pending_adjudication_list_covers_the_five_kinds() {
     // 结算清单的种类就是方案 §9.3 点名的五类：待决出手、信号前接触、罚球、
     // 得分有效性与规则纠正。
     assert_eq!(PendingKind::Shot.as_str(), "shot");
-    assert_eq!(PendingKind::ContactBeforeSignal.as_str(), "contact_before_signal");
+    assert_eq!(
+        PendingKind::ContactBeforeSignal.as_str(),
+        "contact_before_signal"
+    );
     assert_eq!(PendingKind::FreeThrow.as_str(), "free_throw");
     assert_eq!(PendingKind::ScoreValidity.as_str(), "score_validity");
     assert_eq!(PendingKind::RuleCorrection.as_str(), "rule_correction");
@@ -408,8 +416,7 @@ fn a_shot_in_flight_is_a_pending_adjudication_until_it_settles() {
                 .as_ref()
                 .expect("the settlement is open during finalizing");
             assert!(
-                !settlement.pending.has_kind(PendingKind::Shot)
-                    || world.pending_shot.is_some(),
+                !settlement.pending.has_kind(PendingKind::Shot) || world.pending_shot.is_some(),
                 "清单里的待决出手必须对应一笔还在飞的出手"
             );
         }
@@ -499,9 +506,7 @@ fn a_fiba_game_produces_its_own_review_scopes() {
     let settlements = world
         .events
         .iter()
-        .filter(|event| {
-            matches!(event.fact, Fact::PeriodSettlementCompleted { .. })
-        })
+        .filter(|event| matches!(event.fact, Fact::PeriodSettlementCompleted { .. }))
         .count();
     assert!(
         settlements >= world.rules.league.periods.regulation_periods as usize,

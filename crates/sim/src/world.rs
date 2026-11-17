@@ -6,10 +6,8 @@
 
 use glam::Vec2;
 use nba_domain::event::PossessionEndCause;
+use nba_domain::{ControlSequenceId, EventId, GameRules, IdAllocator, NextId, ProgramId, TeamData};
 use serde::{Deserialize, Serialize};
-use nba_domain::{
-    ControlSequenceId, EventId, GameRules, IdAllocator, NextId, ProgramId, TeamData,
-};
 use std::collections::BTreeMap;
 
 use crate::action::{
@@ -540,13 +538,21 @@ impl World {
             "jump-ball circle plus player radius must fit the positioning band"
         );
         let home_attacks_right = self.attacking_right(TeamSide::Home);
-        let jumper_axis = if home_attacks_right { Vec2::X } else { Vec2::NEG_X };
+        let jumper_axis = if home_attacks_right {
+            Vec2::X
+        } else {
+            Vec2::NEG_X
+        };
         self.jump_ball_spots.clear();
         for (handle, spot) in [
             (home_jumper, center - jumper_axis * (circle_radius * 0.5)),
             (away_jumper, center + jumper_axis * (circle_radius * 0.5)),
         ] {
-            let partner = if handle == home_jumper { away_jumper } else { home_jumper };
+            let partner = if handle == home_jumper {
+                away_jumper
+            } else {
+                home_jumper
+            };
             if place {
                 self.assign_jump_ball_spot(handle, spot, true);
             } else {
@@ -596,7 +602,11 @@ impl World {
         let mut receivers = [None; 2];
         for team in [TeamSide::Home, TeamSide::Away] {
             let team_index = Self::team_index(team);
-            let jumper = if team == TeamSide::Home { home_jumper } else { away_jumper };
+            let jumper = if team == TeamSide::Home {
+                home_jumper
+            } else {
+                away_jumper
+            };
             let roster: Vec<usize> = self
                 .on_court(team)
                 .into_iter()
@@ -677,8 +687,13 @@ impl World {
                         .min_by(|(_, left), (_, right)| {
                             (self.players[**left].pos - ring_spots[slot])
                                 .length_squared()
-                                .total_cmp(&(self.players[**right].pos - ring_spots[slot]).length_squared())
-                                .then_with(|| self.players[**left].id.cmp(&self.players[**right].id))
+                                .total_cmp(
+                                    &(self.players[**right].pos - ring_spots[slot])
+                                        .length_squared(),
+                                )
+                                .then_with(|| {
+                                    self.players[**left].id.cmp(&self.players[**right].id)
+                                })
                         })
                         .map(|(index, _)| index)
                         .expect("nonempty jump-ball roster has a first-choice player");
@@ -697,7 +712,9 @@ impl World {
                     .min_by(|(_, left), (_, right)| {
                         (self.players[**left].pos - ring_spots[slot])
                             .length_squared()
-                            .total_cmp(&(self.players[**right].pos - ring_spots[slot]).length_squared())
+                            .total_cmp(
+                                &(self.players[**right].pos - ring_spots[slot]).length_squared(),
+                            )
                             .then_with(|| self.players[**left].id.cmp(&self.players[**right].id))
                     })
                     .map(|(index, _)| index)
@@ -733,12 +750,8 @@ impl World {
         // 把它当成这一轮已经在飞的球，永远等不到撮球。
         self.clear_flight();
         let center = self.rules.court.center();
-        let receivers = self.position_jump_ball_participants(
-            home_jumper,
-            away_jumper,
-            place,
-            receivers,
-        );
+        let receivers =
+            self.position_jump_ball_participants(home_jumper, away_jumper, place, receivers);
         self.jump_ball_receivers = receivers;
         self.ball = BallBody::loose(center, Vec2::ZERO);
         let coefficients = crate::physical::Coefficients::from_policy(&self.params.policy);
@@ -768,12 +781,8 @@ impl World {
         self.clear_flight();
         // 十个人全部列位：参跳两人在圈内，八名非参跳人在圈缘带。停表
         // 跳球时球员已经在场上，所以只写目标，不瞬移。
-        let receivers = self.position_jump_ball_participants(
-            home_jumper,
-            away_jumper,
-            false,
-            [None; 2],
-        );
+        let receivers =
+            self.position_jump_ball_participants(home_jumper, away_jumper, false, [None; 2]);
         let spots = self.jump_ball_spots.clone();
         let team = self.possession.team;
         let ready_at = self.now() + f64::from(self.params.policy.g("jump_ball_staging_seconds"));
@@ -1061,10 +1070,12 @@ impl World {
         if self.players[player].posture_action_ids[index] == 0 || expired {
             let previous = self.players[player].posture_action_ids[index];
             let previous_variant = self.players[player].posture_variants[index];
-            if expired && !matches!(
-                slot,
-                crate::state::PostureSlot::OffBall | crate::state::PostureSlot::OnBall
-            ) {
+            if expired
+                && !matches!(
+                    slot,
+                    crate::state::PostureSlot::OffBall | crate::state::PostureSlot::OnBall
+                )
+            {
                 // 旧的持续姿态走完一个有界窗口：发布同样的终态事实，
                 // 账本里不会留下一个跨整场的动作窗口。
                 self.emit(Fact::PostureEnded {
@@ -1446,8 +1457,16 @@ impl World {
             settlement: None,
             settled: false,
             challenges_left: [
-                rules_capture.league.review.challenges_per_game.min(u8::MAX as u32) as u8,
-                rules_capture.league.review.challenges_per_game.min(u8::MAX as u32) as u8,
+                rules_capture
+                    .league
+                    .review
+                    .challenges_per_game
+                    .min(u8::MAX as u32) as u8,
+                rules_capture
+                    .league
+                    .review
+                    .challenges_per_game
+                    .min(u8::MAX as u32) as u8,
             ],
             free_throw_started: None,
             last_scoring: None,
@@ -2322,9 +2341,10 @@ impl World {
         self.next_event_sequence += 1;
         let parent_event_id = Some(self.last_event_id);
         let control_sequence_id = self.control.sequence_id;
-        let source_event_ids = self.pending_review_source_events.take().unwrap_or_else(|| {
-            parent_event_id.into_iter().collect()
-        });
+        let source_event_ids = self
+            .pending_review_source_events
+            .take()
+            .unwrap_or_else(|| parent_event_id.into_iter().collect());
         let fact = match fact {
             Fact::Shot {
                 shot_id,
@@ -2401,10 +2421,7 @@ impl World {
     /// 把比赛钟恢复到指定检查点。
     ///
     /// 这是「纠正」指令：它只改比赛钟的读数，不动其它计时器。
-    pub fn restore_clock_checkpoint(
-        &mut self,
-        checkpoint_id: nba_domain::CheckpointId,
-    ) {
+    pub fn restore_clock_checkpoint(&mut self, checkpoint_id: nba_domain::CheckpointId) {
         let context = self.clock_context();
         self.clock.apply_directives_with_context(
             vec![crate::clock::ClockDirective::Restore {
@@ -2443,9 +2460,8 @@ impl World {
         //
         // 死球期间控制方仍然存在（球权属于某一方，只是球不在手里），因此
         // 停表不会结束控制序列。
-        let team_changed = current.team != previous.team
-            && current.team.is_some()
-            && previous.team.is_some();
+        let team_changed =
+            current.team != previous.team && current.team.is_some() && previous.team.is_some();
         let team = current.team;
         let holder = current.holder;
         let ball_state = current.ball_state;
@@ -2465,15 +2481,16 @@ impl World {
                 source,
                 at: self.now(),
             };
-            self.control_transitions.push(crate::officiating::ControlTransition {
-                boundary: crate::officiating::ControlBoundary::Established,
-                sequence_id: handover.sequence_id,
-                team,
-                holder,
-                ball_state,
-                source,
-                at: handover.at,
-            });
+            self.control_transitions
+                .push(crate::officiating::ControlTransition {
+                    boundary: crate::officiating::ControlBoundary::Established,
+                    sequence_id: handover.sequence_id,
+                    team,
+                    holder,
+                    ball_state,
+                    source,
+                    at: handover.at,
+                });
             self.emit(Fact::ControlHandoverCommitted {
                 handover,
                 state: current,
@@ -3065,7 +3082,12 @@ impl World {
         let game_clock_before_advance = self.clock.game_clock();
         let mut on_court = [0usize; crate::state::MAX_ON_COURT * 2];
         let mut player_count = 0usize;
-        for handle in self.on_court_home.as_slice().iter().chain(self.on_court_away.as_slice()) {
+        for handle in self
+            .on_court_home
+            .as_slice()
+            .iter()
+            .chain(self.on_court_away.as_slice())
+        {
             on_court[player_count] = *handle;
             player_count += 1;
         }
@@ -3402,8 +3424,7 @@ impl World {
     /// 只有被快攻跑位改过目标的球员会被改回去，持球人和其他球员的当前
     /// 目标不受影响。
     fn expire_break_targets(&mut self) {
-        if self.possession.break_return.is_empty()
-            && self.possession.transition_players.is_empty()
+        if self.possession.break_return.is_empty() && self.possession.transition_players.is_empty()
         {
             return;
         }
@@ -3684,8 +3705,7 @@ impl World {
             // 窗口不同。贴得够近才够得着球。
             let reach = crate::physical::Physical::of(&self.players[defender], &self.params.policy)
                 .standing_reach_ft
-                + self.players[defender]
-                    .attribute("steal")
+                + self.players[defender].attribute("steal")
                     * self.params.policy.g("poke_reach_steal_ft");
             if gap > reach {
                 continue;
@@ -3771,11 +3791,8 @@ impl World {
         };
         // 站位变化的事实带着站位姿态的身份落下：站位就是持球姿态，
         // 因此这一条事实同时给出姿态的身份与开始时刻。
-        let action_id = self.posture_action_id(
-            defender,
-            crate::state::PostureSlot::OnBall,
-            variant,
-        );
+        let action_id =
+            self.posture_action_id(defender, crate::state::PostureSlot::OnBall, variant);
         self.emit(Fact::OnBallPositioningChanged {
             defender,
             kind: variant,

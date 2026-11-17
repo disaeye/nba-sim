@@ -11,8 +11,7 @@ pub use crate::action::TeamSide;
 use crate::action::{ActionRuntime, DefenderRoute};
 use crate::clock::{
     micros_from_seconds, root_context, seconds_from_micros, ClockCommit, ClockCommitLog,
-    ClockController, ClockDirectiveContext, ClockState, ClockDirective,
-    TimerId,
+    ClockController, ClockDirective, ClockDirectiveContext, ClockState, TimerId,
 };
 use crate::params::PolicyTable;
 
@@ -502,18 +501,16 @@ impl Clock {
         Self::with_player_count(0, period_seconds, shot_clock)
     }
 
-    pub fn with_player_count(
-        player_count: usize,
-        period_seconds: f64,
-        shot_clock: f64,
-    ) -> Self {
+    pub fn with_player_count(player_count: usize, period_seconds: f64, shot_clock: f64) -> Self {
         let state = ClockState::new(
             player_count,
             micros_from_seconds(period_seconds),
             micros_from_seconds(shot_clock),
             1,
         );
-        state.validate().expect("clock state initializes every timer");
+        state
+            .validate()
+            .expect("clock state initializes every timer");
         let mut clock = Self {
             state,
             commits: ClockCommitLog::new(),
@@ -702,7 +699,11 @@ impl Clock {
         );
     }
 
-    pub(crate) fn context_for(&self, program_id: ProgramId, cause_event_id: EventId) -> ClockDirectiveContext {
+    pub(crate) fn context_for(
+        &self,
+        program_id: ProgramId,
+        cause_event_id: EventId,
+    ) -> ClockDirectiveContext {
         ClockDirectiveContext {
             cause_event_id,
             program_id,

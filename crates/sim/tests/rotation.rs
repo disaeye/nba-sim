@@ -188,7 +188,10 @@ fn nba_foul_out_with_empty_bench_assesses_team_technical_and_resumes_foul_proced
             break;
         }
     }
-    assert!(saw_flight, "team technical free throw never left the shooter's hand");
+    assert!(
+        saw_flight,
+        "team technical free throw never left the shooter's hand"
+    );
     let shooter = world
         .pending_shot
         .as_ref()

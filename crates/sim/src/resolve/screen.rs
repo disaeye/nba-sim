@@ -145,7 +145,8 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
             );
         }
         ScreenKind::Pop => {
-            let direction = (world.players[screener].pos - world.hoop_for(team)).normalize_or_zero();
+            let direction =
+                (world.players[screener].pos - world.hoop_for(team)).normalize_or_zero();
             let pop = world.players[screener].pos
                 + direction * world.params.policy.g("screen_pop_distance_ft");
             crate::assignment::force_target_as(
@@ -158,8 +159,8 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ScreenKind) -> Ac
         }
         ScreenKind::Slip => {
             // 提前滑出：掩护人在接触之前先离开，防守人被晃过。
-            let direction = (world.players[screener].pos - world.players[defender].pos)
-                .normalize_or_zero();
+            let direction =
+                (world.players[screener].pos - world.players[defender].pos).normalize_or_zero();
             let slip = world.players[screener].pos
                 + direction * world.params.policy.g("screen_slip_distance_ft");
             crate::assignment::force_target_as(

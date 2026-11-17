@@ -60,8 +60,8 @@ pub fn resolve(
             * (policy.w("reach_in_help_base") + help)
             * discipline;
         if world.draw(Stream::Foul, defender, purpose::REACH_IN_FOUL, 0) < rate {
-        let incident = crate::detect::detect_personal_foul(world, defender, driver);
-        crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
+            let incident = crate::detect::detect_personal_foul(world, defender, driver);
+            crate::adjudicate_incidents::adjudicate_one(world, Some(incident));
             if free_throws == 0 {
                 // 非 bonus：死球后进攻方继续本次回合，只是把下一次决策
                 // 推后；不重建回合，否则每吹一次犯规就多算一个回合。
@@ -214,11 +214,8 @@ pub fn resolve(
             pass_intent.kind = ActionKind::Pass(crate::action::PassKind::Chest);
             pass_intent.target = Some(target);
             pass_intent.to_ft = world.players[target].pos;
-            let outcome = crate::resolve::pass::resolve(
-                world,
-                &pass_intent,
-                crate::action::PassKind::Chest,
-            );
+            let outcome =
+                crate::resolve::pass::resolve(world, &pass_intent, crate::action::PassKind::Chest);
             return outcome;
         }
     }

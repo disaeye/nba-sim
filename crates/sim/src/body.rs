@@ -289,9 +289,7 @@ pub fn jump(world: &mut World, handle: usize, share: f32) {
 /// 从上场动作状态触发起跳。跳跃的权威依据是动作窗口：跳投、上篮、
 /// 扣篮、起跳篮板、封盖等在进入 Execution 时起跳。渲染只读 z。
 fn trigger_action_jumps(world: &mut World) {
-    use crate::action::{
-        ActionKind, DefensiveActionKind, ReboundKind, ShotKind,
-    };
+    use crate::action::{ActionKind, DefensiveActionKind, ReboundKind, ShotKind};
     use nba_domain::action_window::ActionPhase;
     for handle in 0..world.players.len() {
         if !world.players[handle].on_court || world.players[handle].z > 0.0 {
@@ -305,9 +303,7 @@ fn trigger_action_jumps(world: &mut World) {
                 match runtime.intent.kind {
                     // 跳步收球与欧洲步是落地的脚步动作，不出手腾空；
                     // 其余出手都是跳投或上篮扣篮，执行段离地。
-                    ActionKind::Shoot(
-                        ShotKind::ProHop | ShotKind::EuroStep,
-                    ) => false,
+                    ActionKind::Shoot(ShotKind::ProHop | ShotKind::EuroStep) => false,
                     ActionKind::Shoot(_) => true,
                     ActionKind::Finish(_) => true,
                     ActionKind::Rebound(ReboundKind::JumpRebound) => true,
@@ -316,9 +312,7 @@ fn trigger_action_jumps(world: &mut World) {
             });
         let defense_jump = world.defensive_actions[handle]
             .as_ref()
-            .filter(|runtime| {
-                runtime.phase == ActionPhase::Execution && !runtime.completed
-            })
+            .filter(|runtime| runtime.phase == ActionPhase::Execution && !runtime.completed)
             .is_some_and(|runtime| runtime.kind == DefensiveActionKind::BlockJump);
         if action_jump || defense_jump {
             jump(world, handle, 1.0);

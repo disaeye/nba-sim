@@ -13,11 +13,7 @@ use nba_sim_core::{MatchSetup, Params, World};
 
 fn world(seed: u64) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
-    World::new(
-        MatchSetup::builtin(GameRules::default()),
-        params,
-        seed,
-    )
+    World::new(MatchSetup::builtin(GameRules::default()), params, seed)
 }
 
 #[derive(Default)]
@@ -41,8 +37,15 @@ fn measure(seed: u64) -> DecisionStats {
             continue;
         }
         match &event.fact {
-            Fact::BallContact { kind: "interception", .. } => stats.interceptions += 1,
-            Fact::Shot { contest, distance_ft, .. } => {
+            Fact::BallContact {
+                kind: "interception",
+                ..
+            } => stats.interceptions += 1,
+            Fact::Shot {
+                contest,
+                distance_ft,
+                ..
+            } => {
                 stats.shots += 1;
                 stats.contests.push(*contest);
                 if *distance_ft >= 22.0 {
@@ -77,7 +80,8 @@ fn decision_guards_hold_in_complete_matches() {
     let quick = total.quick_shots as f64 / total.shots.max(1) as f64;
     let long = total.long_shots as f64 / total.shots.max(1) as f64;
     total.contests.sort_by(|a, b| a.total_cmp(b));
-    let p50 = total.contests
+    let p50 = total
+        .contests
         .get(total.contests.len() / 2)
         .copied()
         .unwrap_or(0.0);
@@ -91,5 +95,8 @@ fn decision_guards_hold_in_complete_matches() {
     );
     assert!(quick >= 0.12, "6 秒内出手占比={quick:.3}，低于 12%");
     assert!(long <= 0.40, "22ft 以外出手占比={long:.3}，高于 40%");
-    assert!(p50 > 0.05, "出手 contest 中位数={p50:.3}，贴防几何没有提供干扰");
+    assert!(
+        p50 > 0.05,
+        "出手 contest 中位数={p50:.3}，贴防几何没有提供干扰"
+    );
 }

@@ -43,10 +43,11 @@ fn measure(seed: u64) -> PresentationStats {
             for action in &player.active_actions {
                 if action.phase == "sustained" {
                     let now = tick.frame.t as f64;
-                    let entry = stats
-                        .sustained
-                        .entry(action.action_id)
-                        .or_insert((format!("{}/{}", action.family, action.kind), now, now));
+                    let entry = stats.sustained.entry(action.action_id).or_insert((
+                        format!("{}/{}", action.family, action.kind),
+                        now,
+                        now,
+                    ));
                     entry.2 = now;
                 }
             }
@@ -61,7 +62,10 @@ fn measure(seed: u64) -> PresentationStats {
             Fact::Block { .. } => {
                 stats.block_ids.insert(event.event_id);
             }
-            Fact::Shot { blocked_by: Some(_), .. } => {
+            Fact::Shot {
+                blocked_by: Some(_),
+                ..
+            } => {
                 stats.blocked_shot_ids.insert(event.event_id);
             }
             _ => {}
@@ -71,7 +75,10 @@ fn measure(seed: u64) -> PresentationStats {
 }
 
 fn percentile(sorted: &[f64], p: f64) -> f64 {
-    sorted.get((sorted.len() as f64 * p) as usize).copied().unwrap_or(0.0)
+    sorted
+        .get((sorted.len() as f64 * p) as usize)
+        .copied()
+        .unwrap_or(0.0)
 }
 
 #[test]
@@ -86,7 +93,10 @@ fn sustained_action_windows_are_bounded() {
     durations.sort_by(|a, b| a.total_cmp(b));
     let p50 = percentile(&durations, 0.5);
     let max = durations.last().copied().unwrap_or(0.0);
-    eprintln!("sustained n={} p50={p50:.1}s max={max:.1}s", durations.len());
+    eprintln!(
+        "sustained n={} p50={p50:.1}s max={max:.1}s",
+        durations.len()
+    );
     assert!(p50 < 8.0, "持续动作窗口 p50={p50:.1}s，超过 8s");
     assert!(max < 30.0, "持续动作窗口 max={max:.1}s，超过 30s");
 }

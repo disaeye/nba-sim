@@ -1384,13 +1384,17 @@ impl Fact {
             | Self::OnBallPositioningChanged { defender: p, .. }
             | Self::PlacementApplied { player: p, .. }
             | Self::Injury { player: p, .. } => *p == player,
-            Self::Block { defender, shooter, .. } => *defender == player || *shooter == player,
+            Self::Block {
+                defender, shooter, ..
+            } => *defender == player || *shooter == player,
             Self::JumpBallStarted {
                 home_jumper,
                 away_jumper,
                 ..
             } => *home_jumper == player || *away_jumper == player,
-            Self::BallContact { entity: Some(p), .. } => *p == player,
+            Self::BallContact {
+                entity: Some(p), ..
+            } => *p == player,
             Self::DefensiveActionStarted { defender: p, .. }
             | Self::DefensiveActionPhaseChanged { defender: p, .. }
             | Self::DefensiveActionCompleted { defender: p, .. }

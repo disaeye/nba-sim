@@ -492,7 +492,12 @@ pub(crate) fn apply_technical_foul(world: &mut World, actor: usize) {
 ///   §IV.2）。
 ///
 /// 恶意犯规计入个人犯规累计与球队单节犯规：它是一���个人犯规。
-pub(crate) fn apply_flagrant_foul(world: &mut World, fouler: usize, fouled: usize, excessive: bool) {
+pub(crate) fn apply_flagrant_foul(
+    world: &mut World,
+    fouler: usize,
+    fouled: usize,
+    excessive: bool,
+) {
     let team = world.players[fouler].team;
     let beneficiary = world.players[fouled].team;
     let booking = book(world, fouler, fouled, FoulKind::Flagrant, 2, false);
