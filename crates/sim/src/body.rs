@@ -110,14 +110,20 @@ pub fn integrate(world: &mut World, dt: f64) {
             .get(handle)
             .and_then(Option::as_ref)
             .is_some_and(|runtime| {
-                runtime.phase == nba_domain::action_window::ActionPhase::Execution
-                    && !runtime.completed
-                    && matches!(
-                        runtime.kind,
-                        crate::action::DefensiveActionKind::CloseoutContest
-                            | crate::action::DefensiveActionKind::BlockJump
-                            | crate::action::DefensiveActionKind::StealAttempt
-                    )
+                let active = match runtime.kind {
+                    // 扑防在整个动作窗口里都接管落点：收势阶段人还在往
+                    // 出手点扑，只是不再增加干扰加成。执行一结束就交回
+                    // 职责层会让防守人停在半路上，扑防永远扑不到位。
+                    crate::action::DefensiveActionKind::CloseoutContest => {
+                        matches!(
+                            runtime.phase,
+                            nba_domain::action_window::ActionPhase::Execution
+                                | nba_domain::action_window::ActionPhase::FollowThrough
+                        )
+                    }
+                    _ => runtime.phase == nba_domain::action_window::ActionPhase::Execution,
+                };
+                active && !runtime.completed
             });
         let mut target =
             runtime.map_or(world.players[handle].target, |runtime| match runtime.role {
@@ -135,7 +141,11 @@ pub fn integrate(world: &mut World, dt: f64) {
             .and_then(Option::as_ref)
             .filter(|runtime| {
                 runtime.kind == crate::action::DefensiveActionKind::CloseoutContest
-                    && runtime.phase == nba_domain::action_window::ActionPhase::Execution
+                    && matches!(
+                        runtime.phase,
+                        nba_domain::action_window::ActionPhase::Execution
+                            | nba_domain::action_window::ActionPhase::FollowThrough
+                    )
                     && !runtime.completed
             })
             .map(|runtime| runtime.target_position)

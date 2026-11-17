@@ -503,7 +503,10 @@ fn the_screener_rolls_or_pops_after_setting_a_screen() {
             .as_ref()
             .map(|action| action.intent.kind);
         assert!(
-            matches!(kind, Some(ActionKind::Cut(_)) | Some(ActionKind::Relocate(_))),
+            matches!(
+                kind,
+                Some(ActionKind::Cut(_)) | Some(ActionKind::Relocate(_))
+            ),
             "掩护人必须顺下或外弹，实际 {kind:?}（sagging={sagging}）"
         );
         if sagging {
@@ -536,8 +539,11 @@ fn a_third_step_after_the_gather_is_a_travel() {
         player.on_court = index == shooter;
         player.vel = Vec2::ZERO;
     }
-    let hoop = world.hoop_for(TeamSide::Home);
-    let spot = hoop + Vec2::new(-6.0, 0.0);
+    world.sync_on_court();
+    let spot = Vec2::new(
+        world.rules.court.width_ft * 0.5,
+        world.rules.court.height_ft * 0.5,
+    );
     world.players[shooter].pos = spot;
     world.players[shooter].target = spot;
     world.possession.team = TeamSide::Home;
@@ -546,8 +552,12 @@ fn a_third_step_after_the_gather_is_a_travel() {
     world.ball.set_held(shooter);
     world.ball.pos = spot;
     world.ball.z = world.rules.ball_radius_ft;
+    world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
 
-    // 收球：确立轴心脚。
+    // 收球：确立轴心脚。脚步接触只在收球态里积累。
+    world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
+    world.players[shooter].target_kind = nba_sim_core::state::TargetKind::Window;
+    world.players[shooter].target_partner = shooter;
     nba_sim_core::footwork::establish_pivot(&mut world, shooter, spot);
     assert!(world.possession.pivot.is_some(), "收球必须确立轴心脚");
     assert_eq!(
@@ -556,7 +566,7 @@ fn a_third_step_after_the_gather_is_a_travel() {
         "收球时还没有用掉任何一步"
     );
 
-    // 两步之内：合法。
+    // 两步之内：合法。每一步按步长记账一次脚步接触。
     nba_sim_core::footwork::accumulate_contact(&mut world, shooter);
     let mut moved = spot;
     for _ in 0..(steps_allowed as usize) {
@@ -565,6 +575,11 @@ fn a_third_step_after_the_gather_is_a_travel() {
         world.players[shooter].vel = Vec2::new(step, 0.0);
         nba_sim_core::footwork::accumulate_contact(&mut world, shooter);
     }
+    assert_eq!(
+        world.possession.pivot.map(|pivot| pivot.steps_taken),
+        Some(steps_allowed as u8),
+        "两步都已经用掉"
+    );
     assert!(
         nba_sim_core::footwork::judge_release(&world, shooter)
             == nba_sim_core::footwork::FootworkVerdict::Legal,
@@ -654,6 +669,9 @@ fn the_gather_grants_two_steps_before_a_travel() {
     world.ball.z = world.rules.ball_radius_ft;
 
     // 收球：确立轴心脚，脚步额度还没有用掉。
+    world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
+    world.players[holder].target_kind = nba_sim_core::state::TargetKind::Window;
+    world.players[holder].target_partner = holder;
     nba_sim_core::footwork::establish_pivot(&mut world, holder, spot);
     let pivot = world.possession.pivot.expect("收球必须确立轴心脚");
     assert_eq!(pivot.steps_taken, 0, "收球时还没有用掉任何一步");
@@ -720,6 +738,9 @@ fn the_support_foot_alternates_on_every_contact() {
     world.ball.set_held(holder);
     world.ball.pos = spot;
 
+    world.possession.dribble_state = nba_sim_core::state::DribbleState::Gathered;
+    world.players[holder].target_kind = nba_sim_core::state::TargetKind::Window;
+    world.players[holder].target_partner = holder;
     nba_sim_core::footwork::establish_pivot(&mut world, holder, spot);
     let axis = world.possession.pivot.expect("收球必须确立轴心脚").foot;
     let step = nba_sim_core::footwork::step_length(&world, holder);
@@ -925,7 +946,13 @@ fn holding_the_ball_closely_guarded_for_five_seconds_is_a_violation() {
     while ticks < 400 && violation.is_none() {
         let before = world.events.len();
         step_tightly_guarded(
-            &mut world, holder, defender, spot, guarded, DribbleState::Gathered, 1,
+            &mut world,
+            holder,
+            defender,
+            spot,
+            guarded,
+            DribbleState::Gathered,
+            1,
         );
         ticks += 1;
         for event in &world.events[before..] {
@@ -1390,14 +1417,8 @@ fn a_step_back_shot_creates_space_before_the_release() {
     };
     let catch_shoot = separation_at_release(ShotKind::CatchShoot);
     let step_back = separation_at_release(ShotKind::StepBack);
-    assert!(
-        catch_shoot < 0.5,
-        "接球就投不得改变站位：{catch_shoot:.2}"
-    );
-    assert!(
-        step_back > 2.5,
-        "后撤步必须真的撤开：{step_back:.2}"
-    );
+    assert!(catch_shoot < 0.5, "接球就投不得改变站位：{catch_shoot:.2}");
+    assert!(step_back > 2.5, "后撤步必须真的撤开：{step_back:.2}");
 }
 
 /// 背身挤打：力量优势真的把背身要位推到更靠近篮筐的位置。
@@ -1515,10 +1536,10 @@ fn post_footwork_follows_the_defenders_stance() {
             };
             let before = world.events.len();
             nba_sim_core::resolve::drive::resolve_post(
-            &mut world,
-            &intent,
-            nba_sim_core::action::PostStepKind::Backdown,
-        );
+                &mut world,
+                &intent,
+                nba_sim_core::action::PostStepKind::Backdown,
+            );
             let kind = world.events[before..]
                 .iter()
                 .find_map(|event| match &event.fact {

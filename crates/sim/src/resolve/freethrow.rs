@@ -45,8 +45,10 @@ pub fn shoot(
     and_one: bool,
     retain_possession: bool,
     foul_id: u64,
+    technical_retained_team: Option<crate::action::TeamSide>,
+    after_technical: Option<FreeThrowFollowUp>,
 ) {
-    shoot_with_retained_team(
+    execute_free_throw(
         world,
         shooter,
         total,
@@ -55,44 +57,12 @@ pub fn shoot(
         and_one,
         retain_possession,
         foul_id,
-        None,
-        None,
+        technical_retained_team,
+        after_technical,
     );
 }
 
-pub fn shoot_team_technical(
-    world: &mut World,
-    shooting_team: crate::action::TeamSide,
-    retained_team: crate::action::TeamSide,
-    foul_id: u64,
-    after_technical: FreeThrowFollowUp,
-) {
-    let shooter = world
-        .on_court(shooting_team)
-        .as_slice()
-        .iter()
-        .copied()
-        .max_by(|left, right| {
-            world.players[*left]
-                .attribute("free_throw")
-                .total_cmp(&world.players[*right].attribute("free_throw"))
-        })
-        .expect("each team must have a player to shoot a technical free throw");
-    shoot_with_retained_team(
-        world,
-        shooter,
-        1,
-        1,
-        0,
-        false,
-        true,
-        foul_id,
-        Some(retained_team),
-        Some(after_technical),
-    );
-}
-
-fn shoot_with_retained_team(
+fn execute_free_throw(
     world: &mut World,
     shooter: usize,
     total: u8,
@@ -126,20 +96,6 @@ fn shoot_with_retained_team(
         technical_retained_team,
         after_technical,
     };
-    // 罚球属于罚球程序：飞行是球的维度，这一罚的程序载荷必须与账本一致，
-    // 否则结算时读到的罚球上下文与实际发球对不上。
-    world.set_phase(crate::state::Phase::FreeThrows {
-        shooter,
-        total: meta.total,
-        remaining: meta.remaining,
-        made: meta.made,
-        next_at: world.now() + f64::from(world.rules.free_throw_interval_seconds()),
-        and_one: meta.and_one,
-        retain_possession: meta.retain_possession,
-        foul_id: meta.foul_id,
-        technical_retained_team: meta.technical_retained_team,
-        after_technical: meta.after_technical,
-    });
     world.pending_shot = Some(PendingShot {
         shooter,
         // 罚球不走出手统计：它的类型是罚球，统计口径在罚球事实里。
@@ -168,6 +124,9 @@ fn shoot_with_retained_team(
     // 罚球人先把球拿到手里，再出手：球态的归属变化必须先于飞行开始，
     // 否则「松球直接变成投篮飞行」这条迁移会被迁移表拒绝。
     world.set_ball_held(shooter);
+    // 列位点在出手时失效：球离手之后是活球篮板争夺，槽位不再是约束。
+    world.clear_free_throw_spots();
+    world.free_throw_started = None;
     // 罚球是一次出手：罚球人有一个真实的动作运行时，因此渲染器能画
     // 出他在罚球线上出手，事件流里也有一次可查的动作生命周期。
     start_free_throw_action(world, shooter);
@@ -189,6 +148,82 @@ fn shoot_with_retained_team(
         crate::state::FlightKind::FreeThrow,
         world.now() + f64::from(rules.max_shot_duration_seconds) + 2.0,
     );
+}
+
+pub fn shoot_team_technical(
+    world: &mut World,
+    shooting_team: crate::action::TeamSide,
+    retained_team: crate::action::TeamSide,
+    foul_id: u64,
+    after_technical: FreeThrowFollowUp,
+) {
+    let shooter = world
+        .on_court(shooting_team)
+        .as_slice()
+        .iter()
+        .copied()
+        .max_by(|left, right| {
+            world.players[*left]
+                .attribute("free_throw")
+                .total_cmp(&world.players[*right].attribute("free_throw"))
+        })
+        .expect("each team must have a player to shoot a technical free throw");
+    prepare_free_throw(
+        world,
+        shooter,
+        1,
+        1,
+        0,
+        false,
+        true,
+        foul_id,
+        Some(retained_team),
+        Some(after_technical),
+        false,
+    );
+}
+
+fn prepare_free_throw(
+    world: &mut World,
+    shooter: usize,
+    total: u8,
+    remaining: u8,
+    made: u8,
+    and_one: bool,
+    retain_possession: bool,
+    foul_id: u64,
+    technical_retained_team: Option<crate::action::TeamSide>,
+    after_technical: Option<FreeThrowFollowUp>,
+    lane_positions: bool,
+) {
+    world.cancel_actions("free_throw_staged");
+    let team = world.players[shooter].team;
+    let attacking_right = world.attacking_right(team);
+    let shooter_spot = nba_domain::court::Court::free_throw_pos_with_geometry(
+        attacking_right,
+        world.rules.free_throw_distance_ft,
+        world.rules.court,
+    );
+    world.players[shooter].target = shooter_spot;
+    let walk_ft = (world.players[shooter].pos - shooter_spot).length();
+    let walk_seconds = f64::from(walk_ft / world.rules.max_player_speed_ftps.max(0.1)) * 1.6;
+    let delay = f64::from(world.rules.free_throw_interval_seconds()).max(walk_seconds + 0.5);
+    world.set_phase(crate::state::Phase::FreeThrows {
+        shooter,
+        total,
+        remaining,
+        made,
+        next_at: world.now() + delay,
+        and_one,
+        retain_possession,
+        foul_id,
+        technical_retained_team,
+        after_technical,
+    });
+    world.free_throw_started = Some(world.now());
+    world.free_throw_lane = Some(crate::world::FreeThrowLane::default());
+    world.set_ball_held(shooter);
+    world.stage_free_throw_procedure(shooter, lane_positions);
 }
 
 /// 罚球出手的动作运行时。
@@ -266,20 +301,9 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
                     retain_possession,
                     foul_id,
                 } => {
-                    // 主罚球程序接管：阶段载荷换成主罚球的账。
-                    world.set_phase(crate::state::Phase::FreeThrows {
-                        shooter,
-                        total,
-                        remaining,
-                        made,
-                        next_at: world.now() + f64::from(world.rules.free_throw_interval_seconds()),
-                        and_one,
-                        retain_possession,
-                        foul_id,
-                        technical_retained_team: None,
-                        after_technical: None,
-                    });
-                    shoot(
+                    // 主罚球程序接管：走裁决入口重新列位（罚球人可能换人），
+                    // 阶段载荷由 adjudicate 统一写入。
+                    prepare_free_throw(
                         world,
                         shooter,
                         total,
@@ -288,6 +312,9 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
                         and_one,
                         retain_possession,
                         foul_id,
+                        None,
+                        None,
+                        true,
                     );
                 }
                 FreeThrowFollowUp::DeadBall { team } => {
@@ -312,8 +339,37 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
         let result = pending
             .result
             .expect("free throw flight must resolve before settlement");
-        let eligible_rebound =
-            !meta.retain_possession && matches!(result, ShotResult::Missed { rim_contact: true });
+        let rim_contact = matches!(result, ShotResult::Missed { rim_contact: true });
+        // 普通罚球序列的最后一罚必须命中或碰筐。罚球未碰筐是违例；
+        // 球未进入活球，球权交给对方在罚球线延长线发球。
+        if !made && !rim_contact && !meta.retain_possession && meta.technical_retained_team.is_none() {
+            world.clear_free_throw_spots();
+            world.possession.shot_clock_start = world.clock.shot_clock();
+            world.line_mut(pending.shooter).turnovers += 1;
+            world.emit(Fact::Turnover {
+                player: pending.shooter,
+                kind: crate::action::TurnoverKind::FreeThrowMissNoRim,
+            });
+            let attacking_right = world.attacking_right(team);
+            let spot = world.rules.court.sideline_at_free_throw_line_extended(
+                world.ball.pos,
+                attacking_right,
+            );
+            world.adjudicate(crate::adjudicate::Adjudication::violation(
+                crate::adjudicate::ViolationKind::FreeThrowMissNoRim,
+                crate::adjudicate::RestartPlan::Inbound {
+                    team: team.other(),
+                    location: crate::adjudicate::InboundLocation::Spot(spot),
+                    ready_after: None,
+                },
+            ));
+            world.release_ball(BallState::Loose {
+                pos: world.ball.pos,
+                vel: Vec2::ZERO,
+            });
+            return;
+        }
+        let eligible_rebound = !meta.retain_possession && rim_contact;
         if eligible_rebound {
             // 罚球禁区违例：球碰筐之前不得有人提前进区。
             //
@@ -345,25 +401,23 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
                     });
                     return;
                 }
-                // 防守方提前进区：重罚一次。
-                world.free_throw_lane = Some(crate::world::FreeThrowLane::default());
-                world.adjudicate(crate::adjudicate::Adjudication::new(
-                    crate::adjudicate::StoppageCause::FreeThrow,
-                    crate::adjudicate::RestartPlan::FreeThrows {
-                        shooter: pending.shooter,
-                        total: meta.total,
-                        remaining: 1,
-                        made: made_count,
-                        and_one: meta.and_one,
-                        retain_possession: meta.retain_possession,
-                        foul_id: meta.foul_id,
-                        technical_retained_team: meta.technical_retained_team,
-                        after_technical: None,
-                    },
-                ));
+                // 防守方提前进区：重罚一次并重新执行列位程序。
+                prepare_free_throw(
+                    world,
+                    pending.shooter,
+                    meta.total,
+                    1,
+                    made_count,
+                    meta.and_one,
+                    meta.retain_possession,
+                    meta.foul_id,
+                    meta.technical_retained_team,
+                    None,
+                    true,
+                );
                 return;
             }
-            let rim_contact = matches!(result, ShotResult::Missed { rim_contact: true });
+            world.clear_free_throw_spots();
             world.possession.shot_clock_start = world.clock.shot_clock();
             world.release_ball(BallState::Loose {
                 pos: world.ball.pos,
@@ -372,13 +426,73 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
             crate::resolve::rebound::resolve(world, "free_throw", 15.0, rim_contact);
             return;
         }
+        if !made && !rim_contact && !meta.retain_possession {
+            // 没碰筐的罚球是死球违例；罚球方有后续罚球时继续该程序，
+            // 序列已结束时交给对方在罚球线延长线发球。
+            if meta.remaining > 1 {
+                prepare_free_throw(
+                    world,
+                    pending.shooter,
+                    meta.total,
+                    meta.remaining - 1,
+                    made_count,
+                    meta.and_one,
+                    meta.retain_possession,
+                    meta.foul_id,
+                    None,
+                    meta.after_technical,
+                    true,
+                );
+                return;
+            }
+            let spot = world.rules.court.sideline_at_free_throw_line_extended(
+                world.ball.pos,
+                world.attacking_right(team),
+            );
+            world.clear_free_throw_spots();
+            world.line_mut(pending.shooter).turnovers += 1;
+            world.emit(Fact::Turnover {
+                player: pending.shooter,
+                kind: crate::action::TurnoverKind::FreeThrowMissNoRim,
+            });
+            world.adjudicate(crate::adjudicate::Adjudication::violation(
+                crate::adjudicate::ViolationKind::FreeThrowMissNoRim,
+                crate::adjudicate::RestartPlan::Inbound {
+                    team: team.other(),
+                    location: crate::adjudicate::InboundLocation::Spot(spot),
+                    ready_after: None,
+                },
+            ));
+            world.release_ball(BallState::Loose {
+                pos: world.ball.pos,
+                vel: Vec2::ZERO,
+            });
+            return;
+        }
         world.possession.shot_clock_start = world.clock.shot_clock();
         world.free_throw_lane = None;
-        let restart_team = if meta.technical_retained_team.is_some() || meta.retain_possession {
-            team
-        } else {
-            team.other()
-        };
+        world.clear_free_throw_spots();
+        if meta.technical_retained_team.is_some() {
+            match meta.after_technical.expect("technical free throw has a follow-up") {
+                FreeThrowFollowUp::Attempts { shooter, total, remaining, made, and_one, retain_possession, foul_id } => {
+                    prepare_free_throw(world, shooter, total, remaining, made, and_one, retain_possession, foul_id, None, None, true);
+                }
+                FreeThrowFollowUp::DeadBall { team } => {
+                    let spot = world.inbound_spot.unwrap_or_else(|| world.rules.court.hoop_pos(world.attacking_right(team)));
+                    world.adjudicate(crate::adjudicate::Adjudication::new(
+                        crate::adjudicate::StoppageCause::FreeThrow,
+                        crate::adjudicate::RestartPlan::Inbound {
+                            team,
+                            location: crate::adjudicate::InboundLocation::Spot(spot),
+                            ready_after: Some(1.2),
+                        },
+                    ));
+                    world.release_ball(BallState::Loose { pos: spot, vel: Vec2::ZERO });
+                }
+            }
+            return;
+        }
+        let restart_team = if meta.retain_possession { team } else { team.other() };
         let mut adjudication = crate::adjudicate::Adjudication::new(
             crate::adjudicate::StoppageCause::FreeThrow,
             crate::adjudicate::RestartPlan::Inbound {
@@ -387,17 +501,10 @@ pub fn finish(world: &mut World, pending: PendingShot, meta: FreeThrowMeta) {
                 ready_after: Some(1.2),
             },
         );
-        if meta.technical_retained_team.is_none() && !meta.retain_possession {
-            adjudication = if made_count > 0 {
-                adjudication
-                    .ending(nba_domain::event::PossessionEndCause::Score, "free_throw")
-                    .scoring(made_count as u32)
-            } else {
-                adjudication.ending(
-                    nba_domain::event::PossessionEndCause::TurnoverViolation,
-                    "free_throw_miss_without_rim_rebound",
-                )
-            };
+        if !meta.retain_possession && made_count > 0 {
+            adjudication = adjudication
+                .ending(nba_domain::event::PossessionEndCause::Score, "free_throw")
+                .scoring(made_count as u32);
         }
         world.adjudicate(adjudication);
         world.ball.release(BallState::Loose {

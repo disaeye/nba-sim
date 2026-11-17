@@ -198,6 +198,7 @@ fn a_defender_inside_the_lane_before_the_release_is_recorded() {
     world.players[shooter].pos = hoop + Vec2::new(-18.0, 0.0);
     world.players[defender].pos = hoop + Vec2::new(-6.0, 0.0);
     world.free_throw_lane = Some(nba_sim_core::world::FreeThrowLane::default());
+    world.free_throw_started = Some(world.now());
     world.set_phase(Phase::FreeThrows {
         shooter,
         total: 1,

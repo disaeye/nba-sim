@@ -17,6 +17,39 @@ fn world(seed: u64) -> World {
     World::new(MatchSetup::builtin(GameRules::default()), params, seed)
 }
 
+/// 把进攻与防守摆成固定的五外站位。势能场测试探测的是几何响应，
+/// 不该受采样回合恰好落在哪个瞬时队形影响。
+fn spread_five_out(world: &mut World, carrier: usize) {
+    let offense = world.players[carrier].team;
+    let defense = offense.other();
+    let hoop = world.hoop_for(offense);
+    let forward = if world.attacking_right(offense) {
+        1.0
+    } else {
+        -1.0
+    };
+    let on_court = world.on_court(offense).as_slice().to_vec();
+    let mut ordered = vec![carrier];
+    ordered.extend(on_court.iter().copied().filter(|handle| *handle != carrier));
+    let offsets = [
+        Vec2::new(-22.0 * forward, 1.0),
+        Vec2::new(-4.0 * forward, 23.0),
+        Vec2::new(-4.0 * forward, -23.0),
+        Vec2::new(-20.0 * forward, 16.0),
+        Vec2::new(-20.0 * forward, -16.0),
+    ];
+    for (rank, attacker) in ordered.iter().enumerate() {
+        world.players[*attacker].pos = hoop + offsets[rank % offsets.len()];
+        world.players[*attacker].vel = Vec2::ZERO;
+    }
+    for (slot, defender) in world.on_court(defense).as_slice().iter().enumerate() {
+        let man = ordered[slot % ordered.len()];
+        world.players[*defender].pos = world.players[man].pos + Vec2::new(2.0 * forward, 0.0);
+        world.players[*defender].vel = Vec2::ZERO;
+        world.possession.matchup[slot] = man;
+    }
+}
+
 /// 推进到有持球人的活球回合，并让站位落定。
 fn live_holder(world: &mut World) -> usize {
     for _ in 0..40_000 {
@@ -127,6 +160,7 @@ fn target_of(world: &World, defender: usize) -> Vec2 {
 fn strong_side_corner_holds_position_when_carrier_enters_the_paint() {
     let mut world = world(13);
     let carrier = live_holder(&mut world);
+    spread_five_out(&mut world, carrier);
     refresh_matchup(&mut world);
     let hoop = world.hoop_for(world.possession.team);
     let corner = strong_side_corner(&world, carrier).expect("a strong-side corner defender exists");
@@ -148,6 +182,7 @@ fn strong_side_corner_holds_position_when_carrier_enters_the_paint() {
 fn weak_side_low_man_sinks_to_the_rim_when_carrier_enters_the_paint() {
     let mut world = world(13);
     let carrier = live_holder(&mut world);
+    spread_five_out(&mut world, carrier);
     refresh_matchup(&mut world);
     let hoop = world.hoop_for(world.possession.team);
     let forward = if world.attacking_right(world.possession.team) {
@@ -172,6 +207,7 @@ fn weak_side_low_man_sinks_to_the_rim_when_carrier_enters_the_paint() {
 fn drive_and_kick_receiver_is_more_open_than_a_perimeter_pass() {
     let mut world = world(13);
     let carrier = live_holder(&mut world);
+    spread_five_out(&mut world, carrier);
     refresh_matchup(&mut world);
     let hoop = world.hoop_for(world.possession.team);
     let defense = world.possession.team.other();
@@ -252,6 +288,7 @@ fn matchup_holds_while_no_screen_or_beat_happens() {
 fn weak_side_high_man_rotates_x_out_to_cover_vacated_shooter_when_low_man_helps_rim() {
     let mut world = world(13);
     let carrier = live_holder(&mut world);
+    spread_five_out(&mut world, carrier);
     refresh_matchup(&mut world);
     let hoop = world.hoop_for(world.possession.team);
     let forward = if world.attacking_right(world.possession.team) {

@@ -24,7 +24,6 @@ pub fn resolve(
         } else {
             crate::footwork::book_travel(world, from, team);
         }
-        crate::footwork::book_travel(world, from, team);
         return ActionOutcome {
             actor: from,
             kind: ActionKind::Pass(kind),

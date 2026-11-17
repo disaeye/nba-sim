@@ -43,6 +43,8 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
     let ball_pos = world.ball.pos;
     let mut box_outs = [usize::MAX; MAX_ON_COURT];
     let mut box_out_count = 0u8;
+    // 篮板活球建立后解除程序站位，所有人开始追球。
+    world.clear_free_throw_spots();
     // 所有场上球员都向球移动；防守人先占篮下卡位，随后再抢球。
     for handle in 0..world.players.len() {
         if !world.players[handle].on_court {

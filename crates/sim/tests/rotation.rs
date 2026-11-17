@@ -167,11 +167,8 @@ fn nba_foul_out_with_empty_bench_assesses_team_technical_and_resumes_foul_proced
             _ => None,
         })
         .expect("foul-out technical is recorded");
-    // 球队技术犯规的罚球在飞：程序是罚球，球在飞行中。
+    // 球队技术犯规：程序进入罚球，罚球人先列位再出手。
     assert!(matches!(world.phase(), Phase::FreeThrows { .. }));
-    assert!(world
-        .ball_flight
-        .is_some_and(|flight| flight.kind == nba_sim_core::state::FlightKind::FreeThrow));
     assert!(world.players[fouler].disqualified);
     assert!(world.players[fouler].retained_after_foul_limit);
     assert_eq!(world.fouls[World::team_index(team)].technical, 1);
@@ -180,6 +177,18 @@ fn nba_foul_out_with_empty_bench_assesses_team_technical_and_resumes_foul_proced
         nba_sim_core::action::Fact::TeamTechnicalFoul { team: foul_team, foul_id, .. }
             if foul_team == team && foul_id == technical_id
     )));
+    // 罚球人在罚球线列位之后才出手：先推进到球真的在飞。
+    let mut saw_flight = false;
+    for _ in 0..800 {
+        world.step(TICK_SECONDS);
+        saw_flight |= world
+            .ball_flight
+            .is_some_and(|flight| flight.kind == nba_sim_core::state::FlightKind::FreeThrow);
+        if saw_flight {
+            break;
+        }
+    }
+    assert!(saw_flight, "team technical free throw never left the shooter's hand");
     let shooter = world
         .pending_shot
         .as_ref()

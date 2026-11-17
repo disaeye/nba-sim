@@ -282,6 +282,12 @@ pub struct World {
     pub pending_jump_ball: Option<PendingJumpBall>,
     /// 当前罚球程序的禁区提前进区记录。
     pub free_throw_lane: Option<FreeThrowLane>,
+    /// 当前罚球程序的列位点：罚球人在罚球线上，其余八人各占一个槽。
+    ///
+    /// 与跳球点位同一套语义：程序进行中（阶段为 FreeThrows 且球未离手）
+    /// 编队站位与职责层不得把这些点拉走；出手离手后点位即失效，
+    /// 否则篮板争夺的人会被钉在槽上。
+    pub(crate) free_throw_spots: Vec<(usize, Vec2)>,
     /// 刚被切掉球的持球人，以及恢复之前不可再次被切的截止时间。
     pub poke_cooldown: Option<(usize, f64)>,
     /// 当前生效的护球姿态。开始其他动作或窗口到期即失效。
@@ -497,6 +503,212 @@ impl World {
         self.begin_period_jump_ball_with_receivers(home_jumper, away_jumper, kind, place, [None; 2])
     }
 
+    fn assign_jump_ball_spot(&mut self, handle: usize, spot: Vec2, place: bool) {
+        if place {
+            crate::body::place(self, handle, spot);
+        } else {
+            let now = self.now();
+            let player = &mut self.players[handle];
+            player.target = spot;
+            player.target_kind = crate::state::TargetKind::Station;
+            player.target_partner = usize::MAX;
+            player.target_changed_at = now;
+            player.progress_best_ft = f32::MAX;
+            player.nonprogress_seconds = 0.0;
+            player.yielding_since = 0.0;
+        }
+        self.jump_ball_spots.push((handle, spot));
+    }
+
+    fn position_jump_ball_participants(
+        &mut self,
+        home_jumper: usize,
+        away_jumper: usize,
+        place: bool,
+        requested_receivers: [Option<usize>; 2],
+    ) -> [Option<usize>; 2] {
+        let center = self.rules.court.center();
+        let circle_radius = self.rules.league.jump_ball.center_circle_radius_ft;
+        let player_radius = self.rules.player_radius_ft;
+        let ring_radius = (circle_radius + player_radius)
+            .max(self.rules.league.jump_ball.jump_ball_receiver_distance_ft);
+        assert!(
+            ring_radius <= 20.0,
+            "jump-ball circle plus player radius must fit the positioning band"
+        );
+        let home_attacks_right = self.attacking_right(TeamSide::Home);
+        let jumper_axis = if home_attacks_right { Vec2::X } else { Vec2::NEG_X };
+        self.jump_ball_spots.clear();
+        for (handle, spot) in [
+            (home_jumper, center - jumper_axis * (circle_radius * 0.5)),
+            (away_jumper, center + jumper_axis * (circle_radius * 0.5)),
+        ] {
+            let partner = if handle == home_jumper { away_jumper } else { home_jumper };
+            if place {
+                self.assign_jump_ball_spot(handle, spot, true);
+            } else {
+                let now = self.now();
+                let player = &mut self.players[handle];
+                player.target = spot;
+                player.target_kind = crate::state::TargetKind::Station;
+                player.target_partner = partner;
+                player.target_changed_at = now;
+                player.progress_best_ft = f32::MAX;
+                player.nonprogress_seconds = 0.0;
+                player.yielding_since = 0.0;
+                self.jump_ball_spots.push((handle, spot));
+            }
+        }
+        self.players[home_jumper].facing = jumper_axis;
+        self.players[away_jumper].facing = -jumper_axis;
+
+        let first_position_team = if home_attacks_right {
+            TeamSide::Home
+        } else {
+            TeamSide::Away
+        };
+        let ring_axis = Vec2::X;
+        let ring_spots: [Vec2; 8] = std::array::from_fn(|index| {
+            let angle = std::f32::consts::TAU * index as f32 / 8.0;
+            center + Vec2::new(angle.cos() * ring_axis.x, angle.sin()) * ring_radius
+        });
+        let mut team_slots = [[0usize; 4]; 2];
+        let mut team_slot_counts = [0usize; 2];
+        for (index, spot) in ring_spots.iter().enumerate() {
+            let team = if index % 2 == 0 {
+                first_position_team
+            } else {
+                first_position_team.other()
+            };
+            let team_index = Self::team_index(team);
+            team_slots[team_index][team_slot_counts[team_index]] = index;
+            team_slot_counts[team_index] += 1;
+            assert!(
+                (*spot - center).length() >= circle_radius + player_radius - 0.01,
+                "jump-ball non-jumpers must stand outside the restraining circle"
+            );
+        }
+        assert_eq!(team_slot_counts, [4, 4], "each team has four non-jumpers");
+
+        let mut receivers = [None; 2];
+        for team in [TeamSide::Home, TeamSide::Away] {
+            let team_index = Self::team_index(team);
+            let jumper = if team == TeamSide::Home { home_jumper } else { away_jumper };
+            let roster: Vec<usize> = self
+                .on_court(team)
+                .into_iter()
+                .filter(|handle| *handle != jumper)
+                .collect();
+            assert!(
+                !roster.is_empty() && roster.len() <= 4,
+                "each team must field at least one and at most four jump-ball non-jumpers"
+            );
+            let hoop_direction = if self.attacking_right(team) {
+                ring_axis
+            } else {
+                -ring_axis
+            };
+            let tap_direction = -hoop_direction;
+            let receiver_distance = self.rules.tip_off_tap_distance_ft;
+            assert!(
+                receiver_distance >= self.rules.league.jump_ball.jump_ball_receiver_distance_ft,
+                "jump-ball tap distance must place the receiver outside the center circle"
+            );
+            assert!(
+                receiver_distance >= circle_radius,
+                "jump-ball receiver must stand outside the center circle"
+            );
+            let tap_spot = center + tap_direction * receiver_distance;
+            let boundary_margin = player_radius;
+            assert!(
+                tap_spot.x >= boundary_margin
+                    && tap_spot.x <= self.rules.court.width_ft - boundary_margin
+                    && tap_spot.y >= boundary_margin
+                    && tap_spot.y <= self.rules.court.height_ft - boundary_margin,
+                "jump-ball receiver spot must be inside playable court geometry"
+            );
+            let receiver = requested_receivers[team_index]
+                .filter(|handle| roster.contains(handle))
+                .unwrap_or_else(|| {
+                    roster
+                        .iter()
+                        .copied()
+                        .min_by(|left, right| {
+                            (self.players[*left].pos - tap_spot)
+                                .length_squared()
+                                .total_cmp(&(self.players[*right].pos - tap_spot).length_squared())
+                                .then_with(|| self.players[*left].id.cmp(&self.players[*right].id))
+                        })
+                        .expect("each team must field a jump-ball receiver")
+                });
+            let receiver_slot = team_slots[team_index]
+                .iter()
+                .copied()
+                .max_by(|left, right| {
+                    (ring_spots[*left] - center)
+                        .dot(tap_direction)
+                        .total_cmp(&(ring_spots[*right] - center).dot(tap_direction))
+                        .then_with(|| right.cmp(left))
+                })
+                .expect("each team must have four ring positions");
+            let mut remaining: Vec<usize> = roster
+                .into_iter()
+                .filter(|handle| *handle != receiver)
+                .collect();
+            let first_choice_direction = tap_direction;
+            let first_choice_slot = team_slots[team_index]
+                .iter()
+                .copied()
+                .filter(|slot| *slot != receiver_slot)
+                .max_by(|left, right| {
+                    (ring_spots[*left] - center)
+                        .dot(first_choice_direction)
+                        .total_cmp(&(ring_spots[*right] - center).dot(first_choice_direction))
+                        .then_with(|| right.cmp(left))
+                });
+            if let Some(slot) = first_choice_slot {
+                if !remaining.is_empty() {
+                    let player_index = remaining
+                        .iter()
+                        .enumerate()
+                        .min_by(|(_, left), (_, right)| {
+                            (self.players[**left].pos - ring_spots[slot])
+                                .length_squared()
+                                .total_cmp(&(self.players[**right].pos - ring_spots[slot]).length_squared())
+                                .then_with(|| self.players[**left].id.cmp(&self.players[**right].id))
+                        })
+                        .map(|(index, _)| index)
+                        .expect("nonempty jump-ball roster has a first-choice player");
+                    let handle = remaining.remove(player_index);
+                    self.assign_jump_ball_spot(handle, ring_spots[slot], place);
+                }
+            }
+            for slot in team_slots[team_index]
+                .into_iter()
+                .filter(|slot| *slot != receiver_slot && Some(*slot) != first_choice_slot)
+                .take(remaining.len())
+            {
+                let player_index = remaining
+                    .iter()
+                    .enumerate()
+                    .min_by(|(_, left), (_, right)| {
+                        (self.players[**left].pos - ring_spots[slot])
+                            .length_squared()
+                            .total_cmp(&(self.players[**right].pos - ring_spots[slot]).length_squared())
+                            .then_with(|| self.players[**left].id.cmp(&self.players[**right].id))
+                    })
+                    .map(|(index, _)| index)
+                    .expect("each team must field four jump-ball non-jumpers");
+                let handle = remaining.remove(player_index);
+                self.assign_jump_ball_spot(handle, ring_spots[slot], place);
+            }
+            self.assign_jump_ball_spot(receiver, tap_spot, place);
+            self.players[receiver].facing = -tap_direction;
+            receivers[team_index] = Some(receiver);
+        }
+        receivers
+    }
+
     /// 带指定接应人的跳球程序。
     ///
     /// 停表跳球的接应人已经站到点球落点上，掷球时必须复用他们：重新按
@@ -514,103 +726,17 @@ impl World {
         self.jump_ball_tapper = None;
         self.jump_ball_receiver = None;
         self.jump_ball_receivers = [None; 2];
-        self.jump_ball_spots = Vec::new();
         // 新跳球就是新球：上一轮残留的飞行记录必须清掉，否则结算层会
         // 把它当成这一轮已经在飞的球，永远等不到撮球。
         self.clear_flight();
         let center = self.rules.court.center();
-        let radius = self.rules.league.jump_ball.center_circle_radius_ft * 0.5;
-        let home_spot = center - Vec2::new(radius, 0.0);
-        let away_spot = center + Vec2::new(radius, 0.0);
-        self.jump_ball_spots.push((home_jumper, home_spot));
-        self.jump_ball_spots.push((away_jumper, away_spot));
-        if place {
-            crate::body::place(self, home_jumper, home_spot);
-            crate::body::place(self, away_jumper, away_spot);
-        } else {
-            crate::assignment::force_target_as(
-                self,
-                home_jumper,
-                home_spot,
-                crate::state::TargetKind::Station,
-                away_jumper,
-            );
-            crate::assignment::force_target_as(
-                self,
-                away_jumper,
-                away_spot,
-                crate::state::TargetKind::Station,
-                home_jumper,
-            );
-        }
-        self.players[home_jumper].facing = Vec2::X;
-        self.players[away_jumper].facing = Vec2::NEG_X;
-        for team in [TeamSide::Home, TeamSide::Away] {
-            let jumper = if team == TeamSide::Home {
-                home_jumper
-            } else {
-                away_jumper
-            };
-            // 停表跳球已经指定了接应人：复用他，不要另挑一个还没到位的人。
-            let receiver = receivers[World::team_index(team)]
-                .filter(|handle| self.players[*handle].on_court && *handle != jumper)
-                .unwrap_or_else(|| {
-                    self.on_court(team)
-                        .into_iter()
-                        .filter(|handle| *handle != jumper)
-                        .min_by(|left, right| {
-                            (self.players[*left].pos - center)
-                                .length_squared()
-                                .total_cmp(&(self.players[*right].pos - center).length_squared())
-                                .then_with(|| self.players[*left].id.cmp(&self.players[*right].id))
-                        })
-                        .expect("each team needs a jump-ball receiver")
-                });
-            let direction = if team == TeamSide::Home {
-                -Vec2::X
-            } else {
-                Vec2::X
-            };
-            // 接应人站到点球落点上：落点距离必须同时满足中圈外的站位要求
-            // 与点球档位，否则接应人够不到球。
-            let distance = self.rules.tip_off_tap_distance_ft;
-            assert!(
-                distance >= self.rules.league.jump_ball.jump_ball_receiver_distance_ft,
-                "jump-ball tap distance must place the receiver outside the center circle"
-            );
-            assert!(
-                distance >= self.rules.league.jump_ball.center_circle_radius_ft,
-                "jump-ball receiver must stand outside the center circle"
-            );
-            let target = center + direction * distance;
-            let radius = self.rules.player_radius_ft;
-            assert!(
-                target.x >= radius
-                    && target.x <= self.rules.court.width_ft - radius
-                    && target.y >= radius
-                    && target.y <= self.rules.court.height_ft - radius,
-                "jump-ball receiver spot must be inside playable court geometry"
-            );
-            if place {
-                crate::body::place(self, receiver, target);
-            } else {
-                crate::assignment::force_target_as(
-                    self,
-                    receiver,
-                    target,
-                    crate::state::TargetKind::Station,
-                    jumper,
-                );
-            }
-            self.players[receiver].target_kind = crate::state::TargetKind::Station;
-            self.players[receiver].target_partner = jumper;
-            self.jump_ball_receivers[World::team_index(team)] = Some(receiver);
-            self.jump_ball_spots.push((receiver, target));
-            self.emit(Fact::PlacementApplied {
-                player: receiver,
-                reason: "jump_ball_receiver",
-            });
-        }
+        let receivers = self.position_jump_ball_participants(
+            home_jumper,
+            away_jumper,
+            place,
+            receivers,
+        );
+        self.jump_ball_receivers = receivers;
         self.ball = BallBody::loose(center, Vec2::ZERO);
         let coefficients = crate::physical::Coefficients::from_policy(&self.params.policy);
         let home = crate::physical::Physical::with(&self.players[home_jumper], &coefficients);
@@ -637,73 +763,19 @@ impl World {
     pub fn stage_held_ball(&mut self, home_jumper: usize, away_jumper: usize) {
         // 停表跳球同样是一次新的掷球：清掉上一轮的飞行记录。
         self.clear_flight();
-        let center = self.rules.court.center();
-        let radius = self.rules.league.jump_ball.center_circle_radius_ft * 0.5;
-        let distance = self.rules.tip_off_tap_distance_ft;
-        let mut spots: Vec<(usize, Vec2)> = Vec::with_capacity(4);
-        let mut receivers: [Option<usize>; 2] = [None; 2];
-        for jumper in [home_jumper, away_jumper] {
-            let team = self.players[jumper].team;
-            let opponent = if jumper == home_jumper {
-                away_jumper
-            } else {
-                home_jumper
-            };
-            let spot = if team == TeamSide::Home {
-                center - Vec2::new(radius, 0.0)
-            } else {
-                center + Vec2::new(radius, 0.0)
-            };
-            crate::assignment::force_target_as(
-                self,
-                jumper,
-                spot,
-                crate::state::TargetKind::Station,
-                opponent,
-            );
-            spots.push((jumper, spot));
-            // 接应人按「离自己的落点最近」挑：挑「离圈心最近」会把站在
-            // 参跳人位上的那个人选成接应人，两个人挤在同一点上，谁也走
-            // 不到位。
-            let receiver_spot = center
-                + if team == TeamSide::Home {
-                    Vec2::NEG_X
-                } else {
-                    Vec2::X
-                } * distance;
-            let receiver = self
-                .on_court(team)
-                .into_iter()
-                .filter(|handle| *handle != jumper)
-                .min_by(|left, right| {
-                    (self.players[*left].pos - receiver_spot)
-                        .length_squared()
-                        .total_cmp(&(self.players[*right].pos - receiver_spot).length_squared())
-                        .then_with(|| self.players[*left].id.cmp(&self.players[*right].id))
-                });
-            if let Some(receiver) = receiver {
-                receivers[World::team_index(team)] = Some(receiver);
-                let direction = if team == TeamSide::Home {
-                    -Vec2::X
-                } else {
-                    Vec2::X
-                };
-                let target = center + direction * distance;
-                crate::assignment::force_target_as(
-                    self,
-                    receiver,
-                    target,
-                    crate::state::TargetKind::Station,
-                    jumper,
-                );
-                spots.push((receiver, target));
-            }
-        }
+        // 十个人全部列位：参跳两人在圈内，八名非参跳人在圈缘带。停表
+        // 跳球时球员已经在场上，所以只写目标，不瞬移。
+        let receivers = self.position_jump_ball_participants(
+            home_jumper,
+            away_jumper,
+            false,
+            [None; 2],
+        );
+        let spots = self.jump_ball_spots.clone();
         let team = self.possession.team;
         let ready_at = self.now() + f64::from(self.params.policy.g("jump_ball_staging_seconds"));
         // 点位同时记进跳球程序：等待到位的那段时间里，编队站位与职责层
-        // 都不得把这四个人拉走。
-        self.jump_ball_spots = spots.clone();
+        // 都不得把这十个人拉走。
         self.pending_jump_ball = Some(PendingJumpBall {
             home: home_jumper,
             away: away_jumper,
@@ -1337,6 +1409,7 @@ impl World {
             pending_rebound: None,
             pending_jump_ball: None,
             free_throw_lane: None,
+            free_throw_spots: Vec::new(),
             poke_cooldown: None,
             protection: None,
             possession_points: 0,
@@ -1878,6 +1951,149 @@ impl World {
         }
     }
 
+    /// 罚球程序进行中时，罚球人与八个列位槽的点位。
+    ///
+    /// 与跳球点位同一套语义：程序进行中（阶段为 FreeThrows 且球未离手）
+    /// 列位点受保护；球离手之后点位失效，篮板争夺不再受槽位约束。
+    pub fn free_throw_procedure_spots(&self) -> &[(usize, Vec2)] {
+        &self.free_throw_spots
+    }
+
+    /// 罚球程序的列位：罚球人站上罚球线，八名非出手人占八个槽。
+    ///
+    /// 分配规则（NBA Rule 9 §II）：防守方占据第一槽（最近底线）与
+    /// 罚球线两端槽；进攻方占据第二、三槽。具体按「防守 4、进攻 2、
+    /// 其余 2」的现实分配：防守拿离篮最近的两组（槽 0/1/6/7），
+    /// 进攻拿槽 2/3/4/5 中的两个，剩下两个给防守。
+    ///
+    /// 点位以 `force_target` 写入：出手人必须真的走到罚球线上，
+    /// 出手几何（`free_throw_model` 读当前位置）因此落在规则位置。
+    ///
+    /// 结算完成后（下一罚或死球）由 `clear_free_throw_spots` 清空，
+    /// 新一罚由下一罚结算重新列位。
+    pub(crate) fn stage_free_throw_procedure(&mut self, shooter: usize, lane_positions: bool) {
+        self.free_throw_spots.clear();
+        let offense = self.players[shooter].team;
+        let attacking_right = self.attacking_right(offense);
+        let slots = nba_domain::court::Court::free_throw_lane_slots_with_geometry(
+            attacking_right,
+            self.rules.court,
+            self.rules.player_radius_ft,
+        );
+        // 罚球线点：出手人自己的位置。
+        let shooter_spot = nba_domain::court::Court::free_throw_pos_with_geometry(
+            attacking_right,
+            self.rules.free_throw_distance_ft,
+            self.rules.court,
+        );
+        let placed = crate::assignment::force_target_as(
+            self,
+            shooter,
+            shooter_spot,
+            crate::state::TargetKind::Station,
+            usize::MAX,
+        );
+        debug_assert!(
+            placed,
+            "the free-throw shooter spot must be a valid station target"
+        );
+        self.free_throw_spots.push((shooter, shooter_spot));
+        self.emit(Fact::PlacementApplied {
+            player: shooter,
+            reason: "free_throw_shooter",
+        });
+        // 限制区列位：六个槽位按离底线远近排列，防守方占最近的两槽与
+        // 罚球线侧两槽，进攻方占中间两槽。一次普通罚球最多五个人进区。
+        // 单罚与技术罚球不列位：其余人留在限制区外。
+        let mut assigned = vec![shooter];
+        if lane_positions {
+            let order: [usize; 6] = [0, 1, 2, 3, 4, 5];
+            let mut slot_index = 0usize;
+            for team in [offense.other(), offense] {
+                let roster: Vec<usize> = self
+                    .on_court(team)
+                    .into_iter()
+                    .filter(|handle| *handle != shooter)
+                    .collect();
+                for handle in roster {
+                    if slot_index >= order.len() {
+                        break;
+                    }
+                    let slot = slots[order[slot_index]];
+                    slot_index += 1;
+                    if crate::assignment::force_target_as(
+                        self,
+                        handle,
+                        slot,
+                        crate::state::TargetKind::Station,
+                        usize::MAX,
+                    ) {
+                        self.free_throw_spots.push((handle, slot));
+                        assigned.push(handle);
+                    }
+                }
+            }
+        }
+        // 其余人站到罚球线延长线之外：他们不在限制区里排队。位置按
+        // 球的纵向位置就近取一侧边线，纵向错开半个身位避免重叠。
+        let line_x = self.rules.court.free_throw_line_extended_x(attacking_right);
+        let mut outside = 0u8;
+        for handle in 0..self.players.len() {
+            if !self.players[handle].on_court || assigned.contains(&handle) {
+                continue;
+            }
+            let side = if self.players[handle].pos.y < self.rules.court.height_ft * 0.5 {
+                -1.0
+            } else {
+                1.0
+            };
+            let radius = self.rules.player_radius_ft;
+            let y = if side < 0.0 {
+                radius + f32::from(outside) * radius * 2.0
+            } else {
+                self.rules.court.height_ft - radius - f32::from(outside) * radius * 2.0
+            };
+            let spot = Vec2::new(line_x, y);
+            outside += 1;
+            if crate::assignment::force_target_as(
+                self,
+                handle,
+                spot,
+                crate::state::TargetKind::Station,
+                usize::MAX,
+            ) {
+                self.free_throw_spots.push((handle, spot));
+                assigned.push(handle);
+            }
+        }
+        debug_assert!(
+            assigned.len() >= 3,
+            "the free-throw procedure must place the shooter and both lane teams"
+        );
+    }
+
+    /// 罚球程序点位失效：球离手之后由结算调用。
+    pub(crate) fn clear_free_throw_spots(&mut self) {
+        self.free_throw_spots.clear();
+    }
+
+    /// 出手等待期的列位重申：把程序点位重新写进目标。
+    ///
+    /// 列位点由规则条文指定（罚球线与八个槽位），它不是导航层的一个
+    /// 建议：写目标时的碰撞校验拒绝它，等于把规则位置当成非法位置。
+    /// 因此重申走程序性直写，写完位置后由分离求解把重叠的人推开。
+    fn reassert_free_throw_spots(&mut self) {
+        if !self.free_throw_pending() {
+            return;
+        }
+        for &(handle, spot) in self.free_throw_spots.clone().iter() {
+            let player = &mut self.players[handle];
+            player.target = spot;
+            player.target_kind = crate::state::TargetKind::Station;
+            player.target_partner = usize::MAX;
+        }
+    }
+
     pub fn attacking_right(&self, team: TeamSide) -> bool {
         self.attacking_right_in_period(team, self.clock.period())
     }
@@ -2043,6 +2259,34 @@ impl World {
         let source_event_ids = self.pending_review_source_events.take().unwrap_or_else(|| {
             parent_event_id.into_iter().collect()
         });
+        let fact = match fact {
+            Fact::Shot {
+                shot_id,
+                shooter,
+                kind,
+                zone,
+                distance_ft,
+                contest,
+                is_three,
+                blocked_by: Some(defender),
+                made,
+                points,
+                assisted_by,
+            } => Fact::Shot {
+                shot_id,
+                shooter,
+                kind,
+                zone,
+                distance_ft,
+                contest: contest.max(0.06),
+                is_three,
+                blocked_by: Some(defender),
+                made,
+                points,
+                assisted_by,
+            },
+            other => other,
+        };
         self.events.push(TimedFact {
             time: self.now(),
             period: self.clock.period(),
@@ -2773,6 +3017,7 @@ impl World {
         crate::resolve::offball::step(self, dt);
         self.check_hand_check(dt);
         crate::ball::step(self, dt);
+        self.check_free_throw_lane();
         self.resolve_due_interactions();
         self.advance_phase();
         self.expire_break_targets();
@@ -2790,7 +3035,9 @@ impl World {
             crate::adjudicate_incidents::adjudicate_one(self, inbound_incident);
         }
         crate::lane::step(self, dt);
-        self.check_free_throw_lane();
+        // 罚球列位重申：出手等待期每 tick 把程序点位写回目标，
+        // 动作结算与绕行恢复都不得覆写（规则指定的位置不是导航建议）。
+        self.reassert_free_throw_spots();
         crate::timeouts::enforce_mandatory(self);
         // 原始事实 → 裁决批次 → 原子提交：检测层只判事实，裁决层按档案
         // 给后果，两者都经统一提交入口落下。抽样类事件在 tick 末尾检测。
@@ -2815,9 +3062,9 @@ impl World {
         }
     }
 
-    /// 罚球禁区：球离手之前，任何球员不得进入禁区内侧。
+    /// 罚球出手之前记录禁区内的球员。
     pub fn check_free_throw_lane(&mut self) {
-        if !self.free_throw_pending() {
+        if !matches!(self.phase(), Phase::FreeThrows { .. }) || self.ball_flight.is_some() {
             return;
         }
         let Some(mut lane) = self.free_throw_lane else {
@@ -2825,9 +3072,13 @@ impl World {
         };
         let offense = self.possession.team;
         let attacking_right = self.attacking_right(offense);
+        let shooter = match self.phase {
+            Phase::FreeThrows { shooter, .. } => shooter,
+            _ => return,
+        };
         for handle in 0..self.players.len() {
             let player = &self.players[handle];
-            if !player.on_court {
+            if !player.on_court || handle == shooter {
                 continue;
             }
             if !self.rules.court.is_in_lane(player.pos, attacking_right) {
@@ -4171,6 +4422,8 @@ impl World {
                         and_one,
                         retain_possession,
                         foul_id,
+                        technical_retained_team,
+                        after_technical,
                     );
                 }
             }

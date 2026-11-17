@@ -324,7 +324,7 @@ fn step_loose(world: &mut World, dt: f64) {
         };
         let threshold = world.params.policy.w("loose_ball_boundary_speed_ftps");
         let outward_speed = -ball.vel.dot(inward);
-        if outward_speed <= threshold && ball.vz.abs() <= threshold {
+        if outward_speed <= threshold {
             ball.pos = Vec2::new(
                 ball.pos.x.clamp(radius, width - radius),
                 ball.pos.y.clamp(radius, height - radius),
@@ -687,6 +687,11 @@ fn try_control_loose(world: &mut World) {
                 "held_ball",
                 0,
             );
+            world.emit(Fact::PlacementApplied {
+                player: home,
+                reason: "held_ball_jump_ball_staged",
+            });
+            // 跳球登记在争球事实之后，让事件流保持判定到程序重开的因果顺序。
             world.stage_held_ball(home, away);
             // 停表跳球会重设跳球人的目标，因此争抢动作在跳球站位之后
             // 建立，否则它会被站位覆盖。

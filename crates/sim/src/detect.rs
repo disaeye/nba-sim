@@ -710,7 +710,7 @@ pub fn detect_team_technical(world: &mut World) -> Option<RawIncident> {
         return None;
     }
     let threshold = world.params.policy.w("team_technical_protest_threshold");
-    if threshold <= f32::default() || world.team_technical_protest < threshold {
+    if threshold <= f32::default() || world.team_technical_protest <= threshold {
         return None;
     }
     world.team_technical_protest = f32::default();

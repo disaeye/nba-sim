@@ -36,6 +36,8 @@ pub fn establish_pivot(world: &mut World, actor: usize, position: Vec2) {
     world.possession.support_foot = support;
     let steps_allowed = world.params.policy.g("footwork_steps_allowed") as u8;
     world.possession.pivot = Some(PivotState::new(foot, position, steps_allowed));
+    world.players[actor].target_kind = crate::state::TargetKind::Window;
+    world.players[actor].target_partner = actor;
     world.possession.pivot_holder = Some(actor);
 }
 
@@ -70,18 +72,22 @@ pub fn accumulate_contact(world: &mut World, actor: usize) -> bool {
     if world.possession.pivot_holder != Some(actor) {
         return false;
     }
+    if world.players[actor].target_kind != crate::state::TargetKind::Window {
+        return false;
+    }
+    if world.possession.dribble_state != crate::state::DribbleState::Gathered {
+        return false;
+    }
     let step = step_length(world, actor);
     if step <= f32::MIN_POSITIVE {
         return false;
     }
-    let last = pivot.last_contact.unwrap_or(pivot.position);
-    let travelled = (world.players[actor].pos - last).length();
-    // 容差：浮点加减会让「正好走满一步」算成差一点点，脚步因此永远
-    // 记不满，计时与走步判定都停在半步之外。
+    let contact = world.players[actor].pos;
+    let last_contact = pivot.last_contact.unwrap_or(pivot.position);
+    let travelled = (contact - last_contact).length();
     if travelled < step - CONTACT_EPSILON_FT {
         return false;
     }
-    let contact = world.players[actor].pos;
     let mut pivot = pivot;
     // 支撑脚交替：这一步是另一只脚落地的。
     let mut support = world.possession.support_foot;
@@ -117,7 +123,9 @@ pub fn judge_release(world: &World, actor: usize) -> FootworkVerdict {
     if pivot.hop {
         return FootworkVerdict::Hop;
     }
-    // 轴心脚被移动：收球之后球手离开了轴心脚的位置。
+    // 收球后合法两步的量程之内不算移动轴心脚；超过两步量程才说明
+    // 球手带着轴心走了。脚步接触用步长记账，这里用总量程兜住短距离
+    // 收球（落点不足一步，记不满一次接触）的情形。
     let step = step_length(world, actor);
     let reach = f32::from(pivot.steps_allowed) * step;
     if (world.players[actor].pos - pivot.position).length() > reach {

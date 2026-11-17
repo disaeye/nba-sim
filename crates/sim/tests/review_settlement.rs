@@ -254,7 +254,7 @@ fn the_review_queue_is_driven_by_the_main_loop() {
     let mut reviews = 0;
     let mut rulings = 0;
     let mut games_with_reviews = 0;
-    for seed in 3106..3114u64 {
+    for seed in 3106..=3123u64 {
         let mut world = nba_world(seed);
         let mut guard = 0;
         while !world.finished && guard < 200_000 {

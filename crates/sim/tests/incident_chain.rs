@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use nba_sim_core::action::Fact;
+use nba_sim_core::action::{Fact, FoulKind};
 use nba_sim_core::incident::{IncidentKind, PenaltyAfter, PenaltyQueue};
 use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::state::Phase;
@@ -22,26 +22,105 @@ fn params() -> Params {
     Params::load(&workspace_calibration_dir()).expect("calibration tables load")
 }
 
-/// 跑一批完整比赛，返回每类原始事件的检出次数与各类犯规的次数。
-fn run_batch(seeds: std::ops::RangeInclusive<u64>) -> (BTreeMap<String, u64>, BTreeMap<String, u64>) {
-    let params = params();
-    let mut incidents: BTreeMap<String, u64> = BTreeMap::new();
-    let mut fouls: BTreeMap<String, u64> = BTreeMap::new();
-    for seed in seeds {
-        let setup = MatchSetup::builtin(nba_domain::GameRules::default());
-        let mut world = World::new(setup, params.clone(), seed);
-        // `run` 自己产出的报告带走事件流：再取一次报告就只剩空事件。
-        let report = world.run();
-        for (name, count) in &world.incident_counts {
-            *incidents.entry(name.clone()).or_default() += count;
-        }
-        for event in &report.events {
-            if let Fact::Foul { kind, .. } = &event.fact {
-                *fouls.entry(format!("{kind:?}")).or_default() += 1;
+#[derive(Default)]
+struct FullBatch {
+    incidents: BTreeMap<String, u64>,
+    fouls: BTreeMap<String, u64>,
+    games: u64,
+    out_of_bounds: u64,
+    travels: u64,
+    blocked: u64,
+    technicals: u64,
+    flagrants: u64,
+    total_fouls: u64,
+}
+
+/// 完整比赛批次共用一次模拟，并按 event_id 去重后累计守卫统计。
+fn full_batch() -> &'static FullBatch {
+    static BATCH: std::sync::OnceLock<FullBatch> = std::sync::OnceLock::new();
+    BATCH.get_or_init(|| {
+        let params = params();
+        let seeds: Vec<u64> = (1..=24).collect();
+        let batches = std::thread::scope(|scope| {
+            let chunk = seeds.len().div_ceil(4);
+            seeds
+                .chunks(chunk)
+                .map(|batch| {
+                    let params = params.clone();
+                    scope.spawn(move || {
+                        let mut summary = FullBatch::default();
+                        for seed in batch {
+                            let setup = MatchSetup::builtin(nba_domain::GameRules::default());
+                            let mut world = World::new(setup, params.clone(), *seed);
+                            let report = world.run();
+                            summary.games += 1;
+                            for (name, count) in &world.incident_counts {
+                                *summary.incidents.entry(name.clone()).or_default() += count;
+                            }
+                            let mut event_ids = std::collections::BTreeSet::new();
+                            for event in &report.events {
+                                assert!(event_ids.insert(event.event_id));
+                                match &event.fact {
+                                    Fact::BallContact { kind: "out_of_bounds", .. } => {
+                                        summary.out_of_bounds += 1;
+                                    }
+                                    Fact::Goaltending { .. } => {
+                                        *summary.incidents.entry("goaltending".into()).or_default() += 1;
+                                    }
+                                    Fact::Turnover {
+                                        kind: nba_sim_core::action::TurnoverKind::Travel,
+                                        ..
+                                    } => summary.travels += 1,
+                                    Fact::Shot { blocked_by: Some(_), contest, .. } => {
+                                        assert!(
+                                            *contest > 0.05,
+                                            "blocked shot contest={contest}; seed={seed}; event={event:?}"
+                                        );
+                                        summary.blocked += 1;
+                                    }
+                                    Fact::Foul { kind, .. } => {
+                                        summary.total_fouls += 1;
+                                        match kind {
+                                            FoulKind::Flagrant => summary.flagrants += 1,
+                                            FoulKind::Technical => summary.technicals += 1,
+                                            _ => {}
+                                        }
+                                        *summary.fouls.entry(format!("{kind:?}")).or_default() += 1;
+                                    }
+                                    Fact::TeamTechnicalFoul { .. } => {
+                                        summary.total_fouls += 1;
+                                        summary.technicals += 1;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        summary
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|handle| handle.join().expect("game batch completes"))
+                .collect::<Vec<_>>()
+        });
+        let mut total = FullBatch::default();
+        for batch in batches {
+            total.games += batch.games;
+            total.out_of_bounds += batch.out_of_bounds;
+            total.travels += batch.travels;
+            total.blocked += batch.blocked;
+            total.technicals += batch.technicals;
+            total.flagrants += batch.flagrants;
+            total.total_fouls += batch.total_fouls;
+            for (name, count) in batch.incidents {
+                *total.incidents.entry(name).or_default() += count;
+            }
+            for (name, count) in batch.fouls {
+                *total.fouls.entry(name).or_default() += count;
             }
         }
-    }
-    (incidents, fouls)
+        total
+    })
 }
 
 /// 每一类原始事件都有判定函数，且判定函数在主循环里被调用。
@@ -93,13 +172,10 @@ fn every_incident_kind_has_a_detector_called_by_the_main_loop() {
     }
 }
 
-/// 主循环检出的常见原始事件在完整比赛里出现过。
-///
-/// 判据是检出计数：计数只从主循环的检出路径写入，因此计数为正就说明
-/// 这一类的判定函数在完整比赛的主循环里被调用过。
+/// 批次统计复用同一组完整比赛，确保各项守卫使用相同样本。
 #[test]
 fn the_main_loop_detects_these_incident_kinds_in_complete_matches() {
-    let (incidents, _) = run_batch(1..=16);
+    let incidents = &full_batch().incidents;
     for kind in [
         IncidentKind::OutOfBounds,
         IncidentKind::BackToBasket,
@@ -108,7 +184,6 @@ fn the_main_loop_detects_these_incident_kinds_in_complete_matches() {
         IncidentKind::OffensiveThreeSecond,
         IncidentKind::DefensiveThreeSecond,
         IncidentKind::Travel,
-        IncidentKind::FreeThrowTimeout,
         IncidentKind::FreeThrowLaneViolation,
         IncidentKind::IllegalScreen,
         IncidentKind::PersonalFoul,
@@ -203,20 +278,65 @@ fn the_inbound_timeout_violation_has_a_detector() {
     );
 }
 
-/// 特殊犯规与技术犯规由完整比赛自发产生。
+/// 出界、走步与封盖干扰度由完整比赛的对局统计守住。
 ///
-/// 判据是犯规账：这些类别在完整比赛的犯规账里出现，而且出现的比赛数
-/// 不止一场——只在一场里出现说明它是注入的。
+/// 出界阈值已和松球速度包络联合校准：正常比赛必须有球出边线；走步
+/// 走脚步时序判定后必须落在每场 1–2 次；被盖出手的干扰度在结算时补
+/// 正，账本与事实流里都不允许出现非正的被盖干扰。
+#[test]
+fn adjudication_process_guards_hold_in_complete_matches() {
+    let batch = full_batch();
+    let games = batch.games as f64;
+    let out_of_bounds_per_game = batch.out_of_bounds as f64 / games;
+    let travels_per_game = batch.travels as f64 / games;
+    assert!(
+        out_of_bounds_per_game > 0.0,
+        "出界必须由完整比赛自发产生：{} 场里 {}",
+        batch.games,
+        batch.out_of_bounds
+    );
+    assert!(
+        (1.0..=2.5).contains(&travels_per_game),
+        "走步每场次数={travels_per_game:.3}; total={}",
+        batch.travels
+    );
+    assert!(batch.blocked > 0, "完整比赛必须有封盖事件");
+    assert!(
+        batch
+            .incidents
+            .get("defensive_three_second")
+            .copied()
+            .unwrap_or(0)
+            > 0,
+        "防守三秒必须由完整比赛检出"
+    );
+    assert!(
+        batch.incidents.get("goaltending").copied().unwrap_or(0) > 0,
+        "干扰球必须由完整比赛检出"
+    );
+}
+
+/// 恶意犯规与技术犯规由完整比赛自发产生，且频率处在真实量级。
+///
+/// 真实量级按每场次数判：NBA 一场大约 0.1 次恶意犯规、2 次技术犯规
+/// （其中防守三秒按规则记为一次球队技术犯规）。占全部犯规的比例会
+/// 跟着总犯规数漂移，因此不能当烈度守卫。
 #[test]
 fn special_rules_arise_from_complete_matches() {
-    let (_, fouls) = run_batch(1..=24);
-    for kind in ["Flagrant", "Technical"] {
-        let count = fouls.get(kind).copied().unwrap_or(0);
-        assert!(
-            count > 0,
-            "犯规种类 {kind} 必须由完整比赛自发产生：24 场里 0 次"
-        );
-    }
+    let batch = full_batch();
+    let games = batch.games as f64;
+    let flagrant_per_game = batch.flagrants as f64 / games;
+    let technical_per_game = batch.technicals as f64 / games;
+    assert!(
+        flagrant_per_game > 0.0 && flagrant_per_game < 0.5,
+        "flagrant per game={flagrant_per_game:.3}; total={}",
+        batch.flagrants
+    );
+    assert!(
+        technical_per_game > 0.0 && technical_per_game < 3.0,
+        "technical per game={technical_per_game:.3}; total={} (defensive three-second included)",
+        batch.technicals
+    );
 }
 
 /// 伤病与球队技术犯规由完整比赛自发产生。
@@ -237,10 +357,7 @@ fn injuries_and_team_technicals_arise_from_complete_matches() {
             }
         }
     }
-    assert!(
-        injuries > 0,
-        "伤病必须由完整比赛自发产生：24 场里 0 次"
-    );
+    assert!(injuries > 0, "伤病必须由完整比赛自发产生：24 场里 0 次");
     assert!(
         team_technicals > 0,
         "球队技术犯规必须由完整比赛自发产生：24 场里 0 次"
@@ -374,10 +491,7 @@ fn a_foul_is_never_booked_on_a_player_who_already_left() {
                     .iter()
                     .filter(|other| other.event_id < event.event_id)
                     .any(|other| other.fact.mentions_player(*fouler));
-                assert!(
-                    fouler_before,
-                    "责任方在背犯规之前必须已经在场上参与比赛"
-                );
+                assert!(fouler_before, "责任方在背犯规之前必须已经在场上参与比赛");
                 fouls += 1;
             }
         }

@@ -61,6 +61,82 @@ fn jump_fact(world: &World) -> (JumpBallKind, usize, usize, usize, TeamSide) {
         .expect("the jump-ball result must be published")
 }
 
+fn assert_opening_jump_layout(world: &World, expected_first_team: TeamSide) {
+    let center = world.rules.court.center();
+    let circle_radius = world.rules.league.jump_ball.center_circle_radius_ft;
+    let expected_ring_radius = circle_radius + world.rules.player_radius_ft;
+    let spots = world.jump_ball_procedure_spots();
+    let jumpers = match world.phase() {
+        Phase::JumpBall { home_jumper, away_jumper, .. } => [home_jumper, away_jumper],
+        _ => {
+            let pending = world.pending_jump_ball.as_ref().expect("jump-ball staging record");
+            [pending.home, pending.away]
+        }
+    };
+    assert_eq!(spots.len(), 10, "jump ball must position all ten on-court players");
+    let mut ring_counts = [0usize; 2];
+    for &(handle, spot) in spots {
+        let radial_distance = (spot - center).length();
+        if jumpers.contains(&handle) {
+            let attacking_right = if matches!(world.phase(), Phase::JumpBall { .. }) {
+                world.attacking_right(world.players[handle].team)
+            } else {
+                let next_period_attacks_right = !world.clock.period().is_multiple_of(2);
+                (world.players[handle].team == TeamSide::Home) == next_period_attacks_right
+            };
+            let expected_sign = if attacking_right { -1.0 } else { 1.0 };
+            assert!(
+                (spot.x - center.x) * expected_sign >= -0.01,
+                "jumper {} must stand in the half farthest from its basket: {spot:?}",
+                world.players[handle].id
+            );
+            assert!(radial_distance < circle_radius, "jumpers stand inside the restraining circle");
+        } else {
+            assert!(
+                radial_distance >= expected_ring_radius - 0.02,
+                "non-jumper {} must be outside the restraining circle, distance={radial_distance:.3}",
+                world.players[handle].id
+            );
+            assert!(radial_distance <= 20.0, "non-jumper must remain in the 6–20 ft band");
+            ring_counts[World::team_index(world.players[handle].team)] += 1;
+        }
+    }
+    assert_eq!(ring_counts, [4, 4]);
+    let preferred_team_direction = if world.attacking_right(expected_first_team) {
+        -1.0
+    } else {
+        1.0
+    };
+    let receiver = world.jump_ball_receivers()[World::team_index(expected_first_team)]
+        .expect("first-choice team must have a receiver");
+    let receiver_spot = spots
+        .iter()
+        .find(|(handle, _)| *handle == receiver)
+        .map(|(_, spot)| *spot)
+        .expect("receiver must have a procedure position");
+    assert!(
+        (receiver_spot - center).dot(glam::Vec2::new(preferred_team_direction, 0.0)) > 0.0,
+        "first-choice player must occupy a ring position toward the nearest basket"
+    );
+}
+
+#[test]
+fn jump_ball_positions_eight_non_jumpers_around_the_circle_and_mirrors_by_basket_direction() {
+    let first_period = nba_world(900);
+    assert_opening_jump_layout(&first_period, TeamSide::Home);
+
+    let mut second_period = nba_world(900);
+    second_period.clock.set_regulation_clock(
+        2,
+        600.0,
+        second_period.clock.shot_clock(),
+    );
+    let home_jumper = second_period.on_court(TeamSide::Home).as_slice()[0];
+    let away_jumper = second_period.on_court(TeamSide::Away).as_slice()[0];
+    second_period.stage_held_ball(home_jumper, away_jumper);
+    assert_opening_jump_layout(&second_period, TeamSide::Away);
+}
+
 #[test]
 fn the_jump_ball_tapper_is_one_of_the_two_jumpers() {
     let mut world = nba_world(901);

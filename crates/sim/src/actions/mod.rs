@@ -833,6 +833,8 @@ pub enum TurnoverKind {
     Backcourt,
     /// 背身五秒违例（NBA Rule 10 §XVI）。
     BackToBasket,
+    /// 罚球失手时球未碰筐：由篮板争抢处理，不记作违例。
+    FreeThrowMissNoRim,
 }
 
 impl TurnoverKind {
@@ -850,6 +852,7 @@ impl TurnoverKind {
             Self::Backcourt => "backcourt",
             Self::BackToBasket => "back_to_basket",
             Self::LaneViolation => "lane_violation",
+            Self::FreeThrowMissNoRim => "free_throw_miss_no_rim",
         }
     }
 }
@@ -1178,6 +1181,12 @@ pub enum Fact {
         /// 强制暂停（联赛规则在固定时点自动停表）还是主动申请的暂停。
         mandatory: bool,
     },
+    /// 跳球程序在中圈建立；与后续拍球归属事实分开。
+    JumpBallStarted {
+        kind: JumpBallKind,
+        home_jumper: usize,
+        away_jumper: usize,
+    },
     /// 跳球中，一方触球后实际确定控制球权的结果。
     JumpBall {
         kind: JumpBallKind,
@@ -1313,6 +1322,7 @@ impl Fact {
             Self::OnBallPositioningChanged { .. } => "ON_BALL_POSITIONING_CHANGED",
             Self::Ejected { .. } => "EJECTED",
             Self::Timeout { .. } => "Timeout",
+            Self::JumpBallStarted { .. } => "JumpBallStarted",
             Self::JumpBall { .. } => "JumpBall",
             Self::PeriodEnd { .. } => "PeriodEnd",
             Self::PeriodSettlementCompleted { .. } => "PeriodSettlementCompleted",
@@ -1365,6 +1375,11 @@ impl Fact {
             | Self::OnBallPositioningChanged { defender: p, .. }
             | Self::PlacementApplied { player: p, .. }
             | Self::Injury { player: p, .. } => *p == player,
+            Self::JumpBallStarted {
+                home_jumper,
+                away_jumper,
+                ..
+            } => *home_jumper == player || *away_jumper == player,
             Self::BallContact { entity: Some(p), .. } => *p == player,
             Self::DefensiveActionStarted { defender: p, .. }
             | Self::DefensiveActionPhaseChanged { defender: p, .. }

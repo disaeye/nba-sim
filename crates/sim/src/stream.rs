@@ -97,6 +97,7 @@ impl Fact {
             Self::Ejected { .. } => "EJECTED",
             Self::OnBallPositioningChanged { .. } => "ON_BALL_POSITIONING_CHANGED",
             Self::Timeout { .. } => "TIMEOUT",
+            Self::JumpBallStarted { .. } => "JUMP_BALL_STARTED",
             Self::JumpBall { .. } => "JUMP_BALL",
             Self::PeriodEnd { .. } => "PERIOD_END",
             Self::PeriodSettlementCompleted { .. } => "PERIOD_SETTLEMENT_COMPLETED",
@@ -596,6 +597,15 @@ impl World {
                 "home_remaining": remaining[0],
                 "away_remaining": remaining[1],
                 "mandatory": mandatory,
+            }),
+            Fact::JumpBallStarted {
+                kind,
+                home_jumper,
+                away_jumper,
+            } => json!({
+                "kind": format!("{kind:?}").to_lowercase(),
+                "home_jumper_id": self.player_id(*home_jumper),
+                "away_jumper_id": self.player_id(*away_jumper),
             }),
             Fact::JumpBall {
                 kind,

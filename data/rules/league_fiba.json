@@ -65,7 +65,8 @@
       "travel",
       "double_dribble",
       "free_throw_timeout",
-      "inbound_timeout"
+      "inbound_timeout",
+      "free_throw_miss_no_rim"
     ],
     "limits": {
       "offensive_three_second_seconds": 3.0,

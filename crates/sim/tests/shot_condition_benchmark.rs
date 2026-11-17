@@ -81,8 +81,12 @@ fn setup(world: &mut World, condition: &Condition) -> (usize, usize) {
     (shooter, defender)
 }
 
-/// 出手一次，返回（是否命中，模型预测的命中率，封盖是否发生，模型预测的封盖率）。
-fn shoot_once(world: &mut World, condition: &Condition, shooter: usize) -> (bool, f32, bool, f32) {
+/// 出手一次，返回命中、预测命中率、封盖、预测封盖率与干扰值。
+fn shoot_once(
+    world: &mut World,
+    condition: &Condition,
+    shooter: usize,
+) -> (bool, f32, bool, f32, f32) {
     let hoop = world.hoop_for(TeamSide::Home);
     // 移动中的出手：球手有速度，瞄准误差因此变大。
     let direction = (hoop - world.players[shooter].pos).normalize_or_zero();
@@ -121,7 +125,12 @@ fn shoot_once(world: &mut World, condition: &Condition, shooter: usize) -> (bool
                     result,
                     nba_sim_core::resolve::shot::ShotResult::Blocked { .. }
                 );
-                return (made, predicted, blocked, predicted_block);
+                let contest = world
+                    .pending_shot
+                    .as_ref()
+                    .expect("an unresolved shot retains its pending record")
+                    .contest;
+                return (made, predicted, blocked, predicted_block, contest);
             }
         }
     }
@@ -143,11 +152,14 @@ fn measure(condition: &Condition, attempts: u32, seed: u64) {
         });
         world.pending_shot = None;
         world.clock.advance_tick();
-        let (hit, p, was_blocked, p_block) = shoot_once(&mut world, condition, shooter);
+        let (hit, p, was_blocked, p_block, contest) = shoot_once(&mut world, condition, shooter);
         made += u32::from(hit);
         blocked += u32::from(was_blocked);
         predicted += f64::from(p);
         predicted_block += f64::from(p_block);
+        if condition.contest_level == 3 && was_blocked {
+            assert!(contest > 0.05, "a blocked shot must have a contest above 0.05");
+        }
     }
     let observed = made as f64 / f64::from(attempts);
     let predicted = predicted / f64::from(attempts);

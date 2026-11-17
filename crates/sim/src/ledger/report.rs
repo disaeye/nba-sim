@@ -77,10 +77,6 @@ impl GameReport {
     }
 
     /// 把另一场的统计并入本报告。
-    ///
-    /// `keep_streams` 为 false 时不保留事实流与决策快照：分布层只需要箱体、
-    /// 回合与聚合计数，过程判据读的是 `events` 与 `decision_samples`。
-    /// 判定批次在合并后会把这两类流放掉，中间过程不留副本。
     pub fn merge(&mut self, other: &GameReport) {
         if other.games > 0 && self.games == 0 {
             self.regulation_periods = other.regulation_periods;
@@ -128,16 +124,12 @@ impl GameReport {
             .extend_from_slice(&other.decision_samples);
         self.violations.extend_from_slice(&other.violations);
         // 过程判据从事实流聚合，因此聚合报告必须保留事件。
-        // 事件里的 `trace` 是局内下标，并入后要按下标偏移重映射，
-        // 否则聚合报告的决策快照会指向另一场比赛的另一手动作。
-        let offset = self.decision_traces.len() as u32;
+        let trace_offset = self.decision_traces.len() as u32;
         let start = self.events.len();
         self.events.extend_from_slice(&other.events);
-        if offset != 0 {
-            for event in &mut self.events[start..] {
-                if let Some(index) = event.trace {
-                    event.trace = Some(index + offset);
-                }
+        for event in &mut self.events[start..] {
+            if let Some(index) = event.trace {
+                event.trace = Some(index + trace_offset);
             }
         }
         self.decision_traces
@@ -148,16 +140,17 @@ impl GameReport {
         merge_lines(&mut self.box_score.away, &other.box_score.away);
     }
 
-    /// 只并入判定要读的量：箱体、回合、聚合计数与事实流。
-    ///
-    /// 决策快照（`decision_traces` 与 `decision_records`）是逐次决策的完整
-    /// 候选集，过程判据读的是 `decision_samples`，所以聚合时不需要把它们
-    /// 整批留在堆上。
+    /// 只并入门禁读取的账本、事件流与统计量。
     pub fn merge_for_gate(&mut self, other: &GameReport) {
+        let event_id_offset = self.games as u64 * (1_u64 << 40);
+        let event_start = self.events.len();
         self.merge(other);
+        for event in &mut self.events[event_start..] {
+            event.event_id = event.event_id.wrapping_add(event_id_offset);
+        }
         self.decision_traces.clear();
-        self.decision_traces.shrink_to_fit();
         self.decision_records.clear();
+        self.decision_traces.shrink_to_fit();
         self.decision_records.shrink_to_fit();
     }
 }

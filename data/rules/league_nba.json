@@ -79,7 +79,8 @@
       "double_dribble",
       "free_throw_timeout",
       "inbound_timeout",
-      "back_to_basket"
+      "back_to_basket",
+      "free_throw_miss_no_rim"
     ],
     "limits": {
       "offensive_three_second_seconds": 3.0,

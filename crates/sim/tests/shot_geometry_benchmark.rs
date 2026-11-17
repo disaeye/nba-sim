@@ -191,7 +191,7 @@ fn free_throw_matches_the_measured_reference() {
         world.pending_shot = None;
         world.possession.ball_phase = BallPhase::Catch;
         world.ball.set_held(shooter);
-        nba_sim_core::resolve::freethrow::shoot(&mut world, shooter, 1, 1, 0, false, false, 1);
+        nba_sim_core::resolve::freethrow::shoot(&mut world, shooter, 1, 1, 0, false, false, 1, None, None);
         for _ in 0..1200 {
             world.clock.advance_simulation_time(TICK_SECONDS);
             nba_sim_core::ball::step(&mut world, TICK_SECONDS);

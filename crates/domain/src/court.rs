@@ -477,4 +477,37 @@ impl Court {
         let outward = if is_home_attacking_right { -1.0 } else { 1.0 };
         Vec2::new(hoop.x + outward * distance_ft, hoop.y)
     }
+
+    /// NBA Rule 9 §I(d) 的六个限制区列位槽：每侧三个槽，距底线 7ft、
+    /// 10ft、13ft。Rule 9 指定靠底线的两槽属于防守方，紧接的两槽
+    /// 属于进攻方，第三组至多由一个防守人占据。几何函数只给槽位，
+    /// 场上人数与队伍分配由罚球程序处理。
+    /// NBA Rule 9 §I(d) 的六个罚球列位：限制区两侧各三个槽，
+    /// 横向中心线距端线 7ft、10ft、13ft；球员身体中心站在限制区线外侧。
+    pub fn free_throw_lane_slots_with_geometry(
+        is_home_attacking_right: bool,
+        geometry: CourtGeometry,
+        player_radius_ft: f32,
+    ) -> [Vec2; 6] {
+        let hoop = geometry.hoop_pos(is_home_attacking_right);
+        let baseline_x = if is_home_attacking_right { geometry.width_ft } else { 0.0 };
+        let inward = if is_home_attacking_right { -1.0 } else { 1.0 };
+        let x_scale = geometry.width_ft / COURT_WIDTH_FT;
+        let y_scale = geometry.height_ft / COURT_HEIGHT_FT;
+        let lane_half_width = LANE_HALF_WIDTH_FT * y_scale;
+        let player_radius = player_radius_ft.min(lane_half_width);
+        const DEPTH_FROM_BASELINE_FT: [f32; 3] = [7.0, 10.0, 13.0];
+        let mut slots = [Vec2::ZERO; 6];
+        for (index, slot) in slots.iter_mut().enumerate() {
+            let depth = DEPTH_FROM_BASELINE_FT[index / 2] * x_scale;
+            let y = hoop.y
+                + if index % 2 == 0 {
+                    -(lane_half_width + player_radius)
+                } else {
+                    lane_half_width + player_radius
+                };
+            *slot = Vec2::new(baseline_x + inward * depth, y);
+        }
+        slots
+    }
 }

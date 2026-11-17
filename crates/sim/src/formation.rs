@@ -390,12 +390,13 @@ pub fn move_toward_targets(world: &mut World) {
         //
         // 这道保护只在跳球程序进行中成立：比赛开始之后点位就失效了，
         // 否则场上永远有四个人被钉在圈边。
-        if let Some(spot) = world
+        let procedure_spot = world
             .jump_ball_procedure_spots()
             .iter()
+            .chain(world.free_throw_procedure_spots())
             .find(|(participant, _)| *participant == handle)
-            .map(|(_, spot)| *spot)
-        {
+            .map(|(_, spot)| *spot);
+        if let Some(spot) = procedure_spot {
             crate::assignment::force_target_as(
                 world,
                 handle,

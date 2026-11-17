@@ -615,11 +615,20 @@ fn push_process_layers(gate: &mut GateReport, report: &GameReport, params: &Para
         Bound::Floor,
     );
 
-    // 走步是脚步结算的真实产出，但它只占违例里的一小块：数量过多说明
-    // 脚步窗口给得太松，过少说明结算根本不执行。按每场计数判分布。
+    // 走步频率以去重后的权威事件身份计数。
+    let mut travel_event_ids = std::collections::BTreeSet::new();
     let travels = report
         .events
         .iter()
+        .filter(|event| {
+            matches!(
+                &event.fact,
+                Fact::Turnover {
+                    kind: crate::action::TurnoverKind::Travel,
+                    ..
+                }
+            ) && travel_event_ids.insert(event.event_id)
+        })
         .filter(|event| {
             matches!(
                 &event.fact,

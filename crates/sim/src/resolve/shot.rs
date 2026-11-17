@@ -9,6 +9,8 @@ use crate::draw::{purpose, Stream};
 use crate::resolve::{clamp01, shooter_zone};
 use crate::world::World;
 
+const MIN_BLOCKED_SHOT_CONTEST: f32 = 0.06;
+
 /// 干扰球：球在下落、水平位置还在篮筐上方的筐柱范围内时被防守人碰到，
 /// 出手直接记中。球越过最高点之前可以合法封盖，越过后就是干扰。
 pub fn check_goaltending(world: &mut World) -> bool {
@@ -233,7 +235,11 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
             // 冻结的几何时把它纠正，分值随之改判。
             let judged_three = is_three;
             let misjudged = world.judge_with_error(shooter, world.last_event_id);
-            let corrected_three = if misjudged { !judged_three } else { judged_three };
+            let corrected_three = if misjudged {
+                !judged_three
+            } else {
+                judged_three
+            };
             let delta = if corrected_three && !judged_three {
                 1
             } else if judged_three && !corrected_three {
@@ -275,8 +281,7 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     //
     // 这个决定在防守人起跳的那一刻就做出了（见 `advance_block_jumps`），
     // 因此这里读的是已经落定的应答，而不是再抽一次。
-    let response = world
-        .players[shooter]
+    let response = world.players[shooter]
         .closeout_response
         .map(|response| match response {
             "draw_contact" => CloseoutResponse::DrawContact,
@@ -298,7 +303,6 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     } else {
         "shooting_foul_rate_two_point"
     });
-    let p_foul = clamp01(base_foul_rate * (0.6 + 0.9 * contest));
     // 造犯规的那一步是主动把身体送进滞空防守人的落地路线：接触成立，
     // 犯规因此几乎必然发生。这个概率不乘在底频上，而是直接成为判罚概率。
     let initiated_contact = draw_contact
@@ -320,21 +324,6 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
         }
         None => false,
     };
-    let fouled = initiated_contact
-        || block_foul
-        || world.draw(Stream::Foul, shooter, purpose::SHOOTING_FOUL, 0) < p_foul;
-    let and_one = fouled
-        && world.draw(Stream::Foul, shooter, purpose::AND_ONE, 0)
-            < world.params.policy.w("and_one_rate");
-    let free_throws = if fouled {
-        if is_three {
-            3
-        } else {
-            2
-        }
-    } else {
-        0
-    };
     let points = if is_three { 3 } else { 2 };
     let shot_id = world.new_shot_id();
     // 瞄准误差是出手时唯一的随机结果：命中由球是否穿过筐口决定。
@@ -353,7 +342,27 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     let p_block = model.block_risk;
     let block_draw = world.draw(Stream::Aim, shooter, purpose::SHOT_BLOCK, 0);
     let block_by = model.block_hand.filter(|_| block_draw < p_block);
-
+    let contest = if block_by.is_some() {
+        contest.max(MIN_BLOCKED_SHOT_CONTEST)
+    } else {
+        contest
+    };
+    let p_foul = clamp01(base_foul_rate * (0.6 + 0.9 * contest));
+    let fouled = initiated_contact
+        || block_foul
+        || world.draw(Stream::Foul, shooter, purpose::SHOOTING_FOUL, 0) < p_foul;
+    let and_one = fouled
+        && world.draw(Stream::Foul, shooter, purpose::AND_ONE, 0)
+            < world.params.policy.w("and_one_rate");
+    let free_throws = if fouled {
+        if is_three {
+            3
+        } else {
+            2
+        }
+    } else {
+        0
+    };
     let assisted_by = world
         .possession
         .assist_candidate
@@ -594,7 +603,8 @@ pub fn finish(world: &mut World) {
         } else {
             crate::review_program::ReviewConclusion::Upheld
         };
-        world.conclude_review(game_clock_scope, conclusion)
+        world
+            .conclude_review(game_clock_scope, conclusion)
             .expect("the period-end ruling was just registered");
     }
     if at_horn && crate::review_program::is_reviewable(world, shot_clock_scope) {
@@ -617,7 +627,8 @@ pub fn finish(world: &mut World) {
         } else {
             crate::review_program::ReviewConclusion::Upheld
         };
-        world.conclude_review(shot_clock_scope, conclusion)
+        world
+            .conclude_review(shot_clock_scope, conclusion)
             .expect("the shot-clock ruling was just registered");
         waved_off = waved_off || shot_clock_violation;
     }
@@ -650,11 +661,12 @@ pub fn finish(world: &mut World) {
                 crate::review_program::ReviewTrigger::Immediate,
                 vec![pending.released_event_id],
             );
-            world.conclude_review(
-                clock_malfunction_scope,
-                crate::review_program::ReviewConclusion::Upheld,
-            )
-            .expect("the clock ruling was just registered");
+            world
+                .conclude_review(
+                    clock_malfunction_scope,
+                    crate::review_program::ReviewConclusion::Upheld,
+                )
+                .expect("the clock ruling was just registered");
         }
     }
     let made = made_ball && !waived && !waved_off;
@@ -662,17 +674,21 @@ pub fn finish(world: &mut World) {
         ShotResult::Blocked { by } => Some(by),
         _ => None,
     };
+    // 被盖是一次真实的手球接触：无论出手时模型抽到了谁，结算确认被盖
+    // 之后干扰度必须为正，账本与事实流都读同一个值。
+    let contest = if blocked_by.is_some() {
+        pending.contest.max(MIN_BLOCKED_SHOT_CONTEST)
+    } else {
+        pending.contest
+    };
     let rim_contact = matches!(result, ShotResult::Missed { rim_contact: true });
     // 二分与三分的复核在这次出手结算时落地：分值据此确定。
     let mut points = if made { pending.points } else { 0 };
     let mut is_three = pending.is_three;
     let mut tpa = pending.is_three;
-    if world
-        .review_state()
-        .pending_all()
-        .iter()
-        .any(|ruling| ruling.scope == Some(crate::review_program::ReviewScope::TwoVersusThreePoints))
-    {
+    if world.review_state().pending_all().iter().any(|ruling| {
+        ruling.scope == Some(crate::review_program::ReviewScope::TwoVersusThreePoints)
+    }) {
         let scope = crate::review_program::ReviewScope::TwoVersusThreePoints;
         world
             .conclude_immediate_review(scope)
@@ -747,6 +763,7 @@ pub fn finish(world: &mut World) {
         world.line_mut(blocker).blocks += 1;
     }
     if let Some(sample) = world.shot_samples.last_mut() {
+        sample.contest = contest;
         sample.made = made;
         sample.blocked = blocked_by.is_some();
         sample.result = match result {
@@ -756,13 +773,16 @@ pub fn finish(world: &mut World) {
             ShotResult::Blocked { .. } => "blocked",
         };
     }
+    if let Some(sample) = world.contest_samples.last_mut() {
+        *sample = contest;
+    }
     world.emit(crate::action::Fact::Shot {
         shot_id: pending.shot_id,
         shooter,
         kind: pending.kind,
         zone: pending.zone,
         distance_ft: pending.distance_ft,
-        contest: pending.contest,
+        contest,
         is_three,
         blocked_by,
         made,

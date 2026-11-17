@@ -40,6 +40,8 @@ pub enum ViolationKind {
     DoubleDribble,
     /// 罚球人没有在规定时限内出手。
     FreeThrowTimeout,
+    /// 罚球失手时球未碰筐：按篮板争抢处理，不记作违例。
+    FreeThrowMissNoRim,
     /// 发球人没有在五秒内把球传入场内。
     InboundTimeout,
     /// 背身五秒违例（NBA Rule 10 §XVI）。
@@ -58,6 +60,7 @@ impl ViolationKind {
             Self::Travel => "travel",
             Self::DoubleDribble => "double_dribble",
             Self::FreeThrowTimeout => "free_throw_timeout",
+            Self::FreeThrowMissNoRim => "free_throw_miss_no_rim",
             Self::InboundTimeout => "inbound_timeout",
             Self::BackToBasket => "back_to_basket",
         }
@@ -458,14 +461,20 @@ impl World {
                 technical_retained_team,
                 after_technical,
             } => {
-                // 每次罚球出手的时限从这一刻开始算。
+                self.stage_free_throw_procedure(
+                    shooter,
+                    technical_retained_team.is_none() && !retain_possession,
+                );
+                let walk = (self.players[shooter].pos - self.players[shooter].target).length()
+                    / self.rules.max_player_speed_ftps.max(f32::MIN_POSITIVE);
+                let interval = f64::from(self.rules.free_throw_interval_seconds());
                 self.free_throw_started = Some(self.now());
                 self.set_phase(Phase::FreeThrows {
                     shooter,
                     total,
                     remaining,
                     made,
-                    next_at: self.now() + f64::from(self.rules.free_throw_interval_seconds()),
+                    next_at: self.now() + interval.max(f64::from(walk) * 1.6 + 0.5),
                     and_one,
                     retain_possession,
                     foul_id,

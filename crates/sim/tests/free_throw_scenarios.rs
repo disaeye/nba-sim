@@ -34,21 +34,21 @@ fn live_world(seed: u64) -> World {
 
 /// 开一场罚球程序：罚球人站在罚球线上。
 fn free_throw_program(world: &mut World, shooter: usize, total: u8) {
-    world.set_phase(Phase::FreeThrows {
-        shooter,
-        total,
-        remaining: total,
-        made: 0,
-        next_at: world.now() + 0.5,
-        and_one: false,
-        retain_possession: false,
-        foul_id: 1,
-        technical_retained_team: None,
-        after_technical: None,
-    });
-    world.free_throw_started = Some(world.now());
     world.free_throw_lane = Some(nba_sim_core::world::FreeThrowLane::default());
-    world.set_ball_held(shooter);
+    world.adjudicate(nba_sim_core::adjudicate::Adjudication::new(
+        nba_sim_core::adjudicate::StoppageCause::FreeThrow,
+        nba_sim_core::adjudicate::RestartPlan::FreeThrows {
+            shooter,
+            total,
+            remaining: total,
+            made: 0,
+            and_one: false,
+            retain_possession: false,
+            foul_id: 1,
+            technical_retained_team: None,
+            after_technical: None,
+        },
+    ));
 }
 
 /// 罚球线延长线与底线之间的禁区：把一个球员放进去。
@@ -178,6 +178,8 @@ fn a_free_throw_in_flight_is_not_a_shooting_timeout() {
         false,
         false,
         1,
+        None,
+        None,
     );
     assert!(
         world.pending_shot.is_some(),
@@ -232,4 +234,49 @@ fn the_free_throw_time_limit_expires_into_a_turnover() {
         ),
         other => panic!("罚球超时之后必须停表换边，实际 {other:?}"),
     }
+}
+
+#[test]
+fn the_staging_places_the_shooter_on_the_free_throw_line() {
+    let mut world = live_world(1207);
+    let shooter = world.holder().expect("live possession has a holder");
+    free_throw_program(&mut world, shooter, 2);
+    // 列位后: 出手人目标必须是罚球线, 且距筐 13.75ft。
+    let team = world.players[shooter].team;
+    let attacking_right = world.attacking_right(team);
+    let hoop = world.hoop_for(team);
+    let line = nba_domain::court::Court::free_throw_pos_with_geometry(
+        attacking_right,
+        world.rules.free_throw_distance_ft,
+        world.rules.court,
+    );
+    let spots = world.free_throw_procedure_spots();
+    let shooter_spot = spots
+        .iter()
+        .find(|(handle, _)| *handle == shooter)
+        .map(|(_, spot)| *spot)
+        .expect("the shooter must have a staged spot");
+    assert!((shooter_spot - line).length() < 0.5, "罚球人的列位点必须是罚球线, 实际 {shooter_spot:?}");
+    let distance = f64::from((shooter_spot - hoop).length());
+    let expected = f64::from(world.rules.free_throw_distance_ft);
+    assert!((distance - expected).abs() < 0.5, "罚球人的列位点必须距筐 {expected}ft, 实际 {distance}");
+    // 普通两罚：罚球人、五名合法列位球员，其余球员站在限制区外。
+    assert_eq!(spots.len(), 10, "整队所有在场球员都应有程序站位");
+    let slots = nba_domain::court::Court::free_throw_lane_slots_with_geometry(
+        attacking_right,
+        world.rules.court,
+        world.rules.player_radius_ft,
+    );
+    let lane_spots: Vec<_> = spots
+        .iter()
+        .filter(|(handle, _)| *handle != shooter)
+        .map(|(_, spot)| *spot)
+        .collect();
+    assert_eq!(lane_spots.len(), 9);
+    for spot in &lane_spots[..5] {
+        assert!(slots.iter().any(|slot| (*slot - *spot).length() < 0.5));
+    }
+    assert!(lane_spots[5..].iter().all(|spot| {
+        !world.rules.court.is_in_lane(*spot, attacking_right)
+    }), "non-lane players stay outside the painted lane");
 }

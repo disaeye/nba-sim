@@ -100,8 +100,40 @@ fn free_throw_is_resolved_by_ball_flight_not_by_a_table_draw() {
         7,
     );
     world.players[0].pos = Vec2::new(70.0, 25.0);
+    world.possession.team = world.players[0].team;
+    world.set_phase(Phase::FreeThrows {
+        shooter: 0,
+        total: 1,
+        remaining: 1,
+        made: 0,
+        next_at: world.now(),
+        and_one: false,
+        retain_possession: false,
+        foul_id: 0,
+        technical_retained_team: None,
+        after_technical: None,
+    });
     let foul_id = world.new_foul_id();
-    freethrow::shoot(&mut world, 0, 1, 1, 0, false, false, foul_id);
+    world.adjudicate(nba_sim_core::adjudicate::Adjudication::new(
+        nba_sim_core::adjudicate::StoppageCause::FreeThrow,
+        nba_sim_core::adjudicate::RestartPlan::FreeThrows {
+            shooter: 0,
+            total: 1,
+            remaining: 1,
+            made: 0,
+            and_one: false,
+            retain_possession: false,
+            foul_id,
+            technical_retained_team: None,
+            after_technical: None,
+        },
+    ));
+    let mut steps = 0;
+    while world.ball_flight.is_none() {
+        world.step(TICK_SECONDS);
+        steps += 1;
+        assert!(steps < 200, "free throw was not released");
+    }
     assert!(world
         .pending_shot
         .as_ref()
@@ -185,11 +217,60 @@ fn an_eligible_missed_final_free_throw_enters_live_rebound_state() {
     world.players[shooter].pos = Vec2::new(70.0, 25.0);
     world.clock.set_shot_clock(9.0);
     let foul_id = world.new_foul_id();
-    freethrow::shoot(&mut world, shooter, 1, 1, 0, false, false, foul_id);
+    world.free_throw_lane = Some(nba_sim_core::world::FreeThrowLane::default());
+    world.adjudicate(nba_sim_core::adjudicate::Adjudication::new(
+        nba_sim_core::adjudicate::StoppageCause::FreeThrow,
+        nba_sim_core::adjudicate::RestartPlan::FreeThrows {
+            shooter,
+            total: 2,
+            remaining: 2,
+            made: 0,
+            and_one: false,
+            retain_possession: false,
+            foul_id,
+            technical_retained_team: None,
+            after_technical: None,
+        },
+    ));
+    let spots = world.free_throw_procedure_spots().to_vec();
+    let (jumper, jumper_spot) = spots.iter().find(|(handle, _)| *handle != shooter).copied().expect("lane player is positioned");
+    world.players[jumper].pos = jumper_spot;
+    let mut steps = 0;
+    while world.ball_flight.is_none() {
+        world.step(TICK_SECONDS);
+        steps += 1;
+        assert!(steps < 200, "free throw was not released");
+    }
     let pending = world.pending_shot.as_mut().expect("free throw pending");
     pending.result = Some(nba_sim_core::resolve::shot::ShotResult::Missed { rim_contact: true });
+    let mut ball = world.ball.clone();
+    let hoop = world.hoop_for(team);
+    ball.transition(nba_sim_core::state::BallState::Loose { pos: hoop, vel: Vec2::ZERO });
+    ball.pos = hoop;
+    ball.z = world.rules.rim_height_ft;
+    ball.vz = 0.0;
+    world.ball = ball;
     let pending = world.pending_shot.take().expect("free throw pending");
     let meta = pending.free_throw.expect("free throw metadata");
+    freethrow::finish(&mut world, pending, meta);
+    assert!(matches!(world.phase(), Phase::FreeThrows { remaining: 1, .. }));
+
+    let mut steps = 0;
+    while world.ball_flight.is_none() {
+        world.step(TICK_SECONDS);
+        steps += 1;
+        assert!(steps < 200, "second free throw was not released");
+    }
+    let pending = world.pending_shot.as_mut().expect("second free throw pending");
+    pending.result = Some(nba_sim_core::resolve::shot::ShotResult::Missed { rim_contact: true });
+    let mut ball = world.ball.clone();
+    ball.transition(nba_sim_core::state::BallState::Loose { pos: hoop, vel: Vec2::ZERO });
+    ball.pos = hoop;
+    ball.z = world.rules.rim_height_ft;
+    ball.vz = 0.0;
+    world.ball = ball;
+    let pending = world.pending_shot.take().expect("second free throw pending");
+    let meta = pending.free_throw.expect("second free throw metadata");
     freethrow::finish(&mut world, pending, meta);
 
     assert!(world.pending_rebound.is_some());
