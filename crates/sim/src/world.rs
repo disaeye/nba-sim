@@ -1131,23 +1131,45 @@ impl World {
                 }
                 let variant = self.players[player].posture_variants[index];
                 // 周期重估换的是姿态窗口的身份：旧身份结束、新身份开始。
-                // 四个槽位一律发事实，投影里的每个身份都能在事件流里
-                // 找到对应的权威记录。
-                self.emit(Fact::PostureEnded {
-                    action_id: self.players[player].posture_action_ids[index],
-                    player,
-                    slot: crate::state::posture_slot_name(slot),
-                    variant,
-                });
+                // 无球职责与持球站位的身份由各自的专用事实携带：职责与站位
+                // 就是姿态本身，轮换时发一条 from==to 的专用事实即可给出
+                // 新身份与开始时刻，无需再发一对重复的姿态生命周期事实。
                 self.next_action_id += 1;
-                self.players[player].posture_action_ids[index] = self.next_action_id;
+                let new_id = self.next_action_id;
+                let old_id = self.players[player].posture_action_ids[index];
+                self.players[player].posture_action_ids[index] = new_id;
                 self.players[player].posture_since[index] = now;
-                self.emit(Fact::PostureStarted {
-                    action_id: self.next_action_id,
-                    player,
-                    slot: crate::state::posture_slot_name(slot),
-                    variant,
-                });
+                match slot {
+                    crate::state::PostureSlot::OffBall => {
+                        self.emit(Fact::DefenseResponsibilityChanged {
+                            player,
+                            from: variant,
+                            to: variant,
+                            action_id: new_id,
+                        });
+                    }
+                    crate::state::PostureSlot::OnBall => {
+                        self.emit(Fact::OnBallPositioningChanged {
+                            defender: player,
+                            kind: variant,
+                            action_id: new_id,
+                        });
+                    }
+                    _ => {
+                        self.emit(Fact::PostureEnded {
+                            action_id: old_id,
+                            player,
+                            slot: crate::state::posture_slot_name(slot),
+                            variant,
+                        });
+                        self.emit(Fact::PostureStarted {
+                            action_id: new_id,
+                            player,
+                            slot: crate::state::posture_slot_name(slot),
+                            variant,
+                        });
+                    }
+                }
             }
         }
     }
