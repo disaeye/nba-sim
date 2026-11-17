@@ -1135,6 +1135,14 @@ pub enum Fact {
         player: usize,
         victim: usize,
     },
+    /// 封盖是防守人改变这次出手轨迹的独立事件，有稳定的事件身份。
+    /// 账本里 `Shot.blocked_by` 只是这次出手的结果字段，回放与统计
+    /// 需要一条能单独引用、能指回来源的事件。
+    Block {
+        defender: usize,
+        shooter: usize,
+        shot_id: u64,
+    },
     Substitution {
         team: TeamSide,
         incoming: usize,
@@ -1315,6 +1323,7 @@ impl Fact {
             Self::DefenseResponsibilityChanged { .. } => "DefenseResponsibilityChanged",
             Self::Turnover { .. } => "Turnover",
             Self::Steal { .. } => "Steal",
+            Self::Block { .. } => "Block",
             Self::Substitution { .. } => "Substitution",
             Self::BenchDepleted { .. } => "BenchDepleted",
             Self::FoulOutRetention { .. } => "FoulOutRetention",
@@ -1362,7 +1371,7 @@ impl Fact {
             | Self::Rebound { player: p, .. }
             | Self::LooseBallRecovered { player: p, .. }
             | Self::SecondChanceStarted { rebounder: p, .. }
-            | Self::Cut { cutter: p, .. } => *p == player,
+            | Self::Cut { cutter: p, .. }
             | Self::DribbleMove { player: p, .. }
             | Self::FakeAction { player: p, .. }
             | Self::BallProtection { player: p, .. }
@@ -1375,6 +1384,7 @@ impl Fact {
             | Self::OnBallPositioningChanged { defender: p, .. }
             | Self::PlacementApplied { player: p, .. }
             | Self::Injury { player: p, .. } => *p == player,
+            Self::Block { defender, shooter, .. } => *defender == player || *shooter == player,
             Self::JumpBallStarted {
                 home_jumper,
                 away_jumper,

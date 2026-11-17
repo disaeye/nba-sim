@@ -66,6 +66,7 @@ fn fact_kind(fact: &Fact) -> &'static str {
         Fact::DefenseResponsibilityChanged { .. } => "defense_responsibility_changed",
         Fact::Turnover { .. } => "turnover",
         Fact::Steal { .. } => "steal",
+        Fact::Block { .. } => "block",
         Fact::Substitution { .. } => "substitution",
         Fact::BenchDepleted { .. } => "bench_depleted",
         Fact::FoulOutRetention { .. } => "foul_out_retention",

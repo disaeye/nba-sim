@@ -90,6 +90,7 @@ impl Fact {
             Self::DefenseResponsibilityChanged { .. } => "DEFENSE_RESPONSIBILITY_CHANGED",
             Self::Turnover { .. } => "TURNOVER",
             Self::Steal { .. } => "STEAL",
+            Self::Block { .. } => "BLOCK",
             Self::Substitution { .. } => "SUBSTITUTION",
             Self::BenchDepleted { .. } => "BENCH_DEPLETED",
             Self::FoulOutRetention { .. } => "FOUL_OUT_RETENTION",
@@ -535,6 +536,11 @@ impl World {
             Fact::Steal { player, victim } => json!({
                 "player_id": self.player_id(*player),
                 "victim_id": self.player_id(*victim),
+            }),
+            Fact::Block { defender, shooter, shot_id } => json!({
+                "defender_id": self.player_id(*defender),
+                "shooter_id": self.player_id(*shooter),
+                "shot_id": format!("shot-{shot_id:06}"),
             }),
             Fact::Substitution {
                 team,

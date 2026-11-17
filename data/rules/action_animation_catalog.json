@@ -8,7 +8,6 @@
     "Man_Sitting",
     "Man_Standing",
     "Man_Jump",
-    "Man_SwordSlash",
     "Man_RunningJump",
     "Man_Clapping",
     "Man_Punch"
@@ -1745,7 +1744,7 @@
             "follow_through"
           ],
           "recipe_3d": {
-            "clip": "Man_SwordSlash",
+            "clip": "Man_Punch",
             "speed": 1.35,
             "loop": false
           },
@@ -1766,7 +1765,7 @@
             "follow_through"
           ],
           "recipe_3d": {
-            "clip": "Man_SwordSlash",
+            "clip": "Man_Punch",
             "speed": 1.4,
             "loop": false
           },

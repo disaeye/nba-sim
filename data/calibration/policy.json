@@ -402,6 +402,7 @@
     "drive_step_back_distance_ft": 3.0,
     "drive_kick_open_defender_ft": 9.0,
     "on_ball_reposition_interval_multiplier": 6.0,
+    "posture_window_max_seconds": 6.0,
     "contain_pressure_multiplier": 0.97,
     "charge_take_pressure_multiplier": 0.99,
     "on_ball_slide_start_ft": 8.0,

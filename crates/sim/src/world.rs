@@ -1054,10 +1054,29 @@ impl World {
         variant: &'static str,
     ) -> u64 {
         let index = slot.index();
-        if self.players[player].posture_action_ids[index] == 0 {
+        let cap = f64::from(self.params.policy.g("posture_window_max_seconds"));
+        let now = self.now();
+        let expired = self.players[player].posture_action_ids[index] != 0
+            && now - self.players[player].posture_since[index] >= cap;
+        if self.players[player].posture_action_ids[index] == 0 || expired {
+            let previous = self.players[player].posture_action_ids[index];
+            let previous_variant = self.players[player].posture_variants[index];
+            if expired && !matches!(
+                slot,
+                crate::state::PostureSlot::OffBall | crate::state::PostureSlot::OnBall
+            ) {
+                // 旧的持续姿态走完一个有界窗口：发布同样的终态事实，
+                // 账本里不会留下一个跨整场的动作窗口。
+                self.emit(Fact::PostureEnded {
+                    action_id: previous,
+                    player,
+                    slot: crate::state::posture_slot_name(slot),
+                    variant: previous_variant,
+                });
+            }
             self.next_action_id += 1;
             self.players[player].posture_action_ids[index] = self.next_action_id;
-            self.players[player].posture_since[index] = self.now();
+            self.players[player].posture_since[index] = now;
             self.players[player].posture_variants[index] = variant;
             if !matches!(
                 slot,
@@ -1077,6 +1096,49 @@ impl World {
     /// 持续姿态开始的时刻。
     pub fn posture_since(&self, player: usize, slot: crate::state::PostureSlot) -> f64 {
         self.players[player].posture_since[slot.index()]
+    }
+
+    /// 周期重估：每个仍在持续的姿态走满一个有界窗口就换一个身份。
+    ///
+    /// 姿态本身连续不变，身份与开始时刻按窗口重发。渲染与账本因此看
+    /// 到的是一串有界的持续窗口，而不是一个横跨整个回合的身份。
+    fn refresh_posture_windows(&mut self) {
+        let cap = f64::from(self.params.policy.g("posture_window_max_seconds"));
+        let now = self.now();
+        for player in 0..self.players.len() {
+            for slot in [
+                crate::state::PostureSlot::OnBall,
+                crate::state::PostureSlot::Transition,
+                crate::state::PostureSlot::OffBall,
+                crate::state::PostureSlot::Closeout,
+            ] {
+                let index = slot.index();
+                if self.players[player].posture_action_ids[index] == 0
+                    || now - self.players[player].posture_since[index] < cap
+                {
+                    continue;
+                }
+                let variant = self.players[player].posture_variants[index];
+                // 周期重估换的是姿态窗口的身份：旧身份结束、新身份开始。
+                // 四个槽位一律发事实，投影里的每个身份都能在事件流里
+                // 找到对应的权威记录。
+                self.emit(Fact::PostureEnded {
+                    action_id: self.players[player].posture_action_ids[index],
+                    player,
+                    slot: crate::state::posture_slot_name(slot),
+                    variant,
+                });
+                self.next_action_id += 1;
+                self.players[player].posture_action_ids[index] = self.next_action_id;
+                self.players[player].posture_since[index] = now;
+                self.emit(Fact::PostureStarted {
+                    action_id: self.next_action_id,
+                    player,
+                    slot: crate::state::posture_slot_name(slot),
+                    variant,
+                });
+            }
+        }
     }
 
     /// 持续姿态在这一刻结束。
@@ -2982,6 +3044,7 @@ impl World {
         // 复核程序由主循环自己推进：教练在档案允许的窗口内申请挑战，否则
         // 由裁判按档案授权的复核范围发起即时回放。
         self.review_step();
+        self.refresh_posture_windows();
         let clock_context = self.clock_context();
         self.clock.advance_tick();
         let phase_before_step = self.phase;

@@ -44,7 +44,7 @@ const CLIP_NAMES = {
   pass: "Man_Punch",
   jump: "Man_Jump",
   celebrate: "Man_Clapping",
-  steal: "Man_SwordSlash",
+  steal: "Man_Punch",
   dunk: "Man_RunningJump",
   stand: "Man_Standing",
 };
@@ -389,7 +389,9 @@ function completeClip(clip, rest, cache) {
       tracks.push(new TrackClass(name, times, frames));
     }
   }
-  const completed = new THREE.AnimationClip(clip.name, clip.duration, tracks);
+  // 剪辑时长必须与轨道覆盖的时长一致：原始 clip.duration 为 0 时
+  // 上面的补帧轨道按 1 秒铺满，这里若仍用 0，剪辑会在第一帧被截断。
+  const completed = new THREE.AnimationClip(clip.name, duration, tracks);
   cache.set(clip.name, completed);
   return completed;
 }

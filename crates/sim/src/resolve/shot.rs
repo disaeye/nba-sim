@@ -761,6 +761,13 @@ pub fn finish(world: &mut World) {
     }
     if let Some(blocker) = blocked_by {
         world.line_mut(blocker).blocks += 1;
+        // 封盖有自己的事件身份：回放与账本都能单独引用这次防守动作，
+        // 并沿 parent_event_id 指回它改变的这次出手。
+        world.emit(crate::action::Fact::Block {
+            defender: blocker,
+            shooter,
+            shot_id: pending.shot_id,
+        });
     }
     if let Some(sample) = world.shot_samples.last_mut() {
         sample.contest = contest;

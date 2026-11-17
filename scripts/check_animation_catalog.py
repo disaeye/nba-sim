@@ -23,7 +23,7 @@ anim_cat = load_json(ANIMATION_CATALOG_PATH)
 
 assert anim_cat.get("catalog_version") == 1, "动作动画目录版本不正确"
 allowed_clips = set(anim_cat.get("allowed_clips", []))
-assert len(allowed_clips) >= 11, "缺少基础动画片段列表"
+assert len(allowed_clips) >= 10, "缺少基础动画片段列表"
 
 expected_families = {fam["id"]: fam for fam in action_cat["families"]}
 actual_families = {fam["id"]: fam for fam in anim_cat["families"]}

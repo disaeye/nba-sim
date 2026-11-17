@@ -30,7 +30,7 @@ fn action_animation_catalog_covers_all_families_and_valid_recipes() {
         .iter()
         .map(|v| v.as_str().expect("clip 字符串").to_string())
         .collect();
-    assert!(allowed_clips.len() >= 11, "基础动画剪辑不足 11 个");
+    assert!(allowed_clips.len() >= 10, "基础动画剪辑不足 10 个");
 
     let families = json["families"].as_array().expect("families 数组");
     assert_eq!(families.len(), 16, "动作族数量必须严格等于 16");

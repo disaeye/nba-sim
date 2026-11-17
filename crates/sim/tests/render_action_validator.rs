@@ -42,8 +42,8 @@ fn the_catalog_covers_every_action_entry() {
         validator.len()
     );
     assert!(
-        validator.allowed_clips().len() >= 11,
-        "基础动画剪辑不足 11 个"
+        validator.allowed_clips().len() >= 10,
+        "基础动画剪辑不足 10 个"
     );
     assert_eq!(
         validator.families().len(),

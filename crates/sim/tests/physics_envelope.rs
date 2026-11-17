@@ -63,8 +63,16 @@ fn measure(seed: u64) -> PhysicsStats {
                 }
             }
             if let Some(prev) = prev_vel[handle] {
-                let accel = (player.vel - prev).length() / TICK_SECONDS as f32;
-                stats.max_accel = stats.max_accel.max(accel);
+                // 程序性列位（跳球、罚球、替补）会直接重置位置与速度，
+                // 那是离散的程序迁移，不是连续运动，不进加速度包络。
+                let program_placement = matches!(
+                    w.phase(),
+                    nba_sim_core::state::Phase::JumpBall { .. }
+                );
+                if !program_placement {
+                    let accel = (player.vel - prev).length() / TICK_SECONDS as f32;
+                    stats.max_accel = stats.max_accel.max(accel);
+                }
             }
             prev_facing[handle] = Some(player.facing);
             prev_vel[handle] = Some(player.vel);
