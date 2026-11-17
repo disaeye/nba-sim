@@ -1049,6 +1049,7 @@ impl World {
                 defensive_role: player.data.defensive_role.as_str().to_string(),
                 x: norm.x,
                 y: norm.y,
+                z: player.z,
                 zone: self.zone_for_position(player.pos, player.team),
                 has_ball: self.holder() == Some(self.player_index(&player.id)),
                 on_court: true,

@@ -17,6 +17,10 @@ pub struct RenderPlayer {
     pub defensive_role: String,
     pub x: f32,
     pub y: f32,
+    /// 脚底离地高度（英尺）。0 表示落地；跳跃成为协议事实，
+    /// 渲染端按此值表现腾空，不再从动作名猜测。
+    #[serde(default)]
+    pub z: f32,
     pub zone: String,
     #[serde(rename = "hasBall")]
     pub has_ball: bool,

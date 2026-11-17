@@ -634,22 +634,25 @@ class PlayerFigure {
     this.model.updateMatrixWorld(true);
   }
 
-  place(x, z, yaw, delta) {
+  place(x, z, yaw, delta, height = 0) {
     this.targetX = x;
     this.targetZ = z;
     if (this.renderX === undefined || delta <= 0 ||
         Math.hypot(x - this.renderX, z - this.renderZ) > RENDER_POS_SNAP_FT) {
       this.renderX = x;
       this.renderZ = z;
-      this.root.position.set(x, 0, z);
+      this.root.position.set(x, height, z);
     }
     if (!this.placed) {
       this.placed = true;
       this.yaw = yaw;
     }
     this.targetYaw = yaw;
+    this.targetHeight = height;
     const step = Math.min(1, Math.max(0, delta) * 14);
     this.yaw += shortestAngle(this.yaw, yaw) * step;
+    // 高度来自引擎的权威 z：与水平位置一样逐帧插值，不按动作名猜测。
+    this.root.position.y += (height - this.root.position.y) * step;
     this.model.rotation.y = this.yaw + this.forwardOffset;
   }
 }
@@ -1161,6 +1164,8 @@ export class Court3D {
       const nextPlayer = (nextFrame.players ?? []).find((candidate) => candidate.id === player.id) ?? player;
       const x = THREE.MathUtils.lerp(finite(player.x, 0.5), finite(nextPlayer.x, player.x ?? 0.5), alpha);
       const y = THREE.MathUtils.lerp(finite(player.y, 0.5), finite(nextPlayer.y, player.y ?? 0.5), alpha);
+      // 垂直坐标来自引擎权威投影：没有 z 的旧流退化为地面。
+      const playerZ = THREE.MathUtils.lerp(finite(player.z, 0), finite(nextPlayer.z, player.z ?? 0), alpha);
       const worldX = (x - 0.5) * courtLength;
       const worldZ = (y - 0.5) * courtWidth;
       const facingX = THREE.MathUtils.lerp(finite(player.facing_x, 0), finite(nextPlayer.facing_x, player.facing_x ?? 0), alpha);
@@ -1176,7 +1181,7 @@ export class Court3D {
         // 固定正交镜头下保留真实朝向：背对镜头就展示背面。
         yaw = Math.atan2(directionX, directionY);
       }
-      view.place(worldX, worldZ, yaw, delta);
+      view.place(worldX, worldZ, yaw, delta, playerZ);
       view.applyActiveActions(player.active_actions, performance.now());
       view.root.visible = true;
     }

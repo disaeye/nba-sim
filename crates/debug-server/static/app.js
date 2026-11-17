@@ -3938,6 +3938,17 @@
         }
       }
 
+      // 引擎的权威垂直坐标优先：z 是脚底离地高度（英尺）。有 z 的流
+      // 直接按它表现腾空，只有旧流（缺 z）才退回按动作名猜测。
+      const hasAuthoritativeZ = Number.isFinite(player.z);
+      if (hasAuthoritativeZ) {
+        const zFeet = Math.max(0, player.z);
+        const peakFeet = 3.5; // NBA 弹跳峰值参考高度
+        const ratio = Math.min(1, zFeet / peakFeet);
+        maxLift = Math.max(maxLift, ratio > 0 ? 0.9 : 0);
+        jumpHeight = maxLift * ratio;
+      }
+
       // 腾空表达：影子不动，人动。俯视视角下高度靠空地分离 +
       // 投影收缩（离天顶越远投影越小），位移为主信号。
       // 位移量级与动作绑定：扣篮 36px、盖帽 34px、跳投 30px、飞扑 20px。

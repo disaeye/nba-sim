@@ -2324,6 +2324,9 @@
           "variant": "held_ball",
           "role": "primary",
           "phases": [
+            "preparation",
+            "execution",
+            "follow_through",
             "sustained"
           ],
           "recipe_3d": {

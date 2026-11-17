@@ -254,6 +254,10 @@ pub struct PlayerState {
     pub data: PlayerData,
     pub pos: Vec2,
     pub vel: Vec2,
+    /// 垂直坐标（英尺，脚底离地高度）与垂直速度：跳跃是物理事实，
+    /// 不再由渲染端按动作名猜测。
+    pub z: f32,
+    pub vz: f32,
     pub facing: Vec2,
     pub on_court: bool,
     pub stamina: f32,
@@ -358,6 +362,8 @@ impl PlayerState {
             data,
             pos,
             vel: Vec2::ZERO,
+            z: 0.0,
+            vz: 0.0,
             facing: Vec2::X,
             on_court: false,
             stamina: 1.0,

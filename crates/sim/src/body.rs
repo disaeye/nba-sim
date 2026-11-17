@@ -244,6 +244,10 @@ pub fn integrate(world: &mut World, dt: f64) {
         }
     }
     separate(world, dt, max_speed, min_separation);
+    // 垂直积分与水平运动同 tick：起跳由权威动作状态触发，重力与落地
+    // 在这里统一推进，球员协议因此带着真实腾空高度。
+    step_vertical(world, dt);
+    trigger_action_jumps(world);
     // 持球人收球后的每一步都算一次脚步接触：走步判定读的是脚步数。
     // 接触只记账，判定在释放（出手或传球）那一刻做：走步是移动当下就
     // 成立的违例，但记账在移动层、裁决在释放层，两边读同一份脚步状态。
@@ -263,6 +267,102 @@ pub fn integrate(world: &mut World, dt: f64) {
         if delta.length() > limit {
             player.pos = world.body_before[handle] + delta.normalize_or_zero() * limit;
         }
+    }
+}
+
+/// 起跳：给球员一个垂直初速度，之后由重力积分决定腾空与落地。
+///
+/// 初速度来自球员自己的弹跳能力（`Physical::vertical_ft`），因此弹跳好的人
+/// 跳得更高。只在脚落地时能起跳，空中不能二次起跳。
+pub fn jump(world: &mut World, handle: usize, share: f32) {
+    let player = &world.players[handle];
+    if player.z > f32::MIN_POSITIVE || !player.on_court {
+        return;
+    }
+    let coefficients = crate::physical::Coefficients::from_policy(&world.params.policy);
+    let vertical = crate::physical::Physical::with(player, &coefficients).vertical_ft * share;
+    let g = world.rules.ball_gravity_ftps2.max(f32::MIN_POSITIVE);
+    // v = sqrt(2gh)：恰好升到 vertical 英尺。
+    world.players[handle].vz = (2.0 * g * vertical).sqrt();
+}
+
+/// 从上场动作状态触发起跳。跳跃的权威依据是动作窗口：跳投、上篮、
+/// 扣篮、起跳篮板、封盖等在进入 Execution 时起跳。渲染只读 z。
+fn trigger_action_jumps(world: &mut World) {
+    use crate::action::{
+        ActionKind, DefensiveActionKind, ReboundKind, ShotKind,
+    };
+    use nba_domain::action_window::ActionPhase;
+    for handle in 0..world.players.len() {
+        if !world.players[handle].on_court || world.players[handle].z > 0.0 {
+            continue;
+        }
+        let action_jump = world.players[handle]
+            .action
+            .as_ref()
+            .filter(|runtime| runtime.phase == ActionPhase::Execution)
+            .is_some_and(|runtime| {
+                match runtime.intent.kind {
+                    // 跳步收球与欧洲步是落地的脚步动作，不出手腾空；
+                    // 其余出手都是跳投或上篮扣篮，执行段离地。
+                    ActionKind::Shoot(
+                        ShotKind::ProHop | ShotKind::EuroStep,
+                    ) => false,
+                    ActionKind::Shoot(_) => true,
+                    ActionKind::Finish(_) => true,
+                    ActionKind::Rebound(ReboundKind::JumpRebound) => true,
+                    _ => false,
+                }
+            });
+        let defense_jump = world.defensive_actions[handle]
+            .as_ref()
+            .filter(|runtime| {
+                runtime.phase == ActionPhase::Execution && !runtime.completed
+            })
+            .is_some_and(|runtime| runtime.kind == DefensiveActionKind::BlockJump);
+        if action_jump || defense_jump {
+            jump(world, handle, 1.0);
+        }
+    }
+}
+
+/// 垂直积分：重力 + 落地钳制。与水平运动同 tick 推进。
+pub fn step_vertical(world: &mut World, dt: f32) {
+    let g = world.rules.ball_gravity_ftps2;
+    for player in world.players.iter_mut() {
+        if !player.on_court {
+            player.z = 0.0;
+            player.vz = 0.0;
+            continue;
+        }
+        if player.z <= 0.0 && player.vz <= 0.0 {
+            player.z = 0.0;
+            player.vz = 0.0;
+            continue;
+        }
+        player.vz -= g * dt;
+        player.z += player.vz * dt;
+        if player.z <= 0.0 {
+            player.z = 0.0;
+            player.vz = 0.0;
+        }
+    }
+}
+
+/// 帧末朝向限速：结算层的直写（罚球面向篮筐、跳球面向落点等）可能
+/// 在一帧里把朝向翻转 180°。这里按转动速率把它拉回上一帧朝向的
+/// 可达弧内，让所有朝向变更都服从同一条物理包络。
+pub fn clamp_facing(world: &mut World, dt: f64) {
+    let max_angle = world.rules.max_player_turn_rate_rad_per_sec * dt as f32;
+    for (handle, player) in world.players.iter_mut().enumerate() {
+        if !player.on_court {
+            continue;
+        }
+        let before = world.facing_before[handle];
+        if before.length_squared() <= f32::MIN_POSITIVE {
+            continue;
+        }
+        player.facing = rotate_toward(before, player.facing, max_angle);
     }
 }
 
@@ -326,7 +426,7 @@ fn step(
     player.facing = direction;
 }
 
-fn rotate_toward(from: Vec2, to: Vec2, max_angle: f32) -> Vec2 {
+pub fn rotate_toward(from: Vec2, to: Vec2, max_angle: f32) -> Vec2 {
     let cross = from.perp_dot(to);
     let dot = from.dot(to).clamp(-1.0, 1.0);
     let angle = cross.atan2(dot);

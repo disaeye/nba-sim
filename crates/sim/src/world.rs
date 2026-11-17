@@ -348,6 +348,9 @@ pub struct World {
     pub(crate) ball_history: Vec<(f64, Vec2)>,
     /// 逐 tick 运动积分的暂存缓冲，稳态不分配。
     pub(crate) body_before: Vec<Vec2>,
+    /// 上一 tick 的朝向：结算层的直写在帧末统一按转动速率限速，
+    /// 与位置/速度包络在同一处收口，避免绕过 `rotate_toward`。
+    pub(crate) facing_before: Vec<Vec2>,
     pub on_court_home: OnCourt,
     pub on_court_away: OnCourt,
 }
@@ -1449,6 +1452,7 @@ impl World {
             momentum: [f32::default(); 2],
             ball_history: Vec::with_capacity(history_capacity),
             body_before: vec![Vec2::ZERO; player_count],
+            facing_before: vec![Vec2::X; player_count],
             on_court_home: OnCourt::new(),
             on_court_away: OnCourt::new(),
         };
@@ -2954,6 +2958,11 @@ impl World {
         if self.finished {
             return;
         }
+        // 帧末朝向限速的基准：记录这一帧开始时每个球员的朝向。结算层
+        // 在本帧里的任何直写都会被拉回可达弧内。
+        for (handle, player) in self.players.iter().enumerate() {
+            self.facing_before[handle] = player.facing;
+        }
         // 复核程序由主循环自己推进：教练在档案允许的窗口内申请挑战，否则
         // 由裁判按档案授权的复核范围发起即时回放。
         self.review_step();
@@ -3045,6 +3054,7 @@ impl World {
         crate::adjudicate_incidents::adjudicate(self, &incidents);
         self.check_period_end();
         self.commit_clock_directives();
+        crate::body::clamp_facing(self, dt);
     }
 
     /// 接球阶段只在接到球后的短暂窗口内成立。
