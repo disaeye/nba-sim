@@ -1121,6 +1121,39 @@ pub fn candidate_utilities(world: &World, state: &DecisionState) -> Vec<Candidat
         }
     }
 
+    // 快攻决策：转换期（抢到篮板或断球后的前几秒）持球人优先把球送
+    // 给快下的队友，或者自己冲筐。真实比赛里转换进攻只有两三秒的
+    // 决策窗口，多打一拍就变成阵地进攻。没有这道规则，转换期会打���
+    // 四五次传球才出手，快攻因此永远产不出早出手。
+    if world.possession.kind == crate::state::PossessionKind::Live {
+        let window = world.params.policy.g("transition_window_seconds") as f64;
+        let elapsed = world.now() - world.possession.started_at;
+        if elapsed <= window {
+            let bonus = world.params.policy.w("transition_attack_bonus");
+            let hoop = world.hoop_for(world.possession.team);
+            for candidate in &mut candidates {
+                let attacks = match candidate.0 {
+                    ActionKind::Drive(_) | ActionKind::Finish(_) => true,
+                    // 转换期的空位出手也是早出手：防守人还没落位，
+                    // 空位三分与快攻上篮是同一条快攻决策的两条出路。
+                    ActionKind::Shoot(_) => state.openness() > 0.5,
+                    ActionKind::Pass(_) => {
+                        // 传给正在快下的队友：他的目标是本方篮下。
+                        candidate.1.is_some_and(|target| {
+                            world.players[target].team == world.players[state.actor].team
+                                && (world.players[target].pos - hoop).length()
+                                    < world.params.policy.g("transition_runner_ft")
+                        })
+                    }
+                    _ => false,
+                };
+                if attacks {
+                    candidate.3.tactical_bonus += bonus;
+                }
+            }
+        }
+    }
+
     // 进攻时钟不会等一个做不完的动作：剩余时间装不下的候选不成立。若
     // 全部装不下，只留最短的那个——那一次违例已经是必然结果。
     let clock = state.shot_clock;
@@ -1956,6 +1989,13 @@ fn pass_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
         &world.players[state.actor].data.attributes,
     );
     let mut best: Option<(usize, Vec2, Utility, f32)> = None;
+    // 快攻期的推进传球：转换窗口内，把球送向正在快下的队友比维持
+    // 阵地轮转更值钱。这个加成必须在逐个队友的比较里生效：它改变的是
+    // 「球给谁」，而不是给已经选定的传球再加一笔。
+    let transition = world.possession.kind == crate::state::PossessionKind::Live
+        && world.now() - world.possession.started_at
+            <= world.params.policy.g("transition_window_seconds") as f64;
+    let transition_bonus = world.params.policy.w("transition_attack_bonus");
     for teammate in &state.teammates {
         // 已建立前场控制后不把球传回后场：那是回场违例。
         if world.control.frontcourt {
@@ -2004,7 +2044,22 @@ fn pass_candidate(world: &World, state: &DecisionState, gamma: f32) -> Option<Ca
                 * weights.w("variance_choice_weight"),
             clock_cost: clock_cost(world, state.shot_clock),
             foul_cost: f32::default(),
-            tactical_bonus: f32::default(),
+            tactical_bonus: if transition {
+                // 快攻跑者：球给到他，进攻就少一次传球，转换期的快攻
+                // 才成立。跑者名单由推进程序写下，因此这是权威事实。
+                let is_runner = world
+                    .possession
+                    .break_return
+                    .iter()
+                    .any(|(runner, _)| *runner == teammate.index);
+                if is_runner {
+                    transition_bonus
+                } else {
+                    f32::default()
+                }
+            } else {
+                f32::default()
+            },
         };
         let total = utility.total(gamma);
         if best
@@ -2529,12 +2584,15 @@ fn fake_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
     // 干扰折减只改变出手的一部分价值：按出手价值的四分之一计入，
     // 否则假动作会被估成「一次没人防的出手」，在候选里压过所有真实动作。
     let fake_share = 0.25;
-    let (kind, gain) = if state.shot_clock < 9.0 {
+    let defender_moving = state
+        .primary_defender
+        .is_some_and(|defender| world.players[defender.index].vel.length() >= 3.0);
+    let (kind, gain) = if state.shot_clock < 9.0 && !defender_moving {
         (
             crate::action::FakeKind::Shot,
             quality.p_make * quality.points * policy.fake_bait_contest_relief * bait * fake_share,
         )
-    } else if state.lane_clearance < 3.0 {
+    } else if state.lane_clearance < 3.0 && state.shot_clock >= 9.0 {
         // 传球假动作的价值是下一次传球：按打开宽度占抄截半径基准的比例折算。
         let opening = (policy.fake_pass_lane_ft
             / world
@@ -2547,15 +2605,14 @@ fn fake_candidate(world: &World, state: &DecisionState) -> Option<Candidate> {
             crate::action::FakeKind::Pass,
             quality.points * 0.25 * opening * bait,
         )
-    } else if state.primary_defender.is_some_and(|defender| {
+    } else if !defender_moving && state.shot_clock >= 9.0 {
         // 防守人已经站定了：迟疑步冻结他的伸手时机。
-        world.players[defender.index].vel.length() < 3.0
-    }) {
         (
             crate::action::FakeKind::Hesitation,
             quality.p_make * quality.points * fake_share * bait,
         )
     } else {
+        // 防守人还在移动：试探步骗他迈出半步，短时钟下也成立。
         (
             crate::action::FakeKind::JabStep,
             quality.p_make * quality.points * fake_share * bait,

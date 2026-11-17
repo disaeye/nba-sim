@@ -425,6 +425,7 @@ fn release_contest(
     let team = world.players[shooter].team;
     let hoop = world.hoop_for(team);
     let policy = &world.params.policy;
+    let shape = crate::state::ContestShape::from_policy(policy);
     let mut best_contest = 0.0_f32;
     let mut best_distance = f32::INFINITY;
     for defender in world.players.iter() {
@@ -438,6 +439,7 @@ fn release_contest(
         let distance = horizontal.hypot(hand_z - release_z);
         let between = crate::state::is_between(predicted, pos, hoop);
         let contest = crate::state::contest_from_defender(
+            shape,
             distance,
             between,
             physical.reach_excess_ft(policy),

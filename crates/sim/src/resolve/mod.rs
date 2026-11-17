@@ -224,6 +224,7 @@ pub fn shooter_zone(world: &World, pos: Vec2, team: TeamSide) -> &'static str {
 pub fn contest_for(world: &World, shooter: usize, pos: Vec2) -> f32 {
     let team = world.players[shooter].team;
     let hoop = world.hoop_for(team);
+    let shape = crate::state::ContestShape::from_policy(&world.params.policy);
     let mut best = 0.0_f32;
     for (defender_index, defender) in world
         .players
@@ -238,7 +239,7 @@ pub fn contest_for(world: &World, shooter: usize, pos: Vec2) -> f32 {
         let between = crate::state::is_between(defender.pos, pos, hoop);
         let reach = crate::physical::Physical::of(defender, &world.params.policy)
             .reach_excess_ft(&world.params.policy);
-        let contest = crate::state::contest_from_defender(distance, between, reach);
+        let contest = crate::state::contest_from_defender(shape, distance, between, reach);
         // 被投篮假动作骗起的防守人不在封盖位置上：失衡窗口内的干扰折减。
         let bait_relief = match defender.bait {
             Some(bait)

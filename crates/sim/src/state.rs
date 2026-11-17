@@ -1498,6 +1498,8 @@ pub struct DecisionState {
     pub leverage: Leverage,
     /// 本方当前的势头（0 = 冷却，越大越热）。
     pub momentum: f32,
+    /// 干扰强度的几何形状：决策层读它算干扰，形状来自策略表。
+    pub contest_shape: ContestShape,
 }
 
 impl DecisionState {
@@ -1509,6 +1511,7 @@ impl DecisionState {
         match self.primary_defender {
             Some(defender) => (1.0
                 - contest_from_defender(
+                    self.contest_shape,
                     defender.distance_ft,
                     defender.between_ball_and_hoop,
                     defender.reach_excess_ft,
@@ -1523,17 +1526,47 @@ impl DecisionState {
     }
 }
 
+/// 干扰强度的几何形状：干扰随距离衰减的窗口与跨度。
+///
+/// 形状来自策略表，因此干扰的几何口径是可校准的量而不是写死的常数。
+/// 它是纯数据，因此 [`contest_from_defender`] 仍是纯函数。
+#[derive(Debug, Clone, Copy)]
+pub struct ContestShape {
+    /// 干扰完全消失的距离（英尺）：超过它就没有干扰。
+    pub window_ft: f32,
+    /// 从零干扰到满干扰跨越的距离（英尺）。
+    pub span_ft: f32,
+    /// 不在球与篮筐之间的防守人的干扰折减。
+    pub off_angle_scale: f32,
+}
+
+impl ContestShape {
+    /// 从策略表读出干扰形状。
+    pub fn from_policy(policy: &crate::params::PolicyTable) -> Self {
+        Self {
+            window_ft: policy.g("contest_distance_window_ft"),
+            span_ft: policy.g("contest_distance_span_ft"),
+            off_angle_scale: policy.w("contest_off_angle_scale"),
+        }
+    }
+}
+
 /// 干扰强度：防守人越近、越处在球与篮筐之间、摸得越高，干扰越高。
 ///
 /// `reach_excess_ft` 来自 [`crate::physical::Physical`]：摸高超出基准的
 /// 部分直接抵掉距离，所以臂展/弹跳是通过物理量而不是属性直接进公式的。
-pub fn contest_from_defender(distance_ft: f32, between: bool, reach_excess_ft: f32) -> f32 {
+pub fn contest_from_defender(
+    shape: ContestShape,
+    distance_ft: f32,
+    between: bool,
+    reach_excess_ft: f32,
+) -> f32 {
     let gap = distance_ft - reach_excess_ft;
-    let base = ((6.0 - gap) / 5.0).clamp(0.0, 1.0);
+    let base = ((shape.window_ft - gap) / shape.span_ft).clamp(0.0, 1.0);
     if between {
         base
     } else {
-        base * 0.55
+        base * shape.off_angle_scale
     }
 }
 

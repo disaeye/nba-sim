@@ -144,12 +144,15 @@ fn taller_defender_contests_from_farther() {
     }
     assert_ne!(shortest, tallest, "名单里没有身高差，测试无从比较");
     let distance = 4.0_f32;
+    let shape = nba_sim_core::state::ContestShape::from_policy(&policy);
     let short = nba_sim_core::state::contest_from_defender(
+        shape,
         distance,
         true,
         Physical::of(&world.players[shortest], &policy).reach_excess_ft(&policy),
     );
     let tall = nba_sim_core::state::contest_from_defender(
+        shape,
         distance,
         true,
         Physical::of(&world.players[tallest], &policy).reach_excess_ft(&policy),

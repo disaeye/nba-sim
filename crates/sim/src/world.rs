@@ -2845,12 +2845,28 @@ impl World {
         if self.possession.break_return.is_empty() {
             crate::formation::assign_break_targets(self, team, handler);
         }
-        self.players[handler].target = self.top_of_key(team);
+        // 抢到篮板的人已经站在本方篮下：让他退回弧顶是把快攻打散。
+        // 他已经在前场时直接冲筐，球在他手上时先看场面再决定。
+        let hoop = self.hoop_for(team);
+        let already_front = (self.players[handler].pos - hoop).length()
+            < self.params.policy.g("transition_front_court_ft");
+        self.players[handler].target = if already_front {
+            hoop
+        } else {
+            self.top_of_key(team)
+        };
         self.players[handler].target_kind = crate::state::TargetKind::Station;
         self.players[handler].target_partner = usize::MAX;
-        let advance_seconds = self.advance_seconds_to_front(handler, team);
+        let _advance_seconds = self.advance_seconds_to_front(handler, team);
+        // 快攻的首个决策立刻发生：抢到篮板或断球的人手上已经有球，
+        // 他当场就要决定是自己冲筐还是把球送出去。等推进到弧顶再决策
+        // 会把这一段全部耗掉，快攻因此永远产不出早出手。
+        //
+        // 推进时间只是球手走到前场的物理时长，不是决策的等待时间：
+        // 决策与推进同时发生，球手一边推进一边读场面。
+        let first_decision = f64::from(self.params.policy.g("transition_first_decision_seconds"));
         self.players[handler].schedule = crate::state::DecisionSchedule {
-            next_redecide_at: self.now() + advance_seconds,
+            next_redecide_at: self.now() + first_decision,
             pending: None,
         };
     }

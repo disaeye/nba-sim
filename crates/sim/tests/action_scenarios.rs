@@ -1208,19 +1208,25 @@ fn a_defensive_rebound_advances_past_midcourt_within_the_transition_window() {
             let holder_side = world
                 .holder()
                 .map(|handle| (world.players[handle].pos, world.players[handle].team));
-            if let Some((pos, side)) = holder_side {
-                if side == team {
-                    let ahead = if world.attacking_right(team) {
-                        pos.x > mid
-                    } else {
-                        pos.x < mid
-                    };
-                    if ahead {
-                        advanced += 1;
-                        pending = None;
-                        continue;
-                    }
-                }
+            let Some((pos, side)) = holder_side else {
+                // 球在空中或死球程序：这次推进的时序不再连续。
+                pending = None;
+                continue;
+            };
+            if side != team {
+                // 转换期被断球：这次推进已经不属于防守篮板方。
+                pending = None;
+                continue;
+            }
+            let ahead = if world.attacking_right(team) {
+                pos.x > mid
+            } else {
+                pos.x < mid
+            };
+            if ahead {
+                advanced += 1;
+                pending = None;
+                continue;
             }
             if elapsed > transition * 3.0 {
                 monitored += 1;
@@ -1279,6 +1285,8 @@ fn a_possession_change_sends_every_defender_back() {
                         | nba_sim_core::state::DefenseResponsibility::Deny
                         | nba_sim_core::state::DefenseResponsibility::GoOver
                         | nba_sim_core::state::DefenseResponsibility::GoUnder
+                        | nba_sim_core::state::DefenseResponsibility::Rotate
+                        | nba_sim_core::state::DefenseResponsibility::DoubleTeam
                 ) {
                     continue;
                 }

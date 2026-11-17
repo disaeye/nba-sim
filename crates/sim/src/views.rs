@@ -42,6 +42,7 @@ pub fn decision_state(world: &World) -> DecisionState {
             arrival_seconds: (*distance / defender.effective_speed(&world.params.policy)).max(0.05),
         }
     });
+    let shape = crate::state::ContestShape::from_policy(&world.params.policy);
     let teammates = world
         .on_court(team)
         .into_iter()
@@ -73,7 +74,7 @@ pub fn decision_state(world: &World) -> DecisionState {
             TeammateView {
                 index: handle,
                 pos: teammate.pos,
-                openness: crate::state::contest_from_defender(gap, false, reach),
+                openness: crate::state::contest_from_defender(shape, gap, false, reach),
                 defender_distance_ft: gap,
                 lane_clearance: crate::state::pass_lane_clearance(
                     &world.players,
@@ -112,6 +113,7 @@ pub fn decision_state(world: &World) -> DecisionState {
         elapsed_in_possession: world.now() - world.possession.started_at,
         leverage,
         momentum: world.momentum[World::team_index(team)],
+        contest_shape: shape,
     }
 }
 
