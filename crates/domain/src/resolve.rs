@@ -59,6 +59,12 @@ pub struct TechniquePolicy {
     pub fake_bait_contest_relief: f32,
     /// 投篮假动作把防守人重心拉向持球人的距离（ft）。
     pub fake_shot_displacement_ft: f32,
+    /// 传球假动作里持球人朝假目标方向跨出的距离（ft）：传球假动作不是
+    /// 纯转身，重心与中枢脚都向假方向移动。
+    pub fake_pass_step_ft: f32,
+    /// 迟疑步向篮筐方向的刺探位移（ft）：迟疑步是带球的真实脚步进退，
+    /// 零位移的迟疑只是原地站立。
+    pub hesitation_step_ft: f32,
     /// 失衡窗口内防守人抄截半径的折减（ft）。
     pub fake_pass_lane_ft: f32,
     /// 试探步的位移（ft）。
@@ -119,6 +125,8 @@ impl Default for TechniquePolicy {
             fake_bait_seconds: 0.9,
             fake_bait_contest_relief: 0.55,
             fake_shot_displacement_ft: 1.3,
+            fake_pass_step_ft: 1.2,
+            hesitation_step_ft: 1.5,
             fake_pass_lane_ft: 2.2,
             jab_step_ft: 1.1,
             protection_seconds: 1.2,

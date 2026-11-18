@@ -53,3 +53,41 @@ fn a_value_exactly_on_the_lower_band_is_inside_the_band() {
         layer.detail
     );
 }
+
+/// 门禁关闭期间，越界值仍被测量与报告，但不得阻断判定。
+#[test]
+fn an_out_of_band_value_is_reported_but_not_blocking_while_gates_are_closed() {
+    assert!(!nba_sim_core::gate::DISTRIBUTION_GATES_ENFORCED);
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let mut report = GameReport::empty();
+    report.games = 16;
+    report.box_score = BoxScore {
+        home: vec![PlayerLine::new(
+            "home-0",
+            "Home Zero",
+            "0",
+            TeamSide::Home,
+            0.5,
+        )],
+        away: vec![PlayerLine::new(
+            "away-0",
+            "Away Zero",
+            "0",
+            TeamSide::Away,
+            0.5,
+        )],
+    };
+    // 16 场 0 次加罚：相对误差 -1.0，远超带宽。
+    report.box_score.home[0].and_one = 0;
+    report.box_score.away[0].and_one = 0;
+
+    let gate = evaluate_merged(&report, &params);
+    let layer = gate
+        .layers
+        .iter()
+        .find(|layer| layer.criterion == "and_one_per_game")
+        .expect("and_one_per_game must be evaluated");
+    assert_eq!(layer.relative_error, -1.0);
+    assert!(layer.passed, "门禁关闭期间越界值不阻断判定");
+    assert!(gate.passed);
+}

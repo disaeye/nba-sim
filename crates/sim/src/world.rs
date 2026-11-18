@@ -299,6 +299,10 @@ pub struct World {
     /// 发球队员走位的时间也算在五秒之内：裁判在发球队员拿到球并准备
     /// 发球的那一刻开始计时，而那一刻是发球程序开始的时候。
     pub inbound_started_at: Option<f64>,
+    /// 活球阶段最近一次有人移动的时刻：停滞破坏者的基准。
+    pub last_live_motion_at: f64,
+    /// 停滞破坏者最近一次拉动决策的时刻：限频基准。
+    pub last_stagnation_pull_at: f64,
     /// 正在非法接触持球人的防守人：持续挡路只判一次（NBA Rule 12B §I）。
     pub hand_check_active: Option<usize>,
     pub violations: Vec<String>,
@@ -1522,6 +1526,8 @@ impl World {
             inbound_passer: None,
             inbound_spot: None,
             inbound_started_at: None,
+            last_live_motion_at: 0.0,
+            last_stagnation_pull_at: 0.0,
             hand_check_active: None,
             violations: Vec::new(),
             last_separation: None,
@@ -2771,7 +2777,9 @@ impl World {
         self.inbound_started_at = Some(self.now());
         self.cancel_actions("inbound");
         self.set_ball_held(handler);
-        crate::formation::set_targets(self, team);
+        // 列位：进攻方沿发球点到弧顶的推进路线就位，防守方回防。推进的
+        // 剩余路程在活球阶段真实跑完，比赛钟不再被停表冲刺预支。
+        crate::formation::stage_inbound_advance(self, team, inbound_spot, handler);
         // 发球队员必须自己走到发球点，不能被瞬移过去：瞬移会让球员在
         // 回合之间跳几十英尺，看起来像系统重排而不是真实移动。
         self.players[handler].target = inbound_spot;
@@ -3067,6 +3075,106 @@ impl World {
         self.possession.id = 0;
     }
 
+    /// 停滞破坏者：活球阶段全场无人移动超过阈值时，把进攻方的决策期限
+    /// 拉到当下。
+    ///
+    /// 真实的活球比赛不存在全员静止：持球人运球试探、无球人跑位、防守人
+    /// 滑步。任何一层的定时器把所有位移同时压住的窗口都违背比赛逻辑。
+    /// 决策层照常评估——破坏者只把评估提前，不代替决策。
+    fn break_live_stagnation(&mut self) {
+        let threshold = f64::from(self.params.policy.g("live_stagnation_seconds"));
+        // 重复拉动的最小间隔：决策评估本身需要时间生效，逐 tick 重拉只会
+        // 消耗抽样序列。
+        const REPULL_INTERVAL: f64 = 0.4;
+        let now = self.now();
+        if self.last_live_motion_at == 0.0 {
+            self.last_live_motion_at = now;
+            return;
+        }
+        let mut fastest = 0.0f32;
+        for handle in self
+            .on_court_home
+            .as_slice()
+            .iter()
+            .chain(self.on_court_away.as_slice())
+        {
+            fastest = fastest.max(self.players[*handle].vel.length());
+        }
+        if fastest >= 1.0 {
+            self.last_live_motion_at = now;
+            return;
+        }
+        // 球在飞行中：接应与卡位由飞行结算驱动，等待不算停滞。
+        if self.ball_flight.is_some() {
+            self.last_live_motion_at = now;
+            return;
+        }
+        if now - self.last_live_motion_at < threshold
+            || now - self.last_stagnation_pull_at < REPULL_INTERVAL
+        {
+            return;
+        }
+        let team = self.possession.team;
+        for handle in self.on_court(team).as_slice() {
+            self.players[*handle].schedule.next_redecide_at = now;
+        }
+        if let Some(holder) = self.holder() {
+            self.players[holder].schedule.next_redecide_at = now;
+        }
+        // 决策拉动之外，再给一个可介入的球员一个真实的横向刺探位移：
+        // 持球人运球试探或无球人晃动抢位。被投篮、传球、突破这类有自己的
+        // 位移目标的动作占住的球员不可打断。
+        let probe_step = f32::from(self.params.policy.g("stagnation_probe_ft"));
+        let probe_eligible = |world: &World, handle: usize| {
+            world.players[handle]
+                .action
+                .as_ref()
+                .is_none_or(|runtime| {
+                    matches!(
+                        runtime.intent.kind,
+                        crate::action::ActionKind::Fake(_)
+                            | crate::action::ActionKind::Protect(_)
+                            | crate::action::ActionKind::Dribble(_)
+                    ) && runtime.phase != nba_domain::action_window::ActionPhase::Execution
+                })
+        };
+        let probe_handle = self
+            .holder()
+            .filter(|holder| probe_eligible(self, *holder))
+            .or_else(|| {
+                self.on_court(team)
+                    .as_slice()
+                    .iter()
+                    .copied()
+                    .find(|handle| probe_eligible(self, *handle))
+            });
+        if let Some(handle) = probe_handle {
+            let facing = self.players[handle].facing;
+            let lateral = if self.next_action_id.is_multiple_of(2) {
+                glam::Vec2::new(-facing.y, facing.x)
+            } else {
+                glam::Vec2::new(facing.y, -facing.x)
+            };
+            let margin = self.rules.player_radius_ft * 2.0;
+            let width = self.rules.court.width_ft;
+            let height = self.rules.court.height_ft;
+            let target = self.players[handle].pos + lateral * probe_step;
+            let target = glam::Vec2::new(
+                target.x.clamp(margin, width - margin),
+                target.y.clamp(margin, height - margin),
+            );
+            crate::assignment::force_target_as(
+                self,
+                handle,
+                target,
+                crate::state::TargetKind::Window,
+                handle,
+            );
+        }
+        // 不重置位移时刻：若拉动与刺探后仍无人移动，下一个周期继续。
+        self.last_stagnation_pull_at = now;
+    }
+
     pub fn decision_state(&self) -> DecisionState {
         crate::views::decision_state(self)
     }
@@ -3146,6 +3254,9 @@ impl World {
             self.advance_movement(dt);
         }
         crate::resolve::poke::step(self, dt);
+        if matches!(phase_before_step, Phase::Live) {
+            self.break_live_stagnation();
+        }
         crate::resolve::offball::step(self, dt);
         self.check_hand_check(dt);
         crate::ball::step(self, dt);

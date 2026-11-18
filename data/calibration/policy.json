@@ -221,6 +221,7 @@
     "loose_ball_catch_base_ft": 1.1,
     "loose_ball_catch_skill_ft": 0.8,
     "loose_ball_pickup_delay_seconds": 0.75,
+    "loose_ball_floor_pickup_seconds": 1.2,
     "foul_trouble_first": 2.0,
     "foul_trouble_second": 3.0,
     "foul_trouble_third": 4.0,
@@ -358,7 +359,9 @@
     "defense_reaction_delay_seconds": 0.25,
     "help_gain_blend_ft": 3.0,
     "ball_history_seconds": 3.0,
-    "possession_setup_seconds": 8.5,
+    "possession_setup_seconds": 1.5,
+    "live_stagnation_seconds": 0.8,
+    "stagnation_probe_ft": 2.0,
     "catch_hold_seconds": 0.8,
     "momentum_decay_per_second": 0.25,
     "shot_slack_end_seconds": 5.0,
@@ -482,6 +485,6 @@
     "post_step_push_ft": 0.5,
     "hand_check_pressure_ft": 1.2,
     "break_sprint_tendency_gain_ftps": 0.8,
-    "oreb_crash_tendency_floor": 0.6
+    "loose_ball_pursuit_value_seconds": 1.8
   }
 }

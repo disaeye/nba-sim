@@ -70,14 +70,36 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: FakeKind) -> Acti
                     displacement = step;
                 }
                 FakeKind::Pass => {
-                    // 传球假动作把防守人的重心引向假目标：他转向，
-                    // 真实传球线路上的手位因此离开线路。
+                    // 传球假动作把防守人的重心引向假目标：他转向并朝假方向
+                    // 踏出半步，持球人也朝假方向跨出中枢脚——两者都是
+                    // 真实的脚步位移，由移动层按速度走完。
                     let fake = intent
                         .target
                         .filter(|target| *target < world.players.len())
                         .unwrap_or(actor);
                     let aim = world.players[fake].pos - world.players[defender].pos;
                     world.players[defender].facing = aim.normalize_or_zero();
+                    let step = policy.fake_pass_step_ft;
+                    let holder_dir = (world.players[fake].pos - world.players[actor].pos)
+                        .normalize_or_zero();
+                    let holder_target = world.players[actor].pos + holder_dir * step;
+                    crate::assignment::force_target_as(
+                        world,
+                        actor,
+                        holder_target,
+                        crate::state::TargetKind::Window,
+                        actor,
+                    );
+                    let defender_target =
+                        world.players[defender].pos + aim.normalize_or_zero() * step * 0.5;
+                    crate::assignment::force_target_as(
+                        world,
+                        defender,
+                        defender_target,
+                        crate::state::TargetKind::Window,
+                        actor,
+                    );
+                    displacement = step;
                 }
                 FakeKind::Hesitation => {
                     // 迟疑步是运球技术，不走这条假动作路径。

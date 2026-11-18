@@ -244,6 +244,106 @@ pub fn set_targets(world: &mut World, offense: TeamSide) {
     }
 }
 
+/// 发球回合的推进列位。
+///
+/// 真实篮球里接发球方在停表期间只推进到中线附近，接应人在发球点前
+/// 接球，剩余推进在活球阶段完成。若停表期间就把整队摆到前场半场位，
+/// 活球开始时全员已到达终点，比赛钟与进攻钟被一段无人移动的空转消耗。
+/// 因此进攻方列位于发球点到弧顶的推进路线上，接应人（主控）最靠前，
+/// 其余四人按远近散开；防守方照常回防到半场防守位——退防在停表期间
+/// 完成符合真实比赛。
+pub fn stage_inbound_advance(world: &mut World, offense: TeamSide, spot: Vec2, passer: usize) {
+    let key = top_of_key(world, offense);
+    let width = world.rules.court.width_ft;
+    let height = world.rules.court.height_ft;
+    let margin = world.rules.player_radius_ft;
+    let delta = key - spot;
+    let total = delta.length().max(f32::MIN_POSITIVE);
+    let dir = delta / total;
+    let perp = Vec2::new(-dir.y, dir.x);
+    // 接应人在发球点前约 12~15ft，其余人沿推进路线散开，最远的接近弧顶。
+    let fractions = [0.2, 0.42, 0.62, 0.8, 1.0];
+    let laterals = [4.0, 12.0, -12.0, 18.0, -18.0];
+    let mut staged: Vec<Vec2> = fractions
+        .iter()
+        .zip(laterals)
+        .map(|(fraction, lateral)| {
+            let point = spot + dir * (total * fraction) + perp * lateral;
+            Vec2::new(
+                point.x.clamp(margin * 2.0, width - margin * 2.0),
+                point.y.clamp(margin * 2.0, height - margin * 2.0),
+            )
+        })
+        .collect();
+    let catch_spot = staged[0];
+    let mut open_spots: Vec<Vec2> = staged.drain(1..).collect();
+
+    // 防守方回防到半场防守位。
+    let defense = defense_spots(&world.params.formations, world.attacking_right(offense));
+    let mut defense_index = 0;
+    let defense_targets: Vec<(usize, Vec2)> = world
+        .on_court(offense.other())
+        .into_iter()
+        .map(|handle| {
+            let spot = defense[defense_index.min(defense.len() - 1)];
+            defense_index += 1;
+            (handle, spot)
+        })
+        .collect();
+    for (handle, target) in defense_targets {
+        crate::assignment::force_target(world, handle, target);
+        world.players[handle].home_spot = target;
+    }
+
+    // 接应人优先主控；主控就是发球人时，接应交给控球能力次高的在场队友。
+    let offense_players = world.on_court(offense);
+    let receiver = offense_players
+        .as_slice()
+        .iter()
+        .copied()
+        .filter(|handle| *handle != passer)
+        .max_by(|a, b| {
+            let score = |handle: usize| {
+                world.players[handle].data.attributes.ball_handling * 2.0
+                    + world.players[handle].data.attributes.passing
+            };
+            score(*a)
+                .partial_cmp(&score(*b))
+                .expect("finite scores")
+        })
+        .expect("inbound offense must have a receiver besides the passer");
+    crate::assignment::force_target(world, receiver, catch_spot);
+    world.players[receiver].home_spot = catch_spot;
+
+    // 其余四人按就近原则分配剩余列位点，避免路线交叉。
+    let mut remaining: Vec<usize> = offense_players
+        .as_slice()
+        .iter()
+        .copied()
+        .filter(|handle| *handle != passer && *handle != receiver)
+        .collect();
+    while !remaining.is_empty() && !open_spots.is_empty() {
+        let (best_player, best_spot, _) = remaining
+            .iter()
+            .flat_map(|handle| {
+                open_spots
+                    .iter()
+                    .enumerate()
+                    .map(move |(index, spot)| (*handle, index, *spot))
+            })
+            .min_by(|a, b| {
+                (world.players[a.0].pos - a.2)
+                    .length_squared()
+                    .total_cmp(&(world.players[b.0].pos - b.2).length_squared())
+            })
+            .expect("nonempty product");
+        let spot = open_spots.remove(best_spot);
+        crate::assignment::force_target(world, best_player, spot);
+        world.players[best_player].home_spot = spot;
+        remaining.retain(|handle| *handle != best_player);
+    }
+}
+
 /// 替补席位置。替补在场边等待，换人后从场边走向目标点。
 pub fn bench_spot(world: &World, team: TeamSide, bench_index: usize) -> Vec2 {
     let width = world.rules.court.width_ft;

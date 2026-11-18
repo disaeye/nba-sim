@@ -30,6 +30,39 @@ pub struct PendingRebound {
     pub box_out_count: u8,
 }
 
+/// 活球追球的价值判定。
+///
+/// 球权是全部进攻的前提：掌控活球就等于发起（或终结）一次进攻。每个
+/// 球员按「球权价值 − 行程成本」决定追不追：
+///
+/// - 价值用「值得为此跑多少秒」计价，由本人的抢球意愿折算。防守方拿下
+///   篮板即终结对方回合并开始转换，但外线防守人的替代选择是退防安全，
+///   意愿由防守篮板倾向给出；进攻方拿球是二次进攻机会，价值按本人的
+///   冲抢倾向折算——倾向就是他对「冲抢价值 − 退防价值」的权衡，因此
+///   同一个球在不同人脚下的追球半径不同。
+/// - 成本是到球的行程时间，由距离与本人的移动速度决定：速度快的球员
+///   成本低，同等距离下先到场的人先追。
+///
+/// 球在脚边时行程成本趋于零，任何倾向下价值都盖过成本，因此人人都会
+/// 捡起；距离远时只有价值高的人追，其余人保持阵形。这些行为都从同一
+/// 个效用比较里涌现，没有统一的距离常数。
+fn pursuit_worth(world: &World, handle: usize, is_defender: bool) -> bool {
+    let base = world.params.policy.g("loose_ball_pursuit_value_seconds");
+    let player = &world.players[handle];
+    let value = if is_defender {
+        // 外线防守人的替代选择是退防安全，只有抢球意愿高的人把追球当作
+        // 首选：意愿由防守篮板倾向给出，与进攻方的冲抢倾向对称。
+        base * player.attribute("defensive_rebound") * 1.2
+    } else {
+        base * player.data.tendencies.offensive_rebound_frequency
+    };
+    let speed = player
+        .effective_speed(&world.params.policy)
+        .max(f32::MIN_POSITIVE);
+    let travel_seconds = (world.ball.pos - player.pos).length() / speed;
+    value > travel_seconds
+}
+
 pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_contact: bool) {
     // 回合已经结束（节末、终场）：这次投失不再产生活球篮板。
     if world.possession.id == 0 {
@@ -45,23 +78,19 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
     let mut box_out_count = 0u8;
     // 篮板活球建立后解除程序站位，所有人开始追球。
     world.clear_free_throw_spots();
-    // 所有场上球员都向球移动；防守人先占篮下卡位，随后再抢球。
+    // 追球由球权价值驱动：掌控活球就等于发起（或终结）一次进攻，这是
+    // 全部战术的前提。每个球员按「球权价值 − 行程成本」自行决定追不追
+    // （见 [`pursuit_worth`]）：防守人拿下篮板即终结对方回合并开始转换；
+    // 进攻人拿球是二次进攻机会，价值按本人的冲抢倾向折算——倾向就是他
+    // 对「冲抢价值 − 退防价值」的权衡。
     for handle in 0..world.players.len() {
         if !world.players[handle].on_court {
             continue;
         }
         let distance = (world.players[handle].pos - ball_pos).length();
-        // 冲抢篮板倾向决定进攻人冲不冲这一球：愿意冲的去抢球，不愿意的
-        // 守在原位，因此自然抢不到。倾向改的是落点，不是伸手范围——伸手
-        // 范围里再加一项会与防守篮板属性在同一场争抢里直接抵消，把防守
-        // 篮板属性的效应量压掉一半。
-        let crashes = world.players[handle].team != offense
-            || world.players[handle]
-                .data
-                .tendencies
-                .offensive_rebound_frequency
-                >= world.params.policy.g("oreb_crash_tendency_floor");
-        world.players[handle].target = if crashes {
+        let is_defender = world.players[handle].team != offense;
+        let chases = pursuit_worth(world, handle, is_defender);
+        world.players[handle].target = if chases {
             ball_pos
         } else {
             world.players[handle].pos
@@ -277,14 +306,22 @@ pub fn resolve_turnover(world: &mut World) {
     if world.possession.id == 0 {
         return;
     }
+    // 传球战术已经死了：活球落地，双方都去追球。接应人若还挂着原来的
+    // 跑位动作，他的动作目标会压过追球目标，球就总被旁边的防守人拿走。
+    world.cancel_actions("loose_ball");
     let ball_pos = world.ball.pos;
+    // 追球同样由球权价值驱动（见 [`pursuit_worth`]）：失误松球与投篮
+    // 松球是同一种机会，价值与成本的比较也是同一套。
     for handle in 0..world.players.len() {
         if !world.players[handle].on_court {
             continue;
         }
-        world.players[handle].target = ball_pos;
-        world.players[handle].target_kind = TargetKind::Window;
-        world.players[handle].target_partner = handle;
+        let is_defender = world.players[handle].team != world.possession.team;
+        if pursuit_worth(world, handle, is_defender) {
+            world.players[handle].target = ball_pos;
+            world.players[handle].target_kind = TargetKind::Window;
+            world.players[handle].target_partner = handle;
+        }
     }
     // 地板球争抢：松球在地上，离球最近的两名球员（每队一名）趴下去抢。
     // 十个人一起扑向球不是地板球争抢，而是十个人一起丢了自己的位置：

@@ -598,7 +598,16 @@ fn try_control_loose(world: &mut World) {
         return;
     }
     // 争抢能力先按可伸手高度折算到球心所在高度，再与平面距离合成。
-    let force_pickup = elapsed > 2.0;
+    // 地板球在人群脚下会被直接捡起：球贴地且无人够到时，短时限后任何
+    // 人都可收走——真实比赛里脚边的活球在不到一秒内就被捡走；伸手半径
+    // 小于站位间距时，等待两秒只会造成全员围观活球的静止窗口。
+    let floor_ball = world.ball.z <= world.rules.ball_radius_ft + 0.5;
+    let force_pickup = elapsed > 2.0
+        || (floor_ball
+            && elapsed
+                > f64::from(
+                    world.params.policy.w("loose_ball_floor_pickup_seconds"),
+                ));
     let base = world.params.policy.w("loose_ball_catch_base_ft");
     let skill = world.params.policy.w("loose_ball_catch_skill_ft");
     let mut best: Option<(usize, f32)> = None;

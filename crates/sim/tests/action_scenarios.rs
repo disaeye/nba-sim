@@ -1277,7 +1277,8 @@ fn a_possession_change_sends_every_defender_back() {
                     continue;
                 }
                 // 追防与盯防持球人的防守人要贴住自己的人：他们在进攻方的
-                // 半场是正常的。
+                // 半场是正常的。拦截人的站位是传球线路上的几何点，球权
+                // 转换后新进攻常从后场深处理球，线路点因此可以越过中线。
                 if matches!(
                     player.defense_responsibility,
                     nba_sim_core::state::DefenseResponsibility::Recover
@@ -1287,6 +1288,7 @@ fn a_possession_change_sends_every_defender_back() {
                         | nba_sim_core::state::DefenseResponsibility::GoUnder
                         | nba_sim_core::state::DefenseResponsibility::Rotate
                         | nba_sim_core::state::DefenseResponsibility::DoubleTeam
+                        | nba_sim_core::state::DefenseResponsibility::Intercept
                 ) {
                     continue;
                 }

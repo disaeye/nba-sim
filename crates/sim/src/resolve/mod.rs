@@ -171,7 +171,8 @@ fn resolve_dribble(
                 );
             }
             DribbleMoveKind::Hesitation => {
-                // 迟疑步冻结防守人的伸手时机：留下一个短失衡窗口。
+                // 迟疑步冻结防守人的伸手时机：留下一个短失衡窗口，同时
+                // 持球人向篮筐方向刺探一小步——迟疑是带球的真实脚步进退。
                 let until =
                     world.now() + f64::from(world.rules.resolve.technique.fake_bait_seconds) * 0.5;
                 world.players[defender].bait = Some(crate::state::Bait {
@@ -179,6 +180,17 @@ fn resolve_dribble(
                     until,
                     displacement_ft: 0.0,
                 });
+                let hoop = world.hoop_for(world.players[actor].team);
+                let towards = (hoop - world.players[actor].pos).normalize_or_zero();
+                let step = world.rules.resolve.technique.hesitation_step_ft;
+                let probe = world.players[actor].pos + towards * step;
+                crate::assignment::force_target_as(
+                    world,
+                    actor,
+                    probe,
+                    crate::state::TargetKind::Window,
+                    actor,
+                );
             }
             DribbleMoveKind::DirectDrive | DribbleMoveKind::Advance => {}
         }

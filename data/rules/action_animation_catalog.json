@@ -1189,6 +1189,9 @@
           "variant": "post_protect",
           "role": "primary",
           "phases": [
+            "preparation",
+            "execution",
+            "follow_through",
             "sustained"
           ],
           "recipe_3d": {

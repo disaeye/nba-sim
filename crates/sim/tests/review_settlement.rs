@@ -244,14 +244,15 @@ fn an_overturned_ruling_flips_possession_and_keeps_the_original_event() {
         .iter()
         .find_map(|event| match &event.fact {
             Fact::Review {
-                call, overturned, ..
-            } => Some((*call, *overturned, event.source_event_ids.clone())),
+                call: "last_touch",
+                overturned,
+                ..
+            } => Some((*overturned, event.source_event_ids.clone())),
             _ => None,
         })
         .expect("复核结论必须发布");
-    assert_eq!(review.0, "last_touch");
-    assert!(review.1, "认定出错时必须改判");
-    assert_eq!(review.2, source_ids, "复核事实必须引用原判的来源事件");
+    assert!(review.0, "认定出错时必须改判");
+    assert_eq!(review.1, source_ids, "复核事实必须引用原判的来源事件");
 }
 
 #[test]
