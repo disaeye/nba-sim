@@ -435,6 +435,7 @@ pub fn role_identity(role: ActionIntentRole) -> ActionRole {
     match role {
         ActionIntentRole::Primary => ActionRole::Primary,
         ActionIntentRole::ScreenPartner => ActionRole::Screener,
+        ActionIntentRole::HandlerPartner => ActionRole::Primary,
         ActionIntentRole::CutPartner => ActionRole::CutPartner,
     }
 }

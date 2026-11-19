@@ -127,8 +127,16 @@ pub fn integrate(world: &mut World, dt: f64) {
             });
         let mut target =
             runtime.map_or(world.players[handle].target, |runtime| match runtime.role {
+                // 掩护动作的落点是掩护人站位的那个点：持球人点名的掩护，
+                // 持球人走的是自己原来的路线，他绕过的是掩护人。因此两种
+                // 发起方向下，主执行人都保留自己的落点。
+                crate::action::ActionIntentRole::Primary
+                    if matches!(runtime.intent.kind, crate::action::ActionKind::Screen(_)) => {
+                    world.players[handle].target
+                }
                 crate::action::ActionIntentRole::Primary => runtime.intent.to_ft,
-                crate::action::ActionIntentRole::CutPartner
+                crate::action::ActionIntentRole::HandlerPartner
+                | crate::action::ActionIntentRole::CutPartner
                 | crate::action::ActionIntentRole::ScreenPartner => world.players[handle].target,
             });
         // 只有扑防在执行窗口里接管落点：扑防要扑到球那里去。站位动作

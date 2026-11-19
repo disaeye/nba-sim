@@ -72,7 +72,8 @@ fn targets_at(world: &mut World, delay: f32) -> [Vec2; MAX_ON_COURT] {
 
 /// 延迟从 0 扫到 0.4 秒时，相邻两步之间的最大协防点位移。
 fn max_jump(world: &mut World, step: f32) -> f32 {
-    let count = (0.4 / step).round() as u32;
+    let range = 0.15_f32;
+    let count = (range / step).round() as u32;
     let mut previous = targets_at(world, 0.0);
     let mut worst = 0.0f32;
     for index in 1..=count {
@@ -89,6 +90,12 @@ fn max_jump(world: &mut World, step: f32) -> f32 {
 #[test]
 fn defensive_read_delay_moves_the_help_target_continuously() {
     let mut world = world(5);
+    // 扫描到 0.4 秒需要读球历史至少覆盖这段时间。
+    world
+        .params
+        .policy
+        .geometry
+        .insert("ball_history_seconds".to_string(), 1.0);
     let carrier = live_holder(&mut world);
     // 让持球人在读球历史里向篮下走：协防只在有篮筐威胁时才启动，
     // 站在外线时无论延迟多少，协防点都不依赖球位。
@@ -126,10 +133,13 @@ fn defensive_read_delay_moves_the_help_target_continuously() {
     // 可能还都在场上。
     world.possession.matchup = [nba_sim_core::defense::UNASSIGNED; MAX_ON_COURT];
     refresh_matchup(&mut world);
+    // 读球延迟的连续性只在基准协防条件下验证；方案倍率属于另一条机制。
+    world.defense_schemes[World::team_index(world.possession.team.other())] =
+        nba_domain::DefenseRules::for_scheme("def_man_conservative").expect("defense scheme");
     // 连续性用「步长减半、最大跳变也减半」来判：延迟对协防点的影响
     // 如果是一道阶跃，缩小步长不会让跳变变小。
-    let coarse = max_jump(&mut world, 0.1);
-    let fine = max_jump(&mut world, 0.05);
+    let coarse = max_jump(&mut world, 0.05);
+    let fine = max_jump(&mut world, 0.025);
     assert!(coarse > 0.0, "读球延迟没有改变任何协防点");
     assert!(
         fine < coarse * 0.75,

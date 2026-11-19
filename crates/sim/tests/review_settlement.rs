@@ -235,12 +235,15 @@ fn an_overturned_ruling_flips_possession_and_keeps_the_original_event() {
         .expect("the ruling is on record")
         .source_event_ids
         .clone();
+    // 推进到第四节时比赛自己可能产生过别的复核结论；这里只检查本次挑战
+    // 新发布的结论，避免找到上一回合的同名复核事实。
+    let events_before = world.events.len();
     world
         .request_challenge(TeamSide::Away)
         .expect("挑战必须受理");
     assert_eq!(world.possession.team, TeamSide::Away, "改判必须翻转球权");
     let review = world
-        .events
+        .events[events_before..]
         .iter()
         .find_map(|event| match &event.fact {
             Fact::Review {

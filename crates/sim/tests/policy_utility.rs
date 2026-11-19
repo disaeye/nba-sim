@@ -169,7 +169,23 @@ fn a_closer_defender_lowers_the_shot_epv() {
 
 #[test]
 fn a_clearer_pass_lane_raises_the_pass_epv() {
-    let mut world = live_world(13);
+    let mut selected = None;
+    for seed in 1..=20u64 {
+        let mut candidate = live_world(seed);
+        let holder = candidate.decision_state().actor;
+        let team = candidate.players[holder].team;
+        let clear = candidate.hoop_for(team);
+        for defender in candidate.on_court(team.other()).as_slice().to_vec() {
+            candidate.players[defender].pos = clear;
+            candidate.players[defender].target = clear;
+        }
+        nba_sim_core::opportunity::remember(&mut candidate, holder);
+        if pass_epv(&candidate).is_some() {
+            selected = Some(candidate);
+            break;
+        }
+    }
+    let mut world = selected.expect("some live decision must offer a pass");
     let state = world.decision_state();
     let holder = state.actor;
     let team = world.players[holder].team;
@@ -179,6 +195,7 @@ fn a_clearer_pass_lane_raises_the_pass_epv() {
         world.players[defender].pos = clear;
         world.players[defender].target = clear;
     }
+    nba_sim_core::opportunity::remember(&mut world, holder);
     let open = pass_epv(&world).expect("a pass must be a candidate");
 
     // 在每一条传球线路的中点都放一个防守人：所有目标的可接球质量同时下降。
@@ -198,6 +215,7 @@ fn a_clearer_pass_lane_raises_the_pass_epv() {
         world.players[defender].pos = (world.players[holder].pos + target) / 2.0;
         world.players[defender].target = world.players[defender].pos;
     }
+    nba_sim_core::opportunity::remember(&mut world, holder);
     let blocked = pass_epv(&world).expect("a pass must be a candidate");
     assert!(
         blocked < open,

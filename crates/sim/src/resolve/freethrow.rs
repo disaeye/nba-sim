@@ -8,7 +8,7 @@ use crate::resolve::shot::{PendingShot, ShotResult};
 use crate::state::BallState;
 use crate::world::World;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum FreeThrowFollowUp {
     Attempts {
         shooter: usize,
@@ -24,7 +24,7 @@ pub enum FreeThrowFollowUp {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct FreeThrowMeta {
     pub total: u8,
     pub remaining: u8,
@@ -262,6 +262,7 @@ fn start_free_throw_action(world: &mut World, shooter: usize) {
         action_id,
         interaction_id,
         player: shooter,
+        role: crate::action::ActionIntentRole::Primary,
         kind: "FreeThrow",
         target: None,
     });

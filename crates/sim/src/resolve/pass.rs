@@ -49,45 +49,25 @@ pub fn resolve(
     world.last_pass_kind = Some(kind);
     let now = world.now();
     let rules = world.rules.clone();
-    let from_player = world.players[from].clone();
-    let mut to_player = world.players[to].clone();
-    // 高吊球在空中等切入人跑到接球点：飞行时间由切入人的跑动时间决定，
-    // 落点是切入人将要到达的接球点。
-    let (landing, flight) = if kind == crate::action::PassKind::Lob {
-        let (spot, flight) = crate::resolve::pass::cut_plan(world, to);
-        (Some(spot), Some(flight))
-    } else {
-        // 普通传球瞄向接球人按当前速度在飞行时间内跑到的位置：提前量
-        // 与飞行时间互相决定，落点由 `catch_point` 迭代求解。
-        let point = crate::value::catch_point(world, from, to);
-        to_player.pos = point;
-        (None, None)
-    };
-    let distance = (to_player.pos - from_player.pos).length();
-    // 传球技术改变飞行时长：手递手几乎没有飞行段，头顶传球弧线更高更慢，
-    // 背后传球出手快但轨迹难控。
-    let kind_flight = match kind {
-        crate::action::PassKind::Handoff => 0.5,
-        crate::action::PassKind::Overhead => 1.25,
-        crate::action::PassKind::BehindBack => 0.9,
-        // 空中接力：球送到篮筐上空，飞行段比普通长传更短。
-        crate::action::PassKind::AlleyOop => 0.8,
-        _ => 1.0,
-    };
-    let duration =
-        flight.unwrap_or_else(|| f64::from(rules.pass_duration(distance, false)) * kind_flight);
+    let from_player = &world.players[from];
+    let to_player = &world.players[to];
     let is_inbound_pass = world.inbound_passer == Some(from);
+    let (landing, duration) = if is_inbound_pass {
+        crate::value::pass_plan(world, from, to, kind)
+    } else {
+        (intent.to_ft, crate::value::pass_flight_seconds(world, from, intent.to_ft, kind))
+    };
     world.ball.release_pass(crate::ball::PassRelease {
         rules: &rules,
-        from_player: &from_player,
-        to_player: &to_player,
+        from_player,
+        to_player,
         now,
         pass_id,
         from,
         to,
         kind,
-        landing,
-        flight,
+        landing: Some(landing),
+        flight: Some(duration),
         inbound: is_inbound_pass,
     });
     if is_inbound_pass {
@@ -194,7 +174,7 @@ pub fn cut_plan(world: &World, cutter: usize) -> (Vec2, f64) {
     let startup = speed / accel;
     let mut flight = startup;
     let mut covered = 0.5 * accel * flight * flight;
-    while covered < distance && flight < 2.0 {
+    while covered < distance && flight < world.params.policy.g("pass_lead_max_seconds") {
         flight += 0.05;
         covered = 0.5 * accel * startup * startup + speed * (flight - startup).max(0.0);
     }
@@ -229,12 +209,8 @@ pub fn resolve_cut(world: &mut World, intent: &ActionIntent) -> crate::action::A
     let mut pass_intent = intent.clone();
     pass_intent.kind = ActionKind::Pass(PassKind::Lob);
     pass_intent.target = Some(cutter);
-    // 高吊球瞄向切入人跑到的接球点，而不是他此刻的位置。
-    pass_intent.to_ft = crate::resolve::pass::cut_plan(world, cutter).0;
     let outcome = resolve(world, &pass_intent, PassKind::Lob);
-    // 空切是一次「球在空中等切入人到位」的传球：发球之后切入人必须真的
-    // 跑到接球点接球。发球完成不等于空切完成。
-    world.players[cutter].target = crate::resolve::pass::cut_plan(world, cutter).0;
+    world.players[cutter].target = intent.to_ft;
     world.players[cutter].target_kind = crate::state::TargetKind::Window;
     world.players[cutter].target_partner = cutter;
     outcome

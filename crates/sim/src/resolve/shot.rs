@@ -118,18 +118,19 @@ pub fn check_goaltending(world: &mut World) -> bool {
     true
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ShotResult {
     Made,
     Missed { rim_contact: bool },
     Blocked { by: usize },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PendingShot {
     pub shooter: usize,
     pub kind: ShotKind,
-    pub zone: &'static str,
+    #[serde(deserialize_with = "crate::checkpoint::label")]
+    pub zone: crate::checkpoint::Label,
     pub distance_ft: f32,
     pub contest: f32,
     pub fouled: bool,
@@ -366,16 +367,24 @@ pub fn resolve(world: &mut World, intent: &ActionIntent, kind: ShotKind) -> Acti
     let assisted_by = world
         .possession
         .assist_candidate
-        .filter(|(passer, time)| *passer != shooter && world.now() - *time < 4.0)
+        .filter(|(passer, time)| {
+            *passer != shooter
+                && world.now() - *time < f64::from(world.params.policy.g("assist_window_seconds"))
+        })
         .map(|(passer, _)| passer);
 
     world.possession.had_shot = true;
+    world.possession.last_shot_distance_ft = distance;
+    world.possession.last_shot_contest = contest;
     // 判据要和决策时刻一致：出手动作在决策之后才结算，因此这里按这次
     // 出手动作的起始时刻判断「是不是刚接到球」，而不是按结算时刻。
     let just_received = world
         .possession
         .last_pass_at
-        .map(|time| intent.start_time - time < 2.5)
+        .map(|time| {
+            intent.start_time - time
+                < f64::from(world.params.policy.g("self_created_window_seconds"))
+        })
         .unwrap_or(false);
     // 判据按「这次出手实际属于哪种进攻」来判，而不是按出手类型的粗分类：
     // 只有真正的接球就投（收到球之后立刻出手）才需要前面有一次传球；
@@ -916,7 +925,7 @@ fn block_probability(
         .iter()
         .enumerate()
         .filter(|(_, p)| p.on_court && p.team != team)
-        .filter(|(_, p)| (p.pos - pos).length() < 5.5)
+        .filter(|(_, p)| (p.pos - pos).length() < world.params.policy.g("contest_proximity_ft"))
         .max_by(|a, b| {
             let weights = &world.params.policy;
             let reference = weights.g("vertical_reference_ft");

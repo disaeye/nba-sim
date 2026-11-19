@@ -1,9 +1,8 @@
 //! 决策视图：把世界状态折算成决策层只读的 [`DecisionState`]。
 //!
-//! 视图与规则、物理分开：决策层看不到世界对象，只能看到这里的字段，
-//! 「掩护是否造成错位」「突破是否过掉人」因此必须以字段形式存在。
+//! 从球员位置和可用观察构建策略输入；动作执行从权威状态读取实际位置。
 
-use crate::action::{DefenderRoute, TeamSide};
+use crate::action::DefenderRoute;
 use crate::state::{DecisionState, DefenderView, HelpView, TeammateView};
 use crate::world::World;
 
@@ -12,36 +11,30 @@ pub fn decision_state(world: &World) -> DecisionState {
     let team = world.players[actor].team;
     let hoop = world.hoop_for(team);
     let pos = world.players[actor].pos;
-    let mut defenders: Vec<(usize, f32)> = world
-        .players
-        .iter()
-        .enumerate()
-        .filter(|(_, p)| p.on_court && p.team != team)
-        .map(|(index, p)| (index, (p.pos - pos).length()))
-        .collect();
-    defenders.sort_by(|a, b| a.1.partial_cmp(&b.1).expect("finite distances"));
-    let primary = defenders.first().map(|(index, distance)| {
-        let defender = &world.players[*index];
-        let closing =
-            (defender.vel - world.players[actor].vel).dot((pos - defender.pos).normalize_or_zero());
+    let mut defenders: Vec<_> = known_opponents(world, actor).collect();
+    defenders.sort_by(|a, b| (a.1.position - pos).length_squared().total_cmp(&(b.1.position - pos).length_squared()));
+    let primary = defenders.first().map(|&(index, read)| {
+        let defender = &world.players[index];
+        let offset = pos - read.position;
+        let distance = offset.length();
         DefenderView {
-            index: *index,
-            distance_ft: *distance,
-            closing_speed_ftps: closing,
-            between_ball_and_hoop: crate::state::is_between(defender.pos, pos, hoop),
-            beaten: *distance > 5.0,
+            index,
+            distance_ft: distance,
+            closing_speed_ftps: (read.velocity - world.players[actor].vel).dot(offset.normalize_or_zero()),
+            between_ball_and_hoop: crate::state::is_between(read.position, pos, hoop),
+            beaten: distance > world.params.policy.g("contest_proximity_ft"),
             route: screen_read_route(world),
             reach_excess_ft: crate::physical::Physical::of(defender, &world.params.policy)
                 .reach_excess_ft(&world.params.policy),
         }
     });
-    let help = defenders.get(1).map(|(index, distance)| {
-        let defender = &world.players[*index];
+    let help = defenders.iter().skip(1).map(|&(index, read)| {
+        let defender = crate::physical::Physical::of(&world.players[index], &world.params.policy);
         HelpView {
-            distance_ft: *distance,
-            arrival_seconds: (*distance / defender.effective_speed(&world.params.policy)).max(0.05),
+            distance_ft: (read.position - pos).length(),
+            arrival_seconds: crate::opportunity::arrival_seconds(read, pos, world.rules.player_radius_ft, defender.speed_ftps, defender.accel_ftps2),
         }
-    });
+    }).min_by(|left, right| left.arrival_seconds.total_cmp(&right.arrival_seconds));
     let shape = crate::state::ContestShape::from_policy(&world.params.policy);
     let teammates = world
         .on_court(team)
@@ -49,45 +42,26 @@ pub fn decision_state(world: &World) -> DecisionState {
         // 候选只能指向真的在场上的队友：名单缓存与球员标志不同步时，
         // 以球员标志为准，不把不在场的人当成可以接球的人。
         .filter(|handle| *handle != actor && world.players[*handle].on_court)
-        .map(|handle| {
-            let teammate = &world.players[handle];
-            // 最近防守人的摸高与距离一起决定接球人的空位程度，
-            // 与主决策里的干扰用同一个映射与同一条公式。
-            let nearest = world
-                .players
-                .iter()
-                .filter(|p| p.on_court && p.team != team)
-                .min_by(|a, b| {
-                    let da = (a.pos - teammate.pos).length_squared();
-                    let db = (b.pos - teammate.pos).length_squared();
-                    da.partial_cmp(&db).expect("finite distances")
-                });
-            let gap = nearest
-                .map(|defender| (defender.pos - teammate.pos).length())
-                .unwrap_or(f32::INFINITY);
-            let reach = nearest
-                .map(|defender| {
-                    crate::physical::Physical::of(defender, &world.params.policy)
-                        .reach_excess_ft(&world.params.policy)
-                })
-                .unwrap_or(f32::default());
-            TeammateView {
+        .filter_map(|handle| {
+            let teammate = crate::opportunity::read(world, actor, handle)?;
+            let nearest = defenders.iter().map(|&(index, read)| (index, (read.position - teammate.position).length()))
+                .min_by(|left, right| left.1.total_cmp(&right.1));
+            let (gap, reach) = nearest.map_or((shape.window_ft * 0.5, f32::default()), |(index, gap)| {
+                let physical = crate::physical::Physical::of(&world.players[index], &world.params.policy);
+                (gap, physical.reach_excess_ft(&world.params.policy))
+            });
+            Some(TeammateView {
                 index: handle,
-                pos: teammate.pos,
+                pos: teammate.position,
                 openness: crate::state::contest_from_defender(shape, gap, false, reach),
                 defender_distance_ft: gap,
-                lane_clearance: crate::state::pass_lane_clearance(
-                    &world.players,
-                    pos,
-                    teammate.pos,
-                    team,
-                ),
-                distance_to_hoop: (teammate.pos - hoop).length(),
-            }
+                lane_clearance: crate::opportunity::observed_lane_clearance(world, actor, pos, teammate.position),
+                distance_to_hoop: (teammate.position - hoop).length(),
+            })
         })
         .collect();
-    let lane = crate::state::lane_clearance(&world.players, pos, hoop, team);
-    let skill_edge = skill_edge(world, actor, team);
+    let lane = crate::opportunity::observed_lane_clearance(world, actor, pos, hoop);
+    let skill_edge = primary.map_or(f32::default(), |defender| skill_edge(world, actor, defender.index));
     let mismatch = skill_edge.clamp(-1.0, 1.0) * 0.5;
     let margin = world.score[World::team_index(team)] as i32
         - world.score[World::team_index(team.other())] as i32;
@@ -127,24 +101,15 @@ pub fn screen_read_route(world: &World) -> Option<DefenderRoute> {
         .map(|read| read.route)
 }
 
-/// 持球人与最近防守人的突破技能差（未截断）。
-///
-/// 决策层用它估突破的期望得分，结算层用同一个差抽过人结果；
-/// 两处用不同式子会让「觉得能过」与「实际能过」脱钩。
-pub fn skill_edge(world: &World, actor: usize, team: TeamSide) -> f32 {
-    let nearest = world
-        .players
-        .iter()
-        .filter(|p| p.on_court && p.team != team)
-        .min_by(|a, b| {
-            (a.pos - world.players[actor].pos)
-                .length_squared()
-                .partial_cmp(&(b.pos - world.players[actor].pos).length_squared())
-                .expect("finite distances")
-        });
-    let Some(defender) = nearest else {
-        return 0.0;
-    };
+pub(crate) fn known_opponents(world: &World, actor: usize) -> impl Iterator<Item = (usize, crate::opportunity::PlayerRead)> + '_ {
+    let team = world.players[actor].team;
+    world.players.iter().enumerate()
+        .filter(move |(_, player)| player.on_court && player.team != team)
+        .filter_map(move |(index, _)| crate::opportunity::read(world, actor, index).map(|read| (index, read)))
+}
+
+fn skill_edge(world: &World, actor: usize, defender: usize) -> f32 {
+    let defender = &world.players[defender];
     let offense = world.players[actor].data.attributes.ball_handling
         + world.players[actor].data.attributes.agility * 0.5;
     let defense =
@@ -153,7 +118,7 @@ pub fn skill_edge(world: &World, actor: usize, team: TeamSide) -> f32 {
 }
 
 /// 决策层能看到的一名球员。
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ObservedPlayer {
     pub index: usize,
     pub pos: glam::Vec2,
@@ -164,13 +129,12 @@ pub struct ObservedPlayer {
 }
 
 /// 决策时可见信息的摘要。细节球员用于传球与协防判断，其余只保留位置。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Observation {
     pub actor: usize,
     pub facing: glam::Vec2,
     pub players: Vec<ObservedPlayer>,
-    pub ball_pos: glam::Vec2,
-    pub ball_visible: bool,
+    pub ball_pos: Option<glam::Vec2>,
     pub shot_clock: f64,
     pub game_clock: f64,
     pub score: [u32; 2],
@@ -218,7 +182,7 @@ pub fn observe(world: &World, actor: usize) -> Observation {
                     && blocker != index
                     && candidate.on_court
                     && (candidate.pos - player.pos).length_squared() < dist_sq
-                    && segment_distance_sq(candidate.pos, player.pos, other.pos) < 20.25
+                    && segment_distance_sq(candidate.pos, player.pos, other.pos) < world.rules.player_radius_ft.powi(2)
             });
         if occluded {
             continue;
@@ -246,13 +210,17 @@ pub fn observe(world: &World, actor: usize) -> Observation {
             .clamp(-1.0, 1.0)
             .acos()
     };
-    let ball_visible = ball_distance <= 55.0 && ball_angle <= 100_f32.to_radians();
+    let ball_visible = world.holder() == Some(actor) || (ball_distance <= 55.0 && ball_angle <= 100_f32.to_radians()
+        && !world.players.iter().enumerate().any(|(index, blocker)| {
+            index != actor && Some(index) != world.holder() && blocker.on_court
+                && (blocker.pos - player.pos).length_squared() < ball_offset.length_squared()
+                && segment_distance_sq(blocker.pos, player.pos, world.ball.pos) < world.rules.player_radius_ft.powi(2)
+        }));
     Observation {
         actor,
         facing: forward,
         players,
-        ball_pos: world.ball.pos,
-        ball_visible,
+        ball_pos: ball_visible.then_some(world.ball.pos),
         shot_clock: world.clock.shot_clock(),
         game_clock: world.clock.game_clock(),
         score: world.score,
@@ -266,20 +234,29 @@ fn mix(hash: &mut u64, value: u64) {
 }
 
 pub fn observation_digest(world: &World, actor: usize) -> u64 {
-    let observation = observe(world, actor);
+    observation_digest_of(&observe(world, actor))
+}
+
+pub fn observation_digest_of(observation: &Observation) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     mix(&mut hash, observation.actor as u64);
+    mix(&mut hash, u64::from(observation.facing.x.to_bits()));
+    mix(&mut hash, u64::from(observation.facing.y.to_bits()));
     for player in &observation.players {
         mix(&mut hash, player.index as u64);
         mix(&mut hash, u64::from(player.pos.x.to_bits()));
         mix(&mut hash, u64::from(player.pos.y.to_bits()));
         mix(&mut hash, u64::from(player.vel.x.to_bits()));
         mix(&mut hash, u64::from(player.vel.y.to_bits()));
+        mix(&mut hash, u64::from(player.distance_ft.to_bits()));
+        mix(&mut hash, u64::from(player.angle_rad.to_bits()));
         mix(&mut hash, u64::from(player.detail));
     }
-    mix(&mut hash, u64::from(observation.ball_pos.x.to_bits()));
-    mix(&mut hash, u64::from(observation.ball_pos.y.to_bits()));
-    mix(&mut hash, u64::from(observation.ball_visible));
+    mix(&mut hash, u64::from(observation.ball_pos.is_some()));
+    if let Some(ball) = observation.ball_pos {
+        mix(&mut hash, u64::from(ball.x.to_bits()));
+        mix(&mut hash, u64::from(ball.y.to_bits()));
+    }
     mix(&mut hash, observation.shot_clock.to_bits());
     mix(&mut hash, observation.game_clock.to_bits());
     mix(&mut hash, u64::from(observation.score[0]));

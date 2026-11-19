@@ -82,6 +82,7 @@ fn fact_kind(fact: &Fact) -> &'static str {
         Fact::PlacementApplied { .. } => "placement_applied",
         Fact::PlayActivated { .. } => "play_activated",
         Fact::PlayWindowEnded { .. } => "play_window_ended",
+        Fact::CoachAdjustment { .. } => "coach_adjustment",
         Fact::GameEnd => "game_end",
         Fact::Goaltending { .. } => "goaltending",
         Fact::Review { .. } => "review",

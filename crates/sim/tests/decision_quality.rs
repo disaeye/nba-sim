@@ -70,6 +70,7 @@ fn g4a_decisions_carry_reconstructable_audit_and_bounded_regret() {
                 .expect("decision trace has a record");
             assert_eq!(record.decision_id, index as u64);
             assert!(record.observation_digest > 0);
+            assert_eq!(record.observation_digest, nba_sim_core::views::observation_digest_of(&record.observation));
             assert!(matches!(
                 record.revalidation,
                 nba_sim_core::state::Revalidation::Accepted

@@ -153,7 +153,7 @@ impl PassKind {
 /// 七种状态覆盖持球、运球飞行、传球飞行、投篮飞行、松球、裁判控球与比赛
 /// 用球离场。持球人用进程内句柄表达：句柄用于快速访问，事件侧用稳定身份
 /// （见 `docs/protocol.md`）。
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum BallState {
     /// 持球。持球人身份由这里携带，不再有第二个「是否持球」标志。
     Held {
@@ -209,8 +209,20 @@ pub enum BallState {
     /// 比赛用球离场：球已出界或出界待发球。
     OutOfPlay {
         pos: Vec2,
-        reason: &'static str,
+        #[serde(deserialize_with = "out_of_play_reason")]
+        reason: OutOfPlayLabel,
     },
+}
+
+type OutOfPlayLabel = &'static str;
+
+fn out_of_play_reason<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<OutOfPlayLabel, D::Error> {
+    match String::deserialize(decoder)?.as_str() {
+        "out_of_bounds" => Ok("out_of_bounds"),
+        "out_of_play" => Ok("out_of_play"),
+        "inbound" => Ok("inbound"),
+        reason => Err(serde::de::Error::custom(format!("unknown out-of-play reason `{reason}`"))),
+    }
 }
 
 /// 球的归属种类：用于迁移表与派生视图，不承载载荷。

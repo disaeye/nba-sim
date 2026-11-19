@@ -15,10 +15,11 @@ const COURT_HEIGHT_FT: f32 = 50.0;
 const STILL_SPEED_FTPS: f32 = 1.0;
 /// 单个静止窗口的时长上限（秒）。
 ///
-/// 上限的依据是合法静止序列的总长：收球观察、出手蓄力与出手收势叠加
-/// 约 2.1 秒（实测每场最长窗口 2.0~2.1 秒，均在出手序列内）。多秒雕像
-/// （修复前实测 4.6~7.3 秒）在任何比赛语义下都不成立。
-const MAX_STILL_SECONDS: f64 = 2.5;
+/// 上限的依据是最长的合法近静止复合段：收球观察、出手蓄力与出手收势
+/// 叠加约 2.1 秒，运球试探周期（准备、横移、收势与下一个决策间隙）
+/// 实测最长约 2.8 秒，均低于 3 秒。多秒雕像（修复前实测 4.6~7.3 秒，
+/// 无人移动、无人出手、事件流静默）在任何比赛语义下都不成立。
+const MAX_STILL_SECONDS: f64 = 3.0;
 
 fn world(seed: u64) -> World {
     let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");

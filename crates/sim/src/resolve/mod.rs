@@ -283,16 +283,6 @@ pub fn contest_for(world: &World, shooter: usize, pos: Vec2) -> f32 {
             best = contest;
         }
     }
-    // 防守人钻过掩护意味着持球人拿到了这段分离距离对应的出手空间。
-    let relief = match world.possession.last_screen {
-        Some(read) if matches!(read.route, crate::action::DefenderRoute::Under) => {
-            let span = world.params.policy.g("screen_under_relief_ft");
-            let ceiling = world.params.policy.g("screen_under_relief_max");
-            let floor = world.params.policy.g("screen_under_relief_floor");
-            (read.separation_ft / span).clamp(floor, ceiling)
-        }
-        _ => f32::default(),
-    };
     // 转换期防守尚未落位：折减随回合推进线性收回。
     let transition = if world.possession.kind == crate::state::PossessionKind::Live {
         let window = world.params.policy.g("transition_window_seconds");
@@ -302,7 +292,7 @@ pub fn contest_for(world: &World, shooter: usize, pos: Vec2) -> f32 {
     } else {
         f32::default()
     };
-    clamp01(best - relief - transition)
+    clamp01(best - transition)
 }
 
 pub fn weighted_pick<R: Rng>(rng: &mut R, weights: &[f32]) -> usize {

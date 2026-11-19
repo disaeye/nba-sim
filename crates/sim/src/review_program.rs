@@ -26,7 +26,7 @@ use crate::world::World;
 ///
 /// 这些是「可以复核什么问题」。裁判当时吹了什么裁决由事件流记录，两张表
 /// 因此解耦：档案只写复核的问题，事件流只写裁判的判定。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ReviewScope {
     /// 出界归属：球权给谁。
     OutOfBoundsAssignment,
@@ -137,7 +137,7 @@ impl ReviewScope {
 }
 
 /// 复核读取的证据类别。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReviewEvidence {
     /// 最后触球：球在出界前被谁碰过。
     LastTouch,
@@ -171,14 +171,14 @@ impl ReviewEvidence {
 ///
 /// 判定层在作出裁决时把观察冻结下来：复核只能读这份冻结记录，不能
 /// 「找到新证据」。观察决定了结论能走到哪一步。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Observation {
     /// 最后触球的队伍。
     Touch(TeamSide),
     /// 球上或球员身上发生了接触。
     Contact,
     /// 出手点所属区域。
-    Zone(&'static str),
+    Zone(#[serde(deserialize_with = "crate::checkpoint::label")] crate::checkpoint::Label),
     /// 出手时刻的比赛钟与进攻钟读数。
     ReleaseClock { game_clock: f64, shot_clock: f64 },
     /// 时钟读数。
@@ -188,7 +188,7 @@ pub enum Observation {
 }
 
 /// 复核推翻原判之后要改什么。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReviewCorrection {
     /// 球权翻给另一方。
     Possession,
@@ -201,7 +201,7 @@ pub enum ReviewCorrection {
 /// 复核结论的依据。
 ///
 /// 复核读两样东西：冻结的观察与权威记录。依据说明结论从哪一样得出。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReviewBasis {
     /// 一次认定：裁判的认定带观察误差，误差抽定后结论随之确定。
     Judgement { misjudged: bool },
@@ -213,7 +213,7 @@ pub enum ReviewBasis {
 ///
 /// 复核问题各有各的时刻：干扰球在球还在飞的时候就能看清，节末时钟在结算
 /// 出手时就能读出来，出界的最后触球只能等教练在窗口内申请。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReviewTrigger {
     /// 登记处当场复核。
     Immediate,
@@ -230,14 +230,15 @@ pub enum ReviewTrigger {
 ///
 /// `scope` 为 `None` 表示这条裁决没有对应的复核问题：它仍然被登记，
 /// 但不可复核——裁判吹了什么与档案承认哪些问题是两件事。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ReviewableRuling {
     /// 复核问题；`None` 表示这条裁决不在任何复核问题下。
     pub scope: Option<ReviewScope>,
     /// 原判给了谁球权。
     pub possession: TeamSide,
     /// 裁判当时吹的裁决名。
-    pub call: &'static str,
+    #[serde(deserialize_with = "crate::checkpoint::label")]
+    pub call: crate::checkpoint::Label,
     /// 读到的证据：能不能推翻原判。
     pub evidence: ReviewEvidence,
     /// 判定层冻结的观察。
@@ -257,7 +258,7 @@ pub struct ReviewableRuling {
 }
 
 /// 复核结论。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReviewConclusion {
     /// 维持原判。
     Upheld,
@@ -266,7 +267,7 @@ pub enum ReviewConclusion {
 }
 
 /// 复核程序的状态。
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ReviewState {
     pending: Vec<ReviewableRuling>,
     concluded: Vec<(ReviewableRuling, ReviewConclusion)>,

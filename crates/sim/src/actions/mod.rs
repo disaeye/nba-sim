@@ -555,7 +555,7 @@ impl ActionKind {
 /// 动作族总数：族编号直接用作按族索引的数组长度。
 pub const FAMILY_COUNT: usize = 13;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ActionIntent {
     pub actor: usize,
     pub kind: ActionKind,
@@ -572,21 +572,22 @@ impl ActionIntent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ActionIntentRole {
     Primary,
     ScreenPartner,
+    HandlerPartner,
     CutPartner,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ActionTurn {
     Begin,
     Advance,
     Resolve,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 /// 一次多人交互：同一份意图由若干球员的运行时共同执行。
 ///
 /// 交互是结算的调度单位。主参与者的运行时到期时，交互整体结算一次；
@@ -595,11 +596,12 @@ pub struct Interaction {
     pub id: u64,
     pub action_id: u64,
     pub intent: ActionIntent,
+    pub decision_trace: Option<u32>,
     /// 掩护的决策时刻防守人：随交互保存，避免并发动作互相清掉这份状态。
     pub screen_defender: Option<usize>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ActionRuntime {
     pub action_id: u64,
     pub interaction_id: u64,
@@ -670,7 +672,7 @@ impl ActionRuntime {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DefensiveActionKind {
     CloseoutContest,
     /// 伸手切球：主动赌一次抄截，执行窗口内成功率提高，收势窗口内失去干扰。
@@ -701,7 +703,7 @@ pub enum DefensiveActionKind {
 /// 这三种与「伸手切球」「扑防」「起跳封盖」不同：它们不是赌博，而是
 /// 防守人面对持球人时自己选的站位方式，因此单独成一个枚举，选取与起手
 /// 两处都不必处理其余防守动作。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum OnBallPositioning {
     /// 滑步跟防：横向移动保持一个身位的间隔。
     Slide,
@@ -769,7 +771,7 @@ impl DefensiveActionKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DefensiveActionRuntime {
     pub action_id: u64,
     pub interaction_id: u64,
@@ -807,7 +809,7 @@ pub enum Completion {
     Interrupted,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DefenderRoute {
     Over,
     Under,
@@ -815,7 +817,7 @@ pub enum DefenderRoute {
     Trapped,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TurnoverKind {
     BadPass,
     LostBall,
@@ -879,13 +881,15 @@ pub struct ActionOutcome {
     pub facts: Vec<Fact>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Fact {
     ActionStarted {
         action_id: u64,
         interaction_id: u64,
         player: usize,
-        kind: &'static str,
+        role: ActionIntentRole,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
         target: Option<usize>,
     },
     /// 持续姿态开始。
@@ -897,21 +901,27 @@ pub enum Fact {
         action_id: u64,
         player: usize,
         /// 姿态槽位名：无球职责、持球站位、转换与扑防应答。
-        slot: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        slot: crate::checkpoint::Label,
         /// 技术变体：职责名、站位名、转换变体与应答名。
-        variant: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        variant: crate::checkpoint::Label,
     },
     /// 持续姿态结束：它与开始事实配对。
     PostureEnded {
         action_id: u64,
         player: usize,
-        slot: &'static str,
-        variant: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        slot: crate::checkpoint::Label,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        variant: crate::checkpoint::Label,
     },
     ActionIntentRejected {
         player: usize,
-        kind: &'static str,
-        reason: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        reason: crate::checkpoint::Label,
     },
     ActionPhaseChanged {
         action_id: u64,
@@ -922,25 +932,30 @@ pub enum Fact {
     ActionCompleted {
         action_id: u64,
         player: usize,
-        kind: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
     },
     ActionFailed {
         action_id: u64,
         player: usize,
-        kind: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
     },
     ActionCancelled {
         action_id: u64,
         player: usize,
-        kind: &'static str,
-        reason: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        reason: crate::checkpoint::Label,
     },
     DefensiveActionStarted {
         action_id: u64,
         interaction_id: u64,
         defender: usize,
         shooter: usize,
-        kind: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
         start_position: Vec2,
     },
     DefensiveActionPhaseChanged {
@@ -953,15 +968,18 @@ pub enum Fact {
         action_id: u64,
         defender: usize,
         shooter: usize,
-        kind: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
         displacement_ft: f32,
     },
     DefensiveActionCancelled {
         action_id: u64,
         defender: usize,
         shooter: usize,
-        kind: &'static str,
-        reason: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        reason: crate::checkpoint::Label,
     },
     PossessionStarted {
         team: TeamSide,
@@ -973,7 +991,8 @@ pub enum Fact {
         possession_id: u64,
         points: u32,
         end_reason: nba_domain::event::PossessionEndCause,
-        termination_detail: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        termination_detail: crate::checkpoint::Label,
         start_game_clock: f64,
         end_game_clock: f64,
         start_shot_clock: f64,
@@ -995,10 +1014,16 @@ pub enum Fact {
         completed: bool,
     },
     Screen {
+        action_id: Option<u64>,
+        handler: usize,
         screener: usize,
+        defender: usize,
         team: TeamSide,
         on_ball: bool,
         contact: bool,
+        used: bool,
+        handler_approached: bool,
+        handler_screener_gap_ft: f32,
         route: DefenderRoute,
         separation_ft: f32,
         /// 掩护人与防守人接触时，掩护人的力量值。
@@ -1013,19 +1038,22 @@ pub enum Fact {
         distance_ft: f32,
         separation_ft: f32,
         /// 本次突破的技术变体：直接、变向还是转身。
-        kind: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
     },
     /// 背身单打：持球人进入低位开始背打（本身不产出结果，结果由后续出手给出）。
     PostUp {
         player: usize,
         /// 本次背身选用的步法名称：撤步转身、上下步、匀手、后仰、挤打。
-        kind: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
     },
     Shot {
         shot_id: u64,
         shooter: usize,
         kind: ShotKind,
-        zone: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        zone: crate::checkpoint::Label,
         distance_ft: f32,
         contest: f32,
         is_three: bool,
@@ -1051,7 +1079,8 @@ pub enum Fact {
     },
     /// 罚球禁区违例：`side` 是提前进区的一方（`offense` 或 `defense`）。
     FreeThrowLaneViolation {
-        side: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        side: crate::checkpoint::Label,
     },
     Rebound {
         player: usize,
@@ -1066,7 +1095,8 @@ pub enum Fact {
     /// 活球被球员拾起（失误松球），不算篮板。
     LooseBallRecovered {
         player: usize,
-        kind: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
     },
     /// 二次进攻回合的边界：前场篮板被控制后开启。
     SecondChanceStarted {
@@ -1078,7 +1108,8 @@ pub enum Fact {
         arrived: bool,
         defender_distance_ft: f32,
         /// 本次切入的路线类型。
-        kind: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
     },
     /// 运球技术细分：动作本身就是一次球与身体的移动，效果按技术区分。
     DribbleMove {
@@ -1122,8 +1153,11 @@ pub enum Fact {
     /// 姿态，事件流从这一条重建姿态的起止。
     DefenseResponsibilityChanged {
         player: usize,
-        from: &'static str,
-        to: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        from: crate::checkpoint::Label,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        to: crate::checkpoint::Label,
+        covers: Option<usize>,
         /// 这一段职责的动作身份：姿态与动作共用同一套身份空间。
         action_id: u64,
     },
@@ -1159,7 +1193,8 @@ pub enum Fact {
     },
     TeamTechnicalFoul {
         team: TeamSide,
-        reason: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        reason: crate::checkpoint::Label,
         foul_id: u64,
     },
     /// 对位防守人的站位姿态变了：滑步、贴身施压、站位吃犯规。
@@ -1172,7 +1207,8 @@ pub enum Fact {
     /// 姿态，因此它的身份与时间边界在这一条里一起给出。
     OnBallPositioningChanged {
         defender: usize,
-        kind: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
         /// 这一段站位的动作身份：姿态与动作共用同一套身份空间。
         action_id: u64,
     },
@@ -1180,7 +1216,8 @@ pub enum Fact {
     Ejected {
         team: TeamSide,
         player: usize,
-        reason: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        reason: crate::checkpoint::Label,
     },
     /// 暂停被批准：比分与两个边界的暂停余额。
     Timeout {
@@ -1226,9 +1263,17 @@ pub enum Fact {
         play: usize,
         possession: u64,
     },
+    /// 跨回合教练调整：依据与生效方案都随事实发布。
+    CoachAdjustment {
+        team: TeamSide,
+        evidence_repeated: u32,
+        evidence_difficult: u32,
+        target: String,
+    },
     /// 球与地板、篮筐、篮板、球员或手部的接触。
     BallContact {
-        kind: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        kind: crate::checkpoint::Label,
         entity: Option<usize>,
         time: f64,
         x: f32,
@@ -1246,7 +1291,8 @@ pub enum Fact {
     /// 复核结论：教练挑战的结果与原判是否保留。
     Review {
         team: TeamSide,
-        call: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        call: crate::checkpoint::Label,
         overturned: bool,
         cost_timeout: bool,
         /// 改判带来的分值变化：正数补分，负数扣分。
@@ -1257,13 +1303,15 @@ pub enum Fact {
     },
     PlacementApplied {
         player: usize,
-        reason: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        reason: crate::checkpoint::Label,
     },
     /// 伤病事件：对抗负荷或碰撞引发的球员受伤。
     Injury {
         team: TeamSide,
         player: usize,
-        severity: &'static str,
+        #[serde(deserialize_with = "crate::checkpoint::label")]
+        severity: crate::checkpoint::Label,
     },
     /// 一个提交批次内的全部时钟写入。指令、检查点与固定步推进按提交顺序记录。
     ClockDirectivesCommitted {
@@ -1337,6 +1385,7 @@ impl Fact {
             Self::PeriodSettlementCompleted { .. } => "PeriodSettlementCompleted",
             Self::PlayActivated { .. } => "PlayActivated",
             Self::PlayWindowEnded { .. } => "PlayWindowEnded",
+            Self::CoachAdjustment { .. } => "CoachAdjustment",
             Self::BallContact { kind, .. } => kind,
             Self::Goaltending { .. } => "Goaltending",
             Self::Review { .. } => "Review",
@@ -1362,7 +1411,6 @@ impl Fact {
             | Self::ActionFailed { player: p, .. }
             | Self::ActionCancelled { player: p, .. }
             | Self::Pass { from: p, .. }
-            | Self::Screen { screener: p, .. }
             | Self::Drive { driver: p, .. }
             | Self::PostUp { player: p, .. }
             | Self::Shot { shooter: p, .. }
@@ -1384,6 +1432,9 @@ impl Fact {
             | Self::OnBallPositioningChanged { defender: p, .. }
             | Self::PlacementApplied { player: p, .. }
             | Self::Injury { player: p, .. } => *p == player,
+            Self::Screen { handler, screener, defender, .. } => {
+                *handler == player || *screener == player || *defender == player
+            }
             Self::Block {
                 defender, shooter, ..
             } => *defender == player || *shooter == player,

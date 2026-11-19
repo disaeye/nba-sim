@@ -6,10 +6,11 @@ use crate::action::{ActionKind, Fact, TeamSide, TurnoverKind};
 use crate::state::{TargetKind, MAX_ON_COURT};
 use crate::world::{Phase, World};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct PendingRebound {
     pub offense: TeamSide,
-    pub zone: &'static str,
+    #[serde(deserialize_with = "crate::checkpoint::label")]
+    pub zone: crate::checkpoint::Label,
     pub shot_distance: f32,
     pub rim_contact: bool,
     pub started_at: f64,
@@ -101,7 +102,10 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
         let airborne = world.defensive_actions[handle]
             .as_ref()
             .is_some_and(|action| action.kind == crate::action::DefensiveActionKind::BlockJump);
-        if world.players[handle].team != offense && distance < 12.0 && !airborne {
+        if world.players[handle].team != offense
+            && distance < world.params.policy.g("boxout_engage_radius_ft")
+            && !airborne
+        {
             world.emit(Fact::BoxOut {
                 player: handle,
                 distance_ft: distance,
@@ -123,6 +127,7 @@ pub fn resolve(world: &mut World, zone: &'static str, shot_distance: f32, rim_co
                 player: handle,
                 from: from.as_str(),
                 to: crate::state::DefenseResponsibility::BoxOut.as_str(),
+                covers: None,
                 action_id,
             });
             // 卡位是一件事：好的卡位者往球落点的方向挤，把进攻球员
@@ -251,6 +256,7 @@ fn start_rebound_jump(world: &mut World, handle: usize) {
         action_id,
         interaction_id,
         player: handle,
+        role: crate::action::ActionIntentRole::Primary,
         kind: "ReboundJump",
         target: None,
     });
@@ -294,6 +300,7 @@ pub fn start_held_ball_actions(world: &mut World, home: usize, away: usize) {
             action_id,
             interaction_id,
             player: handle,
+            role: crate::action::ActionIntentRole::Primary,
             kind: "HeldBallDive",
             target: None,
         });
@@ -406,6 +413,7 @@ fn start_loose_ball_dive(world: &mut World, handle: usize) {
         action_id,
         interaction_id,
         player: handle,
+        role: crate::action::ActionIntentRole::Primary,
         kind: "LooseBallDive",
         target: None,
     });
@@ -607,6 +615,7 @@ pub fn control(world: &mut World, handle: usize) {
         action_id: secure_action,
         interaction_id: secure_interaction,
         player: handle,
+        role: crate::action::ActionIntentRole::Primary,
         kind: secure_kind.as_str(),
         target: None,
     });

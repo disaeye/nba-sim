@@ -74,6 +74,19 @@ pub fn refresh_matchup(world: &mut World) {
     }
 }
 
+/// 根据掩护时的对位，找出承担接替任务的防守人。
+pub(crate) fn screen_partner(world: &World, screener: usize, chaser: usize) -> Option<usize> {
+    let defense = world.possession.team.other();
+    world.on_court(defense).as_slice().iter().copied().zip(world.possession.matchup)
+        .find_map(|(defender, attacker)| (defender != chaser && attacker == screener).then_some(defender))
+}
+
+pub(crate) fn switch_screen_pair(world: &mut World, chaser: usize, screener: usize) {
+    if let Some(partner) = screen_partner(world, screener, chaser) {
+        switch_matchup(world, chaser, partner);
+    }
+}
+
 /// 换防：把两名防守人的对位对象互换。
 pub fn switch_matchup(world: &mut World, first: usize, second: usize) {
     let defense = world.possession.team.other();
@@ -100,6 +113,11 @@ pub fn switch_matchup(world: &mut World, first: usize, second: usize) {
 /// 协防引力在球威胁篮筐时把弱侧人拉向护筐点。强侧无球防守人不参与协防，
 /// 因此持球人突破时他们的目标点不变。全部计算在栈上完成，不产生堆分配。
 pub fn solve_defense_targets(world: &World) -> [Vec2; MAX_ON_COURT] {
+    defense_plan(world).0
+}
+
+fn defense_plan(world: &World) -> ([Vec2; MAX_ON_COURT], [Option<usize>; MAX_ON_COURT]) {
+    let mut cover = [None; MAX_ON_COURT];
     let offense = world.possession.team;
     let defense = offense.other();
     let defenders = world.on_court(defense);
@@ -109,8 +127,8 @@ pub fn solve_defense_targets(world: &World) -> [Vec2; MAX_ON_COURT] {
     let ball = carrier
         .map(|handle| world.players[handle].pos)
         .unwrap_or(hoop);
-    let potential = &world.rules.tactics.defense.potential_field;
-    let scheme = &world.rules.tactics.defense;
+    let potential = &world.defense_scheme(defense).potential_field;
+    let scheme = world.defense_scheme(defense);
     let policy = &world.params.policy;
     // 协防看的是延迟读球的位置：防守人反应要时间，轮转因此总慢半拍。
     let read_ball = world.delayed_ball_position(policy.g("defense_reaction_delay_seconds") as f64);
@@ -271,45 +289,50 @@ pub fn solve_defense_targets(world: &World) -> [Vec2; MAX_ON_COURT] {
 
     // X-Out 补位轮转算法：
     // 当弱侧低位人深度收缩护筐时，其放空的对位人需要弱侧其他防守人（高位协防人）补位轮转覆盖
-    let mut max_help = 0.0_f32;
-    let mut low_slot = None;
-    for slot in 0..defenders.as_slice().len() {
-        if help_weights[slot] > max_help && help_weights[slot] > 0.25 {
-            max_help = help_weights[slot];
-            low_slot = Some(slot);
-        }
-    }
-    if let Some(l_slot) = low_slot {
-        let vacated_attacker = world.possession.matchup[l_slot];
-        if vacated_attacker != UNASSIGNED && world.players[vacated_attacker].on_court {
-            let vacated_pos = world.players[vacated_attacker].pos;
-            for slot in 0..defenders.as_slice().len() {
-                if slot == l_slot {
-                    continue;
-                }
-                let man = world.possession.matchup[slot];
-                if man == UNASSIGNED || Some(man) == carrier || !world.players[man].on_court {
-                    continue;
-                }
-                let same_side = (world.players[man].pos.y - 25.0) * (ball.y - 25.0) > 0.0;
-                if !same_side {
-                    let x_out_scale = (max_help * 0.45).min(0.5);
-                    targets[slot] = targets[slot].lerp(vacated_pos, x_out_scale);
-                    break;
-                }
+    let help_threshold = policy.g("help_rotation_threshold");
+    let helper = help_weights.iter().enumerate()
+        .filter(|(_, weight)| **weight >= help_threshold)
+        .max_by(|(_, left), (_, right)| left.total_cmp(right))
+        .map(|(slot, _)| slot);
+    if let Some(helper) = helper {
+        let vacated = world.possession.matchup[helper];
+        if vacated != UNASSIGNED && world.players[vacated].on_court {
+            let point = world.players[vacated].pos;
+            let center = world.rules.court.height_ft / f32::from(2_u8);
+            let candidate = defenders.as_slice().iter().enumerate()
+                .filter(|(slot, _)| *slot != helper)
+                .filter(|(slot, defender)| {
+                    let man = world.possession.matchup[*slot];
+                    man != UNASSIGNED && Some(man) != carrier
+                        && world.players[**defender].action.is_none()
+                        && world.defensive_actions[**defender].is_none()
+                        && world.players[man].on_court
+                        && (world.players[man].pos.y - center) * (read_ball.y - center) <= f32::default()
+                })
+                .map(|(slot, defender)| {
+                    let player = &world.players[*defender];
+                    let body = crate::physical::Physical::of(player, policy);
+                    let sample = crate::opportunity::PlayerRead { tick: world.clock.tick(), position: player.pos, velocity: player.vel };
+                    let seconds = crate::opportunity::arrival_seconds(sample, point, crate::assignment::pressure_separation(world), body.speed_ftps, body.accel_ftps2);
+                    (slot, seconds)
+                })
+                .filter(|(_, seconds)| *seconds <= policy.g("help_rotation_max_seconds"))
+                .min_by(|(_, left), (_, right)| left.total_cmp(right));
+            if let Some((slot, _)) = candidate {
+                cover[slot] = Some(vacated);
+                targets[slot] = point + (hoop - point).normalize_or_zero() * crate::assignment::pressure_separation(world);
             }
         }
     }
-
-    targets
+    (targets, cover)
 }
 
 /// 把求解结果写进球员目标点。
 pub fn apply_defense_targets(world: &mut World) {
     let defense = world.possession.team.other();
     let defenders = world.on_court(defense);
-    let targets = solve_defense_targets(world);
-    crate::assignment::assign_defense_responsibilities(world, &targets);
+    let (targets, cover) = defense_plan(world);
+    crate::assignment::assign_defense_responsibilities(world, &targets, &cover);
     let carrier = world.holder();
     let pressure = crate::assignment::pressure_separation(world);
     let hoop = world.hoop_for(world.possession.team);
@@ -491,20 +514,11 @@ pub fn apply_defense_targets(world: &mut World) {
                 };
                 (crate::state::TargetKind::Station, man, target)
             }
-            // 补位：接管另一个位置留下的空当，先站到空当的位置。
-            crate::state::DefenseResponsibility::Rotate => {
-                let target = if man != usize::MAX && world.players[man].on_court {
-                    let ball = carrier
-                        .map(|carrier| world.players[carrier].pos)
-                        .unwrap_or(world.players[*handle].pos);
-                    let receiver = world.players[man].pos;
-                    let direction = (receiver - ball).normalize_or_zero();
-                    world.players[man].pos - direction * pressure
-                } else {
-                    targets[slot]
-                };
-                (crate::state::TargetKind::Station, man, target)
-            }
+            crate::state::DefenseResponsibility::Rotate => (
+                crate::state::TargetKind::Pressure,
+                cover[slot].unwrap_or(man),
+                targets[slot],
+            ),
             // 夹击：贴到持球人身侧，与另一名防守人一起包住他。
             crate::state::DefenseResponsibility::DoubleTeam => {
                 let target = carrier
@@ -521,10 +535,25 @@ pub fn apply_defense_targets(world: &mut World) {
             }
             // 延误：抢在掩护完成之前先碰一下持球人，随后回到对位。
             crate::state::DefenseResponsibility::Hedge => {
+                // 延误的位置在持球人与掩护人之间：方案里的延误距离决定他
+                // 提前多少英尺去碰持球人。距离不能超出合法贴身间隔，否则
+                // 这个落点根本不是一个合法的站位。
+                let scheme = world.defense_scheme(world.possession.team.other());
+                let hedge_distance = scheme
+                    .screen_defense
+                    .hedge_distance_ft
+                    .clamp(pressure, pressure + 2.0);
                 let target = carrier
                     .map(|carrier| {
-                        let direction = (hoop - world.players[carrier].pos).normalize_or_zero();
-                        world.players[carrier].pos + direction * pressure
+                        let toward_screener = world
+                            .possession
+                            .last_screen
+                            .map(|read| world.players[read.screener].pos)
+                            .map(|screener| (screener - world.players[carrier].pos).normalize_or_zero())
+                            .unwrap_or_else(|| {
+                                (hoop - world.players[carrier].pos).normalize_or_zero()
+                            });
+                        world.players[carrier].pos + toward_screener * hedge_distance
                     })
                     .unwrap_or(targets[slot]);
                 (

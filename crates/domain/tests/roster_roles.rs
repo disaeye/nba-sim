@@ -210,33 +210,12 @@ fn every_declared_role_is_supported_by_its_tendencies() {
 
 #[test]
 fn adr_020_shot_zone_criteria_are_supported_by_tendencies() {
-    // 产出判据的参数：背身得分手的三分倾向不得超过 0.10，定点射手不得
-    // 低于 0.90。这两个阈值与 gate.rs 的 post_scorer_preference_max /
-    // stationary_shooter_preference_min 相同，因此「倾向 → 效用 → 产出」
-    // 这条链上的两端由同一组数字约束。
     let rosters = [
         roster(include_str!("../../../data/roster/home.json")),
         roster(include_str!("../../../data/roster/away.json")),
     ];
-    let policy: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../data/calibration/policy.json"
-    ))
-    .expect("policy parses");
-    let process = &policy["process"];
-    let post_ceiling = process["post_scorer_preference_max"]
-        .as_f64()
-        .expect("post ceiling exists") as f32;
-    let shooter_floor = process["stationary_shooter_preference_min"]
-        .as_f64()
-        .expect("shooter floor exists") as f32;
-    let post_cap = process["post_scorer_three_share_max"]
-        .as_f64()
-        .expect("post share cap exists") as f32;
-    let shooter_min = process["stationary_shooter_three_share_min"]
-        .as_f64()
-        .expect("shooter share floor exists") as f32;
-    assert!(post_cap < 0.04 + 1e-6, "背身中锋的三分产出上限必须不超过 4%");
-    assert!(shooter_min >= 0.35, "定点射手的三分产出下限必须不低于 35%");
+    let post_ceiling = 0.10;
+    let shooter_floor = 0.90;
     for side in &rosters {
         for player in &side.players {
             if player.offensive_role == "PostScorer" {

@@ -209,14 +209,13 @@ pub fn resolve(
     }
     // 突破分球：球交给弱侧空位队友，这次突破本身不直接得分。
     if kind == nba_domain::action_window::DriveKind::DriveKick {
-        if let Some(target) = drive_kick_target(world, driver) {
-            let mut pass_intent = intent.clone();
-            pass_intent.kind = ActionKind::Pass(crate::action::PassKind::Chest);
-            pass_intent.target = Some(target);
-            pass_intent.to_ft = world.players[target].pos;
-            let outcome =
-                crate::resolve::pass::resolve(world, &pass_intent, crate::action::PassKind::Chest);
-            return outcome;
+        if let Some(target) = intent.target.filter(|target| world.players[*target].on_court) {
+            if let Some(read) = crate::opportunity::read(world, driver, target) {
+                let mut pass_intent = intent.clone();
+                pass_intent.kind = ActionKind::Pass(crate::action::PassKind::Chest);
+                pass_intent.to_ft = crate::value::observed_pass_plan(world, driver, target, crate::action::PassKind::Chest, read).0;
+                return crate::resolve::pass::resolve(world, &pass_intent, crate::action::PassKind::Chest);
+            }
         }
     }
     // 后撤步：球手向后撤开，防守人被带出位置。
@@ -237,33 +236,6 @@ pub fn resolve(
         },
         facts: Vec::new(),
     }
-}
-
-/// 突破分球的目标：离防守人最远的队友。
-///
-/// 空位的判据是防守人离他足够远：分球给有人看着的队友等于白传。
-fn drive_kick_target(world: &World, driver: usize) -> Option<usize> {
-    let open_ft = world.params.policy.g("drive_kick_open_defender_ft");
-    let team = world.players[driver].team;
-    let mut best: Option<(usize, f32)> = None;
-    for (index, player) in world.players.iter().enumerate() {
-        if index == driver || !player.on_court || player.team != team {
-            continue;
-        }
-        let defender_distance = world
-            .players
-            .iter()
-            .filter(|other| other.on_court && other.team != team)
-            .map(|other| (other.pos - player.pos).length())
-            .fold(f32::INFINITY, f32::min);
-        if defender_distance < open_ft {
-            continue;
-        }
-        if best.is_none_or(|(_, current)| defender_distance > current) {
-            best = Some((index, defender_distance));
-        }
-    }
-    best.map(|(index, _)| index)
 }
 
 /// 走步的账本与裁决：收球步的两条触发路径共用这里的写入。
@@ -372,7 +344,9 @@ pub fn resolve_finish(
             && world
                 .possession
                 .last_post_at
-                .map(|t| world.now() - t < 4.0)
+                .map(|t| {
+                    world.now() - t < f64::from(world.params.policy.g("post_phase_memory_seconds"))
+                })
                 .unwrap_or(false));
     if was_post {
         world.possession.ball_phase = crate::state::BallPhase::Post;

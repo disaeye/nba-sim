@@ -101,7 +101,7 @@ impl MatchSetup {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TimedFact {
     pub time: f64,
     pub period: u32,
@@ -121,7 +121,7 @@ pub struct TimedFact {
     pub trace: Option<u32>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct TeamFouls {
     /// 单节球队犯规（bonus 计数）：进攻犯规与技术犯规不计入。
     pub period: u8,
@@ -132,7 +132,7 @@ pub struct TeamFouls {
 }
 
 /// 轮换状态：换人意图与停表窗口内的换人配额。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RotationState {
     /// 每队的待执行换人意图。活球期间只登记，不停表就不动阵容。
     pub pending: [bool; 2],
@@ -140,7 +140,7 @@ pub struct RotationState {
     pub applied_in_window: [u32; 2],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PossessionRecord {
     pub team: TeamSide,
     pub id: u64,
@@ -158,13 +158,14 @@ pub struct PossessionRecord {
     pub screens: u32,
     pub drives: u32,
     pub points: u32,
-    pub ended_by: &'static str,
+    #[serde(deserialize_with = "crate::checkpoint::label")]
+    pub ended_by: crate::checkpoint::Label,
     /// 回合开始到首个动作起手的秒数：推进速度的直接度量。
     pub first_action_seconds: Option<f64>,
 }
 
 /// 停表跳球的准备：参跳双方、到位时刻与四个站位。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PendingJumpBall {
     pub home: usize,
     pub away: usize,
@@ -179,13 +180,13 @@ pub struct PendingJumpBall {
 }
 
 /// 罚球期间的禁区站位记录：球离手之前有人进区就是违例。
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 pub struct FreeThrowLane {
     pub offense_early: bool,
     pub defense_early: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct World {
     pub params: RuntimeParams,
     pub rules: GameRules,
@@ -193,6 +194,15 @@ pub struct World {
     ///
     /// 它是检查点的一部分：磁盘检查点恢复时用的就是这一份设置。
     pub setup: MatchSetup,
+    /// 两队各自的防守方案档案。
+    ///
+    /// 方案决定掩护防守（换防、延误）、协防深度与对位间隔，因此它是
+    /// 防守行为的输入而不是展示文字。每队用自己名单上声明的那份档案。
+    pub defense_schemes: [nba_domain::DefenseRules; 2],
+    /// 当前方案档案的身份：调整时据此选择下一个方案。
+    pub coach_schemes: [String; 2],
+    /// 跨回合教练证据。
+    pub coach_evidence: [crate::coach::TeamEvidence; 2],
     pub clock: Clock,
     phase: Phase,
     pub ball: BallBody,
@@ -1149,6 +1159,7 @@ impl World {
                             player,
                             from: variant,
                             to: variant,
+                            covers: self.players.get(self.players[player].target_partner).map(|_| self.players[player].target_partner),
                             action_id: new_id,
                         });
                     }
@@ -1362,6 +1373,12 @@ impl World {
         let params = params.into();
         let rules = setup.rules.clone();
         let setup_snapshot = setup.clone();
+        // 防守方案来自两队自己的名单声明：主队守时用主队声明的方案，
+        // 客队守时用客队声明的方案。方案因此是防守行为的真实输入。
+        let home_scheme = nba_domain::DefenseRules::for_scheme(&setup_snapshot.home.default_defense_tactic)
+            .expect("the home roster must declare a known defensive scheme");
+        let away_scheme = nba_domain::DefenseRules::for_scheme(&setup_snapshot.away.default_defense_tactic)
+            .expect("the away roster must declare a known defensive scheme");
         // 读球历史按秒数上限预分配：稳态每帧只做写入与裁剪，不再扩容。
         let history_capacity =
             ((params.policy.g("ball_history_seconds") as f64 / TICK_SECONDS).ceil() as usize) + 64;
@@ -1434,11 +1451,18 @@ impl World {
         for index in 0..params.tactics.plays.len() {
             play_cooldowns.insert(index, 0.0);
         }
+        let coach_schemes = [
+            setup_snapshot.home.default_defense_tactic.clone(),
+            setup_snapshot.away.default_defense_tactic.clone(),
+        ];
         let center = rules.court.center();
         let mut world = Self {
             params,
             rules,
             setup: setup_snapshot,
+            defense_schemes: [home_scheme.clone(), away_scheme.clone()],
+            coach_schemes,
+            coach_evidence: [crate::coach::TeamEvidence::default(), crate::coach::TeamEvidence::default()],
             clock: Clock::with_player_count(player_count, period_seconds, shot_clock),
             phase: Phase::Pregame,
             ball: BallBody::loose(center, Vec2::ZERO),
@@ -1666,39 +1690,25 @@ impl World {
         intent: ActionIntent,
         participants: &[(usize, crate::action::ActionIntentRole)],
     ) -> bool {
-        // 决策到执行之间有人离场（换人窗口、被逐）：把他从参与人里剔除，
-        // 动作照常开始；主执行人自己离场是编程错误，仍然就地失败。
-        // 常规路径不分配：只有真的有人离场时才收集一份过滤后的副本。
-        let any_off_court = participants
-            .iter()
-            .any(|(player, _)| !self.players[*player].on_court);
-        let filtered;
-        let participants = if any_off_court {
-            filtered = participants
-                .iter()
-                .copied()
-                .filter(|(player, _)| self.players[*player].on_court)
-                .collect::<Vec<_>>();
-            filtered.as_slice()
-        } else {
-            participants
-        };
-        // 主执行人已经离场：动作不成立，返回假，不做断言——这是换人与
-        // 被逐带来的正常时序，不是内核错误。
-        if !participants.iter().any(|(player, role)| {
+        assert!(intent.actor < self.players.len());
+        assert!(participants.iter().all(|(player, _)| *player < self.players.len()));
+        assert!(intent.target.is_none_or(|target| target < self.players.len()));
+        assert!(participants.iter().any(|(player, role)| {
             *player == intent.actor && *role == crate::action::ActionIntentRole::Primary
-        }) {
+        }), "action requires its primary participant");
+        let target_required = matches!(intent.kind,
+            crate::action::ActionKind::Pass(_) | crate::action::ActionKind::Screen(_)
+                | crate::action::ActionKind::Cut(_));
+        let unavailable = participants.iter().any(|(player, _)| !self.players[*player].on_court)
+            || (target_required && intent.target.is_some_and(|target| !self.players[target].on_court));
+        if unavailable {
+            self.emit(Fact::ActionIntentRejected {
+                player: intent.actor,
+                kind: intent.kind.as_str(),
+                reason: "participant_left_court",
+            });
             return false;
         }
-        assert!(participants
-            .iter()
-            .all(|(player, _)| *player < self.players.len()));
-        assert!(
-            intent
-                .target
-                .is_none_or(|target| target < self.players.len()),
-            "action target must reference a player"
-        );
         let conflict = participants
             .iter()
             .any(|(player, _)| self.players[*player].action.is_some());
@@ -1752,7 +1762,8 @@ impl World {
                 id: interaction_id,
                 action_id,
                 intent,
-                screen_defender: self.screen_defender,
+                decision_trace: self.active_trace,
+                screen_defender: self.screen_defender.take(),
             },
         );
         self.action_turn = None;
@@ -1849,15 +1860,15 @@ impl World {
         follow_through: f64,
         phase: nba_domain::action_window::ActionPhase,
     ) -> u64 {
-        // 交互是多人动作的调度单位，行动���是每个参与者自己的：两个人
-        // 参与同一次掩护时，他们有两个动作身份与一个交互身份。因此事件流
-        // 能分别指出谁做了什么，交互又能指出这是一次配合。
-        self.next_action_id += 1;
-        let primary_action_id = self.next_action_id;
+        // 每名参与者拥有自己的动作身份，并由交互身份关联。
+        let mut primary_action_id = None;
         let kind = intent.kind.as_str();
         for &(player, role) in participants {
             self.next_action_id += 1;
             let action_id = self.next_action_id;
+            if role == crate::action::ActionIntentRole::Primary {
+                assert!(primary_action_id.replace(action_id).is_none());
+            }
             let participant_intent = intent.clone();
             let runtime = ActionRuntime::new(
                 action_id,
@@ -1875,11 +1886,19 @@ impl World {
                 action_id,
                 interaction_id,
                 player,
+                role,
                 kind,
                 target: intent.target,
             });
         }
-        primary_action_id
+        primary_action_id.expect("interaction requires a primary participant")
+    }
+
+    pub(crate) fn action_rejection_reason(&self, actor: usize) -> &'static str {
+        match self.events.last().map(|event| &event.fact) {
+            Some(Fact::ActionIntentRejected { player, reason, .. }) if *player == actor => reason,
+            _ => panic!("rejected action must publish its reason"),
+        }
     }
 
     pub(crate) fn cancel_actions(&mut self, reason: &'static str) {
@@ -1978,6 +1997,13 @@ impl World {
             _ => 0,
         };
         shot + pass + free_throws
+    }
+
+    /// 取得片段终点的报告，并在副本中封存时钟记录。
+    pub fn report_at_boundary(&self) -> GameReport {
+        let mut boundary = self.clone();
+        boundary.flush_clock_directives();
+        boundary.report()
     }
 
     pub fn report(&mut self) -> GameReport {
@@ -2488,12 +2514,13 @@ impl World {
         //
         // 死球期间控制方仍然存在（球权属于某一方，只是球不在手里），因此
         // 停表不会结束控制序列。
-        let team_changed =
-            current.team != previous.team && current.team.is_some() && previous.team.is_some();
         let team = current.team;
         let holder = current.holder;
         let ball_state = current.ball_state;
-        if team_changed {
+        let previous_team = self.control_transitions.last().and_then(|transition| transition.team);
+        let first_control = previous_sequence.is_none() && team.is_some() && holder.is_some() && !current.dead;
+        let team_changed = previous_sequence.is_some() && team.is_some() && team != previous_team;
+        if first_control || team_changed {
             let sequence = ControlSequenceId::next(&mut self.identities);
             current.sequence_id = Some(sequence.raw());
             current.established_by_event_id = Some(self.next_event_id + 1);
@@ -2501,7 +2528,7 @@ impl World {
             self.control = current;
             let handover = crate::officiating::ControlHandover {
                 previous_sequence_id: previous_sequence,
-                previous_team: previous.team,
+                previous_team,
                 sequence_id: sequence.raw(),
                 team,
                 holder,
@@ -2802,6 +2829,14 @@ impl World {
         self.set_phase(Phase::Inbound { team, ready_at });
     }
 
+    /// 防守方案：某队自己声明的那份档案。
+    ///
+    /// 方案按队伍读，不按当前球权读：它属于队伍而不是属于回合。守方
+    /// 的方案因此是这场球里防守行为的唯一来源。
+    pub fn defense_scheme(&self, team: TeamSide) -> &nba_domain::DefenseRules {
+        &self.defense_schemes[Self::team_index(team)]
+    }
+
     pub fn start_possession(&mut self, team: TeamSide, kind: PossessionKind) {
         let inbound_passer = self.inbound_passer;
         self.inbound_passer = None;
@@ -2827,7 +2862,6 @@ impl World {
             );
         }
         crate::motion::reset_ball_history(self);
-        self.possession.off_ball_actions = 0;
         let next_possession_id = if continuing_possession {
             self.possession.id
         } else {
@@ -2942,6 +2976,13 @@ impl World {
     /// 首个决策落在 `transition_window_seconds` 的一半处，剩下的时间留给终结。
     pub fn begin_live_push(&mut self, handler: usize) {
         let team = self.players[handler].team;
+        // 球权确立的瞬间，防守的职责时钟重置：追球阶段防守人聚在球边，
+        // 球一旦被控制，他们必须立刻回到自己的职责与站位，而不是带着
+        // 追球目标在传球线路里站到停留计时到期——那会把篮板人的第一传
+        // 全部堵在窄缝里。
+        for handle in self.on_court(team.other()).as_slice() {
+            self.players[*handle].assignment_since = 0.0;
+        }
         if let Some(index) = self
             .possession
             .break_return
@@ -3071,6 +3112,21 @@ impl World {
             had_offensive_rebound: self.possession.had_offensive_rebound,
             first_action_seconds: record.first_action_seconds,
         });
+        // 教练只从公开回合事实学习：本次回合是否借掩护出手、出手距离与
+        // 对抗强度都留在回合状态里，截至回合结束才交给教练层。
+        if record.screens > 0 && self.possession.had_shot {
+            crate::coach::observe_possession(
+                self,
+                record.team.other(),
+                crate::coach::PossessionSignal {
+                    screen_used: true,
+                    shot: true,
+                    shot_distance_ft: self.possession.last_shot_distance_ft,
+                    contest: self.possession.last_shot_contest,
+                    points,
+                },
+            );
+        }
         self.possession_log.push(record);
         self.possession.id = 0;
     }
@@ -3126,17 +3182,14 @@ impl World {
         // 位移目标的动作占住的球员不可打断。
         let probe_step = f32::from(self.params.policy.g("stagnation_probe_ft"));
         let probe_eligible = |world: &World, handle: usize| {
-            world.players[handle]
-                .action
-                .as_ref()
-                .is_none_or(|runtime| {
-                    matches!(
-                        runtime.intent.kind,
-                        crate::action::ActionKind::Fake(_)
-                            | crate::action::ActionKind::Protect(_)
-                            | crate::action::ActionKind::Dribble(_)
-                    ) && runtime.phase != nba_domain::action_window::ActionPhase::Execution
-                })
+            world.players[handle].action.as_ref().is_none_or(|runtime| {
+                matches!(
+                    runtime.intent.kind,
+                    crate::action::ActionKind::Fake(_)
+                        | crate::action::ActionKind::Protect(_)
+                        | crate::action::ActionKind::Dribble(_)
+                ) && runtime.phase != nba_domain::action_window::ActionPhase::Execution
+            })
         };
         let probe_handle = self
             .holder()
@@ -3822,7 +3875,11 @@ impl World {
             }
             // 赌博倾向低的防守人很少伸手：用抢断倾向做概率筛选。
             let gamble = self.players[defender].data.tendencies.gamble_steal;
-            let chance = f64::from((0.05 + 0.35 * gamble).clamp(0.0, 0.5));
+            let chance = f64::from(
+                (self.params.policy.g("steal_gamble_chance_base")
+                    + self.params.policy.g("steal_gamble_chance_gain") * gamble)
+                    .clamp(0.0, 0.5),
+            );
             let roll = f64::from(self.draw(
                 crate::draw::Stream::Decision,
                 defender,
@@ -4352,21 +4409,31 @@ impl World {
 
     fn resolve_interaction(&mut self, interaction: Interaction) {
         let action_id = interaction.action_id;
-        let screen_screener = interaction.intent.target;
+        let screen_screener = if matches!(interaction.intent.kind, crate::action::ActionKind::Screen(_)) {
+            let target = interaction.intent.target.expect("screen requires a partner");
+            Some(if self.holder() == Some(interaction.intent.actor) { target } else { interaction.intent.actor })
+        } else {
+            interaction.intent.target
+        };
         self.action_turn = Some((action_id, crate::action::ActionTurn::Resolve));
+        let prior_trace = self.active_trace;
+        let prior_possession = self.possession.id;
+        self.active_trace = interaction.decision_trace;
         // 掩护防守人跟着交互走：并发动作结算时不会互相覆盖。
         self.screen_defender = interaction.screen_defender;
         let outcome = resolve::resolve(self, interaction.intent);
         self.screen_defender = None;
-        self.apply_outcome(outcome, screen_screener, action_id);
+        self.apply_outcome(outcome, screen_screener, interaction.screen_defender, interaction.id);
         self.action_turn = None;
+        self.active_trace = prior_trace.filter(|_| self.possession.id == prior_possession);
     }
 
     fn apply_outcome(
         &mut self,
         outcome: crate::action::ActionOutcome,
         screen_screener: Option<usize>,
-        action_id: u64,
+        screen_defender: Option<usize>,
+        interaction_id: u64,
     ) {
         let facts = outcome.facts.clone();
         for fact in facts {
@@ -4380,7 +4447,12 @@ impl World {
                 Some(crate::state::DecisionTrigger::PassReceived);
         }
         if let Some(separation) = outcome.delta.separation_ft {
-            self.last_separation = Some((outcome.actor, separation, self.now()));
+            let beneficiary = if outcome.delta.defender_route.is_some() {
+                self.holder().unwrap_or(outcome.actor)
+            } else {
+                outcome.actor
+            };
+            self.last_separation = Some((beneficiary, separation, self.now()));
         }
         if let Some(route) = outcome.delta.defender_route {
             let screener = screen_screener.unwrap_or(outcome.actor);
@@ -4390,17 +4462,17 @@ impl World {
                 screener,
                 separation_ft: outcome.delta.separation_ft.unwrap_or_default(),
             });
-            // 换防路线意味着两名防守人交换对位对象。
             if matches!(route, crate::action::DefenderRoute::Switch) {
-                let carrier = self.holder().unwrap_or(outcome.actor);
-                crate::defense::switch_matchup(self, outcome.actor, carrier);
+                if let Some(defender) = screen_defender {
+                    crate::defense::switch_screen_pair(self, defender, screener);
+                }
             }
         }
         for player in 0..self.players.len() {
             let Some(mut runtime) = self.players[player].action.take() else {
                 continue;
             };
-            if runtime.action_id != action_id {
+            if runtime.interaction_id != interaction_id {
                 self.players[player].action = Some(runtime);
                 continue;
             }
@@ -4431,8 +4503,11 @@ impl World {
         }
         self.players[outcome.actor].schedule.next_redecide_at =
             self.now() + f64::from(self.rules.redecide_interval_seconds);
-        self.players[outcome.actor].schedule.pending =
-            Some(crate::state::DecisionTrigger::ActionComplete);
+        self.players[outcome.actor].schedule.pending = Some(if outcome.delta.defender_route.is_some() {
+            crate::state::DecisionTrigger::ScreenContact
+        } else {
+            crate::state::DecisionTrigger::ActionComplete
+        });
     }
 
     /// 当前是否存在满足条件的交互，供职责分配与计时判定读派生状态。
@@ -4537,7 +4612,9 @@ impl World {
                         let arrived = pending.spots.iter().all(|(handle, spot)| {
                             (self.players[*handle].pos - *spot).length() <= 1.5
                         });
-                        if arrived || pending.waited >= 5.0 {
+                        let jump_staging_timeout =
+                            self.params.policy.g("jump_staging_timeout_seconds");
+                        if arrived || pending.waited >= jump_staging_timeout {
                             self.pending_jump_ball = None;
                             self.begin_period_jump_ball_with_receivers(
                                 pending.home,

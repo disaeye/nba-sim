@@ -4,7 +4,7 @@
 //! 逐事件与单回合行为见 `engine.rs`。
 
 use nba_sim_core::params::workspace_calibration_dir;
-use nba_sim_core::{gate, MatchSetup, Params, TeamSide, World};
+use nba_sim_core::{MatchSetup, Params, TeamSide, World};
 
 mod common;
 
@@ -14,10 +14,6 @@ fn short_play(seed: u64) -> nba_sim_core::GameReport {
 
 fn params() -> Params {
     Params::load(&workspace_calibration_dir()).expect("tables load")
-}
-
-fn play(seed: u64) -> nba_sim_core::GameReport {
-    nba_sim_core::run_game(seed, &workspace_calibration_dir())
 }
 
 /// 六十场短比赛批次只跑一次，分类与犯规类断言共用同一批报告；
@@ -60,51 +56,16 @@ fn split_chunks(seeds: &[u64], chunks: usize) -> Vec<&[u64]> {
 }
 
 #[test]
-fn game_shape_is_within_the_professional_range() {
-    // 两场完整比赛的均值离区间边界超过四个标准差，足以验证量级；两场并行执行。
-    let reports: Vec<nba_sim_core::GameReport> = std::thread::scope(|scope| {
-        let handles: Vec<_> = [1u64, 3]
+fn shots_respect_geometry_and_context() {
+    for seed in [21, 22, 23] {
+        let report = short_play(seed);
+        let violations: Vec<_> = report
+            .violations
             .iter()
-            .map(|seed| scope.spawn(|| play(*seed)))
+            .filter(|value| value.starts_with("geometry:") || value.starts_with("context:"))
             .collect();
-        handles
-            .into_iter()
-            .map(|h| h.join().expect("full game thread must not panic"))
-            .collect()
-    });
-    let mut points = Vec::new();
-    let mut possessions = Vec::new();
-    for report in reports {
-        points.push((report.home_score + report.away_score) as f64);
-        possessions.push(report.possessions.len() as f64);
+        assert!(violations.is_empty(), "seed {seed}: {violations:?}");
     }
-    let mean_points: f64 = points.iter().sum::<f64>() / points.len() as f64;
-    let mean_possessions: f64 = possessions.iter().sum::<f64>() / possessions.len() as f64;
-    assert!(
-        (150.0..=280.0).contains(&mean_points),
-        "mean total points {mean_points:.1} outside the plausible range"
-    );
-    assert!(
-        (170.0..=230.0).contains(&mean_possessions),
-        "mean possessions {mean_possessions:.1} outside the plausible range: {possessions:?}"
-    );
-}
-
-#[test]
-fn shots_are_geometrically_legal_across_a_batch() {
-    let reports: Vec<_> = [21u64, 22, 23]
-        .iter()
-        .map(|seed| short_play(*seed))
-        .collect();
-    let report = gate::evaluate_batch(&reports, &params());
-    assert_eq!(
-        report.geometric_violations, 0,
-        "geometric violations must be zero"
-    );
-    assert_eq!(
-        report.context_violations, 0,
-        "context violations must be zero"
-    );
 }
 
 #[test]

@@ -110,7 +110,7 @@ pub fn step(world: &mut World, dt: f64) {
     // 停球后的防守抱人/搂抱犯规判定：持球人已停步/合球时，过度逼抢或搂抱构成非投篮犯规
     let is_stopped = world.possession.dribble_state == crate::state::DribbleState::Gathered
         || world.players[holder].vel.length() < 1.0;
-    if is_stopped && nearest <= 2.8 {
+    if is_stopped && nearest <= world.params.policy.g("hold_foul_reach_ft") {
         let physicality = world.players[thief].data.tendencies.physicality;
         let contain = world.players[thief].on_ball_positioning
             == Some(crate::action::OnBallPositioning::Contain);

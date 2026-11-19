@@ -13,14 +13,14 @@ use crate::draw::{purpose, Stream};
 use crate::state::BallState;
 use crate::world::World;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PassResult {
     Caught { to: usize },
     Intercepted { by: usize },
     Incomplete,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct PassInFlight {
     pub pass_id: u64,
     pub from: usize,
@@ -30,7 +30,7 @@ pub struct PassInFlight {
     pub bounced: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BallBody {
     state: BallState,
     pub pos: Vec2,
@@ -568,7 +568,9 @@ fn try_control_loose(world: &mut World) {
                 if gap < world.rules.min_player_separation_ft + 0.6 {
                     let physicality = world.players[crasher].data.tendencies.physicality;
                     let strength = world.players[crasher].data.attributes.strength;
-                    let push_rate = 0.002 + 0.008 * (physicality * 0.7 + strength * 0.3);
+                    let push_rate = world.params.policy.g("rebound_push_foul_base")
+                        + world.params.policy.g("rebound_push_foul_gain")
+                            * (physicality * 0.7 + strength * 0.3);
                     let roll = world.draw(
                         crate::draw::Stream::Foul,
                         crasher,
@@ -602,12 +604,10 @@ fn try_control_loose(world: &mut World) {
     // 人都可收走——真实比赛里脚边的活球在不到一秒内就被捡走；伸手半径
     // 小于站位间距时，等待两秒只会造成全员围观活球的静止窗口。
     let floor_ball = world.ball.z <= world.rules.ball_radius_ft + 0.5;
-    let force_pickup = elapsed > 2.0
+    let force_pickup = elapsed
+        > f64::from(world.params.policy.g("loose_ball_force_pickup_seconds"))
         || (floor_ball
-            && elapsed
-                > f64::from(
-                    world.params.policy.w("loose_ball_floor_pickup_seconds"),
-                ));
+            && elapsed > f64::from(world.params.policy.w("loose_ball_floor_pickup_seconds")));
     let base = world.params.policy.w("loose_ball_catch_base_ft");
     let skill = world.params.policy.w("loose_ball_catch_skill_ft");
     let mut best: Option<(usize, f32)> = None;
@@ -1098,6 +1098,15 @@ fn handle_player_contact(
         }
         BallState::PassFlight { to, .. } => {
             if kind == "player" && handle != to {
+                // 拦截的前提是够得着球：高弧线球从头顶过，站着的人碰不到。
+                // 接触判定因此把球的高度与防守人的站立摸高相比，球高于摸高
+                // 就是一次真实的越顶传球，不构成接触。
+                let reach =
+                    crate::physical::Physical::of(&world.players[handle], &world.params.policy)
+                        .standing_reach_ft;
+                if ball.z > reach {
+                    return;
+                }
                 // 防守球员拍到传球：手是横着扫过来的，球被抽离原来的线路，
                 // 带着一部分前进速度斜着飞出去。沿法线镜像会把球原速打回
                 // 出球人，结果是所有人挤在原点互相弹球，进攻方永远抢不到。

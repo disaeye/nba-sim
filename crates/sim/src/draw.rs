@@ -44,7 +44,7 @@ pub struct DrawKey {
     pub ordinal: u16,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct DrawSource {
     pub base_seed: u64,
 }

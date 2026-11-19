@@ -18,7 +18,8 @@
         "drop_depth_ft": 0.0,
         "hedge_distance_ft": 0.0,
         "switch_trigger_distance_ft": 5.0,
-        "recover_timeout_seconds": 1.2
+        "recover_timeout_seconds": 1.2,
+        "strategy": "standard_contest"
       },
       "drop_low_man_rim_gain": 1.0
     },
@@ -32,7 +33,8 @@
         "drop_depth_ft": 0.0,
         "hedge_distance_ft": 2.5,
         "switch_trigger_distance_ft": 4.0,
-        "recover_timeout_seconds": 0.8
+        "recover_timeout_seconds": 0.8,
+        "strategy": "fight_through"
       },
       "drop_low_man_rim_gain": 1.0
     },
@@ -46,7 +48,8 @@
         "drop_depth_ft": 0.0,
         "hedge_distance_ft": 0.0,
         "switch_trigger_distance_ft": 7.0,
-        "recover_timeout_seconds": 0.0
+        "recover_timeout_seconds": 0.0,
+        "strategy": "switch"
       },
       "drop_low_man_rim_gain": 1.0
     },
@@ -60,7 +63,8 @@
         "drop_depth_ft": 8.5,
         "hedge_distance_ft": 0.0,
         "switch_trigger_distance_ft": 3.0,
-        "recover_timeout_seconds": 1.5
+        "recover_timeout_seconds": 1.5,
+        "strategy": "go_under"
       },
       "drop_low_man_rim_gain": 2.6
     },
@@ -74,7 +78,8 @@
         "drop_depth_ft": 0.0,
         "hedge_distance_ft": 4.5,
         "switch_trigger_distance_ft": 4.0,
-        "recover_timeout_seconds": 1.2
+        "recover_timeout_seconds": 1.2,
+        "strategy": "standard_contest"
       },
       "drop_low_man_rim_gain": 1.2
     },
@@ -88,7 +93,8 @@
         "drop_depth_ft": 6.0,
         "hedge_distance_ft": 0.0,
         "switch_trigger_distance_ft": 3.0,
-        "recover_timeout_seconds": 1.5
+        "recover_timeout_seconds": 1.5,
+        "strategy": "go_under"
       },
       "drop_low_man_rim_gain": 2.2
     }

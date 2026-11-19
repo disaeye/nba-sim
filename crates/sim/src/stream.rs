@@ -104,6 +104,7 @@ impl Fact {
             Self::PeriodSettlementCompleted { .. } => "PERIOD_SETTLEMENT_COMPLETED",
             Self::PlayActivated { .. } => "PLAY_ACTIVATED",
             Self::PlayWindowEnded { .. } => "PLAY_WINDOW_ENDED",
+            Self::CoachAdjustment { .. } => "COACH_ADJUSTMENT",
             Self::BallContact { .. } => "BALL_CONTACT",
             Self::Goaltending { .. } => "GOALTENDING",
             Self::Review { .. } => "REVIEW",
@@ -149,12 +150,14 @@ impl World {
                 action_id,
                 interaction_id,
                 player,
+                role,
                 kind,
                 target,
             } => json!({
                 "action_id": action_id,
                 "interaction_id": interaction_id,
                 "player_id": self.player_id(*player),
+                "role": format!("{role:?}"),
                 "action": kind,
                 "target_id": target.map(|handle| self.player_id(handle)),
             }),
@@ -337,19 +340,30 @@ impl World {
                 "completed": completed,
             }),
             Fact::Screen {
+                action_id: _,
+                handler,
                 screener,
+                defender,
                 team,
                 on_ball,
                 contact,
+                used,
+                handler_approached,
+                handler_screener_gap_ft,
                 route,
                 separation_ft,
                 strength,
                 displacement_ft,
             } => json!({
+                "handler_id": self.player_id(*handler),
                 "screener_id": self.player_id(*screener),
+                "defender_id": self.player_id(*defender),
                 "team": team.as_str(),
                 "on_ball": on_ball,
                 "contact": contact,
+                "used": used,
+                "handler_approached": handler_approached,
+                "handler_screener_gap_ft": handler_screener_gap_ft,
                 "route": format!("{route:?}"),
                 "separation_ft": separation_ft,
                 "strength": strength,
@@ -522,12 +536,14 @@ impl World {
                 player,
                 from,
                 to,
+                covers,
                 action_id,
             } => json!({
                 "action_id": action_id,
                 "player_id": self.player_id(*player),
                 "from": from,
                 "to": to,
+                "covers_id": covers.map(|handle| self.player_id(handle)),
             }),
             Fact::Turnover { player, kind } => json!({
                 "player_id": self.player_id(*player),
@@ -633,6 +649,12 @@ impl World {
             Fact::PlayWindowEnded { play, possession } => {
                 json!({ "play_id": PLAY_SOURCES[*play].0, "possession": possession })
             }
+            Fact::CoachAdjustment { team, evidence_repeated, evidence_difficult, target } => json!({
+                "team": team.as_str(),
+                "repeated_opportunities": evidence_repeated,
+                "difficult_makes": evidence_difficult,
+                "target": target,
+            }),
             Fact::PeriodEnd { period } => json!({ "period": period }),
             Fact::PeriodSettlementCompleted {
                 period,
@@ -789,9 +811,12 @@ impl World {
                 nba_domain::action_spec::ActionFamily::ActionScreen => {
                     match runtime.role {
                         crate::action::ActionIntentRole::ScreenPartner => "screener",
+                        crate::action::ActionIntentRole::HandlerPartner => "ball_handler",
                         crate::action::ActionIntentRole::CutPartner => "cut_partner",
+                        crate::action::ActionIntentRole::Primary if matches!(runtime.intent.kind, crate::action::ActionKind::Screen(_))
+                            && runtime.intent.actor == player_index && runtime.intent.target != Some(player_index) => "screener",
+                        crate::action::ActionIntentRole::Primary if matches!(runtime.intent.kind, crate::action::ActionKind::Screen(_)) => "ball_handler",
                         crate::action::ActionIntentRole::Primary => match identity.variant {
-                            // 无球掩护由掩护人自己发起，因此他是掩护人。
                             "off_ball" => "screener",
                             // 绕掩护接球与手递手接球由切入人自己发起。
                             "curl" | "handoff" => "cut_partner",
@@ -803,12 +828,13 @@ impl World {
                 nba_domain::action_spec::ActionFamily::ActionCut => "cut_partner",
                 _ => identity.role.as_str(),
             };
-            // 掩护动作只属于掩护人：持球人点名的掩护他自己走的是切入或
-            // 传球，因此他不带掩护动作。
-            let is_screener_call = identity.family
-                == nba_domain::action_spec::ActionFamily::ActionScreen
-                && role_str == "ball_handler";
-
+            // 持球人在掩护交互里不是独立动作：他由 SCREEN 事实里的
+            // handler_id 标识。协议不为他单独发一个没有动画配方的动作身份。
+            if family == nba_domain::action_spec::ActionFamily::ActionScreen.as_str()
+                && role_str == "ball_handler"
+            {
+                return actions;
+            }
             let phase_str = match runtime.phase {
                 nba_domain::action_window::ActionPhase::Preparation => "preparation",
                 nba_domain::action_window::ActionPhase::Execution => "execution",
@@ -831,23 +857,21 @@ impl World {
                 }
             }
 
-            if !is_screener_call {
-                actions.push(RenderAction {
-                    action_id: runtime.action_id,
-                    interaction_id: Some(runtime.interaction_id),
-                    source: "action_window".to_string(),
-                    family: family.to_string(),
-                    kind: kind.to_string(),
-                    variant: variant.to_string(),
-                    role: role_str.to_string(),
-                    phase: phase_str.to_string(),
-                    started_at: runtime.intent.start_time as f32,
-                    phase_started_at: phase_started as f32,
-                    ends_at: Some(runtime.ends_at as f32),
-                    participants,
-                    target_id,
-                });
-            }
+            actions.push(RenderAction {
+                action_id: runtime.action_id,
+                interaction_id: Some(runtime.interaction_id),
+                source: "action_window".to_string(),
+                family: family.to_string(),
+                kind: kind.to_string(),
+                variant: variant.to_string(),
+                role: role_str.to_string(),
+                phase: phase_str.to_string(),
+                started_at: runtime.intent.start_time as f32,
+                phase_started_at: phase_started as f32,
+                ends_at: Some(runtime.ends_at as f32),
+                participants,
+                target_id,
+            });
         }
 
         if let Some(Some(def_action)) = self.defensive_actions.get(player_index) {
@@ -1057,6 +1081,7 @@ impl World {
             let active_actions = self.player_active_actions(player_index, player);
             players.push(RenderPlayer {
                 id: player.id.clone(),
+                handle: player_index,
                 jersey: player.jersey.clone(),
                 team: player.team.as_str().to_string(),
                 position: player.data.position.as_str().to_string(),
@@ -1065,6 +1090,8 @@ impl World {
                 x: norm.x,
                 y: norm.y,
                 z: player.z,
+                velocity_x: player.vel.x / self.rules.court.width_ft,
+                velocity_y: player.vel.y / self.rules.court.height_ft,
                 zone: self.zone_for_position(player.pos, player.team),
                 has_ball: self.holder() == Some(self.player_index(&player.id)),
                 on_court: true,
@@ -1224,7 +1251,8 @@ impl World {
             Fact::Pass { pass_id, .. } => {
                 (None, Some(format!("pass-{pass_id:06}")), None, None, None)
             }
-            Fact::ActionStarted { action_id, .. }
+            Fact::Screen { action_id: Some(action_id), .. }
+            | Fact::ActionStarted { action_id, .. }
             | Fact::ActionPhaseChanged { action_id, .. }
             | Fact::ActionCompleted { action_id, .. }
             | Fact::ActionFailed { action_id, .. }
@@ -1301,7 +1329,7 @@ impl World {
     fn event_decision_trace(&self, event: &TimedFact) -> Option<DecisionTrace> {
         let is_action = matches!(
             event.fact,
-            Fact::Shot { .. } | Fact::Pass { .. } | Fact::Drive { .. } | Fact::PostUp { .. }
+            Fact::Screen { .. } | Fact::Shot { .. } | Fact::Pass { .. } | Fact::Drive { .. } | Fact::PostUp { .. }
         );
         if !is_action {
             return None;
@@ -1468,6 +1496,7 @@ pub fn frame_rules(rules: &nba_domain::GameRules, calibration_version: &str) -> 
         player_radius_ft: rules.player_radius_ft,
         body_contact_radius_ft: rules.body_contact_radius_ft,
         min_player_separation_ft: rules.min_player_separation_ft,
+        contact_margin_ft: rules.contact_margin_ft,
         separation_safety_margin_ft: rules.separation_safety_margin_ft,
         max_player_speed_ftps: rules.max_player_speed_ftps,
         max_player_accel_ftps2: rules.max_player_accel_ftps2,

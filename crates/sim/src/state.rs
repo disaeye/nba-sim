@@ -15,7 +15,7 @@ use crate::clock::{
 };
 use crate::params::PolicyTable;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum OffenseJob {
     Handler,
     SpotUp,
@@ -40,7 +40,7 @@ impl OffenseJob {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TargetKind {
     Station,
     Pressure,
@@ -122,7 +122,7 @@ impl PostureSlot {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DefenseResponsibility {
     OnBall,
     Deny,
@@ -170,7 +170,7 @@ impl DefenseResponsibility {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Slot {
     Handler,
     Wing,
@@ -193,9 +193,11 @@ impl Slot {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DecisionTrigger {
     PossessionStart,
+    NewObservation,
+    OpportunityChanged,
     ActionComplete,
     BallHolderChanged,
     PassReceived,
@@ -209,7 +211,7 @@ pub enum DecisionTrigger {
 ///
 /// 决策由事件触发；`next_redecide_at` 是无事件时的回退时刻。
 /// `pending` 记录尚未消费的触发来源，供审计与协议投影。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct DecisionSchedule {
     pub next_redecide_at: f64,
     pub pending: Option<DecisionTrigger>,
@@ -219,7 +221,7 @@ pub struct DecisionSchedule {
 ///
 /// 三种假动作造成同一个状态，但消费者不同：投篮假动作降低干扰，
 /// 传球假动作压缩抄截半径，试探步两者都轻微受影响。窗口到期即恢复。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Bait {
     pub kind: crate::action::FakeKind,
     pub until: f64,
@@ -228,7 +230,7 @@ pub struct Bait {
 }
 
 /// 持球人的护球姿态：在窗口内降低切球成功率。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct BallProtection {
     pub holder: usize,
     pub kind: crate::action::ProtectKind,
@@ -244,7 +246,7 @@ impl Default for DecisionSchedule {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlayerState {
     pub id: String,
     pub name: String,
@@ -312,6 +314,7 @@ pub struct PlayerState {
     pub resting_until: f64,
     /// 重决策调度：事件触发加最小间隔。
     pub schedule: DecisionSchedule,
+    pub reads: Vec<Option<crate::opportunity::PlayerRead>>,
     /// 对位防守人下一次评估站位动作的时刻：站位与切球是两条独立的
     /// 调度，因此各有各的间隔。
     pub positioning_next_at: f64,
@@ -328,7 +331,8 @@ pub struct PlayerState {
     /// 扑防应答：造犯规接触或侧移避让。
     ///
     /// 这是出手人对扑防的应对，窗口覆盖到这次出手结算为止。
-    pub closeout_response: Option<&'static str>,
+    #[serde(deserialize_with = "crate::checkpoint::optional_label")]
+    pub closeout_response: Option<crate::checkpoint::Label>,
     /// 本球员当前执行的身体动作；多人配合使用相同的 interaction_id。
     pub action: Option<ActionRuntime>,
     /// 持续姿态的动作身份。
@@ -344,7 +348,8 @@ pub struct PlayerState {
     pub posture_since: [f64; POSTURE_SLOT_COUNT],
     /// 每种姿态当前的技术变体：职责名、站位名、转换变体与应答名。
     /// 姿态结束时的事实因此能指到它当时是哪一个变体。
-    pub posture_variants: [&'static str; POSTURE_SLOT_COUNT],
+    #[serde(deserialize_with = "crate::checkpoint::posture_labels")]
+    pub posture_variants: [crate::checkpoint::Label; POSTURE_SLOT_COUNT],
     /// 被假动作骗到后的失衡窗口：干扰、抄截半径与切球成功率都读它。
     pub bait: Option<Bait>,
     /// 最近一次完成掩护的时刻：掩护结束后掩护人要顺下或外弹。
@@ -396,6 +401,7 @@ impl PlayerState {
             resting_until: f64::default(),
             screened_at: f64::NEG_INFINITY,
             schedule: DecisionSchedule::default(),
+            reads: Vec::new(),
             positioning_next_at: 0.0,
             on_ball_positioning: None,
             transition: None,
@@ -490,7 +496,7 @@ impl ClockAdvance {
     };
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Clock {
     pub state: ClockState,
     commits: ClockCommitLog,
@@ -715,7 +721,7 @@ impl Clock {
 ///
 /// 传球、投篮、罚球与跳球撮球的飞行不替换比赛程序：程序仍是活球，
 /// 飞行只是球的第二个维度。
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BallFlight {
     pub kind: FlightKind,
     /// 飞行结束、该结算的时刻。
@@ -723,7 +729,7 @@ pub struct BallFlight {
 }
 
 /// 四种飞行：传球、投篮（含上篮）、罚球、跳球撮球。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FlightKind {
     Pass,
     Shot,
@@ -768,7 +774,7 @@ pub use nba_domain::ShotContext;
 /// 权威球的宏观归属状态。
 pub use nba_domain::BallState;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Phase {
     Inbound {
         team: TeamSide,
@@ -812,7 +818,7 @@ pub enum Phase {
     Finished,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ResumePhase {
     Inbound {
         team: TeamSide,
@@ -1087,7 +1093,7 @@ impl Phase {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PossessionKind {
     Dead,
     Live,
@@ -1104,7 +1110,7 @@ impl PossessionKind {
 
 /// 持球状态：运球中或已收球。收球后只允许终结（投篮/传球）或两步
 /// 内的调整；再运球是二次运球，收球后超步幅位移是走步。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum BallPhase {
     #[default]
     Dribble,
@@ -1130,14 +1136,14 @@ impl BallPhase {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum DribbleState {
     #[default]
     Dribbling,
     Gathered,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PossessionState {
     pub team: TeamSide,
     pub id: u64,
@@ -1147,6 +1153,9 @@ pub struct PossessionState {
     pub screens: u32,
     pub drives: u32,
     pub had_shot: bool,
+    /// 本次回合最近一次出手的观测：跨回合调整只从这些公开量学习。
+    pub last_shot_distance_ft: f32,
+    pub last_shot_contest: f32,
     pub had_offensive_rebound: bool,
     pub last_pass_at: Option<f64>,
     pub last_pass_from: Option<usize>,
@@ -1160,13 +1169,18 @@ pub struct PossessionState {
     pub last_drive_at: Option<f64>,
     pub last_post_at: Option<f64>,
     /// 上一次背身选用的步法：随后的跳投因此能区分转身跳投与后仰跳投。
-    pub last_post_step: Option<&'static str>,
+    #[serde(deserialize_with = "crate::checkpoint::optional_label")]
+    pub last_post_step: Option<crate::checkpoint::Label>,
     pub last_drive_actor: Option<usize>,
     pub last_post_actor: Option<usize>,
     pub last_cut_actor: Option<usize>,
     /// 回合开始到首个动作起手的秒数。
     pub first_action_seconds: Option<f64>,
     /// 本回合已经发生的无球自主动作数：无球球员每个回合只另起一次动作。
+    ///
+    /// 掩护之后的绕掩护接球是例外：它必须跟在掩护之后，因此允许再来
+    /// 一次。没有这个上限，无球球员会在整个回合里反复切入，进攻因此
+    /// 一直在没有接球机会的路线上跑。
     pub off_ball_actions: u8,
     /// 当前运球技术带给球的暴露程度（0 = 护住，1 = 完全暴露）。
     pub dribble_exposure: f32,
@@ -1246,6 +1260,8 @@ impl PossessionState {
             screens: 0,
             drives: 0,
             had_shot: false,
+            last_shot_distance_ft: f32::default(),
+            last_shot_contest: f32::default(),
             had_offensive_rebound: false,
             last_pass_at: None,
             last_pass_from: None,
@@ -1292,11 +1308,8 @@ impl PossessionState {
     }
 }
 
-/// 掩护结算出的防守人路线及其有效期。
-///
-/// 决策层看不到这个结构就直接是战术盲人：防守人钻掩护下沿还是换防，
-/// 决定了持球人该干拔还是突破。
-#[derive(Debug, Clone, Copy)]
+/// 最近一次有效掩护的防守路线与参与人。
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct ScreenRead {
     pub route: DefenderRoute,
     pub at: f64,
@@ -1305,7 +1318,7 @@ pub struct ScreenRead {
 }
 
 /// 逐次出手的过程观测。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct ShotSample {
     pub shot_clock: f64,
     /// 出手时的比赛时间与节次：分层诊断需要按末段窗口切样本。
@@ -1320,7 +1333,8 @@ pub struct ShotSample {
     pub defender_ft: f32,
     pub zone: u8,
     /// 出手时由动作结算写入的持球阶段。
-    pub phase: &'static str,
+    #[serde(deserialize_with = "crate::checkpoint::label")]
+    pub phase: crate::checkpoint::Label,
     /// 出手点到篮筐的平面距离。
     pub distance_ft: f32,
     /// 本次出手抽样得到的瞄准半径。
@@ -1339,13 +1353,14 @@ pub struct ShotSample {
     pub p_block: f32,
     pub p_make_cond: f32,
     /// 球体结算给出的结果类别：made / missed / blocked。
-    pub result: &'static str,
+    #[serde(deserialize_with = "crate::checkpoint::label")]
+    pub result: crate::checkpoint::Label,
     pub made: bool,
     pub points: u8,
 }
 
 /// 逐次传球的观测，用于乒乓传球与传导质量判定。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct PassSample {
     pub possession: u64,
     pub from: usize,
@@ -1379,6 +1394,13 @@ pub struct DecisionRecord {
     pub tick: u64,
     pub actor: usize,
     pub observation_digest: u64,
+    pub observation: crate::views::Observation,
+    pub source_event_id: Option<u64>,
+    pub trigger: DecisionTrigger,
+    pub player_reads: Vec<crate::opportunity::KnownPlayer>,
+    pub unknown_players: Vec<usize>,
+    #[serde(default)]
+    pub windows: Vec<crate::opportunity::DecisionWindow>,
     pub candidates: Vec<CandidateTrace>,
     pub chosen: usize,
     pub revalidation: Revalidation,
@@ -1390,7 +1412,7 @@ pub enum Revalidation {
     Cancelled(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DecisionTraceSample {
     pub actor: usize,
     pub beta: f32,
@@ -1409,7 +1431,7 @@ impl DecisionTraceSample {
 }
 
 /// 逐次决策的观测：掩护路线、所选动作族与效用的完整分解。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct DecisionSample {
     pub route: Option<DefenderRoute>,
     pub family: u8,
@@ -1518,7 +1540,7 @@ impl DecisionState {
                     defender.reach_excess_ft,
                 ))
             .clamp(0.0, 1.0),
-            None => 1.0,
+            None => 0.5,
         }
     }
 
@@ -1661,7 +1683,7 @@ pub const MAX_ON_COURT: usize = 5;
 
 /// 在场球员句柄的定长集合。每 tick 的防守目标求解与箱体计时都读它，
 /// 用定长数组避免逐 tick 堆分配。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct OnCourt {
     handles: [usize; MAX_ON_COURT],
     len: usize,

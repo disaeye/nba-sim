@@ -7,14 +7,10 @@ fn main() {
     let mut calibration = PathBuf::from(nba_sim_core::CALIBRATION_DIR);
     let mut verbose = false;
     let mut json = false;
-    let mut gate = false;
-    let mut gate_only = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--json" => json = true,
-            "--gate" => gate = true,
-            "--gate-only" => gate_only = true,
             "--seeds" => {
                 let value = args.next().expect("--seeds requires a range like 1..10");
                 let (start, end) = value
@@ -33,26 +29,6 @@ fn main() {
             }
         }
     }
-    if gate_only {
-        let params =
-            nba_sim_core::Params::load(&calibration).expect("calibration tables must load");
-        use rayon::prelude::*;
-        let mut reports: Vec<_> = (1..=16u64)
-            .into_par_iter()
-            .map(|seed| run_game(seed, &calibration))
-            .collect();
-        reports.sort_by_key(|report| report.seed);
-        let mut merged = nba_sim_core::GameReport::empty();
-        for report in &reports {
-            merged.merge_for_gate(report);
-        }
-        let gate_report = nba_sim_core::gate::evaluate_merged(&merged, &params);
-        println!(
-            "GATE {}",
-            serde_json::to_string(&gate_report).expect("gate report serializes")
-        );
-        return;
-    }
     if seeds.is_empty() {
         seeds.push(42);
     }
@@ -60,7 +36,6 @@ fn main() {
     println!("seed  score      poss  FGA  3PA   FTA  TOV  OREB  2P%    3P%    FT%");
     let mut totals = Vec::new();
     let mut metrics = Metrics::default();
-    let mut gate_reports: Vec<nba_sim_core::GameReport> = Vec::new();
     for seed in seeds {
         let report = run_game(seed, &calibration);
         metrics.add(&report);
@@ -87,9 +62,6 @@ fn main() {
             report_distributions(&report);
         }
         totals.push(summary);
-        if gate {
-            gate_reports.push(report);
-        }
     }
 
     if totals.len() > 1 {
@@ -113,45 +85,7 @@ fn main() {
     if json {
         print_metrics(&metrics);
     }
-    if gate {
-        let params =
-            nba_sim_core::Params::load(&calibration).expect("calibration tables must load");
-        // 门禁的 16 场来自固定种子 1..=16。命令行已经跑过同一批时直接
-        // 复用报告；换种子集时另行并行模拟，判定入口与批次始终一致。
-        let reports: Vec<nba_sim_core::GameReport> = if gate_reports.len() == 16
-            && gate_reports.iter().zip(1..=16u64).all(|(report, seed)| report.seed == seed)
-        {
-            gate_reports
-        } else {
-            use rayon::prelude::*;
-            let mut batch: Vec<_> = (1..=16u64)
-                .into_par_iter()
-                .map(|seed| run_game(seed, &calibration))
-                .collect();
-            batch.sort_by_key(|report| report.seed);
-            batch
-        };
-        let mut merged = nba_sim_core::GameReport::empty();
-        for report in &reports {
-            merged.merge_for_gate(report);
-        }
-        let report = nba_sim_core::gate::evaluate_merged(&merged, &params);
-        let mut samples: Vec<String> = Vec::new();
-        for game in &reports {
-            for violation in &game.violations {
-                if samples.len() < 8 && !samples.contains(violation) {
-                    samples.push(violation.clone());
-                }
-            }
-        }
-        for sample in samples {
-            println!("VIOLATION {sample}");
-        }
-        println!(
-            "GATE {}",
-            serde_json::to_string(&report).expect("gate report serializes")
-        );
-    }
+
 }
 
 #[derive(Default)]

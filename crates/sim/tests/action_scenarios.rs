@@ -493,7 +493,6 @@ fn the_screener_rolls_or_pops_after_setting_a_screen() {
         world.ball.z = world.rules.ball_radius_ft;
         world.clock.set_shot_clock(20.0);
         world.possession.started_at = world.now() - 5.0;
-        world.possession.off_ball_actions = 0;
         world.players[screener].screened_at = world.now();
         world.players[screener].schedule.next_redecide_at = 0.0;
 
@@ -2162,4 +2161,85 @@ fn real_games_include_off_ball_screens() {
             .count() as u32;
     }
     assert!(off_ball > 0, "真实比赛里必须有掩护人自己发起的无球掩护");
+}
+
+/// 同一掩护几何、只换防守方案：换防、沉退与挤过给出不同的防守路线。
+///
+/// 这是 §16.1 要求的「同一标签下因防守方式不同产生不同反应」。三臂共用
+/// 完全相同的站位、对位和随机种子，唯一差别是守方的方案档案。
+#[test]
+fn defensive_scheme_changes_the_screen_route_on_identical_geometry() {
+    use nba_domain::{DefenseRules, OnBallScreenDefenseStrategy};
+    use nba_sim_core::action::DefenderRoute;
+
+    let params = Params::load(&workspace_calibration_dir()).expect("calibration tables load");
+    let run = |scheme_id: &str| {
+        let mut world = World::new(
+            MatchSetup::builtin(GameRules::default()),
+            params.clone(),
+            263,
+        );
+        let carrier = world.on_court(TeamSide::Home).as_slice()[0];
+        let screener = world.on_court(TeamSide::Home).as_slice()[1];
+        let on_ball = world.on_court(TeamSide::Away).as_slice()[0];
+        let helper = world.on_court(TeamSide::Away).as_slice()[1];
+        for (index, player) in world.players.iter_mut().enumerate() {
+            player.on_court =
+                index == carrier || index == screener || index == on_ball || index == helper;
+            player.vel = Vec2::ZERO;
+        }
+        let carrier_spot = Vec2::new(60.0, 25.0);
+        world.players[carrier].pos = carrier_spot;
+        world.players[carrier].target = carrier_spot;
+        // 掩护人贴住持球人的对位防守人。
+        world.players[screener].pos = Vec2::new(60.8, 25.6);
+        world.players[screener].target = world.players[screener].pos;
+        // helper 离持球人最近，因此成为持球人的对位人（要被掩护的那个）；
+        // on_ball 离掩护人最近，因此是掩护人的对位人（可换防的人）。
+        world.players[helper].pos = Vec2::new(60.1, 25.2);
+        world.players[helper].target = world.players[helper].pos;
+        world.players[on_ball].pos = Vec2::new(61.0, 25.9);
+        world.players[on_ball].target = world.players[on_ball].pos;
+        world.possession.team = TeamSide::Home;
+        world.start_possession(TeamSide::Home, PossessionKind::Live);
+        world.set_phase(Phase::Live);
+        world.ball.set_held(carrier);
+        world.ball.pos = carrier_spot;
+        world.ball.z = world.rules.ball_radius_ft;
+        nba_sim_core::defense::refresh_matchup(&mut world);
+        world.defense_schemes[World::team_index(TeamSide::Away)] =
+            DefenseRules::for_scheme(scheme_id).expect("defense scheme exists");
+        world.screen_defender = Some(helper);
+        let intent = ActionIntent {
+            actor: carrier,
+            kind: ActionKind::Screen(ScreenKind::OnBall),
+            target: Some(screener),
+            from_ft: carrier_spot,
+            to_ft: world.players[screener].pos,
+            start_time: world.now(),
+            duration: 1.0,
+        };
+        let before = world.events.len();
+        nba_sim_core::resolve::screen::resolve(&mut world, &intent, ScreenKind::OnBall);
+        let screen = world.events[before..].iter().find_map(|event| match &event.fact {
+            Fact::Screen { contact, route, .. } => Some((*contact, *route)),
+            _ => None,
+        });
+        (world.possession.matchup[0], screen)
+    };
+
+    let assert_strategy = |id: &str, expected: OnBallScreenDefenseStrategy| {
+        let setup = DefenseRules::for_scheme(id).expect("defense scheme exists");
+        assert_eq!(setup.screen_defense.strategy, expected, "方案档案必须声明该策略");
+    };
+    assert_strategy("def_switch_heavy", OnBallScreenDefenseStrategy::Switch);
+    assert_strategy("def_drop_coverage", OnBallScreenDefenseStrategy::GoUnder);
+    assert_strategy("def_man_pressure", OnBallScreenDefenseStrategy::FightThrough);
+
+    let (_, switch) = run("def_switch_heavy");
+    let (_, drop) = run("def_drop_coverage");
+    let (_, pressure) = run("def_man_pressure");
+    assert_eq!(switch, Some((true, DefenderRoute::Switch)), "换防方案必须形成接触并换防：{switch:?}");
+    assert_eq!(drop, Some((true, DefenderRoute::Under)), "沉退方案必须形成接触并绕后：{drop:?}");
+    assert_eq!(pressure, Some((true, DefenderRoute::Over)), "挤过方案必须形成接触并挤过：{pressure:?}");
 }

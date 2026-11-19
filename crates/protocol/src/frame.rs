@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 pub struct RenderPlayer {
     /// Stable roster identity; jersey numbers are presentation data only.
     pub id: String,
+    /// 引擎内部的球员句柄：决策记录里的参与人身份用的就是它。协议投影
+    /// 因此把它带出来，消费方才能把帧与决策记录对上。
+    #[serde(default)]
+    pub handle: usize,
     pub jersey: String,
     pub team: String,
     /// 六类位置（attributes.md §2.7a）：Point/Combo/Wing/Forward/Big/Center。
@@ -28,6 +32,10 @@ pub struct RenderPlayer {
     #[serde(rename = "onCourt")]
     pub on_court: bool,
     pub action: String,
+    #[serde(default)]
+    pub velocity_x: f32,
+    #[serde(default)]
+    pub velocity_y: f32,
     /// 当前动作窗口阶段；没有活动窗口时省略。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action_phase: Option<String>,
@@ -602,6 +610,8 @@ pub struct FrameRules {
     pub body_contact_radius_ft: f32,
     pub min_player_separation_ft: f32,
     #[serde(default)]
+    pub contact_margin_ft: f32,
+    #[serde(default)]
     pub separation_safety_margin_ft: f32,
     pub max_player_speed_ftps: f32,
     pub max_player_accel_ftps2: f32,
@@ -632,7 +642,7 @@ pub struct FrameRules {
 /// 行为模型（决策、动作、裁决规则）改动时这个值随之改动。规则版本说
 /// 明「按哪套规则判」，校准版本说明「按哪份校准算」，引擎模型版本说明
 /// 「按哪套行为模型选」。
-pub const ENGINE_MODEL_VERSION: &str = "action-chain-1";
+pub const ENGINE_MODEL_VERSION: &str = "action-chain-2";
 
 fn default_body_contact_radius() -> f32 {
     1.0
@@ -680,6 +690,7 @@ impl Default for FrameRules {
             player_radius_ft: 1.8,
             body_contact_radius_ft: 1.0,
             min_player_separation_ft: 3.6,
+            contact_margin_ft: 0.05,
             // C6.4：取 GameRules::default() (0.05) 同源值——第二个手抄漂移点，
             // 由 engine/tests 的全字段一致性测试抓出。
             separation_safety_margin_ft: 0.05,

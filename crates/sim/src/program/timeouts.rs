@@ -11,7 +11,7 @@ use crate::state::{Phase, ResumePhase, TeamSide};
 use crate::world::World;
 
 /// 一支球队的暂停账本。
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 pub struct TimeoutBudget {
     /// 本场剩余暂停数。
     pub remaining: u32,

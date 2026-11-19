@@ -138,7 +138,7 @@ impl ClockAdjustment {
 
 /// 球权的控制状态：谁控球、哪队控制、谁最后触球、控制何时建立、是否已过
 /// 前场、球是否在空中或已触及篮筐。
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ControlState {
     /// 当前控球人；无人控制时为 `None`。
     pub holder: Option<usize>,
@@ -170,23 +170,26 @@ pub struct ControlState {
     /// 结束上一控制序列的事件身份。
     pub ended_by_event_id: Option<u64>,
     /// 当前球态身份。
-    pub ball_state: &'static str,
+    #[serde(deserialize_with = "crate::checkpoint::label")]
+    pub ball_state: crate::checkpoint::Label,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ControlBoundary {
     Established,
     Ended,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ControlTransition {
     pub boundary: ControlBoundary,
     pub sequence_id: u64,
     pub team: Option<TeamSide>,
     pub holder: Option<usize>,
-    pub ball_state: &'static str,
-    pub source: &'static str,
+    #[serde(deserialize_with = "crate::checkpoint::label")]
+    pub ball_state: crate::checkpoint::Label,
+    #[serde(deserialize_with = "crate::checkpoint::label")]
+    pub source: crate::checkpoint::Label,
     pub at: f64,
 }
 
@@ -194,15 +197,17 @@ pub struct ControlTransition {
 ///
 /// 交接是一个原子事件：它同时包含上一段的结束与新一段的开始，因此
 /// 验证器按它重建时，建立与结束永远成对。
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ControlHandover {
     pub previous_sequence_id: Option<u64>,
     pub previous_team: Option<TeamSide>,
     pub sequence_id: u64,
     pub team: Option<TeamSide>,
     pub holder: Option<usize>,
-    pub ball_state: &'static str,
-    pub source: &'static str,
+    #[serde(deserialize_with = "crate::checkpoint::label")]
+    pub ball_state: crate::checkpoint::Label,
+    #[serde(deserialize_with = "crate::checkpoint::label")]
+    pub source: crate::checkpoint::Label,
     pub at: f64,
 }
 

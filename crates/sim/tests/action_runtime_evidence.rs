@@ -56,6 +56,7 @@ fn runtime_identity(
         nba_domain::action_spec::ActionFamily::ActionScreen => match runtime.role {
             nba_sim_core::action::ActionIntentRole::ScreenPartner => "screener",
             nba_sim_core::action::ActionIntentRole::CutPartner => "cut_partner",
+            nba_sim_core::action::ActionIntentRole::HandlerPartner => "ball_handler",
             nba_sim_core::action::ActionIntentRole::Primary => match identity.variant {
                 "off_ball" => "screener",
                 "curl" | "handoff" => "cut_partner",

@@ -421,6 +421,7 @@ fn release_contest(
     pos: Vec2,
     release_z: f32,
     delay: f32,
+    observer: Option<usize>,
 ) -> (f32, f32) {
     let team = world.players[shooter].team;
     let hoop = world.hoop_for(team);
@@ -428,11 +429,17 @@ fn release_contest(
     let shape = crate::state::ContestShape::from_policy(policy);
     let mut best_contest = 0.0_f32;
     let mut best_distance = f32::INFINITY;
-    for defender in world.players.iter() {
+    for (handle, defender) in world.players.iter().enumerate() {
         if !defender.on_court || defender.team == team {
             continue;
         }
-        let predicted = defender.pos + defender.vel * delay;
+        let predicted = match observer {
+            Some(actor) => {
+                let Some(read) = crate::opportunity::read(world, actor, handle) else { continue; };
+                read.position + read.velocity * delay
+            }
+            None => defender.pos + defender.vel * delay,
+        };
         let physical = crate::physical::Physical::of(defender, policy);
         let hand_z = world.rules.chest_height_ft + 1.0 + defender.attribute("block") * 2.5;
         let horizontal = (predicted - pos).length();
@@ -548,9 +555,21 @@ pub fn block_risk_for_path(
     release_z: f32,
     sigma: f32,
 ) -> (f32, Option<usize>) {
+    block_risk_from_hands(world, origin, landing, plan, release_z, sigma, blocking_hands(world, shooter))
+}
+
+fn block_risk_from_hands(
+    world: &World,
+    origin: Vec2,
+    landing: Vec2,
+    plan: &ShotPlan,
+    release_z: f32,
+    sigma: f32,
+    hands: impl IntoIterator<Item = BlockingHand>,
+) -> (f32, Option<usize>) {
     let rules = &world.rules;
     let mut best = (0.0_f32, None);
-    for hand in blocking_hands(world, shooter) {
+    for hand in hands {
         let (distance, _point, _lateral, _z) = trajectory_closest(
             plan,
             origin,
@@ -611,6 +630,14 @@ pub fn evaluate(
     phase: BallPhase,
     pos: Vec2,
 ) -> ShotModel {
+    evaluate_with_observer(world, shooter, kind, phase, pos, None)
+}
+
+pub fn evaluate_observed(world: &World, observer: usize, shooter: usize, kind: ShotKind, phase: BallPhase, pos: Vec2) -> ShotModel {
+    evaluate_with_observer(world, shooter, kind, phase, pos, Some(observer))
+}
+
+fn evaluate_with_observer(world: &World, shooter: usize, kind: ShotKind, phase: BallPhase, pos: Vec2, observer: Option<usize>) -> ShotModel {
     let team = world.players[shooter].team;
     let hoop = world.hoop_for(team);
     let zone = crate::resolve::shooter_zone(world, pos, team);
@@ -684,11 +711,16 @@ pub fn evaluate(
     // 扣掉这两种分支之后的净命中率。瞄准误差决定的是球自己能不能穿过
     // 筐口，所以先把净目标反解成条件命中率：飞行层的封盖与犯规判定再把
     // 条件概率折回净命中率，两次口径不会重复扣减。
-    let (contest, _block_distance) = release_contest(world, shooter, pos, release_z, delay);
+    let (contest, _block_distance) = release_contest(world, shooter, pos, release_z, delay, observer);
     let rim_in = policy.w("shot_rim_in_probability").clamp(0.0, 0.9);
     let contact_band = policy.w("shot_rim_contact_band").max(0.0);
     let contact_radius = aperture + contact_band;
-    let movement = world.players[shooter].vel.length() / rules.max_player_speed_ftps;
+    let velocity = match observer {
+        Some(actor) if actor != shooter => crate::opportunity::read(world, actor, shooter)
+            .map_or(world.players[shooter].vel, |read| read.velocity),
+        _ => world.players[shooter].vel,
+    };
+    let movement = velocity.length() / rules.max_player_speed_ftps;
     // 实测曲线本身就是本类出手在本距离上的总体命中率，已经包含联盟平均的
     // 干扰与移动。两个乘子都以本类出手的总体均值为中心：比均值更紧的防守
     // 扩大瞄准误差，比均值更干净的出手缩小瞄准误差，两侧对称、均值不变。
@@ -723,7 +755,7 @@ pub fn evaluate(
     // 因为命中率对瞄准偏差是凸函数，乘子的方差会抬高均值。
     // 站位动作的压力：贴身施压与站位吃犯规都压低命中目标，因此这个
     // 乘子小于 1。它只作用在这里，不进干扰强度，因此封盖概率不受影响。
-    let positioning = positioning_pressure(world, team);
+    let positioning = observer.map_or_else(|| positioning_pressure(world, team), |_| f32::from(1_u8));
     let adjust = kind_factor(kind)
         * phase_factor(world, phase)
         * movement_factor
@@ -751,8 +783,19 @@ pub fn evaluate(
         sigma_reference.max(MIN_LOG_ARGUMENT)
     };
     let sigma_prior = sigma_for(1.0);
-    let (block_risk, block_hand) =
-        block_risk_for_path(world, shooter, origin, hoop, &plan, release_z, sigma_prior);
+    let (block_risk, block_hand) = match observer {
+        None => block_risk_for_path(world, shooter, origin, hoop, &plan, release_z, sigma_prior),
+        Some(actor) => {
+            // 封盖人的位置按观测者的记忆算：他现在站在哪里。若记忆过期，
+            // 封盖的高度按实际身体算，不按记忆里的旧位置算。
+            let hands = blocking_hands(world, shooter).into_iter().filter_map(|mut hand| {
+                let read = crate::opportunity::read(world, actor, hand.handle)?;
+                hand.pos = read.position + read.velocity * delay;
+                Some(hand)
+            });
+            block_risk_from_hands(world, origin, hoop, &plan, release_z, sigma_prior, hands)
+        }
+    };
     let block_risk = block_risk.clamp(0.0, 0.95);
     let survive = 1.0 - block_risk;
     let sigma = sigma_prior;

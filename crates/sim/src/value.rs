@@ -8,7 +8,7 @@
 use glam::Vec2;
 
 use crate::action::PassKind;
-use crate::resolve::{contest_for, shooter_zone};
+use crate::resolve::shooter_zone;
 use crate::state::DecisionState;
 use crate::world::World;
 
@@ -24,12 +24,26 @@ fn shot_points(world: &World, pos: Vec2, shooter: usize) -> (f32, &'static str) 
 
 /// 投失后由进攻方拿到篮板的概率。只用当前场上位置和篮板属性，不读结果表。
 pub fn offensive_rebound_probability(world: &World, shooter: usize) -> f32 {
+    rebound_probability(world, shooter, None)
+}
+
+fn rebound_probability(world: &World, shooter: usize, observer: Option<usize>) -> f32 {
     let offense = world.players[shooter].team;
     let hoop = world.hoop_for(offense);
     let mut offensive = 0.0_f32;
     let mut defensive = 0.0_f32;
-    for player in world.players.iter().filter(|player| player.on_court) {
-        let distance = (player.pos - hoop).length();
+    for (handle, player) in world.players.iter().enumerate().filter(|(_, player)| player.on_court) {
+        // 篮板位置按观察者记得的位置算：他不知道的人不参与这次估算。
+        // 出手人自己对自己的位置是知道的，因此他永远读到自己的真实位置。
+        let position = match observer {
+            None => player.pos,
+            Some(actor) if handle == actor => player.pos,
+            Some(actor) => match crate::opportunity::read(world, actor, handle) {
+                Some(read) => read.position,
+                None => continue,
+            },
+        };
+        let distance = (position - hoop).length();
         let near = (1.0 - distance / 30.0).clamp(0.0, 1.0);
         let rebound = if player.team == offense {
             "offensive_rebound"
@@ -43,7 +57,8 @@ pub fn offensive_rebound_probability(world: &World, shooter: usize) -> f32 {
             defensive += weight;
         }
     }
-    (0.35 * offensive / (offensive + defensive + f32::MIN_POSITIVE)).clamp(0.0, 0.35)
+    let total = offensive + defensive;
+    (0.35 * offensive / (total + f32::MIN_POSITIVE)).clamp(0.0, 0.35)
 }
 
 /// 一次出手被犯规带来的净值：罚球期望加加罚期望，使用当前规则与策略表。
@@ -67,7 +82,14 @@ pub fn foul_value(world: &World, points: f32) -> f32 {
 /// 本次出手的分值再领一次。按本次出手的分值折算会高估三分投失，因为
 /// 三分不中之后的二次进攻多半是两分。
 pub fn shot_value_for(world: &World, actor: usize, _pos: Vec2, p_make: f32, points: f32) -> f32 {
-    let offensive_rebound = offensive_rebound_probability(world, actor);
+    shot_value_with_rebound(world, p_make, points, offensive_rebound_probability(world, actor))
+}
+
+pub(crate) fn observed_shot_value_for(world: &World, observer: usize, shooter: usize, p_make: f32, points: f32) -> f32 {
+    shot_value_with_rebound(world, p_make, points, rebound_probability(world, shooter, Some(observer)))
+}
+
+fn shot_value_with_rebound(world: &World, p_make: f32, points: f32, offensive_rebound: f32) -> f32 {
     let second_chance = world.params.policy.w("second_chance_value");
     let after_miss = (1.0 - p_make) * offensive_rebound * second_chance;
     p_make * points + after_miss + foul_value(world, points)
@@ -87,6 +109,16 @@ pub fn shot_value(
     let (points, _zone) = shot_points(world, pos, actor);
     let model = crate::shot_quality::evaluate(world, actor, kind, phase, pos);
     shot_value_for(world, actor, pos, model.p_make, points)
+}
+
+pub(crate) fn observed_shot_value(world: &World, observer: usize, shooter: usize, pos: Vec2, kind: crate::action::ShotKind, phase: crate::state::BallPhase) -> f32 {
+    let (points, _) = shot_points(world, pos, shooter);
+    let model = crate::shot_quality::evaluate_observed(world, observer, shooter, kind, phase, pos);
+    observed_shot_value_for(world, observer, shooter, model.p_make, points)
+}
+
+pub(crate) fn observed_catch_value(world: &World, observer: usize, pos: Vec2, shooter: usize) -> f32 {
+    observed_shot_value(world, observer, shooter, pos, crate::action::ShotKind::CatchShoot, crate::state::BallPhase::Catch)
 }
 
 /// 接球后的价值：接球人自己在这条视界上能拿到的最好的结果。
@@ -136,48 +168,40 @@ pub fn pass_completion_probability(
     to: usize,
     kind: crate::action::PassKind,
 ) -> f32 {
+    let plan = pass_plan(world, from, to, kind);
+    pass_completion_for_plan(world, from, to, kind, plan, false)
+}
+
+fn pass_completion_for_plan(world: &World, from: usize, to: usize, kind: PassKind, (end, flight): (Vec2, f64), observed: bool) -> f32 {
     let rules = &world.rules;
     let passer = &world.players[from];
     let receiver = &world.players[to];
-    let start = passer.pos;
-    // 高吊球的接球点是切入人跑到的位置，不是他此刻的位置：价值层与执行层
-    // 必须用同一个落点，否则模型会认为这次传球根本传不到。
-    let end = if kind == crate::action::PassKind::Lob {
-        crate::resolve::pass::cut_plan(world, to).0
-    } else {
-        catch_point(world, from, to)
-    };
+    let start = passer.pos + passer.facing.normalize_or_zero() * rules.ball_holder_offset_ft;
     let distance = (end - start).length();
     if distance <= f32::MIN_POSITIVE {
-        return 0.0;
+        return f32::default();
     }
-    // 球到达接球点所需的时间：高吊球按切入人跑到接球点的时间算，与执行
-    // 层使用同一个时长，防守人的预测位置才落在同一时刻。
-    let flight = if kind == crate::action::PassKind::Lob {
-        crate::resolve::pass::cut_plan(world, to).1
-    } else {
-        f64::from(rules.pass_duration(distance, false))
-    };
     let touch = receiver.attribute("ball_handling");
-    // 拦截高度与执行层一致：高吊球从人的头顶飞过，平直传球走胸口。
-    let _intercept_height = if kind == crate::action::PassKind::Lob {
-        rules.rim_height_ft + 0.5
-    } else {
-        rules.chest_height_ft + 1.0
-    };
+    // 拦截高度与执行层一致：高吊球从人的头顶飞过（球高于站立摸高，
+    // 执行层的接触判定不构成拦截），平直传球走胸口，线路上的人都够得着。
+    // 价值层因此对高吊球不计途中拦截风险，只保留接球点的争夺；两层对
+    // 同一次传球的可行性因此给出同一判定，选择层在人群中会自然选高吊
+    // 而不是往窄缝里塞平直球。
+    let over_the_top = matches!(
+        kind,
+        crate::action::PassKind::Lob | crate::action::PassKind::AlleyOop
+    );
     let mut clearance = f32::INFINITY;
-    for defender in world.players.iter().filter(|player| player.on_court) {
-        if defender.team == passer.team {
+    for (handle, defender) in world.players.iter().enumerate() {
+        if !defender.on_court || defender.team == passer.team || over_the_top {
             continue;
         }
-        // 高吊球的落点是切入人跑到的位置，他自己的防守人就在落点旁边；
-        // 那个防守人不是这次传球的拦截者——高吊球从他头顶飞过。
-        if kind == crate::action::PassKind::Lob {
-            let near_cutter = (defender.pos - world.players[to].pos).length() < 3.0;
-            if near_cutter {
-                continue;
-            }
-        }
+        let (defender_pos, defender_vel) = if observed {
+            let Some(read) = crate::opportunity::read(world, from, handle) else { continue; };
+            (read.position, read.velocity)
+        } else {
+            (defender.pos, defender.vel)
+        };
         let intercept_radius = crate::ball::pass_intercept_radius(world, defender);
         // 球与防守人都在匀速移动：走廊净空是两者在飞行期间的最小距离。
         // 取防守人当前位置比一次会把「正跑向线路」的人当成站着不动，取飞行
@@ -185,8 +209,8 @@ pub fn pass_completion_probability(
         // 运动的最近距离，与执行层逐 tick 的球体接触是同一件事的连续形式。
         let segment = end - start;
         let ball_vel = segment / flight as f32;
-        let relative_pos = start - defender.pos;
-        let relative_vel = ball_vel - defender.vel;
+        let relative_pos = start - defender_pos;
+        let relative_vel = ball_vel - defender_vel;
         let denominator = relative_vel.length_squared();
         let approach = if denominator > 1.0e-6 {
             (-relative_pos.dot(relative_vel) / denominator).clamp(0.0, flight as f32)
@@ -252,7 +276,8 @@ pub fn pass_completion_probability(
     probability *= 1.0 - world.params.policy.b("pass_iq_penalty") * (1.0 - iq);
     // 被包夹时出球更难：两张手就在球前面，传球线路被堵住。
     // 护球姿态能把一部分劣势补回来：球护在身体一侧，出手点仍然存在。
-    if world.trapped(from) {
+    let trapped = if observed { crate::opportunity::observed_trap(world, from) } else { world.trapped(from) };
+    if trapped {
         let relief = if world.protected(from, world.now()) {
             world.params.policy.g("trap_protection_relief")
         } else {
@@ -270,9 +295,13 @@ pub fn pass_completion_probability(
 /// 都使球飞完全程却没人接到。落点按飞行时间迭代：提前量取决于飞行
 /// 时间，飞行时间又取决于落点距离，两次迭代即收敛。
 /// 价值层与执行层必须用同一个落点。
-pub fn catch_point(world: &World, from: usize, receiver: usize) -> Vec2 {
+pub fn pass_plan(world: &World, from: usize, receiver: usize, kind: PassKind) -> (Vec2, f64) {
+    if kind == PassKind::Lob {
+        return crate::resolve::pass::cut_plan(world, receiver);
+    }
     let player = &world.players[receiver];
-    let start = world.players[from].pos;
+    let passer = &world.players[from];
+    let start = passer.pos + passer.facing.normalize_or_zero() * world.rules.ball_holder_offset_ft;
     let reach = (player.target - player.pos).length();
     let mut point = player.pos;
     for _ in 0..2 {
@@ -280,7 +309,7 @@ pub fn catch_point(world: &World, from: usize, receiver: usize) -> Vec2 {
         if distance <= f32::MIN_POSITIVE {
             break;
         }
-        let flight = f64::from(world.rules.pass_duration(distance, false));
+        let flight = pass_flight_for_distance(world, distance, kind);
         let lead = player.vel * flight as f32;
         // 接球人跑不到自己的站位之外：提前量超过剩余路程时按站位截断。
         point = if lead.length() > reach {
@@ -289,18 +318,64 @@ pub fn catch_point(world: &World, from: usize, receiver: usize) -> Vec2 {
             player.pos + lead
         };
     }
-    point
+    (point, pass_flight_seconds(world, from, point, kind))
 }
 
-/// 传球价值：接球后的完整后果乘以完成概率，失败按失误成本计入。
+pub fn pass_flight_seconds(world: &World, from: usize, target: Vec2, kind: PassKind) -> f64 {
+    let passer = &world.players[from];
+    let start = passer.pos + passer.facing.normalize_or_zero() * world.rules.ball_holder_offset_ft;
+    pass_flight_for_distance(world, (target - start).length(), kind)
+}
+
+fn pass_flight_for_distance(world: &World, distance: f32, kind: PassKind) -> f64 {
+    let scale = match kind {
+        PassKind::Handoff => world.params.policy.g("handoff_flight_scale"),
+        PassKind::Overhead => world.params.policy.g("overhead_pass_flight_scale"),
+        PassKind::BehindBack => world.params.policy.g("behind_back_pass_flight_scale"),
+        PassKind::AlleyOop => world.params.policy.g("alley_oop_pass_flight_scale"),
+        _ => f32::from(1_u8),
+    };
+    f64::from(world.rules.pass_duration(distance, false)) * f64::from(scale)
+}
+
+/// 传球价值包含接球后的出手机会与剩余的组织时间。
 pub fn pass_value(world: &World, from: usize, to: usize) -> f32 {
-    let probability = pass_completion_probability(world, from, to, crate::action::PassKind::Chest);
-    let point = catch_point(world, from, to);
-    let contest = contest_for(world, to, point);
-    let caught = catch_value(world, point, to, contest);
-    let turnover =
-        world.params.policy.w("epv_turnover_cost") * world.params.policy.w("possession_value");
-    probability * caught - (1.0 - probability) * turnover
+    pass_value_for(world, from, to, PassKind::Chest).1
+}
+
+pub fn pass_value_for(world: &World, from: usize, to: usize, kind: PassKind) -> (f32, f32) {
+    let Some(receiver) = crate::opportunity::read(world, from, to) else {
+        return (f32::default(), f32::default());
+    };
+    let (point, flight) = observed_pass_plan(world, from, to, kind, receiver);
+    pass_value_for_plan(world, from, to, kind, (point, flight))
+}
+
+pub fn observed_pass_plan(world: &World, from: usize, to: usize, kind: PassKind, receiver: crate::opportunity::PlayerRead) -> (Vec2, f64) {
+    if kind == PassKind::Lob {
+        let basket = crate::resolve::pass::cut_target(world, to);
+        (basket, pass_flight_seconds(world, from, basket, kind))
+    } else {
+        let eta = pass_flight_seconds(world, from, receiver.position, kind);
+        let target = receiver.position + receiver.velocity * eta as f32;
+        (target, pass_flight_seconds(world, from, target, kind))
+    }
+}
+
+pub fn pass_value_for_plan(world: &World, from: usize, to: usize, kind: PassKind, (point, flight): (Vec2, f64)) -> (f32, f32) {
+    let probability = pass_completion_for_plan(world, from, to, kind, (point, flight), true);
+    let remaining = (world.clock.shot_clock().min(world.clock.game_clock()) - flight).max(f64::default());
+    let model = crate::shot_quality::evaluate_observed(world, from, to, crate::action::ShotKind::CatchShoot, crate::state::BallPhase::Catch, point);
+    let reorganize = dribble_value(world, remaining);
+    let shot = if remaining >= f64::from(model.release_delay_seconds) {
+        let (points, _) = shot_points(world, point, to);
+        observed_shot_value_for(world, from, to, model.p_make, points)
+    } else {
+        f32::default()
+    };
+    let caught = if remaining > f64::default() { shot.max(reorganize) } else { f32::default() };
+    let turnover = world.params.policy.w("epv_turnover_cost") * world.params.policy.w("possession_value");
+    (probability, probability * caught - (f32::from(1_u8) - probability) * turnover)
 }
 
 /// 突破的后续选择分布。
@@ -319,8 +394,9 @@ pub fn drive_value(world: &World, state: &DecisionState, p_success: f32) -> f32 
     // 突破的整组后果：成功时挤过去在篮下终结，受阻时只剩下保留球权的价值。
     let finish_pos = state.hoop
         + (state.actor_pos - state.hoop).normalize_or_zero() * policy.g("finish_min_distance_ft");
-    let finish = shot_value(
+    let finish = observed_shot_value(
         world,
+        state.actor,
         state.actor,
         finish_pos,
         crate::action::ShotKind::DrivingLayup,
@@ -333,7 +409,7 @@ pub fn drive_value(world: &World, state: &DecisionState, p_success: f32) -> f32 
     let kick = state
         .teammates
         .iter()
-        .map(|mate| catch_value(world, mate.pos, mate.index, 1.0 - mate.openness))
+        .map(|mate| observed_catch_value(world, state.actor, mate.pos, mate.index))
         .fold(f32::default(), f32::max);
     let success = if kick > finish {
         finish * (1.0 - kick_share) + kick * kick_share

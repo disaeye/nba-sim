@@ -210,25 +210,18 @@ pub struct FreeThrowTable {
     pub and_one_share: f32,
 }
 
-/// 判定带宽（相对误差区间）。
-#[derive(Debug, Clone, Copy, Deserialize)]
-pub struct Band {
-    pub lower: f64,
-    pub upper: f64,
-}
-
 /// 出手类型 × 距离的真实命中率曲线（运行时表）。
 ///
 /// 这一段是「距离衰减」组的实测数据：每个出手类型在每个距离档上的真实
 /// 命中率。投篮模型用它把目标命中率换成瞄准误差，因此模型预测的命中率
 /// 就是实测命中率，而不是靠一组手调的倍率近似出来的。
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize)]
 pub struct ShotDistanceCell {
     pub upper_ft: f32,
     pub rate: f32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct ShotDistanceProfile {
     /// 距离上限（ft）到命中率的序列，按距离升序。
     pub cells: Vec<ShotDistanceCell>,
@@ -304,7 +297,7 @@ impl ShotDistanceProfile {
 /// 这是「距离衰减」组的实测数据：每个出手类型在每个距离档上的真实命中
 /// 率。投篮模型用它把目标命中率换成瞄准误差，因此模型预测的命中率就是
 /// 实测命中率，而不是靠一组手调的倍率近似出来的。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct ShotDistanceTable {
     pub provenance: Provenance,
     pub profiles: BTreeMap<String, ShotDistanceProfile>,
@@ -344,7 +337,7 @@ impl ShotDistanceTable {
 
 /// 策略响应系数。由 `scripts/calibrate/fit_policy.py` 做矩匹配写入，
 /// 目标是让引擎产生的出手与回合分布贴近 `shot_profile` 与 `possession`。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct PolicyTable {
     pub provenance: Provenance,
     pub weights: BTreeMap<String, f32>,
@@ -352,12 +345,6 @@ pub struct PolicyTable {
     /// 免得把英尺当权重读。
     #[serde(default)]
     pub geometry: BTreeMap<String, f32>,
-    #[serde(default)]
-    pub bands: BTreeMap<String, Band>,
-    /// 过程判据的设计边界。键名与 `gate` 的准则同名；这些是设计边界，
-    /// 不是联盟实测分布。
-    #[serde(default)]
-    pub process: BTreeMap<String, f32>,
     /// 出手类型 × 是否三分 × 距离的真实命中率曲线。
     #[serde(default)]
     pub shot_distance: BTreeMap<String, ShotDistanceProfile>,
@@ -382,14 +369,6 @@ impl PolicyTable {
             .map(|profile| profile.rate_at(distance_ft))
     }
 
-    /// 判定带宽（相对误差区间）：未单独登记的准则用 `default`。
-    pub fn band(&self, criterion: &str) -> Band {
-        self.bands
-            .get(criterion)
-            .or_else(|| self.bands.get("default"))
-            .copied()
-            .unwrap_or_else(|| panic!("policy table has no band for `{criterion}`"))
-    }
     /// 几何量（英尺或秒）。
     pub fn g(&self, key: &str) -> f32 {
         *self
@@ -403,16 +382,9 @@ impl PolicyTable {
             .get(key)
             .unwrap_or_else(|| panic!("policy table has no weight `{key}`"))
     }
-    /// 过程判据的设计边界。
-    pub fn p(&self, key: &str) -> f32 {
-        *self
-            .process
-            .get(key)
-            .unwrap_or_else(|| panic!("policy table has no process bound `{key}`"))
-    }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct Formations {
     pub provenance: Provenance,
     pub offense: Vec<[f32; 2]>,
@@ -509,7 +481,7 @@ pub const VALIDATION_TABLES: &[TableSpec] = &[
 ];
 
 /// 运行时参数。S7 之后引擎只读这一组表。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeParams {
     pub policy: PolicyTable,
     pub formations: Formations,

@@ -510,7 +510,8 @@ pub fn move_toward_targets(world: &mut World) {
             continue;
         }
         if world.any_interaction(|screen| {
-            matches!(screen.kind, ActionKind::Screen(_)) && screen.target == Some(handle)
+            matches!(screen.kind, ActionKind::Screen(_))
+                && (screen.target == Some(handle) || screen.actor == handle)
         }) {
             continue;
         }

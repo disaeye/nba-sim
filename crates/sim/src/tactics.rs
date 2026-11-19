@@ -84,7 +84,7 @@ pub const SYSTEM_SOURCES: &[(&str, &str)] = &[
 ];
 
 /// 选板档案与体系档案的合集。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TacticsTable {
     pub plays: Vec<PlaySpec>,
     pub systems: BTreeMap<String, TacticalSetSpec>,
@@ -183,7 +183,7 @@ impl TacticsTable {
 }
 
 /// 当前生效的选板窗口。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct PlayWindow {
     pub play: usize,
     pub ends_at: f64,
@@ -392,14 +392,17 @@ pub fn apply_play_effects(world: &World, candidates: &mut Vec<crate::policy::Can
         }
     }
     // 硬抑制只有在还剩别的动作时才生效。
+    let before = candidates.len();
     if candidates
         .iter()
         .any(|(kind, _, _, _)| !hard[kind.family() as usize])
     {
         candidates.retain(|(kind, _, _, _)| !hard[kind.family() as usize]);
     }
+    // 抑制不得清空一个本来非空的候选集。空候选集本身是合法输入：进攻
+    // 钟装不下任何动作时，决策层用兜底出手接手。
     assert!(
-        !candidates.is_empty(),
+        before == 0 || !candidates.is_empty(),
         "选板的硬抑制不能清空候选集：{}",
         play.id
     );

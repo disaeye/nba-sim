@@ -317,7 +317,7 @@ pub enum ClockCommit {
 /// 时钟提交记录缓冲。
 ///
 /// 连续推进先存在这里，只有在写入指令之前或者收尾时才变成一条提交记录。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ClockCommitLog {
     commits: Vec<ClockCommit>,
     pending: Option<ClockSegmentApplied>,

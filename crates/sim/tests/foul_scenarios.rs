@@ -555,7 +555,7 @@ fn rebound_push_foul_awards_penalty_and_terminates_rebound() {
 
     let events_before = world.events.len();
     let mut push_foul_called = false;
-    for _ in 0..100 {
+    for attempt in 0..3_000 {
         world.players[def_player].pos = glam::Vec2::new(45.0, 25.0);
         world.players[def_player].vel = glam::Vec2::ZERO;
         world.players[off_player].pos = glam::Vec2::new(45.5, 25.0);
@@ -564,6 +564,21 @@ fn rebound_push_foul_awards_penalty_and_terminates_rebound() {
         world.ball.vel = glam::Vec2::ZERO;
         world.ball.z = 10.0;
         world.ball.vz = 0.0;
+        // 推人犯规每次只有约千分之三的抽样概率；每次试验重建同一卡位
+        // 现场，抽样地址随 tick 改变，才有独立的三千次样本。
+        world.pending_rebound = Some(nba_sim_core::resolve::rebound::PendingRebound {
+            offense,
+            zone: "Paint",
+            shot_distance: 5.0,
+            rim_contact: true,
+            started_at: world.now(),
+            turnover: false,
+            poke_by: None,
+            pass_by: None,
+            box_outs,
+            box_out_count: 1,
+        });
+        world.set_phase(Phase::Live);
         world.step(TICK_SECONDS);
         if world.events[events_before..].iter().any(|e| {
             matches!(
