@@ -17,7 +17,7 @@
 
 ## 2. 验证与资源
 
-`nba-sim sim-core --gate` 的固定 16 场判定覆盖 39 条分布与过程判据，逐条观测值写入 `docs/dev/evidence/gap_closure_cycle/gate.txt`，汇总写入同目录的 `verification.json`。NBA 与 FIBA 的 `validate-core` 工件分别保存在 `docs/dev/evidence/action_chain_validation/` 与 `docs/dev/evidence/fiba_validation/`；`run.json` 记录提交身份、规则版本、校准版本与引擎模型版本。13 项机制实验的逐项观测、配对区间与裁决写入 `mechanism_core.json`，认证状态写入 `certification.json`，样本量按各属性效应量给出。
+`sim-core` 运行用户指定的比赛并输出统计；`validate-core` 检查几何、动作语境和独立账本。机制实验由显式选项运行，结果随本次运行写入指定目录。
 
 基线指纹按最终参数向量保存在 `crates/sim/tests/baseline/fingerprint.json`。冻结三张表由 `scripts/calibrate/freeze.py --check` 核对。全量工作区测试日志写入 `.pi/tasks/final-workspace-tests.log`，验收链逐项退出码写入 `.work/evidence/final-validation.summary`。
 
@@ -27,11 +27,9 @@
 
 - 权威方案：`docs/dev/current/full_simulation_plan.md`
 - 阶段与证据对应：`docs/dev/evidence/stage_gate_map.md`
+- 比赛流程 I–L 证据：`docs/dev/evidence/process_stages.md`
+- 真实比赛过程研究：`docs/dev/evidence/process_research.md`
 - 设计说明：`docs/dev/action_chain_engine.md`
-- 门禁逐条结果：`docs/dev/evidence/gap_closure_cycle/gate.txt`
-- 门禁汇总与验收现场：`docs/dev/evidence/gap_closure_cycle/verification.json`
-- NBA 认证与机制实验：`docs/dev/evidence/action_chain_validation/`
-- FIBA 认证与回放清单：`docs/dev/evidence/fiba_validation/`
 - 资源与性能工件：`docs/dev/evidence/performance.json`
 - 验收链逐项退出码：`.work/evidence/final-validation.summary`
 - 全量工作区测试日志：`.pi/tasks/final-workspace-tests.log`

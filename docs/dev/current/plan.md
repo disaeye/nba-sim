@@ -2,4 +2,4 @@
 
 > 唯一权威实施方案见 [`full_simulation_plan.md`](full_simulation_plan.md)。本文件只提供入口，不另列任务或复制方案内容。阶段执行进度与验证记录见 `implementation.md`，当前代码状态见 [`../status.md`](../status.md)。
 
-执行时严格遵循 `full_simulation_plan.md` 的依赖阶段和验收条件。方案只在该文件维护一份。动作动画工作按 H 阶段完成，覆盖目录来源为 `data/rules/action_animation_catalog.json`；状态、实施步骤和验证依据分别记录在 `implementation.md` 与 `status.md`。
+比赛流程真实性的设计、工作包与验收见 `docs/dev/current/full_simulation_plan.md` §16–§19。按 §19 的依赖顺序执行；当前代码与已验证结果分别由 `status.md` 和 `implementation.md` 记录。

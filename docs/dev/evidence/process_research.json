@@ -1,0 +1,191 @@
+{
+  "study": "process_research_v1",
+  "reference": {
+    "id": "nba-shotdetail-pbp-2023-24",
+    "league": "NBA",
+    "season": "双赛季：shotdetail 归档为 2023-24 NBA 常规赛（2023-10-24 ~ 2024-04-14）；nbastats 与 pbpstats 归档为 2024-25 NBA 常规赛（2024-10-22 ~ 2025-04-13）",
+    "games": 1230,
+    "pbp_source": "shufinskiy/nba_data datasets/nbastats_2024.tar.xz（底层为 stats.nba.com PlayByPlay 归档）；commit e829d4678be1e075f99e5d41a1c5f97089be446b",
+    "pbp_sha256": "8f370da00ad0a6d4157921bd161d56ea32647a165d906516f2b36384a6a4989a",
+    "shotdetail_source": "ismayc/shot-quality-study data/shotdetail_2023.tar.xz（底层为 NBA Stats ShotChartDetail 归档）",
+    "shotdetail_sha256": "303e71f967c199568b345cd73a75e595f1f99532cca3e6ce59afb286b63f840d",
+    "fit_separation": "归档只用于研究与校准来源，研究脚本不把参考数据送入参数拟合"
+  },
+  "simulation": {
+    "path": ".work/simcore-sample4.json",
+    "games": 4,
+    "note": "显式运行的研究样本；不是发布门禁"
+  },
+  "claims": [
+    {
+      "id": "PROC-DREB-FIRST-SHOT",
+      "definition": "防守篮板后首次出手到本队下一次出手的时间；先出现对手出手或本段结束记为未形成本队出手。",
+      "status": "Measured",
+      "league_scope": "NBA",
+      "coverage": "event-level play-by-play; same-period elapsed time",
+      "reference": {
+        "n": 60917,
+        "clusters": 1230,
+        "mean_seconds": 9.7074708209531,
+        "median_seconds": 9,
+        "ci95_seconds": [
+          9.650781491924311,
+          9.764950863388698
+        ],
+        "own_shot_share": 0.7875806430760082
+      },
+      "simulation": {
+        "n": 290,
+        "clusters": 4,
+        "mean_seconds": 10.879652200896164,
+        "median_seconds": 10.35009765625,
+        "ci95_seconds": [
+          10.17212236748367,
+          11.593226901555466
+        ],
+        "own_shot_share": 0.7591623036649214
+      },
+      "delta_seconds": 1.1721813799430638,
+      "limitations": [
+        "逐事件归档不含球员观察、传球意图与掩护类型",
+        "时间口径是同一节内比赛钟差，不跨节配对",
+        "模拟样本为显式运行的研究样本，不进入发布门禁"
+      ]
+    },
+    {
+      "id": "PROC-OREB-FIRST-SHOT",
+      "definition": "前场篮板后首次出手到本队下一次出手的时间；先出现对手出手或本段结束记为未形成本队出手。",
+      "status": "Measured",
+      "league_scope": "NBA",
+      "coverage": "event-level play-by-play; same-period elapsed time",
+      "reference": {
+        "n": 24297,
+        "clusters": 1230,
+        "mean_seconds": 4.1033460921101375,
+        "median_seconds": 2,
+        "ci95_seconds": [
+          4.040335167994742,
+          4.167202439828553
+        ],
+        "own_shot_share": 0.8293906810035843
+      },
+      "simulation": {
+        "n": 69,
+        "clusters": 4,
+        "mean_seconds": 4.583340188731318,
+        "median_seconds": 2.149993896484375,
+        "ci95_seconds": [
+          4.177772861056858,
+          5.343778928120931
+        ],
+        "own_shot_share": 0.9452054794520548
+      },
+      "delta_seconds": 0.47999409662118087,
+      "limitations": [
+        "逐事件归档不含球员观察、传球意图与掩护类型",
+        "时间口径是同一节内比赛钟差，不跨节配对",
+        "模拟样本为显式运行的研究样本，不进入发布门禁"
+      ]
+    },
+    {
+      "id": "PROC-STEAL-FIRST-SHOT",
+      "definition": "抢断后首次出手到本队下一次出手的时间；先出现对手出手或本段结束记为未形成本队出手。",
+      "status": "Measured",
+      "league_scope": "NBA",
+      "coverage": "event-level play-by-play; same-period elapsed time",
+      "reference": {
+        "n": 15435,
+        "clusters": 1230,
+        "mean_seconds": 7.220408163265306,
+        "median_seconds": 5,
+        "ci95_seconds": [
+          7.140890793403454,
+          7.2995906698720034
+        ],
+        "own_shot_share": 0.7873393185064272
+      },
+      "simulation": {
+        "n": 98,
+        "clusters": 4,
+        "mean_seconds": 9.638269404975736,
+        "median_seconds": 8.99993896484375,
+        "ci95_seconds": [
+          8.093275091621313,
+          10.62941401612525
+        ],
+        "own_shot_share": 0.7967479674796748
+      },
+      "delta_seconds": 2.4178612417104297,
+      "limitations": [
+        "逐事件归档不含球员观察、传球意图与掩护类型",
+        "时间口径是同一节内比赛钟差，不跨节配对",
+        "模拟样本为显式运行的研究样本，不进入发布门禁"
+      ]
+    },
+    {
+      "id": "PROC-OREB-SHOT-ZONE",
+      "definition": "前场篮板后本队下一次出手的区域构成（rim/near/mid/three）。",
+      "status": "InsufficientEvidence",
+      "league_scope": "NBA",
+      "coverage": "shotdetail 与逐事件归档按 GAME_ID + EVENTNUM 联结",
+      "reference": null,
+      "simulation": {
+        "rim": 0.463768115942029,
+        "near": 0.4492753623188406,
+        "mid": 0.043478260869565216,
+        "three": 0.043478260869565216
+      },
+      "reason": "参考 shotdetail 为 2023-24，逐事件归档为 2024-25，两者比赛身份不相交，不能按事件联结。",
+      "limitations": [
+        "只比较构成，不把构成差异当作通过或失败"
+      ]
+    },
+    {
+      "id": "PROC-PASS-COUNT",
+      "definition": "每个回合的传球次数与传球结果占比。",
+      "status": "InsufficientEvidence",
+      "league_scope": "NBA",
+      "reason": "逐事件归档不含每次传球与接球人；无法区分传球、手递手与传球被点掉。",
+      "source": "nba-shotdetail-pbp-2023-24"
+    },
+    {
+      "id": "PROC-SCREEN-USE",
+      "definition": "掩护发生、被利用与后续顺下/外弹的先后。",
+      "status": "InsufficientEvidence",
+      "league_scope": "NBA",
+      "reason": "没有球员追踪或人工标注，掩护类型与使用无法从事件文本可靠辨认。",
+      "source": "nba-shotdetail-pbp-2023-24"
+    },
+    {
+      "id": "PROC-HELP-CLOSE",
+      "definition": "协防、补位、扑防的触发顺序与窗口时长。",
+      "status": "InsufficientEvidence",
+      "league_scope": "NBA",
+      "reason": "事件归档只有结果事实，没有十人位置与朝向；追踪数据与标注均缺失。",
+      "source": "nba-shotdetail-pbp-2023-24"
+    },
+    {
+      "id": "PROC-CORNER-WINDOW",
+      "definition": "底角接球窗口的持续时间与被关闭原因。",
+      "status": "InsufficientEvidence",
+      "league_scope": "NBA",
+      "reason": "窗口需要连续位置与防守到达时间；现有归档无法重建。",
+      "source": "nba-shotdetail-pbp-2023-24"
+    }
+  ],
+  "coverage": {
+    "event_level": [
+      "DREB",
+      "OREB",
+      "STEAL",
+      "OREB shot zone"
+    ],
+    "missing": [
+      "pass count",
+      "screen use",
+      "help/closeout order",
+      "corner window"
+    ],
+    "rule": "研究结果不计算总通过率，也不作为发布或自动构建门禁"
+  }
+}

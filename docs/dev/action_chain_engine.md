@@ -59,11 +59,11 @@
 | `formations` | 半场站位坐标 | 阵型几何 |
 | `policy` | 策略权重、结算速率、封盖参数 | 矩匹配 |
 
-`scripts/calibrate/fit_tables.py` 从原始数据生成前五张表；`scripts/calibrate/fit_policy.py` 用矩匹配调整策略权重。`policy.json` 分四块：`weights` 是无量纲响应系数，`geometry` 是英尺与秒类几何量，`bands` 是判定带宽，`process` 是过程判据的设计边界。
+`scripts/calibrate/fit_tables.py` 从原始数据生成参考表，`scripts/calibrate/fit_policy.py` 按职责估计策略系数。`policy.json` 的 `weights` 保存响应系数，`geometry` 保存长度和时长。
 
 ## 5. 判定
 
-判定分四层，前两层在结算时逐动作记录，后两层对批次做比较。
+几何和动作语境按动作检查，账本按事实独立重建。
 
 | 层 | 内容 | 失败后果 |
 | --- | --- | --- |
@@ -74,7 +74,7 @@
 
 判定单元是动作与回合；聚合统计只作为投影呈现。
 
-`nba-sim sim-core --gate` 输出四层结果：几何与语境违规、39 条分布与过程判据的逐条观测值和带宽判定。当前逐条数值由 `scripts/refresh_gate_evidence.py` 从固定 16 场判定刷新到 `docs/dev/evidence/gap_closure_cycle/gate.txt`，汇总写入同目录的 `verification.json`；认证状态与机制实验结果写入 `docs/dev/evidence/action_chain_validation/`。
+`sim-core` 按指定场次输出比赛事实和统计。
 
 ## 6. 协议流
 
@@ -84,7 +84,7 @@
 
 ## 7. 验证入口
 
-`crates/validation/core_validation` 提供验证：四层判定加事实流独立重建。重建只读事实，把得分、出手、篮板、失误重新累加后与箱体对账，两侧分叉即判定失败。`nba-sim validate-core --seed N --games M` 以退出码给出结论，`--out <目录>` 指定工件目录。
+`crates/validation/src/core_validation.rs` 独立重建得分、出手、篮板、失误、时钟和控制，并记录几何与语境违规。`validate-core` 通过退出码报告检查结果，`--out` 指定证据目录。
 
 ### 机制实验
 
@@ -104,7 +104,7 @@
 
 ### 工件
 
-`validate-core` 写出 `core_validation.json`、`mechanism_core.json`、`certification.json`、`batch_statistical_results.json`、`branch_coverage.json`、`five_dimension.json`、`run.json` 与 `match_manifest.json`。`certification.json` 给出认证状态与分类摘要；`batch_statistical_results.json` 是逐准则的观测值、基准、带宽区间与相对误差；`branch_coverage.json` 记录实际判定过的准则数；`five_dimension.json` 记录五维诊断；`run.json` 记录提交身份、工作区状态、种子与场次、机制实验配置与校准表来源；`match_manifest.json` 记录完整回放输入。
+`validate-core` 写出 `core_validation.json`、`run.json` 与 `match_manifest.json`；显式运行机制实验时另写 `mechanism_core.json`。
 
 ## 8. 服务与入口
 

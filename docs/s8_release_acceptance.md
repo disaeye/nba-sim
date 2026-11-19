@@ -22,13 +22,12 @@
 
 16 个动作族与 111 个动作条目各有生产候选、结算器、场景测试与渲染配方。`StreamTick` 带比赛阶段、程序、球态、计时器运行标志、规则版本、校准版本、引擎模型版本、活动动作与程序资格。`FrameEvent` 带事件身份、控制序列身份与来源事件；事件流可独立重建比分、控制、时间、犯规、资格、暂停、罚则、动作生命周期与节末结算。
 
-## 3. 门禁与认证
+## 3. 规则与资源检查
 
-`nba-sim sim-core --gate` 的固定 16 场判定覆盖 39 条分布与过程判据，逐条观测值写入 `docs/dev/evidence/gap_closure_cycle/gate.txt`，汇总写入同目录的 `verification.json`。几何违规数与语境违规数均为零。
+比赛几何、语境和账本由 `validate-core` 检查。
 
-NBA 认证与机制实验工件位于 `docs/dev/evidence/action_chain_validation/`，FIBA 认证与回放清单位于 `docs/dev/evidence/fiba_validation/`。两个联赛的 `run.json` 记录生成工件的代码提交、规则版本、校准版本与引擎模型版本。13 项机制实验的逐项观测、配对区间与裁决写入 `mechanism_core.json`，认证状态写入 `certification.json`。`data/calibration/known_insufficient.json` 的登记表为空。
 
-`scripts/calibrate/freeze.py --check` 核对三张冻结表。基线指纹按最终行为与参数向量保存在 `crates/sim/tests/baseline/fingerprint.json`。`scripts/check_final_artifacts.py` 核对门禁、认证、机制实验、资源工件与规则目录的一致性。
+`scripts/calibrate/freeze.py --check` 核对冻结表；`scripts/check_final_artifacts.py` 核对规则目录和资源工件。
 
 ## 4. 测试与资源
 

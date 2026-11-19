@@ -4,7 +4,7 @@
 
 ## 当前目标
 
-按 `docs/dev/current/full_simulation_plan.md` 的 A-H 工作包完成 NBA 与 FIBA 完整比赛模拟内核。状态、进度、阶段证据、门禁证据、验证工件与 CI 守卫均描述最终状态。
+NBA 与 FIBA 完整比赛内核对应 A–H 工作包；比赛流程真实性对应 I–L 工作包。
 
 ## 阶段进度
 
@@ -16,25 +16,33 @@
 | D. 复核与节末结算 | 已完成 | 11 个 `ReviewScope` 与联赛档案双向映射，复核按来源事件身份抽样观察误差。教练挑战支持实质改判，节末结算按出手瞬间比赛钟裁定进球；`PeriodSettlementCompleted` 发布后比分、球权、动作与计时器冻结。 |
 | E. 并行动作系统 | 已完成 | `World::advance_parallel_actions` 逐人推进每名球员自己的 `ActionRuntime`，多人配合由 `World::interactions` 按交互编号结算；防守动作有 `CloseoutContest`、`StealAttempt`、`BlockJump` 三种运行时。能力、倾向、战术与实时几何共同驱动候选、执行与后果。 |
 | F. 事件、回放与协议投影 | 已完成 | 事件派生球员与球队账本，独立验证器只读事件流重建时钟与控制序列。`StreamTick` 带比赛阶段、程序、球态、计时器运行标志、三个版本号、活动动作与程序资格。`FrameRules`、`FrameEvent` 与 `RenderAction` 使用同一动作身份。 |
-| G. 校准与验收 | 已完成 | 39 条门禁判据全部位于带宽内，逐条观测值由 `scripts/refresh_gate_evidence.py` 刷新。冻结三表哈希、基线指纹、NBA/FIBA 认证与 13 项机制实验由 `scripts/final_validation.sh` 统一生成并核对。样本量按各属性效应量给出。 |
+| G. 校准与验收 | 已完成 | 校准表、规则场景与独立账本可分别验证。 |
 | H. 动作动画与资源观测 | 已完成 | 两类球场渲染器读取同一 `ActionSpecTable` 与动作配方，渲染映射、未知值负面对照和回放定位都有自动验证。七类资源场景的峰值常驻内存、运行时间、事件数、动作数、加时数与每 tick 分配写入 `docs/dev/evidence/performance.json`。 |
+| I. 移除批量门禁并建立片段验证 | 已完成 | 默认短片段验证、快照直接恢复、预算与缺帧定位全部具备；CLI、CI、API、界面和工件守卫无固定批量门禁。 |
+| J. 贯通半场挡拆、感知、协防与选择 | 已完成 | 半场片段独立重建掩护几何与窗口；感知、候选、重校验、执行和终态分别记录。成对实验覆盖同路线不同几何、看见/没看见、选择后成功/失败与换防/沉退/挤过。 |
+| K. 验证整场连续行为 | 已完成 | 跨回合证据区分重复掩护得分与高难度命中；合法窗口改变防守方案并发布依据。转换、前场篮板续攻、程序恢复、末段和 NBA/FIBA 一致性由现有生产场景与账本覆盖。 |
+| L. 复现实战过程研究并公布证据覆盖 | 已完成 | `scripts/research/process_study.py` 以独立逐事件归档与显式模拟样本做过程比较；三项时间指标给出样本量、聚类区间与差值，区域构成、传球、掩护、协防与底角窗口分项列为证据不足；研究不进入发布门禁。 |
 
 ## 验证证据
 
 各阶段对应的测试身份、输入范围与代码路径集中在 `docs/dev/evidence/stage_gate_map.md`；本页不重复维护测试清单。行为与参数冻结后由 `scripts/final_validation.sh` 运行一次完整工作区测试，逐项退出码写入 `.work/evidence/final-validation.summary`，全量测试日志写入 `.pi/tasks/final-workspace-tests.log`。每个测试进程受 `.cargo/config.toml`、`scripts/mem-capped-runner.sh` 与 `scripts/run-tests.sh` 的 2 GiB 地址空间上限约束。
 
-`scripts/final_validation.sh` 统一运行门禁证据刷新、文档与目录守卫、源码守卫、冻结表校验、资源测量、两类渲染器脚本、基线重录、NBA/FIBA 认证、全量工作区测试与最终工件一致性守卫。`python3 scripts/check_final_artifacts.py` 核对门禁、认证、机制实验、资源工件与规则目录登记的一致性。
+`scripts/final_validation.sh` 运行静态检查、资源检查、渲染回归和工作区测试。`scripts/check_final_artifacts.py` 核对规则目录与资源工件。
+
+真实比赛过程研究由 `scripts/research/process_study.py` 显式运行，结果写入 `docs/dev/evidence/process_research.json`；它不参与 `final_validation.sh` 或发布门禁。
 
 ## 校准记录
 
-`scripts/calibrate/fit_policy.py` 按职责分组调 `policy.json` 的权重，目标是 `shot_profile.json` 的区域与创造方式份额，以及 `possession.json` 的回合数、每回合出手、失误率、罚球与得分。影响行为的系数都从参数表读取；每次拟合后用 `validate-core` 记录残差。当前 39 条判据的观测值与带宽判定以 `docs/dev/evidence/gap_closure_cycle/gate.txt` 为准。
+`scripts/calibrate/fit_policy.py` 可以按职责估计 `policy.json` 的系数；`scripts/calibrate/fit_tables.py` 根据逐球和逐回合资料生成参考表。
 
-`nba-sim validate-core --mechanism` 逐项把单个属性从 0.10 抬到 0.95，与同一批种子的基线做配对 bootstrap。样本量写在 `crates/validation/src/mechanism_core.rs` 的 `REQUIRED_SEEDS` 里，默认值是 160 个种子。13 项属性的逐项观测、配对区间与裁决写在 `docs/dev/evidence/action_chain_validation/mechanism_core.json`，认证状态写在同目录的 `certification.json`。`known_insufficient.json` 的登记表为空。
+`nba-sim validate-core --mechanism ATTRIBUTE` 对指定属性运行配对实验，并写出该属性的结果。
 
-## 当前残差
+## 比赛流程验证
 
-五维诊断里 `events_per_game` 的上界是量程守卫，用来挡住事件日志失控。限制区计时、发球五秒、非法触球、突破变体、背身步法、对位站位姿态、干扰球与 111 个动作条目的生命周期事实都从生产路径发布，当前上界与理由记在 `data/diagnostics/five_dimension_bands.json` 的 `band_rationale` 里。
+`validate-core` 默认检查开场控制和首个回合，可用 `--scenario` 选定片段。完整比赛需显式给出 `--games`。场景按步数限制起点搜索和推进，失败记录保留复现输入。调试服务器基于当前回放的已生成事实核对账本；查询验证结果时不重新模拟比赛。
+
+种子 1 的两个场景分别在 tick 33 和 tick 177 结束。使用开发构建运行默认场景组，NBA 耗时 0.02 秒、峰值常驻内存 11,036 KiB；FIBA 耗时 0.01 秒、峰值常驻内存 12,632 KiB。`crates/validation/tests/fragment.rs` 验证快照直接恢复与连续推进产生相同帧和事件，并验证步数超限及缺帧定位。比赛流程真实性的完整交付条件见 `docs/dev/current/full_simulation_plan.md` §19。
 
 ## 验收证据入口
 
-A-H 工作包按 `docs/dev/current/full_simulation_plan.md` 的最终验收条件完成；当前状态由 `docs/dev/status.md`、阶段证据 `docs/dev/evidence/stage_gate_map.md` 与最终证据工件给出。
+A-H 工作包按 `docs/dev/current/full_simulation_plan.md` 的最终验收条件完成；I、J 工作包的逐项证据见 [`../evidence/process_stages.md`](../evidence/process_stages.md)。当前状态由 `docs/dev/status.md`、阶段证据 `docs/dev/evidence/stage_gate_map.md` 与最终证据工件给出。
