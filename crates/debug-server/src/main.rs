@@ -18,8 +18,8 @@ mod validation_api;
 use core_api::SharedCore;
 
 use validation_api::{
-    api_validation_certification, api_validation_layers, api_validation_report,
-    api_validation_run, api_validation_status, cache_game, idle_state, SharedValidation,
+    api_validation_report, api_validation_run, api_validation_status, cache_game, idle_state,
+    SharedValidation,
 };
 
 type Response = (&'static str, &'static str, Vec<u8>);
@@ -170,8 +170,6 @@ fn route(req: &Request, core: &SharedCore, validation: &SharedValidation) -> Res
         ("POST", "/api/validation/run") => api_validation_run(req, validation),
         ("GET", "/api/validation/status") => api_validation_status(validation),
         ("GET", "/api/validation/report") => api_validation_report(validation),
-        ("GET", "/api/validation/layers") => api_validation_layers(req),
-        ("GET", "/api/validation/certification") => api_validation_certification(req),
         ("OPTIONS", _) => ("204 No Content", "text/plain; charset=utf-8", Vec::new()),
         _ => {
             if req.path.starts_with("/api/core/") {
@@ -278,15 +276,19 @@ fn parse_run_request(req: &Request) -> Result<RunRequest, String> {
     Ok(RunRequest { seed, scope })
 }
 
-/// POST/GET /api/simulate：跑一场并返回 NDJSON tick 流，同时缓存这场
-/// 比赛给验证入口重放。
+/// 返回 NDJSON 帧流，并保存这次运行的独立检查结果。
 fn api_simulate(req: &Request, validation: &SharedValidation) -> Response {
     let run = match parse_run_request(req) {
         Ok(run) => run,
         Err(e) => return bad_request(e),
     };
-    cache_game(validation, run.seed, &run.scope);
-    core_api::core_simulate_response(run.seed, &run.scope)
+    match core_api::run_core_simulation(run.seed, &run.scope) {
+        Ok((body, report, finished)) => {
+            cache_game(validation, &run.scope, report, finished);
+            ("200 OK", "application/x-ndjson; charset=utf-8", body)
+        }
+        Err(error) => internal_error(error),
+    }
 }
 
 fn url_decode(input: &str) -> Result<String, String> {
@@ -374,16 +376,22 @@ mod tests {
         let text = String::from_utf8(body).expect("stream must be UTF-8");
         let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
         assert!(lines.len() > 2, "expected a tick stream");
-        for line in lines {
+        for line in &lines {
             let tick: Value = serde_json::from_str(line).expect("tick line must be JSON");
             assert!(tick["t"].as_f64().is_some(), "tick line must carry time");
             assert!(tick["tick_index"].as_u64().is_some(), "tick line must carry an index");
         }
-        assert_eq!(
-            crate::validation_api::cached_seed(&validation),
-            Some(1),
-            "simulate must cache the game for the validation entry"
+        let (status, _, body) = api_validation_run(
+            &request("POST", "/api/validation/run", Vec::new()),
+            &validation,
         );
+        assert_eq!(status, "200 OK");
+        let result: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(result["result"]["scope"], "1p");
+        assert_eq!(result["result"]["ticks"], lines.len() as u64);
+        let (_, _, body) = api_validation_report(&validation);
+        let report: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(report["games"][0]["seed"], 1);
     }
 
     /// 会话入口接受联赛档案：FIBA 档案进入同一内核，未知的档案就地失败。

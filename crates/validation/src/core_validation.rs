@@ -1,20 +1,13 @@
-//! 动作链内核的验证入口。
-//!
-//! 旧验证体系逐回合读取旧引擎的观测事实；本模块为新内核提供同一位置的
-//! 判定入口：四层判定加箱体守恒。判定单元是动作与回合，聚合统计只在
-//! 分布层出现。
+//! 独立验证比赛事件、账本、几何和动作语境。
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::mechanism_core::MechanismReport;
 use nba_sim_core::action::Fact;
 use nba_sim_core::params::workspace_calibration_dir;
 use nba_sim_core::world::TICK_SECONDS;
-use nba_sim_core::{gate, GameReport, MatchSetup, Params, PlayerLine, TeamSide, World};
+use nba_sim_core::{GameReport, MatchSetup, Params, PlayerLine, TeamSide, World};
 use serde::{Deserialize, Serialize};
-
-pub use crate::mechanism_core::{load_known_insufficient, KnownInsufficient};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LedgerCheck {
@@ -32,6 +25,15 @@ pub struct LedgerCheck {
     /// 控制序列可由事件流独立重建，且建立与结束成对。
     pub control_reconcile: bool,
     pub detail: String,
+}
+
+impl LedgerCheck {
+    pub fn passed(&self) -> bool {
+        self.points_reconcile && self.attempts_reconcile && self.rebounds_reconcile
+            && self.turnovers_reconcile && self.minutes_reconcile && self.fouls_reconcile
+            && self.possessions_reconcile && self.player_stats_reconcile
+            && self.clock_reconcile && self.control_reconcile
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,9 +54,6 @@ pub struct CoreGameResult {
 pub struct CoreValidationReport {
     pub games: Vec<CoreGameResult>,
     pub scope: String,
-    /// 分布层需要完整比赛结果，才能与赛季基准比较。
-    pub distribution_applicable: bool,
-    pub gate: gate::GateReport,
     pub geometry_violations: usize,
     pub context_violations: usize,
     pub ledger_failures: usize,
@@ -73,26 +72,8 @@ impl CoreValidationReport {
         if self.context_violations > 0 {
             failures.push(format!("context violations: {}", self.context_violations));
         }
-        // 分布层只在存在对应联赛的赛季基准时参与认证。参考分布来自 NBA
-        // 2024-25 赛季；FIBA 没有对应的赛季分布表，分布观测只记录在工件里。
-        if self.distribution_applicable {
-            for layer in self.gate.layers.iter().filter(|layer| !layer.passed) {
-                failures.push(format!(
-                    "{}: observed {:.3} target {:.3}",
-                    layer.criterion, layer.observed, layer.target
-                ));
-            }
-        }
         for game in &self.games {
-            if !game.ledger.points_reconcile
-                || !game.ledger.attempts_reconcile
-                || !game.ledger.rebounds_reconcile
-                || !game.ledger.turnovers_reconcile
-                || !game.ledger.minutes_reconcile
-                || !game.ledger.fouls_reconcile
-                || !game.ledger.possessions_reconcile
-                || !game.ledger.player_stats_reconcile
-            {
+            if !game.ledger.passed() {
                 failures.push(format!("ledger: seed {} {}", game.seed, game.ledger.detail));
             }
         }
@@ -100,7 +81,7 @@ impl CoreValidationReport {
     }
 }
 
-/// 判定范围。分布层需要整场比赛；几何、语境与账本对部分比赛同样成立。
+/// 几何、语境与账本检查的比赛范围。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationScope {
     Full,
@@ -224,12 +205,21 @@ pub fn run_core_validation_scoped_for_league_with_dir(
     let params = Params::load(calibration_dir)?;
     let rules = rule_profile_for_league(league);
     let mut results = Vec::new();
-    let mut merged = GameReport::empty();
-    let mut geometric_violations = 0;
+    let mut geometry_violations = 0;
     let mut context_violations = 0;
     for offset in 0..games {
         let seed = seed_start + offset;
-        let mut report = run_scoped_game(seed, &params, scope, &rules);
+        let report = run_scoped_game(seed, &params, scope, &rules);
+        geometry_violations += report
+            .violations
+            .iter()
+            .filter(|violation| violation.starts_with("geometry:"))
+            .count();
+        context_violations += report
+            .violations
+            .iter()
+            .filter(|violation| violation.starts_with("context:"))
+            .count();
         let ledger = check_ledger_scoped(seed, &report, scope.is_full());
         results.push(CoreGameResult {
             seed,
@@ -243,60 +233,14 @@ pub fn run_core_validation_scoped_for_league_with_dir(
             ledger,
             violations: report.violations.clone(),
         });
-        if scope.is_full() {
-            merged.merge_for_gate(&report);
-        } else {
-            geometric_violations += report
-                .violations
-                .iter()
-                .filter(|violation| violation.starts_with("geometry:"))
-                .count();
-            context_violations += report
-                .violations
-                .iter()
-                .filter(|violation| violation.starts_with("context:"))
-                .count();
-        }
-        drop_event_stream(&mut report);
-    }
-    let mut gate = if scope.is_full() {
-        gate::evaluate_merged(&merged, &params)
-    } else {
-        gate::GateReport::default()
-    };
-    if !scope.is_full() {
-        gate.geometric_violations = geometric_violations;
-        gate.context_violations = context_violations;
     }
     let ledger_failures = results
         .iter()
-        .filter(|result| {
-            !result.ledger.points_reconcile
-                || !result.ledger.attempts_reconcile
-                || !result.ledger.rebounds_reconcile
-                || !result.ledger.turnovers_reconcile
-                || !result.ledger.minutes_reconcile
-                || !result.ledger.fouls_reconcile
-                || !result.ledger.possessions_reconcile
-                || !result.ledger.player_stats_reconcile
-                || !result.ledger.clock_reconcile
-                || !result.ledger.control_reconcile
-        })
+        .filter(|result| !result.ledger.passed())
         .count();
-    let geometry_violations = gate.geometric_violations;
-    let context_violations = gate.context_violations;
-    // 分布层只有存在对应联赛的赛季基准时才参与认证。仓库的参考分布来自
-    // NBA 2024-25 赛季；FIBA 档案没有对应的赛季分布表，它的分布观测只
-    // 记录，不参与缺陷判定。几何、语境与账本对两个档案照常成立。
-    let distribution_applicable =
-        scope.is_full() && league == nba_domain::league::LeagueId::Nba;
-    let passed = ledger_failures == 0
-        && geometry_violations == 0
-        && context_violations == 0
-        && (!distribution_applicable || gate.passed);
+    let passed = ledger_failures == 0 && geometry_violations == 0 && context_violations == 0;
     Ok(CoreValidationReport {
         scope: scope.as_str(),
-        distribution_applicable,
         geometry_violations,
         context_violations,
         ledger_failures,
@@ -308,7 +252,6 @@ pub fn run_core_validation_scoped_for_league_with_dir(
             .sum(),
         passed,
         games: results,
-        gate,
     })
 }
 
@@ -326,34 +269,23 @@ fn run_scoped_game(
             while !world.finished && world.clock.period() < 2 {
                 world.step(TICK_SECONDS);
             }
-            world.report()
+            world.report_at_boundary()
         }
         ValidationScope::Possessions(target) => {
             while !world.finished && world.possession_log.len() < target as usize {
                 world.step(TICK_SECONDS);
             }
-            world.report()
+            world.report_at_boundary()
         }
     }
-}
-
-/// 验证完成后释放过程流，降低批次峰值内存。
-fn drop_event_stream(report: &mut GameReport) {
-    report.events.clear();
-    report.events.shrink_to_fit();
-    report.decision_traces.clear();
-    report.decision_traces.shrink_to_fit();
-    report.decision_records.clear();
-    report.decision_records.shrink_to_fit();
-    report.decision_samples.clear();
-    report.decision_samples.shrink_to_fit();
 }
 
 pub fn check_ledger(seed: u64, report: &GameReport) -> LedgerCheck {
     check_ledger_scoped(seed, report, true)
 }
 
-fn check_ledger_scoped(seed: u64, report: &GameReport, require_closed: bool) -> LedgerCheck {
+/// 对照从比赛开始到指定边界的账本。片段允许仍有活动控制序列。
+pub fn check_ledger_scoped(seed: u64, report: &GameReport, require_closed: bool) -> LedgerCheck {
     let mut points_reconcile = true;
     let mut attempts_reconcile = true;
     let mut rebounds_reconcile = true;
@@ -390,13 +322,9 @@ fn check_ledger_scoped(seed: u64, report: &GameReport, require_closed: bool) -> 
             clock_reconcile = false;
             detail.push_str(&format!("clock reconstruction: {error}; "));
         }
-    }    match crate::reconstruct::check_control_sequences(report) {
-        Ok(control) => {
-            if control.active_sequence.is_some() {
-                control_reconcile = false;
-                detail.push_str("control sequence still active at the end of the report; ");
-            }
-        }
+    }
+    match crate::reconstruct::check_control_sequences_scoped(report, require_closed) {
+        Ok(_) => {}
         Err(error) => {
             control_reconcile = false;
             detail.push_str(&format!("control reconstruction: {error}; "));
@@ -913,222 +841,4 @@ fn player_team_index(report: &GameReport, player: usize) -> usize {
         );
         1
     }
-}
-
-/// 批次判定总览：把四层判定与机制实验合成一份可读结论。
-pub fn certification_artifact(
-    report: &CoreValidationReport,
-    mechanism: Option<&MechanismReport>,
-    commit: &str,
-    known_insufficient: &[KnownInsufficient],
-) -> serde_json::Value {
-    let mut defects = Vec::new();
-    let mut insufficient = Vec::new();
-    let mut known = Vec::new();
-    let mut new_insufficient = Vec::new();
-    let mut not_applicable = Vec::new();
-    let mut marginal = Vec::new();
-    for layer in &report.gate.layers {
-        if !layer.passed {
-            if report.distribution_applicable {
-                defects.push(layer.criterion.clone());
-            } else {
-                // 没有对应联赛的赛季分布基准：观测值留在工件里，认证按
-                // 「当前不适用」登记，不把跨联赛比较当成引擎缺陷。
-                not_applicable.push(format!("distribution:{}", layer.criterion));
-            }
-        }
-    }
-    if report.geometry_violations > 0 {
-        defects.push("geometry_legality".to_string());
-    }
-    if report.context_violations > 0 {
-        defects.push("context_legality".to_string());
-    }
-    if report.ledger_failures > 0 {
-        defects.push("box_score_ledger".to_string());
-    }
-    if let Some(mechanism) = mechanism {
-        for result in &mechanism.results {
-            match result.verdict.as_str() {
-                "defect" => defects.push(format!("mechanism:{}", result.attribute)),
-                "insufficient" => insufficient.push(result.attribute.clone()),
-                "not_applicable" => not_applicable.push(format!(
-                    "mechanism:{}（{}）",
-                    result.attribute, result.reason
-                )),
-                _ => {}
-            }
-            if result.marginal {
-                marginal.push(match result.lower_bound_ratio {
-                    Some(ratio) => format!("mechanism:{}（下界比 {ratio:.2}）", result.attribute),
-                    None => format!("mechanism:{}", result.attribute),
-                });
-            }
-        }
-    }
-    for attribute in &insufficient {
-        match known_insufficient
-            .iter()
-            .find(|entry| entry.attribute == *attribute)
-        {
-            Some(entry) if entry.resolution == "more_games" => {
-                known.push(format!("mechanism:{attribute}"));
-            }
-            Some(entry) => {
-                not_applicable.push(format!("mechanism:{}（{}）", attribute, entry.reason))
-            }
-            None => new_insufficient.push(format!("mechanism:{attribute}")),
-        }
-    }
-    let status = if !defects.is_empty() || !new_insufficient.is_empty() {
-        "defects_found"
-    } else if !known.is_empty() {
-        "insufficient_evidence"
-    } else {
-        "pass"
-    };
-    let games = report.games.len();
-    let clean_games = report
-        .games
-        .iter()
-        .filter(|game| {
-            game.ledger.points_reconcile
-                && game.ledger.attempts_reconcile
-                && game.ledger.rebounds_reconcile
-                && game.ledger.turnovers_reconcile
-                && game.ledger.minutes_reconcile
-                && game.ledger.fouls_reconcile
-                && game.ledger.possessions_reconcile
-                && game.ledger.player_stats_reconcile
-        })
-        .count();
-    let evaluated: std::collections::BTreeSet<&str> = report
-        .gate
-        .layers
-        .iter()
-        .map(|layer| layer.criterion.as_str())
-        .collect();
-    let sampled_gate = REGISTERED_GATE_CRITERIA
-        .iter()
-        .filter(|name| evaluated.contains(*name))
-        .count();
-    let unregistered: Vec<String> = evaluated
-        .iter()
-        .filter(|name| !REGISTERED_GATE_CRITERIA.contains(name))
-        .map(|name| (*name).to_string())
-        .collect();
-    let mechanism_attributes = mechanism.map(|value| value.results.len()).unwrap_or(0);
-    let registered =
-        REGISTERED_GATE_CRITERIA.len() + crate::mechanism_core::MechanismAttribute::all().len();
-    let sampled = sampled_gate + mechanism_attributes;
-    serde_json::json!({
-        "certification_status": status,
-        "commit": commit,
-        "games": games,
-        "per_game_ledger": { "passed": clean_games, "total": games },
-        "criteria": {
-            "defects": defects,
-            "known_insufficient": known,
-            "new_insufficient": new_insufficient,
-            "not_applicable": not_applicable,
-            "marginal": marginal,
-        },
-        "coverage": {
-            "registered": registered,
-            "sampled": sampled,
-            "uncovered": registered.saturating_sub(sampled),
-            "unregistered": unregistered,
-            "gate_criteria": REGISTERED_GATE_CRITERIA.len(),
-            "mechanism_attributes": mechanism_attributes,
-            "not_applicable": not_applicable.len(),
-        },
-    })
-}
-
-/// 已登记的判定准则。
-pub const REGISTERED_GATE_CRITERIA: [&str; 38] = [
-    "zone_share_rim",
-    "zone_share_near",
-    "zone_share_mid",
-    "zone_share_three",
-    "creation_share_drive",
-    "creation_share_cut",
-    "creation_share_post",
-    "creation_share_pull_up",
-    "creation_share_putback",
-    "creation_share_transition",
-    "creation_share_set",
-    "turnover_per_possession",
-    "fga_per_possession",
-    "fta_per_game",
-    "points_per_game",
-    "oreb_per_game",
-    "possessions_per_game",
-    "blocks_per_game",
-    "steals_per_game",
-    "shooting_fouls_per_game",
-    "and_one_per_game",
-    "free_throw_percentage",
-    "early_contested_rate",
-    "usage_top1_over_fifth",
-    "assisted_fg_spread",
-    "ping_pong_rate",
-    "minutes_max",
-    "shot_clock_buckets_complete",
-    "defender_distance_buckets_complete",
-    "post_scorer_three_share",
-    "stationary_shooter_three_share",
-    "play_activation_rate",
-    "play_window_gap",
-    "substitutions_per_game",
-    "pass_chain_mean",
-    "screen_read_under_shoot",
-    "screen_read_over_drive",
-    "shot_points_by_clock",
-];
-
-/// 逐准则的观测值与基准，供批次统计工件消费。
-pub fn batch_statistical_artifact(
-    report: &CoreValidationReport,
-    params: &Params,
-) -> serde_json::Value {
-    let games = report.games.len().max(1) as f64;
-    let points: f64 = report
-        .games
-        .iter()
-        .map(|game| (game.home_score + game.away_score) as f64)
-        .sum();
-    let possessions: f64 = report
-        .games
-        .iter()
-        .map(|game| game.possessions as f64)
-        .sum();
-    let criteria: Vec<serde_json::Value> = report
-        .gate
-        .layers
-        .iter()
-        .map(|layer| {
-            let band = params.policy.band(&layer.criterion);
-            serde_json::json!({
-                "criterion": layer.criterion,
-                "observed": layer.observed,
-                "target": layer.target,
-                "band": { "lower": band.lower, "upper": band.upper },
-                "relative_error": layer.relative_error,
-                "passed": layer.passed,
-            })
-        })
-        .collect();
-    serde_json::json!({
-        "games": report.games.len(),
-        "criteria": criteria,
-        "totals": {
-            "points_per_game": points / games,
-            "possessions_per_game": possessions / games,
-            "geometry_violations": report.geometry_violations,
-            "context_violations": report.context_violations,
-            "ledger_failures": report.ledger_failures,
-        },
-    })
 }

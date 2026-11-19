@@ -187,11 +187,19 @@ impl std::fmt::Display for ControlReconstructionError {
 pub fn check_control_sequences(
     report: &GameReport,
 ) -> Result<ReconstructedControl, ControlReconstructionError> {
+    check_control_sequences_scoped(report, true)
+}
+
+pub(crate) fn check_control_sequences_scoped(
+    report: &GameReport,
+    require_closed: bool,
+) -> Result<ReconstructedControl, ControlReconstructionError> {
     let control = reconstruct_control(report);
     if control.established == 0 && control.ended == 0 {
         return Err(ControlReconstructionError::NoControlCommits);
     }
-    if control.established != control.ended {
+    let open = usize::from(control.active_sequence.is_some());
+    if (require_closed && open != 0) || control.established != control.ended + open {
         return Err(ControlReconstructionError::Unbalanced {
             established: control.established,
             ended: control.ended,

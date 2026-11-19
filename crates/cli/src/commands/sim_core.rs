@@ -1,11 +1,7 @@
-//! `sim-core` 子命令：动作链内核的单场与批量入口。
-//!
-//! 与旧引擎的 `run` 子命令并存，便于对照与迁移。箱体是球员级，
-//! `--gate` 输出四层判定结果。
+//! `sim-core` 子命令：运行用户指定的比赛并输出统计或帧流。
 
 use nba_sim_core::{
-    gate, run_game_for_league, summarize, CompletionSummary, MatchSetup, Params, RuntimeParams,
-    TeamSide, World,
+    run_game_for_league, summarize, CompletionSummary, MatchSetup, RuntimeParams, TeamSide, World,
 };
 use std::io::Write;
 use std::path::Path;
@@ -13,7 +9,6 @@ use std::path::Path;
 pub(crate) fn run_sim_core(
     seed: u64,
     games: u64,
-    gate: bool,
     json: bool,
     stream: Option<&str>,
     league: nba_domain::league::LeagueId,
@@ -52,12 +47,6 @@ pub(crate) fn run_sim_core(
     }
 
     if json {
-        if gate {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "--json and --gate cannot be used together",
-            ));
-        }
         let summaries: Vec<CompletionSummary> = reports
             .iter()
             .map(CompletionSummary::from_report)
@@ -103,34 +92,6 @@ pub(crate) fn run_sim_core(
         );
     }
 
-    if gate {
-        let validation = Params::load(&calibration)
-            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-        let mut batch = Vec::new();
-        for batch_seed in 1..=16u64 {
-            batch.push(run_game_for_league(batch_seed, &calibration, league));
-        }
-        let report = gate::evaluate_batch(&batch, &validation);
-        println!();
-        println!(
-            "几何违规 {}  语境违规 {}  分布失败 {}",
-            report.geometric_violations,
-            report.context_violations,
-            report.failed()
-        );
-        for layer in &report.layers {
-            println!(
-                "  {} {:<28} observed {:.3}  target {:.3}",
-                if layer.passed { "OK " } else { "BAD" },
-                layer.criterion,
-                layer.observed,
-                layer.target
-            );
-        }
-        if !report.passed {
-            return Err(std::io::Error::other("sim-core gate failed"));
-        }
-    }
     Ok(())
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env zsh
-# 最终验收：刷新工件、跑全部静态守卫、验证门禁与认证、记录全量测试。
+# 最终验收：运行静态检查、回归测试并记录执行结果。
 #
 # 只在行为与参数冻结后运行一次。任何一项失败都会让脚本以非零退出码
 # 结束，并把每项结果写进 .work/evidence/final-validation.summary。
@@ -36,10 +36,6 @@ if [ "$BUILD_STATUS" -ne 0 ]; then
     FAILED=$((FAILED + 1))
 fi
 
-# 门禁证据取自 CLI 的固定 16 场判定入口。
-run refresh_gate_evidence python3 scripts/refresh_gate_evidence.py
-run gate_cli ./target/release/nba-sim sim-core --seed 1 --gate
-
 # 静态守卫。
 run check_docs python3 scripts/check_docs.py
 run check_animation_catalog python3 scripts/check_animation_catalog.py
@@ -63,22 +59,14 @@ run check_disk_budget python3 scripts/check_disk_budget.py --report
 run freeze_check python3 scripts/calibrate/freeze.py --check
 run measure_resources_report python3 scripts/measure_resources.py --report
 run measure_resources_check python3 scripts/measure_resources.py --check
+run final_artifacts python3 scripts/check_final_artifacts.py
 run browser_renderers zsh scripts/run_browser_checks.sh
 run git_diff_check git diff --check
 
-# 基线指纹按最终参数向量重录，随后跑一次比对测试。
-run record_baseline cargo test -p nba-sim-core --test baseline_fingerprint -- --ignored record_baseline_fingerprint
 run baseline_compare cargo test -p nba-sim-core --test baseline_fingerprint
-
-# NBA 与 FIBA 认证：两个联赛的工件都写进规范证据目录，供一致性守卫核对。
-run validate_nba ./target/release/nba-sim validate-core --seed 1 --games 16 --mechanism --league nba --out docs/dev/evidence/action_chain_validation
-run validate_fiba ./target/release/nba-sim validate-core --seed 1 --games 16 --league fiba --out docs/dev/evidence/fiba_validation
 
 # 全量工作区测试：只跑一次，输出同时进入验收合同指定的日志。
 run workspace_tests zsh -c 'set -o pipefail; cargo test --workspace > .pi/tasks/final-workspace-tests.log 2>&1; rc=$?; echo "EXIT=$rc" | tee -a .pi/tasks/final-workspace-tests.log; exit "$rc"'
-
-# 认证与门禁工件写完后，核对工件之间的提交身份与判定数字。
-run final_artifacts python3 scripts/check_final_artifacts.py
 
 printf "\n==== 最终验收摘要 ====\n" | tee -a "$SUMMARY"
 cat "$SUMMARY"

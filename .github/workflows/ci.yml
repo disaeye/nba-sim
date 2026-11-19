@@ -205,8 +205,8 @@ jobs:
             command: cargo test -p nba-sim-core
           - name: nba-wasm
             command: cargo test -p nba-wasm
-          - name: nba-validation-mechanism
-            command: cargo test -p nba-validation --test mechanism
+          - name: nba-validation-fragments
+            command: cargo test -p nba-validation --test fragment
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -219,6 +219,14 @@ jobs:
           echo "CARGO_BUILD_JOBS=${CPUS}" >> "$GITHUB_ENV"
       - name: Run Tier 1 target
         run: ${{ matrix.command }} -- --test-threads "$(nproc)"
+      - name: Measure validation fragments
+        if: matrix.name == 'nba-validation-fragments'
+        shell: bash
+        run: |
+          cargo build -p nba-sim-cli
+          ulimit -v 2097152
+          /usr/bin/time -f 'elapsed=%e peak_rss_kib=%M' target/debug/nba-sim validate-core --json
+          /usr/bin/time -f 'elapsed=%e peak_rss_kib=%M' target/debug/nba-sim validate-core --league fiba --json
 
   tier2_tests:
     needs: change_detection
@@ -249,39 +257,6 @@ jobs:
           echo "CARGO_BUILD_JOBS=${CPUS}" >> "$GITHUB_ENV"
       - name: Run Tier 2 target
         run: ${{ matrix.command }} -- --test-threads "$(nproc)"
-
-  tier3_tests:
-    needs: [change_detection, tier2_tests]
-    if: |
-      needs.change_detection.outputs.is_full == 'true' ||
-      needs.change_detection.outputs.core_changed == 'true'
-    name: Tier 3 (batch validation)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Configure runner parallelism
-        run: |
-          CPUS="$(nproc)"
-          echo "Runner CPUs: ${CPUS}"
-          echo "CARGO_BUILD_JOBS=${CPUS}" >> "$GITHUB_ENV"
-      - name: Run action-chain batch validation
-        run: |
-          cargo build --release -p nba-sim-cli
-          set +e
-          ./target/release/nba-sim validate-core --seed 1 --games 32 --mechanism \
-            --out .work/validation-view
-          CODE=$?
-          set -e
-          # 1 = 存在缺陷或未登记的不足，2 = 执行错误，两者都必须阻断；
-          # 3 = 只有已登记在 data/calibration/known_insufficient.json 的不足，
-          # 属于待补数据/待接属性的工作清单，降为告警。
-          if [ "$CODE" -eq 3 ]; then
-            echo "::warning::action-chain validation reports insufficient evidence"
-          elif [ "$CODE" -ne 0 ]; then
-            exit "$CODE"
-          fi
 
   browser_tests:
     needs: [change_detection]
@@ -323,7 +298,6 @@ jobs:
       - clippy
       - fast_test
       - tier2_tests
-      - tier3_tests
       - browser_tests
     if: |
       always() &&
@@ -337,7 +311,6 @@ jobs:
           CLIPPY_RESULT: ${{ needs.clippy.result }}
           FAST_TEST_RESULT: ${{ needs.fast_test.result }}
           TIER2_RESULT: ${{ needs.tier2_tests.result }}
-          TIER3_RESULT: ${{ needs.tier3_tests.result }}
           BROWSER_RESULT: ${{ needs.browser_tests.result }}
         run: |
           for result in "$LINT_RESULT" "$CLIPPY_RESULT" "$FAST_TEST_RESULT"; do
@@ -347,11 +320,9 @@ jobs:
             fi
           done
           if [[ "$TIER2_RESULT" != "success" ]] ||
-             [[ "$TIER3_RESULT" != "success" ]] ||
              [[ "$BROWSER_RESULT" != "success" ]]; then
             printf 'Full-gate jobs did not all pass:\n'
-            printf 'Tier 2=%s, Tier 3=%s, Browser=%s\n' \
-              "$TIER2_RESULT" "$TIER3_RESULT" "$BROWSER_RESULT"
+            printf 'Tier 2=%s, Browser=%s\n' "$TIER2_RESULT" "$BROWSER_RESULT"
             exit 1
           fi
           echo "All parallel full-gate jobs passed."

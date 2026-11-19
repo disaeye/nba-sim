@@ -2316,7 +2316,6 @@
 
   function renderValidationResult(result) {
     const exitCode = Number(result.exit_code);
-    const evidence = result.evidence || {};
     let cls = "validation-defect";
     if (exitCode === 0) {
       cls = "validation-pass";
@@ -2345,21 +2344,15 @@
       verdictCls = "verdict-insufficient";
     }
     verdictRow.className = `validation-verdict-row ${verdictCls}`;
-    verdictRow.textContent = `${verdictText}（${result.games ?? "?"} 场快速批次；权威判定见下方批次总览）`;
+    verdictRow.textContent = `${verdictText}（范围：${result.scope}）`;
     fragment.appendChild(verdictRow);
-
-    if (result.distribution_applicable === false) {
-      const scopeNote = document.createElement("div");
-      scopeNote.className = "validation-verdict-row verdict-insufficient";
-      scopeNote.textContent = `判定范围 ${result.scope ?? "部分比赛"}：几何、语境、账本按屏内片段判定；分布层需要整场比赛，本页不作分布判定`;
-      fragment.appendChild(scopeNote);
-    }
 
     const grid = document.createElement("div");
     grid.className = "validation-metric-grid";
     grid.append(
-      metricCell(`${evidence.passes ?? 0}/${evidence.opportunities ?? 0}`, "通过/机会"),
-      metricCell(evidence.defects ?? 0, "缺陷"),
+      metricCell(result.geometry_violations ?? 0, "几何违规"),
+      metricCell(result.context_violations ?? 0, "动作语境违规"),
+      metricCell(result.ledger_failures ?? 0, "账本有误场次"),
       metricCell(result.games ?? 0, "判定场次"),
       metricCell(result.ticks ?? 0, "刻数"),
       metricCell(result.events ?? 0, "事件"),
@@ -2375,10 +2368,6 @@
     loadValidationLedger(ledgerTitle);
 
     const detail = $("validationDetail");
-    // 第 3/4/5 层：统计与机制判定（statistical/mechanism 工件）。
-    loadValidationLayers(detail || summary);
-    // 批次判定总览（certification 工件，最近一次批量判定跑）。
-    loadValidationCertification(detail || summary);
 
     // 失败准则详单。
     if (detail) {
@@ -2400,174 +2389,6 @@
       loadValidationScenarios(detail);
     }
     summary.replaceChildren(fragment);
-  }
-
-  async function loadValidationCertification(container) {
-    if (!container) return;
-    try {
-      const response = await fetch("/api/validation/certification");
-      if (!response.ok) return;
-      const body = await response.json();
-      const cert = body.certification;
-      if (!cert || !cert.certification_status) {
-        const row = document.createElement("div");
-        row.className = "validation-ledger-item muted-label";
-        row.textContent = "批次判定：尚未运行（CLI: nba-sim validate-core --games 16 --mechanism --out .work/validation-view）";
-        container.prepend(row);
-        return;
-      }
-      const title = document.createElement("div");
-      title.className = "validation-section-title";
-      title.textContent = "批次判定总览（最近一次整场批量判定）";
-      container.appendChild(title);
-      const statusTextMap = {
-        pass: "通过",
-        defects_found: "存在缺陷",
-        insufficient_evidence: "证据不足",
-      };
-      const statusClsMap = {
-        pass: "verdict-pass",
-        defects_found: "verdict-defect",
-        insufficient_evidence: "verdict-insufficient",
-      };
-      const statusRow = document.createElement("div");
-      statusRow.className = `validation-verdict-row ${statusClsMap[cert.certification_status] || "verdict-insufficient"}`;
-      const criteria = cert.criteria || {};
-      const ledger = cert.per_game_ledger || {};
-      statusRow.textContent = `判定结论：${statusTextMap[cert.certification_status] || cert.certification_status} · 逐场账本 ${ledger.passed ?? "?"}/${ledger.total ?? "?"} · 缺陷 ${(criteria.defects || []).length} 项 · 已知不足 ${(criteria.known_insufficient || []).length} 项 · 未登记不足 ${(criteria.new_insufficient || []).length} 项 · 当前不适用 ${(criteria.not_applicable || []).length} 项 · 边缘通过 ${(criteria.marginal || []).length} 项`;
-      container.appendChild(statusRow);
-      // 缺陷清单（引擎侧工作清单的输入）。
-      for (const criterion of criteria.defects || []) {
-        const row = document.createElement("div");
-        row.className = "validation-ledger-item";
-        const name = document.createElement("span");
-        name.textContent = criterion;
-        const verdict = document.createElement("span");
-        verdict.className = "verdict-defect";
-        verdict.textContent = "缺陷";
-        row.append(name, verdict);
-        container.appendChild(row);
-      }
-      for (const criterion of criteria.known_insufficient || []) {
-        const row = document.createElement("div");
-        row.className = "validation-ledger-item";
-        const name = document.createElement("span");
-        name.textContent = criterion;
-        const verdict = document.createElement("span");
-        verdict.className = "verdict-insufficient";
-        verdict.textContent = "已知不足";
-        row.append(name, verdict);
-        container.appendChild(row);
-      }
-      for (const criterion of criteria.new_insufficient || []) {
-        const row = document.createElement("div");
-        row.className = "validation-ledger-item";
-        const name = document.createElement("span");
-        name.textContent = criterion;
-        const verdict = document.createElement("span");
-        verdict.className = "verdict-defect";
-        verdict.textContent = "未登记不足";
-        row.append(name, verdict);
-        container.appendChild(row);
-      }
-      for (const criterion of criteria.not_applicable || []) {
-        const row = document.createElement("div");
-        row.className = "validation-ledger-item";
-        const name = document.createElement("span");
-        name.textContent = criterion;
-        const verdict = document.createElement("span");
-        verdict.className = "verdict-insufficient";
-        verdict.textContent = "当前不适用";
-        row.append(name, verdict);
-        container.appendChild(row);
-      }
-      for (const criterion of criteria.marginal || []) {
-        const row = document.createElement("div");
-        row.className = "validation-ledger-item";
-        const name = document.createElement("span");
-        name.textContent = criterion;
-        const verdict = document.createElement("span");
-        verdict.className = "verdict-insufficient";
-        verdict.textContent = "边缘通过";
-        row.append(name, verdict);
-        container.appendChild(row);
-      }
-      // 判定面覆盖。
-      const cov = cert.coverage || {};
-      const covRow = document.createElement("div");
-      covRow.className = "validation-ledger-item";
-      covRow.textContent = `判定面覆盖：已判定 ${cov.sampled ?? "?"} 项（分布准则 ${cov.gate_criteria ?? "?"} · 机制属性 ${cov.mechanism_attributes ?? "?"}） · 未覆盖 ${cov.uncovered ?? "?"}`;
-      container.appendChild(covRow);
-    } catch {
-      // 认证总览失败不影响其他展示。
-    }
-  }
-
-  async function loadValidationLayers(container) {
-    if (!container) return;
-    try {
-      const response = await fetch("/api/validation/layers");
-      if (!response.ok) return;
-      const body = await response.json();
-      // 分布判定：批次逐准则的观测值与基准。
-      const stat = body.statistical;
-      if (stat && Array.isArray(stat.criteria) && stat.criteria.length) {
-        const title = document.createElement("div");
-        title.className = "validation-section-title";
-        title.textContent = `分布判定（${stat.criteria.length} 项准则 · ${stat.games ?? "?"} 场批次）`;
-        container.appendChild(title);
-        for (const criterion of stat.criteria) {
-          const row = document.createElement("div");
-          row.className = "validation-ledger-item";
-          const name = document.createElement("span");
-          name.textContent = `${criterion.criterion} · 观测 ${Number(criterion.observed).toFixed(3)} / 基准 ${Number(criterion.target).toFixed(3)}`;
-          const verdict = document.createElement("span");
-          verdict.className = `verdict-${criterion.passed ? "pass" : "defect"}`;
-          verdict.textContent = criterion.passed ? "通过" : "缺陷";
-          row.append(name, verdict);
-          container.appendChild(row);
-        }
-      }
-      // 机制实验：按证据类别分两组，接线证据与产物证据不能互相代替。
-      const mech = body.mechanism;
-      if (mech && Array.isArray(mech.results) && mech.results.length) {
-        const verdictZh = {
-          pass: "通过",
-          insufficient: "效应不足",
-          defect: "方向相反",
-          not_applicable: "当前不适用",
-        };
-        const kindZh = {
-          wiring: "接线证据（度量直接取自消费者公式的输入）",
-          outcome: "产物证据（度量是比赛产物）",
-        };
-        for (const kind of ["wiring", "outcome"]) {
-          const rows = mech.results.filter((result) => result.evidence_kind === kind);
-          if (!rows.length) continue;
-          const title = document.createElement("div");
-          title.className = "validation-section-title";
-          title.textContent = `机制实验 · ${kindZh[kind] || kind}（${rows.length} 个属性 · 每属性 ${mech.config?.seeds ?? "?"} 个种子）`;
-          container.appendChild(title);
-          for (const result of rows) {
-            const row = document.createElement("div");
-            row.className = "validation-ledger-item";
-            const name = document.createElement("span");
-            const interval = `[${(Number(result.ci_low) * 100).toFixed(1)}%, ${(Number(result.ci_high) * 100).toFixed(1)}%]`;
-            const marginal = result.marginal ? " · 边缘通过" : "";
-            const reason = result.reason ? ` · ${result.reason}` : "";
-            name.textContent = `${result.attribute} · ${result.metric} · ${Number(result.baseline).toFixed(3)} → ${Number(result.perturbed).toFixed(3)}（${(result.relative_change * 100).toFixed(1)}%） · 区间 ${interval}${marginal}${reason}`;
-            const verdict = document.createElement("span");
-            const verdictKey = result.verdict === "pass" ? "pass" : result.verdict === "defect" ? "defect" : "insufficient";
-            verdict.className = `verdict-${verdictKey}`;
-            verdict.textContent = verdictZh[result.verdict] || result.verdict;
-            row.append(name, verdict);
-            container.appendChild(row);
-          }
-        }
-      }
-    } catch {
-      // 分层详单失败不影响顶层结论展示。
-    }
   }
 
   async function loadValidationLedger(titleEl) {

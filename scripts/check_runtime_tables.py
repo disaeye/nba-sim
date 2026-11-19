@@ -23,7 +23,6 @@ PRODUCTION_DIRS = [
     ROOT / "crates" / "debug-server" / "src",
 ]
 VALIDATION_FILES = {
-    SIM / "gate.rs",
     SIM / "params.rs",
     SIM / "bin" / "sim2.rs",
     ROOT / "crates" / "cli" / "src" / "commands" / "validate_core.rs",

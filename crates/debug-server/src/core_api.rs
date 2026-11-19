@@ -233,7 +233,7 @@ pub(crate) fn api_core_simulate(req: &Request) -> Response {
 /// 按范围跑一次新内核并返回 NDJSON 帧流。
 ///
 /// 范围口径与旧入口一致：`<n>p` 表示回合数，`1q` 表示一节，`full` 表示整场。
-pub(crate) fn run_core_simulation(seed: u64, scope: &str) -> Result<(Vec<u8>, usize), String> {
+pub(crate) fn run_core_simulation(seed: u64, scope: &str) -> Result<(Vec<u8>, nba_sim_core::GameReport, bool), String> {
     use nba_sim_core::{MatchSetup, RuntimeParams, World};
 
     let params = RuntimeParams::load(&workspace_calibration_dir())?;
@@ -258,14 +258,12 @@ pub(crate) fn run_core_simulation(seed: u64, scope: &str) -> Result<(Vec<u8>, us
     };
 
     let mut body = Vec::new();
-    let mut ticks = 0usize;
     while !world.finished {
         world.step(nba_sim_core::world::TICK_SECONDS);
         let tick = world.stream_tick();
         let line = serde_json::to_string(&tick).map_err(|error| error.to_string())?;
         body.extend_from_slice(line.as_bytes());
         body.push(b'\n');
-        ticks += 1;
         let reached_possessions = possession_target
             .map(|target| world.possession_log.len() as u32 >= target)
             .unwrap_or(false);
@@ -276,14 +274,8 @@ pub(crate) fn run_core_simulation(seed: u64, scope: &str) -> Result<(Vec<u8>, us
             break;
         }
     }
-    Ok((body, ticks))
-}
-
-pub(crate) fn core_simulate_response(seed: u64, scope: &str) -> Response {
-    match run_core_simulation(seed, scope) {
-        Ok((body, _ticks)) => ("200 OK", "application/x-ndjson; charset=utf-8", body),
-        Err(error) => internal_error(error),
-    }
+    let finished = world.finished;
+    Ok((body, world.report_at_boundary(), finished))
 }
 
 pub(crate) fn route_core(req: &Request, core: &SharedCore) -> Option<Response> {
